@@ -106,9 +106,12 @@ Three ways a summary refreshes:
    `M-x scope-bootstrap` for the whole tree.
 
 The queue is one Scheme list with one in-flight job (`scope--queue`,
-`scope--running`). A job calls `(llm PROMPT HANDLER)` (editor.scm:9411)
-for a file or a change. A directory or the project uses `llm-with-tools`
-so the agent reads the files itself, the way codescope's bootstrap did.
+`scope--running`). A job calls `(llm-for 'summarize PROMPT HANDLER)` for
+a file and `(llm-for 'explain ...)` for a change. A directory or the
+project uses `llm-with-tools` with the `explain` role, so the agent reads
+the files itself, the way codescope's bootstrap did. The role, not the
+model, is what the job names; the router (3.6) picks the model, and a
+project changes it in `.project.scm`.
 The handler writes the morg file, sets `#+source`, and redraws every
 scope buffer that shows the node. The queue drops a job whose key changed
 while it waited (the file changed again) and re-queues the newest key.
@@ -201,9 +204,73 @@ diff-mode has the cards and the watch. Add:
   summary, keyed on `HEAD` plus the diff sha. This is the "what has the
   agent been doing" page.
 
-### 3.6 Elixir
+### 3.6 The model router
 
-None expected. Every mechanism exists: `llm`, `llm-with-tools`,
+Every LLM call in the editor names a ROLE, never a model id. A role
+resolves to a TIER or a model; a tier resolves to a model. One table,
+three layers of override.
+
+```scheme
+;; packages/models.scm — the global defaults
+(define *model-tiers*
+  '((fast   "claude-haiku-4-5-20251001")
+    (medium "claude-sonnet-5")
+    (strong "claude-opus-5")))
+
+(define *model-roles*
+  '((summarize fast)       ; a file synopsis, a directory card grid
+    (explain   medium)     ; a diff, recent.md, project.md
+    (code      strong)     ; code-mode and code-agent-mode edits
+    (chat      medium)))   ; the default chat model, today (llm-model)
+```
+
+A role value is a tier name or a model id; a tier value is a model id. A
+tier can carry an effort: `(strong "claude-opus-5" effort "high")`.
+
+Resolution, `(model-for ROLE [BUF])`, first hit wins:
+
+1. the buffer local `model-<role>` (set by `M-x set-model-role`)
+2. the project: `.project.scm` in the root, through the existing
+   `project-default!` mechanism (project.scm:64), keys `model-<role>`
+   and `model-<tier>`
+3. the global tables above (`defcustom`, group `models`)
+
+Then the tier lookup on the same three layers, then
+`llm-connector-for-model` (editor.scm:6269) picks the lane. So a project
+overrides one role, one tier, or both:
+
+```scheme
+;; <root>/.project.scm
+(project-models! 'summarize "gpt-5.4-mini"    ; a role to a model
+                 'strong    "gpt-5.6-sol"     ; a tier to a model
+                 'code      'medium)          ; a role to a tier
+```
+
+`project-models!` is sugar over `project-default!` with the `model-`
+prefix. The defaults apply as buffer locals to the project's buffers
+(`project-defaults-apply!`), so layer 1 and layer 2 are one read.
+
+Callers:
+
+- `(llm-for ROLE PROMPT HANDLER)` = `llm-with-model` (session.ex:1313)
+  with the resolved model.
+- `llm-with-tools` gains an optional ROLE; it passes the model as the
+  seventh `llm-tools` argument (session.ex:1332), which exists.
+- `code-model` and `code-agent-model` (code.scm:943, :1181) keep working
+  as explicit ids; an empty value means "ask the router for `code`".
+- `(llm-model)` stays the `chat` role's answer for the API lane.
+
+`M-x models` is a list: role, tier, model, connector, and which layer
+answered. `g` re-reads `.project.scm`. `RET` sets the buffer local.
+
+Tests (`priv/tests/models-test.scm`): resolution order with a fake
+project root; a role to a tier to a model; a role to a model directly;
+an unknown role errors with the role name; `.project.scm` override wins
+over global and loses to the buffer local.
+
+### 3.7 Elixir
+
+None expected. Every mechanism exists: `llm`, `llm-with-model`, `llm-with-tools`,
 `git-*` primitives, `shell-command->string`, `watch-path!`, `on-fs-change!`,
 `read-file`, `write-file!`, `list-dir`, `code-outline`, `imenu-rows`,
 `lsp-buffer-request`, the list mode, morg. The one candidate is a content
@@ -214,6 +281,22 @@ hash primitive; `git hash-object --stdin` through the shell covers it.
 Each phase lands on `worktree-codebrowser` with focused tests only
 (`priv/tests/scope-test.scm` and one ExUnit file for the key dispatch
 path). No suite runs until the merge.
+
+### P0. The model router
+
+Files: `packages/models.scm` (new), `packages/project.scm`
+(`project-models!`), `packages/tools.scm` (ROLE on `llm-with-tools`),
+`packages/code.scm` (empty `code-model` asks the router), `init.scm`
+(load order: after project.scm, before code.scm).
+
+Accept: `(model-for 'summarize)` answers the global tier; a
+`.project.scm` with `(project-models! 'summarize "x")` answers "x" for a
+buffer in that root and the global for a buffer outside it;
+`M-x set-model-role` wins over both; `M-x models` shows the three layers
+and the connector; `llm-for` sends the resolved model.
+
+Tests: `priv/tests/models-test.scm`, pure resolution over fixture tables
+and a temporary root with a `.project.scm`.
 
 ### P1. Providers: M-. in a document reaches the code
 
@@ -283,8 +366,9 @@ close CB8/CB9 in Linear or mark what this replaces.
    or `~/.compos/scope/<root>/`.
 2. Auto-refresh on by default with a budget of 60 calls per hour per
    project, or off until `G`.
-3. The summary model: `scope-model` defcustom, default the chat default.
-   A cheap model for files, the default for directories and the project.
+3. Decided 2026-08-30: a model router (3.6). Roles `summarize`, `explain`,
+   `code`, `chat`; tiers `fast`, `medium`, `strong`; `.project.scm`
+   overrides both. Open: the global tier defaults named above.
 4. Should `M-.` in a document GO (pop-to-buffer) or PEEK (current
    `definition-peek`)? The plan keeps peek: a document names many things
    and the reader checks more than they follow.
