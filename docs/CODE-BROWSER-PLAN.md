@@ -174,9 +174,11 @@ What the mode adds:
   paragraph about the definition at point first.
 - **Definitions in the popup**: `definition-peek` shows its hit in the
   popup over the summary (popper's stack), `q` brings the summary back,
-  `M-.` again goes there. `peek--show!` (peek.scm:41) gains the popup as
-  its window when the reader is in the side window or a morg document;
-  the split-the-frame path stays for a code buffer.
+  `M-.` again goes there. The popup peek machinery already exists in
+  editor.scm (`peek-show!`, `popup-show-quietly`, POPUPS.md rule 10):
+  peek.scm calls it when the reader is in the side window or a morg
+  document, instead of growing popup code of its own. The
+  split-the-frame path stays for a code buffer.
 - **Commands**, all `M-x`: `scope` (Dired at the root, mode on), `scope-here`,
   `scope-mode`, `scope-doc` (select the side window), `scope-recent`,
   `scope-refresh`, `scope-bootstrap`, `scope-find` (complete over the
@@ -397,7 +399,8 @@ spends.
 Files: `packages/scope.scm` (the minor mode, `scope-doc-mode`, the
 follow hooks, the commands), `priv/dired.scm` (the `summary` column,
 `dired-match?`, the local carried by visit), `packages/peek.scm`
-(the popup as the peek window), `themes.scm` (badges).
+(route `peek--show!` through editor.scm's `peek-show!`), `themes.scm`
+(badges).
 
 Accept: `M-x scope` opens Dired at the root with the column and the
 popup on `project.md`; `n`/`p` move the side window; `RET` on a file

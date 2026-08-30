@@ -78,7 +78,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 #### I want to walk down to the code without losing my place
 
-- `RET` on a directory opens it here. `RET` on a file peeks it beside the listing; `RET` again keeps it, as Dired does today. `^` goes up. Point returns to the row I came from.
+- `RET` on a directory opens it here. `RET` on a file peeks it in the popup; `RET` again opens it beside the listing, as Dired does today (`M-RET` opens directly; an edit keeps the peek). `^` goes up. Point returns to the row I came from.
 - **Commands:** `dired-visit`, `dired-up`.
 
 #### I want to read a file's summary before its code
@@ -217,7 +217,7 @@ The `summary` column is the first sentence of the entry's summary, or a badge: `
 
 ### A file with scope-mode on
 
-`RET` on `code.scm` peeks it; `RET` again keeps it. scope-mode is on in it because the listing had it on. The side window shows the file's summary, with the paragraph about the definition at point first.
+`RET` on `code.scm` peeks it; `RET` again opens it beside the listing. scope-mode is on in it because the listing had it on. The side window shows the file's summary, with the paragraph about the definition at point first.
 
 ```
 +-- code.scm --------------------------------------------+-- *scope* ---------------------------------------+
