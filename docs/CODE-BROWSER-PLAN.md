@@ -106,12 +106,12 @@ Three ways a summary refreshes:
    `M-x scope-bootstrap` for the whole tree.
 
 The queue is one Scheme list with one in-flight job (`scope--queue`,
-`scope--running`). A job calls `(llm-for 'summarize PROMPT HANDLER)` for
-a file and `(llm-for 'explain ...)` for a change. A directory or the
-project uses `llm-with-tools` with the `explain` role, so the agent reads
-the files itself, the way codescope's bootstrap did. The role, not the
-model, is what the job names; the router (3.6) picks the model, and a
-project changes it in `.project.scm`.
+`scope--running`). A job calls `(llm-with-preset 'summarize PROMPT HANDLER)`
+for a file and `(llm-with-preset 'explain ...)` for a change. A directory
+or the project uses `llm-with-tools` with the `explain` preset, so the
+agent reads the files itself, the way codescope's bootstrap did. The
+preset, not the model, is what the job names; the preset table (3.6)
+picks the model, and a project changes it in `.project.scm`.
 The handler writes the morg file, sets `#+source`, and redraws every
 scope buffer that shows the node. The queue drops a job whose key changed
 while it waited (the file changed again) and re-queues the newest key.
@@ -204,69 +204,102 @@ diff-mode has the cards and the watch. Add:
   summary, keyed on `HEAD` plus the diff sha. This is the "what has the
   agent been doing" page.
 
-### 3.6 The model router
+### 3.6 Presets: the model router, summonable with `@name`
 
-Every LLM call in the editor names a ROLE, never a model id. A role
-resolves to a TIER or a model; a tier resolves to a model. One table,
-three layers of override.
+Reference: gptel's presets (karthink, "stdin | LLM | stdout",
+youtube.com/watch?v=xHEnWvKmSKM). A preset is a named collection of LLM
+settings applied to one query as a unit: model, system prompt, tools,
+effort. It applies globally, to a buffer, or to one request with
+`@name` anywhere in the prompt. The `@name` cookie is removed before the
+send, highlighted in the buffer, and completed on `@`.
+
+compos already has half of it. `define-preset!` (mcp.scm:79) names a
+tool collection; `'chat-presets` holds a buffer's choice;
+`llm-set-preset` picks one; `chat-presets-changed!` reattaches a live
+ACP session. code-mode holds the other half as three knobs:
+`code-presets`, `code-model`, `code-instructions` (code.scm:939-990).
+The plan joins them: one preset table, and the model router is what a
+preset says about its model.
 
 ```scheme
-;; packages/models.scm — the global defaults
+;; packages/models.scm — tiers: a model alias, with an effort
 (define *model-tiers*
   '((fast   "claude-haiku-4-5-20251001")
     (medium "claude-sonnet-5")
-    (strong "claude-opus-5")))
+    (strong "claude-opus-5" effort "high")))
 
-(define *model-roles*
-  '((summarize fast)       ; a file synopsis, a directory card grid
-    (explain   medium)     ; a diff, recent.md, project.md
-    (code      strong)     ; code-mode and code-agent-mode edits
-    (chat      medium)))   ; the default chat model, today (llm-model)
+;; packages/presets.scm — a preset is a plist; every key is optional
+(define-preset! 'coding
+  'description "Edit code in this editor with the structural tools"
+  'model 'strong                       ; a tier or a model id
+  'tools '(compos)                     ; the MCP presets of today
+  'system code-instructions            ; a string or a thunk
+  'parents '(compos))
+
+(define-preset! 'summarize 'description "A file or directory synopsis"
+  'model 'fast 'system (prompt-file "scope-file"))
+(define-preset! 'explain 'description "What a change does and why"
+  'model 'medium 'system (prompt-file "scope-change"))
+(define-preset! 'chat 'description "The default chat" 'model 'medium)
 ```
 
-A role value is a tier name or a model id; a tier value is a model id. A
-tier can carry an effort: `(strong "claude-opus-5" effort "high")`.
+The three-argument form `(define-preset! NAME DESC SERVERS)` keeps
+working: it is `'tools SERVERS`. Every registered MCP preset is a preset
+with only tools, so `compos`, `web`, and the user's own stay valid.
 
-Resolution, `(model-for ROLE [BUF])`, first hit wins:
+Resolution of one field, `(preset-get NAME KEY [BUF])`, first hit wins:
 
-1. the buffer local `model-<role>` (set by `M-x set-model-role`)
-2. the project: `.project.scm` in the root, through the existing
-   `project-default!` mechanism (project.scm:64), keys `model-<role>`
-   and `model-<tier>`
-3. the global tables above (`defcustom`, group `models`)
+1. the one-shot: the `@name` cookies of the turn (below)
+2. the buffer local `'preset-<key>` (`M-x set-preset-field`)
+3. `.project.scm`: `(project-preset! 'coding 'model "gpt-5.6-sol")` and
+   `(project-tier! 'strong "gpt-5.6-sol")`, sugar over `project-default!`
+   (project.scm:64), so the values ride the existing defaults plist and
+   apply to the project's buffers as locals
+4. the preset, then its `'parents` in order
+5. the global tables (`defcustom`, group `models`)
 
-Then the tier lookup on the same three layers, then
-`llm-connector-for-model` (editor.scm:6269) picks the lane. So a project
-overrides one role, one tier, or both:
+`(preset-model NAME [BUF])` resolves `'model` and then the tier on the
+same layers; `llm-connector-for-model` (editor.scm:6269) picks the lane.
+A tier's `effort` rides along unless the preset names its own.
 
-```scheme
-;; <root>/.project.scm
-(project-models! 'summarize "gpt-5.4-mini"    ; a role to a model
-                 'strong    "gpt-5.6-sol"     ; a tier to a model
-                 'code      'medium)          ; a role to a tier
-```
+Where a preset applies:
 
-`project-models!` is sugar over `project-default!` with the `model-`
-prefix. The defaults apply as buffer locals to the project's buffers
-(`project-defaults-apply!`), so layer 1 and layer 2 are one read.
+- **Global**: `M-x set-preset` with no buffer sets `*default-preset*`.
+- **Buffer**: `M-x set-preset` in a chat or an llm-mode buffer writes
+  `'chat-presets` (a list, as today) and the model/effort locals through
+  `chat-switch!` (editor.scm:7282), which switches in place when the
+  backend can take the model and reattaches otherwise. That is the
+  existing `llm-set-preset` with a wider preset.
+- **One request**: `@coding` anywhere in the input. `agent-send`
+  (agent-session.scm:141) and `llm-mode` (`M-o`) read the cookies before
+  the send: the cookies come out of the text, the preset's system parts
+  join the turn's `chat-system-prompt-parts` (chat.scm:578), its tools
+  join `chat-presets-of` for the send, and its model reaches the lane.
+  On the API lane every field is one-shot: the next turn is back to the
+  buffer's own settings. On a stateful ACP session the model changes in
+  place when `chat-model-takeable?` says yes, else the echo area says
+  the preset holds for the rest of the session; tools on ACP are fixed
+  at session start, so a tool change there is the reattach path
+  `chat-presets-changed!` already handles. Several cookies stack, last
+  wins per field (gptel allows one; the table makes stacking free).
+- **A call from Scheme**: `(llm-with-preset NAME PROMPT HANDLER)` =
+  `llm-with-model` (session.ex:1313) with the resolved model, the
+  preset's system text in front of the prompt. `llm-with-tools` gains an
+  optional NAME and passes the model as the seventh `llm-tools` argument
+  (session.ex:1332), which exists. The scope jobs name `summarize` and
+  `explain`; nothing outside models.scm names a model id.
 
-Callers:
+The input surface: a `chat-input` capf source (`add-capf!`,
+editor.scm:3356) offers `@name` with the description as the annotation
+when the word at point starts with `@`; a face `preset-cookie` paints a
+cookie that names a real preset (the same paint pass that draws the
+input). `M-x presets` lists name, description, model, tier, connector,
+tools, and which layer answered each field; `RET` sets the buffer
+preset, `g` re-reads `.project.scm`.
 
-- `(llm-for ROLE PROMPT HANDLER)` = `llm-with-model` (session.ex:1313)
-  with the resolved model.
-- `llm-with-tools` gains an optional ROLE; it passes the model as the
-  seventh `llm-tools` argument (session.ex:1332), which exists.
-- `code-model` and `code-agent-model` (code.scm:943, :1181) keep working
-  as explicit ids; an empty value means "ask the router for `code`".
-- `(llm-model)` stays the `chat` role's answer for the API lane.
-
-`M-x models` is a list: role, tier, model, connector, and which layer
-answered. `g` re-reads `.project.scm`. `RET` sets the buffer local.
-
-Tests (`priv/tests/models-test.scm`): resolution order with a fake
-project root; a role to a tier to a model; a role to a model directly;
-an unknown role errors with the role name; `.project.scm` override wins
-over global and loses to the buffer local.
+`code-model`, `code-agent-model`, and `code-presets` become views of
+the `coding` preset: an empty value asks the preset. `(llm-model)` is
+the `chat` preset's model.
 
 ### 3.7 Elixir
 
@@ -282,22 +315,35 @@ Each phase lands on `worktree-codebrowser` with focused tests only
 (`priv/tests/scope-test.scm` and one ExUnit file for the key dispatch
 path). No suite runs until the merge.
 
-### P0. The model router
+### P0. Presets and the model router
 
-Files: `packages/models.scm` (new), `packages/project.scm`
-(`project-models!`), `packages/tools.scm` (ROLE on `llm-with-tools`),
-`packages/code.scm` (empty `code-model` asks the router), `init.scm`
-(load order: after project.scm, before code.scm).
+Files: `packages/models.scm` (tiers, resolution), `packages/presets.scm`
+(the table, `@` cookies, capf, face, `M-x presets`), `packages/mcp.scm`
+(`define-preset!` grows keys; `llm-set-preset` becomes `set-preset`),
+`packages/project.scm` (`project-preset!`, `project-tier!`),
+`packages/agent-session.scm` and `editor.scm` llm-mode (cookie read
+before the send), `packages/chat.scm` (system parts from the preset),
+`packages/tools.scm` (NAME on `llm-with-tools`), `packages/code.scm`
+(the `coding` preset owns the three knobs), `themes.scm`
+(`preset-cookie`), `init.scm` (load order: models, presets, after
+project.scm and before code.scm).
 
-Accept: `(model-for 'summarize)` answers the global tier; a
-`.project.scm` with `(project-models! 'summarize "x")` answers "x" for a
-buffer in that root and the global for a buffer outside it;
-`M-x set-model-role` wins over both; `M-x models` shows the three layers
-and the connector; `llm-for` sends the resolved model.
+Accept: `(preset-model 'summarize)` answers the global tier; a
+`.project.scm` with `(project-preset! 'summarize 'model "x")` answers
+"x" in that root and the global outside it; the buffer local wins over
+both; `@coding fix the loop` sends "fix the loop" with the coding model,
+system, and tools on the API lane and the buffer is unchanged on the next
+turn; on an ACP session the model switches in place or the echo area says
+it holds; `@` in the input completes preset names; `M-x presets` shows
+the layers; the old three-argument `define-preset!` still loads
+`~/.compos/ai-config.scm` files.
 
-Tests: `priv/tests/models-test.scm`, pure resolution over fixture tables
-and a temporary root with a `.project.scm`.
-
+Tests: `priv/tests/presets-test.scm`, pure resolution over fixture
+tables and a temporary root with a `.project.scm`; the cookie parser
+(text out, names out, unknown `@word` stays in the text); the send path
+through `KeyDispatch.handle_key/1` with the stub backend
+(`AIMAX_CHAT` replay lane) asserting the model and system the turn
+carried.
 ### P1. Providers: M-. in a document reaches the code
 
 Files: `packages/peek.scm` (chain), `packages/scope.scm` (new: path and
@@ -366,9 +412,11 @@ close CB8/CB9 in Linear or mark what this replaces.
    or `~/.compos/scope/<root>/`.
 2. Auto-refresh on by default with a budget of 60 calls per hour per
    project, or off until `G`.
-3. Decided 2026-08-30: a model router (3.6). Roles `summarize`, `explain`,
-   `code`, `chat`; tiers `fast`, `medium`, `strong`; `.project.scm`
-   overrides both. Open: the global tier defaults named above.
+3. Decided 2026-08-30: presets with a model router (3.6), gptel-shaped.
+   Presets `coding`, `summarize`, `explain`, `chat`; tiers `fast`,
+   `medium`, `strong`; `@name` in the input summons one for a turn;
+   `.project.scm` overrides preset fields and tiers. Open: the global tier
+   defaults named above.
 4. Should `M-.` in a document GO (pop-to-buffer) or PEEK (current
    `definition-peek`)? The plan keeps peek: a document names many things
    and the reader checks more than they follow.
