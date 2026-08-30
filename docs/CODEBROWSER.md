@@ -5,28 +5,34 @@ reader sees a summary at every level: the project, a directory, a file, a
 definition, a change. Every summary stays true to the code, and every name
 in a summary is one key from the code it names.
 
+There is no new table. Dired is the table of a directory. `scope-mode` is a
+minor mode that toggles onto a Dired buffer or a file buffer, the way
+`diff-mode` toggles onto them. It adds one column to Dired, one side window
+that shows the summary of what point is on, and definitions in the popup.
+
 This document is the user experience. `docs/CODE-BROWSER-PLAN.md` is the
 mechanism and the build order. This document is in this order:
 
 1. The model.
 2. The user stories.
 3. The screens.
-4. The rules: levels, keys, the peek, summaries, freshness, changes, links, presets, agents, persistence.
+4. The rules: the mode, the side window, the popup, summaries, freshness, changes, links, presets, agents, persistence.
 5. The acceptance list.
 
 ## Model
 
 ### Objects
 
-- A **project** is a git checkout. Its root is the top level.
-- A **node** is one thing the reader can stand on: the project, a directory, a file, or a definition. A node has a path and, for a definition, a line.
+- A **project** is a git checkout.
+- A **node** is one thing the reader can stand on: the project, a directory, a file, or a definition.
 - A **summary** is one morg file about one node, in `<root>/.compos/scope/`. A file summary says what the file does, why it exists, who calls it, and what to watch. A directory summary says what lives here, one card per entry. The project summary says what the project is, what to know, and how to run it. `recent.md` says what changed lately.
-- A **level** is one list buffer that shows the children of one node. The project level shows the root's entries. A directory level shows its entries. A file level shows its definitions (the outline).
-- A **flight** is the reader moving between levels with four keys and reading the peek as they go.
+- **scope-mode** is a minor mode. On a Dired buffer it adds the `summary` column and the side window. On a file buffer it adds the side window. It claims no motion key: Dired moves like Dired, a file moves like a file.
+- The **side window** is the popup (docs/POPUPS.md) showing the summary of the node at point. It follows point.
+- A **definition popup** is a definition shown in the same popup, over the summary. `q` brings the summary back.
 
 ### The three rules
 
-1. Every node has a summary, or a row that says it has none. The reader never meets an empty page.
+1. Every node has a summary, or a badge that says it has none. The reader never meets an empty side window.
 2. A summary is fresh or it says `stale`. The reader never reads a lie without a badge on it.
 3. Every name in a summary reaches the code with `M-.`: a path, a module, a function, a Scheme name. A name that reaches nothing says so and opens nothing.
 
@@ -42,101 +48,104 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 #### I want to know what the agent did while I was away
 
-- `M-x scope` opens the project level. The header is the project in one paragraph. Rows with `M` are the files the working tree changed; rows with `stale` are the files whose summary is behind the code.
-- `r` opens `recent.md`: what the last commits did, what is in flight.
+- `M-x scope` opens Dired at the project root with scope-mode on. The side window shows the project summary. Each row has its one-liner; the `vc` column says `modified` where the working tree changed, and `stale` in the summary column says where the summary is behind.
+- `M-x scope-recent` puts `recent.md` in the side window: what the last commits did, what is in flight.
 - **Commands:** `scope`, `scope-recent`.
 
 #### I want to see the changes themselves, with the reasons
 
-- `c` at the project level opens the diff: one card per file, hunks folded.
+- `M-x diff-mode` in the listing opens the diff for that directory, as today: one card per file, hunks folded.
 - `e` on a card explains it: intent, mechanism, risk. The same call brings the file's summary up to date.
-- `j` and `k` in the diff walk the cards; `RET` on a hunk visits the line.
-- **Commands:** `scope-changes`, `diff-explain`, `diff-visit`.
+- **Commands:** `diff-mode`, `diff-explain`.
 
 #### I want to check that a change did what the explanation says
 
-- In the explanation, `M-.` on a name peeks the definition as it is now. `M-.` again goes there. `M-,` comes back to the explanation.
+- In the explanation, `M-.` on a name shows the definition as it is now, in the popup over the explanation. `q` brings the explanation back. `M-.` again on the same name goes to the code.
 - **Command:** `definition-peek`.
 
 #### I want to catch up on one directory, not the whole tree
 
-- `l` into the directory. Its header says what lives here. Rows with `M` or `stale` are where the work happened.
-- `c` there opens the diff for that directory only.
-- **Commands:** `scope-descend`, `scope-changes`.
+- `RET` on the directory opens it here, as Dired does. The side window shows that directory's summary. Rows say `modified` and `stale` where the work happened.
+- **Command:** `dired-visit`.
 
 ### As a reader new to a codebase
 
 #### I want the shape of the project before any file
 
-- `M-x scope`. The header is one paragraph; the rows are the top-level entries, each with one line.
-- `j` and `k` show each entry's full summary in the peek as point moves. No file opens.
-- **Commands:** `scope`, list motion.
+- `M-x scope`. The side window is the project in one page. The rows are the top-level entries, each with one line.
+- `n` and `p` move the rows; the side window shows each entry's full summary as point moves. No file opens.
+- **Commands:** `scope`, Dired motion.
 
 #### I want to walk down to the code without losing my place
 
-- `l` into a directory, `l` into a file, `l` onto a definition: the code shows with `code-browse` on. `h` returns one level, with point on the row I came from, every time.
-- **Commands:** `scope-descend`, `scope-ascend`.
+- `RET` on a directory opens it here. `RET` on a file peeks it beside the listing; `RET` again keeps it, as Dired does today. `^` goes up. Point returns to the row I came from.
+- **Commands:** `dired-visit`, `dired-up`.
 
 #### I want to read a file's summary before its code
 
-- On a file row, the peek shows the summary. `d` opens it and selects it. `q` returns to the list.
+- On the file's row, the side window shows the summary. `M-x scope-doc` selects the side window so I can scroll it, fold it, or edit it. `q` returns to the listing.
 - **Command:** `scope-doc`.
 
 #### I want to see a file's definitions with what each one does
 
-- `l` on a file row opens its outline: line, kind, name, and doc for every definition. The peek is the file, and the row's definition carries the tint.
-- **Command:** `scope-descend`.
+- `RET` peeks the file; `M-x imenu` lists its definitions with line, kind, name, and doc. `M-x code-browse` turns on structural keys in it: `j` and `k` walk the definitions, and the side window shows the file's summary with the paragraph about the definition at point on top.
+- **Commands:** `imenu`, `code-browse`.
 
 #### I want to find the code behind a name I just read
 
-- In any summary, `M-.` on the name peeks the definition. A path peeks the file, `path:42` peeks the line, `Mod.fun` peeks the function.
+- In the side window, `M-.` on the name shows the definition in the popup over the summary. A path shows the file, `path:42` the line, `Mod.fun` the function. `M-.` again goes there; `q` brings the summary back.
 - A name that reaches nothing says "No definition of NAME" and opens nothing.
 - **Command:** `definition-peek`.
 
 #### I want to jump to any definition in the project by name
 
-- `M-x scope-find` reads a name with completion over every definition in the project. `RET` opens the file level with point on it; the peek shows the code.
+- `M-x scope-find` reads a name with completion over every definition in the project and visits it, with the side window on that file's summary.
 - **Command:** `scope-find`.
 
 #### I want to narrow a big directory to what I am looking for
 
-- `/` narrows the rows on every keystroke, over the name and the one-liner. `\` widens.
+- `/` narrows the rows on every keystroke. It matches the name and the one-liner too, so `/ watcher` finds the file whose summary says watcher. `\` widens.
 - **Rule:** list narrowing, as in every table.
 
 ### As a reader who opens a file first
 
 #### I want the summary of the file I am in
 
-- `M-x scope-here` opens the file's level with point on the definition at point. `h` goes to its directory.
-- **Command:** `scope-here`.
+- `M-x scope-mode` in the file. The side window shows the file's summary. It stays while I read; `M-x scope-mode` again takes it away.
+- **Command:** `scope-mode`.
 
 #### I want the summary of the definition I am in
 
-- `M-x scope-here` in a file level shows the doc column for the definition at point; `d` opens the file summary at its paragraph about that definition when one exists.
+- With scope-mode on in a file, the side window puts the paragraph about the definition at point first, when the summary has one, and the outline row for it above the page.
+- **Rule:** the side window.
+
+#### I want the listing my file is in, with the summaries
+
+- `M-x scope-here` opens Dired on the file's directory with scope-mode on, point on the file.
 - **Command:** `scope-here`.
 
 ### As a reader whose summaries do not exist yet
 
 #### I want summaries for a project that has none
 
-- Every row shows `?`. `G` at the project level bootstraps: files first, then directories, then the project page. The footer counts what landed. Rows fill in as they land; the budget bounds the run and the footer says when it stops.
+- Every row shows `?` in the summary column. `M-x scope-bootstrap` at the root writes them: files first, then directories, then the project page. The rows fill in as they land. The budget bounds the run; the modeline says when it stops.
 - **Command:** `scope-bootstrap`.
 
 #### I want one summary now
 
-- `g` on the row queues it. The row shows `~` while the job runs, then its one-liner.
+- `M-x scope-refresh` on the row queues it. The row shows `~` while the job runs, then its one-liner.
 - **Command:** `scope-refresh`.
 
 #### I want the summaries without spending on a large tree
 
-- `scope-auto-refresh` off keeps the queue quiet; badges still show. `G` on one subdirectory bootstraps only that subtree. The `summarize` preset's tier is `fast`; `.project.scm` can set a cheaper model.
+- `scope-auto-refresh` off keeps the queue quiet; badges still show. `scope-bootstrap` in a subdirectory writes only that subtree. The `summarize` preset's tier is `fast`; `.project.scm` can set a cheaper model.
 - **Rules:** freshness, presets.
 
 ### As a reader who edits
 
 #### I want to correct a summary
 
-- `d` opens it as a morg buffer. I edit and save. The summary keeps its key, so it stays fresh until the code changes. The next refresh carries my text as the existing doc and asks the model to keep what still holds.
+- `M-x scope-doc` selects the side window. I edit and save. The summary keeps its key, so it stays fresh until the code changes. The next refresh carries my text as the existing doc and asks the model to keep what still holds.
 - **Command:** `scope-doc`.
 
 #### I want the summary to follow my edit to the code
@@ -153,7 +162,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 #### I want to see what the agent touches as it works
 
-- The scope level and the diff both follow the filesystem. A file the agent saves shows `M` and `stale` on the next draw; the diff card appears.
+- The listing follows the filesystem, as Dired does. A file the agent saves shows `modified` and `stale` on the next draw. The diff, if open, grows a card.
 - **Rule:** the watch.
 
 #### I want the explanation of the agent's change before I read the diff
@@ -180,164 +189,116 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 ## The screens
 
-### The project level
+### Dired with scope-mode on
 
-`M-x scope` opens the project level in the project's group. The list is on the left, the peek is on the right.
-
-```
-+-- *scope: compos --------------------------------+-- files/apps/compos_core/priv/packages/code.scm.md --+
-| compos                                             | code.scm reads a source file with structural keys.  |
-| Emacs rebuilt on the BEAM, scripted in Scheme,     | It is a minor mode: the buffer keeps its major mode |
-| rendered by Phoenix LiveView. 4 apps, 312 files.   | and its file. h/l walk the tree, j/k the siblings.  |
-|                                                    |                                                     |
-|   apps/            the four umbrella apps          | It exists because an agent writes code faster than  |
-|   docs/            specs, plans, the handoff       | a person reads it. Called from code-browse and by   |
-|   bin/             test-fast, the release script   | imenu, which reads its outline (imenu-rows).        |
-|   config/          runtime.exs and the ports       |                                                     |
-|   CLAUDE.md        the working instructions        | Watch: nested tree-sitter nodes can share one byte  |
-|   README.md        what the project is             | range, so a node is (kind start end), never the     |
-|   mix.exs          the umbrella manifest       M   | range alone.                                        |
-|                                                    |                                                     |
-| 7 of 7 . 2 stale . budget 58/60 . r recent . c changes                                                 |
-+----------------------------------------------------+-----------------------------------------------------+
-```
-
-The header is the project summary's opening paragraph. Each row is one entry with the first line of its summary. The footer counts the rows, the stale summaries, the refresh budget left this hour, and the keys that change the view.
-
-### A directory level
-
-`l` on `apps/` opens `*scope: apps*` in the same window. `l` again on `compos_core/`, and again on `priv/packages/`:
+`M-x scope` opens Dired at the project root with scope-mode on. The listing is Dired's, with one more column. The popup on the right is the side window.
 
 ```
-+-- *scope: apps/compos_core/priv/packages ----------------------------------------+
-| The bundled packages: every mode, command, and list the editor ships.            |
-| init.scm loads them in dependency order.                                         |
-|                                                                                  |
-|   agent.scm          the chat's turn loop and its tool calls                     |
-|   annotate.scm       margin notes on any buffer                     stale        |
-|   chat.scm           the conversation of record and the tool surface            |
-|   code.scm           read a source file with structural keys        M           |
-|   components.scm     the ui/* block components                                   |
-|   diff-mode.scm      the git diff as cards, following the filesystem            |
-|   lsp.scm            diagnostics, definition, references, hover                  |
-|   morg/              babel blocks and tangling for morg documents                |
-|   peek.scm           look at a definition without going there                    |
-|   scope.scm          this browser                                    ?          |
-|                                                                                  |
-| 61 of 61 . 3 stale . 1 without                                                   |
-+----------------------------------------------------------------------------------+
++-- /Users/svs/src/compos/apps/compos_core/priv/packages ------------+-- *scope* ---------------------------------------+
+| packages  61 entries . 2 modified                                   | code.scm                                stale     |
+|                                                                     |                                                  |
+|   ..                                                                | code.scm reads a source file with structural     |
+|   morg/          --  Aug 30  drwxr-xr-x           babel blocks      | keys. It is a minor mode: the buffer keeps its   |
+|   agent.scm    41K  Aug 29  -rw-r--r--            the chat's turn   | major mode and its file. h and l walk the tree,  |
+|   annotate.scm 18K  Aug 27  -rw-r--r--   stale    margin notes on   | j and k the siblings.                            |
+|   chat.scm     33K  Aug 30  -rw-r--r--            the conversation  |                                                  |
+| > code.scm     58K  Aug 30  -rw-r--r-- modified   read a source f   | It exists because an agent writes code faster    |
+|   diff-mode.scm 40K Aug 30  -rw-r--r--            the git diff as   | than a person reads it. code-browse is the       |
+|   lsp.scm      22K  Aug 20  -rw-r--r--            diagnostics, def  | reader's verb set; imenu reads its outline       |
+|   peek.scm      7K  Aug 30  -rw-r--r--            look at a defini  | through imenu-rows, and an agent reads the same  |
+|   scope.scm     3K  Aug 30  -rw-r--r-- untracked ?                  | outline through code-outline.                    |
+|                                                                     |                                                  |
+| RET peek  m mark  d flag  x trash  s sort  / filter  ^ up  g revert | Watch: nested tree-sitter nodes can share one    |
++---------------------------------------------------------------------+ byte range, so a node is (kind start end).       |
+                                                                      +--------------------------------------------------+
 ```
 
-Badges on the right: `stale` when the code moved since the summary, `?` when there is no summary, `~` while a refresh runs, `M` when git says the file is modified, `!` when it is in conflict. The peek on the right shows the row's full summary and follows `j` and `k`.
+The `summary` column is the first sentence of the entry's summary, or a badge: `?` none, `stale` behind the code, `~` refreshing, `pinned` kept by hand. The side window shows the whole summary of the row at point and moves with `n` and `p`.
 
-### A file level
+### A file with scope-mode on
 
-`l` on `code.scm` opens its outline: one row per definition, from `imenu-rows`. The peek on the right is now the file itself, and the row's definition carries the code-browse tint.
-
-```
-+-- *scope: apps/compos_core/priv/packages/code.scm ---------------------------+
-| code.scm reads a source file with structural keys. It is a minor mode.       |
-|                                                                              |
-|    23  defcustom  code-browse-fold-lines   fold definitions past this many   |
-|    44  define     code--pick-backend!      ts when a grammar parses, else    |
-|    92  define     code--anchor             point at the start of the code   |
-|   399  section    go to definition         the seam for LSP                 |
-|   423  define     code--goto-definition    LSP when attached, else the same |
-|   554  command    code-browse              toggle structural browsing       |
-|   759  define     code-outline             (LINE KIND NAME DOC) rows        |
-|  1463  command    imenu                    jump to a definition             |
-|                                                                              |
-| 41 of 41 . tree-sitter                                                       |
-+------------------------------------------------------------------------------+
-```
-
-`l` on a definition selects the right window at that definition with `code-browse` on. `h` there comes back to the outline. `h` on the outline goes to the directory, with point on `code.scm`.
-
-### The summary page
-
-`d` on any row opens the node's morg summary in the right window and selects it. It is a plain morg buffer: fold it, edit it, save it. `M-.` on a name in it peeks the definition; `M-.` again goes there; `M-,` comes back. `q` returns to the list.
+`RET` on `code.scm` peeks it; `RET` again keeps it. scope-mode is on in it because the listing had it on. The side window shows the file's summary, with the paragraph about the definition at point first.
 
 ```
-#+scope: file
-#+path: apps/compos_core/priv/packages/code.scm
-#+source: 9f1c2a7
-#+written: 2026-08-30T12:04:11Z
++-- code.scm --------------------------------------------+-- *scope* ---------------------------------------+
+| (define (code--goto-definition)                         | code.scm . code--goto-definition   L423  define  |
+|   (let ((sym (code--symbol-at)))                        |                                                  |
+|     (cond                                               | The seam for LSP. With a server attached,        |
+|       ((not sym) (message "No symbol at point"))        | lsp-definition answers. Without one, the same    |
+|       ((and (boundp 'lsp-definition)                    | file answers: the first line that defines the    |
+|             (buffer-local (current-buffer) 'lsp-server))| symbol under point.                              |
+|        (lsp-definition sym))                            |                                                  |
+|       (else ...                                         | code.scm reads a source file with structural     |
+|                                                         | keys. It is a minor mode: ...                    |
++---------------------------------------------------------+--------------------------------------------------+
+```
 
-code.scm reads a source file with structural keys. It is a minor mode:
-the buffer keeps its major mode and its file. `h` and `l` walk the tree,
-`j` and `k` walk the siblings, `TAB` folds a body.
+### A definition in the popup
 
-It exists because an agent writes code faster than a person reads it.
-`code-browse` is the reader's verb set. `imenu` and the `scope` file
-level read its outline through `imenu-rows`, and an agent reads the
-same outline through `code-outline`.
+`M-.` on `lsp-definition` in the side window shows the definition in the popup, over the summary. `q` brings the summary back. `M-.` again goes to the code and keeps the popup on the summary.
 
-Watch: nested tree-sitter nodes can share one byte range (an Elixir
-`arguments` node and the call inside it), so a node is
-`(KIND START END)`, never the range alone. See `docs/code-browse.html`.
+```
++-- code.scm ---------------------------------------------+-- lsp.scm  (popup, over *scope*) ---------------+
+| ...                                                     | (define (lsp-definition sym)                     |
+|                                                         |   (let ((buf (current-buffer)))                  |
+|                                                         |     (let ((id (lsp--server-of buf)))             |
+|                                                         |       (if (not id)                               |
+|                                                         |           (message "No language server here")    |
+|                                                         |           (lsp-buffer-request id                 |
+|                                                         |             "textDocument/definition" buf (point)|
+|                                                         | q back to the summary . M-. go there             |
++---------------------------------------------------------+--------------------------------------------------+
 ```
 
 ### Changes
 
-`c` at any level opens the diff for that node: the whole tree at the project level, one directory, or one file. It is the existing diff-mode: cards per file, hunks folded, following the filesystem. `e` on a card explains it:
+`M-x diff-mode` in the listing opens the diff for the directory, as today. `e` on a card explains it:
 
 ```
-+-- *git: compos ----------------------------------------------------------------+
-| v apps/compos_core/priv/packages/code.scm                    +41 -6   explained |
++-- *git: compos/apps/compos_core/priv/packages ---------------------------------+
+| v code.scm                                                   +41 -6   explained |
 |   v what changed                                                                |
-|     Adds a `code--doc-inside` reader so the outline's DOC column takes the      |
-|     docstring inside a definition when nothing sits above it. The heredoc      |
-|     branch trims the closing quotes. Risk: a Python file with a bare string    |
-|     as its first statement reads as a docstring; that matches Python's rule.   |
+|     Adds a code--doc-inside reader so the outline's DOC column takes the        |
+|     docstring inside a definition when nothing sits above it. Risk: a Python    |
+|     file with a bare string as its first statement reads as a docstring; that   |
+|     matches Python's rule.                                                      |
 |   > @@ -637,6 +637,24 @@                                                        |
 |   > @@ -683,4 +701,9 @@                                                         |
-| > apps/compos_core/priv/tests/code-test.scm                  +18 -0             |
+| > ../tests/code-test.scm                                     +18 -0             |
 +--------------------------------------------------------------------------------+
 ```
 
-The same call rewrites the file's summary, so after `e` the file row is fresh again. `r` at the project level opens `recent.md`: the last twenty commits and the working tree, in two paragraphs.
+The same call rewrites the file's summary, so after `e` the file's row is fresh again.
 
 ## Rules
 
-### Levels
+### The mode
 
-1. A level is one list buffer named `*scope: REL*`; the project level is `*scope: NAME*`. A level opened twice is the same buffer.
-2. `l` opens the child level in the same window. `h` opens the parent level in the same window and puts point on the row the reader came from.
-3. The file level's rows are `imenu-rows`: tree-sitter where a grammar parses the file, indentation elsewhere, headings for a morg file. Every file has a file level.
-4. `l` on a definition row selects the right window at the definition with `code-browse` on. `h` in that window returns to the file level. This is the bottom of the flight.
-5. Every level enters the project's group (docs/groups.md). A peek says nothing about the group.
-6. `M-x scope-here` opens the level of the current buffer's file with point on the definition at point. `M-x scope-find` reads a definition name with completion over the project's outline index and opens its file level on it.
+1. `scope-mode` is a minor mode. `M-x scope-mode` toggles it on the current buffer. `M-x scope` opens Dired at the project root with it on. `M-x scope-here` opens Dired at the current file's directory with it on, point on the file.
+2. On a Dired buffer, scope-mode adds the `summary` column and the side window. Dired's keys, marks, flags, sorting, and filters are unchanged. `/` also matches the one-liner.
+3. On a file buffer, scope-mode adds the side window. The buffer's keys are unchanged. `code-browse` is a separate minor mode and combines with it.
+4. A buffer opened from a listing that has scope-mode on has scope-mode on. `M-x scope-mode` in it turns it off for that buffer.
+5. The `summary` column and the side window read the store once per draw. A listing of 400 rows costs one store read, not 400.
 
-### Keys
+### The side window
 
-The alphabet is code-browse's, so the reader learns one set. No global binding claims a key; `M-x scope` opens the first level.
+1. The side window is the popup, on the right by default (docs/POPUPS.md). Its buffer is `*scope*`. It is a morg buffer in `scope-doc-mode`: rendered, foldable, editable, `M-.` on every name.
+2. It follows point: the list `'preview` hook in Dired and the post-command hook in a file buffer, with the same debounce the switcher's peek uses. It does not follow point in any other window.
+3. In a file, the page starts with the outline row of the definition at point (line, kind, name), then the summary's paragraph about that definition when the summary has one, then the summary.
+4. `M-x scope-doc` selects the side window. `q` there returns to the buffer it follows. Saving it writes the summary file.
+5. Closing the popup (`C-\``) does not turn scope-mode off; the next `n` or `p` opens it again. `M-x scope-mode` off closes it.
+6. One side window per frame. Two listings with scope-mode on share it; it shows the one that has point.
 
-| key | command | does |
-|---|---|---|
-| `l`, `RET` | `scope-descend` | into the row: a directory's level, a file's outline, a definition's code |
-| `h` | `scope-ascend` | the parent level, point on where the reader came from |
-| `j`, `k` | list motion | with the peek following |
-| `d` | `scope-doc` | the row's summary, selected, in the right window |
-| `c` | `scope-changes` | the diff for the row, or the level's node |
-| `r` | `scope-recent` | `recent.md` (project level) |
-| `g` | `scope-refresh` | queue the row's summary |
-| `G` | `scope-bootstrap` | queue the row's subtree, or the whole store at the project level |
-| `/`, `\` | list narrowing | narrow by text; widen |
-| `q` | `quit-window` | leave the level |
+### The popup
 
-A test binds its own keys under `<f9>` and names the command. No test names a production key.
-
-### The peek
-
-1. The right window is the peek. It shows the summary of the row at point, and it follows `j` and `k` after a short debounce, the way the switcher's peek does.
-2. On a file level the peek is the file itself, and the row's definition carries the code-browse tint. The reader sees the code move as they walk the outline.
-3. `d` selects the peek window and keeps it. `l` on a definition selects it and keeps it. Any other command that leaves the level lets the peek go.
-4. A level opened in a frame with one window splits it. A level opened beside a window uses that window for the peek.
+1. `M-.` in the side window, in a change explanation, and in any morg document is `definition-peek`. It shows the definition in the popup, over the summary (popper's stack, POPUPS.md rule 4).
+2. `q` in the definition popup brings the summary back. `M-.` again on the same name goes to the definition in a work window and leaves the popup on the summary. `M-,` returns.
+3. `M-.` in a file buffer is unchanged: `code-goto-definition`, LSP when attached.
 
 ### Summaries
 
 1. A summary is a morg file. Directives at the top say what it is about (`#+scope`, `#+path`), what it read (`#+source`, `#+inputs`), who wrote it (`#+model`, `#+written`). `morg-scan` reads them; nothing else parses them.
-2. A file summary is two to four short paragraphs, no headings: what, why, who calls it, what to watch. Paths are inline as `path/to/file.ext`. Names are inline as `name`.
+2. A file summary is two to four short paragraphs, no headings: what, why, who calls it, what to watch. Paths are inline as `path/to/file.ext`. Names are inline as `name`. A paragraph that is about one definition starts with that name, so the side window can put it first.
 3. A directory summary is one paragraph and one card per entry; noise entries (`_build`, `deps`, `node_modules`) have no card.
 4. The project summary is one paragraph, a "Worth knowing" list, and "Running".
 5. `recent.md` is two paragraphs: what the last commits did, what is in flight.
@@ -350,21 +311,22 @@ A test binds its own keys under `<f9>` and names the command. No test names a pr
 2. A summary is fresh when `#+source` equals the key. Else it is `stale`. No clock is read.
 3. A stale summary still shows, with the badge. A missing summary shows `?`.
 4. The queue holds one job in flight. A job that waited while its input changed again is dropped and re-queued with the newest key. Children settle before parents.
-5. Auto-refresh has a budget of calls per hour per project (default 60). The footer shows it. A queue that meets the budget stops and says so; `g` still runs by hand.
+5. Auto-refresh has a budget of calls per hour per project (default 60). The modeline of a scope-mode buffer shows it. A queue that meets the budget stops and says so; `scope-refresh` still runs by hand.
 6. A hand-edited summary keeps its key. The next refresh carries the edited text as the existing doc.
 
 ### Changes
 
-1. `c` opens the existing diff-mode buffer for the node: `git-diff` scoped to the project, a directory, or a file.
+1. `M-x diff-mode` in a listing or a file opens the diff for that directory or file, as today.
 2. `e` on a file card runs one `explain` call with the diff, the file, and the existing summary. It gets two sections: what changed, shown under the card; the updated summary, written to the store and marked fresh.
 3. `recent.md` refreshes when `HEAD` moves or the working diff changes.
 
 ### Links
 
-1. `M-.` in a summary, in `recent.md`, in a change explanation, and in any morg document, is `definition-peek`. Its providers, in order: a path (`code.scm`, `code.scm:423`, `lib/foo.ex#L42`), a Scheme name, an LSP `workspace/symbol` when a server is attached, the project outline index.
+1. `definition-peek`'s providers, in order: a path (`code.scm`, `code.scm:423`, `lib/foo.ex#L42`), a Scheme name, an LSP `workspace/symbol` when a server is attached, the project outline index.
 2. A path resolves against the document's directory and then the project root. It is a link only when the file exists.
 3. A name with a module (`Compos.Core.Git.diff`, `Mod.fun/2`) resolves through the outline index and LSP. A bare name resolves in the same order and takes the first hit.
 4. A name that resolves nowhere says "No definition of NAME" and opens nothing.
+5. `M-x scope-find` completes over the outline index and visits the definition.
 
 ### Presets
 
@@ -379,22 +341,23 @@ A test binds its own keys under `<f9>` and names the command. No test names a pr
 
 ### Persistence
 
-1. A level rebuilds from its locals after a restart: `'scope-node` names the node, and the mode setup redraws the rows. The peek is not restored; the next `j` or `k` brings it back.
+1. scope-mode is a minor mode local; it survives a restart, and the mode setup reopens the side window on the next motion.
 2. The store is files. A restart loses nothing. The queue is not persisted; a stale summary is stale until viewed or changed again.
 
 ## Acceptance
 
-1. `M-x scope` in a project opens `*scope: NAME*` with the project's entries and the header from `project.md`, or `?` rows and an empty header for a project without a store.
-2. `l` on a directory row opens its level; `h` returns with point on that row.
-3. `l` on a file row opens the outline; `l` on a definition row selects the code with `code-browse` on; `h` twice returns to the directory.
-4. `j` and `k` move the peek to the row's summary; on a file level they move the tint in the file.
-5. `d` opens the summary and `M-.` on a path in it peeks the file; `M-.` on `Compos.Core.Git.diff` peeks git.ex; `M-.` on a Scheme name peeks its definition; `M-.` again goes there; `M-,` returns.
-6. Saving a file marks its row `stale` on the next draw; with auto-refresh on and budget left, the row shows `~` and then a fresh one-liner; the directory row refreshes after.
-7. `g` on a row queues it; `G` at the project level bootstraps and the footer counts.
-8. A hand edit to a summary survives the next refresh as the existing doc in the prompt.
-9. `c` on a file row opens its diff; `e` on the card shows the explanation and marks the file's summary fresh.
-10. `r` opens `recent.md`; it refreshes after a commit.
-11. A `.project.scm` preset override changes the model the next job sends.
-12. `scope-outline` and `scope-read` return the store to a chat that holds them.
-13. Every level survives `M-x restart-daemon` with its rows and point.
-14. Tests bind dummy `<f9>` keys to the commands; no test names a production key.
+1. `M-x scope` in a project opens Dired at the root with scope-mode on, the `summary` column filled, and `*scope*` in the popup showing `project.md`; a project without a store shows `?` in the column and an empty-state page.
+2. `n` and `p` in the listing move the side window to the row's summary; `RET` on a directory keeps scope-mode on in it.
+3. `RET` on a file peeks it with scope-mode on; the side window shows the file's summary; moving point across definitions changes the outline row and the first paragraph.
+4. `M-x scope-mode` in a plain file buffer opens the side window with its summary; again closes it.
+5. `M-.` on a path in the side window shows the file in the popup; on `Compos.Core.Git.diff` shows git.ex; on a Scheme name shows its definition; `q` brings the summary back; `M-.` again goes to the code; `M-,` returns.
+6. Saving a file marks its row `stale` on the next draw; with auto-refresh on and budget left, the row shows `~` and then a fresh one-liner; the directory's summary refreshes after.
+7. `M-x scope-refresh` queues one row; `M-x scope-bootstrap` at the root fills the tree and the modeline counts.
+8. A hand edit to `*scope*` saves to the store and survives the next refresh as the existing doc in the prompt.
+9. `M-x diff-mode` in the listing opens its diff; `e` on a card shows the explanation and marks the file's summary fresh.
+10. `M-x scope-recent` shows `recent.md`; it refreshes after a commit.
+11. `/ watcher` in the listing narrows to the rows whose one-liner says watcher.
+12. A `.project.scm` preset override changes the model the next job sends.
+13. `scope-outline` and `scope-read` return the store to a chat that holds them.
+14. scope-mode survives `M-x restart-daemon` on every buffer that had it.
+15. Dired's own tests are unchanged; scope-mode's tests bind dummy `<f9>` keys to its commands and never name a production key.

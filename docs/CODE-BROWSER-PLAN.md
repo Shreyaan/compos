@@ -147,48 +147,47 @@ Order: path, scheme-ide, lsp, outline. The first hit wins.
 `symbol-at-point` needs one change: a document reads a wider alphabet
 (`/`, `.`, `:`, `#`) so a path and a qualified name are one symbol.
 
-`definition-peek` already handles the rest: peek in the other window,
-`M-.` again to go, `M-,` back via the marker stack.
+`definition-peek` already handles the rest: `M-.` again to go, `M-,`
+back via the marker stack. Where it shows the hit is 3.4: the popup.
 
-### 3.4 The fly surface: `scope-mode`
+### 3.4 The surface: scope-mode over Dired, a side window, popup definitions
 
-One list-mode buffer per level, on the list mechanism (docs/LISTS.md):
+Decided 2026-08-30: no new table. Dired is the table of a directory
+(`priv/dired.scm`, a `define-list-mode!`). `scope-mode` is a minor mode
+that toggles onto a Dired buffer or a file buffer, the way `diff-mode`
+toggles onto them (git.scm:197). `docs/CODEBROWSER.md` has the stories
+and the screens.
 
-```
-*scope: apps/compos_core/priv/packages*      <- the directory
-  code.scm       code-browse: read a source file with structural keys
-  lsp.scm        LSP client: diagnostics, definition, references, hover
-  peek.scm       look at a definition without going there
-  morg/          babel blocks and tangling for morg documents
-```
+What the mode adds:
 
-Rows are the entries. The second column is the first line of the entry's
-summary (blank plus a `?` badge when none, `stale` badge when stale).
+- **A `summary` column in Dired**, the way Dired got the `vc` column: the
+  first sentence of the entry's summary, or a badge (`?`, `stale`, `~`,
+  `pinned`). Dired's `'columns` and `dired-cells` grow the column; it
+  draws only when the buffer wears scope-mode. `dired-match?` reads the
+  one-liner too, so `/` narrows on it. The column reads the store once
+  per draw through the row context (docs/LISTS.md rule 1).
+- **The side window**: the popup (`display-buffer-popup!`,
+  editor.scm:4965; docs/POPUPS.md) showing `*scope*`, a morg buffer in
+  `scope-doc-mode`. It follows point: Dired's `'preview` hook
+  (editor.scm:1309) and a post-command hook in a file buffer, with the
+  switcher's debounce. In a file it puts the outline row and the
+  paragraph about the definition at point first.
+- **Definitions in the popup**: `definition-peek` shows its hit in the
+  popup over the summary (popper's stack), `q` brings the summary back,
+  `M-.` again goes there. `peek--show!` (peek.scm:41) gains the popup as
+  its window when the reader is in the side window or a morg document;
+  the split-the-frame path stays for a code buffer.
+- **Commands**, all `M-x`: `scope` (Dired at the root, mode on), `scope-here`,
+  `scope-mode`, `scope-doc` (select the side window), `scope-recent`,
+  `scope-refresh`, `scope-bootstrap`, `scope-find` (complete over the
+  outline index, visit). No global key.
+- **Inheritance**: a buffer opened from a listing with scope-mode on
+  wears scope-mode. `dired-visit-with-group` carries the local.
 
-Keys, the code-browse alphabet, so the reader learns one set:
-
-| key | command | does |
-|---|---|---|
-| `l` / `RET` | `scope-descend` | dir: open its list. file: open the file's outline list. definition: visit the code. |
-| `h` | `scope-ascend` | the parent directory's list |
-| `j` / `k` | list motion | with a debounced peek of the summary in the other window |
-| `d` | `scope-doc` | open the summary morg buffer for the row (read, edit, `M-.` inside it) |
-| `c` | `scope-changes` | the diff explanation for the row; a dir shows its changed files |
-| `g` | `scope-refresh` | queue this node |
-| `G` | `scope-bootstrap` | queue this subtree |
-| `/` | list narrowing | exists |
-
-A file's outline level reuses `imenu-rows` (code.scm:1418): rows are
-(LINE KIND NAME DOC). `l` there visits the definition with `code-browse`
-on. So the descent is: project, directory, file, definition, code. `h` all
-the way back. That is the flight.
-
-`M-x scope` opens the project root list. `M-x scope-here` opens the level
-of the current buffer's file. Both enter the project's group.
-
-The summary buffers are morg files, so the rendered view, folds, links,
-and `M-.` are free. A scope buffer's `d` opens `files/<rel>.md`; a path in
-it opens the code; a name in it peeks the definition.
+What is gone from the earlier draft: the `*scope: REL*` list modes, the
+`h`/`l`/`j`/`k` flight alphabet, the file outline level (Dired `RET` peeks
+the file; `imenu` and `code-browse` are the outline), the `c`/`d`/`r`/`g`
+keys.
 
 ### 3.5 Changes: the diff explains itself
 
@@ -393,18 +392,24 @@ Tests: keys from a fixture repo; `#+source` round trip; queue drop and
 re-queue; the LLM seam stubbed with a lambda (`*scope-llm*`), so no test
 spends.
 
-### P3. `scope-mode`, the fly surface
+### P3. scope-mode, the side window, popup definitions
 
-Files: `packages/scope.scm` (the list modes), `themes.scm` (badges).
+Files: `packages/scope.scm` (the minor mode, `scope-doc-mode`, the
+follow hooks, the commands), `priv/dired.scm` (the `summary` column,
+`dired-match?`, the local carried by visit), `packages/peek.scm`
+(the popup as the peek window), `themes.scm` (badges).
 
-Accept: `M-x scope` shows the root; `l`/`h` walk the tree; a file row
-descends to its outline; an outline row visits the definition with
-`code-browse` on; `j`/`k` peek the summary; `d` opens the morg summary;
-`g` queues; everything survives a restart (the list rebuilds from
-`'scope-node` local).
+Accept: `M-x scope` opens Dired at the root with the column and the
+popup on `project.md`; `n`/`p` move the side window; `RET` on a file
+peeks it with the mode on and the side window on its summary; `M-.` in
+the side window shows the definition in the popup and `q` brings the
+summary back; `M-x scope-mode` in a plain file opens and closes the side
+window; the mode survives a restart.
 
-Tests: through `KeyDispatch.handle_key/1` with dummy bindings under `<f9>`
-(never the production keys); the restore path.
+Tests: through `KeyDispatch.handle_key/1` with dummy `<f9>` bindings;
+Dired's own tests unchanged; the column's cells over a fixture store;
+the follow hook writes `*scope*` for the row at point; the restore
+path.
 
 ### P4. Changes
 
