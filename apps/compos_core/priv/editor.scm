@@ -3565,6 +3565,32 @@
         (if m ((cadr m) buf))))
     (reverse (or (buffer-local buf 'minor-modes) '()))))
 
+;; Every mode the editor knows, major and minor, one name each, sorted.
+;; load-mode offers this list; the catalog and the help pages read the
+;; two registries directly.
+(define (mode-names)
+  (sort (dedupe-names (append (map car *mode-setups*)
+                        (map car *minor-mode-setups*)))))
+
+;; Put the current buffer in the mode NAME. This is the same toggle the
+;; modeline click and the mode's own M-x command run, so a major mode
+;; enters and a minor mode flips.
+(define (load-mode! name)
+  (modeline-toggle-mode! name))
+
+(domain! 'modes)
+(effects! '(write))
+(define-command "load-mode" "Choose a mode by name and put this buffer in it"
+  (lambda ()
+    (minibuffer-read "Mode: " (mode-names)
+      (lambda (name)
+        (if (member name (mode-names))
+            (load-mode! name)
+            (message (string-append "no mode named " name)))))))
+(global-set-key "C-x m" "load-mode")
+(domain! 'unknown)
+(effects! '(unknown))
+
 ;; #t while a wake rebuilds a buffer's runtime. A wake is not an open:
 ;; the switcher previews a dormant buffer by re-running its mode setup,
 ;; and a list whose rows come from the network must not pay that fetch
