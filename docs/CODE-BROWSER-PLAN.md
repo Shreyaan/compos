@@ -232,19 +232,37 @@ preset says about its model.
 (define-preset! 'coding
   'description "Edit code in this editor with the structural tools"
   'model 'strong                       ; a tier or a model id
-  'tools '(compos)                     ; the MCP presets of today
+  'servers '(compos)                   ; MCP servers to mount (today's presets)
+  'tools '(code-outline code-read eval-scheme apropos act
+           web/fetch)                  ; the tools the model holds: editor tools
+                                       ; by define-tool! name, MCP tools as
+                                       ; server/tool
   'system code-instructions            ; a string or a thunk
   'parents '(compos))
 
 (define-preset! 'summarize 'description "A file or directory synopsis"
-  'model 'fast 'system (prompt-file "scope-file"))
+  'model 'fast 'tools '() 'system (prompt-file "scope-file"))
 (define-preset! 'explain 'description "What a change does and why"
-  'model 'medium 'system (prompt-file "scope-change"))
+  'model 'medium 'tools '(read-file code-outline code-read)
+  'system (prompt-file "scope-change"))
 (define-preset! 'chat 'description "The default chat" 'model 'medium)
 ```
 
+Two keys say what the model can call. `'servers` names MCP servers to
+mount; it is the old third argument. `'tools` names the tools the turn
+offers: an editor tool by its `define-tool!` name (tools.scm:25), an MCP
+tool as `server/tool`, a whole server as `server/*`. No `'tools` key
+means every tool of the mounted servers and every editor tool, as today.
+`'tools '()` means none: a summary job holds no tool. `'parents` merge
+both lists. The filter runs in one place, `chat-live-tool-specs`, which
+is what the API lane freezes into `'chat-tool-specs` (chat.scm:427) and
+what `llm-with-tools` sends; an ACP session gets the same list as its
+`mcpServers` plus the tool names it may call. The effects grants of
+agent-permissions.scm still apply on top: a preset offers a tool, the
+grant decides whether it runs without asking.
+
 The three-argument form `(define-preset! NAME DESC SERVERS)` keeps
-working: it is `'tools SERVERS`. Every registered MCP preset is a preset
+working: it is `'servers SERVERS`. Every registered MCP preset is a preset
 with only tools, so `compos`, `web`, and the user's own stay valid.
 
 Resolution of one field, `(preset-get NAME KEY [BUF])`, first hit wins:
@@ -282,11 +300,12 @@ Where a preset applies:
   at session start, so a tool change there is the reattach path
   `chat-presets-changed!` already handles. Several cookies stack, last
   wins per field (gptel allows one; the table makes stacking free).
-- **A call from Scheme**: `(llm-with-preset NAME PROMPT HANDLER)` =
-  `llm-with-model` (session.ex:1313) with the resolved model, the
-  preset's system text in front of the prompt. `llm-with-tools` gains an
-  optional NAME and passes the model as the seventh `llm-tools` argument
-  (session.ex:1332), which exists. The scope jobs name `summarize` and
+- **A call from Scheme**: `(llm-with-preset NAME PROMPT HANDLER)` runs
+  the tool loop (`llm-tools`, session.ex:1332, model as the seventh
+  argument, which exists) with the preset's tools, its system text, and
+  its model; a preset with `'tools '()` takes the plain `llm-with-model`
+  path (session.ex:1313). `llm-with-tools` becomes `llm-with-preset`
+  with the `chat` preset. The scope jobs name `summarize` and
   `explain`; nothing outside models.scm names a model id.
 
 The input surface: a `chat-input` capf source (`add-capf!`,
@@ -298,7 +317,8 @@ tools, and which layer answered each field; `RET` sets the buffer
 preset, `g` re-reads `.project.scm`.
 
 `code-model`, `code-agent-model`, and `code-presets` become views of
-the `coding` preset: an empty value asks the preset. `(llm-model)` is
+the `coding` preset: an empty value asks the preset. `chat-tool-list`
+(mcp.scm:547) shows the filtered list and names the preset that cut it. `(llm-model)` is
 the `chat` preset's model.
 
 ### 3.7 Elixir
@@ -339,7 +359,8 @@ the layers; the old three-argument `define-preset!` still loads
 `~/.compos/ai-config.scm` files.
 
 Tests: `priv/tests/presets-test.scm`, pure resolution over fixture
-tables and a temporary root with a `.project.scm`; the cookie parser
+tables and a temporary root with a `.project.scm`; the tool filter
+(editor name, `server/tool`, `server/*`, `'()`, parents merged); the cookie parser
 (text out, names out, unknown `@word` stays in the text); the send path
 through `KeyDispatch.handle_key/1` with the stub backend
 (`AIMAX_CHAT` replay lane) asserting the model and system the turn
