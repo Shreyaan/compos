@@ -771,7 +771,7 @@ defmodule Compos.Ui.Layouts do
           .ag-hint { font-family: var(--font-mono); font-size: calc(10px * var(--text-scale-factor, 1)); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
           .ml-extra {
             display: flex; align-items: center; gap: 12px;
-            font-family: var(--font-mono); font-size: 11px; padding: 0 8px;
+            font-family: var(--font-mono); font-size: 12.5px; padding: 0 8px;
             white-space: nowrap;
           }
           .ml-extra .ml-segment { color: var(--dim-fg, #8a857a); }
@@ -785,7 +785,7 @@ defmodule Compos.Ui.Layouts do
             flex-shrink: 0;
             background: var(--modeline-bg, #ded9ca);
             color: var(--modeline-fg, #34322c);
-            font-size: 12px;
+            font-size: 13.5px;
           }
           .window.active .modeline {
             background: var(--modeline-active-bg, #e1e5f1);
@@ -803,7 +803,7 @@ defmodule Compos.Ui.Layouts do
           }
           .dash-live {
             display: flex; gap: 16px; padding: 6px 16px;
-            font-family: var(--font-mono); font-size: 10.5px;
+            font-family: var(--font-mono); font-size: 12px;
             color: var(--dim-fg, #8a857a);
             border-bottom: 1px solid var(--border-bg, #e2dbc9);
           }
@@ -814,7 +814,7 @@ defmodule Compos.Ui.Layouts do
             border-bottom: 1px solid var(--border-bg, #e2dbc9);
           }
           .ml-caret {
-            font-family: var(--font-mono); font-size: 9px; cursor: pointer;
+            font-family: var(--font-mono); font-size: 10.5px; cursor: pointer;
             color: var(--accent-fg, #26356b); flex: 0 0 auto; opacity: 0.7;
           }
           .ml-caret:hover { opacity: 1; }
@@ -825,15 +825,15 @@ defmodule Compos.Ui.Layouts do
           .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
           .modeline .name { font-weight: 700; color: var(--buffer-group-color, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .ml-icon { display: inline-block; min-width: 1.1em; color: var(--accent-fg, #26356b); font-weight: 700; text-align: center; }
-          .ml-pos { font-family: var(--font-mono); font-size: 11px; opacity: 1; white-space: nowrap; }
-          .ml-mode { font-family: var(--font-mono); font-size: 11px; opacity: 1; white-space: nowrap; }
+          .ml-pos { font-family: var(--font-mono); font-size: 12.5px; opacity: 1; white-space: nowrap; }
+          .ml-mode { font-family: var(--font-mono); font-size: 12.5px; opacity: 1; white-space: nowrap; }
           .ml-group-item { color: var(--buffer-group-color, var(--accent-fg, #26356b)); }
           .ml-state-modified { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
           .ml-info { color: inherit; }
           .ml-toggle { cursor: pointer; }
           .ml-toggle:hover { opacity: 1; text-decoration: underline; }
           .ml-group {
-            font-family: var(--font-mono); font-size: 10.5px;
+            font-family: var(--font-mono); font-size: 12px;
             color: var(--buffer-group-color, var(--accent-fg, #26356b)); opacity: 0.85;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             max-width: 16ch; flex: 0 1 auto;
@@ -845,19 +845,19 @@ defmodule Compos.Ui.Layouts do
             flex-shrink: 0;
             background: var(--window-bg, #fdfcf8);
             border-bottom: 1px solid var(--border-bg, #cbc4b1);
-            font-family: var(--font-mono); font-size: 12.5px;
+            font-family: var(--font-mono); font-size: 14px;
           }
           .echo { color: var(--dim-fg, #57534a); white-space: pre; }
           .ml-frame-path {
             min-width: 0; max-width: 62vw; overflow: hidden; text-overflow: ellipsis;
-            color: var(--dim-fg, #57534a); font-size: 11px; white-space: nowrap;
+            color: var(--dim-fg, #57534a); font-size: 12.5px; white-space: nowrap;
           }
           .ml-frame-group {
-            color: var(--frame-group-color, var(--accent-fg, #26356b)); font-size: 11px;
+            color: var(--frame-group-color, var(--accent-fg, #26356b)); font-size: 12.5px;
             font-weight: 650; white-space: nowrap;
           }
           .echo-hint {
-            color: var(--dim-fg, #8a857a); opacity: 0.8; font-size: 11px;
+            color: var(--dim-fg, #8a857a); opacity: 0.8; font-size: 12.5px;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           }
           .mb-spacer { flex: 1; }
@@ -910,7 +910,7 @@ defmodule Compos.Ui.Layouts do
             align-content: start;
           }
           /* the name is the point: give it the room, ellipsize later */
-          .mb-panel.palette .mb-cand { font-size: 13.5px; }
+          .mb-panel.palette .mb-cand { font-size: 14.5px; }
           .mb-panel.palette .mb-label { max-width: 80ch; }
           .mb-panel.palette.transient-panel { height: auto; max-height: 62dvh; }
           .transient-title {
@@ -1010,7 +1010,7 @@ defmodule Compos.Ui.Layouts do
 
           .mb-label-row {
             padding: 6px 14px 5px;
-            font-family: var(--font-mono); font-size: 10px;
+            font-family: var(--font-mono); font-size: 11px;
             letter-spacing: 0.13em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a);
           }
@@ -1038,7 +1038,7 @@ defmodule Compos.Ui.Layouts do
             padding: 9px 14px 4px;
           }
           .mb-sep-label {
-            font-family: var(--font-mono); font-size: 9.5px;
+            font-family: var(--font-mono); font-size: 10.5px;
             letter-spacing: 0.15em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a); white-space: nowrap;
           }
@@ -1051,7 +1051,7 @@ defmodule Compos.Ui.Layouts do
             align-items: baseline; column-gap: 12px;
             padding: 3px 14px;
             border-left: 2px solid transparent;
-            font-family: var(--font-mono); font-size: 12.5px;
+            font-family: var(--font-mono); font-size: 14px;
           }
           .mb-cand.selected {
             background: var(--select-bg, #e7e9f1);
@@ -1069,7 +1069,7 @@ defmodule Compos.Ui.Layouts do
             overflow: hidden; text-overflow: ellipsis;
           }
           .mb-hint {
-            color: var(--dim-fg, #8a857a); font-size: 11px;
+            color: var(--dim-fg, #8a857a); font-size: 12.5px;
             /* an annotation is COLUMNS, padded with spaces by the
                annotator — nowrap collapses a run of spaces to one and the
                columns fell apart. pre keeps them and still does not wrap. */
@@ -1077,13 +1077,13 @@ defmodule Compos.Ui.Layouts do
           }
           .mb-input-row {
             display: flex; align-items: baseline;
-            padding: 7px 14px 8px;
+            padding: 7px 14px 8px; font-size: 14px;
             border-top: 1px solid var(--border-bg, #e2dbc9);
             background: var(--default-bg, #efeadf);
           }
           /* the prompt line holds the selection: the input names a directory */
           .mb-input-row.selected { background: var(--select-bg, #e7e9f1); }
-          .mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 10.5px; }
+          .mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 11.5px; }
           /* which-key is a keyboard-blocking overlay. Keep the buffer geometry
              unchanged while the prefix panel explains the pending keys. */
           .which-key {
@@ -1098,7 +1098,7 @@ defmodule Compos.Ui.Layouts do
           }
           .wk-title {
             display: flex; justify-content: space-between; gap: 18px;
-            font-family: var(--font-mono); font-size: 10px;
+            font-family: var(--font-mono); font-size: 11.5px;
             letter-spacing: 0.14em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a); padding-bottom: 8px;
           }
@@ -1109,18 +1109,18 @@ defmodule Compos.Ui.Layouts do
           .wk-empty {
             padding: 10px 0 3px;
             color: var(--dim-fg, #8a857a);
-            font-family: var(--font-mono); font-size: 12px;
+            font-family: var(--font-mono); font-size: 13.5px;
           }
           .wk-group-title {
             display: flex; align-items: baseline; gap: 7px;
             margin: 0 0 4px; padding-bottom: 3px;
             border-bottom: 1px solid var(--border-bg, #e2dbc9);
             color: var(--accent-fg, #26356b);
-            font-family: var(--font-mono); font-size: 11px;
+            font-family: var(--font-mono); font-size: 12.5px;
             letter-spacing: 0.08em; text-transform: uppercase;
           }
           .wk-group-title span {
-            color: var(--dim-fg, #8a857a); font-size: 9px; font-weight: 400;
+            color: var(--dim-fg, #8a857a); font-size: 10.5px; font-weight: 400;
           }
           .wk-grid {
             display: grid;
@@ -1130,7 +1130,7 @@ defmodule Compos.Ui.Layouts do
           .wk-item {
             display: grid; grid-template-columns: minmax(8ch, auto) 1fr;
             align-items: baseline; gap: 8px;
-            min-width: 0; font-family: var(--font-mono); font-size: 12px;
+            min-width: 0; font-family: var(--font-mono); font-size: 13.5px;
           }
           .wk-key {
             justify-self: start;

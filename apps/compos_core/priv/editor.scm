@@ -9778,9 +9778,9 @@
         font-family: var(--font-mono); }
 .dseg-r { align-items: flex-end; }
 .dseg-inline { flex-direction: row; align-items: baseline; gap: 7px; }
-.dseg-k { font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
+.dseg-k { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
           color: var(--faint-fg, #b3ac9c); white-space: nowrap; }
-.dseg-v { font-size: 12.5px; color: var(--default-fg, #1b1a17); white-space: nowrap; }
+.dseg-v { font-size: 14px; color: var(--default-fg, #1b1a17); white-space: nowrap; }
 .dseg-strong { font-weight: 600; }
 .dseg-group-current { color: var(--buffer-group-color, var(--default-fg, #1b1a17)); }
 .dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
