@@ -25,6 +25,8 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 2. `ibuffer` sections its rows by group, by mode, or by directory (`ibuffer-toggle-grouping`). Under the group sectioning the frame's group comes first, then the other groups by name, then the ungrouped rows. Inside a section the rows sort by name, by recency (MRU), or by size (`ibuffer-toggle-sorting-mode`); the defaults are `ibuffer-default-grouping` and `ibuffer-default-sorting-mode`.
 3. A folded section (`ibuffer-toggle-filter-group`) is one heading row that carries the member count, the modified count, and the bytes. It is not a separator: the narrowing keeps it while a member matches, the highlight can rest on it, and RET opens it. The meta line counts folded members.
 4. A right-aligned last column pads on its left, so its text ends at the column's edge; its face span starts after the padding.
+5. The key bar fits the window. A key that does not fit is dropped from the end, and a bar that dropped any ends in `? keys`, where `?` shows them all. A bar that wrapped took two lines and pushed the rows down.
+6. A mode's `'meta` answers a string, or `(TEXT SPANS)` with its own faces. The ibuffer wide head says the grouping and the sort as chips this way, the current one lit.
 
 ## Point
 

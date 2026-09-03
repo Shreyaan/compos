@@ -929,7 +929,8 @@
 ;;; header string, and the three had drifted apart.
 ;;;
 ;;;   'title    (buf) -> string             what this list shows
-;;;   'meta     (buf) -> string             the counts under the title
+;;;   'meta     (buf) -> string             the counts under the title,
+;;;                      or (TEXT SPANS) with its own (OFFSET LENGTH FACE) spans
 ;;;   'total    (buf) -> number             rows before the filters, for the chip
 ;;;   'columns  (buf) -> ((LABEL WIDTH ALIGN TRIM) ...)
 ;;;                      WIDTH #f means the rest of the line.
@@ -1174,7 +1175,10 @@
 ;; fourteen. So the narrowing says itself here, in the sentence under the
 ;; title, and it says how to leave.
 (define (list-meta-line buf)
-  (let* ((meta (list-say buf 'meta))
+  (let* ((said (list-say buf 'meta))
+         ;; a mode's meta is a string, or the text and its own spans
+         (meta (if (pair? said) (car said) said))
+         (own-spans (if (pair? said) (cadr said) #f))
          (meta (if (list-more? buf)
                    (string-append meta (if (equal? meta "") "" " · ")
                                   (number->string (list-shown-count buf)) " of "
@@ -1189,9 +1193,9 @@
                      ((equal? meta "") note)
                      (else (string-append meta "   ·   " note)))))
     (list text
-          (append (if (equal? meta "")
-                      '()
-                      (list (list 0 (string-byte-length meta) "dim")))
+          (append (cond ((equal? meta "") '())
+                        (own-spans own-spans)
+                        (else (list (list 0 (string-byte-length meta) "dim"))))
                   (if (equal? note "")
                       '()
                       (list (list (- (string-byte-length text)
@@ -1218,11 +1222,16 @@
     (if (list-opt buf 'compact)
         (if (and (null? (list-filters buf))
                  (not (equal? (car meta) "")))
-            (append (list (list (list-fit
-                                  (string-append (list-say buf 'title) "  "
-                                                 (car meta))
-                                  w 'middle)
-                                '()))
+            ;; the meta's spans ride along, shifted past the title;
+            ;; a line the width trimmed loses them, as the offsets moved
+            (append (let* ((title (list-say buf 'title))
+                           (text (string-append title "  " (car meta)))
+                           (fitted (list-fit text w 'middle)))
+                      (list (list fitted
+                                  (if (equal? fitted text)
+                                      (list-shift-spans (cadr meta)
+                                                        (+ (string-byte-length title) 2))
+                                      '()))))
                     (list-key-lines buf)
                     (list-label-lines buf cols))
             (append (list (list-title-line buf w))
@@ -1244,7 +1253,7 @@
           (else (list (list "" '()))))))
 
 ;; the key bar: what this list does, in the words the mode chose
-(define (list-key-bar buf keys)
+(define (list-key-bar-text keys)
   (let loop ((ks keys) (text " ") (spans '()))
     (if (null? ks)
         (list text (reverse spans))
@@ -1257,6 +1266,20 @@
                 (cons (list (+ at (string-byte-length key) 1)
                             (string-byte-length word) "dim")
                       (cons (list at (string-byte-length key) "accent") spans)))))))
+
+;; the bar fits the window: a key that does not fit is dropped from the
+;; end, and a bar that dropped any ends in "? keys", where ? shows them
+;; all. A bar that wrapped took two lines and pushed the rows down.
+(define (list-key-bar buf keys)
+  (let ((w (list-view-width buf))
+        (full (list-key-bar-text keys)))
+    (if (<= (string-length (car full)) w)
+        full
+        (let loop ((ks keys))
+          (let ((bar (list-key-bar-text (append ks '(("?" "keys"))))))
+            (if (or (null? ks) (<= (string-length (car bar)) w))
+                bar
+                (loop (reverse (cdr (reverse ks))))))))))
 
 ;; one entry's cells, one list per line of the row
 (define (list-row-cells buf e &optional ctx)

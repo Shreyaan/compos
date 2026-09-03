@@ -95,7 +95,7 @@
     (check-equal! (ibuffer-test-names) '("*zz-ib-b*" "*zz-ib-c*" "*zz-ib-a*") "recent order is MRU")
     (ibuffer-set-sort! 'size)
     (check-equal! (ibuffer-test-names) '("*zz-ib-b*" "*zz-ib-c*" "*zz-ib-a*") "largest first")
-    (check-contains! (ibuffer-meta "*ibuffer*") "size order" "the meta names the order")
+    (check-contains! (car (ibuffer-meta "*ibuffer*")) "by mode · size" "the meta names the order")
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-toggle-sorting-mode-cycles
@@ -127,7 +127,7 @@
       (check-equal! (ibuffer-heading-count (car es)) 3 "it counts its members")
       (check-equal! (ibuffer-heading-bytes (car es)) 6 "and their bytes"))
     (check-contains! (buffer-text "*ibuffer*") "▸" "the chevron points right")
-    (check-contains! (ibuffer-meta "*ibuffer*") "3 buffers" "the meta still counts the folded rows")
+    (check-contains! (car (ibuffer-meta "*ibuffer*")) "3 buffers" "the meta still counts the folded rows")
     (check-true! (ibuffer-heading? (ibuffer-current)) "the highlight can rest on the heading")
     (list-set-filters! "*ibuffer*" (list (list "match" "zz-ib-b")))
     (check-equal! (length (list-entries "*ibuffer*")) 1 "a member matches, so the heading stays")
@@ -136,6 +136,24 @@
     (list-set-filters! "*ibuffer*" (list (list "match" "zz-ib-")))
     (run-command "ibuffer-visit")
     (check-equal! (length (ibuffer-test-names)) 3 "RET on the heading opens it again")
+    (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-headings-and-marks-wear-bands
+  "a heading row and a marked row each get a background overlay across the row"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (let* ((es (list-entries "*ibuffer*"))
+           (heading (car es))
+           (ov (ibuffer-row-overlays "*ibuffer*" heading 100)))
+      (check-equal! (length ov) 1 "one band on a heading")
+      (check-equal! (nth 2 (car ov)) "ibuffer-heading" "the heading face")
+      (check-equal! (car (car ov)) 100 "from the row's start")
+      (check-true! (> (cadr (car ov)) 100) "to its end"))
+    (list-mark! "*ibuffer*" "*zz-ib-a*" "*")
+    (let ((ov (ibuffer-row-overlays "*ibuffer*" "*zz-ib-a*" 200)))
+      (check-equal! (nth 2 (car ov)) "ibuffer-marked" "a marked row wears the tint"))
+    (list-mark! "*ibuffer*" "*zz-ib-a*" #f)
+    (check-equal! (ibuffer-row-overlays "*ibuffer*" "*zz-ib-a*" 200) '() "an unmarked buffer with no file wears nothing")
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-narrows-by-mode-and-name

@@ -79,6 +79,7 @@ defmodule Compos.IbufferTest do
     assert text =~ "GROUP"
     assert text =~ "LAST"
     assert text =~ "FILE"
+    assert text =~ "GROUP group · mode · directory   SORT name · recent · size"
     assert text =~ "d flag"
     assert text =~ "x execute"
     assert text =~ "*zz-ibuffer-a*"
@@ -102,7 +103,7 @@ defmodule Compos.IbufferTest do
     assert keys =~ "RET visit"
 
     assert headline =~
-             ~r/^Buffers  \d+ buffers · \d+ modified · \S+ · grouped by group · name order$/
+             ~r/^Buffers  \d+ buffers · \d+ modified · \S+ · by group · name$/
 
     assert labels =~ "BUFFER"
     assert labels =~ "DETAILS"
@@ -142,7 +143,7 @@ defmodule Compos.IbufferTest do
     assert text =~ "▾  in this group"
     assert text =~ "▾  #{foreign}"
     assert text =~ "▾  ungrouped"
-    assert text =~ ~r/^3 buffers · 0 modified · \S+ · grouped by group · name order/m
+    assert text =~ ~r/^3 buffers · 0 modified · \S+ · by group · name/m
     assert :binary.match(text, "in this group") < :binary.match(text, "*zz-ibuffer-a*")
     assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, foreign)
     assert :binary.match(text, foreign) < :binary.match(text, "*zz-ibuffer-b*")
@@ -180,7 +181,7 @@ defmodule Compos.IbufferTest do
       (list-set-filters! "*ibuffer*" (list (list "match" "zz-ibuffer-"))))})
 
     text = Buffer.text("*ibuffer*")
-    assert text =~ "grouped by group · name order"
+    assert text =~ "by group · name"
     assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, "*zz-ibuffer-b*")
   end
 

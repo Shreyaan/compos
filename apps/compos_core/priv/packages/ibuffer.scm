@@ -33,6 +33,11 @@
 (add-display-rule! *ibuffer-buffer* 'popup)
 
 (define *ibuffer-sorts* '(name recent size))
+
+;; a heading wears a band across its row, and a marked or flagged row a
+;; tint; both are translucent, so they sit on any theme
+(defface! 'ibuffer-heading 'bg "rgba(128, 128, 128, 0.10)")
+(defface! 'ibuffer-marked 'bg "rgba(213, 172, 102, 0.13)")
 (define *ibuffer-groupings* '(group mode directory))
 
 ;;; --- last seen ----------------------------------------------------------------
@@ -297,13 +302,6 @@
   (let ((p (buffer-path b)))
     (if p (car (ibuffer-split-path (abbreviate-file-name p))) "no file")))
 
-;; a long directory keeps its head and its tail
-(define (ibuffer-short-directory dir)
-  (let ((n (string-length dir)))
-    (if (> n 26)
-        (string-append (substring dir 0 12) "…" (substring dir (- n 12) n))
-        dir)))
-
 (define (ibuffer-row-name-parts b)
   (let ((p (buffer-path b)))
     (if p
@@ -312,7 +310,9 @@
           ;; all name
           (if (equal? (cadr parts) "")
               (list "" (abbreviate-file-name p))
-              (list (ibuffer-short-directory (car parts)) (cadr parts))))
+              ;; the column trims the middle of a long path itself, so
+              ;; the head of the directory and the whole name stay
+              parts))
         (list "" b))))
 
 (define (ibuffer-details b)
@@ -323,11 +323,13 @@
             (ibuffer-last-label b)))
     " · "))
 
-(define (ibuffer-heading-details row)
+(define (ibuffer-heading-details row width)
   (let ((m (ibuffer-heading-modified row))
         (n (ibuffer-heading-count row)))
     (string-append
-      (if (> m 0) (string-append (number->string m) " modified · ") "")
+      (if (and (> m 0) (>= width 28))
+          (string-append (number->string m) " modified · ")
+          "")
       (number->string n) (if (= n 1) " buffer · " " buffers · ")
       (ibuffer-human (ibuffer-heading-bytes row)))))
 
@@ -335,11 +337,19 @@
 
 ;;; --- columns and cells --------------------------------------------------------
 
+;; the details take a third of a narrow window and no more than 30
+;; columns of a wide one; the name keeps the rest
+(define (ibuffer-details-width w) (max 16 (min 30 (quotient w 3))))
+
 (define (ibuffer-compact-columns buf)
   (list (list "" 1)
         (list "" 1)
         (list "buffer" #f)
-        (list "details" 30 'right)))
+        (list "details" (ibuffer-details-width (list-view-width buf)) 'right)))
+
+(define (ibuffer-details-column-width buf)
+  (let ((cols (list-columns buf)))
+    (if (> (length cols) 3) (or (list-col-width (nth 3 cols)) 30) 30)))
 
 (define (ibuffer-wide-columns buf)
   (list (list "" 1)
@@ -365,7 +375,8 @@
 (define (ibuffer-compact-cells buf b)
   (if (ibuffer-heading? b)
       (append (ibuffer-heading-head b)
-              (list (list (ibuffer-heading-details b) "dim")))
+              (list (list (ibuffer-heading-details b (ibuffer-details-column-width buf))
+                          "dim")))
       (append (ibuffer-cell-head b)
               (list (list (ibuffer-details b) "faint")))))
 
@@ -401,8 +412,22 @@
           (loop (+ i 1))
           i))))
 
+(define (ibuffer-row-bytes buf b)
+  (fold (lambda (n line) (+ n (string-byte-length (car line)) 1))
+        0 (list-row-lines buf b)))
+
+(define (ibuffer-band buf b off face)
+  (list (list off (+ off (ibuffer-row-bytes buf b) -1) face)))
+
 (define (ibuffer-row-overlays buf b off)
-  (if (or (ibuffer-heading? b) (not (buffer-path b)))
+  (cond ((ibuffer-heading? b) (ibuffer-band buf b off "ibuffer-heading"))
+        ((not (equal? (list-mark-of buf b) " "))
+         (append (ibuffer-band buf b off "ibuffer-marked")
+                 (ibuffer-dir-overlay buf b off)))
+        (else (ibuffer-dir-overlay buf b off))))
+
+(define (ibuffer-dir-overlay buf b off)
+  (if (not (buffer-path b))
       '()
       (let* ((parts (ibuffer-row-name-parts b))
              (dir (car parts))
@@ -421,15 +446,57 @@
 
 ;;; --- the head and the key bar -------------------------------------------------
 
-(define (ibuffer-meta buf)
+;; the pieces of a line with their faces, as the text and its spans
+(define (ibuffer-join-parts parts)
+  (let loop ((ps parts) (text "") (spans '()))
+    (if (null? ps)
+        (list text (reverse spans))
+        (let* ((t (car (car ps)))
+               (f (cadr (car ps)))
+               (at (string-byte-length text)))
+          (loop (cdr ps)
+                (string-append text t)
+                (if f (cons (list at (string-byte-length t) f) spans) spans))))))
+
+;; a row of choices: the label, then every choice, the current one lit
+(define (ibuffer-chips label items current)
+  (cons (list label "faint")
+        (let loop ((is items) (out '()))
+          (if (null? is)
+              (reverse out)
+              (loop (cdr is)
+                    (cons (list (car is) (if (equal? (car is) current) "accent" "dim"))
+                          (cons (list (if (null? out) " " " · ") "dim") out)))))))
+
+(define (ibuffer-counts-parts n dirty bytes)
+  (list (list (string-append
+                (number->string n) (if (= n 1) " buffer" " buffers")
+                " · " (number->string dirty) " modified"
+                " · " (ibuffer-human bytes))
+              "dim")))
+
+;; the wide head says the choices as chips; the compact one says the
+;; current ones in four words
+(define (ibuffer-wide-meta-line n dirty bytes)
+  (ibuffer-join-parts
+    (append (ibuffer-counts-parts n dirty bytes)
+            (list (list "   " #f))
+            (ibuffer-chips "GROUP" '("group" "mode" "directory")
+                           (symbol->string (ibuffer-grouping)))
+            (list (list "   " #f))
+            (ibuffer-chips "SORT" '("name" "recent" "size")
+                           (symbol->string (ibuffer-sort))))))
+
+(define (ibuffer-compact-meta-line n dirty bytes)
+  (ibuffer-join-parts
+    (append (ibuffer-counts-parts n dirty bytes)
+            (list (list (string-append " · by " (symbol->string (ibuffer-grouping))
+                                       " · " (symbol->string (ibuffer-sort)))
+                        "dim")))))
+
+(define (ibuffer-meta-with buf line)
   (let loop ((rows (list-entries buf)) (n 0) (dirty 0) (bytes 0))
-    (cond ((null? rows)
-           (string-append
-             (number->string n) (if (= n 1) " buffer" " buffers")
-             " · " (number->string dirty) " modified"
-             " · " (ibuffer-human bytes)
-             " · grouped by " (symbol->string (ibuffer-grouping))
-             " · " (symbol->string (ibuffer-sort)) " order"))
+    (cond ((null? rows) (line n dirty bytes))
           ((ibuffer-heading? (car rows))
            (let ((row (car rows)))
              (if (ibuffer-heading-folded? row)
@@ -443,6 +510,10 @@
              (loop (cdr rows) (+ n 1)
                    (+ dirty (if (buffer-modified? b) 1 0))
                    (+ bytes (buffer-size b))))))))
+
+(define (ibuffer-compact-meta buf) (ibuffer-meta-with buf ibuffer-compact-meta-line))
+(define (ibuffer-wide-meta buf) (ibuffer-meta-with buf ibuffer-wide-meta-line))
+(define (ibuffer-meta buf) (ibuffer-compact-meta buf))
 
 (define (ibuffer-compact-footer buf)
   '(("RET" "visit") ("SPC" "mark") ("k" "kill") ("TAB" "fold")
@@ -631,11 +702,13 @@
               'max-cols (lambda (buf) (- ibuffer-compact-cols 1))
               'columns ibuffer-compact-columns
               'cells ibuffer-compact-cells
+              'meta ibuffer-compact-meta
               'footer ibuffer-compact-footer)
         (list 'name 'wide
               'default #t
               'columns ibuffer-wide-columns
               'cells ibuffer-wide-cells
+              'meta ibuffer-wide-meta
               'footer ibuffer-wide-footer))
     'title (lambda (buf) "Buffers")
     'meta ibuffer-meta
