@@ -11388,7 +11388,7 @@
 (global-set-key "C-x C-f" "find-file")
 (global-set-key "C-x C-s" "save-buffer")
 (global-set-key "C-x C-w" "write-file")
-(global-set-key "C-x b" "switch-to-buffer")
+(global-set-key "C-x b" "switch-to-buffer-prompt")
 (global-set-key "C-x k" "kill-buffer")
 (global-set-key "C-x n n" "narrow-to-region")
 (global-set-key "C-x n w" "widen")
