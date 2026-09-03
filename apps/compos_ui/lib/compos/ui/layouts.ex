@@ -1246,17 +1246,31 @@ defmodule Compos.Ui.Layouts do
           // <prior> and <next>, and Scheme pages by visual rows.
           const NATIVE_MOTION = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
                                  "Home", "End"];
-          function nativeTextKey(e) {
+          // An editable buffer has two states, and neither is a mode. The
+          // user lands on it in the movement state: Cmd-Left/Right travel
+          // as keys, so the windmove chords move the focus past it. The
+          // first key that is not ESC or C-g puts it in the editing state:
+          // Cmd-Left/Right are then the platform's line start and end,
+          // native, because a server round trip for them read as lag.
+          // ESC or C-g returns it to the movement state. A modifier alone
+          // and a plain Cmd-arrow change nothing: they are the window
+          // motion itself, or the shift before a chord.
+          function editingAfterKey(e, editing) {
+            if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return editing;
+            if (e.key === "Escape") return false;
+            if (e.ctrlKey && !e.altKey && !e.metaKey && e.key === "g") return false;
+            if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey &&
+                NAMED[e.key] && e.key.startsWith("Arrow")) return editing;
+            return true;
+          }
+          function nativeTextKey(e, editing) {
             const a = document.activeElement;
             if (!a || !a.closest || !a.closest(".buf[contenteditable]")) return false;
-            // Cmd-Left/Right are the platform's line start and end; a server
-            // round trip for them read as lag. Cmd-Up/Down stay keys: they
-            // are window motion outside prose. Window motion left and right
-            // from an editable buffer is the command, windmove-left and
-            // windmove-right, on a chord a keymap picks
-            // (windmove-default-keybindings).
+            // Cmd-Up/Down stay keys: they are window motion outside prose.
+            // Cmd-Left/Right are keys too until the buffer is in the
+            // editing state (editingAfterKey).
             if (e.metaKey && !e.ctrlKey && !e.altKey &&
-                (e.key === "ArrowLeft" || e.key === "ArrowRight")) return true;
+                (e.key === "ArrowLeft" || e.key === "ArrowRight")) return editing === true;
             if (e.ctrlKey || e.altKey || e.metaKey) return false;
             if (e.key === "Dead" || e.key === "Process" || e.key === "Unidentified") return true;
             if (e.key.length === 1) return true;
@@ -2442,6 +2456,21 @@ defmodule Compos.Ui.Layouts do
                     }
                   }
                   this.whichKeyHeld = new Set(heldWhichKeyModifiers(e));
+                  // The landing: the active window and the buffer it shows.
+                  // A new landing starts in the movement state. The state
+                  // then follows the keys that reach the editable surface.
+                  const landedWin = document.querySelector(".window.active");
+                  const landing = landedWin
+                    ? landedWin.dataset.winId + ":" + (landedWin.dataset.buffer || "")
+                    : null;
+                  if (landing !== this._landing) {
+                    this._landing = landing;
+                    this._editing = false;
+                  }
+                  const onSurface = document.activeElement && document.activeElement.closest &&
+                    document.activeElement.closest(".window.active .buf[contenteditable]");
+                  if (onSurface) this._editing = editingAfterKey(e, this._editing);
+                  const native = nativeTextKey(e, this._editing);
                   // Cmd-C with no native selection: copy the editor region
                   // (with one, the browser's own copy handles it)
                   if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "c" &&
@@ -2456,7 +2485,11 @@ defmodule Compos.Ui.Layouts do
                   // pipeline turns this key into a beforeinput intent
                   // (accents, input methods, dictation, autocorrect).
                   // Chords, motion keys, and TAB still travel as keys.
-                  if (NATIVE_MOTION.includes(e.key)) {
+                  // a Cmd-Left/Right that travels as a key (movement state)
+                  // moves no caret and is not the cause of a selection report
+                  const cmdKeyed = e.metaKey && !native &&
+                    (e.key === "ArrowLeft" || e.key === "ArrowRight");
+                  if (NATIVE_MOTION.includes(e.key) && !cmdKeyed) {
                     // the cause of the next selection report (wrapAffinity);
                     // Cmd-Left/Right are Home and End
                     this._lastMotion = e.metaKey && e.key === "ArrowLeft" ? "Home"
@@ -2470,7 +2503,7 @@ defmodule Compos.Ui.Layouts do
                     // caret move from a click down there.
                     this._motionAt = performance.now();
                   }
-                  if (nativeTextKey(e)) return;
+                  if (native) return;
                   const spec = keySpec(e);
                   if (spec === null) return;
                   e.preventDefault();

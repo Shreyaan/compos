@@ -94,6 +94,15 @@ Plain arrows, Home, End, Page keys, and Shift-arrows can be either native or
 server commands. Proposal: native when `cua-mode` is on; server commands
 otherwise. Both update the same point.
 
+An editable surface has a movement state and an editing state. Neither is a
+mode. The user lands on a window in the movement state: Cmd-Left and
+Cmd-Right travel as keys, so the windmove chords move the focus past the
+buffer. The first key that is not ESC or C-g enters the editing state, where
+the browser keeps Cmd-Left and Cmd-Right as line start and line end. ESC or
+C-g returns to the movement state. A change of the active window or of its
+buffer is a new landing. The client owns this state (`editingAfterKey` in
+`layouts.ex`), because the decision must run inside `keydown`.
+
 - A selection report (`sel`) is a caret motion in the selected window and nothing else. A click selects a window through `mouse` (window, line, column) before its caret is reported, so a `sel` for any other window is stray - the browser's selection lives in the last editable buffer, and a patch that nudges it (a popup opening, a scroll beside it) is not a move anyone made. The client reports only the active window's caret, and the server drops a report for another window.
 - Each visible window shows its point. The active editable window uses the native caret. Inactive windows use a steady hollow marker.
 

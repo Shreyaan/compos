@@ -368,8 +368,6 @@
     ("M-<right>" "forward-word")
     ("M-S-<left>" "cua-select-backward-word")
     ("M-S-<right>" "cua-select-forward-word")
-    ("s-<left>" "beginning-of-line")
-    ("s-<right>" "end-of-line")
     ("s-<up>" "beginning-of-buffer")
     ("s-<down>" "end-of-buffer")
     ("s-S-<left>" "cua-select-line-start")

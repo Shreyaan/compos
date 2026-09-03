@@ -11039,9 +11039,10 @@
 ;; Emacs windmove has no default keys. A keymap installs them:
 ;; (windmove-default-keybindings MODIFIERS) binds the four arrows with
 ;; MODIFIERS to windmove-*. MODIFIERS is one symbol or a list of symbols
-;; from shift, control, meta, super; no argument means shift. A writing
-;; buffer gives Cmd-Left/Right to the line, so a user picks the chord that
-;; leaves it for the window beside it.
+;; from shift, control, meta, super; no argument means shift. The client
+;; sends Cmd-Left/Right from an editable buffer only in its movement
+;; state (before the first key, or after ESC); in the editing state the
+;; browser keeps them as line start and end.
 (define *windmove-directions* '("left" "right" "up" "down"))
 
 (define (windmove-chord modifiers key)

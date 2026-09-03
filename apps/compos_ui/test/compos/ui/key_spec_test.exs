@@ -19,9 +19,10 @@ defmodule Compos.Ui.KeySpecTest do
     "const NAMED = {" <> body
   end
 
-  # Runs every case through keySpec and nativeTextKey. A case is a key
-  # event plus `editable`: whether a contenteditable buffer surface has
-  # focus.
+  # Runs every case through keySpec, nativeTextKey and editingAfterKey. A
+  # case is a key event plus `editable`: whether a contenteditable buffer
+  # surface has focus, and `editing`: whether that surface is in the
+  # editing state (the movement state is the default).
   defp run(cases) do
     script = """
     #{encoder_script()}
@@ -36,7 +37,9 @@ defmodule Compos.Ui.KeySpecTest do
         { key: "", code: "", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false },
         c.event
       );
-      return { spec: keySpec(e), native: nativeTextKey(e) };
+      const editing = c.editing === true;
+      return { spec: keySpec(e), native: nativeTextKey(e, editing),
+               after: editingAfterKey(e, editing) };
     });
     process.stdout.write(JSON.stringify(out));
     """
@@ -80,19 +83,65 @@ defmodule Compos.Ui.KeySpecTest do
           %{event: event("ArrowRight", "ArrowRight", [:metaKey])}
         ])
 
-      assert left == %{"spec" => "s-<left>", "native" => false}
-      assert right == %{"spec" => "s-<right>", "native" => false}
+      assert Map.take(left, ["spec", "native"]) == %{"spec" => "s-<left>", "native" => false}
+      assert Map.take(right, ["spec", "native"]) == %{"spec" => "s-<right>", "native" => false}
     end
 
-    test "Cmd-Left and Cmd-Right are the browser's line start and end on an editable surface" do
+    test "Cmd-Left and Cmd-Right are the browser's line start and end on a surface in the editing state" do
+      [left, right] =
+        run([
+          %{event: event("ArrowLeft", "ArrowLeft", [:metaKey]), editable: true, editing: true},
+          %{event: event("ArrowRight", "ArrowRight", [:metaKey]), editable: true, editing: true}
+        ])
+
+      assert left["native"] == true
+      assert right["native"] == true
+    end
+
+    test "Cmd-Left and Cmd-Right travel as keys from a surface in the movement state" do
       [left, right] =
         run([
           %{event: event("ArrowLeft", "ArrowLeft", [:metaKey]), editable: true},
           %{event: event("ArrowRight", "ArrowRight", [:metaKey]), editable: true}
         ])
 
-      assert left["native"] == true
-      assert right["native"] == true
+      assert left == %{"spec" => "s-<left>", "native" => false, "after" => false}
+      assert right == %{"spec" => "s-<right>", "native" => false, "after" => false}
+    end
+    test "a printable key, RET, a plain arrow and a chord enter the editing state" do
+      results =
+        run([
+          %{event: event("a", "KeyA"), editable: true},
+          %{event: event("Enter", "Enter"), editable: true},
+          %{event: event("ArrowDown", "ArrowDown"), editable: true},
+          %{event: event("x", "KeyX", [:ctrlKey]), editable: true},
+          %{event: event("ArrowLeft", "ArrowLeft", [:metaKey, :shiftKey]), editable: true}
+        ])
+
+      assert Enum.map(results, & &1["after"]) == [true, true, true, true, true]
+    end
+
+    test "ESC and C-g return to the movement state" do
+      [esc, cg] =
+        run([
+          %{event: event("Escape", "Escape"), editable: true, editing: true},
+          %{event: event("g", "KeyG", [:ctrlKey]), editable: true, editing: true}
+        ])
+
+      assert esc["after"] == false
+      assert cg["after"] == false
+    end
+
+    test "a modifier alone and a plain Cmd-arrow keep the state" do
+      results =
+        run([
+          %{event: event("Shift", "ShiftLeft", [:shiftKey]), editable: true},
+          %{event: event("Meta", "MetaLeft", [:metaKey]), editable: true, editing: true},
+          %{event: event("ArrowUp", "ArrowUp", [:metaKey]), editable: true},
+          %{event: event("ArrowRight", "ArrowRight", [:metaKey]), editable: true, editing: true}
+        ])
+
+      assert Enum.map(results, & &1["after"]) == [false, true, false, true]
     end
 
     test "Cmd-Shift-Left and Cmd-Shift-Right encode as s-S-<left> and s-S-<right>" do
@@ -124,8 +173,8 @@ defmodule Compos.Ui.KeySpecTest do
           %{event: event("PageUp", "PageUp"), editable: true}
         ])
 
-      assert down == %{"spec" => "<next>", "native" => false}
-      assert up == %{"spec" => "<prior>", "native" => false}
+      assert Map.take(down, ["spec", "native"]) == %{"spec" => "<next>", "native" => false}
+      assert Map.take(up, ["spec", "native"]) == %{"spec" => "<prior>", "native" => false}
     end
   end
 
