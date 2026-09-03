@@ -1,10 +1,16 @@
 ;;; ibuffer.scm --- the buffer list as a dired: filter, mark, act.
 ;;;
 ;;; C-x C-b and M-x ibuffer open *ibuffer*. The table shows one row per
-;;; buffer, grouped and sorted by name. Compact rows combine size, mode, and group details.
-;;; Wide rows also show file status. The keys follow traditional Emacs ibuffer:
-;;; m marks, * marks all rows, d flags for killing, x executes, u and U
-;;; unmark, RET visits, g refreshes, and q quits. / narrows the table.
+;;; buffer under a heading per section. A section is a group, a mode, or
+;;; a directory; `;` cycles the grouping. Inside a section the rows sort
+;;; by name, by recency, or by size; `,` cycles the sort. TAB folds the
+;;; section at point, and a folded heading stays as a row that carries
+;;; its counts. A row shows the modified dot, the icon, the directory in
+;;; dim and the name in the colour of its mode family, and on the right
+;;; the size, the mode, and the time since the buffer was last shown.
+;;; The keys follow traditional Emacs ibuffer: m marks, * marks all rows,
+;;; d flags for killing, x executes, u and U unmark, RET visits, g
+;;; refreshes, and q quits. / narrows the table by name, mode, or path.
 
 (domain! 'buffers)
 (effects! '(read))
@@ -12,11 +18,59 @@
 (defgroup 'buffers "Buffer lists and buffer management.")
 
 (defcustom 'ibuffer-compact-cols 100
-  "Below this width, ibuffer combines size, mode, and group details."
+  "Below this width, ibuffer combines size, mode, and last-seen details."
   'group 'buffers 'type 'number)
+
+(defcustom 'ibuffer-default-sorting-mode 'name
+  "The order of the rows inside a section: 'name, 'recent, or 'size."
+  'group 'buffers 'type 'choice)
+
+(defcustom 'ibuffer-default-grouping 'group
+  "What a section is: 'group, 'mode, or 'directory."
+  'group 'buffers 'type 'choice)
 
 (define *ibuffer-buffer* "*ibuffer*")
 (add-display-rule! *ibuffer-buffer* 'popup)
+
+(define *ibuffer-sorts* '(name recent size))
+(define *ibuffer-groupings* '(group mode directory))
+
+;;; --- last seen ----------------------------------------------------------------
+;;; The editor keeps an MRU order but no clock. This table notes the time
+;;; a buffer was last shown in the active window. It starts empty at boot,
+;;; so a buffer nobody showed since the restart has no time.
+
+(define *ibuffer-seen* '())
+
+(define (ibuffer-note-seen! b)
+  (when (string? b)
+    (set! *ibuffer-seen*
+      (cons (list b (current-time))
+            (filter (lambda (e) (not (equal? (car e) b))) *ibuffer-seen*)))))
+
+(define (ibuffer--seen-hook!)
+  (when (and (boundp 'active-window) (boundp 'window-buffer))
+    (ibuffer-note-seen! (window-buffer (active-window)))))
+
+(add-hook! 'window-configuration-change-hook 'ibuffer--seen-hook!)
+
+(define (ibuffer-seen-at b)
+  (let ((e (assoc b *ibuffer-seen*)))
+    (and e (cadr e))))
+
+(define (ibuffer-age-label age)
+  (cond ((not age) "")
+        ((< age 10) "now")
+        ((< age 60) (string-append (number->string age) "s"))
+        ((< age 3600) (string-append (number->string (quotient age 60)) "m"))
+        ((< age 86400) (string-append (number->string (quotient age 3600)) "h"))
+        (else (string-append (number->string (quotient age 86400)) "d"))))
+
+(define (ibuffer-last-label b)
+  (let ((t (ibuffer-seen-at b)))
+    (ibuffer-age-label (and t (- (current-time) t)))))
+
+;;; --- the source ---------------------------------------------------------------
 
 (define (ibuffer-workspace-buffer? b)
   (let* ((root (and (boundp (quote daemon-workspace-root))
@@ -36,28 +90,99 @@
        (ibuffer-workspace-buffer? b)))
 
 ;; #f means the ordinary complete table. A list, including an empty list,
-;; is the exact result set that a buffer prompt handed to ibuffer.
-(define (ibuffer-sort-names rows)
-  (map cadr
-    (sort (map (lambda (row) (list (string-downcase row) row)) rows))))
-
+;; is the exact result set that a buffer prompt handed to ibuffer. The
+;; source keeps MRU order; a section sorts its own rows.
 (define (ibuffer-source)
   (let ((scope (buffer-local *ibuffer-buffer* 'ibuffer-scope)))
-    (ibuffer-sort-names
-      (filter ibuffer-row? (if (equal? scope #f) (buffer-list-mru) scope)))))
+    (filter ibuffer-row? (if (equal? scope #f) (buffer-list-mru) scope))))
 
-;; the members of the group the frame stands in come first, in their
-;; order; the rest follow in theirs
-(define (ibuffer-promote-group rows group)
-  (if (not group)
-      rows
-      (append (filter (lambda (b) (buffer-in-group? b group)) rows)
-              (filter (lambda (b) (not (buffer-in-group? b group))) rows))))
+(define (ibuffer-total) (length (ibuffer-source)))
 
-(define (ibuffer-separator label group) (list label "" "separator" group))
+;;; --- the view state: sort, grouping, folds -----------------------------------
+;;; The three live on the list buffer, so they survive a quit and a
+;;; reopen the way the filters do.
+
+(define (ibuffer-sort)
+  (or (buffer-local *ibuffer-buffer* 'ibuffer-sort) ibuffer-default-sorting-mode))
+
+(define (ibuffer-grouping)
+  (or (buffer-local *ibuffer-buffer* 'ibuffer-grouping) ibuffer-default-grouping))
+
+(define (ibuffer-collapsed)
+  (or (buffer-local *ibuffer-buffer* 'ibuffer-collapsed) '()))
+
+(define (ibuffer-cycle-after item items)
+  (let ((rest (member item items)))
+    (if (and rest (pair? (cdr rest))) (cadr rest) (car items))))
+
+(define (ibuffer-set-sort! mode)
+  (buffer-set-local! *ibuffer-buffer* 'ibuffer-sort mode)
+  (when (buffer-known? *ibuffer-buffer*) (ibuffer-refresh!)))
+
+(define (ibuffer-set-grouping! mode)
+  (buffer-set-locals! *ibuffer-buffer*
+    (list 'ibuffer-grouping mode 'ibuffer-collapsed '()))
+  (when (buffer-known? *ibuffer-buffer*) (ibuffer-refresh!)))
+
+(define (ibuffer-folded? key) (if (member key (ibuffer-collapsed)) #t #f))
+
+(define (ibuffer-toggle-fold! key)
+  (let ((now (ibuffer-collapsed)))
+    (buffer-set-local! *ibuffer-buffer* 'ibuffer-collapsed
+      (if (member key now)
+          (filter (lambda (k) (not (equal? k key))) now)
+          (cons key now)))
+    (ibuffer-refresh!)))
+
+;;; --- sorting ------------------------------------------------------------------
+
+(define (ibuffer-sort-names rows)
+  (map cadr (sort (map (lambda (row) (list (string-downcase row) row)) rows))))
+
+(define (ibuffer-sort-sizes rows)
+  (map cadr (sort (map (lambda (row) (list (- 0 (buffer-size row)) row)) rows))))
+
+(define (ibuffer-sort-rows rows)
+  (let ((mode (ibuffer-sort)))
+    (cond ((equal? mode 'size) (ibuffer-sort-sizes rows))
+          ((equal? mode 'recent) rows)
+          (else (ibuffer-sort-names rows)))))
+
+;;; --- headings -----------------------------------------------------------------
+;;; A heading row is a list: (LABEL "" KIND KEY COUNT MODIFIED BYTES FACE
+;;; MEMBERS). KIND is "separator" for an open section, whose rows follow
+;;; it, or "folded" for a closed one, whose rows it stands for. A folded
+;;; heading is a row of its own: the narrowing keeps it when a member
+;;; matches, the highlight can rest on it, and RET or TAB opens it.
+
+(define (ibuffer-heading label key kind members face)
+  (list label "" kind key
+        (length members)
+        (length (filter buffer-modified? members))
+        (fold (lambda (n b) (+ n (buffer-size b))) 0 members)
+        face
+        members))
+
+(define (ibuffer-heading? row) (and (pair? row) (> (length row) 2)))
+(define (ibuffer-heading-label row) (car row))
+(define (ibuffer-heading-key row) (nth 3 row))
+(define (ibuffer-heading-count row) (nth 4 row))
+(define (ibuffer-heading-modified row) (nth 5 row))
+(define (ibuffer-heading-bytes row) (nth 6 row))
+(define (ibuffer-heading-face row) (nth 7 row))
+(define (ibuffer-heading-members row) (nth 8 row))
+(define (ibuffer-heading-folded? row) (equal? (nth 2 row) "folded"))
 
 (define (ibuffer-separator? buf row)
-  (and (pair? row) (> (length row) 2) (equal? (nth 2 row) "separator")))
+  (and (ibuffer-heading? row) (equal? (nth 2 row) "separator")))
+
+(define (ibuffer-section label key members face)
+  (if (null? members)
+      '()
+      (if (ibuffer-folded? key)
+          (list (ibuffer-heading label key "folded" members face))
+          (cons (ibuffer-heading label key "separator" members face)
+                (ibuffer-sort-rows members)))))
 
 ;; A buffer can belong to many groups, but an ibuffer row appears once. The
 ;; current group wins. Otherwise, the first group by name owns the row.
@@ -67,14 +192,6 @@
       (cond ((null? groups) #f)
             ((member (car groups) memberships) (car groups))
             (else (loop (cdr groups)))))))
-
-(define (ibuffer-group-section rows id label ordered-groups)
-  (let ((members (filter (lambda (row)
-                           (equal? (ibuffer-row-group row ordered-groups) id))
-                         rows)))
-    (if (pair? members)
-        (cons (ibuffer-separator label id) members)
-        '())))
 
 ;; Match C-x b for the current section, then continue group by group. Other
 ;; groups sort by name. Buffers with no matching membership come last.
@@ -87,28 +204,54 @@
          (grouped
            (fold (lambda (out id)
                    (append out
-                     (ibuffer-group-section
-                       rows id
+                     (ibuffer-section
                        (if (equal? id current) "in this group" (group-name id))
-                       ordered)))
+                       (string-append "group:" id)
+                       (filter (lambda (row)
+                                 (equal? (ibuffer-row-group row ordered) id))
+                               rows)
+                       (group-color-face id))))
                  '() ordered))
          (ungrouped
            (filter (lambda (row) (not (ibuffer-row-group row ordered))) rows)))
-    (append grouped
-            (if (pair? ungrouped)
-                (cons (ibuffer-separator "ungrouped" #f) ungrouped)
-                '()))))
+    (append grouped (ibuffer-section "ungrouped" "group:" ungrouped "faint"))))
 
-;; The list fetches its name-sorted rows on open and on g. A mark or a
-;; narrowing redraws the rows it already has, so the cursor stays stable.
+;; the rows bucketed by a key fn, one section per key, keys by name;
+;; LAST names the key that goes at the end whatever its name
+(define (ibuffer-keyed-sections rows key-of face-of last)
+  (let* ((keys (dedupe-names (map key-of rows)))
+         (named (map cadr
+                     (sort (map (lambda (k) (list (string-downcase k) k))
+                                (filter (lambda (k) (not (equal? k last))) keys)))))
+         (ordered (append named (if (member last keys) (list last) '()))))
+    (fold (lambda (out k)
+            (append out
+              (ibuffer-section k k
+                (filter (lambda (row) (equal? (key-of row) k)) rows)
+                (face-of k))))
+          '() ordered)))
+
+(define (ibuffer-mode-sections rows)
+  (ibuffer-keyed-sections rows ibuffer-short-mode ibuffer-mode-family-face #f))
+
+(define (ibuffer-directory-sections rows)
+  (ibuffer-keyed-sections rows ibuffer-row-directory (lambda (k) "accent")
+                          "no file"))
+
+;; The list fetches its rows on open and on g. A mark or a narrowing
+;; redraws the rows it already has, so the cursor stays stable.
 (define (ibuffer-rows)
-  (ibuffer-group-sections (ibuffer-source)
-                          (and (boundp 'frame-group) (frame-group))))
+  (let ((rows (ibuffer-source))
+        (grouping (ibuffer-grouping)))
+    (cond ((equal? grouping 'mode) (ibuffer-mode-sections rows))
+          ((equal? grouping 'directory) (ibuffer-directory-sections rows))
+          (else (ibuffer-group-sections
+                  rows (and (boundp 'frame-group) (frame-group)))))))
 
 (define (ibuffer-visible)
   (list-keep *ibuffer-buffer* (ibuffer-rows)))
 
-(define (ibuffer-total) (length (ibuffer-source)))
+;;; --- one row's words ----------------------------------------------------------
 
 (define (ibuffer-human n)
   (cond ((>= n 1048576)
@@ -124,20 +267,79 @@
         (substring mode 0 (- n 5))
         mode)))
 
+;; a mode family wears one colour: conversations and pages in accent,
+;; text and code in ok, mail and terminals in warn
+(define *ibuffer-mode-faces*
+  '(("chat" "accent") ("browse" "accent") ("mcp-hub" "accent")
+    ("doppler" "accent") ("agent" "accent")
+    ("scheme" "ok") ("elixir" "ok") ("org" "ok") ("morg" "ok")
+    ("markdown" "ok") ("dired" "ok") ("text" "ok")
+    ("notmuch" "warn") ("notmuch-show" "warn") ("irc" "warn")
+    ("erc" "warn") ("shell" "warn") ("term" "warn")))
+
+(define (ibuffer-mode-family-face mode)
+  (let ((e (assoc mode *ibuffer-mode-faces*)))
+    (and e (cadr e))))
+
+(define (ibuffer-row-face b)
+  (or (ibuffer-mode-family-face (ibuffer-short-mode b))
+      (buffer-filename-face b)
+      (and (string-prefix? "*" b) "accent")))
+
+;; the abbreviated directory and the base name of a file buffer; a buffer
+;; with no file is all base
+(define (ibuffer-split-path p)
+  (let* ((parts (string-split p "/"))
+         (base (car (reverse parts))))
+    (list (substring p 0 (- (string-length p) (string-length base))) base)))
+
+(define (ibuffer-row-directory b)
+  (let ((p (buffer-path b)))
+    (if p (car (ibuffer-split-path (abbreviate-file-name p))) "no file")))
+
+;; a long directory keeps its head and its tail
+(define (ibuffer-short-directory dir)
+  (let ((n (string-length dir)))
+    (if (> n 26)
+        (string-append (substring dir 0 12) "…" (substring dir (- n 12) n))
+        dir)))
+
+(define (ibuffer-row-name-parts b)
+  (let ((p (buffer-path b)))
+    (if p
+        (let ((parts (ibuffer-split-path (abbreviate-file-name p))))
+          ;; a directory's path ends in a slash and has no base: it is
+          ;; all name
+          (if (equal? (cadr parts) "")
+              (list "" (abbreviate-file-name p))
+              (list (ibuffer-short-directory (car parts)) (cadr parts))))
+        (list "" b))))
+
 (define (ibuffer-details b)
   (string-join
     (filter (lambda (part) (not (equal? part "")))
       (list (ibuffer-human (buffer-size b))
             (ibuffer-short-mode b)
-            (group-label (buffer-group b))))
+            (ibuffer-last-label b)))
     " · "))
 
+(define (ibuffer-heading-details row)
+  (let ((m (ibuffer-heading-modified row))
+        (n (ibuffer-heading-count row)))
+    (string-append
+      (if (> m 0) (string-append (number->string m) " modified · ") "")
+      (number->string n) (if (= n 1) " buffer · " " buffers · ")
+      (ibuffer-human (ibuffer-heading-bytes row)))))
+
+(define (ibuffer-chevron row) (if (ibuffer-heading-folded? row) "▸" "▾"))
+
+;;; --- columns and cells --------------------------------------------------------
+
 (define (ibuffer-compact-columns buf)
-  (let ((name-width (max 20 (min 32 (quotient (list-view-width buf) 2)))))
-    (list (list "" 1)
-          (list "" 1)
-          (list "buffer" name-width)
-          (list "details" #f))))
+  (list (list "" 1)
+        (list "" 1)
+        (list "buffer" #f)
+        (list "details" 30 'right)))
 
 (define (ibuffer-wide-columns buf)
   (list (list "" 1)
@@ -146,56 +348,138 @@
         (list "size" 7 'right)
         (list "mode" 16)
         (list "group" 18)
+        (list "last" 4 'right)
         (list "file" 4)))
 
 (define (ibuffer-cell-head b)
-  (list (if (buffer-modified? b) (list "●" "warn") "")
-        (list (buffer-icon b) "faint")
-        (list b (or (buffer-filename-face b)
-                    (if (string-prefix? "*" b) "accent" #f)))))
+  (let ((parts (ibuffer-row-name-parts b)))
+    (list (if (buffer-modified? b) (list "●" "warn") "")
+          (list (buffer-icon b) "faint")
+          (list (string-append (car parts) (cadr parts)) (ibuffer-row-face b)))))
 
-(define (ibuffer-separator-cell row)
-  (let ((group (and (> (length row) 3) (nth 3 row))))
-    (list (string-append "── " (car row) " ")
-          (or (and group (group-color-face group)) "accent"))))
+(define (ibuffer-heading-head row)
+  (list ""
+        (list (ibuffer-chevron row) "dim")
+        (list (ibuffer-heading-label row) (or (ibuffer-heading-face row) "accent"))))
 
 (define (ibuffer-compact-cells buf b)
-  (if (ibuffer-separator? buf b)
-      (list "" "" (ibuffer-separator-cell b) "")
+  (if (ibuffer-heading? b)
+      (append (ibuffer-heading-head b)
+              (list (list (ibuffer-heading-details b) "dim")))
       (append (ibuffer-cell-head b)
               (list (list (ibuffer-details b) "faint")))))
 
 (define (ibuffer-wide-cells buf b)
-  (if (ibuffer-separator? buf b)
-      (list "" "" (ibuffer-separator-cell b) "" "" "" "")
+  (if (ibuffer-heading? b)
+      (append (ibuffer-heading-head b)
+        (list (list (ibuffer-human (ibuffer-heading-bytes b)) "dim")
+              (let ((m (ibuffer-heading-modified b)))
+                (if (> m 0)
+                    (list (string-append (number->string m) " modified") "warn")
+                    ""))
+              (let ((n (ibuffer-heading-count b)))
+                (list (string-append (number->string n)
+                                     (if (= n 1) " buffer" " buffers"))
+                      "dim"))
+              "" ""))
       (append (ibuffer-cell-head b)
         (list (list (ibuffer-human (buffer-size b)) "dim")
               (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
               (list (group-label (buffer-group b))
                     (and (buffer-group b) (group-color-face (buffer-group b))))
+              (list (ibuffer-last-label b) "dim")
               (list (if (buffer-path b) "✓" "") "ok")))))
 
+;; the directory in front of a file name is dim: a span over the head of
+;; the buffer cell. The cell sits after the mark and the two one-character
+;; columns; the dot and the icon can be multibyte, so the span counts
+;; their bytes and not their columns.
+(define (ibuffer-prefix-chars a b)
+  (let ((n (min (string-length a) (string-length b))))
+    (let loop ((i 0))
+      (if (and (< i n) (equal? (substring a i (+ i 1)) (substring b i (+ i 1))))
+          (loop (+ i 1))
+          i))))
+
+(define (ibuffer-row-overlays buf b off)
+  (if (or (ibuffer-heading? b) (not (buffer-path b)))
+      '()
+      (let* ((parts (ibuffer-row-name-parts b))
+             (dir (car parts))
+             (cols (list-columns buf))
+             (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
+             (fitted (list-fit (string-append dir (cadr parts)) width 'middle))
+             (dim (substring fitted 0 (ibuffer-prefix-chars fitted dir)))
+             (dot (if (buffer-modified? b) "●" " "))
+             (icon (let ((i (buffer-icon b))) (if (equal? i "") " " i)))
+             (start (+ off 2
+                       (string-byte-length dot) 2
+                       (string-byte-length icon) 2)))
+        (if (equal? dim "")
+            '()
+            (list (list start (+ start (string-byte-length dim)) "dim"))))))
+
+;;; --- the head and the key bar -------------------------------------------------
+
 (define (ibuffer-meta buf)
-  (let* ((rows (filter (lambda (row) (not (ibuffer-separator? buf row)))
-                       (list-entries buf)))
-         (n (length rows))
-         (dirty (length (filter buffer-modified? rows))))
-    (string-append (number->string n) (if (= n 1) " buffer" " buffers")
-                   " · " (number->string dirty) " modified"
-                   " · grouped by group · name order")))
+  (let loop ((rows (list-entries buf)) (n 0) (dirty 0) (bytes 0))
+    (cond ((null? rows)
+           (string-append
+             (number->string n) (if (= n 1) " buffer" " buffers")
+             " · " (number->string dirty) " modified"
+             " · " (ibuffer-human bytes)
+             " · grouped by " (symbol->string (ibuffer-grouping))
+             " · " (symbol->string (ibuffer-sort)) " order"))
+          ((ibuffer-heading? (car rows))
+           (let ((row (car rows)))
+             (if (ibuffer-heading-folded? row)
+                 (loop (cdr rows)
+                       (+ n (ibuffer-heading-count row))
+                       (+ dirty (ibuffer-heading-modified row))
+                       (+ bytes (ibuffer-heading-bytes row)))
+                 (loop (cdr rows) n dirty bytes))))
+          (else
+           (let ((b (car rows)))
+             (loop (cdr rows) (+ n 1)
+                   (+ dirty (if (buffer-modified? b) 1 0))
+                   (+ bytes (buffer-size b))))))))
 
 (define (ibuffer-compact-footer buf)
-  '(("RET" "visit") ("SPC" "mark") ("k" "kill") ("G" "group")
-    ("d" "flag") ("x" "execute") ("/" "filter") ("q" "quit")))
+  '(("RET" "visit") ("SPC" "mark") ("k" "kill") ("TAB" "fold")
+    ("," "sort") (";" "group by") ("/" "filter") ("q" "quit")))
 
 (define (ibuffer-wide-footer buf)
-  '(("RET" "visit") ("SPC" "mark") ("*" "all") ("k" "kill")
-    ("G" "group") ("d" "flag") ("x" "execute") ("/" "filter")
+  '(("RET" "visit") ("SPC" "mark") ("*" "all") ("k" "kill") ("TAB" "fold")
+    ("," "sort") (";" "group by") ("G" "add to group")
+    ("d" "flag") ("x" "execute") ("/" "filter")
     ("\\" "widen") ("g" "refresh") ("q" "quit")))
+
+;; what `/` reads: the name, the mode, and the path
+(define (ibuffer-match? buf row input)
+  (if (ibuffer-heading? row)
+      (let loop ((ms (ibuffer-heading-members row)))
+        (and (pair? ms)
+             (or (ibuffer-match? buf (car ms) input) (loop (cdr ms)))))
+      (completion-match?
+        (string-append row " "
+                       (or (buffer-local row 'mode-name) "Fundamental") " "
+                       (or (buffer-path row) ""))
+        input 'substring)))
 
 (define (ibuffer-refresh!) (list-refresh! *ibuffer-buffer*))
 (define (ibuffer-current) (list-current *ibuffer-buffer*))
 (define (ibuffer-filter-push! f) (list-filter-push! *ibuffer-buffer* f))
+
+;; the heading of the section the highlight is in: the row itself when it
+;; is a heading, else the nearest heading above it
+(define (ibuffer-section-at)
+  (let ((i (list-clamped-index *ibuffer-buffer*))
+        (es (list-entries *ibuffer-buffer*)))
+    (and i
+         (let loop ((k (min i (- (length es) 1))))
+           (cond ((< k 0) #f)
+                 ((ibuffer-heading? (nth k es)) (nth k es))
+                 (else (loop (- k 1))))))))
 
 (domain! 'buffers)
 (effects! '(read))
@@ -220,23 +504,56 @@
 (define-command "ibuffer" "List buffers in a traditional management table"
   (lambda () (ibuffer-open! #f)))
 
-(define-command "ibuffer-visit" "Visit the selected buffer in another window"
+(define-command "ibuffer-visit"
+  "Visit the selected buffer in another window; on a folded heading, open the section"
   (lambda ()
     (let ((b (ibuffer-current)))
-      (if (and b (buffer-known? b))
-          (let ((w (display-buffer-other-window! b)))
-            (run-command "quit-window")
-            (when (and w (window-exists? w)) (select-window! w))
-            (switch-to-buffer! b))
-          (message "no buffer here")))))
+      (cond ((ibuffer-heading? b) (ibuffer-toggle-fold! (ibuffer-heading-key b)))
+            ((and (string? b) (buffer-known? b))
+             (let ((w (display-buffer-other-window! b)))
+               (run-command "quit-window")
+               (when (and w (window-exists? w)) (select-window! w))
+               (switch-to-buffer! b)))
+            (else (message "no buffer here"))))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer table"
   (lambda () (ibuffer-refresh!)))
 
+(define-command "ibuffer-toggle-filter-group"
+  "Fold or unfold the section at point"
+  (lambda ()
+    (let ((row (ibuffer-section-at)))
+      (if row
+          (ibuffer-toggle-fold! (ibuffer-heading-key row))
+          (message "no section here")))))
+
+(define-command "ibuffer-toggle-sorting-mode"
+  "Cycle the order inside a section: name, recent, size"
+  (lambda ()
+    (let ((next (ibuffer-cycle-after (ibuffer-sort) *ibuffer-sorts*)))
+      (ibuffer-set-sort! next)
+      (message (string-append "sorted by " (symbol->string next))))))
+
+(define-command "ibuffer-do-sort-by-alphabetic" "Order the rows of a section by name"
+  (lambda () (ibuffer-set-sort! 'name)))
+
+(define-command "ibuffer-do-sort-by-recency" "Order the rows of a section by last use"
+  (lambda () (ibuffer-set-sort! 'recent)))
+
+(define-command "ibuffer-do-sort-by-size" "Order the rows of a section by size, largest first"
+  (lambda () (ibuffer-set-sort! 'size)))
+
+(define-command "ibuffer-toggle-grouping"
+  "Cycle what a section is: group, mode, directory"
+  (lambda ()
+    (let ((next (ibuffer-cycle-after (ibuffer-grouping) *ibuffer-groupings*)))
+      (ibuffer-set-grouping! next)
+      (message (string-append "grouped by " (symbol->string next))))))
+
 ;; Keep the former public helper for callers and historical tests.
 (define (ibuffer-preview!)
   (let ((b (ibuffer-current)))
-    (when (and b (buffer-known? b))
+    (when (and (string? b) (buffer-known? b))
       (display-buffer-other-window! b))))
 
 (define-command "ibuffer-next" "Move down and preview the selected buffer"
@@ -259,7 +576,7 @@
                              (string-append "; kept " (number->string kept))
                              ""))))
       (let ((target (car targets)))
-        (if (not (buffer-known? target))
+        (if (not (and (string? target) (buffer-known? target)))
             (ibuffer-kill-targets! view (cdr targets) killed kept)
             (kill-buffer-confirm! target
               (lambda (killed?)
@@ -279,22 +596,33 @@
 
 (effects! '(read))
 
-(mode-icon! "ibuffer-mode" "")
+(mode-icon! "ibuffer-mode" "")
 
 (define-list-mode! "ibuffer-mode"
   (list
     'doc (string-append
-           "A traditional buffer management table. Compact rows combine "
-           "size, mode, and group details. Rows sort by group and buffer name. "
-           "Wide rows also show file status. / narrows "
-           "the table and \\ widens it. m marks one row, * marks all shown "
-           "rows, u unmarks one row, and U clears all marks. k kills now. "
-           "d flags rows for killing, and x executes the flags. G puts "
-           "the targets in a group. RET visits, g refreshes, and q quits.")
+           "A traditional buffer management table. A section is a group, "
+           "a mode, or a directory; ; cycles the grouping. Rows inside a "
+           "section sort by name, recency, or size; , cycles the sort. "
+           "TAB folds the section at point. Compact rows combine size, "
+           "mode, and last-seen details. Wide rows also show the group and "
+           "the file status. / narrows the table by name, mode, or path, "
+           "and \\ widens it. m marks one row, * marks all shown rows, u "
+           "unmarks one row, and U clears all marks. k kills now. d flags "
+           "rows for killing, and x executes the flags. G puts the targets "
+           "in a group. RET visits, g refreshes, and q quits.")
     'buffer *ibuffer-buffer*
     'category 'buffer
     'rows (lambda (buf) (ibuffer-rows))
     'separator? ibuffer-separator?
+    'section? (lambda (buf b) (ibuffer-heading? b))
+    'markable? (lambda (buf b) (string? b))
+    'key (lambda (buf b)
+           (if (ibuffer-heading? b)
+               (string-append "section:" (ibuffer-heading-key b))
+               b))
+    'match ibuffer-match?
+    'overlays ibuffer-row-overlays
     'local-filter #t
     'stamp (lambda (buf) (length (buffer-list-mru)))
     'layouts
@@ -315,7 +643,8 @@
     'compact #t
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
-                         (and (buffer-known? b)
+                         (and (string? b)
+                              (buffer-known? b)
                               (begin (buffer-kill! b) #t)))))
     'noun "buffer"
     ;; the row under the highlight shows in the window this listing
@@ -323,9 +652,12 @@
     ;; this listing is in
     'preview (lambda (buf b)
                (let ((w (other-window-id (active-window))))
-                 (when (and w (buffer-known? b))
+                 (when (and w (string? b) (buffer-known? b))
                    (window-preview-buffer! b w))))
     'keys '(("RET" "ibuffer-visit") ("k" "ibuffer-kill")
+            ("TAB" "ibuffer-toggle-filter-group")
+            ("," "ibuffer-toggle-sorting-mode")
+            (";" "ibuffer-toggle-grouping")
             ("G" "group-add") ("g" "ibuffer-refresh")
             ("q" "quit-window"))))
 
@@ -335,3 +667,7 @@
 (catalog-meta! 'command "ibuffer-kill" 'domain 'buffers 'effects '(destroy))
 (public! 'ibuffer-refresh! "(ibuffer-refresh!) — rebuild the *ibuffer* table")
 (public! 'ibuffer-open-buffers! "(ibuffer-open-buffers! BUFFERS) — open ibuffer on exactly these known buffers")
+(public! 'ibuffer-set-sort! "(ibuffer-set-sort! MODE) — order the rows of a section by 'name, 'recent, or 'size")
+(public! 'ibuffer-set-grouping! "(ibuffer-set-grouping! MODE) — section the table by 'group, 'mode, or 'directory")
+(public! 'ibuffer-toggle-fold! "(ibuffer-toggle-fold! KEY) — fold or unfold the section KEY names")
+(public! 'ibuffer-age-label "(ibuffer-age-label SECONDS) — \"now\", \"40s\", \"5m\", \"2h\", \"3d\", or \"\" for #f")

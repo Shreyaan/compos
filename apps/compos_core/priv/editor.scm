@@ -409,6 +409,9 @@
 ;;;   filter  (buf entry filter) -> #t to keep. The mode's own filter kinds.
 ;;;   separator? (buf entry) -> #t for a section heading. Headings are not
 ;;;              choices. Filtering drops a heading when its section is empty.
+;;;   section? (buf entry) -> #t for a row that starts a section. Default:
+;;;            separator?. A selectable start (a folded section) stays
+;;;            when its section is empty and it matches by itself.
 ;;;   selection-face  face name for the row at point. Omit it for no highlight.
 
 (define *list-modes* '())
@@ -859,15 +862,28 @@
 (define (list-keep-section-emit buf heading rows filters ctx out)
   (let ((kept (filter (lambda (e) (list-entry-kept? buf e filters ctx))
                       (reverse rows))))
-    (if (null? kept)
-        out
-        (append out (if heading (cons heading kept) kept)))))
+    (cond ((pair? kept)
+           (append out (if heading (cons heading kept) kept)))
+          ;; a heading that is a row of its own (a folded section) stays
+          ;; when it matches by itself
+          ((and heading
+                (list-selectable? buf heading)
+                (list-entry-kept? buf heading filters ctx))
+           (append out (list heading)))
+          (else out))))
+
+;; a row that starts a section: a heading, or a folded section standing
+;; as one selectable row. The mode's 'section? says which; without it,
+;; the separators are the only starts.
+(define (list-section-start? buf e)
+  (let ((f (list-opt buf 'section?)))
+    (if f (f buf e) (list-separator? buf e))))
 
 (define (list-keep-sections buf entries filters ctx)
   (let walk ((rest entries) (heading #f) (rows '()) (out '()))
     (cond ((null? rest)
            (list-keep-section-emit buf heading rows filters ctx out))
-          ((list-separator? buf (car rest))
+          ((list-section-start? buf (car rest))
            (walk (cdr rest) (car rest) '()
                  (list-keep-section-emit buf heading rows filters ctx out)))
           (else (walk (cdr rest) heading (cons (car rest) rows) out)))))
@@ -1073,11 +1089,19 @@
         (let* ((k (car ks))
                (fitted (list-fit (list-cell-text (car cs)) (list-col-width k)
                                  (list-col-trim k)))
-               (padded (if (null? (cdr ks))
+               ;; the last column is not padded, so the line ends where
+               ;; its text ends; a right-aligned last column pads on the
+               ;; left, so its text ends at the column's edge
+               (align (list-col-align k))
+               (padded (if (and (null? (cdr ks)) (not (equal? align 'right)))
                            fitted
-                           (list-pad fitted (list-col-width k) (list-col-align k))))
+                           (list-pad fitted (list-col-width k) align)))
                (face (list-cell-face (car cs)))
-               (start (string-byte-length text)))
+               ;; a right-aligned cell's text sits after its padding
+               (start (+ (string-byte-length text)
+                         (if (equal? align 'right)
+                             (- (string-byte-length padded) (string-byte-length fitted))
+                             0))))
           (loop (cdr cs) (cdr ks)
                 (string-append text padded
                                (if (null? (cdr ks)) "" *list-gap*))
