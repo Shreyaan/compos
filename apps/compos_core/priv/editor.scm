@@ -6247,13 +6247,31 @@
   (let ((e (assoc name *display-buffer-actions*)))
     (and e (cadr e))))
 
+;;; The target layout. A layout chosen at window-layout (C-x l) is the
+;;; frame's target: the shape stays as the person left it. While a frame
+;;; has one, a display takes a pane the frame has and never splits one:
+;;; pop-up-window reads as use-some-window in every chain, a rule's own
+;;; included (Emacs display-buffer-overriding-action). A kill keeps its
+;;; window and refills it from that window's history, so the shape holds
+;;; there too. The target is a name; the shape is the frame itself, and
+;;; a split or a delete by the person is the new shape. window-layout's
+;;; "free" row and window-layout-free drop the target.
+(define (layout-target) (frame-local 'layout-target))
+(define (layout-target-set! name) (set-frame-local! 'layout-target name))
+
+(define (display--keep-shape actions)
+  (if (layout-target)
+      (map (lambda (a) (if (equal? a 'pop-up-window) 'use-some-window a)) actions)
+      actions))
+
 ;; the chain for NAME: the rule's actions, then the base, then the fallback
 (define (display-buffer-actions-for name &optional alist)
   (let* ((rule (cadr (display-rule-for name (or alist '()))))
          (own (cond ((null? rule) '())
                     ((pair? rule) rule)
                     (else (list rule)))))
-    (append own *display-buffer-base-action* *display-buffer-fallback-action*)))
+    (display--keep-shape
+      (append own *display-buffer-base-action* *display-buffer-fallback-action*))))
 
 ;;; what a display did to a window, for quit-window: (WIN KIND PREV).
 ;;; KIND 'window: the display made the window, and quit deletes it.
@@ -6904,6 +6922,34 @@
               (loop (cdr rest) #f)))))))
   buffers)
 
+;;; A build makes its windows from one survivor: delete-other-windows!
+;;; keeps one, and each split copies that one's history into the new
+;;; window. Without a repair every pane remembers the survivor's past,
+;;; a kill in a pane then shows the survivor's previous buffer, and the
+;;; panes that went away take their pasts with them. So a build captures
+;;; every window's (BUFFER . HISTORY) first and hands each new pane the
+;;; history of the pane that showed its buffer. A pane on a buffer no
+;;; window showed takes a pane that went away, that buffer first, so a
+;;; kill there falls back to what the frame lost (Emacs prev-buffers).
+(define (layout--capture-histories)
+  (map (lambda (row) (cons (cadr row) (window-buffer-history (car row))))
+       (window-list)))
+
+(define (layout--restore-histories! captured)
+  (let* ((rows (window-list))
+         (shown (map cadr rows))
+         (gone (filter (lambda (e) (not (member (car e) shown))) captured)))
+    (let loop ((rows rows) (gone gone))
+      (when (pair? rows)
+        (let* ((win (car (car rows)))
+               (buf (cadr (car rows)))
+               (own (assoc buf captured)))
+          (cond (own (window-history-set! win (cdr own)) (loop (cdr rows) gone))
+                ((pair? gone)
+                 (window-history-set! win (cons (car (car gone)) (cdr (car gone))))
+                 (loop (cdr rows) (cdr gone)))
+                (else (window-history-set! win '()) (loop (cdr rows) gone))))))))
+
 ;; The engine runs one arrangement at a time. switch-to-buffer! wakes a dormant
 ;; buffer, which re-runs its mode setups; without this flag that wake would ask
 ;; for another layout in the middle of this one.
@@ -6950,10 +6996,12 @@
         (set! *layout-busy* #t)
         (winner-save!)
         (set! *winner-inhibit* #t)
-        (let ((panes (layout--panes anchor spec)))
+        (let ((panes (layout--panes anchor spec))
+              (histories (layout--capture-histories)))
           (when (pair? panes)
             (delete-other-windows!)
             (layout--fill-line! panes (layout--dir spec) (layout--ratio spec))
+            (layout--restore-histories! histories)
             (let ((w (window-showing anchor)))
               (when w (select-window! w))))
           (set! *winner-inhibit* #f)
@@ -7103,6 +7151,7 @@
         (set! *layout-busy* #t)
         (winner-save!)
         (set! *winner-inhibit* #t)
+        (set! *layout-histories* (layout--capture-histories))
         (delete-other-windows!)
         (cond
           ((equal? algorithm 'columns)
@@ -7123,11 +7172,16 @@
           (else
            (if (null? (cdr panes)) (switch-to-buffer! (car panes))
                (layout--main-stack! panes 'top))))
+        (layout--restore-histories! *layout-histories*)
+        (set! *layout-histories* '())
         (let ((home (window-showing (car panes))))
           (when home (select-window! home)))
         (set! *winner-inhibit* #f)
         (set! *layout-busy* #f)
         panes))))
+
+;; the histories a tile is carrying across its build
+(define *layout-histories* '())
 
 (define (tile-visible-windows! algorithm)
   (let* ((visible (layout-visible-buffers))
@@ -7139,7 +7193,9 @@
         (tile-windows! algorithm panes))))
 
 (define (window-layout-command algorithm)
-  (lambda () (tile-visible-windows! algorithm)))
+  (lambda ()
+    (when (tile-visible-windows! algorithm)
+      (layout-target-set! algorithm))))
 
 ;; Layout selection is a live preview. Keep the complete frame arrangement so
 ;; cancelling the prompt returns both the windows and the selected window.
@@ -7169,7 +7225,20 @@
 (define-command "window-layout-main-bottom" "Show a main pane and the other buffers below"
   (window-layout-command 'main-bottom))
 
-(define-command "window-layout" "Choose a tiling layout for visible buffers"
+;; the commit: the chosen layout is the frame's target from here on
+(define (window-layout-choose! saved name)
+  ;; Commit from the original arrangement so winner records one real
+  ;; layout change, not an intermediate preview arrangement.
+  (window-tree-set! saved)
+  (cond ((equal? name "free")
+         (layout-target-set! #f)
+         (message "Layout free: a display may split a window again"))
+        ((window-layout-preview! name)
+         (layout-target-set! (string->symbol name))
+         (message (string-append "Layout " name " is the target: a display takes a pane the frame has")))
+        (else #f)))
+
+(define-command "window-layout" "Choose a tiling layout for visible buffers; the choice is the frame's target layout"
   (lambda ()
     (let ((saved (window-tree)))
       (minibuffer-read-preview "Window layout: "
@@ -7180,18 +7249,24 @@
            ("main-right" "companion view (companion on the right)")
            ("main-left" "2/3 + 1/3 (companion on the left)")
            ("main-bottom" "2/3 + 1/3 (companion below)")
-           ("main-top" "2/3 + 1/3 (companion above)"))
-        window-layout-preview-without-history!
+           ("main-top" "2/3 + 1/3 (companion above)")
+           ("free" "no target: a display may split a window"))
         (lambda (name)
-          ;; Commit from the original arrangement so winner records one real
-          ;; layout change, not an intermediate preview arrangement.
-          (window-tree-set! saved)
-          (window-layout-preview! name))
+          (if (equal? name "free")
+              (window-tree-set! saved)
+              (window-layout-preview-without-history! name)))
+        (lambda (name) (window-layout-choose! saved name))
         (lambda () (window-tree-set! saved))))))
+
+(define-command "window-layout-free"
+  "Drop the frame's target layout: a display may split a window again"
+  (lambda ()
+    (layout-target-set! #f)
+    (message "Layout free: a display may split a window again")))
 
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
-  '("window-layout" "window-layout-columns" "window-layout-rows"
+  '("window-layout" "window-layout-free" "window-layout-columns" "window-layout-rows"
     "window-layout-grid" "window-layout-main-right" "window-layout-main-bottom"))
 
 ;; The engine's entry point: a mode turned on in BUF. Arrange the frame only
@@ -11463,6 +11538,10 @@
   "(pop-to-buffer NAME [ALIST]) — display-buffer, then select the window it used")
 (public! 'display-buffer-actions-for
   "(display-buffer-actions-for NAME [ALIST]) — the action chain a display of NAME would try, in order")
+(public! 'layout-target
+  "(layout-target) — the frame's target layout, the name chosen at window-layout, or #f")
+(public! 'layout-target-set!
+  "(layout-target-set! NAME) — make NAME the frame's target layout: a display takes a pane the frame has and never splits one; #f frees the frame")
 (public! 'define-display-action!
   "(define-display-action! NAME FN) — register a display action; FN takes NAME and ALIST and returns a window or #f")
 (public! 'split-window-sensibly

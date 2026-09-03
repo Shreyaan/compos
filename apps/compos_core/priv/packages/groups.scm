@@ -1951,14 +1951,35 @@
   (let ((s (group-buffer-as group 'scratch)))
     (and s (not (equal? s name)) (buffer-known? s) s)))
 
-;; what a killed buffer's window may show in its group: one of the
-;; group's chats, or the group's scratch — nothing else, not even a
-;; member the window showed before
+;; the buffer WIN showed before NAME that is a live member of GROUP
+;; and that no other window of FRAME shows: the window's own history,
+;; most recent first (Emacs other-buffer), sealed to the group
+(define (group-kill-previous-member group name win frame)
+  (let ((id (group-resolve-id group))
+        (elsewhere (map cadr
+                        (filter (lambda (row)
+                                  (and (equal? (caddr row) frame)
+                                       (not (equal? (car row) win))))
+                                (window-list-all)))))
+    (and id
+         (let loop ((bs (window-buffer-history win)))
+           (cond ((null? bs) #f)
+                 ((and (not (equal? (car bs) name))
+                       (not (member (car bs) elsewhere))
+                       (fill-candidate? (car bs))
+                       (buffer-in-group? (car bs) id))
+                  (car bs))
+                 (else (loop (cdr bs))))))))
+
+;; what a killed buffer's window may show in its group: a member of the
+;; group, one of the group's chats, or the group's scratch — never a
+;; buffer from outside the group
 (define (group-kill-keeper? shown group)
   (let ((id (group-resolve-id group)))
     (and id shown (buffer-known? shown)
          (or (and (chat-buffer? shown) (equal? (chat-group-id shown) id))
-             (equal? shown (group-buffer-as group 'scratch))))))
+             (equal? shown (group-buffer-as group 'scratch))
+             (and (fill-candidate? shown) (buffer-in-group? shown id))))))
 
 (define (group-dying? group)
   (and *group-dying* (equal? (group-resolve-id group) *group-dying*)))
@@ -1968,16 +1989,18 @@
   (length (filter (lambda (row) (equal? (caddr row) frame)) (window-list-all))))
 
 ;; The window of a killed buffer stays in its group (user ruling,
-;; 2026-09-03): it shows the group's last chat, else the group's
-;; scratch, and it closes only when the group has neither — a group
-;; that is dying. A buffer from another group never comes in.
+;; 2026-09-03): it shows the member it showed before, most recent first
+;; from its own history (user ruling, 2026-09-03: a window refills MRU),
+;; else the group's last chat, else the group's scratch, and it closes
+;; only when the group has none of these — a group that is dying. A
+;; buffer from another group never comes in, and a member another window
+;; of the frame shows is not shown twice.
 ;;
-;; Before the kill, a window in a group moves to the chat or the scratch
-;; the group already has, so the core needs no stand-in. After the kill,
-;; a window the core had to fill on its own is checked: a chat of the
-;; group or its scratch may stay; anything else gives way to the group's
-;; scratch (made now, from a member that survived), else the window
-;; closes. The last window
+;; Before the kill, a window in a group moves to that buffer, so the core
+;; needs no stand-in. After the kill, a window the core had to fill on
+;; its own is checked: a member, a chat of the group or its scratch may
+;; stay; anything else gives way to the group's scratch (made now, from a
+;; member that survived), else the window closes. The last window
 ;; of a frame cannot close: it shows *scratch*. A window in no group
 ;; keeps the core's fallback, unless that fallback is a peek.
 ;;
@@ -2002,7 +2025,8 @@
         (let ((win (car place))
               (group (caddr place)))
           (when (and group (not (group-dying? group)))
-            (let ((next (or (group-kill-last-chat group name)
+            (let ((next (or (group-kill-previous-member group name win (cadr place))
+                            (group-kill-last-chat group name)
                             (group-kill-existing-scratch group name))))
               (when next (window-set-buffer! win next))))))
       places)

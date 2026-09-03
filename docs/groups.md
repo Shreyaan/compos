@@ -427,7 +427,13 @@ A group is sealed: a restored pane shows a member of G, or G's scratch as a blan
 
 ### The overview
 
-When a member is killed, its window stays in the group. The window shows the group's last chat, else the group's scratch. The window closes only when the group has neither, which is a group that is dying. A buffer from another group never comes in, and the buffer the window showed before does not come back.
+When a member is killed, its window stays in the group. The window shows the member it showed before, from its own history, most recent first. A member another window of the frame shows is not shown twice. When the history offers no member, the window shows the group's last chat, else the group's scratch. The window closes only when the group has none of these, which is a group that is dying. A buffer from another group never comes in.
+
+### The target layout
+
+The layout chosen at `window-layout` (`C-x l`), or by one of the `window-layout-*` commands, is the frame's target. The shape stays as the person left it: while a frame has a target, a display takes a pane the frame has and never splits one. `pop-up-window` reads as `use-some-window` in every action chain, a rule's own included. A kill keeps its window and refills it from that window's history, so the shape holds there too. The target is a name; the shape is the frame itself, and a split or a delete by the person is the new shape. The `free` row of `window-layout`, or `window-layout-free`, drops the target, and a display may split a window again. `winner-undo` walks back through the shapes.
+
+A tile builds its windows from one survivor, so the build hands each new pane the history of the pane that showed its buffer. A pane on a buffer no window showed takes the history of a pane that went away, that pane's buffer first.
 
 `autolayout` is the one-main-pane layout. The selected window's buffer becomes the main pane on `window-layout-main-side` (`'left` or `'right`) with `window-layout-main-ratio` of the frame. The other visible buffers share the rest: a column, or tiles when `window-layout-stack` is `'grid`. `autolayout-set-main-width` sets the share as a fraction or a percent. `autolayout-mode` keeps the frame in this shape: when a window comes or goes, the frame re-arranges, the main pane stays main while its buffer is visible, and a new buffer joins the stack. `autolayout-main-left`, `autolayout-main-right` and `autolayout-toggle-stack` change one custom and arrange the frame.
 
@@ -448,7 +454,7 @@ One pool answers which buffers may fill a window in this frame: `window-fill-buf
 
 `kill-buffer` fills each affected window in this order:
 
-1. The next MRU member of the frame's destination group.
+1. The member the window showed before, from the window's own history, most recent first, that no other window of the frame shows; else the group's last chat; else the group's scratch.
 2. When the frame has no destination: the next MRU open file under the current buffer's root.
 3. When a destination or a root exists and offers nothing: delete the window. The last window shows the group's scratch buffer.
 4. When neither a destination nor a root exists: `other-buffer`, as in Emacs.

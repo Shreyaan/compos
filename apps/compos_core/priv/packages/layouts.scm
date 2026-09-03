@@ -240,8 +240,10 @@
   overview-quit!)
 
 (define-command "window-layout-adaptive"
-  "Tile visible buffers for the selected frame's usable width"
-  (lambda () (tile-visible-adaptive!)))
+  "Tile visible buffers for the selected frame's usable width; the choice is the frame's target layout"
+  (lambda ()
+    (when (tile-visible-adaptive!)
+      (layout-target-set! 'adaptive))))
 
 ;;; --- autolayout: one main pane, the rest beside it ---------------------------
 ;;; The StumpWM shape. The selected window's buffer is the main pane on

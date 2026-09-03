@@ -36,7 +36,18 @@
   (set-frame-local! 'previous-group #f)
   (set-frame-local! 'pinned-group #f)
   (delete-other-windows!)
-  (switch-to-buffer! t--sw-first))
+  (switch-to-buffer! t--sw-first)
+  ;; An id is "grp:SECOND:N", and N starts at 0 here, so a group of this
+  ;; test can wear the id of a group of the last test. A scratch or a chat
+  ;; that test left, and a membership the three buffers still hold,
+  ;; would then pass for this test's own. Take them away.
+  (for-each (lambda (b)
+              (when (or (string-prefix? "*scratch:zzsw" b) (string-prefix? "*chat:zzsw" b))
+                (buffer-kill! b)))
+            (buffer-list))
+  (for-each (lambda (b)
+              (for-each (lambda (id) (buffer-remove-group! b id)) (buffer-group-ids b)))
+            (list t--sw-first t--sw-second t--sw-third)))
 
 (define (t--sw-done!)
   (when (minibuffer-state) (minibuffer-cancel!))
@@ -310,14 +321,35 @@
     (switch-to-buffer! t--sw-second)
     id))
 
+(deftest 'a-killed-buffers-window-shows-the-member-it-showed-before
+  "the window stays and refills from its own past, most recent member first"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((id (t--sw-kill-frame! "zzsw-kill-member"))
+           (win (active-window)))
+      (buffer-add-group! t--sw-third id)
+      (switch-to-buffer! t--sw-third)
+      (switch-to-buffer! t--sw-second)
+      (check-equal! (car (window-buffer-history win)) t--sw-third "the window showed third before")
+      (buffer-kill! t--sw-second)
+      (check-equal! (length (window-list)) 2 "the window stays")
+      (check-true! (window-exists? win) "the same window")
+      (check-equal! (window-buffer win) t--sw-third "and shows the member it showed before")
+      (check-equal! (active-window) win "the selection stays in it")
+      (let ((chat (group-chat id)))
+        (when (buffer-known? chat) (buffer-kill! chat))))
+    (t--sw-done!)))
+
 (deftest 'a-killed-buffers-window-shows-the-groups-last-chat
-  "the window stays, and the group's chat takes its place"
+  "the window's past leads with the member the other window shows, so the group's chat takes the place"
   (lambda ()
     (t--sw-setup!)
     (let* ((id (t--sw-kill-frame! "zzsw-kill-chat"))
            (chat (group-chat id))
            (win (active-window)))
       (check-equal! (window-buffer win) t--sw-second "the window shows the victim")
+      (check-equal! (car (window-buffer-history win)) t--sw-first
+                    "its past leads with first, which the left window shows")
       (buffer-kill! t--sw-second)
       (check-equal! (length (window-list)) 2 "the window stays")
       (check-true! (window-exists? win) "the same window")

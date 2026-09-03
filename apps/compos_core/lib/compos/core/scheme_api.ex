@@ -39,6 +39,8 @@ defmodule Compos.Core.SchemeAPI do
         "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers.",
       "window-buffer-history" =>
         "(window-buffer-history [ID]) — return the window's previous buffers, most recent first.",
+      "window-history-set!" =>
+        "(window-history-set! ID HISTORY) — replace the window's previous buffers with HISTORY, most recent first.",
       "mru-list" =>
         "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order.",
       "mru-note-group!" => "(mru-note-group! NAME) — record a group switch as a history entry.",
@@ -611,6 +613,9 @@ defmodule Compos.Core.SchemeAPI do
       "window-buffer-history" => fn
         [] -> Editor.window_buffer_history()
         [id] -> Editor.window_buffer_history(id)
+      end,
+      "window-history-set!" => fn [id, history] when is_list(history) ->
+        Editor.set_window_history(id, history)
       end,
       # the whole history: ("buffer" NAME) and ("group" NAME) rows in
       # recency order — a group switch is an entry like a buffer visit

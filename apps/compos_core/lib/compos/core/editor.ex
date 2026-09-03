@@ -326,6 +326,10 @@ defmodule Compos.Core.Editor do
   def window_buffer_history(win \\ nil, fid \\ nil),
     do: GenServer.call(__MODULE__, {:window_buffer_history, win, fid(fid)})
 
+  @doc "Replace one window's previous buffers. A tiler gives each new pane the history of the pane it stands for."
+  def set_window_history(win, history, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_window_history, win, history, fid(fid)})
+
   def mru_all, do: GenServer.call(__MODULE__, :mru_all)
   def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
 
@@ -1256,7 +1260,10 @@ defmodule Compos.Core.Editor do
               wp_safely(fn -> Buffer.drop_win_point(buffer, win) end)
             end)
 
-            {id, %{f | tree: release_buffer_from_tree(f.tree, buffer, fallback)}}
+            # what this frame's other windows show: a refill never
+            # duplicates one of them (Emacs other-buffer)
+            shown = f.tree |> visible_buffers() |> Enum.reject(&(&1 == buffer))
+            {id, %{f | tree: release_buffer_from_tree(f.tree, buffer, fallback, shown)}}
         end
       end)
 
@@ -1634,6 +1641,30 @@ defmodule Compos.Core.Editor do
       end
 
     {:reply, history, state}
+  end
+
+  # The tiler rebuilds windows from one survivor, and a split copies the
+  # survivor's history into the new leaf; Scheme hands each new pane the
+  # history of the pane it replaces. The leaf's own buffer never leads
+  # its history.
+  def handle_call({:set_window_history, win, history, fid}, _from, state) do
+    f = frame(state, fid)
+
+    case find_leaf(f.tree, win || f.active) do
+      nil ->
+        {:reply, false, state}
+
+      leaf ->
+        history =
+          history
+          |> Enum.filter(&is_binary/1)
+          |> Enum.reject(&(&1 == leaf.buffer))
+          |> Enum.uniq()
+          |> Enum.take(500)
+
+        tree = replace_leaf(f.tree, leaf.id, %{leaf | history: history})
+        {:reply, true, put_frame(state, %{f | tree: tree})}
+    end
   end
 
   # the WHOLE history, group marks included: a group switch is an entry
@@ -2601,12 +2632,13 @@ defmodule Compos.Core.Editor do
     do: %{split | children: Enum.map(split.children, &unpin_buffer_leaves(&1, buffer))}
 
   # a leaf that showed the victim shows what it showed before, when that
-  # buffer still lives; FALLBACK otherwise
-  defp release_buffer_from_tree(%{type: :leaf} = leaf, buffer, fallback) do
+  # buffer still lives and no other window of the frame shows it (SHOWN);
+  # FALLBACK otherwise
+  defp release_buffer_from_tree(%{type: :leaf} = leaf, buffer, fallback, shown) do
     history = leaf |> Map.get(:history, []) |> List.delete(buffer)
 
     if leaf.buffer == buffer do
-      own = Enum.find(history, &Buffer.exists?/1)
+      own = Enum.find(history, &(&1 not in shown and Buffer.exists?(&1)))
       next = own || fallback
       %{leaf | buffer: next, history: List.delete(history, next), top: 0, manual: false}
     else
@@ -2614,10 +2646,11 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  defp release_buffer_from_tree(%{type: :split} = split, buffer, fallback),
+  defp release_buffer_from_tree(%{type: :split} = split, buffer, fallback, shown),
     do: %{
       split
-      | children: Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback))
+      | children:
+          Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback, shown))
     }
 
   defp replace_leaf(%{type: :leaf} = leaf, id, new),
