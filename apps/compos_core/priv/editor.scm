@@ -9036,7 +9036,7 @@
     agent-models agent-mode agent-modes chat-mcp-dirty
     chat-history-pos chat-history-draft
     agent-unstick agent-scroll-top
-    code-agent-switch-pending prompt-parts))
+    code-agent-switch-pending prompt-parts editing-state))
 
 (define (chat-clear-locals! buf keys)
   (for-each (lambda (k) (buffer-set-local! buf k #f)) keys))
@@ -11071,6 +11071,81 @@
   (windmove-install-keybindings! (or modifiers '(shift super))
                                  "windmove-swap-states-"))
 
+;;; --- the movement state and the editing state ------------------------------
+;;; An editable buffer has two states, and neither is a mode. The user lands
+;;; on a window in the movement state: the Cmd-arrows run windmove. The first
+;;; command that is not keyboard-quit enters the editing state: the keymap
+;;; editing-state-map is in force, ahead of the buffer's maps, and the
+;;; Cmd-arrows move point to the line and buffer ends. keyboard-quit (ESC,
+;;; C-g) returns the buffer to the movement state. A change of the active
+;;; window or of its buffer is a new landing. A read-only buffer stays in the
+;;; movement state. The client keeps the same state for a contenteditable
+;;; surface (layouts.ex editingAfterKey), where the Cmd-arrows are native in
+;;; the editing state and never reach this map.
+(define-keymap! "editing-state-map")
+(define-key "editing-state-map" "s-<left>" "beginning-of-line")
+(define-key "editing-state-map" "s-<right>" "end-of-line")
+(define-key "editing-state-map" "s-<up>" "beginning-of-buffer")
+(define-key "editing-state-map" "s-<down>" "end-of-buffer")
+
+(define *editing-landing* #f)   ; (frame window buffer) of the last landing
+
+(define (editing-state? buf)
+  (if (member "editing-state-map" (buffer-minor-maps buf)) #t #f))
+
+(define (editing-state-on! buf)
+  (unless (editing-state? buf)
+    (buffer-minor-maps! buf (cons "editing-state-map" (buffer-minor-maps buf))))
+  (unless (equal? (buffer-local buf 'editing-state) #t)
+    (buffer-set-local! buf 'editing-state #t)
+    (desktop-skip! buf 'editing-state)))
+
+(define (editing-state-off! buf)
+  (when (editing-state? buf)
+    (buffer-minor-maps! buf
+      (remove (lambda (m) (equal? m "editing-state-map")) (buffer-minor-maps buf))))
+  (when (buffer-local buf 'editing-state)
+    (buffer-set-local! buf 'editing-state #f)))
+
+(define (editing--landing)
+  (let ((w (active-window)))
+    (and w (list (selected-frame) w (window-buffer w)))))
+
+;; a new landing starts in the movement state
+(define (editing--check-landing!)
+  (let ((here (editing--landing)))
+    (unless (equal? here *editing-landing*)
+      (set! *editing-landing* here)
+      (let ((buf (and here (caddr here))))
+        (when (and buf (buffer-exists? buf))
+          (editing-state-off! buf))))))
+
+;; after a command: CMD is the command that ran. A named command is still
+;; this-command when post-command-hook runs; a self-insert has finished
+;; and is last-command.
+(define (editing--command-name)
+  (let ((this (this-command)))
+    (if (and (string? this) (not (equal? this "")))
+        this
+        (last-command))))
+
+(define (editing--after-command! &optional cmd)
+  (let ((buf (current-buffer))
+        (cmd (or cmd (editing--command-name))))
+    (cond ((not (and buf (buffer-exists? buf))) #t)
+          ((buffer-read-only? buf) (editing-state-off! buf))
+          ((equal? cmd "keyboard-quit") (editing-state-off! buf))
+          ((and (string? cmd) (string-prefix? "windmove-" cmd)) #t)
+          (else (editing-state-on! buf)))))
+
+(add-hook! 'window-configuration-change-hook 'editing--check-landing!)
+(add-hook! 'pre-command-hook 'editing--check-landing!)
+(add-hook! 'post-command-hook 'editing--after-command!)
+
+(catalog-meta! 'function "editing-state?" 'domain 'windows 'effects '(read))
+(catalog-meta! 'function "editing-state-on!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "editing-state-off!" 'domain 'windows 'effects '(write))
+
 ;; S-<left>/<right>: walk buffer history — S-<left> goes to the buffer you
 ;; just left (MRU), pressing again goes deeper; S-<right> walks back. The
 ;; list freezes for the duration of a run (yank-pop's last-command trick),
@@ -11665,6 +11740,9 @@
 (public! 'global-set-key "(global-set-key KEYS COMMAND-NAME), e.g. \"C-c x\"")
 (public! 'global-unset-key "(global-unset-key KEYS) — remove one global binding")
 (public! 'windmove-default-keybindings "(windmove-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to windmove-left/right/up/down")
+(public! 'editing-state? "(editing-state? BUF) — #t when BUF is in the editing state: editing-state-map is in force and the Cmd-arrows move point, not the focus")
+(public! 'editing-state-on! "(editing-state-on! BUF) — enter the editing state in BUF; the first command after a landing does this")
+(public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows run windmove; keyboard-quit and a new landing do this")
 (public! 'windmove-swap-states-default-keybindings "(windmove-swap-states-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to windmove-swap-states-*")
 (public! 'windmove-chord "(windmove-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (windmove-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")

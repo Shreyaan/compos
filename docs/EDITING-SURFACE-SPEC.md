@@ -99,9 +99,19 @@ mode. The user lands on a window in the movement state: the four Cmd-arrows
 travel as keys, so the windmove chords move the focus past the buffer. The
 first key that is not ESC or C-g enters the editing state, where the browser
 keeps the Cmd-arrows as line start and end and document start and end. ESC
-or C-g returns to the movement state; ESC runs `keyboard-quit`. A change of the active window or of its
-buffer is a new landing. The client owns this state (`editingAfterKey` in
-`layouts.ex`), because the decision must run inside `keydown`.
+or C-g returns to the movement state; ESC runs `keyboard-quit`. A change of
+the active window or of its buffer is a new landing. A read-only buffer stays
+in the movement state.
+
+The state lives in two places that agree. Scheme owns it for every buffer
+(`editing-state-on!`, `editing-state-off!`, `editing-state?` in `editor.scm`):
+the post-command hook enters the editing state after any command except
+`keyboard-quit` and `windmove-*`, the landing check leaves it, and the keymap
+`editing-state-map` is in force only in the editing state. A buffer the
+server draws (the chat) is handled here alone. The client mirrors the state
+for a contenteditable surface (`editingAfterKey` in `layouts.ex`), because
+the native-or-key decision for a Cmd-arrow must run inside `keydown`; a
+Cmd-arrow the client keeps native never reaches the server map.
 
 - A selection report (`sel`) is a caret motion in the selected window and nothing else. A click selects a window through `mouse` (window, line, column) before its caret is reported, so a `sel` for any other window is stray - the browser's selection lives in the last editable buffer, and a patch that nudges it (a popup opening, a scroll beside it) is not a move anyone made. The client reports only the active window's caret, and the server drops a report for another window.
 - Each visible window shows its point. The active editable window uses the native caret. Inactive windows use a steady hollow marker.
