@@ -824,9 +824,9 @@
               (sleep-woken! #f))
             ;; you also know a buffer by its mode, its group, or its
             ;; project: those three fields match what you type. The icon
-            ;; leads them, so the count is four. The switcher opens as the
-            ;; centered palette, not the bottom line.
-            4 "palette"
+            ;; leads them, so the count is four. The prompt draws on the
+            ;; bottom line; the modal (switch-to-buffer) is the centered one.
+            4 #f
             ;; TAB: a selection completes to itself; an input that names
             ;; ONE group locks the rows to that group — the more deliberate
             ;; act wins over plain completion; one candidate left is taken
