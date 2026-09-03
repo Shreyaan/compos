@@ -3939,7 +3939,27 @@
 ;; The primitive changes the window and wakes the process; Scheme owns the
 ;; mode closures, so it also completes runtime restoration in this same
 ;; interpreter turn. A caller never sees the buffer between those two steps.
+;; A switch to a buffer from outside the frame's group does not take the
+;; selected window: the display chain shows the buffer as category
+;; foreign, the popup by the stock rule, and selects it there. The
+;; group's panes stay sealed, and the frame stays in its group. A switch
+;; made inside the popup replaces the popup's buffer the same way. The
+;; chain never comes back here: the popup floats the buffer before it
+;; switches, and a floating buffer is not foreign; the same-window action
+;; calls switch-to-buffer-here!; the window actions set a window's buffer
+;; by id. Emacs: switch-to-buffer-obey-display-actions.
+;; A mechanism that puts a buffer in a window it chose — a layout, a
+;; swap, a restore, a borrowed window — calls switch-to-buffer-here!.
 (define (switch-to-buffer! buf)
+  (if (display-foreign? buf)
+      (begin
+        (pop-to-buffer buf)
+        (message (string-append buf " is not in this group. It floats in the popup."))
+        buf)
+      (switch-to-buffer-here! buf)))
+
+;; the switch itself: the selected window shows BUF, whatever its group
+(define (switch-to-buffer-here! buf)
   (let ((restoring (not (buffer-exists? buf))))
     (window-switch-buffer! buf)
     (when restoring (restore-buffer-runtime! buf))
@@ -5156,9 +5176,9 @@
 ;; exactly this and nothing more.
 (define (save-buffer-named! b)
   (let ((here (current-buffer)))
-    (switch-to-buffer! b)
+    (switch-to-buffer-here! b)
     (run-command "save-buffer")
-    (when (buffer-exists? here) (switch-to-buffer! here))))
+    (when (buffer-exists? here) (switch-to-buffer-here! here))))
 
 ;; Filename completion — pure Scheme over list-dir/string primitives.
 ;; A completion fn maps input -> (list new-input candidates).
@@ -5809,7 +5829,8 @@
 ;;;
 ;;; read in order, first match wins. PATTERN is a substring of the buffer
 ;;; name, or (category KIND) for a kind of display the caller names
-;;; ((category preview) is a peek). ACTION is one action name or a list
+;;; ((category preview) is a peek; (category foreign) is a buffer from
+;;; outside the frame's group). ACTION is one action name or a list
 ;;; of them, tried in order; the display-buffer section below lists them.
 ;;; The two this editor started with:
 ;;;
@@ -5851,9 +5872,25 @@
         (list "*opencode" 'popup '())
         (list "*Messages*" 'popup '())
         (list "*llm*" 'popup '())
-        ;; a peek goes to the popup. Last, so a rule for a name wins, and
-        ;; a rule of your own (add-display-rule! conses in front) wins too
-        (list '(category preview) 'popup '())))
+        ;; a peek goes to the popup, and so does a buffer from outside the
+        ;; frame's group: the group's panes stay sealed (docs/groups.md).
+        ;; Last, so a rule for a name wins, and a rule of your own
+        ;; (add-display-rule! conses in front) wins too
+        (list '(category preview) 'popup '())
+        (list '(category foreign) 'popup '())))
+
+;; A buffer from outside the frame's group. groups.scm answers; with no
+;; groups, no buffer is foreign. A display of a foreign buffer that names
+;; no category of its own is a display of category foreign, and the
+;; stock rule sends it to the popup. A rule of your own for
+;; (category foreign) routes it elsewhere; a pane that shows it then
+;; takes the frame out of the group.
+(define display-foreign? (lambda (name) #f))
+
+(define (display--alist-with-category name alist)
+  (if (and (not (plist-get alist 'category)) (display-foreign? name))
+      (append (list 'category 'foreign) alist)
+      alist))
 
 ;; PARAMS is optional, so every rule written before the params existed
 ;; still reads the same and takes the defaults
@@ -6008,7 +6045,7 @@
         (when (and (window-exists? w) (buffer-exists? buf)
                    (not (equal? (window-buffer w) buf)))
           (select-window! w)
-          (switch-to-buffer! buf))))
+          (switch-to-buffer-here! buf))))
     (or (frame-local 'popup-work) '())))
 
 (define (popup-layout-live? layout)
@@ -6027,7 +6064,7 @@
       (let ((buf (cadr r)))
         (when (and buf (buffer-exists? buf))
           (when (not (equal? (window-buffer (car r)) buf))
-            (switch-to-buffer! buf))
+            (switch-to-buffer-here! buf))
           (goto-char! (caddr r)))))))
 
 ;; Closing the popup is three things, every time and in this order: the
@@ -6322,7 +6359,8 @@
 
 ;; the chain for NAME: the rule's actions, then the base, then the fallback
 (define (display-buffer-actions-for name &optional alist)
-  (let* ((rule (cadr (display-rule-for name (or alist '()))))
+  (let* ((a (display--alist-with-category name (or alist '())))
+         (rule (cadr (display-rule-for name a)))
          (own (cond ((null? rule) '())
                     ((pair? rule) rule)
                     (else (list rule)))))
@@ -6450,7 +6488,7 @@
   (lambda (name alist)
     (if (plist-get alist 'inhibit-same-window)
         #f
-        (begin (switch-to-buffer! name) (active-window)))))
+        (begin (switch-to-buffer-here! name) (active-window)))))
 
 (define-display-action! 'same (display-action-fn 'same-window))
 
@@ -6778,9 +6816,9 @@
 (define (show-in-other-work-window! name)
   (let* ((me (active-window))
          (w (other-work-window-id me)))
-    (if w
-        (begin (select-window! w) (switch-to-buffer! name))
-        (begin (split-window! 'h 0.5) (other-window!) (switch-to-buffer! name)))
+    (cond ((display-foreign? name) (pop-to-buffer name))
+          (w (select-window! w) (switch-to-buffer-here! name))
+          (else (split-window! 'h 0.5) (other-window!) (switch-to-buffer-here! name)))
     (active-window)))
 
 ;; open KNOWN as a buffer of your own, beside the listing: the popup
@@ -6962,7 +7000,7 @@
 ;; panes therefore use 1/3, then 1/2, and finish as equal thirds.
 (define (layout--fill-line! buffers dir first-ratio)
   (when (pair? buffers)
-    (switch-to-buffer! (car buffers))
+    (switch-to-buffer-here! (car buffers))
     (let loop ((rest (cdr buffers)) (first? #t))
       (when (pair? rest)
         (let* ((count (+ 1 (length rest)))
@@ -6974,7 +7012,7 @@
           (let ((new (layout--new-window before)))
             (when new
               (select-window! new)
-              (switch-to-buffer! (car rest))
+              (switch-to-buffer-here! (car rest))
               (loop (cdr rest) #f)))))))
   buffers)
 
@@ -7144,7 +7182,7 @@
 ;; Ratios follow the leaf counts, so odd grids give the larger half more room.
 (define (layout--grid! buffers dir)
   (if (null? (cdr buffers))
-      (switch-to-buffer! (car buffers))
+      (switch-to-buffer-here! (car buffers))
       (let* ((count (length buffers))
              (left-count (quotient (+ count 1) 2))
              (left (take-n buffers left-count))
@@ -7177,7 +7215,7 @@
          (ratio (layout--valid-ratio window-layout-main-ratio (- 1 *window-third*)))
          (before (map car (window-list)))
          (first-window (active-window)))
-    (switch-to-buffer! (if stack-first? (car stack) main))
+    (switch-to-buffer-here! (if stack-first? (car stack) main))
     (split-window! split-dir (if stack-first? (- 1 ratio) ratio))
     (let ((second-window (layout--new-window before)))
       (if stack-first?
@@ -7185,7 +7223,7 @@
             (select-window! first-window)
             (layout--stack-zone! stack stack-dir)
             (select-window! second-window)
-            (switch-to-buffer! main))
+            (switch-to-buffer-here! main))
           (begin
             (select-window! second-window)
             (layout--stack-zone! stack stack-dir))))))
@@ -7217,16 +7255,16 @@
           ((equal? algorithm 'grid)
            (layout--grid! panes 'h))
           ((equal? algorithm 'main-right)
-           (if (null? (cdr panes)) (switch-to-buffer! (car panes))
+           (if (null? (cdr panes)) (switch-to-buffer-here! (car panes))
                (layout--main-stack! panes 'right)))
           ((equal? algorithm 'main-left)
-           (if (null? (cdr panes)) (switch-to-buffer! (car panes))
+           (if (null? (cdr panes)) (switch-to-buffer-here! (car panes))
                (layout--main-stack! panes 'left)))
           ((equal? algorithm 'main-bottom)
-           (if (null? (cdr panes)) (switch-to-buffer! (car panes))
+           (if (null? (cdr panes)) (switch-to-buffer-here! (car panes))
                (layout--main-stack! panes 'bottom)))
           (else
-           (if (null? (cdr panes)) (switch-to-buffer! (car panes))
+           (if (null? (cdr panes)) (switch-to-buffer-here! (car panes))
                (layout--main-stack! panes 'top))))
         (layout--restore-histories! *layout-histories*)
         (set! *layout-histories* '())
@@ -7369,6 +7407,10 @@
         (message "No popup window")
         (let* ((buf (current-buffer))
                (side (popup-side-of buf)))
+          ;; the buffer is about to take a pane. groups.scm adds a foreign
+          ;; buffer to the frame's group here, before any window change
+          ;; derives the group again from the panes
+          (run-hooks 'popup-bufferize-hook)
           (popup-float! buf #f)
           ;; a window on the left or the top takes that place in the tree
           ;; now: floating, it sat second and the class placed it
@@ -11016,9 +11058,9 @@
   (let ((nb (window-in-direction dir)))
     (if nb
         (let ((mine (current-buffer)))
-          (switch-to-buffer! (cadr nb))
+          (switch-to-buffer-here! (cadr nb))
           (select-window! (car nb))
-          (switch-to-buffer! mine)
+          (switch-to-buffer-here! mine)
           (chat-snap-to-input!))
         (message (string-append "No window " (symbol->string dir))))))
 
@@ -11160,6 +11202,8 @@
             (filter (lambda (b)
                       (and (not (string-prefix? " " b))
                            (not (buffer-context-only? b))
+                           ;; in a group, the ring cycles the group
+                           (not (display-foreign? b))
                            (not (equal? b (current-buffer)))))
                     (buffer-list-mru))))
     (set! *buffer-cycle-pos* 0))
@@ -11603,7 +11647,9 @@
 (effects! '(read))
 (public! 'current-buffer "Name of the buffer point is in")
 (effects! '(write display))
-(public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
+(public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window; a buffer outside the frame's group floats in the popup (category foreign)")
+(public! 'switch-to-buffer-here! "(switch-to-buffer-here! NAME) — show in the active window whatever the group: the mechanism a layout, a swap, or a restore uses")
+(public! 'display-foreign? "(display-foreign? NAME) — #t when a pane on NAME would take the frame out of its group; groups.scm answers")
 (public! 'visit "(visit PATH [GROUP]) — open a file; GROUP joins it to that context; /ssh:HOST:/PATH opens over ssh")
 (public! 'find-file-read "(find-file-read [GROUP]) — prompt for a file and join it to GROUP; no GROUP keeps it ungrouped")
 (for-each

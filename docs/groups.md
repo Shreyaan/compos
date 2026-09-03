@@ -448,6 +448,16 @@ A tile builds its windows from one survivor, so the build hands each new pane th
 
 `switch` saves the outgoing layout as it is, every time. A layout that shows a foreign buffer is saved with it. Showing a foreign buffer in a work window takes the frame out of G (see "The current group"); that moment saves G's layout as it stands and sets `previous` to G, so a switch from a frame in no group has nothing left to save, and a switch back to G finds the arrangement the reader left.
 
+### A foreign buffer floats
+
+A switch to a buffer outside G does not take a pane. The buffer shows in the popup, and the frame stays in G. This covers `switch-to-buffer`, `RET` in the switcher, `find-file` on a file with a live buffer in another group, and a jump that lands in such a buffer. The popup floats over the panes, `M-<arrows>` move it, and `q` or `` C-` `` dismisses it. Dismissed, the group is as it was.
+
+The mechanism is one display rule: a display of a buffer outside G is a display of category `foreign`, and the stock rule `((category foreign) popup)` sends it to the popup (docs/DISPLAY-BUFFER.md). A rule of your own for the category routes it elsewhere; a pane that shows it then takes the frame out of G as before.
+
+To keep the buffer, add it to G. `popup-bufferize` (`` C-M-` ``) adds the buffer to G first and then settles the popup into the layout, so the pane it becomes is a member's pane. `group-add` adds it and leaves the popup where it is.
+
+A pinned frame shows a foreign buffer in the selected window: the pin keeps G through window changes, so nothing floats.
+
 ### Window fill
 
 One pool answers which buffers may fill a window in this frame: `window-fill-buffers` (`priv/editor.scm`). It is the frame's context, the way a completion source answers a prompt — in a group, the group's members (the switcher's members section reads the same list); out of one, the recency ring — minus every buffer that never fills a window: a hidden name, a context-only buffer, the popup's buffer, or a peek. Every site that fills a window reads the pool and never the ring: the columns of a layout, the window a kill empties, the buffer `q` falls to. A layout that read the ring pulled buffers in from other groups.
@@ -569,7 +579,7 @@ The frame stands in the group its windows show. The rules:
 3. When several groups are shared by every window, the frame keeps its current one if it is among them, else the most recent of them.
 4. A pinned frame keeps its pinned group through every window change.
 5. The derivation runs after every change of the frame's windows or their buffers, whoever made the change. The editor calls `window-configuration-changed!` (Emacs `window-configuration-change-hook`) from its one commit point; a command, a kill that drops a window onto its next buffer, and an agent all reach it. The window commands also run it before they return, so their modeline is right at once.
-6. A visit to an ungrouped buffer in a work window leaves the group; killing that buffer drops the window onto its next buffer, and the frame is back in that buffer's group with no command involved.
+6. A pane that shows an ungrouped buffer leaves the group; killing that buffer drops the window onto its next buffer, and the frame is back in that buffer's group with no command involved. A switch never makes such a pane: a switch to a buffer outside the group floats it in the popup (see "A foreign buffer floats"). A layout, a swap, or a restore can still put one in a pane.
 
 ### Layouts
 
@@ -600,6 +610,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 17. Agent context: files and focus from the chat's frame, else from the chat's groups.
 18. The current group derives from the work windows: two windows in one group put the frame in it; a window on an ungrouped buffer takes it out.
 19. A popup over the group changes nothing: open, and closed again, the frame's group is the same.
+19a. A switch to a buffer outside the group floats it in the popup; the panes and the group stay. `popup-bufferize` adds the buffer to the group before it becomes a pane.
 20. A kill from outside any command (the Elixir path) that drops a window onto a group's buffer puts the frame back in that group.
 21. `ibuffer` lists the frame's group first, and a mark does not reorder the rows.
 22. A layout fills its panes from the pool: in a group, three columns come from the members and never from another group; a peek and the popup's buffer fill no window.

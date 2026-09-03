@@ -358,8 +358,12 @@
             ((buffer-known? "*scratch*") (window-preview-buffer! "*scratch*" w))))))
 
 ;; close the popup and settle dormancy; KEEP stays awake (#f keeps none)
+;; a pick from outside the group floats in the popup (docs/groups.md,
+;; sealed groups): the home window takes back what it showed, and the
+;; switch that follows finds the buffer off screen and floats it
 (define (switch-close! buf keep)
   (switch-sleep-woken! buf keep)
+  (when (and keep (display-foreign? keep)) (switch-restore-home! buf))
   (run-command "quit-window"))
 
 ;;; --- typing is the filter -------------------------------------------------------
@@ -817,7 +821,11 @@
                 (cond
                   ((equal? picked "") #f)
                   ((buffer-known? picked)
-                   (switch-act! e view context? (lambda (keep) #f)))
+                   ;; a pick from outside the group floats: the window
+                   ;; takes back what it showed, and the switch floats it
+                   (switch-act! e view context?
+                     (lambda (keep)
+                       (when (and keep (display-foreign? keep)) (restore-here!)))))
                   ((assoc picked rows)
                    ;; a card, a tab, a file or a recent row had no preview:
                    ;; put back what the window showed, then act

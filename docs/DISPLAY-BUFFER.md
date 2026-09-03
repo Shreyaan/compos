@@ -39,6 +39,7 @@ The actions:
 The callers pass an alist, a plist:
 
 - `'category KIND`: the kind of display. A peek passes `preview`. The stock rule `((category preview) popup)` is last in the alist, so a rule for a name wins over it.
+- A display of a buffer from outside the frame's group that names no category is a display of category `foreign` (`display-foreign?`, answered by groups.scm). The stock rule `((category foreign) popup)` sends it to the popup, so a group's panes stay sealed (docs/groups.md). `switch-to-buffer!` obeys this rule (Emacs `switch-to-buffer-obey-display-actions`); a mechanism that fills a window it chose calls `switch-to-buffer-here!`. To route foreign buffers through the window chain instead: `(add-display-rule! '(category foreign) 'pop-up-window)`.
 - `'inhibit-same-window #t`: keep the selected window out of the chain. `display-buffer-other-window!` is `display-buffer` with this set.
 
 ## Previews are a rule

@@ -881,11 +881,11 @@
                      ((and (pair? docs) (pair? (cdr docs))) (car (cdr docs)))
                      (else #f))))
     (delete-other-windows!)
-    (switch-to-buffer! main)
+    (switch-to-buffer-here! main)
     (when side
       (split-window! 'h 0.6)
       (other-window!)
-      (switch-to-buffer! side)
+      (switch-to-buffer-here! side)
       (let ((window (window-showing main)))
         (when window (select-window! window))))))
 
@@ -1172,6 +1172,38 @@
       next)))
 
 (set! window-state-changed! group-current-recalculate!)
+
+;;; --- a sealed group and the popup -----------------------------------------------
+;;; A buffer from outside the group never takes a pane by a switch. The
+;;; display chain shows it as category foreign, the popup by the stock
+;;; rule (docs/DISPLAY-BUFFER.md), and the frame stays in its group: a
+;;; popup says nothing about the group (docs/POPUPS.md, rule 6). Dismiss
+;;; the popup and the group is as it was. popup-bufferize keeps the
+;;; buffer: it joins the group first, so the pane it becomes is a
+;;; member's pane. A pinned frame keeps the old way and shows a foreign
+;;; buffer in the selected window.
+
+;; BUF would take the frame out of its group if a pane showed it
+(define (group-foreign-buffer? buf)
+  (let ((id (frame-group)))
+    (and id
+         (not (group-pinned))
+         (not *group-current-inhibit*)
+         (not (popup--class? buf))
+         (let ((ids (group-context-memberships buf)))
+           (and ids (not (member id ids)) #t)))))
+
+;; through the name, so a reload of the predicate reaches the seam
+(set! display-foreign? (lambda (name) (group-foreign-buffer? name)))
+
+(define (group-keep-popup-buffer!)
+  (let ((buf (current-buffer))
+        (id (frame-group)))
+    (when (and id (group-work-buffer? buf) (not (buffer-in-group? buf id)))
+      (buffer-add-group! buf id)
+      (message (string-append buf " joins " (group-name id))))))
+
+(add-hook! 'popup-bufferize-hook 'group-keep-popup-buffer!)
 
 (define-command "group-pin"
   "Toggle a frame pin that keeps the current group through window changes"

@@ -272,7 +272,9 @@ defmodule Compos.GroupSwitchCommandTest do
       (buffer-add-group! "#{second}" "#{docs}")
       (set-frame-local! 'current-group "#{mail}")
       (frame-group-label-refresh!)
-      (switch-to-buffer! "#{second}"))
+      ;; the pane takes the other group's buffer as a layout would: a
+      ;; switch would float it in the popup (sealed groups)
+      (switch-to-buffer-here! "#{second}"))
     """)
 
     rendered = Editor.render_state()
@@ -308,13 +310,15 @@ defmodule Compos.GroupSwitchCommandTest do
       (set-frame-local! 'current-group "#{here}")
       (frame-group-label-refresh!)
       (delete-other-windows!)
-      (switch-to-buffer! "#{first}")
+      ;; the panes take buffers of other groups as a layout would: a
+      ;; switch would float them in the popup (sealed groups)
+      (switch-to-buffer-here! "#{first}")
       (split-window! 'h)
       (other-window!)
-      (switch-to-buffer! "#{second}")
+      (switch-to-buffer-here! "#{second}")
       (split-window! 'v)
       (other-window!)
-      (switch-to-buffer! "#{third}"))
+      (switch-to-buffer-here! "#{third}"))
     """)
 
     rendered = Editor.render_state()

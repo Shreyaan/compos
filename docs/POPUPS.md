@@ -16,4 +16,5 @@ In Emacs terms the popup is a side window. A buffer reaches it by a display rule
 11. `M-<down>` and `M-<up>` outside the popup scroll it (`scroll-other-window` reads the popup beside your work before the next window); `scroll-popup` and `scroll-popup-down` scroll it by name.
 5. `C-\`` toggles the popup (closed, it shows the last popup buffer again); `C-M-\`` (`popup-bufferize`) makes it an ordinary window in the place it occupies; `C-c p` puts any buffer in the popup; `q` in a listing dismisses it (rule 4).
 6. A popup is a visit, not a place: it says nothing about the frame's group (docs/groups.md).
+12. A buffer from outside the frame's group floats here: a switch to it is a display of category `foreign`, and the stock rule sends that category to the popup, so the group's panes stay sealed (docs/groups.md, "A foreign buffer floats"). `popup-bufferize` on such a buffer adds it to the group first (`popup-bufferize-hook`), then settles it into the layout.
 7. `*Messages*`, `*Telemetry*`, `*ibuffer*`, `*shell*`, `*llm*`, and `*opencode…` are popups by rule.

@@ -60,6 +60,11 @@
   (set! *group-next-id* 0)
   (delete-other-windows!))
 
+;; show BUF in the selected window whatever its group: the mechanism a
+;; layout uses. A test that puts a foreign buffer in a pane on purpose
+;; calls this; a switch would float the buffer in the popup.
+(define (t--sw-show-here! buf) (switch-to-buffer-here! buf))
+
 (define (t--sw-type! text) (minibuffer-change! text))
 (define (t--sw-key! name) (run-command (string-append "minibuffer-" name)))
 
@@ -273,12 +278,12 @@
   (run-command "group-new")
   (t--sw-type! two-name)
   (t--sw-key! "confirm")
-  (switch-to-buffer! t--sw-first)
+  (t--sw-show-here! t--sw-first)
   (run-command "group-new")
   (t--sw-type! one-name)
   (t--sw-key! "confirm")
   (split-window! 'v)
-  (switch-to-buffer! t--sw-third)
+  (t--sw-show-here! t--sw-third)
   (buffer-add-group! t--sw-third (group-resolve-id one-name))
   (switch-to-group! (group-resolve-id two-name))
   (delete-other-windows!))
@@ -513,7 +518,7 @@
       (t--sw-key! "confirm-input")
       (check-true! (buffer-in-group? grouped here) "homogeneous work inherits current-group")
 
-      (switch-to-buffer! t--sw-third)
+      (t--sw-show-here! t--sw-third)
       (check-false! (frame-group) "the ungrouped buffer clears current-group")
       (run-command "buffer-new")
       (t--sw-type! ungrouped)
@@ -989,10 +994,12 @@
     (buffer-add-group! t--sw-first current)
     (buffer-add-group! t--sw-second current)
     (buffer-add-group! t--sw-third foreign)
+    ;; the hops build the recency order: a switch to another group's
+    ;; buffer would float it, so the panes take them as a mechanism would
+    (t--sw-show-here! t--sw-second)
+    (t--sw-show-here! t--sw-third)
+    (t--sw-show-here! t--sw-first)
     (set-frame-local! 'current-group current)
-    (switch-to-buffer! t--sw-second)
-    (switch-to-buffer! t--sw-third)
-    (switch-to-buffer! t--sw-first)
     (list current foreign)))
 
 (deftest 'the-switcher-lists-the-current-group-before-other-buffers
@@ -1160,22 +1167,29 @@
       (check-equal! (current-buffer) t--sw-second "the candidate has focus"))
     (t--sw-done!)))
 
-(deftest 'confirm-follows-the-picked-buffers-group-without-moving-membership
-  "RET changes the frame standing but does not change membership"
+(deftest 'confirm-floats-a-buffer-of-another-group-and-the-frame-stays
+  "RET on a buffer outside the group shows it in the popup; the panes, the group, and every membership stay"
   (lambda ()
     (t--sw-setup!)
-    (let ((ids (t--sw-three-groups!)))
+    (let* ((ids (t--sw-three-groups!))
+           (win (active-window))
+           (shown (window-buffer win)))
       (t--sw-open-all!)
       (t--sw-type! t--sw-third)
       (t--sw-key! "confirm")
 
-      (check-equal! (current-buffer) t--sw-third "the window moved")
-      (check-equal! (frame-local 'current-group) (cadr ids) "the frame followed it")
-      (check-false! (buffer-in-group? t--sw-third (car ids)) "and no membership changed"))
+      (check-equal! (current-buffer) t--sw-third "the buffer is selected")
+      (check-true! (popup-open?) "in the popup")
+      (check-equal! (popup-buffer) t--sw-third "which shows it")
+      (check-equal! (window-buffer win) shown "the pane shows what it showed")
+      (check-equal! (frame-local 'current-group) (car ids) "the frame stays in its group")
+      (check-false! (buffer-in-group? t--sw-third (car ids)) "and no membership changed")
+      (popup-close!)
+      (set-frame-local! 'popup-buffer #f))
     (t--sw-done!)))
 
-(deftest 'switching-to-an-ungrouped-buffer-clears-the-frame-group
-  "a broadened buffer switch leaves group isolation when the target is ungrouped"
+(deftest 'switching-to-an-ungrouped-buffer-floats-it-and-keeps-the-frame-group
+  "a broadened buffer switch to an ungrouped buffer shows it in the popup; the frame keeps its group"
   (lambda ()
     (t--sw-setup!)
     (let ((here (group-record-create! "zzsw-current")))
@@ -1183,13 +1197,17 @@
       (buffer-add-group! t--sw-second here)
       (set-frame-local! 'current-group here)
       (switch-to-buffer! t--sw-first)
+      (let ((win (active-window)))
+        (t--sw-open-all!)
+        (t--sw-type! t--sw-third)
+        (t--sw-key! "confirm")
 
-      (t--sw-open-all!)
-      (t--sw-type! t--sw-third)
-      (t--sw-key! "confirm")
-
-      (check-equal! (current-buffer) t--sw-third "the ungrouped buffer is current")
-      (check-false! (frame-local 'current-group) "the frame left group isolation"))
+        (check-equal! (current-buffer) t--sw-third "the ungrouped buffer is current")
+        (check-true! (popup-open?) "in the popup")
+        (check-equal! (window-buffer win) t--sw-first "the pane shows the member it showed")
+        (check-equal! (frame-local 'current-group) here "the frame keeps its group")
+        (popup-close!)
+        (set-frame-local! 'popup-buffer #f)))
     (t--sw-done!)))
 
 (deftest 'switching-context-restores-the-saved-layout
@@ -1297,7 +1315,7 @@
       (switch-to-buffer! t--sw-first)
       (split-window! 'h 0.5)
       (other-window!)
-      (switch-to-buffer! t--sw-second)
+      (t--sw-show-here! t--sw-second)
       (mru-note-group! target)
       (mru-note-group! recent)
       (mru-note-group! here)
@@ -1326,7 +1344,7 @@
       (switch-to-buffer! t--sw-second)
       (check-equal! (frame-group) here "two members keep the shared group")
 
-      (switch-to-buffer! t--sw-third)
+      (t--sw-show-here! t--sw-third)
       (check-false! (frame-group) "a foreign visible buffer makes the frame mixed")
 
       (delete-window!)
@@ -1395,10 +1413,10 @@
       (buffer-add-group! t--sw-first here)
       (buffer-add-group! t--sw-second there)
       (buffer-add-group! t--sw-third there)
+      (t--sw-show-here! t--sw-third)
+      (t--sw-show-here! t--sw-second)
+      (t--sw-show-here! t--sw-first)
       (set-frame-local! 'current-group here)
-      (switch-to-buffer! t--sw-third)
-      (switch-to-buffer! t--sw-second)
-      (switch-to-buffer! t--sw-first)
       (mru-note-group! there)
       (mru-note-group! here)
 
@@ -1424,9 +1442,9 @@
           (there (group-record-create! "zzsw-enter-there")))
       (buffer-add-group! t--sw-first here)
       (buffer-add-group! t--sw-second there)
+      (t--sw-show-here! t--sw-second)
+      (t--sw-show-here! t--sw-first)
       (set-frame-local! 'current-group here)
-      (switch-to-buffer! t--sw-second)
-      (switch-to-buffer! t--sw-first)
 
       (run-command "group-switch")
       (t--sw-type! "zzsw-enter-there")
@@ -1584,8 +1602,10 @@
         (buffer-set-local! foreign 'transient #f)
         (for-each (lambda (id) (buffer-remove-group! foreign id))
                   (buffer-group-ids foreign))
-        (switch-to-buffer! foreign)
-        (group-current-recalculate!)
+        ;; a switch would float it in the popup (the tests below); a pane
+        ;; that shows it is the case here, and only a window action shows
+        ;; a foreign buffer in a pane
+        (t--sw-show-here! foreign)
         (check-false! (frame-group) "the foreign pane takes the frame out of the group")
         (let ((tree (window-tree)))
           (check-equal! (group-layout home) tree "the layout was saved as it stood, foreign pane included")
@@ -1606,4 +1626,104 @@
         (buffer-kill! foreign)
         (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
                   (group-buffers-as home 'scratch))))
+    (t--sw-done!)))
+
+;;; --- a switch to a foreign buffer floats it in the popup --------------------------
+
+;; the frame in HOME with two panes; a foreign buffer that no group holds
+(define (t--sw-sealed-frame!)
+  (let ((home (group-record-create! "zzsw-float-home")))
+    (buffer-add-group! t--sw-first home)
+    (buffer-add-group! t--sw-second home)
+    (switch-to-buffer! t--sw-first)
+    (split-window! 'h 0.5)
+    (other-window!)
+    (switch-to-buffer! t--sw-second)
+    (group-current-recalculate!)
+    (let ((foreign (test-buffer! "zz-sw-float-foreign" "")))
+      (buffer-set-local! foreign 'transient #f)
+      (for-each (lambda (id) (buffer-remove-group! foreign id))
+                (buffer-group-ids foreign))
+      (list home foreign))))
+
+(define (t--sw-sealed-done! foreign)
+  (when (popup-open?) (popup-close!))
+  (set-frame-local! 'popup-buffer #f)
+  (when (buffer-known? foreign) (buffer-kill! foreign)))
+
+(deftest 'a-foreign-buffer-is-a-display-of-category-foreign
+  "the chain for a buffer outside the group starts at the popup; a member takes the plain chain"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((pair (t--sw-sealed-frame!)) (foreign (cadr pair)))
+      (check-equal! (car (display-buffer-actions-for foreign)) 'popup
+                    "a foreign buffer goes to the popup")
+      (check-false! (equal? (car (display-buffer-actions-for t--sw-second)) 'popup)
+                    "a member does not")
+      (check-true! (group-foreign-buffer? foreign) "the predicate names it")
+      (check-false! (group-foreign-buffer? t--sw-first) "and not a member")
+      (t--sw-sealed-done! foreign))
+    (t--sw-done!)))
+
+(deftest 'a-switch-to-a-foreign-buffer-floats-it-and-the-frame-stays-in-its-group
+  "switch-to-buffer! on a buffer outside the group opens the popup on it; the panes and the group hold"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
+           (panes (window-list)))
+      (switch-to-buffer! foreign)
+      (check-true! (popup-open?) "the popup is open")
+      (check-equal! (popup-buffer) foreign "on the foreign buffer")
+      (check-equal! (current-buffer) foreign "and selected: a switch is a visit")
+      (check-equal! (frame-group) home "the frame stays in its group")
+      (for-each (lambda (row)
+                  (check-equal! (window-buffer (car row)) (cadr row)
+                                "a pane shows what it showed"))
+                panes)
+      (popup-close!)
+      (check-equal! (frame-group) home "dismissed, the group is as it was")
+      (check-false! (window-showing foreign) "and the foreign buffer is off screen")
+      (check-equal! (length (window-list)) 2 "two panes, as before")
+      (t--sw-sealed-done! foreign))
+    (t--sw-done!)))
+
+(deftest 'a-switch-to-a-member-takes-the-selected-window
+  "the redirect is for foreign buffers only"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((pair (t--sw-sealed-frame!)) (foreign (cadr pair))
+           (win (active-window)))
+      (switch-to-buffer! t--sw-first)
+      (check-false! (popup-open?) "no popup")
+      (check-equal! (window-buffer win) t--sw-first "the selected window shows the member")
+      (t--sw-sealed-done! foreign))
+    (t--sw-done!)))
+
+(deftest 'popup-bufferize-adds-the-foreign-buffer-to-the-group
+  "keeping the popup as a window makes its buffer a member first, so the pane is a member's pane"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair)))
+      (switch-to-buffer! foreign)
+      (run-command "popup-bufferize")
+      (check-true! (buffer-in-group? foreign home) "the buffer joined the group")
+      (check-false! (popup-open?) "the popup is a window now")
+      (group-current-recalculate!)
+      (check-equal! (frame-group) home "and the frame stays in the group")
+      (t--sw-sealed-done! foreign))
+    (t--sw-done!)))
+
+(deftest 'a-pinned-frame-shows-a-foreign-buffer-in-the-selected-window
+  "a pin keeps the group through window changes, so the switch takes the pane as before"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
+           (win (active-window)))
+      (set-frame-local! 'pinned-group home)
+      (switch-to-buffer! foreign)
+      (check-false! (popup-open?) "no popup")
+      (check-equal! (window-buffer win) foreign "the pane shows the foreign buffer")
+      (check-equal! (frame-group) home "and the pin holds the group")
+      (set-frame-local! 'pinned-group #f)
+      (t--sw-sealed-done! foreign))
     (t--sw-done!)))
