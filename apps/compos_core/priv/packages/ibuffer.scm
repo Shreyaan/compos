@@ -521,7 +521,7 @@
 
 (define (ibuffer-wide-footer buf)
   '(("RET" "visit") ("SPC" "mark") ("*" "all") ("k" "kill") ("TAB" "fold")
-    ("," "sort") (";" "group by") ("G" "add to group")
+    ("," "sort") (";" "group by") ("G" "add to group") ("K" "kill group")
     ("d" "flag") ("x" "execute") ("/" "filter")
     ("\\" "widen") ("g" "refresh") ("q" "quit")))
 
@@ -664,6 +664,28 @@
           (targets (list-targets (current-buffer))))
       (ibuffer-kill-targets! view targets 0 0))))
 
+;; the group at point: under group sectioning, the section's group;
+;; otherwise the group of the buffer on the row
+(define (ibuffer-group-at)
+  (let ((row (ibuffer-current))
+        (heading (ibuffer-section-at)))
+    (cond ((and (equal? (ibuffer-grouping) 'group) heading)
+           (let ((key (ibuffer-heading-key heading)))
+             (and (string-prefix? "group:" key)
+                  (> (string-length key) 6)
+                  (substring key 6 (string-length key)))))
+          ((string? row) (buffer-group row))
+          (else #f))))
+
+(define-command "ibuffer-group-kill"
+  "Kill the group at point: every member, then the group itself"
+  (lambda ()
+    (let ((g (ibuffer-group-at)))
+      (if g
+          (begin (group-kill! g)
+                 (when (buffer-known? *ibuffer-buffer*) (ibuffer-refresh!)))
+          (message "no group here")))))
+
 
 (effects! '(read))
 
@@ -678,10 +700,11 @@
            "TAB folds the section at point. Compact rows combine size, "
            "mode, and last-seen details. Wide rows also show the group and "
            "the file status. / narrows the table by name, mode, or path, "
-           "and \\ widens it. m marks one row, * marks all shown rows, u "
+           "and \\ widens it. m marks one row, SPC toggles the mark, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "
-           "in a group. RET visits, g refreshes, and q quits.")
+           "in a group, and K kills the group at point. RET visits, g "
+           "refreshes, and q quits.")
     'buffer *ibuffer-buffer*
     'category 'buffer
     'rows (lambda (buf) (ibuffer-rows))
@@ -727,7 +750,8 @@
                (let ((w (other-window-id (active-window))))
                  (when (and w (string? b) (buffer-known? b))
                    (window-preview-buffer! b w))))
-    'keys '(("RET" "ibuffer-visit") ("k" "ibuffer-kill")
+    'keys '(("RET" "ibuffer-visit") ("SPC" "list-toggle-mark")
+            ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")
             ("TAB" "ibuffer-toggle-filter-group")
             ("," "ibuffer-toggle-sorting-mode")
             (";" "ibuffer-toggle-grouping")
@@ -738,6 +762,7 @@
 
 (category! 'buffers)
 (catalog-meta! 'command "ibuffer-kill" 'domain 'buffers 'effects '(destroy))
+(catalog-meta! 'command "ibuffer-group-kill" 'domain 'buffers 'effects '(destroy))
 (public! 'ibuffer-refresh! "(ibuffer-refresh!) — rebuild the *ibuffer* table")
 (public! 'ibuffer-open-buffers! "(ibuffer-open-buffers! BUFFERS) — open ibuffer on exactly these known buffers")
 (public! 'ibuffer-set-sort! "(ibuffer-set-sort! MODE) — order the rows of a section by 'name, 'recent, or 'size")

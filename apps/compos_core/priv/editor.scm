@@ -607,6 +607,15 @@
 (define-command "list-unmark" "Unmark the entry at point"
   (lambda () (list-mark-at-point! #f)))
 
+;; one key that marks and unmarks: a marked or flagged row loses its
+;; mark, any other row gets one
+(define-command "list-toggle-mark" "Mark the entry at point, or unmark a marked one"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (e (list-current buf)))
+      (list-mark-at-point!
+        (if (and e (not (equal? (list-mark-of buf e) " "))) #f *list-mark-char*)))))
+
 (define-command "list-unmark-all" "Drop every mark and flag in this list"
   (lambda ()
     (let ((buf (current-buffer)))

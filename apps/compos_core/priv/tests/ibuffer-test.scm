@@ -156,6 +156,46 @@
     (check-equal! (ibuffer-row-overlays "*ibuffer*" "*zz-ib-a*" 200) '() "an unmarked buffer with no file wears nothing")
     (ibuffer-test-reset!)))
 
+(deftest 'ibuffer-toggle-mark-marks-then-unmarks
+  "list-toggle-mark on an unmarked row marks it and moves down; on a marked row it unmarks"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (list-goto-first-entry "*ibuffer*")
+    (check-equal! (ibuffer-current) "*zz-ib-a*" "start on the first row")
+    (run-command "list-toggle-mark")
+    (check-equal! (list-mark-of "*ibuffer*" "*zz-ib-a*") "*" "the row is marked")
+    (check-equal! (ibuffer-current) "*zz-ib-b*" "and point moved down")
+    (list-goto-first-entry "*ibuffer*")
+    (run-command "list-toggle-mark")
+    (check-equal! (list-mark-of "*ibuffer*" "*zz-ib-a*") " " "the same key clears the mark")
+    (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-group-kill-kills-the-section-group
+  "K on a row under group sectioning kills that row's group: the members and the record"
+  (lambda ()
+    (ibuffer-test-reset!)
+    (when (group-record-by-name "zz-ib-group")
+      (group-record-delete! (group-record-by-name "zz-ib-group")))
+    (test-buffer! "*zz-ib-a*" "")
+    (test-buffer! "*zz-ib-b*" "")
+    (let ((g (group-record-create! "zz-ib-group")))
+      (buffer-add-group! "*zz-ib-a*" g)
+      (buffer-add-group! "*zz-ib-b*" g)
+      (switch-to-buffer! "*zz-ib-a*")
+      (run-command "ibuffer")
+      (buffer-set-locals! "*ibuffer*"
+        (list 'ibuffer-grouping 'group 'ibuffer-sort 'name 'ibuffer-collapsed '()))
+      (list-set-filters! "*ibuffer*" (list (list "match" "zz-ib-")))
+      (ibuffer-refresh!)
+      (list-goto-first-entry "*ibuffer*")
+      (check-true! (string? (ibuffer-current)) "point is on a member row")
+      (check-equal! (ibuffer-group-at) g "the row's section names the group")
+      (run-command "ibuffer-group-kill")
+      (check-false! (buffer-known? "*zz-ib-a*") "the first member is gone")
+      (check-false! (buffer-known? "*zz-ib-b*") "the second member is gone")
+      (check-false! (group-record-by-id g) "and the group record with them"))
+    (ibuffer-test-reset!)))
+
 (deftest 'ibuffer-narrows-by-mode-and-name
   "the typed narrowing reads the mode as well as the name"
   (lambda ()
