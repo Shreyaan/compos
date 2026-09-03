@@ -31,18 +31,21 @@
   (let ((i (string-rindex root "/")))
     (if i (substring root (+ i 1) (string-length root)) root)))
 
-;;; --- project defaults --------------------------------------------------------
+;;; --- project config ----------------------------------------------------------
 
-;; A project config uses this form:
+;; A project can put arbitrary Scheme in ROOT/compos.scm. It is evaluated with
+;; each newly opened project buffer current, after a file buffer has received
+;; its major mode. Defaults are a convenient way to share buffer-local LLM
+;; policy without preventing a buffer from making a later explicit choice:
 ;;
 ;;   (project-defaults!
 ;;     'llm-connector "codex-app-server"
 ;;     'llm-model "gpt-5.6-sol"
 ;;     'llm-effort "high")
 ;;
-;; Loading is staged. An evaluation failure does not replace the last valid
-;; defaults for that project. The file still runs in the live Scheme session,
-;; as requested, so it can also call normal configuration functions.
+;; Loading the defaults is staged. An evaluation failure does not replace the
+;; last valid defaults for that project. Other effects of the file are ordinary
+;; live Scheme effects and happen in the buffer for which the file was run.
 (define *project-defaults* '())
 (define *project-default-root* #f)
 (define *project-default-pending* '())
@@ -63,7 +66,7 @@
 
 (define (project-default! key value)
   (if (not *project-default-root*)
-      (begin (message "project-default! is only valid inside .project.scm") #f)
+      (begin (message "project-default! is only valid inside compos.scm") #f)
       (begin
         (set! *project-default-pending*
           (project-defaults-put *project-default-pending* key value))
@@ -154,8 +157,8 @@
         (project-defaults-apply! buf root)))
     (buffer-list)))
 
-(define (project-defaults-load! root)
-  (let ((path (and root (string-append root "/.project.scm"))))
+(define (project-config-load! root)
+  (let ((path (and root (string-append root "/compos.scm"))))
     (if (not (and path (file-exists? path)))
         (begin
           (set! *project-defaults*
@@ -178,9 +181,12 @@
                   *project-default-pending*)
                 (begin
                   (message
-                    (string-append ".project.scm error: "
+                    (string-append "compos.scm error: "
                                    (value->string (car (cdr result)))))
                   #f)))))))
+
+;; Compatibility for callers of the narrower project-defaults API.
+(define project-defaults-load! project-config-load!)
 
 ;; the buffer switcher asks for every buffer's project on each prompt
 ;; open. The .git walk runs once per directory; the cache holds the
@@ -368,21 +374,31 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 
 (add-hook! 'find-file-hook 'project--remember-hook!)
 
-;; A file visit re-runs the project config. New non-file buffers use the last
-;; valid defaults through their inherited default-directory.
-(define (project--defaults-hook!)
-    (let ((root (project-current)))
-      (when root
-        (project-defaults-load! root)
-        (project-defaults-apply! (current-buffer) root))))
+;; A real file visit reaches this hook after auto-mode, so compos.scm can act on
+;; the finished buffer rather than on a half-created one.
+(define (project-configure-buffer! buf)
+  (let ((root (project-buffer-root buf)))
+    (when root
+      (with-current-buffer buf
+        (lambda () (project-config-load! root)))))
+  buf)
 
-(add-hook! 'find-file-hook 'project--defaults-hook!)
+(define (project--config-hook!)
+  (project-configure-buffer! (current-buffer)))
 
+(add-hook! 'find-file-hook 'project--config-hook!)
+
+;; A non-file buffer inherits its creator's default-directory before this seam,
+;; so chats, shells, and scratch buffers also run their project's config. File
+;; buffers wait for find-file-hook above, where their mode is already installed.
 (on-buffer-created!
   (lambda (buf)
-    (let ((root (project-buffer-root buf)))
-      (when (and root (pair? (project-defaults-for root)))
-        (project-defaults-apply! buf root)))))
+    (when (not (buffer-path buf))
+      (project-configure-buffer! buf))))
+
+;; Waking or restoring a buffer is another open boundary: it may have slept
+;; while compos.scm changed, and it missed every creation and visit hook.
+(on-buffer-woken! project-configure-buffer!)
 
 ;;; --- commands ----------------------------------------------------------------
 
@@ -720,13 +736,17 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 (catalog-meta! 'function "project-buffers" 'domain 'project 'effects '(read))
 (public! 'project-current "Root of the current project, #f when outside one")
 (public! 'project-default!
-  "(project-default! KEY VALUE) — set one default while .project.scm runs")
+  "(project-default! KEY VALUE) — set one default while compos.scm runs")
 (public! 'project-defaults!
-  "(project-defaults! KEY VALUE ...) — set project buffer defaults in .project.scm")
+  "(project-defaults! KEY VALUE ...) — set project buffer defaults in compos.scm")
 (public! 'project-defaults-for
   "(project-defaults-for ROOT) -> the last valid defaults loaded for ROOT")
 (public! 'project-defaults-load!
-  "(project-defaults-load! ROOT) — run ROOT/.project.scm and apply its defaults")
+  "Compatibility alias for project-config-load!")
+(public! 'project-config-load!
+  "(project-config-load! ROOT) — run ROOT/compos.scm in the current buffer and apply its defaults")
+(public! 'project-configure-buffer!
+  "(project-configure-buffer! BUF) — run BUF's project compos.scm with BUF current")
 (public! 'project-files "(project-files ROOT) -> project file paths, git-aware")
 (public! 'project-search-matches
   "(project-search-matches ROOT PATTERN) -> search project text files as (PATH:LINE PATH LINE TEXT) matches")

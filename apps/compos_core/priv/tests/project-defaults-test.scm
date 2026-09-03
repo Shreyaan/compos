@@ -9,6 +9,8 @@
 (define t--project-defaults-root
   (string-append (compos-home) "/zz-project-defaults"))
 
+(define *t-project-config-runs* 0)
+
 (define (t--project-defaults-reset!)
   (shell-command->string (string-append "rm -rf " t--project-defaults-root))
   (set! *project-root-cache* '())
@@ -17,11 +19,11 @@
             *project-defaults*)))
 
 (deftest 'project-file-loads-project-defaults
-  ".project.scm runs when a project file is visited"
+  "compos.scm runs when a project file is visited"
   (lambda ()
     (t--project-defaults-reset!)
     (make-directory! (string-append t--project-defaults-root "/.git"))
-    (write-file! (string-append t--project-defaults-root "/.project.scm")
+    (write-file! (string-append t--project-defaults-root "/compos.scm")
       "(project-defaults! 'llm-connector \"codex-app-server\" 'llm-model \"zz-project-model\" 'llm-effort \"high\")\n")
     (let ((path (string-append t--project-defaults-root "/one.scm")))
       (write-file! path "(display \"one\")\n")
@@ -40,7 +42,7 @@
   (lambda ()
     (t--project-defaults-reset!)
     (make-directory! (string-append t--project-defaults-root "/.git"))
-    (write-file! (string-append t--project-defaults-root "/.project.scm")
+    (write-file! (string-append t--project-defaults-root "/compos.scm")
       "(project-default! 'llm-model \"zz-project-model\")\n")
     (let ((path (string-append t--project-defaults-root "/two.scm")))
       (write-file! path "(display \"two\")\n")
@@ -59,7 +61,7 @@
   (lambda ()
     (t--project-defaults-reset!)
     (make-directory! (string-append t--project-defaults-root "/.git"))
-    (let ((config (string-append t--project-defaults-root "/.project.scm"))
+    (let ((config (string-append t--project-defaults-root "/compos.scm"))
           (first (string-append t--project-defaults-root "/refresh-one.scm"))
           (second (string-append t--project-defaults-root "/refresh-two.scm"))
           (chosen (string-append t--project-defaults-root "/refresh-chosen.scm")))
@@ -88,7 +90,7 @@
   (lambda ()
     (t--project-defaults-reset!)
     (make-directory! (string-append t--project-defaults-root "/.git"))
-    (let ((config (string-append t--project-defaults-root "/.project.scm")))
+    (let ((config (string-append t--project-defaults-root "/compos.scm")))
       (write-file! config "(project-default! 'llm-model \"valid-model\")\n")
       (project-defaults-load! t--project-defaults-root)
       (write-file! config
@@ -105,7 +107,7 @@
   (lambda ()
     (t--project-defaults-reset!)
     (make-directory! (string-append t--project-defaults-root "/.git"))
-    (let ((config (string-append t--project-defaults-root "/.project.scm"))
+    (let ((config (string-append t--project-defaults-root "/compos.scm"))
           (path (string-append t--project-defaults-root "/removed.scm")))
       (write-file! config "(project-default! 'llm-model \"removed-model\")\n")
       (write-file! path "removed\n")
@@ -122,9 +124,10 @@
   (lambda ()
     (t--project-defaults-reset!)
     (make-directory! (string-append t--project-defaults-root "/.git"))
-    (write-file! (string-append t--project-defaults-root "/.project.scm")
-      "(project-defaults! 'llm-connector \"api\" 'llm-model \"zz-chat-model\" 'llm-effort \"medium\")\n")
-    (project-defaults-load! t--project-defaults-root)
+    (write-file! (string-append t--project-defaults-root "/compos.scm")
+      (string-append
+        "(project-defaults! 'llm-connector \"api\" 'llm-model \"zz-chat-model\" 'llm-effort \"medium\")\n"
+        "(buffer-set-local! (current-buffer) 'project-config-ran-in (current-buffer))\n"))
     (let ((chat "*chat:zz-project-default*")
           (owner (test-buffer! "*zz-project-default-owner*" "")))
       (buffer-set-local! owner 'default-directory
@@ -140,8 +143,33 @@
                     "the chat effort uses the LLM default")
       (check-false! (buffer-local chat 'llm-model)
                     "the chat does not retain an unclassified LLM local")
+      (check-equal! (buffer-local chat 'project-config-ran-in) chat
+                    "arbitrary config ran with the new chat current")
       (buffer-kill! chat)
       (buffer-kill! owner))
+    (t--project-defaults-reset!)))
+
+(deftest 'project-config-runs-on-every-file-visit-in-that-buffer
+  "each visit evaluates arbitrary compos.scm code with the visited buffer current"
+  (lambda ()
+    (t--project-defaults-reset!)
+    (set! *t-project-config-runs* 0)
+    (make-directory! (string-append t--project-defaults-root "/.git"))
+    (write-file! (string-append t--project-defaults-root "/compos.scm")
+      (string-append
+        "(set! *t-project-config-runs* (+ *t-project-config-runs* 1))\n"
+        "(buffer-set-local! (current-buffer) 'project-config-ran-in (current-buffer))\n"))
+    (let ((path (string-append t--project-defaults-root "/arbitrary.scm")))
+      (write-file! path "arbitrary\n")
+      (visit path)
+      (check-equal! *t-project-config-runs* 1 "the first visit ran the config")
+      (check-equal! (buffer-local path 'project-config-ran-in) path
+                    "the visited file was current during evaluation")
+      (visit path)
+      (check-equal! *t-project-config-runs* 2 "revisiting ran the config again")
+      (buffer-woken! path)
+      (check-equal! *t-project-config-runs* 3 "waking ran the config again")
+      (buffer-kill! path))
     (t--project-defaults-reset!)))
 
 ;; tile-all no longer scopes to a project: it is the overview of every
