@@ -87,26 +87,29 @@ defmodule Compos.Ui.KeySpecTest do
       assert Map.take(right, ["spec", "native"]) == %{"spec" => "s-<right>", "native" => false}
     end
 
-    test "Cmd-Left and Cmd-Right are the browser's line start and end on a surface in the editing state" do
-      [left, right] =
-        run([
-          %{event: event("ArrowLeft", "ArrowLeft", [:metaKey]), editable: true, editing: true},
-          %{event: event("ArrowRight", "ArrowRight", [:metaKey]), editable: true, editing: true}
-        ])
+    test "the four Cmd-arrows are the browser's own motion on a surface in the editing state" do
+      results =
+        run(
+          for k <- ~w(ArrowLeft ArrowRight ArrowUp ArrowDown),
+              do: %{event: event(k, k, [:metaKey]), editable: true, editing: true}
+        )
 
-      assert left["native"] == true
-      assert right["native"] == true
+      assert Enum.map(results, & &1["native"]) == [true, true, true, true]
     end
 
-    test "Cmd-Left and Cmd-Right travel as keys from a surface in the movement state" do
-      [left, right] =
-        run([
-          %{event: event("ArrowLeft", "ArrowLeft", [:metaKey]), editable: true},
-          %{event: event("ArrowRight", "ArrowRight", [:metaKey]), editable: true}
-        ])
+    test "the four Cmd-arrows travel as keys from a surface in the movement state" do
+      results =
+        run(
+          for k <- ~w(ArrowLeft ArrowRight ArrowUp ArrowDown),
+              do: %{event: event(k, k, [:metaKey]), editable: true}
+        )
 
-      assert left == %{"spec" => "s-<left>", "native" => false, "after" => false}
-      assert right == %{"spec" => "s-<right>", "native" => false, "after" => false}
+      assert results == [
+               %{"spec" => "s-<left>", "native" => false, "after" => false},
+               %{"spec" => "s-<right>", "native" => false, "after" => false},
+               %{"spec" => "s-<up>", "native" => false, "after" => false},
+               %{"spec" => "s-<down>", "native" => false, "after" => false}
+             ]
     end
     test "a printable key, RET, a plain arrow and a chord enter the editing state" do
       results =

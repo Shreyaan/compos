@@ -11040,9 +11040,9 @@
 ;; (windmove-default-keybindings MODIFIERS) binds the four arrows with
 ;; MODIFIERS to windmove-*. MODIFIERS is one symbol or a list of symbols
 ;; from shift, control, meta, super; no argument means shift. The client
-;; sends Cmd-Left/Right from an editable buffer only in its movement
+;; sends the Cmd-arrows from an editable buffer only in its movement
 ;; state (before the first key, or after ESC); in the editing state the
-;; browser keeps them as line start and end.
+;; browser keeps them as line and document start and end.
 (define *windmove-directions* '("left" "right" "up" "down"))
 
 (define (windmove-chord modifiers key)
@@ -11395,9 +11395,12 @@
 (global-set-key "C-x u" "undo")
 (global-set-key "C-g" "keyboard-quit")
 (global-set-key "C-u" "universal-argument")
-;; ESC is Meta (dispatch translates unbound ESC k to M-k); a doubled ESC
-;; quits, the Emacs way
-(global-set-key "ESC ESC" "keyboard-quit")
+;; ESC quits, like C-g. Emacs makes a lone ESC the Meta prefix; here it
+;; echoed "ESC-" and waited, and the user presses ESC to leave the editing
+;; state of a buffer (layouts.ex editingAfterKey). Meta is the Option key.
+;; Dispatch still translates an unbound ESC k to M-k in a map that leaves
+;; ESC unbound.
+(global-set-key "ESC" "keyboard-quit")
 
 (global-set-key "M-f" "forward-word")
 (global-set-key "M-b" "backward-word")

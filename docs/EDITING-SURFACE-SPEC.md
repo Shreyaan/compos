@@ -95,11 +95,11 @@ server commands. Proposal: native when `cua-mode` is on; server commands
 otherwise. Both update the same point.
 
 An editable surface has a movement state and an editing state. Neither is a
-mode. The user lands on a window in the movement state: Cmd-Left and
-Cmd-Right travel as keys, so the windmove chords move the focus past the
-buffer. The first key that is not ESC or C-g enters the editing state, where
-the browser keeps Cmd-Left and Cmd-Right as line start and line end. ESC or
-C-g returns to the movement state. A change of the active window or of its
+mode. The user lands on a window in the movement state: the four Cmd-arrows
+travel as keys, so the windmove chords move the focus past the buffer. The
+first key that is not ESC or C-g enters the editing state, where the browser
+keeps the Cmd-arrows as line start and end and document start and end. ESC
+or C-g returns to the movement state; ESC runs `keyboard-quit`. A change of the active window or of its
 buffer is a new landing. The client owns this state (`editingAfterKey` in
 `layouts.ex`), because the decision must run inside `keydown`.
 

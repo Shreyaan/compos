@@ -1,8 +1,9 @@
 defmodule Compos.EscMetaTest do
   @moduledoc """
-  ESC is Meta, the Emacs way: an unbound ESC pends, and ESC k resolves
-  as M-k. A map that binds ESC itself (evil, the completion popup) still
-  wins, because the plain sequence resolves first.
+  ESC is Meta, the Emacs way, in a map that leaves ESC unbound: the ESC
+  pends, and ESC k resolves as M-k. A map that binds ESC itself (evil, the
+  completion popup, the stock global map) wins, because the plain sequence
+  resolves first. The setup unbinds the global ESC and restores it after.
   """
 
   use ExUnit.Case
@@ -23,6 +24,15 @@ defmodule Compos.EscMetaTest do
     Editor.set_pending([])
     Editor.delete_other_windows()
 
+    # Session.eval prints its value: a bound command reads as "\"name\""
+    esc_command =
+      case eval!(~s{(key-binding "ESC")}) do
+        "\"" <> _ = printed -> String.trim(printed, "\"")
+        _ -> nil
+      end
+
+    eval!(~s{(global-unset-key "ESC")})
+
     eval!("""
     (begin
       (buffer-create "#{@buf}")
@@ -33,6 +43,7 @@ defmodule Compos.EscMetaTest do
 
     on_exit(fn ->
       Editor.set_pending([])
+      if esc_command, do: Session.eval(~s{(global-set-key "ESC" "#{esc_command}")})
       if Buffer.exists?(@buf), do: Compos.Core.kill_buffer(@buf)
     end)
 
@@ -58,11 +69,6 @@ defmodule Compos.EscMetaTest do
     press(["q"])
     assert Editor.snapshot().pending == []
     assert Buffer.text(@buf) == "hello world\n"
-  end
-
-  test "ESC ESC quits" do
-    press(["ESC", "ESC"])
-    assert Editor.snapshot().pending == []
   end
 
   test "a local ESC binding beats the meta translation" do
