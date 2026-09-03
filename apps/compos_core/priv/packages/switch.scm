@@ -753,6 +753,19 @@
 (define (switch-prompt-locked-rows g)
   (cons (group-container-candidate g) (cdr (switch-locked-rows g))))
 
+;; the prompt lists buffers, not group cards: the sectioned rows
+;; without the containers, and without a heading that then has no rows.
+;; A group is reached by C-RET on one of its buffers, by TAB on its
+;; name, or by C-x G.
+(define (switch-buffer-only-rows rows)
+  (let loop ((rs (filter (lambda (e) (not (switch-container? e))) rows))
+             (out '()))
+    (cond ((null? rs) (reverse out))
+          ((and (switch-separator? #f (car rs))
+                (or (null? (cdr rs)) (switch-separator? #f (cadr rs))))
+           (loop (cdr rs) out))
+          (else (loop (cdr rs) (cons (car rs) out))))))
+
 (define-command "switch-to-buffer-prompt"
   "Switch to a buffer from a prompt; C-RET enters the buffer's group, TAB locks to a group"
   (lambda ()
@@ -762,7 +775,8 @@
            ;; opening the switcher snapshots this group's arrangement:
            ;; wherever you go next, the way back is exact
            (_ (group-layout-save-if-shown! my-group))
-           (rows (switch-sectioned-rows here my-group (active-window)))
+           (rows (switch-buffer-only-rows
+                   (switch-sectioned-rows here my-group (active-window))))
            (view 'buffers)
            (fallback (switch-first-choice rows))
            (row-of (lambda (name) (or (assoc name rows) (list name))))
