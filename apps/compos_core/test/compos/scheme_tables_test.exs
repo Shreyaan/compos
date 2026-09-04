@@ -40,6 +40,16 @@ defmodule Compos.SchemeTablesTest do
     end
   end
 
+  test "a Session restart does not erase active lane diagnostics" do
+    key = {:test_lane_job, make_ref()}
+    :ets.insert(:compos_lane_jobs, {key, self(), "sentinel", 0})
+    on_exit(fn -> :ets.delete(:compos_lane_jobs, key) end)
+
+    restart_session!()
+
+    assert [{^key, _, "sentinel", 0}] = :ets.lookup(:compos_lane_jobs, key)
+  end
+
   test "the environment table names the owner as its heir" do
     tid = :persistent_term.get({Session, :interp}).store.tid
     assert :ets.info(tid, :owner) == Process.whereis(Session)

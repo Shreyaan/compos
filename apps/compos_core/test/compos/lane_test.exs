@@ -2,15 +2,15 @@ defmodule Compos.LaneTest do
   @moduledoc """
   Compos.Core.Lane.Worker: the serial worker behind a lane.
 
-  A caller that times out dies with its message still in the worker's
-  mailbox. The worker must skip that job: nobody can take the reply, and a
-  burst of such jobs would hold the lane for minutes after every caller
-  gave up.
+  A queued call is skipped once its caller is gone. An active call runs in a
+  linked job process: caller death or timeout kills that job immediately while
+  leaving the serial lane available for the next caller.
   """
 
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
 
-  alias Compos.Core.Lane
+  alias Compos.Core.{Lane, Session}
 
   test "a job whose caller died before its turn is skipped, and a live caller still runs" do
     lane = {:lane_test, System.unique_integer([:positive])}
@@ -48,5 +48,117 @@ defmodule Compos.LaneTest do
 
     assert Lane.run(lane, fn _ -> {:reply, :alive} end, 5_000, "alive") == :alive
     refute_received :ran_for_a_dead_caller
+  end
+
+  test "a running job dies with its caller and the lane immediately recovers" do
+    lane = {:lane_test, System.unique_integer([:positive])}
+    me = self()
+
+    caller =
+      spawn(fn ->
+        Lane.run(
+          lane,
+          fn _ ->
+            send(me, {:active_job, self()})
+            receive do: (:never -> {:reply, :impossible})
+          end,
+          5_000,
+          "caller death"
+        )
+      end)
+
+    assert_receive {:active_job, job}, 1_000
+    caller_monitor = Process.monitor(caller)
+    job_monitor = Process.monitor(job)
+    Process.exit(caller, :kill)
+
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 1_000
+    assert_receive {:DOWN, ^job_monitor, :process, ^job, :killed}, 1_000
+    assert Lane.run(lane, fn _ -> {:reply, :recovered} end, 1_000, "recovery") == :recovered
+  end
+
+  test "a timeout cancels the active job even when the caller catches the exit" do
+    lane = {:lane_test, System.unique_integer([:positive])}
+    me = self()
+
+    caller =
+      spawn(fn ->
+        try do
+          Lane.run(
+            lane,
+            fn _ ->
+              send(me, {:timed_job, self()})
+              receive do: (:never -> {:reply, :impossible})
+            end,
+            200,
+            "timeout"
+          )
+        catch
+          :exit, reason ->
+            send(me, {:caught_timeout, self(), reason})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+
+    assert_receive {:timed_job, job}, 1_000
+    job_monitor = Process.monitor(job)
+    assert_receive {:caught_timeout, ^caller, _reason}, 1_000
+    assert Process.alive?(caller)
+    assert_receive {:DOWN, ^job_monitor, :process, ^job, :killed}, 1_000
+    assert Lane.run(lane, fn _ -> {:reply, :recovered} end, 1_000, "recovery") == :recovered
+    send(caller, :stop)
+  end
+
+  test "a timed-out recursive Scheme eval is killed, logged in full, and recovers" do
+    lane = {:lane_test, System.unique_integer([:positive])}
+    marker = "timeout-source-tail-marker"
+    source = ~s[(begin "#{String.duplicate("padding-", 20)}" (let loop () (loop)) "#{marker}")]
+
+    log =
+      capture_log(fn ->
+        assert catch_exit(Session.eval(source, nil, 100, lane))
+      end)
+
+    assert log =~ marker
+    assert {:ok, "42"} = Session.eval("(+ 40 2)", nil, 1_000, lane)
+  end
+
+  test "a lane job can re-enter its own lane without deadlocking" do
+    lane = {:lane_test, System.unique_integer([:positive])}
+
+    assert Lane.run(
+             lane,
+             fn _ ->
+               nested = Lane.run(lane, fn _ -> {:reply, {:nested, Lane.current()}} end)
+               {:reply, nested}
+             end,
+             1_000,
+             "reentrant"
+           ) == {:nested, lane}
+  end
+
+  test "killing a lane also kills its linked active job" do
+    lane = {:lane_test, System.unique_integer([:positive])}
+    me = self()
+
+    spawn(fn ->
+      Lane.run(
+        lane,
+        fn _ ->
+          send(me, {:kill_job, self()})
+          receive do: (:never -> {:reply, :impossible})
+        end,
+        5_000,
+        "explicit kill"
+      )
+    end)
+
+    assert_receive {:kill_job, job}, 1_000
+    job_monitor = Process.monitor(job)
+    assert :ok = Lane.kill(lane)
+    assert_receive {:DOWN, ^job_monitor, :process, ^job, :killed}, 1_000
+    assert Lane.run(lane, fn _ -> {:reply, :fresh} end, 1_000, "fresh") == :fresh
   end
 end

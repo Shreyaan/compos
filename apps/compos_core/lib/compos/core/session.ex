@@ -78,7 +78,14 @@ defmodule Compos.Core.Session do
   """
   def eval(src, fid \\ nil, timeout \\ 30_000, lane \\ nil) do
     fid = fid(fid)
-    Lane.run(lane || :ui, fn from -> exec_eval(src, fid, from) end, timeout, eval_label(src))
+
+    try do
+      Lane.run(lane || :ui, fn from -> exec_eval(src, fid, from) end, timeout, eval_label(src))
+    catch
+      :exit, {:timeout, _} = reason ->
+        Logger.warning("timed out Scheme eval; full source follows:\n#{src}")
+        exit(reason)
+    end
   end
 
   @doc "The live interpreter handle (constant after init)."
@@ -339,7 +346,7 @@ defmodule Compos.Core.Session do
     # so cannot die of it. Empty them rather than create them: their identity
     # then survives a crash here, and no lane worker holding the published
     # handle ever reads a dead table id.
-    Enum.each(Compos.Core.SchemeTables.named_tables(), &Compos.Core.SchemeTables.reset/1)
+    Enum.each(Compos.Core.SchemeTables.reset_tables(), &Compos.Core.SchemeTables.reset/1)
     # *Messages* is this session's log, so it starts empty every boot. Drop
     # the row and the checkpoint an older daemon left: without this, the
     # catalog still names *Messages*, create_buffer restores last session's

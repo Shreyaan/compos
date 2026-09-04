@@ -26,6 +26,7 @@ defmodule Compos.Core.Lane do
   @registry Compos.Core.LaneRegistry
   @supervisor Compos.Core.LaneSupervisor
   @single_lane :scheme
+  @jobs_table :compos_lane_jobs
 
   @doc "The configured Scheme scheduler: :lanes or :single_actor."
   def execution_mode do
@@ -47,8 +48,8 @@ defmodule Compos.Core.Lane do
   Run FUN in the lane named by KEY and return its reply. FUN receives the
   GenServer `from` of the lane call (or nil when run inline) and returns
   `{:reply, value}`, or `:noreply` after claiming the reply slot
-  (eval-defer!). A call from inside the lane's own worker runs inline —
-  re-entry must not deadlock.
+  (eval-defer!). A call from inside the lane's current job runs inline, so
+  re-entry cannot deadlock.
 
   LABEL names the job in telemetry and the slow-job log. A caller that
   times out logs the worker's current stack under the label, so a stuck
@@ -57,72 +58,86 @@ defmodule Compos.Core.Lane do
   def run(key, fun, timeout \\ 30_000, label \\ "") do
     logical_key = key
     key = route(key)
-    pid = whereis(key)
-    enqueued_at = System.monotonic_time(:millisecond)
 
-    if pid == self() do
+    if current() == key do
       {:reply, value} = fun.(nil)
       value
     else
-      try do
-        GenServer.call(pid, {:run, fun, label, logical_key, enqueued_at}, timeout)
-      catch
-        # the worker idled out between lookup and call: take a fresh one
-        :exit, {:noproc, _} ->
-          GenServer.call(
-            whereis(key),
-            {:run, fun, label, logical_key, enqueued_at},
-            timeout
-          )
+      call_worker(
+        whereis(key),
+        key,
+        logical_key,
+        make_ref(),
+        fun,
+        label,
+        System.monotonic_time(:millisecond),
+        timeout,
+        20
+      )
+    end
+  end
 
-        # the lane is held past the caller's deadline: say by what, and
-        # where it is stuck — this line is the whole diagnosis of a
-        # frozen lane, so it must fire in production, not in a debugger
-        :exit, {:timeout, _} = reason ->
-          {stack, running} = worker_state(pid)
+  defp call_worker(pid, key, owner, job_id, fun, label, enqueued_at, timeout, retries) do
+    try do
+      GenServer.call(pid, {:run, job_id, fun, label, owner, enqueued_at}, timeout)
+    catch
+      # The worker idled out between lookup and call: take a fresh one. The
+      # replacement call keeps the same job identity and cancellation path.
+      :exit, {:noproc, _} when retries > 0 ->
+        Process.sleep(1)
 
-          Logger.warning(
-            "lane #{inspect(key)} owner #{inspect(logical_key)}: #{label} " <>
-              "timed out after #{timeout}ms " <>
-              "while the worker runs #{running}; worker at #{stack}"
-          )
+        call_worker(
+          whereis(key),
+          key,
+          owner,
+          job_id,
+          fun,
+          label,
+          enqueued_at,
+          timeout,
+          retries - 1
+        )
 
-          exit(reason)
-      end
+      # The caller deadline owns the work. Tell the serial worker to kill this
+      # exact active job; a queued or already-finished job cannot match it.
+      :exit, {:timeout, _} = reason ->
+        {stack, running} = worker_state(pid)
+        send(pid, {:cancel_job, job_id, self()})
+
+        Logger.warning(
+          "lane #{inspect(key)} owner #{inspect(owner)}: #{label} " <>
+            "timed out after #{timeout}ms " <>
+            "while the worker runs #{running}; worker at #{stack}"
+        )
+
+        exit(reason)
     end
   end
 
   defp worker_state(pid) do
-    stack =
-      case Process.info(pid, :current_stacktrace) do
-        {:current_stacktrace, frames} ->
-          frames |> Enum.take(4) |> Enum.map_join(" < ", &Exception.format_stacktrace_entry/1)
+    case :ets.lookup(jobs_table(), pid) do
+      [{^pid, job_pid, label, t0}] ->
+        {process_stack(job_pid), "#{label} (#{System.monotonic_time(:millisecond) - t0}ms in)"}
 
-        _ ->
-          "dead worker"
-      end
-
-    running =
-      case :ets.lookup(jobs_table(), pid) do
-        [{^pid, label, t0}] ->
-          "#{label} (#{System.monotonic_time(:millisecond) - t0}ms in)"
-
-        [] ->
-          "no job"
-      end
-
-    {stack, running}
+      [] ->
+        {process_stack(pid), "no job"}
+    end
   end
 
-  @doc "The running job per worker pid: {pid, label, started_at_ms}."
-  def jobs_table do
-    case :ets.whereis(:compos_lane_jobs) do
-      :undefined ->
-        :ets.new(:compos_lane_jobs, [:named_table, :public, :set, read_concurrency: true])
+  defp process_stack(pid) do
+    case Process.info(pid, :current_stacktrace) do
+      {:current_stacktrace, frames} ->
+        frames |> Enum.take(4) |> Enum.map_join(" < ", &Exception.format_stacktrace_entry/1)
 
-      _tid ->
-        :compos_lane_jobs
+      _ ->
+        "dead worker"
     end
+  end
+
+  @doc "The running job per worker pid: {worker, job, label, started_at_ms}."
+  def jobs_table do
+    Compos.Core.SchemeTables.ensure_table(@jobs_table)
+    @jobs_table
   end
 
   @doc "Run FUN in the lane without waiting; the reply is discarded."
@@ -199,6 +214,7 @@ defmodule Compos.Core.Lane do
 
     @impl true
     def init(key) do
+      Process.flag(:trap_exit, true)
       Process.put(:compos_scheme_lane, key)
       {:ok, key, @idle}
     end
@@ -207,18 +223,22 @@ defmodule Compos.Core.Lane do
     # telemetry, and put the slow ones in the log by name
     @slow_ms 250
 
-    # A caller that timed out and died leaves its message in this mailbox.
-    # Nobody can receive the reply, so the work is waste: skip it. A burst
-    # of such jobs would otherwise hold the lane for minutes after every
-    # caller gave up.
+    # A queued job whose caller is already gone is skipped. A running job lives
+    # in its own process so this serial worker can observe caller death or a
+    # timeout cancellation and kill only that job, preserving later callers.
     @impl true
-    def handle_call({:run, fun, label, owner, enqueued_at}, {caller, _} = from, key) do
+    def handle_call(
+          {:run, job_id, fun, label, owner, enqueued_at},
+          {caller, _} = from,
+          key
+        ) do
       if Process.alive?(caller) do
-        case timed(key, owner, label, enqueued_at, fn -> guarded(fun, from) end) do
-          {:reply, value} -> {:reply, value, key, @idle}
-          # the fun claimed the reply slot (eval-defer!): it answers later
-          # through GenServer.reply — this worker moves on at once
-          :noreply -> {:noreply, key, @idle}
+        case run_call_job(key, job_id, caller, from, fun, label, owner, enqueued_at) do
+          {:done, {:reply, value}} -> {:reply, value, key, @idle}
+          # The fun claimed the reply slot (eval-defer!): it answers later
+          # through GenServer.reply — this worker moves on at once.
+          {:done, :noreply} -> {:noreply, key, @idle}
+          :cancelled -> {:noreply, key, @idle}
         end
       else
         :telemetry.execute(
@@ -233,13 +253,81 @@ defmodule Compos.Core.Lane do
 
     @impl true
     def handle_cast({:run, fun, label, owner, enqueued_at}, key) do
-      timed(key, owner, label, enqueued_at, fn -> guarded(fun, nil) end)
+      {:message_queue_len, backlog} = Process.info(self(), :message_queue_len)
+      timed(self(), key, owner, label, enqueued_at, backlog, fn -> guarded(fun, nil) end)
       {:noreply, key, @idle}
     end
 
-    # A job that raises outside the Session's own safe() wrapper must
-    # fail its caller, never this worker: a dead worker takes every
-    # queued job in the lane down with it.
+    defp run_call_job(key, job_id, caller, from, fun, label, owner, enqueued_at) do
+      worker = self()
+      caller_monitor = Process.monitor(caller)
+      {:message_queue_len, backlog} = Process.info(worker, :message_queue_len)
+
+      {job, job_monitor} =
+        :erlang.spawn_opt(
+          fn ->
+            Process.put(:compos_scheme_lane, key)
+
+            result =
+              timed(worker, key, owner, label, enqueued_at, backlog, fn ->
+                guarded(fun, from)
+              end)
+
+            send(worker, {:lane_job_result, job_id, result})
+          end,
+          [:link, :monitor]
+        )
+
+      await_call_job(job_id, caller, caller_monitor, job, job_monitor, key, owner, label)
+    end
+
+    defp await_call_job(job_id, caller, caller_monitor, job, job_monitor, key, owner, label) do
+      receive do
+        {:lane_job_result, ^job_id, result} ->
+          Process.demonitor(caller_monitor, [:flush])
+          Process.demonitor(job_monitor, [:flush])
+          {:done, result}
+
+        {:cancel_job, ^job_id, ^caller} ->
+          cancel_call_job(job_id, caller_monitor, job, job_monitor, key, owner, label)
+
+        {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+          cancel_call_job(job_id, caller_monitor, job, job_monitor, key, owner, label)
+
+        {:DOWN, ^job_monitor, :process, ^job, reason} ->
+          Process.demonitor(caller_monitor, [:flush])
+          :ets.delete(Compos.Core.Lane.jobs_table(), self())
+          {:done, {:reply, {:error, "lane job exited: #{inspect(reason)}"}}}
+      end
+    end
+
+    defp cancel_call_job(job_id, caller_monitor, job, job_monitor, key, owner, label) do
+      Process.exit(job, :kill)
+
+      receive do
+        {:DOWN, ^job_monitor, :process, ^job, _reason} -> :ok
+      end
+
+      Process.demonitor(caller_monitor, [:flush])
+      :ets.delete(Compos.Core.Lane.jobs_table(), self())
+
+      receive do
+        {:lane_job_result, ^job_id, _result} -> :ok
+      after
+        0 -> :ok
+      end
+
+      :telemetry.execute(
+        [:compos, :lane, :cancelled],
+        %{},
+        %{lane: key, owner: owner, label: label}
+      )
+
+      :cancelled
+    end
+
+    # A job that raises outside the Session's own safe() wrapper must fail its
+    # caller, never this worker or later queued jobs.
     defp guarded(fun, from) do
       fun.(from)
     rescue
@@ -248,17 +336,16 @@ defmodule Compos.Core.Lane do
       :exit, reason -> {:reply, {:error, "exit: #{inspect(reason)}"}}
     end
 
-    defp timed(key, owner, label, enqueued_at, fun) do
+    defp timed(worker, key, owner, label, enqueued_at, backlog, fun) do
       t0 = System.monotonic_time(:millisecond)
       queue_time = max(t0 - enqueued_at, 0)
-      {:message_queue_len, backlog} = Process.info(self(), :message_queue_len)
-      :ets.insert(Compos.Core.Lane.jobs_table(), {self(), label, t0})
+      :ets.insert(Compos.Core.Lane.jobs_table(), {worker, self(), label, t0})
 
       try do
         fun.()
       after
         ms = System.monotonic_time(:millisecond) - t0
-        :ets.delete(Compos.Core.Lane.jobs_table(), self())
+        :ets.delete(Compos.Core.Lane.jobs_table(), worker)
 
         :telemetry.execute(
           [:compos, :lane, :job],

@@ -1,9 +1,9 @@
 defmodule Compos.Core.SchemeTables do
   @moduledoc """
-  The owner of the Scheme world's ETS tables, and nothing else.
+  The stable owner of the Scheme world's and lane scheduler's ETS tables.
 
   An ETS table dies with the process that created it. `Compos.Core.Session`
-  created all three of the Scheme world's tables and also runs the riskiest
+  previously created its own tables and also runs the riskiest
   code in the daemon: it loads the stdlib, reloads changed files, rebinds
   primitives and sweeps frames. One crash there took every registered
   command, every escaped closure and the whole environment with it, and
@@ -13,9 +13,9 @@ defmodule Compos.Core.SchemeTables do
   This process holds the tables and runs no Scheme. It cannot crash from
   anything Scheme does, so the tables outlive a Session restart:
 
-  - the two named tables are created once, here. Session empties and
-    refills them rather than creating them, so their identity is stable
-    across a restart and no lane worker ever sees them vanish.
+  - the named tables are created once, here. Session empties and refills its
+    registry tables; lanes update their jobs table. Their identities stay stable
+    across a Session restart, so active work never sees a dead table id.
   - the environment table is created by `Scheme.new` inside Session, which
     is where it has to be. Session names this process its heir, so the
     table transfers here instead of dying. In-flight lane work finishes
@@ -37,10 +37,11 @@ defmodule Compos.Core.SchemeTables do
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  @doc """
-  The named tables the Scheme world uses. Created here, emptied by Session.
-  """
-  def named_tables,
+  @doc "All named tables held by this stable owner."
+  def named_tables, do: reset_tables() ++ [:compos_lane_jobs]
+
+  @doc "Scheme registry tables emptied and rebuilt when Session starts."
+  def reset_tables,
     do: [Compos.Core.SchemeAPI.commands_table(), :compos_escaped_closures, :compos_messages]
 
   @doc """
