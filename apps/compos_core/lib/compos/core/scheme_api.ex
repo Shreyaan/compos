@@ -33,7 +33,7 @@ defmodule Compos.Core.SchemeAPI do
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
   def docs do
     %{
-      "buffer-create" => "(buffer-create NAME) — create an empty buffer NAME and return NAME.",
+      "buffer-create" => "(buffer-create NAME) — create an empty buffer NAME and return NAME. A NAME that is a file on disk loads that file instead.",
       "buffer-list" => "(buffer-list) — return the names of all buffers.",
       "buffer-list-mru" =>
         "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers.",

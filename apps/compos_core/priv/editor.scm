@@ -5011,14 +5011,31 @@
 ;; creation). Without this, every non-file buffer — chat, shell, agent
 ;; thread, listing — answers "~" and C-x C-f from it loses your place.
 (define raw-buffer-create buffer-create)
+
+;; A buffer name that is a file on disk names that file. An empty buffer
+;; under such a name holds a lie, and the first save turns the lie into
+;; a clobber: an agent made ~/.compos/init.scm that way and wrote seven
+;; lines over a hundred. A directory name is not a file: a Dired listing
+;; is a plain buffer named by its directory.
+(define (buffer-shadows-file? name)
+  (and (string? name)
+       (string-prefix? "/" name)
+       (not (remote-path? name))
+       (not (buffer-path name))
+       (file-exists? name)
+       (not (file-directory? name))))
+
 (define (buffer-create name)
-  (let ((fresh (not (buffer-exists? name)))
-        (new (not (buffer-known? name))))
-    (raw-buffer-create name)
-    (when (and fresh (boundp (quote default-directory)))
-      (buffer-set-local! name 'default-directory (default-directory)))
-    (when new (buffer-created! name))
-    name))
+  (if (and (not (buffer-known? name)) (buffer-shadows-file? name))
+      ;; the name is a file: load it, so the buffer starts as the file
+      (find-file name)
+      (let ((fresh (not (buffer-exists? name)))
+            (new (not (buffer-known? name))))
+        (raw-buffer-create name)
+        (when (and fresh (boundp (quote default-directory)))
+          (buffer-set-local! name 'default-directory (default-directory)))
+        (when new (buffer-created! name))
+        name)))
 
 ;; remote buffers save over ssh, never through the local filesystem
 (define (save-remote-buffer! bpath)
@@ -5053,6 +5070,15 @@
         (path
          (run-hooks 'after-save-hook)
          (message (string-append "Wrote " path)))
+        ;; the name is a file on disk, and this buffer never read it: the
+        ;; text here is not that file plus edits, so writing it there is
+        ;; a clobber. write-file is the gesture that writes over a file
+        ;; on purpose.
+        ((buffer-shadows-file? (current-buffer))
+         (error (string-append
+                  (abbreviate-file-name (current-buffer))
+                  " exists on disk and this buffer never read it."
+                  " Use write-file to write over it.")))
         ;; the buffer name IS an absolute path: the file name is known,
         ;; so save there and adopt the path — no prompt. C-x C-w is the
         ;; gesture that picks a different file.
