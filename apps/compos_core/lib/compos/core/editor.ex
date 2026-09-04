@@ -1513,7 +1513,8 @@ defmodule Compos.Core.Editor do
         filter: true,
         match_hint: false,
         style: nil,
-        completion_style: :flex
+        completion_style: :flex,
+        preselect: :first
       }
       |> Map.merge(handlers)
       |> Map.put(:prompt, prompt)
@@ -2229,18 +2230,21 @@ defmodule Compos.Core.Editor do
 
   @doc """
   True when the prompt line itself is the selection, not a candidate row
-  (vertico-preselect 'directory).
+  (vertico-preselect 'directory and 'prompt).
 
   A file prompt whose input ends with "/" names a directory. RET must open
   that directory, not the first file in it — TAB descends into a directory
-  and leaves its contents listed. C-n/C-p touch the list and take the
-  selection back to the candidates.
+  and leaves its contents listed. A prompt that asks for `preselect:
+  :prompt` (write-file) takes the typed input whatever the list shows: the
+  input names a NEW file, and a fuzzy match on another file must not take
+  the write. C-n/C-p touch the list and take the selection back to the
+  candidates in both cases.
   """
   def prompt_preselected?(mb) do
     touched = Map.get(mb, :sel_touched) || (mb[:list] && mb.list.touched) || false
 
     mb[:on_complete] not in [nil, false] and not touched and
-      String.ends_with?(mb.input, "/")
+      (mb[:preselect] == :prompt or String.ends_with?(mb.input, "/"))
   end
 
   defp put_mb_input(mb, input) do

@@ -116,6 +116,17 @@ A mode change applies automatic policy after the mode is known and before mode-g
 Before a durable buffer is killed or evicted, pending Provenance operations and the buffer checkpoint are flushed. Restoration recovers both to a mutually consistent accepted revision.
 
 A normal kill does not delete history. Explicit discard may remove session-only history. Deleting durable history is a separate, confirmable operation.
+## Writing a buffer to a file
+
+`write-file` (`C-x C-w`, and `C-x C-s` on a buffer without a file) asks for a
+path. RET writes the typed text. A fuzzy match on a file already in that
+directory does not take the write: press `C-n` or `TAB` first to choose a
+candidate on purpose. An answer that names a directory writes the buffer's
+own name into that directory, as Emacs does. The buffer then visits the
+written file, and its directory is the file's directory. A chat records the
+written directory as `chat-directory`; the `.chat` header carries it, so the
+chat works there after a restart.
+
 ## Buffer-facing API
 
 The buffer layer exposes these conceptual operations:

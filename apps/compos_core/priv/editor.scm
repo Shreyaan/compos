@@ -5097,7 +5097,7 @@
 ;; chat, forever after C-x C-s just saves.
 (define (write-buffer-to-file! old path0)
   (unless (equal? (string-trim path0) "")
-    (let ((p (expand-path (normalize-file-input (string-trim path0)))))
+    (let ((p (write-file-target old path0)))
       (if (equal? p old)
           ;; the buffer already carries this name: adopt, do not re-visit
           (begin
@@ -5105,7 +5105,10 @@
             (run-hooks 'after-save-hook)
             (message (string-append "Wrote " p)))
           (let ((g (buffer-group old))
-                (record (buffer-local old 'chat-wire-turns)))
+                (record (buffer-local old 'chat-wire-turns))
+                (chat? (buffer-local old 'agent-slug)))
+            (when chat?
+              (buffer-set-local! old 'chat-directory (path-directory p)))
             (write-file! p (or (chat-file-text old) (buffer-text old)))
             (visit p)
             (when g (buffer-set-local! (current-buffer) 'group g))
@@ -5138,14 +5141,19 @@
   (let ((path (buffer-path buf)))
     (if (and (string? path) (not (equal? path "")))
         path
-        (let* ((stem (write-file-buffer-stem buf))
-               (mode (buffer-local buf 'mode-name))
-               (ext (if (auto-mode-for stem)
-                        ""
-                        (write-file-mode-extension mode))))
-          (string-append (default-directory) stem ext)))))
+        (string-append (default-directory) (write-file-default-name buf)))))
 
 ;;; --- delete-file ---------------------------------------------------------------
+;; An answer that names a directory writes the buffer's own name into
+;; it, as Emacs does. A chat that a person writes somewhere on purpose
+;; works there from then on: the directory is chat identity, and the
+;; .chat header carries it across a restart.
+(define (write-file-target old path0)
+  (let ((p (expand-path (normalize-file-input (string-trim path0)))))
+    (if (file-directory? p)
+        (string-append p "/" (write-file-default-name old))
+        p)))
+
 ;;; Emacs delete-file, as a command. The prompt starts on this buffer's
 ;;; file, and a yes-or-no question stands between RET and the disk. The
 ;;; file goes to the trash (Emacs delete-by-moving-to-trash); a prefix
@@ -5162,6 +5170,9 @@
     (cond ((not (or (file-exists? full) (file-directory? full))) #f)
           (permanent? (delete-file! full) full)
           (else (trash-file! full) full))))
+            (when chat?
+              (buffer-set-local! (current-buffer) 'chat-directory
+                                 (path-directory p)))
 
 (define (delete-file--ask! path permanent?)
   (let ((full (expand-path (normalize-file-input path))))
@@ -5185,6 +5196,14 @@
     (read-file-name-initial "Delete file: " (delete-file-default (current-buffer))
       (lambda (input) (delete-file--ask! input (and arg #t))))))
 
+(define (write-file-default-name buf)
+  (let* ((stem (write-file-buffer-stem buf))
+         (mode (buffer-local buf 'mode-name))
+         (ext (if (auto-mode-for stem)
+                  ""
+                  (write-file-mode-extension mode))))
+    (string-append stem ext)))
+
 (public! 'delete-file-path!
   "(delete-file-path! PATH PERMANENT?) — move PATH to the trash, or delete it when PERMANENT?; the path, or #f when nothing is there")
 
@@ -5193,7 +5212,8 @@
     (let ((old (current-buffer)))
       (read-file-name-initial (string-append "Write " old " to file: ")
         (write-file-default-path old)
-        (lambda (p) (write-buffer-to-file! old p))))))
+        (lambda (p) (write-buffer-to-file! old p))
+        (list (list 'preselect 'prompt))))))
 
 ;; Save a buffer that is not the current one. save-buffer acts on the
 ;; current buffer, and it must: the remote, chat and no-file branches all
@@ -5242,6 +5262,9 @@
 ;; listing says which directory it listed. Every file prompt goes through
 ;; here, and nothing else has to know the annotator needs it.
 ;; A prompt shows eight rows at a time. Annotating every entry to show
+      ;; the answer names a NEW file: RET writes the typed text, and a
+      ;; fuzzy match on a file already there does not take the write.
+      ;; C-n and TAB still pick a candidate on purpose.
 ;; eight is the file prompt's worst case: the annotator stats the file and
 ;; reads auto-mode-alist for each one, so 5000 entries cost 1.8s on the
 ;; :ui lane and the editor stops between keystrokes. Past this many
@@ -5299,10 +5322,11 @@
 
 ;; ONE file prompt (dup #17): minibuffer with filename completion. INITIAL
 ;; chooses its starting directory and text. K receives the confirmed text
-;; exactly as typed.
+;; exactly as typed. OPTS is an alist of extra prompt options, such as
+;; (preselect prompt).
 ;; match-hint: the annotation names the mode the file opens in, so "dired"
 ;; narrows the listing to the directories and "elixir" to the .ex files.
-(define (read-file-name-initial prompt initial k)
+(define (read-file-name-initial prompt initial k &optional opts)
   (let* ((dd (default-directory))
          (seed (if (and (string? initial) (not (equal? initial ""))) initial dd))
          (seed-dir (car (path-split (normalize-file-input seed))))
@@ -5310,14 +5334,16 @@
     (set! *file-nav-dir* dir)
     (let ((cands (file-candidates dir (list-dir dir))))
       (minibuffer-read* prompt cands
-        (list (list 'complete file-complete)
-              (list 'change file-nav-change)
-              (list 'initial seed)
-              ;; the icon leads the annotation, so the mode is the second
-              ;; field: both must be in reach for "dired" to find a directory
-              (list 'match-hint 2)
-              (list 'style #f)
-              (list 'confirm k))))))
+        (append
+          (list (list 'complete file-complete)
+                (list 'change file-nav-change)
+                (list 'initial seed)
+                ;; the icon leads the annotation, so the mode is the second
+                ;; field: both must be in reach for "dired" to find a directory
+                (list 'match-hint 2)
+                (list 'style #f)
+                (list 'confirm k))
+          (or opts '()))))))
 
 (define (read-file-name prompt k)
   (read-file-name-initial prompt (default-directory) k))
@@ -8989,7 +9015,7 @@
             (when v (buffer-set-local! buf (cadr pair) v))))
         '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)
-          (summary chat-summary)))
+          (summary chat-summary) (directory chat-directory)))
       (let* ((end (or (chat-file-record-at text) (string-byte-length text)))
              (recorded (chat-file-record text))
              (turns (chat-parse-transcript (substring-bytes text (or nl 0) end))))
@@ -9247,6 +9273,8 @@
       (else
         ;; identity that belongs to the OLD backend must not follow the
         ;; conversation across (a foreign model id is silently ignored by
+    (let ((d (buffer-local buf 'chat-directory)))
+      (if (string? d) (string-append " directory " (value->string d)) ""))
         ;; an adapter while the modeline keeps repeating it)
         (unless same-lane?
           (buffer-set-local! buf 'agent-models #f)

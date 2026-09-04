@@ -1724,6 +1724,10 @@ defmodule Compos.Core.SchemeAPI do
               # how the input matches a candidate: flex, substring, prefix,
               # regexp, exact. The prompt chooses; the engine applies.
               "completion-style" -> {:completion_style, Compos.Core.Candidates.style(v)}
+              # which row RET takes when the person did not arrow: 'first is
+              # the highlighted candidate (vertico), 'prompt is the typed
+              # input. A destination prompt (write-file) asks for 'prompt.
+              "preselect" -> {:preselect, String.to_atom(plain(v))}
               # A prompt can reuse a domain list when its filtered result is
               # collected. Scheme decides the target and receives the rows.
               "collect" -> {:on_collect, v}
