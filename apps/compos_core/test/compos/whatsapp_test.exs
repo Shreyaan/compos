@@ -138,10 +138,15 @@ defmodule Compos.WhatsappTest do
 
     assert Buffer.text(@list_buffer) =~ "Mukund"
     assert Buffer.text(@list_buffer) =~ "me: it's the weekend"
-    assert Buffer.text(@chat_buffer) =~ "09-05 11:49  Me"
-    assert Buffer.text(@chat_buffer) =~ "it's the weekend"
-    refute Buffer.text(@chat_buffer) =~ "Chat: "
-    refute Buffer.text(@chat_buffer) =~ "From: "
+    # the buffer holds the transcript the server printed, unedited:
+    # the grammar reads it, and the blocks are the compact reading
+    assert Buffer.text(@chat_buffer) =~ "[2026-09-05 11:49:38] Chat: Mukund From: Me:"
+
+    assert eval!(~S|(map whatsapp--msg-sender (whatsapp--messages "*WhatsApp conversation*"))|) ==
+             ~S|("Me")|
+
+    assert eval!(~S|(map whatsapp--msg-body (whatsapp--messages "*WhatsApp conversation*"))|) ==
+             ~S|("it's the weekend")|
 
     assert eval!(~S|(buffer-local "*WhatsApp conversation*" 'render-mode)|) ==
              ~S("blocks")
@@ -188,8 +193,60 @@ defmodule Compos.WhatsappTest do
 
     sent = eval!("*zz-whatsapp-sent*")
     assert sent =~ ~S(recipient "123@s.whatsapp.net")
-    assert sent =~ ~S(message "On my way")
+    # the one message on screen is the one being answered, so the
+    # reply carries it: the transport has no reply-to field
+    assert sent =~ "> Me: it's the weekend"
+    assert sent =~ "On my way"
     assert eval!("*zz-whatsapp-message-fetches*") == "2"
+  end
+
+  test "messages are the unit of motion, and a reply quotes the one selected" do
+    open_chat()
+
+    eval!(~S"""
+    (whatsapp--render-conversation! "*WhatsApp conversation*"
+      (string-append
+        "[2026-09-05 11:48:00] Chat: Mukund From: Mukund: are you around\n"
+        "[2026-09-05 11:49:38] Chat: Mukund From: Me: it's the weekend\n"))
+    """)
+
+    assert eval!(~S|(length (whatsapp--messages "*WhatsApp conversation*"))|) == "2"
+
+    # the transcript arrives newest first, so the message at the top is
+    # the one a reader lands on
+    assert eval!(
+             ~S|(whatsapp--msg-sender (whatsapp--current-message "*WhatsApp conversation*"))|
+           ) == ~S("Mukund")
+
+    eval!(~S"""
+    (with-current-buffer "*WhatsApp conversation*"
+      (lambda () (run-command "whatsapp-next-message")))
+    """)
+
+    assert eval!(
+             ~S|(whatsapp--msg-sender (whatsapp--current-message "*WhatsApp conversation*"))|
+           ) == ~S("Me")
+
+    eval!(~S"""
+    (with-current-buffer "*WhatsApp conversation*"
+      (lambda () (run-command "whatsapp-prev-message")))
+    """)
+
+    assert eval!(
+             ~S|(whatsapp--msg-sender (whatsapp--current-message "*WhatsApp conversation*"))|
+           ) == ~S("Mukund")
+
+    assert eval!(~S|(value->string (buffer-local "*WhatsApp conversation*" 'render-blocks))|) =~
+             "whatsapp-message-current"
+
+    eval!(~S|(switch-to-buffer! "*WhatsApp conversation*")|)
+    eval!(~S|(run-command "whatsapp-reply")|)
+    "yes" |> String.graphemes() |> Enum.each(&KeyDispatch.handle_key/1)
+    press("RET")
+
+    sent = eval!("*zz-whatsapp-sent*")
+    assert sent =~ "> Mukund: are you around"
+    assert sent =~ "yes"
   end
 
   test "a late response cannot overwrite a newly selected chat" do

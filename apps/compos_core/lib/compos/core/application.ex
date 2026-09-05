@@ -5,6 +5,13 @@ defmodule Compos.Core.Application do
 
   @impl true
   def start(_type, _args) do
+    # Before anything can ask for structure. A bundled grammar is part
+    # of the editor the way the compiled-in four are, and a mode that
+    # reads one must not race its arrival — an empty answer from the
+    # parser reads exactly like an empty buffer. Already built, this is
+    # a stat and a dlopen; the compile happens once, when a source moves.
+    Compos.Core.TreeSitter.load_bundled()
+
     children = [
       {Registry, keys: :unique, name: Compos.Core.BufferRegistry},
       {Registry, keys: :duplicate, name: Compos.Core.EventRegistry},
@@ -62,11 +69,11 @@ defmodule Compos.Core.Application do
         restart: :temporary
       },
       Compos.Core.LLMDb,
-      # one-shot: compile the bundled grammars if their sources moved,
-      # then register every grammar this machine has with the NIF
+      # one-shot: register the grammars the user installed. These are
+      # the reader's own, so they can arrive after the frame does.
       %{
         id: :grammar_boot,
-        start: {Task, :start_link, [&Compos.Core.TreeSitter.load_all/0]},
+        start: {Task, :start_link, [&Compos.Core.TreeSitter.load_installed/0]},
         restart: :temporary
       }
     ]

@@ -59,12 +59,6 @@ defmodule Compos.Core.TreeSitter do
     |> Enum.filter(&File.exists?(Path.join([&1, "src", "parser.c"])))
   end
 
-  @doc "Register every grammar this machine has (boot path)."
-  def load_all do
-    built = load_bundled()
-    load_names(installed() -- built, "")
-  end
-
   @doc "Compile any bundled grammar whose sources moved, then load them all."
   def load_bundled do
     names =
@@ -124,8 +118,8 @@ defmodule Compos.Core.TreeSitter do
     match?({:ok, %{mtime: m}} when m > at, File.stat(path, time: :posix))
   end
 
-  @doc "Register every installed grammar with the NIF."
-  def load_installed, do: load_names(installed(), "")
+  @doc "Register every installed grammar the bundle does not own."
+  def load_installed, do: load_names(installed() -- bundled(), "")
 
   @doc "Register one installed grammar with the NIF."
   def load(name) do
