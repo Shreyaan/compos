@@ -516,6 +516,24 @@
     (check-contains! (t--nm-calls) "tag -m -- ( tag:inbox )" "the second press unmarks the query")
     (t--nm-done!)))
 
+(deftest 'mark-all-under-a-filter-tags-only-the-narrowed-query
+  "the tag call names the base plus the filters, both ways"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-filter")
+    (t--nm-answer! "from:alice")
+    (run-command "notmuch-mark-all")
+    (check-contains! (t--nm-calls) "tag +m -- ( ( tag:inbox ) and from:alice )"
+                     "the mark covers the filtered search, not the mailbox")
+    (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
+                             "\"tags\": [\"inbox\", \"m\", \"unread\"]")
+    (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
+    (run-command "notmuch-mark-all")
+    (check-contains! (t--nm-calls) "tag -m -- ( ( tag:inbox ) and from:alice )"
+                     "and so does the unmark")
+    (t--nm-done!)))
+
 (deftest 'mark-all-then-archive-marked-asks-before-it-acts
   "a bulk change over a whole query takes a confirmation"
   (lambda ()
