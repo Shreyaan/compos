@@ -479,6 +479,42 @@
     (check-equal! (length (list-entries "*notmuch*")) 2 "and all its rows")
     (t--nm-done!)))
 
+;; the stub answers every search from search.json; a test that needs
+;; marked rows rewrites that file with the m tag on some threads
+(define (t--nm-replace s from to) (string-join (string-split s from) to))
+(define (t--nm-search-json-with! from to)
+  (write-file! (string-append t--nm-dir "/search.json")
+    (t--nm-replace (cadr (assoc "search.json" t--nm-files)) from to)))
+
+(deftest 'a-marked-thread-shows-the-list-mark-on-its-row
+  "the m tag becomes a list mark, so the row wears the mark column"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (check-equal! (list-marks "*notmuch*") '() "no thread is marked at first")
+    (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
+                             "\"tags\": [\"inbox\", \"m\", \"unread\"]")
+    (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
+    (check-equal! (list-marks "*notmuch*") (list (list "0001" "*"))
+                  "the marked thread carries the list mark")
+    (let ((row (car (list-row-lines "*notmuch*" (car (list-entries "*notmuch*"))))))
+      (check-equal! (string-prefix? "* " (car row)) #t "the row starts with the mark"))
+    (let ((row (car (list-row-lines "*notmuch*" (cadr (list-entries "*notmuch*"))))))
+      (check-equal! (string-prefix? "  " (car row)) #t "an unmarked row starts blank"))
+    (t--nm-done!)))
+
+(deftest 'mark-all-again-unmarks-the-search
+  "every shown thread marked, a second mark-all removes the m tag"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (t--nm-search-json-with! "\"tags\": [\"inbox\"" "\"tags\": [\"m\", \"inbox\"")
+    (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
+    (check-equal! (nm--all-marked? "*notmuch*") #t "every row is marked")
+    (run-command "notmuch-mark-all")
+    (check-contains! (t--nm-calls) "tag -m -- ( tag:inbox )" "the second press unmarks the query")
+    (t--nm-done!)))
+
 (deftest 'mark-all-then-archive-marked-asks-before-it-acts
   "a bulk change over a whole query takes a confirmation"
   (lambda ()

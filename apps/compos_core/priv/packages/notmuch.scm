@@ -14,7 +14,7 @@
 ;;; Search buffer keys (ported from the user's Emacs config):
 ;;;   n/p next/prev (n marks read; both auto-preview) · RET open · SPC preview
 ;;;   a archive · d trash · u smart-untag · . toggle unread · @ by sender
-;;;   m mark+advance · M mark all · U unmark all · F show marked
+;;;   m mark+advance · M or * mark all (again unmarks) · U unmark all · F show marked
 ;;;   A archive marked · D trash marked · t tag marked · T tag this thread
 ;;;   / custom query filter · l add a tag filter · \ remove the last filter
 ;;;   s new search · g refresh · q quit
@@ -185,6 +185,12 @@ when a message has no text/plain part." 'group 'notmuch)
                                       (or (nm--get th 'tags) '())
                                       (or (nm--get th 'date_relative) "")))
                    (nm--search-json (nm--query-of buf) notmuch-search-limit))))
+    ;; a marked thread carries the m tag, and the list draws its mark
+    ;; column from the marks local: derive the marks from the tags on
+    ;; every fetch, so a marked row shows the mark like any other list
+    (buffer-set-local! buf 'list-marks
+      (map (lambda (th) (list (nm--th-id th) *list-mark-char*))
+           (filter (lambda (th) (member "m" (nm--th-tags th))) rows)))
     ;; the tag column measures itself against the threads this search
     ;; found. It reads the number here, and not from the entries: a draw
     ;; lays the columns out while the entries it replaces are still the
@@ -279,7 +285,6 @@ when a message has no text/plain part." 'group 'notmuch)
     'title (lambda (buf) "Mail")
     'meta nm--search-meta
     'total (lambda (buf) (length (list-entries buf)))
-    'no-marks #t
     'footer (lambda (buf)
               '(("RET" "open") ("SPC" "preview") ("m" "mark")
                 ("a" "archive") ("d" "trash") ("t" "tag")
@@ -415,7 +420,6 @@ when a message has no text/plain part." 'group 'notmuch)
     'meta (lambda (buf)
             (string-append (number->string (length (list-entries buf))) " saved searches"))
     'total (lambda (buf) (length (list-source-entries buf)))
-    'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
               '(("RET" "open") ("s" "search") ("/" "filter")
@@ -776,13 +780,24 @@ when a message has no text/plain part." 'group 'notmuch)
             (list-move-in! buf 1))
           (message "No thread on this line")))))
 
-(define-command "notmuch-mark-all" "Mark every thread in this search"
+(define (nm--all-marked? buf)
+  (let ((es (list-entries buf)))
+    (and (pair? es)
+         (let loop ((es es))
+           (cond ((null? es) #t)
+                 ((member "m" (nm--th-tags (car es))) (loop (cdr es)))
+                 (else #f))))))
+
+;; like list-mark-all: a second press, with every shown thread marked,
+;; reads as "never mind" and unmarks the search
+(define-command "notmuch-mark-all" "Mark every thread in this search; again unmarks them"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (nm--run (string-append "tag +m -- "
+    (let* ((buf (current-buffer))
+           (unmark? (nm--all-marked? buf)))
+      (nm--run (string-append "tag " (if unmark? "-m" "+m") " -- "
                               (nm--quote (string-append "( " (nm--query-of buf) " )"))))
       (nm--refresh! buf)
-      (message "Marked all"))))
+      (message (if unmark? "Unmarked all" "Marked all")))))
 
 (define-command "notmuch-unmark-all" "Unmark every thread in this search"
   (lambda ()
