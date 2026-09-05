@@ -62,14 +62,15 @@
               acc
               (let ((b (car bs)))
                 (loop (cdr bs)
-                      (if (member (caddr b) (list "meta" "waiting" "permission" "question" "queued"))
+                      (if (member (caddr b) (list "meta" "status" "waiting" "permission" "question" "queued"))
                           acc
                           (string-append acc
                             (substring-bytes text (car b)
                                              (min (cadr b) mark)))))))))))
 
 (define (agent-seed-transcript buf)
-  (or (chat-flatten buf) (agent-conversation-text buf)))
+  (or (and (boundp 'chat-model-flatten) (chat-model-flatten buf))
+      (agent-conversation-text buf)))
 
 (define (agent-send-msg! slug raw)
   (let* ((buf (agent-buf slug))

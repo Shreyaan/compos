@@ -29,6 +29,11 @@ config :compos_ui, app_port: 4005
 config :compos_core, buffer_idle_timeout_ms: 24 * 60 * 60 * 1_000
 config :compos_core, daemon_registry_path: Path.expand("~/.compos/daemons.json")
 
+# A Scheme execution runs on its own process. The bound kills that process
+# when its heap passes the limit, so one runaway loop cannot take the memory
+# of the machine. Zero disables the bound.
+config :compos_core, scheme_heap_limit_mb: 1024
+
 config :phoenix, :json_library, Jason
 
 if config_env() == :dev do

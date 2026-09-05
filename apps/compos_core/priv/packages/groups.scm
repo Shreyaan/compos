@@ -806,7 +806,7 @@
           (and entry (car (cdr entry))))
         saved)))
 
-(define (group-layout-set! g tree)
+(define (group-layout-set! g tree &optional target)
   (let* ((id (group-ensure-record! g))
          (record (and id (group-record-by-id id)))
          (saved (and record (group-record-layout record)))
@@ -819,11 +819,18 @@
                          entries)))
     (when id
       (group-record-update! id 'layout
-        (cons 'per-frame (cons (list frame tree) others)))
+        (cons 'per-frame (cons (list frame tree target) others)))
       tree)))
 
+(define (group-layout-target g)
+  (let* ((record (group-record-by-id (group-resolve-id g)))
+         (saved (and record (group-record-layout record)))
+         (entry (and (pair? saved) (equal? (car saved) 'per-frame)
+                     (assoc (selected-frame) (cdr saved)))))
+    (and entry (> (length entry) 2) (caddr entry))))
+
 (define (group-layout-save! g)
-  (group-layout-set! g (window-tree)))
+  (group-layout-set! g (window-tree) (layout-target)))
 
 ;; A saved layout names its buffers, because a name IS the buffer handle
 ;; here. Membership escapes renames by riding the buffer ('group-ids), but
@@ -835,8 +842,9 @@
         ((and (pair? layout) (equal? (car layout) 'per-frame))
          (cons 'per-frame
                (map (lambda (entry)
-                      (list (car entry)
-                            (window-tree-rename (car (cdr entry)) old new)))
+                      (append (list (car entry)
+                                    (window-tree-rename (car (cdr entry)) old new))
+                              (cddr entry)))
                     (cdr layout))))
         (else (window-tree-rename layout old new))))
 
@@ -1005,15 +1013,22 @@
 ;; Realise a scene. The frame stands in the scene's group BEFORE any pane
 ;; is built, so every buffer a pane's command opens lands in that group
 ;; rather than in whichever one you came from.
-(define (scene-open! name)
+(define (scene-open! name &optional destination)
   (let ((spec (scene-spec name)))
     (if (not spec)
         (begin (message (string-append "No scene named " name)) #f)
-        (let ((id (begin (layout-abort!) (group-ensure-record! name)))
-              (from (frame-group)))
+        (let* ((from (frame-group))
+               (target (if (equal? destination "") from (or destination name)))
+               (id (begin (layout-abort!) (and target (group-ensure-record! target))))
+               ;; An ungrouped scene has no group companion to materialise.
+               (spec (if id spec
+                         (append (list (car spec) (cadr spec))
+                           (filter (lambda (pane)
+                                     (not (equal? (scene--declared-pane pane) 'group-chat)))
+                                   (cddr spec))))))
           ;; leaving a group snapshots it, exactly as switching does: the
           ;; way back to where you were must stay exact
-          (when (and from (not (equal? from (group-resolve-id name))))
+          (when (and from (not (equal? from id)))
             (group-layout-save-if-shown! from)
             (set-frame-local! 'previous-group from))
           (set-frame-local! 'current-group id)
@@ -1022,11 +1037,12 @@
                  (anchor (layout--pane #f (car (cdr (cdr resolved)))))
                  (panes (apply-layout! anchor resolved)))
             ;; a pane the scene built is a member by construction
-            (for-each (lambda (b)
-                        (if (chat-buffer? b)
-                            (chat-set-group! b id)
-                            (buffer-add-group! b id)))
-                      panes)
+            (when id
+              (for-each (lambda (b)
+                          (if (chat-buffer? b)
+                              (chat-set-group! b id)
+                              (buffer-add-group! b id)))
+                        panes))
             ;; `as` is a role on this buffer's membership in this group.
             ;; Bind after the layout has materialised every ensure pane.
             (for-each
@@ -1034,12 +1050,12 @@
                 (let* ((role (scene--role declared))
                        (pane (scene--pane id declared))
                        (buf (and role (layout--pane anchor pane))))
-                  (when buf
+                  (when (and id buf)
                     (if (chat-buffer? buf)
                         (chat-set-group! buf id)
                         (buffer-add-group-as! buf id role)))))
               (cdr (cdr spec)))
-            (mru-note-group! id)
+            (when id (mru-note-group! id))
             (windows-shown-catchup!)
             panes)))))
 
@@ -1051,7 +1067,7 @@
           (minibuffer-read "Scene: " names scene-open!)))))
 
 (public! 'define-scene! "(define-scene! NAME SPEC) — declare a group's arrangement; write each pane as (as ROLE PANE), where PANE is \"NAME\", (ensure \"NAME\" \"COMMAND\"), or group-chat")
-(public! 'scene-open! "(scene-open! NAME) — stand in the scene's group and build its arrangement, making any missing pane")
+(public! 'scene-open! "(scene-open! NAME [DESTINATION]) — build the scene in DESTINATION; omitted uses NAME, empty uses the current group")
 
 ;; A layout names buffers, and a member killed since it was saved is a
 ;; name with nothing behind it. The window restore makes a buffer for
@@ -1078,6 +1094,7 @@
             (when (and from (not (equal? from id)))
               (group-layout-save-if-shown! from)
               (set-frame-local! 'previous-group from)))
+          (layout-target-set! #f)
           (set-frame-local! 'current-group id)
           ;; An explicit switch moves an active pin. The frame stays pinned,
           ;; but it does not trap the user in the old group.
@@ -1089,6 +1106,7 @@
                   (group-revive-layout-files! saved)
                   (window-tree-set! saved)
                   (group-restore-sanitize! id)
+                  (layout-target-set! (group-layout-target id))
                   (group-layout-save! id))
                 (begin
                   (group-default-layout! id)
@@ -1949,13 +1967,23 @@
 ;; The pool (editor.scm window-fill-buffers): in a group, the group's
 ;; members; out of one, the ring. The switcher's members section and the
 ;; windows' fill read the same list.
+(define (group-primary-fill? b)
+  (and (not (chat-buffer? b)) (not (group-scratch-buffer? b))))
+
+(define (group-fill-buffers group)
+  (let ((members (filter fill-candidate? (group-user-buffers-mru group))))
+    (append (filter group-primary-fill? members)
+            (filter (lambda (b) (not (group-primary-fill? b))) members))))
+
 (set! window-fill-source
   (lambda ()
     (let ((g (frame-group)))
-      (if g
-          (group-user-buffers-mru g)
-          (filter (lambda (b) (not (buffer-context-only? b)))
-                  (buffer-list-mru))))))
+      (if g (group-fill-buffers g)
+          (filter (lambda (b) (not (buffer-context-only? b))) (buffer-list-mru))))))
+(set! window-fill-primary?
+  (lambda (b) (or (not (frame-group)) (group-primary-fill? b))))
+(set! window-fill-member?
+  (lambda (b) (or (not (frame-group)) (buffer-in-group? b (frame-group)))))
 
 ;; the next buffer for a window in no group: the first of the pool that
 ;; is not the dying buffer
@@ -1983,25 +2011,21 @@
   (let ((s (group-buffer-as group 'scratch)))
     (and s (not (equal? s name)) (buffer-known? s) s)))
 
-;; the buffer WIN showed before NAME that is a live member of GROUP
-;; and that no other window of FRAME shows: the window's own history,
-;; most recent first (Emacs other-buffer), sealed to the group
+;; The pane's own history wins, then hidden group work, then existing companions.
 (define (group-kill-previous-member group name win frame)
-  (let ((id (group-resolve-id group))
-        (elsewhere (map cadr
-                        (filter (lambda (row)
-                                  (and (equal? (caddr row) frame)
-                                       (not (equal? (car row) win))))
-                                (window-list-all)))))
-    (and id
-         (let loop ((bs (window-buffer-history win)))
-           (cond ((null? bs) #f)
-                 ((and (not (equal? (car bs) name))
-                       (not (member (car bs) elsewhere))
-                       (fill-candidate? (car bs))
-                       (buffer-in-group? (car bs) id))
-                  (car bs))
-                 (else (loop (cdr bs))))))))
+  (let ((elsewhere (map cadr
+                    (filter (lambda (row)
+                              (and (equal? (caddr row) frame)
+                                   (not (equal? (car row) win))))
+                            (window-list-all)))))
+    (let loop ((bs (dedupe-names
+                    (append (window-buffer-history win) (group-fill-buffers group)))))
+      (cond ((null? bs) #f)
+            ((and (not (equal? (car bs) name))
+                  (not (member (car bs) elsewhere))
+                  (fill-candidate? (car bs))
+                  (buffer-in-group? (car bs) group)) (car bs))
+            (else (loop (cdr bs)))))))
 
 ;; what a killed buffer's window may show in its group: a member of the
 ;; group, one of the group's chats, or the group's scratch — never a
@@ -2023,7 +2047,7 @@
 ;; The window of a killed buffer stays in its group (user ruling,
 ;; 2026-09-03): it shows the member it showed before, most recent first
 ;; from its own history (user ruling, 2026-09-03: a window refills MRU),
-;; else the group's last chat, else the group's scratch, and it closes
+;; else hidden ordinary group work, then an existing chat or scratch; it closes
 ;; only when the group has none of these — a group that is dying. A
 ;; buffer from another group never comes in, and a member another window
 ;; of the frame shows is not shown twice.
@@ -2057,9 +2081,7 @@
         (let ((win (car place))
               (group (caddr place)))
           (when (and group (not (group-dying? group)))
-            (let ((next (or (group-kill-previous-member group name win (cadr place))
-                            (group-kill-last-chat group name)
-                            (group-kill-existing-scratch group name))))
+            (let ((next (group-kill-previous-member group name win (cadr place))))
               (when next (window-set-buffer! win next))))))
       places)
     (lambda ()
@@ -2077,7 +2099,8 @@
                       ((group-kill-keeper? shown group) #t)
                       (else
                         (let ((blank (and (not (group-dying? group))
-                                          (group-blank-buffer group))))
+                                          (or (group-blank-buffer group)
+                                              (group-chat group)))))
                           (cond (blank (window-set-buffer! win blank))
                                 ((> (group-kill-frame-window-count frame) 1)
                                  (delete-window-id! win))

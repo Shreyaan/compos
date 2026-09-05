@@ -1,5 +1,6 @@
 # Documentation
 
+- [Advice](ADVICE.md) — named function advice, inspection, and enable/disable controls.
 - [Architecture](ARCHITECTURE.md) — system boundary and design rules.
 - [The New Browser Was Emacs All Along](EMACS-AS-AGENT-HARNESS.md) — why the
   Emacs model fits agent harnesses and rich rendered applications.

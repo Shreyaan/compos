@@ -18,6 +18,7 @@
     (package! (string->symbol name))
     (load (string-append (compos-priv-dir) "/packages/" file))))
 
+(load-bundled-package "advice.scm")
 (load-bundled-package "custom.scm")
 (load-bundled-package "tools.scm")
 (load-bundled-package "recipes.scm")

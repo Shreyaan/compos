@@ -122,6 +122,10 @@ defmodule Compos.Scheme.Eval do
   end
 
   @doc "Apply a Scheme callable to already-evaluated args."
+  def apply_fn({:interposed, original, wrapper}, args, store) do
+    apply_fn(wrapper, [original, args], store)
+  end
+
   def apply_fn({:closure, {req, opt, rest}, body, closure_env}, args, store) do
     vars = bind_params!(req, opt, rest, args)
     {frame, store} = Env.new_frame(store, closure_env, vars)

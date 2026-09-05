@@ -777,6 +777,9 @@ defmodule Compos.Ui.Layouts do
             0%, 18% { transform: translateX(-120%); }
             82%, 100% { transform: translateX(120%); }
           }
+          .ag-status { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: baseline; margin: 10px 0; padding: 8px 12px; border-left: 2px solid var(--agent-meta-fg, #8a8577); color: var(--agent-meta-fg, #8a8577); background: color-mix(in srgb, var(--agent-meta-fg, #8a8577) 7%, transparent); }
+          .ag-status .ag-label { margin: 0; }
+          .ag-status-text { min-width: 0; }
           .ag-meta { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.8); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
           @keyframes ag-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
           .ag-inputrow {
@@ -889,22 +892,31 @@ defmodule Compos.Ui.Layouts do
           .prompt { color: var(--accent-fg, #26356b); font-weight: 600; white-space: pre; flex-shrink: 0; }
           .mb-input { white-space: pre; flex-shrink: 0; font-family: var(--font-mono); }
           .mb-input .cursor { background: var(--cursor-bg, #26356b); }
-          /* the minibuffer blocks keyboard input, so it overlays the buffers
-             without changing their geometry while it is open. */
+          /* Every minibuffer read owns the keyboard. Show that modal state
+             directly, without changing the window tree below it. */
+          .mb-modal-layer {
+            position: fixed; inset: 0; z-index: 70;
+            display: flex; align-items: center; justify-content: center;
+            padding: clamp(16px, 4vw, 48px);
+            background: rgba(15, 18, 24, 0.24);
+          }
           .mb-panel {
-            position: absolute; left: 0; right: 0; bottom: 30px; z-index: 50;
+            position: relative; z-index: 1;
+            width: min(760px, 100%); max-height: min(72dvh, 680px);
+            display: flex; flex-direction: column;
             background: var(--window-bg, #fdfcf8);
-            border-top: 2px solid var(--accent-fg, #26356b);
-            box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
-
+            border: 1px solid var(--border-bg, #e2dbc9);
+            border-top: 3px solid var(--accent-fg, #26356b);
+            border-radius: 14px;
+            box-shadow: 0 28px 80px rgba(0, 0, 0, 0.32);
+            overflow: hidden;
           }
           /* palette style: the prompt floats centered over the windows,
              input on top, candidates below — the buffer switcher asks
              for this shape. The echo bar keeps the bottom row, so the
              window tree does not reflow while the palette is open. */
           .mb-panel.palette {
-            position: fixed; left: 50%; top: 14dvh;
-            transform: translateX(-50%);
+            position: relative;
             /* FIXED geometry: the box never changes size while you type —
                fewer candidates leave empty rows, never a smaller panel */
             width: min(1100px, 96vw);
@@ -937,7 +949,7 @@ defmodule Compos.Ui.Layouts do
           /* the name is the point: give it the room, ellipsize later. The
              palette reads at the transient's size: names 20px, hints 17px,
              one head row with the prompt's name and its key legend. */
-          .mb-panel.palette { width: min(1480px, 96vw); top: 9dvh; height: 74dvh; }
+          .mb-panel.palette { width: min(1480px, 100%); height: 74dvh; }
           .mb-panel.palette .mb-cand {
             font-size: 20px; padding: 7px 24px; min-height: 42px; column-gap: 22px;
             border-left-width: 3px;
@@ -981,7 +993,9 @@ defmodule Compos.Ui.Layouts do
              the footer legend comes from the menu's own keys. Type is sized
              for reading at a distance: names 21px, keys in boxes, rail 18px. */
           .mb-panel.palette.transient-panel {
-            height: auto; max-height: 78dvh; top: 9dvh;
+            position: fixed; left: 50%; top: 9dvh;
+            transform: translateX(-50%);
+            height: auto; max-height: 78dvh;
             width: min(1480px, 96vw);
             font-family: var(--font-mono);
           }
@@ -1232,6 +1246,19 @@ defmodule Compos.Ui.Layouts do
           }
           /* the prompt line holds the selection: the input names a directory */
           .mb-input-row.selected { background: var(--select-bg, #e7e9f1); }
+          .mb-panel:not(.palette) .mb-label-row {
+            order: -2; padding: 12px 20px 9px;
+            border-bottom: 1px solid var(--border-bg, #e2dbc9);
+          }
+          .mb-panel:not(.palette) .mb-input-row {
+            order: -1; padding: 17px 20px 18px; font-size: 18px;
+            border-top: none; border-bottom: 1px solid var(--border-bg, #e2dbc9);
+            background: var(--window-bg, #fdfcf8);
+          }
+          .mb-panel:not(.palette) .mb-body { flex: 0 1 auto; min-height: 0; }
+          .mb-panel:not(.palette) .mb-cands { max-height: min(48dvh, 440px); }
+          .mb-panel:not(.palette) .prompt { font-size: 18px; margin-right: 8px; }
+          .mb-panel:not(.palette) .mb-input { font-size: 18px; }
           .mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 11.5px; }
           /* which-key is a keyboard-blocking overlay. Keep the buffer geometry
              unchanged while the prefix panel explains the pending keys. */
@@ -1418,7 +1445,9 @@ defmodule Compos.Ui.Layouts do
           }
           function nativeTextKey(e, editing) {
             const a = document.activeElement;
-            if (!a || !a.closest || !a.closest(".buf[contenteditable]")) return false;
+            // A pane switch can leave DOM focus in the old editable until
+            // the next patch. Only the selected pane may handle keys natively.
+            if (!a || !a.closest || !a.closest(".window.active .buf[contenteditable]")) return false;
             // A Cmd-arrow is a key until the buffer is in the editing
             // state (editingAfterKey); then the browser moves the caret.
             if (e.metaKey && !e.ctrlKey && !e.altKey &&
@@ -2285,6 +2314,8 @@ defmodule Compos.Ui.Layouts do
                 this.scroller = this.el;
                 this.buf = this.el.dataset.buf;
                 this.stick = this.el.dataset.stick !== "false";
+                this.anchor = this.el.dataset.scrollAnchor ? parseInt(this.el.dataset.scrollAnchor, 10) : null;
+                this.offset = parseInt(this.el.dataset.scrollOffset || "0", 10);
                 this.report = null;
                 this.placing = false;
                 this.ro = null;
@@ -2312,14 +2343,43 @@ defmodule Compos.Ui.Layouts do
                   // made, so it must not move the place they left
                   if (this.placing) return;
                   this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
+                  // A modal overlay covers the hit test point. Keep the
+                  // place the reader left rather than dropping it.
+                  const anchor = this.lastVisible();
+                  if (anchor) {
+                    this.anchor = anchor.index;
+                    this.offset = Math.round(anchor.offset);
+                  }
                   clearTimeout(this.report);
                   this.report = setTimeout(() => {
                     this.pushEvent("ag_stick", {
                       buf: this.el.dataset.buf,
                       stick: this.stick,
-                      top: Math.round(s.scrollTop)
+                      top: Math.round(s.scrollTop),
+                      anchor: this.anchor,
+                      offset: this.offset
                     });
                   }, 250);
+                };
+                // The last visible block, found with one hit test. A scan
+                // of every block calls getBoundingClientRect per block, and
+                // each call flushes layout: on a long transcript that is one
+                // layout per block on every scroll event, which blocks the
+                // page until the reader stops. One hit test costs one flush,
+                // whatever the transcript holds.
+                this.lastVisible = () => {
+                  const r = this.scroller.getBoundingClientRect();
+                  const x = r.left + r.width / 2;
+                  const y = Math.min(r.bottom, window.innerHeight) - 1;
+                  if (y <= r.top) return null;
+                  const hit = document.elementFromPoint(x, y);
+                  const block = hit && hit.closest && hit.closest("[data-ag-index]");
+                  if (!block || !this.scroller.contains(block)) return null;
+                  const b = block.getBoundingClientRect();
+                  return {
+                    index: parseInt(block.dataset.agIndex, 10),
+                    offset: b.top - r.top
+                  };
                 };
                 this.scroller.addEventListener("scroll", this.scrollH);
                 // A scroll event is an effect and cannot tell the
@@ -2351,6 +2411,16 @@ defmodule Compos.Ui.Layouts do
                   return;
                 }
                 const max = Math.max(0, s.scrollHeight - s.clientHeight);
+                const saved = this.anchor !== null ? this.el.querySelector(`[data-ag-index="${this.anchor}"]`) : null;
+                if (!this.stick && saved) {
+                  const r = this.scroller.getBoundingClientRect();
+                  const delta = saved.getBoundingClientRect().top - r.top - this.offset;
+                  if (Math.abs(delta) <= 1) return;
+                  this.placing = true;
+                  this.scroller.scrollTop += delta;
+                  requestAnimationFrame(() => { this.placing = false; });
+                  return;
+                }
                 const want = this.stick
                   ? max
                   : Math.min(parseInt(this.el.dataset.scrollTop || "0", 10), max);
@@ -2389,6 +2459,8 @@ defmodule Compos.Ui.Layouts do
                 if (buf !== this.buf) {
                   this.buf = buf;
                   this.stick = this.el.dataset.stick !== "false";
+                  this.anchor = this.el.dataset.scrollAnchor ? parseInt(this.el.dataset.scrollAnchor, 10) : null;
+                  this.offset = parseInt(this.el.dataset.scrollOffset || "0", 10);
                   this.place();
                 } else if (this.stick) {
                   this.place();
@@ -2534,7 +2606,8 @@ defmodule Compos.Ui.Layouts do
                   }));
 
                   const focusedTerminal = document.activeElement?.closest?.(".terminal-view");
-                  if (document.hasFocus() && (editorOpen || (!terminal && focusedTerminal))) {
+                  const staleEditable = document.activeElement?.closest?.(".window:not(.active) .buf[contenteditable]");
+                  if (document.hasFocus() && (editorOpen || (!terminal && focusedTerminal) || staleEditable)) {
                     this.sink?.focus();
                   }
                 };

@@ -35,6 +35,8 @@ defmodule Compos.Ui.AgentViewTest do
     Buffer.append(buf, "\n>>> you: profile redisplay\n\n", source: :editor)
     p_start = Buffer.byte_size(buf)
     Buffer.append(buf, "Paint is **0.6ms** now.\n", source: :editor)
+    s_start = Buffer.byte_size(buf)
+    Buffer.append(buf, "Profiling the editor repaint path.\n", source: :editor)
     t_start = Buffer.byte_size(buf)
     Buffer.append(buf, "\n▸ run · M-x profile\n", source: :editor)
     b_start = Buffer.byte_size(buf)
@@ -55,7 +57,8 @@ defmodule Compos.Ui.AgentViewTest do
 
     Buffer.set_local(buf, "agent-blocks", [
       [t_start, mark, "tool", "t1", "M-x profile", "run", "done", b_start],
-      [p_start, t_start, "prose"],
+      [s_start, t_start, "status"],
+      [p_start, s_start, "prose"],
       [u_start, p_start, "user", "profile redisplay"]
     ])
 
@@ -69,6 +72,8 @@ defmodule Compos.Ui.AgentViewTest do
     refute has_element?(view, ~s(.agent-view[phx-hook="AgentScroll"]))
     assert html =~ "ag-user"
     assert html =~ "profile redisplay"
+    assert has_element?(view, ".ag-status .ag-label", "SUMMARY")
+    assert has_element?(view, ".ag-status-text", "Profiling the editor repaint path.")
     # markdown became HTML in the prose block; the assertion holds for the
     # page renderer (data-src attributes, byte spans) and for the Earmark
     # fallback (bare tags) alike
@@ -182,6 +187,50 @@ defmodule Compos.Ui.AgentViewTest do
     # a bare title keeps one span and gains no empty argument
     assert has_element?(view, ".ag-title .ag-tool-name", "ToolSearch")
     assert length(String.split(render(view), "ag-arg")) == 2
+  end
+
+  test "agent reader position round-trips a visible block anchor", %{conn: conn} do
+    buf = "*agent: scroll-anchor-test*"
+    {:ok, _} = Compos.Core.create_buffer(buf)
+
+    Buffer.append(buf, "first\nsecond\n", source: :editor)
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-saved-mark", Buffer.byte_size(buf))
+    Buffer.set_local(buf, "agent-marker-bytes", 0)
+
+    Buffer.set_local(buf, "agent-blocks", [
+      [6, 13, "prose"],
+      [0, 6, "user", "first"]
+    ])
+
+    Buffer.set_local(buf, "agent-unstick", true)
+    Buffer.set_local(buf, "agent-scroll-top", 312)
+    Buffer.set_local(buf, "agent-scroll-anchor", 1)
+    Buffer.set_local(buf, "agent-scroll-offset", -24)
+
+    Editor.set_window_buffer(buf)
+    {:ok, view, _html} = live(conn, "/")
+
+    assert has_element?(
+             view,
+             ~s(.ag-scroll[data-stick="false"][data-scroll-top="312"][data-scroll-anchor="1"][data-scroll-offset="-24"])
+           )
+
+    assert has_element?(view, ~s(.ag-user[data-ag-index="0"]))
+    assert has_element?(view, ~s(.ag-prose[data-ag-index="1"]))
+
+    render_hook(view, "ag_stick", %{
+      "buf" => buf,
+      "stick" => false,
+      "top" => 480,
+      "anchor" => 0,
+      "offset" => -11
+    })
+
+    assert Buffer.get_local(buf, "agent-unstick")
+    assert Buffer.get_local(buf, "agent-scroll-top") == 480
+    assert Buffer.get_local(buf, "agent-scroll-anchor") == 0
+    assert Buffer.get_local(buf, "agent-scroll-offset") == -11
   end
 
   # the transcript lives in its own LiveComponent so a keystroke diffs to a

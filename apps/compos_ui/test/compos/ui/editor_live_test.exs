@@ -470,6 +470,23 @@ defmodule Compos.Ui.EditorLiveTest do
     refute preview =~ "fresh_row"
   end
 
+  test "a plain input prompt renders as a centered modal dialog", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    assert {:ok, _} =
+             Compos.Core.Session.eval(
+               ~S|(read-string "Reply: " (lambda (value) value))|
+             )
+
+    assert has_element?(
+             view,
+             ".mb-modal-layer .mb-panel:not(.palette)[role=dialog][aria-modal=true]"
+           )
+
+    assert has_element?(view, ".mb-panel .mb-input-row .prompt", "Reply:")
+    keys(view, ["C-g"])
+  end
+
   test "minibuffer shows on M-x with selectable candidates", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     html = keys(view, ["M-x"])

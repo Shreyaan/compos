@@ -31,7 +31,7 @@ defmodule Compos.EditorTest do
     # next one starting inside it, and a buffer born in a group is not the
     # groupless buffer the next test asked for.
     Compos.Core.Session.eval(
-      "(begin (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
+      "(begin (layout-target-set! #f) (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
     )
 
     Editor.minibuffer_close()
@@ -4302,7 +4302,12 @@ defmodule Compos.EditorTest do
       run("window-layout")
       type("columns")
 
-      assert Editor.render_state().tree != before
+      preview = Editor.render_state().tree
+      assert %{type: :split, dir: :h, ratio: first,
+               children: [_, %{type: :split, dir: :h, ratio: second_ratio}]} = preview
+      assert_in_delta first, 1 / 3, 0.001
+      assert_in_delta second_ratio, 1 / 2, 0.001
+      assert collect_buffers(preview) == [buf, second, third]
       press(["C-g"])
       assert layout_shape(Editor.render_state().tree) == layout_shape(before)
 

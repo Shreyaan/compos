@@ -21,7 +21,7 @@ defmodule Compos.Core.Lane do
 
   require Logger
 
-  alias Compos.Core.Buffer
+  alias Compos.Core.{Buffer, SchemeHeap}
 
   @registry Compos.Core.LaneRegistry
   @supervisor Compos.Core.LaneSupervisor
@@ -202,6 +202,10 @@ defmodule Compos.Core.Lane do
     @moduledoc false
     use GenServer
 
+    require Logger
+
+    alias Compos.Core.SchemeHeap
+
     # an idle worker retires: per-connection and per-buffer lanes would
     # otherwise pile up one process each for the life of the daemon
     @idle 300_000
@@ -215,6 +219,7 @@ defmodule Compos.Core.Lane do
     @impl true
     def init(key) do
       Process.flag(:trap_exit, true)
+      SchemeHeap.apply_to_self()
       Process.put(:compos_scheme_lane, key)
       {:ok, key, @idle}
     end
@@ -275,7 +280,7 @@ defmodule Compos.Core.Lane do
 
             send(worker, {:lane_job_result, job_id, result})
           end,
-          [:link, :monitor]
+          [:link, :monitor | SchemeHeap.spawn_opts()]
         )
 
       await_call_job(job_id, caller, caller_monitor, job, job_monitor, key, owner, label)
@@ -297,9 +302,22 @@ defmodule Compos.Core.Lane do
         {:DOWN, ^job_monitor, :process, ^job, reason} ->
           Process.demonitor(caller_monitor, [:flush])
           :ets.delete(Compos.Core.Lane.jobs_table(), self())
-          {:done, {:reply, {:error, "lane job exited: #{inspect(reason)}"}}}
+          {:done, {:reply, {:error, job_exit_message(key, owner, label, reason)}}}
       end
     end
+
+    # The heap bound kills the job process outright, so the reason is bare
+    # `:killed`. Name the limit: a caller that reads "lane job exited" cannot
+    # tell a runaway from a crash. This worker cancels its own job through
+    # cancel_call_job/6, so a kill that arrives here came from the bound.
+    defp job_exit_message(key, owner, label, :killed) do
+      message = SchemeHeap.exceeded_message(label)
+      Logger.warning("lane #{inspect(key)} owner #{inspect(owner)}: #{message}")
+      message
+    end
+
+    defp job_exit_message(_key, _owner, _label, reason),
+      do: "lane job exited: #{inspect(reason)}"
 
     defp cancel_call_job(job_id, caller_monitor, job, job_monitor, key, owner, label) do
       Process.exit(job, :kill)

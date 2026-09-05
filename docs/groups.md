@@ -424,19 +424,21 @@ Visiting a file never changes the destination. A group made from files inside a 
 
 `switch G` restores, per frame: the window tree, the buffer in each window, point and scroll per window, and the selected window. A group with no layout on this frame shows its scratch buffer in one window.
 
-A group is sealed: a restored pane shows a member of G, or G's scratch as a blank pane. A pane that was saved with a foreign buffer keeps its place and shows a member that is not yet visible, else the scratch. A pane whose buffer is gone is filled the same way, so a saved peek heals on the next switch. A layout that tiles the group (`window-layout`) fills the panes the members cannot fill with the scratch, never with a buffer from outside G.
+A group is sealed: a restored pane shows a member of G, or G's scratch as a blank pane. A pane that was saved with a foreign buffer keeps its place and shows a member that is not yet visible, else the scratch. A pane whose buffer is gone is filled the same way, so a saved peek heals on the next switch. A layout that tiles the group (`window-layout`) uses visible panes and eligible hidden group work. Unused capacity stays empty; it never imports a foreign buffer or manufactures a scratch pane.
 
 ### The overview
 
-When a member is killed, its window stays in the group. The window shows the member it showed before, from its own history, most recent first. A member another window of the frame shows is not shown twice. When the history offers no member, the window shows the group's last chat, else the group's scratch. The window closes only when the group has none of these, which is a group that is dying. A buffer from another group never comes in.
+When a member is killed, its window stays in the group. The window shows the member it showed before, from its own history, most recent first. A member another window of the frame shows is not shown twice. When the history offers no member, the window uses hidden ordinary group work in MRU order, then an existing group chat or scratch. If the surviving group has no companion, repair creates its chat. A dying group gives up the pane. A buffer from another group never comes in.
 
 ### The target layout
 
-The layout chosen at `window-layout` (`C-x l`), or by one of the `window-layout-*` commands, is the frame's target. The shape stays as the person left it: while a frame has a target, a display takes a pane the frame has and never splits one. `pop-up-window` reads as `use-some-window` in every action chain, a rule's own included. A kill keeps its window and refills it from that window's history, so the shape holds there too. The target is a name; the shape is the frame itself, and a split or a delete by the person is the new shape. The `free` row of `window-layout`, or `window-layout-free`, drops the target, and a display may split a window again. `winner-undo` walks back through the shapes.
+The layout chosen at `window-layout` (`C-x l`), or a `window-layout-*` command, is a persistent target algorithm. It works with one buffer and grows as work opens: `two-pane` has capacity two, `columns` three, and rows/grid/main/adaptive arrange the occupied slots. At capacity, a visit replaces the selected slot and a passive result replaces the least recently used other pane. Focus changes do not reorder slots. Closing a pane reflows the survivors without reopening hidden work.
+
+Targets belong to the group's saved layout on each frame, and the active target also survives desktop save. A new group starts without inheriting the outgoing target. `window-layout-free` drops the target. See [Display buffer](DISPLAY-BUFFER.md#layout-presets) for eligibility, ordering, replacement, preview, and measured geometry rules.
 
 A tile builds its windows from one survivor, so the build hands each new pane the history of the pane that showed its buffer. A pane on a buffer no window showed takes the history of a pane that went away, that pane's buffer first.
 
-`autolayout` is the one-main-pane layout. The selected window's buffer becomes the main pane on `window-layout-main-side` (`'left` or `'right`) with `window-layout-main-ratio` of the frame. The other visible buffers share the rest: a column, or tiles when `window-layout-stack` is `'grid`. `autolayout-set-main-width` sets the share as a fraction or a percent. `autolayout-mode` keeps the frame in this shape: when a window comes or goes, the frame re-arranges, the main pane stays main while its buffer is visible, and a new buffer joins the stack. `autolayout-main-left`, `autolayout-main-right` and `autolayout-toggle-stack` change one custom and arrange the frame. `s-RET` (Cmd-RET) runs `autolayout`, so the window you are in becomes the main pane. `autolayout-mode` is a custom, so the mode survives a restart.
+`autolayout` is the one-main-pane layout. The selected window's buffer becomes the main pane on `window-layout-main-side` (`'left` or `'right`) with `window-layout-main-ratio` of the frame. The other visible buffers share the rest: a column, or tiles when `window-layout-stack` is `'grid`. `autolayout-set-main-width` sets the share as a fraction or a percent. `autolayout-mode` keeps the frame in this shape: when a window comes or goes, the frame re-arranges, the main pane stays main while its buffer is visible, and a new buffer joins the stack. `autolayout-main-left`, `autolayout-main-right` and `autolayout-toggle-stack` change one custom and arrange the frame. `s-RET` (Cmd-RET) runs `autolayout`, so the window you are in becomes the main pane and that arrangement becomes the target. `autolayout-mode` is a custom, so the mode survives a restart.
 
 `tile-all` opens the context overview. It is available only in a group or project. A group takes priority and supplies all its buffers, including chats. Otherwise, the current project supplies all its open buffers. The overview locks the frame: keys select a tile and do not edit. It saves no group layout and changes no membership by itself.
 
@@ -615,3 +617,19 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 20. A kill from outside any command (the Elixir path) that drops a window onto a group's buffer puts the frame back in that group.
 21. `ibuffer` lists the frame's group first, and a mark does not reorder the rows.
 22. A layout fills its panes from the pool: in a group, three columns come from the members and never from another group; a peek and the popup's buffer fill no window.
+
+## Application entry destinations
+
+`scene-open!` accepts an optional destination group. Omission keeps the scene's named group behavior.
+An empty string uses the current group. If the frame has no group, the scene stays ungrouped and omits its group companion.
+The entry selects the destination before it creates panes. Mode hooks do not select the destination.
+
+WhatsApp exposes this choice as `whatsapp-group`, empty by default:
+
+```scheme
+(customize-set! 'whatsapp-group "")          ; use the current group
+(customize-set! 'whatsapp-group "whatsapp")  ; use this named group
+(run-command "whatsapp")
+```
+
+WhatsApp reuses its existing scene layout. Its buffers join the destination without losing existing memberships.

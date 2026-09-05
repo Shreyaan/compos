@@ -60,6 +60,32 @@ defmodule Compos.FramesTest do
     assert ids == Enum.uniq(ids)
   end
 
+  test "a list redraw keeps a foreign frame on its selected row" do
+    buf = "frames-list-#{System.unique_integer([:positive])}"
+    mode = "frames-list-mode-#{System.unique_integer([:positive])}"
+    {:ok, fid} = Editor.attach_frame(nil)
+
+    assert {:ok, _} =
+             Session.eval(
+               "(define-list-mode! \"#{mode}\" (list 'buffer \"#{buf}\" 'rows (lambda (b) '(\"alpha\" \"beta\" \"gamma\")) 'columns (lambda (b) (list (list \"name\" #f))) 'cells (lambda (b row) (list row)) 'no-marks #t))",
+               fid
+             )
+
+    assert {:ok, _} = Session.eval("(list-mode-show! \"#{mode}\")", fid)
+    [{win, ^buf}] = Enum.filter(Editor.list_windows(fid), fn {_id, name} -> name == buf end)
+    assert {:ok, _} = Session.eval("(list-goto-index! \"#{buf}\" 2)", fid)
+    assert Buffer.win_point(buf, win) > 0
+
+    Editor.select_frame("f-main")
+    assert {:ok, _} = Session.eval("(list-redraw! \"#{buf}\")", "f-main")
+
+    assert {:ok, ~S("gamma")} =
+             Session.eval(
+               "(list-key-at-pos \"#{buf}\" (window-point #{win}))",
+               "f-main"
+             )
+  end
+
   test "same buffer in two frames shares text" do
     buf = "frames-shared-#{System.unique_integer([:positive])}"
     {:ok, fid} = Editor.attach_frame(nil)

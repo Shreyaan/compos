@@ -45,6 +45,20 @@
 
 (define (chat-record buf) (or (buffer-local buf 'chat-wire-turns) '()))
 
+(define (chat-conversation-turn? turn)
+  (and (member (plist-get turn 'role) (list "user" "assistant")) #t))
+
+(define (chat-model-record buf)
+  (filter chat-conversation-turn? (chat-record buf)))
+
+(define (chat-drop-oldest-conversation-turns record n)
+  (reverse
+    (let loop ((turns (reverse record)) (left n) (kept '()))
+      (cond ((null? turns) (reverse kept))
+            ((and (> left 0) (chat-conversation-turn? (car turns)))
+             (loop (cdr turns) (- left 1) kept))
+            (else (loop (cdr turns) left (cons (car turns) kept)))))))
+
 (define (chat-record-push! buf role blocks wire)
   (buffer-set-local! buf 'chat-wire-turns
     (cons (append (list 'role role 'blocks blocks)
@@ -156,7 +170,7 @@
 ;; four bytes to the token: close enough to decide WHEN, and no tokenizer
 ;; in the editor can be closer than the provider's own count
 (define (chat-record-tokens buf)
-  (quotient (fold (lambda (acc t) (+ acc (chat-turn-bytes t))) 0 (chat-record buf)) 4))
+  (quotient (fold (lambda (acc t) (+ acc (chat-turn-bytes t))) 0 (chat-model-record buf)) 4))
 
 ;; A turn the kept window can open on: a message the user wrote. The
 ;; results of a tool round carry the "user" role too, and a window that
@@ -187,19 +201,36 @@
 ;; record turns (oldest first) as the portable transcript the summarizer reads
 (define (chat-turns-text turns)
   (fold (lambda (acc t)
-          (let ((txt (chat-turn-display t)))
+          (let ((txt (chat-turn-display t))
+                (role (plist-get t 'role)))
             (if (equal? txt "")
                 acc
                 (string-append acc
-                  (if (equal? (plist-get t 'role) "user") "### You\n" "### Assistant\n")
+                  (cond ((equal? role "user") "### You\n")
+                        ((equal? role "status") "### Status\n")
+                        (else "### Assistant\n"))
                   txt "\n\n"))))
         "" turns))
+
+(define (chat-model-flatten buf)
+  (and (buffer-local buf 'agent-saved-mark)
+       (pair? (chat-model-record buf))
+       (let loop ((turns (reverse (chat-record-turns (chat-model-record buf))))
+                  (text ""))
+         (if (null? turns)
+             (string-append text (chat-prompt-marker))
+             (loop (cdr turns)
+                   (string-append text
+                     (if (equal? (car (car turns)) "user")
+                         (chat-prompt-marker)
+                         (chat-reply-marker))
+                     (cadr (car turns)) "\n"))))))
 
 ;; is there a head to summarize at all? A chat shorter than its own keep
 ;; window has nothing to compact, and neither has one already compacting.
 (define (chat-can-compact? buf)
   (and (not (buffer-local buf 'chat-compacting))
-       (let ((all (chat-record buf)))
+       (let ((all (chat-model-record buf)))
          (> (length all) (chat-compact-keep-count all)))))
 
 ;; the model this chat sends to — its own, or the editor's default
@@ -230,7 +261,7 @@
 ;; only if the record still ends with it: a turn that landed meanwhile
 ;; stays put, and a reset that emptied the record cancels the whole thing.
 (define (chat-compact! buf slug)
-  (let* ((all (chat-record buf))
+  (let* ((all (chat-model-record buf))
          (keep (chat-compact-keep-count all))
          (head (chat-drop all keep))
          (n (length head)))
@@ -247,9 +278,9 @@
 (define (chat-compact-apply! buf slug n summary)
   (buffer-set-local! buf 'chat-compacting #f)
   (let ((all (chat-record buf)))
-    (when (and (buffer-exists? buf) (> (length all) n))
+    (when (and (buffer-exists? buf) (> (length (chat-model-record buf)) n))
       (buffer-set-local! buf 'chat-wire-turns
-        (append (chat-take all (- (length all) n))
+        (append (chat-drop-oldest-conversation-turns all n)
                 (list (list 'role "user"
                             'blocks (list (list "text"
                               (string-append
@@ -276,10 +307,10 @@
              (message "a compaction is already in flight"))
             ((not (chat-can-compact? buf))
              (message (string-append "nothing to compact: this chat is "
-                                     (number->string (length (chat-record buf)))
+                                     (number->string (length (chat-model-record buf)))
                                      " turns, and it keeps the last "
                                      (number->string
-                                       (chat-compact-keep-count (chat-record buf))))))
+                                       (chat-compact-keep-count (chat-model-record buf))))))
             (else
              (let* ((all (chat-record buf))
                     (n (- (length all) (chat-compact-keep-count all))))
@@ -644,7 +675,7 @@
     (unless (= healed 0)
       (message (string-append "healed this chat: dropped " (number->string healed)
                               " orphaned tool " (if (= healed 1) "block" "blocks"))))
-    (list 'turns (reverse (chat-record buf))
+    (list 'turns (reverse (chat-model-record buf))
           'system (prompt-parts-text (chat-system-prompt-parts buf tools?))
           'tools (if tools? (chat-tools buf) '())
           'dispatcher (chat-tool-dispatch slug))))
@@ -1036,7 +1067,8 @@
 ;; the tail of the rendered transcript, cut on line boundaries so a
 ;; multibyte character never splits
 (define (chat-summary--tail buf)
-  (let* ((lines (string-split (buffer-text buf) "\n"))
+  (let* ((lines (string-split
+                  (chat-turns-text (reverse (chat-model-record buf))) "\n"))
          (n (length lines)))
     (let loop ((ls lines) (extra (- n *chat-summary-tail-lines*)))
       (if (and (pair? ls) (> extra 0))
@@ -1070,6 +1102,17 @@
   (let ((log (or (buffer-local buf 'chat-summary-log) '())))
     (buffer-set-local! buf 'chat-summary-log
       (chat-summary--take (cons (list (current-time) text) log) *chat-summary-log-max*)))
+  ;; A summary is transcript status: ordered where it lands, durable in the
+  ;; record, but filtered from every model-facing conversation path.
+  (chat-record-push! buf "status" (list (list "text" text)) #f)
+  (when (buffer-local buf 'agent-saved-mark)
+    (when (boundp 'agent-adopt-prose-tail!) (agent-adopt-prose-tail! buf))
+    (let* ((rendered (string-append "\n" text "\n\n"))
+           (start (chat-render! buf rendered))
+           (end (+ start (string-byte-length rendered))))
+      (chat-blocks-push! buf start end "status" '())
+      (when (boundp 'agent-add-overlay!)
+        (agent-add-overlay! buf start end "agent-meta"))))
   ;; the bar shows the paragraph now, not after the next command
   (when (boundp 'dashboard--sync!) (dashboard--sync! buf))
   ;; between turns no save is coming -- the archive takes the fresh
@@ -1107,9 +1150,13 @@
           "_No summary and no jj change yet._\n"
           (string-join
             (map (lambda (e)
-                   (string-append
-                     "**" (if (> (car e) 0) (format-time (car e) "%H:%M") "--:--") "** "
-                     (symbol->string (cadr e)) "  \n" (caddr e) "\n"))
+                   (let ((kind (cadr e)))
+                     (string-append
+                       "**" (if (> (car e) 0) (format-time (car e) "%H:%M") "--:--") "**"
+                       (if (equal? kind 'summary)
+                           ""
+                           (string-append " " (symbol->string kind)))
+                       "  \n" (caddr e) "\n")))
                  entries)
             "\n")))))
 

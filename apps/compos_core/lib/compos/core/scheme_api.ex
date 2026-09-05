@@ -2472,6 +2472,7 @@ defmodule Compos.Core.SchemeAPI do
 
   defp callback?({:closure, _, _, _}), do: true
   defp callback?({:builtin, _, _}), do: true
+  defp callback?({:interposed, _, _}), do: true
   defp callback?(_), do: false
 
   defp status_plist(e) do

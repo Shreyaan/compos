@@ -3951,12 +3951,20 @@
 ;; A mechanism that puts a buffer in a window it chose — a layout, a
 ;; swap, a restore, a borrowed window — calls switch-to-buffer-here!.
 (define (switch-to-buffer! buf)
-  (if (display-foreign? buf)
-      (begin
-        (pop-to-buffer buf)
-        (message (string-append buf " is not in this group. It floats in the popup."))
-        buf)
-      (switch-to-buffer-here! buf)))
+  ;; A user visit promotes quiet file loads before deciding target eligibility.
+  ;; Logical and agent buffer switches remain headless.
+  (when (and (not (buffer-context?)) (boundp 'buffer-promote!)
+             (not (agent-edit-author? (current-edit-author))))
+    (buffer-promote! buf))
+  (cond ((buffer-context?) (switch-to-buffer-here! buf))
+        ((display-foreign? buf)
+         (pop-to-buffer buf)
+         (message (string-append buf " is not in this group. It floats in the popup."))
+         buf)
+        ((and (not *layout-busy*) (layout-target)
+              (not (popup--class? (window-buffer (active-window))))
+              (layout-target-open! buf #t #f)) buf)
+        (else (switch-to-buffer-here! buf))))
 
 ;; the switch itself: the selected window shows BUF, whatever its group
 (define (switch-to-buffer-here! buf)
@@ -6443,17 +6451,137 @@
   (let ((e (assoc name *display-buffer-actions*)))
     (and e (cadr e))))
 
-;;; The target layout. A layout chosen at window-layout (C-x l) is the
-;;; frame's target: the shape stays as the person left it. While a frame
-;;; has one, a display takes a pane the frame has and never splits one:
-;;; pop-up-window reads as use-some-window in every chain, a rule's own
-;;; included (Emacs display-buffer-overriding-action). A kill keeps its
-;;; window and refills it from that window's history, so the shape holds
-;;; there too. The target is a name; the shape is the frame itself, and
-;;; a split or a delete by the person is the new shape. window-layout's
-;;; "free" row and window-layout-free drop the target.
+;; Explicit layouts remain targets as their occupied pane count changes.
 (define (layout-target) (frame-local 'layout-target))
-(define (layout-target-set! name) (set-frame-local! 'layout-target name))
+(define (layout-target-set! name)
+  (set-frame-local! 'layout-target name)
+  (unless name (set-frame-local! 'layout-slots #f))
+  (when (and name (not (frame-local 'layout-slots)))
+    (let ((visible (layout-visible-buffers)))
+      (layout-target-note-slots!
+        (if (and (member name '(main-left main-top)) (pair? visible))
+            (cons (car (reverse visible)) (take-n visible (- (length visible) 1)))
+            visible))))
+  (set-frame-local! 'layout-target-count (length (layout-visible-buffers)))
+  name)
+
+;; A target is an algorithm and a capacity, not a frozen accidental tree.
+(define (layout-target-capacity target)
+  (cond ((equal? target 'two-pane) 2)
+        ((equal? target 'columns) 3)
+        (else #f)))
+
+;; Logical slot order is independent of focus and of the side holding main.
+;; Match each occurrence once so deliberate duplicate views remain distinct.
+(define (layout-target-note-slots! panes)
+  (let loop ((names panes) (rows (window-list)) (out '()))
+    (if (null? names)
+        (begin
+          (set-frame-local! 'layout-slots (reverse out))
+          (set-frame-local! 'layout-target-count (length out)))
+        (let ((matches (filter (lambda (row) (equal? (cadr row) (car names))) rows)))
+          (if (null? matches)
+              (loop (cdr names) rows out)
+              (loop (cdr names)
+                    (filter (lambda (row) (not (equal? (car row) (car (car matches))))) rows)
+                    (cons (car matches) out)))))))
+
+(define (layout-visible-window? row)
+  (and (not (equal? (car row) (popup-window)))
+       (not (popup--class? (cadr row)))))
+
+(define (layout-target-visible-buffers)
+  (let ((visible (map cadr (filter layout-visible-window? (window-list)))))
+    ;; The current tree is authoritative: a manual swap or restored tree can
+    ;; keep window IDs while changing their order. Cached IDs must not undo it.
+    ;; Main-left/top place the logical main last in physical tree order.
+    (if (and (pair? visible) (member (layout-target) '(main-left main-top)))
+        (cons (car (reverse visible)) (take-n visible (- (length visible) 1)))
+        visible)))
+
+(define (layout-focus-token)
+  (let ((name (window-buffer (active-window))))
+    (let loop ((rows (window-list)) (occurrence 0))
+      (cond ((null? rows) (list name 0))
+            ((equal? (car (car rows)) (active-window)) (list name occurrence))
+            (else (loop (cdr rows)
+                    (+ occurrence (if (equal? (cadr (car rows)) name) 1 0))))))))
+
+(define (layout-focus-restore! token)
+  (let ((matches (filter (lambda (row) (equal? (cadr row) (car token))) (window-list))))
+    (when (pair? matches)
+      (select-window! (car (nth (min (cadr token) (- (length matches) 1)) matches))))))
+
+(define (layout-target-arrange! panes focus)
+  (let ((target (layout-target))
+        (token (if (equal? focus (window-buffer (active-window)))
+                   (layout-focus-token) (list focus 0))))
+    (when (pair? panes)
+      (if (equal? target 'adaptive)
+          (tile-adaptive-windows! panes)
+          (tile-windows! target panes))
+      (layout-focus-restore! token)
+      panes)))
+
+;; Results replace the least recently used other work pane. Ties keep order.
+(define (layout-replacement-window selected)
+  (let ((mru (buffer-list-mru)))
+    (define (rank buf)
+      (let loop ((rest mru) (n 0))
+        (cond ((null? rest) n)
+              ((equal? (car rest) buf) n)
+              (else (loop (cdr rest) (+ n 1))))))
+    (let loop ((windows (display--work-windows)) (best #f) (age -1))
+      (if (null? windows)
+          best
+          (let* ((win (car windows))
+                 (score (rank (window-buffer win))))
+            (if (and (not (equal? win selected)) (> score age))
+                (loop (cdr windows) win score)
+                (loop (cdr windows) best age)))))))
+
+;; A user open selects its result. A display records how to quit and keeps focus.
+(define (layout-target-open! name select? inhibit-same?)
+  (and (fill-candidate? name) (window-fill-member? name)
+       (not (buffer-context?))
+       (let* ((selected (active-window))
+              (focus (window-buffer selected))
+              (shown (if inhibit-same?
+                         (window-showing-other name selected)
+                         (window-showing name)))
+              (panes (layout-target-visible-buffers))
+              (capacity (layout-target-capacity (layout-target))))
+         (cond (shown
+                (when select? (select-window! shown))
+                shown)
+               ((and (not (member name panes))
+                     (or (not capacity) (< (length panes) capacity)))
+                (layout-target-arrange! (append panes (list name)) (if select? name focus))
+                (let ((win (window-showing name)))
+                  (when win (window-quit-restore-note! win 'window #f))
+                  win))
+               (else
+                 (let ((win (if select? selected (layout-replacement-window selected))))
+                   (when win
+                     (let ((previous (window-buffer win)))
+                       (display-buffer-in-window! win name)
+                       (if select?
+                           (window-quit-restore-forget! win)
+                           (window-quit-restore-note! win 'other previous))
+                       (when select? (select-window! win))
+                       win))))))))
+
+;; Window changes reflow occupied slots. Closing a pane does not reopen hidden work.
+(define (layout-target-on-change!)
+  (when (and (layout-target) (not *layout-busy*)
+             (not (minibuffer-state)) (not (popup-open?)))
+    (let ((panes (layout-target-visible-buffers))
+          (focus (window-buffer (active-window))))
+      (when (and (pair? panes)
+                 (not (equal? (length panes) (frame-local 'layout-target-count))))
+        (layout-target-arrange! panes focus)))))
+
+(add-hook! 'window-configuration-change-hook 'layout-target-on-change!)
 
 (define (display--keep-shape actions)
   (if (layout-target)
@@ -6501,7 +6629,8 @@
                (delete-window!)
                (delete-window-id! win))
            #t)
-          ((and (equal? (cadr rec) 'other) (caddr rec) (buffer-known? (caddr rec)))
+          ((and (equal? (cadr rec) 'other) (caddr rec)
+                (fill-candidate? (caddr rec)) (window-fill-member? (caddr rec)))
            (window-set-buffer! win (caddr rec))
            (window-state-changed!)
            #t)
@@ -6615,7 +6744,7 @@
 
 (define-display-action! 'use-some-window
   (lambda (name alist)
-    (let ((win (other-work-window-id (active-window))))
+    (let ((win (layout-replacement-window (active-window))))
       (and win
            (let ((prev (window-buffer win)))
              (display-buffer-in-window! win name)
@@ -6631,12 +6760,16 @@
     ;; capture rule below only fires from a member buffer, and the board
     ;; is not one.
     (group-layout-save-before-cover! name)
-    (let loop ((actions (display-buffer-actions-for name a)))
-      (if (null? actions)
-          #f
-          (let* ((fn (display-action-fn (car actions)))
-                 (win (and fn (fn name a))))
-            (or win (loop (cdr actions))))))))
+    (let ((actions (display-buffer-actions-for name a)))
+      (or (and (layout-target) (not *layout-busy*) (pair? actions)
+               (not (member (car actions) '(popup same same-window)))
+               (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
+          (let loop ((actions actions))
+            (if (null? actions)
+                #f
+                (let* ((fn (display-action-fn (car actions)))
+                       (win (and fn (fn name a))))
+                  (or win (loop (cdr actions))))))))))
 
 ;; show NAME and select its window (Emacs pop-to-buffer)
 (define (pop-to-buffer name &optional alist)
@@ -6988,9 +7121,9 @@
 (public! 'window-fill-buffers
   "(window-fill-buffers) — the buffers a window in this frame may be filled with, most recent first: the frame's context, never the raw MRU ring")
 (public! 'window-fill-blank
-  "(window-fill-blank) — the blank pane a layout shows when the pool runs out, or #f; scratch.scm answers the group's scratch")
+  "(window-fill-blank) — context scratch fallback, or #f; fixed target layouts leave spare capacity empty")
 (public! 'fill-candidate?
-  "(fill-candidate? NAME) — #t when a window may be filled with NAME: known, not hidden, not the popup, not a peek")
+  "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, transient, context-only, popup or peek")
 (public! 'peek!
   "(peek! KNOWN OPEN) — show the buffer OPEN returns beside the selected window as a peek; KNOWN is its name, so a buffer that already existed is only shown and never killed; the next peek replaces it")
 (public! 'peek-or-keep!
@@ -7129,23 +7262,34 @@
 ;;; window showed takes a pane that went away, that buffer first, so a
 ;;; kill there falls back to what the frame lost (Emacs prev-buffers).
 (define (layout--capture-histories)
-  (map (lambda (row) (cons (cadr row) (window-buffer-history (car row))))
+  (map (lambda (row)
+         (list (cadr row) (window-buffer-history (car row))
+               (window-point (car row)) (window-quit-restore (car row))))
        (window-list)))
 
+(define (layout--drop-record record records)
+  (cond ((null? records) '())
+        ((equal? record (car records)) (cdr records))
+        (else (cons (car records) (layout--drop-record record (cdr records))))))
+
 (define (layout--restore-histories! captured)
-  (let* ((rows (window-list))
-         (shown (map cadr rows))
-         (gone (filter (lambda (e) (not (member (car e) shown))) captured)))
-    (let loop ((rows rows) (gone gone))
+  (let ((shown (map cadr (window-list))))
+    (let loop ((rows (window-list)) (remaining captured))
       (when (pair? rows)
         (let* ((win (car (car rows)))
                (buf (cadr (car rows)))
-               (own (assoc buf captured)))
-          (cond (own (window-history-set! win (cdr own)) (loop (cdr rows) gone))
-                ((pair? gone)
-                 (window-history-set! win (cons (car (car gone)) (cdr (car gone))))
-                 (loop (cdr rows) (cdr gone)))
-                (else (window-history-set! win '()) (loop (cdr rows) gone))))))))
+               (own (assoc buf remaining))
+               (gone (filter (lambda (e) (not (member (car e) shown))) remaining))
+               (record (or own (and (pair? gone) (car gone)))))
+          (window-quit-restore-forget! win)
+          (cond (own
+                 (window-history-set! win (cadr own))
+                 (when (number? (caddr own)) (window-set-point! win (caddr own)))
+                 (let ((quit (nth 3 own)))
+                   (when quit (window-quit-restore-note! win (cadr quit) (caddr quit)))))
+                (record (window-history-set! win (cons (car record) (cadr record))))
+                (else (window-history-set! win '())))
+          (loop (cdr rows) (if record (layout--drop-record record remaining) remaining)))))))
 
 ;; The engine runs one arrangement at a time. switch-to-buffer! wakes a dormant
 ;; buffer, which re-runs its mode setups; without this flag that wake would ask
@@ -7205,22 +7349,10 @@
           (set! *layout-busy* #f)
           panes))))
 
-;; Return one buffer for each visible work window. Put the selected window first.
-;; Keep duplicate buffers because two windows can show different points in one buffer.
-;; Floating buffers cover a layout and do not become members of it.
+ ;; Visible panes keep tree order. Selecting a pane does not promote it.
 (define (layout-visible-buffers)
-  (let* ((selected-window (active-window))
-         (selected (window-buffer selected-window)))
-    (let loop ((windows (window-list))
-               (acc (if (popup--class? selected) '() (list selected))))
-      (if (null? windows)
-          acc
-          (let ((win (car (car windows)))
-                (buf (car (cdr (car windows)))))
-            (loop (cdr windows)
-              (if (or (equal? win selected-window) (popup--class? buf))
-                  acc
-                  (append acc (list buf)))))))))
+  (map cadr
+    (filter layout-visible-window? (window-list))))
 
 ;;; --- the pool: which buffers belong in this frame's windows -------------
 ;;; One source, the way a completion source answers a prompt. The buffers
@@ -7237,10 +7369,14 @@
 (define (fill-candidate? b)
   (and (string? b) (buffer-known? b)
        (not (string-prefix? " " b))
+       (not (buffer-local b 'context-only))
+       (not (buffer-local b 'transient))
        (not (popup--class? b))
        (not (and (boundp 'peek-buffer?) (peek-buffer? b)))))
 
 (define window-fill-source (lambda () (buffer-list-mru)))
+(define window-fill-primary? (lambda (buffer) #t))
+(define window-fill-member? (lambda (buffer) #t))
 
 (define (window-fill-buffers)
   (filter fill-candidate? (window-fill-source)))
@@ -7252,34 +7388,25 @@
 ;; shape without a buffer from outside.
 (define window-fill-blank (lambda () #f))
 
-;; The three-column command is useful as a quick workspace view. If fewer
-;; than three work buffers are visible, the remaining columns come from
-;; the pool, and only the pool; when the pool runs out, one blank pane.
-(define (layout--three-columns buffers)
-  (let loop ((rest (window-fill-buffers))
-             (result buffers))
-    (cond ((>= (length result) 3) result)
-          ((null? rest)
-           (let ((blank (window-fill-blank)))
-             (if (and blank (not (member blank result)))
-                 (append result (list blank))
-                 result)))
+;; Explicit fixed layouts fill with hidden work from the same context.
+;; Keep the focused buffer when a smaller target hides surplus panes.
+(define (layout--fit buffers capacity)
+  (let* ((kept (take-n buffers capacity))
+         (focus (window-buffer (active-window))))
+    (if (and (member focus buffers) (not (member focus kept)))
+        (append (take-n kept (- capacity 1)) (list focus))
+        kept)))
+
+(define (layout--fill-to buffers capacity)
+  (let loop ((rest (filter window-fill-primary? (window-fill-buffers)))
+             (result (layout--fit buffers capacity)))
+    (cond ((>= (length result) capacity) result)
+          ((null? rest) result)
           ((member (car rest) result) (loop (cdr rest) result))
           (else (loop (cdr rest) (append result (list (car rest))))))))
 
-;; The two-pane preset keeps the selected buffer and the next visible buffer.
-;; It fills a missing companion from the frame's group or MRU pool.
-(define (layout--two-panes buffers)
-  (let loop ((rest (window-fill-buffers))
-             (result (take-n buffers 2)))
-    (cond ((>= (length result) 2) result)
-          ((null? rest)
-           (let ((blank (window-fill-blank)))
-             (if (and blank (not (member blank result)))
-                 (append result (list blank))
-                 result)))
-          ((member (car rest) result) (loop (cdr rest) result))
-          (else (loop (cdr rest) (append result (list (car rest))))))))
+(define (layout--three-columns buffers) (layout--fill-to buffers 3))
+(define (layout--two-panes buffers) (layout--fill-to buffers 2))
 
 ;; Validate each requested pane without removing duplicate buffer names.
 (define (layout--known-buffers buffers)
@@ -7392,21 +7519,30 @@
           (when home (select-window! home)))
         (set! *winner-inhibit* #f)
         (set! *layout-busy* #f)
+        (layout-target-note-slots! panes)
         panes))))
 
 ;; the histories a tile is carrying across its build
 (define *layout-histories* '())
 
-(define (tile-visible-windows! algorithm)
-  (let* ((visible (layout-visible-buffers))
-         (panes (cond ((equal? algorithm 'two-pane)
-                       (layout--two-panes visible))
-                      ((equal? algorithm 'columns)
-                       (layout--three-columns visible))
-                      (else visible))))
-    (if (< (length panes) 2)
-        (begin (message "Open at least two work buffers") #f)
-        (tile-windows! algorithm panes))))
+(define (layout-request-buffers)
+  (let* ((visible (layout-target-visible-buffers))
+         (hidden (if (and (boundp 'frame-group) (frame-group))
+                     (filter (lambda (b) (not (member b visible))) (window-fill-buffers))
+                     '())))
+    ;; Existing panes keep their buffers, including deliberate duplicates,
+    ;; transient lists and visible non-members. Only hidden fillers are filtered.
+    (append visible hidden)))
+
+(define (tile-visible-windows! algorithm &optional requested)
+  (let* ((focus (layout-focus-token))
+         (visible (or requested (layout-request-buffers)))
+         (panes (cond ((equal? algorithm 'two-pane) (layout--two-panes visible))
+                      ((equal? algorithm 'columns) (layout--three-columns visible))
+                      (else visible)))
+         (result (and (pair? panes) (tile-windows! algorithm panes))))
+    (when result (layout-focus-restore! focus))
+    result))
 
 (define (window-layout-command algorithm)
   (lambda ()
@@ -7415,25 +7551,25 @@
 
 ;; Layout selection is a live preview. Keep the complete frame arrangement so
 ;; cancelling the prompt returns both the windows and the selected window.
-(define (window-layout-preview! name)
+(define (window-layout-preview! name &optional requested)
   ;; A failed earlier arrangement must not disable a later interactive
   ;; preview. This command is a new top-level layout request.
   (layout-abort!)
   (if (equal? name "adaptive")
-      (tile-visible-adaptive!)
-      (tile-visible-windows! (string->symbol name))))
+      (tile-visible-adaptive! requested)
+      (tile-visible-windows! (string->symbol name) requested)))
 
-(define (window-layout-preview-without-history! name)
+(define (window-layout-preview-without-history! name &optional requested)
   (let ((was *winner-inhibit*))
     (set! *winner-inhibit* #t)
-    (let ((result (window-layout-preview! name)))
+    (let ((result (window-layout-preview! name requested)))
       (set! *winner-inhibit* was)
       result)))
 
 (define-command "window-layout-columns" "Tile visible buffers in equal columns"
   (window-layout-command 'columns))
 (define-command "window-layout-two-pane"
-  "Show two side-by-side panes; the selected pane takes two thirds"
+  "Show up to two side-by-side panes; the first pane takes two thirds"
   (window-layout-command 'two-pane))
 (define-command "window-layout-rows" "Tile visible buffers in equal rows"
   (window-layout-command 'rows))
@@ -7445,21 +7581,26 @@
   (window-layout-command 'main-bottom))
 
 ;; the commit: the chosen layout is the frame's target from here on
-(define (window-layout-choose! saved name)
+(define (window-layout-choose! saved name &optional requested)
   ;; Commit from the original arrangement so winner records one real
   ;; layout change, not an intermediate preview arrangement.
   (window-tree-set! saved)
   (cond ((equal? name "free")
          (layout-target-set! #f)
          (message "Layout free: a display may split a window again"))
-        ((window-layout-preview! name)
+        ((window-layout-preview! name requested)
          (layout-target-set! (string->symbol name))
-         (message (string-append "Layout " name " is the target: a display takes a pane the frame has")))
+         (message (string-append "Layout " name " is the target")))
         (else #f)))
 
 (define-command "window-layout" "Choose a tiling layout for visible buffers; the choice is the frame's target layout"
   (lambda ()
-    (let ((saved (window-tree)))
+    (let ((saved (window-tree))
+          (saved-panes (layout-target-visible-buffers))
+          (saved-order (layout-request-buffers)))
+      (define (restore-preview!)
+        (window-tree-set! saved)
+        (layout-target-note-slots! saved-panes))
       (minibuffer-read-preview "Window layout: "
         '( ("adaptive" "choose from usable monitor width")
            ("two-pane" "2/3 + 1/3 side by side")
@@ -7472,11 +7613,11 @@
            ("main-top" "2/3 + 1/3 (companion above)")
            ("free" "no target: a display may split a window"))
         (lambda (name)
-          (if (equal? name "free")
-              (window-tree-set! saved)
-              (window-layout-preview-without-history! name)))
-        (lambda (name) (window-layout-choose! saved name))
-        (lambda () (window-tree-set! saved))))))
+          (restore-preview!)
+          (unless (equal? name "free")
+            (window-layout-preview-without-history! name saved-order)))
+        (lambda (name) (restore-preview!) (window-layout-choose! saved name saved-order))
+        (lambda () (restore-preview!))))))
 
 (define-command "window-layout-free"
   "Drop the frame's target layout: a display may split a window again"
@@ -7495,6 +7636,7 @@
 (define (layout-enter! buf)
   (let ((spec (buffer-layout buf)))
     (if (and spec
+             (not (layout-target))
              (not *layout-busy*)
              (equal? (window-buffer (active-window)) buf))
         (apply-layout! buf spec)
@@ -9246,9 +9388,11 @@
              (string-append acc (chat-prompt-marker))
              (loop (cdr ts)
                    (string-append acc
-                     (if (equal? (car (car ts)) "user")
-                         (chat-prompt-marker)
-                         (chat-reply-marker))
+                     (cond ((equal? (car (car ts)) "user")
+                            (chat-prompt-marker))
+                           ((equal? (car (car ts)) "status")
+                            "\n### Status\n")
+                           (else (chat-reply-marker)))
                      (cadr (car ts)) "\n"))))))
 
 ;;; --- .chat files carry their identity ------------------------------------------
@@ -9338,6 +9482,7 @@
         (let* ((p (car parts))
                (role (cond ((string-prefix? "You\n" p) "user")
                            ((string-prefix? "Assistant\n" p) "assistant")
+                           ((string-prefix? "Status\n" p) "status")
                            (else #f)))
                ;; string-index counts bytes, so the cut must too — a
                ;; transcript is arbitrary prose, not ASCII
@@ -9387,13 +9532,18 @@
         (buffer-set-local! buf 'agent-saved-mark 0)
         (for-each
           (lambda (t)
-            (let ((start (chat-render! buf
-                           (if (equal? (car t) "user")
-                               (string-append "\n>>> you: " (cadr t) "\n\n")
-                               (string-append (cadr t) "\n")))))
+            (let* ((role (car t))
+                   (start (chat-render! buf
+                            (cond ((equal? role "user")
+                                   (string-append "\n>>> you: " (cadr t) "\n\n"))
+                                  ((equal? role "status")
+                                   (string-append "\n" (cadr t) "\n\n"))
+                                  (else (string-append (cadr t) "\n"))))))
               (chat-blocks-push! buf start (chat-mark buf)
-                (if (equal? (car t) "user") "user" "prose")
-                (if (equal? (car t) "user") (list (cadr t)) '()))))
+                (cond ((equal? role "user") "user")
+                      ((equal? role "status") "status")
+                      (else "prose"))
+                (if (equal? role "user") (list (cadr t)) '()))))
           turns)
         (buffer-set-local! buf 'agent-marker-bytes 0)
         (buffer-set-local! buf 'render-mode "agent")
@@ -11407,10 +11557,20 @@
 
 ;;; --- tiling windows --------------------------------------------------------
 
+(define (split-window-with-other-buffer! direction)
+  (let* ((before (map car (window-list)))
+         (shown (map cadr (window-list)))
+         (candidates (filter (lambda (b) (not (member b shown))) (window-fill-buffers))))
+    (split-window! direction)
+    (let ((created (layout--new-window before)))
+      (when (and created (pair? candidates))
+        (display-buffer-in-window! created (car candidates)))
+      created)))
+
 (define-command "split-window-below" "Split the window in two, one above the other"
-  (lambda () (split-window! 'v)))
+  (lambda () (split-window-with-other-buffer! 'v)))
 (define-command "split-window-right" "Split the window in two, side by side"
-  (lambda () (split-window! 'h)))
+  (lambda () (split-window-with-other-buffer! 'h)))
 ;; `C-x 0` in the popup closes the popup: same window, same close, so the
 ;; same return. Winner still records the arrangement — popup-close! calls
 ;; delete-window-id!, which winner does not save, so save it here.
@@ -12231,7 +12391,7 @@
 (public! 'layout-target
   "(layout-target) — the frame's target layout, the name chosen at window-layout, or #f")
 (public! 'layout-target-set!
-  "(layout-target-set! NAME) — make NAME the frame's target layout: a display takes a pane the frame has and never splits one; #f frees the frame")
+  "(layout-target-set! NAME) — keep NAME as the target algorithm as panes open or close; #f frees the frame")
 (public! 'define-display-action!
   "(define-display-action! NAME FN) — register a display action; FN takes NAME and ALIST and returns a window or #f")
 (public! 'split-window-sensibly

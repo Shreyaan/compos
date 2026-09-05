@@ -90,6 +90,12 @@ defmodule Compos.Scheme do
     store =
       Enum.reduce(Env.frame_names(interp.store, interp.global), interp.store, fn name, store ->
         case Env.fetch(store, interp.global, name) do
+          {:ok, {:interposed, {:builtin, primitive, _old}, _wrapper}} ->
+            case Map.fetch(fresh, primitive) do
+              {:ok, fun} -> Env.define(store, interp.global, name, {:builtin, primitive, fun})
+              :error -> store
+            end
+
           {:ok, {:builtin, primitive, _old}} ->
             case Map.fetch(fresh, primitive) do
               {:ok, fun} -> Env.define(store, interp.global, name, {:builtin, primitive, fun})

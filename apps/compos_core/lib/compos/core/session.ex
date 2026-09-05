@@ -1147,6 +1147,8 @@ defmodule Compos.Core.Session do
         "(current-edit-author) — the caller process's edit author string, or #f",
       "with-current-buffer" =>
         "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window.",
+      "buffer-context?" =>
+        "(buffer-context?) — #t inside a logical current-buffer binding; window placement must not change the frame there.",
       "with-frame-windows" =>
         "(with-frame-windows THUNK) — run THUNK with no logical buffer context: current-buffer and switch-to-buffer! act on the frame's real windows.",
       "with-scheme-lock" =>
@@ -1158,6 +1160,8 @@ defmodule Compos.Core.Session do
       "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
       "set-symbol-value!" =>
         "(set-symbol-value! 'NAME VAL) — set the global value of the symbol.",
+      "function-interpose!" =>
+        "(function-interpose! 'NAME WRAPPER) — internal binding wrapper; WRAPPER receives ORIGINAL and ARGS; #f removes it.",
       "boundp" => "(boundp 'NAME) — return #t when the symbol has a global binding.",
       "global-names" => "(global-names) — return every globally bound name, sorted.",
       "load" => "(load PATH) — evaluate a Scheme file in the live session.",
@@ -2281,6 +2285,7 @@ defmodule Compos.Core.Session do
       # current-buffer and the switch primitives resolve through the
       # frame's real windows, so a tool that intends a display change can
       # make one and observe it truthfully.
+      "buffer-context?" => fn [] -> Frame.buffer_context() != nil end,
       "with-frame-windows" => fn [thunk], store ->
         Compos.Core.Frame.without_buffer(fn ->
           Compos.Scheme.Eval.apply_fn(thunk, [], store)
@@ -2345,6 +2350,9 @@ defmodule Compos.Core.Session do
       end,
       "set-symbol-value!" => fn [{:sym, name}, val], store ->
         {val, Compos.Scheme.Env.define(store, global, name, val)}
+      end,
+      "function-interpose!" => fn [{:sym, name}, wrapper], store ->
+        {:void, Compos.Scheme.Env.interpose(store, global, name, wrapper)}
       end,
       "boundp" => fn [{:sym, name}], store ->
         {match?({:ok, _}, Compos.Scheme.Env.fetch(store, global, name)), store}

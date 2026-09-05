@@ -51,11 +51,14 @@ defmodule Compos.Scheme.Builtins do
       "number?" => fn [x] -> is_number(x) end,
       "string?" => fn [x] -> is_binary(x) end,
       "symbol?" => fn [x] -> match?({:sym, _}, x) end,
-      "procedure?" => fn [x] -> match?({:closure, _, _, _}, x) or match?({:builtin, _, _}, x) end,
+      "procedure?" => fn [x] ->
+        match?({:closure, _, _, _}, x) or match?({:builtin, _, _}, x) or
+          match?({:interposed, _, _}, x)
+      end,
       # introspection: closures carry their AST, so userland functions can
       # print their own source; builtins are opaque Elixir
       "function-source" => fn [v] ->
-        case v do
+        case source_callable(v) do
           {:closure, {req, opt, rest}, body, _env} ->
             params =
               req ++
@@ -343,7 +346,7 @@ defmodule Compos.Scheme.Builtins do
       "number?" => "(number? X) — return true if X is a number.",
       "string?" => "(string? X) — return true if X is a string.",
       "symbol?" => "(symbol? X) — return true if X is a symbol.",
-      "procedure?" => "(procedure? X) — return true if X is a closure or a builtin.",
+      "procedure?" => "(procedure? X) — return true if X is a callable, including an advised function.",
       "function-source" => "(function-source F) — return the lambda source of F; builtins report as opaque.",
       "string-append" => "(string-append S ...) — concatenate the strings into one string.",
       "string-length" => "(string-length S) — return the count of characters in S, not bytes.",
@@ -488,4 +491,7 @@ defmodule Compos.Scheme.Builtins do
   defp plist_get([k, v | _], key) when k == key, do: v
   defp plist_get([_, _ | rest], key), do: plist_get(rest, key)
   defp plist_get(_, _key), do: false
+  defp source_callable({:interposed, original, _}), do: source_callable(original)
+  defp source_callable(value), do: value
+
 end

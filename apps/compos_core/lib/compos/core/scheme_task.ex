@@ -10,7 +10,7 @@ defmodule Compos.Core.SchemeTask do
 
   use GenServer
 
-  alias Compos.Core.{Frame, SchemeReadLimiter, Session}
+  alias Compos.Core.{Frame, SchemeHeap, SchemeReadLimiter, Session}
   alias Compos.Scheme
 
   @registry Compos.Core.SchemeTaskRegistry
@@ -81,8 +81,15 @@ defmodule Compos.Core.SchemeTask do
       pid -> GenServer.call(pid, :await, timeout)
     end
   catch
-    :exit, {:timeout, _} -> {:error, "task await timed out after #{timeout}ms"}
-    :exit, reason -> {:error, "task await failed: #{inspect(reason)}"}
+    :exit, {:timeout, _} ->
+      {:error, "task await timed out after #{timeout}ms"}
+
+    # The heap bound kills the task process, so the call exits with `:killed`.
+    :exit, {:killed, _} ->
+      {:error, SchemeHeap.exceeded_message("the Scheme task")}
+
+    :exit, reason ->
+      {:error, "task await failed: #{inspect(reason)}"}
   end
 
   def cancel(%Ref{} = ref) do
@@ -105,6 +112,7 @@ defmodule Compos.Core.SchemeTask do
 
   @impl true
   def init({ref, closure, args, interp, fid, buffer, root, owner, label}) do
+    SchemeHeap.apply_to_self()
     owner_monitor = if is_pid(owner), do: Process.monitor(owner), else: nil
 
     {:ok,

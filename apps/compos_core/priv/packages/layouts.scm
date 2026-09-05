@@ -66,11 +66,13 @@
       (window-layout-for-width (frame-cols) (length panes))
       panes)))
 
-(define (tile-visible-adaptive!)
-  (let ((panes (layout-visible-buffers)))
-    (if (< (length panes) 2)
-        (begin (message "Open at least two work buffers") #f)
-        (tile-adaptive-windows! panes))))
+(define (tile-visible-adaptive! &optional requested)
+  (let ((panes (or requested (layout-request-buffers)))
+        (focus (layout-focus-token)))
+    (when (pair? panes)
+      (tile-adaptive-windows! panes)
+      (layout-focus-restore! focus)
+      panes)))
 
 ;;; --- tile-all: the overview -------------------------------------------------
 ;;; tile-all is the context overview. It tiles each buffer in the current
@@ -287,7 +289,7 @@
                                          (else (cons (car rest) (drop (cdr rest))))))))))))
 
 ;; arrange the frame with MAIN as the main pane. One pane: one window.
-(define (autolayout-apply! main)
+(define (autolayout-apply! main &optional algorithm)
   (let ((panes (autolayout--panes main)))
     (cond ((null? panes) #f)
           (else
@@ -295,7 +297,7 @@
             (set-frame-local! 'autolayout-panes panes)
             (if (null? (cdr panes))
                 (begin (delete-other-windows!) panes)
-                (tile-windows! (autolayout--algorithm) panes))))))
+                (tile-windows! (or algorithm (autolayout--algorithm)) panes))))))
 
 ;; the hook: the frame's panes changed, so the shape is re-made. Nothing
 ;; runs while a tiler runs, or while a prompt is open.
@@ -319,21 +321,30 @@
           ((> n 1) (/ n 100))
           (else n))))
 
+(define (autolayout-select! main &optional algorithm)
+  (let* ((target (or algorithm (autolayout--algorithm)))
+         (panes (autolayout-apply! main target)))
+    (when panes (layout-target-set! target))
+    panes))
+
 (define-command "autolayout"
   "Make the selected window's buffer the main pane; the other buffers stack beside it"
-  (lambda () (autolayout-apply! (window-buffer (active-window)))))
+  (lambda ()
+    (let ((target (layout-target)))
+      (autolayout-select! (window-buffer (active-window))
+        (and (member target '(main-left main-right main-top main-bottom)) target)))))
 
 (define-command "autolayout-main-left"
   "Put the main pane on the left and arrange the frame"
   (lambda ()
     (customize-set! 'window-layout-main-side 'left)
-    (autolayout-apply! (window-buffer (active-window)))))
+    (autolayout-select! (window-buffer (active-window)))))
 
 (define-command "autolayout-main-right"
   "Put the main pane on the right and arrange the frame"
   (lambda ()
     (customize-set! 'window-layout-main-side 'right)
-    (autolayout-apply! (window-buffer (active-window)))))
+    (autolayout-select! (window-buffer (active-window)))))
 
 (define-command "autolayout-set-main-width"
   "Set the main pane's share of the frame, as a fraction or a percent, and arrange the frame"
@@ -347,7 +358,7 @@
           (if (and ratio (>= ratio 0.3) (<= ratio 0.9))
               (begin
                 (customize-set! 'window-layout-main-ratio ratio)
-                (autolayout-apply! (or (frame-local 'autolayout-main)
+                (autolayout-select! (or (frame-local 'autolayout-main)
                                        (window-buffer (active-window)))))
               (message "The main pane takes between 30% and 90% of the frame")))))))
 
@@ -357,7 +368,7 @@
     (customize-set! 'window-layout-stack
                     (if (equal? window-layout-stack 'grid) 'column 'grid))
     (message (if (equal? window-layout-stack 'grid) "Tiles beside the main pane" "A column beside the main pane"))
-    (autolayout-apply! (or (frame-local 'autolayout-main) (window-buffer (active-window))))))
+    (autolayout-select! (or (frame-local 'autolayout-main) (window-buffer (active-window))))))
 
 (define-command "autolayout-mode"
   "Keep the frame in the main-and-stack layout as windows come and go; again turns it off"
@@ -366,6 +377,7 @@
     (customize-save! 'autolayout-mode (not autolayout-mode))
     (if autolayout-mode
         (begin
+          (layout-target-set! #f)
           (autolayout-apply! (window-buffer (active-window)))
           (message "Autolayout on: the selected buffer is the main pane"))
         (message "Autolayout off"))))
@@ -403,7 +415,7 @@
 (public! 'tile-visible-adaptive!
   "(tile-visible-adaptive!) — tile visible work windows for the selected frame width")
 (public! 'autolayout-apply!
-  "(autolayout-apply! MAIN) — arrange the frame with MAIN as the main pane and the other visible buffers beside it")
+  "(autolayout-apply! MAIN [ALGORITHM]) — arrange MAIN and the other visible buffers using ALGORITHM or the default main side")
 (effects! '(read))
 (public! 'overview-buffers
   "(overview-buffers) — current group members, else current project buffers")
@@ -415,3 +427,25 @@
 
 (domain! 'unknown)
 (effects! '(unknown))
+
+;; The active target is desktop state too: switching groups is not required
+;; before saving. Window IDs and derived slot/count caches are runtime state.
+(define (layout-targets-state)
+  (map (lambda (frame) (list frame (frame-local-in frame 'layout-target))) (frame-list)))
+
+(define (layout-targets-restore! saved)
+  (for-each
+    (lambda (frame)
+      (let* ((entry (assoc frame saved))
+             (target (and entry (cadr entry)))
+             (old (assoc frame *frame-locals*))
+             (locals (if old (cadr old) '()))
+             (kept (filter (lambda (row)
+                              (not (member (car row) '(layout-target layout-slots layout-target-count))))
+                            locals)))
+        (set! *frame-locals*
+          (cons (list frame (cons (list 'layout-target target) kept))
+                (filter (lambda (row) (not (equal? (car row) frame))) *frame-locals*)))))
+    (frame-list)))
+
+(persist-global! 'layout-targets layout-targets-state layout-targets-restore!)

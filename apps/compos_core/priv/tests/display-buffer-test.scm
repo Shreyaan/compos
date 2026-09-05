@@ -27,9 +27,11 @@
     (set! split-width-threshold (cadr thresholds))
     (set! *display-buffer-base-action* '())
     (layout-target-set! #f)
-    (switch-to-buffer! "*scratch*")
-    (run-command "delete-other-windows")
     (when (popup-open?) (popup-close!))
+    (set-frame-local! 'pinned-group #f)
+    (set-frame-local! 'current-group #f)
+    (switch-to-buffer-here! "*scratch*")
+    (run-command "delete-other-windows")
     (let ((out (thunk)))
       (for-each (lambda (b)
                   (when (or (string-prefix? "*zz-db" b) (string-prefix? t--db-dir b))
@@ -140,31 +142,25 @@
               (window-quit-restore! win)
               (check-equal! (window-buffer other) "*zz-db-a*" "quit puts the first buffer back"))))))))
 
-(deftest 'a-target-layout-keeps-a-display-from-splitting
-  "with a target layout, pop-up-window reads as use-some-window: the shape stays"
+(deftest 'a-target-layout-fills-capacity-before-replacing
+  "an explicit two-pane target grows once, then uses the other pane"
   (lambda ()
     (t--db-with t--db-wide
       (lambda ()
-        (let ((me (active-window)))
+        (let ((home (current-buffer)))
           (buffer-create "*zz-db-a*")
           (buffer-create "*zz-db-b*")
-          (buffer-create "*zz-db-c*")
-          (let ((other (display-buffer "*zz-db-a*")))
-            (check-equal! (length (window-list)) 2 "free: the wide window split")
-            (layout-target-set! 'columns)
-            (check-equal! (display-buffer-actions-for "*zz-db-b*")
-                          '(reuse-window use-some-window use-some-window same-window)
-                          "the chain splits nothing")
-            (check-equal! (display-buffer "*zz-db-b*") other "the other window shows it")
-            (check-equal! (length (window-list)) 2 "no third window")
-            (check-equal! (active-window) me "point stays")
-            (run-command "delete-other-windows")
-            (check-equal! (display-buffer "*zz-db-c*") me
-                          "one window: the selected window shows it")
-            (check-equal! (length (window-list)) 1 "and the sole window did not split")
-            (layout-target-set! #f)
-            (check-equal! (car (cdr (display-buffer-actions-for "*zz-db-c*"))) 'pop-up-window
-                          "free again: the chain may split")))))))
+          (layout-target-set! 'two-pane)
+          (display-buffer "*zz-db-a*")
+          (check-equal! (length (window-list)) 2 "underfilled target grows")
+          (check-equal! (current-buffer) home "passive display preserves focus")
+          (let ((other (window-showing "*zz-db-a*")))
+            (check-equal! (display-buffer "*zz-db-b*") other "full target replaces the other pane")
+            (check-equal! (length (window-list)) 2 "capacity is respected")
+            (check-equal! (current-buffer) home "replacement preserves focus"))
+          (layout-target-set! #f)
+          (check-equal! (cadr (display-buffer-actions-for "*zz-db-b*")) 'pop-up-window
+                        "free restores sensible splitting"))))))
 
 (deftest 'same-window-is-the-last-resort-and-inhibit-keeps-it-out
   "with the same window inhibited and nothing else, the display fails rather than covers"

@@ -27,19 +27,21 @@ defmodule Compos.Ui.AgentTranscript do
       data-win={@win}
       data-stick={to_string(@stick)}
       data-scroll-top={@scroll_top}
+      data-scroll-anchor={@scroll_anchor}
+      data-scroll-offset={@scroll_offset}
     >
-      <%= for b <- @blocks do %>
+      <%= for {b, block_index} <- Enum.with_index(@blocks) do %>
         <%= case b.kind do %>
           <% :user -> %>
-            <div class="ag-user"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
+            <div data-ag-index={block_index} class="ag-user"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
           <% :queued -> %>
-            <div class="ag-user ag-queued"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
+            <div data-ag-index={block_index} class="ag-user ag-queued"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
           <% :prose -> %>
-            <div class="ag-prose">{Phoenix.HTML.raw(b.html)}</div>
+            <div data-ag-index={block_index} class="ag-prose">{Phoenix.HTML.raw(b.html)}</div>
           <% :thought -> %>
-            <details class="ag-thought"><summary>thought</summary><div class="ag-thought-text">{b.text}</div></details>
+            <details data-ag-index={block_index} class="ag-thought"><summary>thought</summary><div class="ag-thought-text">{b.text}</div></details>
           <% :tool -> %>
-            <details class={"ag-tool #{b.status}"} open={b.open}>
+            <details data-ag-index={block_index} class={"ag-tool #{b.status}"} open={b.open}>
               <summary
                 phx-click="agent_card"
                 phx-value-win={@win}
@@ -64,9 +66,9 @@ defmodule Compos.Ui.AgentTranscript do
               <pre :if={b.body != ""} class="ag-body">{b.body}</pre>
             </details>
           <% :plan -> %>
-            <pre class="ag-plan">{b.text}</pre>
+            <pre data-ag-index={block_index} class="ag-plan">{b.text}</pre>
           <% :permission -> %>
-            <div class="ag-perm">
+            <div data-ag-index={block_index} class="ag-perm">
               <span class="ag-perm-title">needs permission — {b.title}</span>
               <button
                 class="ag-btn allow"
@@ -88,7 +90,7 @@ defmodule Compos.Ui.AgentTranscript do
               >Deny</button>
             </div>
           <% :question -> %>
-            <div class="ag-question">
+            <div data-ag-index={block_index} class="ag-question">
               <div class="ag-question-title">{b.question}</div>
               <div class="ag-question-answers">
                 <button
@@ -103,8 +105,10 @@ defmodule Compos.Ui.AgentTranscript do
               </div>
               <div class="ag-question-hint">Choose an answer or type another reply below.</div>
             </div>
+          <% :status -> %>
+            <div data-ag-index={block_index} class="ag-status"><span class="ag-label">SUMMARY</span><div class="ag-status-text">{b.text}</div></div>
           <% :meta -> %>
-            <div class="ag-meta">{b.text}</div>
+            <div data-ag-index={block_index} class="ag-meta">{b.text}</div>
         <% end %>
       <% end %>
     </div>

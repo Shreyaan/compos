@@ -4,7 +4,7 @@ Where a buffer goes when a command shows it. The mechanism is Emacs' `display-bu
 
 ## The three verbs
 
-1. `switch-to-buffer!` shows a buffer in the selected window. `find-file` and the switcher use it: a visit takes the window you are in.
+1. `switch-to-buffer!` visits a buffer. With a target layout it reuses an existing view, fills spare capacity, then replaces the selected pane. Without a target it takes the selected window. Foreign buffers use the popup.
 2. `display-buffer` shows a buffer somewhere else and selects nothing. A result, a listing, a help page, a shell take their window through it. It returns the window.
 3. `pop-to-buffer` is `display-buffer` and then a `select-window!`. A listing you open to work in uses it (`list-mode-show!`).
 
@@ -22,7 +22,7 @@ The actions:
 | --- | --- |
 | `reuse-window` | a window that shows the buffer already |
 | `pop-up-window` | split the largest work window when it is big enough (`split-window-sensibly`), else the selected one |
-| `use-some-window` | another work window; the popup and a peek are not one |
+| `use-some-window` | the least recently used other work window; excludes the popup and peeks |
 | `same-window` | the selected window (`same` is the same action) |
 | `popup` | the side window (`popup-show`, docs/POPUPS.md) |
 
@@ -34,11 +34,79 @@ The actions:
 
 ## Layout presets
 
-`C-x l` opens the layout presets. The `two-pane` preset keeps the selected
-buffer on the left at two-thirds width. It shows the next visible buffer on the
-right. A frame with one pane gets its companion from the current group or the
-recent buffer list. The preset closes extra panes and makes `two-pane` the
-frame's layout target.
+An explicitly chosen layout is a **target**. It remains selected as buffers
+open and panes close. Choosing it with one buffer works: that buffer occupies
+the whole frame until there is another buffer to show.
+
+| Target | Capacity | Arrangement |
+| --- | --- | --- |
+| `two-pane` | 2 | first pane 2/3, companion 1/3 |
+| `columns` | 3 | equal columns |
+| `rows`, `grid`, `main-*` | occupied panes | apply the chosen tiler as work opens |
+| `adaptive` | occupied panes | choose the tiler for the current frame width |
+| `free` | sensible splitting | no target |
+
+Pane order is stable across focus changes. Main layouts retain their logical
+main pane even when it is physically on the right or bottom. Changing to a
+smaller target keeps the first slots and ensures the focused buffer remains
+visible; surplus buffers remain open in the group.
+
+Explicit layout selection and preview use one order: existing pane buffers
+first, then the group's other eligible buffers in MRU order, with ordinary
+work before companions. The picker captures this order once; highlighting
+another layout or accepting it distributes the same sequence over its slots.
+Existing panes keep their buffers, including Dired, other transient lists,
+visible non-members and deliberate duplicate views. A layout change never
+substitutes hidden work for an already occupied slot. Floating popup windows
+are excluded from the base arrangement.
+
+Only hidden fillers are subject to eligibility: no peeks, floating popups,
+transient buffers, context-only buffers or foreign group members. Existing
+group chats and scratch buffers are eligible fillers. Fixed targets cap the
+sequence at their capacity. With no group, flexible layouts use visible panes
+and fixed layouts fill from the eligible global MRU. Missing capacity creates
+no placeholder buffer. Preserving an already displayed non-member does not
+change its membership or import other foreign buffers.
+
+`C-x 2` and `C-x 3` put an eligible buffer not already visible into the new
+pane, using the same sealed group pool. Focus stays in the original pane.
+Only when there is no other candidate does the split show the same buffer.
+Low-level `split-window!` retains its duplicate-view mechanism for callers
+that deliberately construct a layout.
+
+| Action under a target | Result |
+| --- | --- |
+| Visit an already visible buffer | select its existing pane |
+| Open a new member below capacity | append a slot, reflow, select it |
+| Open a member at capacity | replace the selected slot |
+| Display an ordinary result | fill capacity, else replace the least recently used other pane; preserve focus |
+| Close a pane | reflow surviving slots; do not pull hidden work back in |
+| Kill a buffer | refill from eligible pane history, then hidden group work, then existing group companions |
+| Quit a displayed result | restore the borrowed pane or remove the pane created for it |
+| Cancel a layout preview | restore the original tree, focus, and ordering cache |
+| Switch groups | save and restore that group's target and tree on this frame |
+
+Group kill repair retains its final chat/scratch fallback and creates the surviving group’s chat when no companion remains. No foreign buffer
+is eligible to refill a sealed group's pane. Background buffer contexts do
+not open or rearrange visible panes. Mode-entry layouts and automatic
+relayout hooks defer to an explicitly selected target.
+
+Relayout preserves each view's point and buffer history, including separate
+views of one buffer. The active target is saved with the desktop even without
+switching groups. `window-layout-free` releases the target. `s-RET` (`autolayout`) deliberately promotes the selected pane to main, preserving the existing main-layout side. The default side applies only when the current target has no main pane.
+
+The measured regression journeys are in `priv/tests/layout-policy-test.scm`,
+with a disposable-frame runner and keyboard-path test in
+`test/compos/layout_policy_test.exs`. Each journey records normalized
+`(buffer x y width height)` rectangles after each transition. For example:
+
+| Rows journey | Geometry `(y, height)` in slot order |
+| --- | --- |
+| A, choose rows | A `(0, 1)` |
+| open B | A `(0, 1/2)`, B `(1/2, 1/2)` |
+| open C | A `(0, 1/3)`, B `(1/3, 1/3)`, C `(2/3, 1/3)` |
+| close B's pane | A `(0, 1/2)`, C `(1/2, 1/2)` |
+| reopen B | A `(0, 1/3)`, C `(1/3, 1/3)`, B `(2/3, 1/3)` |
 
 ## Rules
 

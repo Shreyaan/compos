@@ -7,7 +7,15 @@
 //!
 //! COMPOS_URL points the shell at a daemon (default http://127.0.0.1:4004);
 //! a daemon is auto-spawned only for loopback hosts. COMPOS_DIR overrides
-//! the checkout the daemon is started from.
+//! the checkout the daemon is started from. COMPOS_SPAWN replaces the
+//! command that starts the daemon, so the shell can start a release build
+//! instead of the dev loop:
+//!
+//!   COMPOS_URL=http://localhost:4014 \
+//!   COMPOS_SPAWN='COMPOS_HOME=~/.compos-rel COMPOS_PORT=4014 \
+//!     _build/prod/rel/compos/bin/compos daemon' cargo run
+//!
+//! COMPOS_HOME names the directory the shell writes daemon.log in.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -58,12 +66,29 @@ fn project_root() -> PathBuf {
     }
 }
 
+/// The command that starts a daemon. COMPOS_SPAWN wins; the default is the
+/// dev loop, which runs in the foreground and so takes `exec`.
+fn spawn_command() -> String {
+    std::env::var("COMPOS_SPAWN").unwrap_or_else(|_| "exec mix run --no-halt".to_string())
+}
+
+/// The directory the daemon log goes in — the same home the daemon uses.
+fn home_dir() -> String {
+    std::env::var("COMPOS_HOME").unwrap_or_else(|_| "~/.compos".to_string())
+}
+
 fn spawn_daemon() {
     let root = project_root();
-    // same launch shape as the dev loop: log to ~/.compos/daemon.log, detach
+    let home = home_dir();
+    // same launch shape as the dev loop: log to $COMPOS_HOME/daemon.log, detach
+    let script = format!(
+        "mkdir -p {home} && {cmd} >> {home}/daemon.log 2>&1",
+        home = home,
+        cmd = spawn_command()
+    );
     let spawned = Command::new("sh")
         .arg("-c")
-        .arg("mkdir -p ~/.compos && exec mix run --no-halt >> ~/.compos/daemon.log 2>&1")
+        .arg(&script)
         .current_dir(&root)
         .spawn();
 

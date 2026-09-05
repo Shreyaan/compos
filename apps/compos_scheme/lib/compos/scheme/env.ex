@@ -139,7 +139,56 @@ defmodule Compos.Scheme.Env do
   end
 
   @doc "Bind name in the given frame (define)."
-  def define(%__MODULE__{tid: tid, local: local} = store, ref, name, val) do
+  def define(store, ref, name, val) do
+    old = own_value(store, ref, name)
+    put_binding(store, ref, name, preserve_interposer(old, val))
+  end
+
+  # Read only this frame: a lexical shadow must not inherit a global wrapper.
+  defp own_value(%__MODULE__{local: local, tid: tid}, ref, name) do
+    case local do
+      %{^ref => {vars, _}} ->
+        Map.get(vars, name)
+
+      _ ->
+        case :ets.lookup(tid, {:var, ref, name}) do
+          [{_, value}] -> value
+          [] -> nil
+        end
+    end
+  end
+
+  defp preserve_interposer(value, value), do: value
+
+  defp preserve_interposer({:interposed, _, wrapper}, value),
+    do: {:interposed, value, wrapper}
+
+  defp preserve_interposer(_, value), do: value
+
+  @doc "Install or remove one binding wrapper. Scheme owns composition and policy."
+  def interpose(store, ref, name, wrapper) do
+    current = lookup(store, ref, name)
+
+    original =
+      case current do
+        {:interposed, original, _} -> original
+        value -> value
+      end
+
+    unless callable?(original) and (wrapper == false or callable?(wrapper)) do
+      raise ArgumentError, "function-interpose! expects callable target and wrapper"
+    end
+
+    value = if wrapper == false, do: original, else: {:interposed, original, wrapper}
+    put_binding(store, ref, name, value)
+  end
+
+  defp callable?({:closure, _, _, _}), do: true
+  defp callable?({:builtin, _, _}), do: true
+  defp callable?({:interposed, _, _}), do: true
+  defp callable?(_), do: false
+
+  defp put_binding(%__MODULE__{tid: tid, local: local} = store, ref, name, val) do
     case local do
       %{^ref => {vars, parent}} ->
         %{store | local: Map.put(local, ref, {Map.put(vars, name, val), parent})}
@@ -170,7 +219,7 @@ defmodule Compos.Scheme.Env do
       %{^ref => {vars, parent}} ->
         cond do
           Map.has_key?(vars, name) ->
-            %{store | local: Map.put(local, ref, {Map.put(vars, name, val), parent})}
+            define(store, ref, name, val)
 
           parent != nil ->
             set!(store, parent, name, val)
@@ -182,10 +231,7 @@ defmodule Compos.Scheme.Env do
       _ ->
         cond do
           :ets.member(tid, {:var, ref, name}) ->
-            store = promote(store, [val])
-            :ets.insert(tid, {{:var, ref, name}, val})
-            cache_put(ref, name, val)
-            store
+            define(store, ref, name, val)
 
           (p = shared_parent(tid, ref)) != nil ->
             set!(store, p, name, val)

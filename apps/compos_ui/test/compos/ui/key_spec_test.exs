@@ -30,7 +30,10 @@ defmodule Compos.Ui.KeySpecTest do
     const out = cases.map((c) => {
       globalThis.document = {
         activeElement: c.editable
-          ? { closest: (s) => (s === ".buf[contenteditable]" ? {} : null) }
+          ? { closest: (s) => (
+              s === ".buf[contenteditable]" ||
+              (s === ".window.active .buf[contenteditable]" && c.active !== false)
+                ? {} : null) }
           : null
       };
       const e = Object.assign(
@@ -62,6 +65,19 @@ defmodule Compos.Ui.KeySpecTest do
 
   defp event(key, code, mods \\ []) do
     Map.merge(%{key: key, code: code}, Map.new(mods, &{&1, true}))
+  end
+
+  test "an inactive editable cannot swallow the selected list pane's keys" do
+    results =
+      run(
+        for key <- ~w(ArrowUp ArrowDown ArrowLeft ArrowRight Enter Backspace a),
+            do: %{event: event(key, key), editable: true, active: false, editing: true}
+      )
+
+    assert Enum.all?(results, &(&1["native"] == false))
+
+    assert Enum.take(Enum.map(results, & &1["spec"]), 4) ==
+             ["<up>", "<down>", "<left>", "<right>"]
   end
 
   describe "a Cmd-arrow travels as a key" do
@@ -111,6 +127,7 @@ defmodule Compos.Ui.KeySpecTest do
                %{"spec" => "s-<down>", "native" => false, "after" => false}
              ]
     end
+
     test "a printable key, RET, a plain arrow and a chord enter the editing state" do
       results =
         run([

@@ -202,12 +202,17 @@ defmodule Compos.Ui.EditorLive do
 
   # the transcript follow flag and reader position (S7): runtime locals,
   # so a refresh keeps the reader's place and a restart resets to follow
-  def handle_event("ag_stick", %{"buf" => buf, "stick" => stick, "top" => top}, socket)
+  def handle_event("ag_stick", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
       when is_boolean(stick) and is_integer(top) do
     if Compos.Core.Buffer.exists?(buf) do
       # inverted on purpose: the cleared (#f) local must mean "follow"
       Compos.Core.Buffer.set_local(buf, "agent-unstick", not stick)
       Compos.Core.Buffer.set_local(buf, "agent-scroll-top", top)
+
+      anchor = if is_integer(params["anchor"]), do: params["anchor"], else: nil
+      offset = if is_integer(params["offset"]), do: params["offset"], else: 0
+      Compos.Core.Buffer.set_local(buf, "agent-scroll-anchor", anchor)
+      Compos.Core.Buffer.set_local(buf, "agent-scroll-offset", offset)
     end
 
     {:noreply, socket}
@@ -1201,7 +1206,13 @@ defmodule Compos.Ui.EditorLive do
         </div>
       </div>
       <%= if @state.minibuffer do %>
-        <div class={"mb-panel #{if Map.get(@state.minibuffer, :style) == "palette", do: "palette"}"}>
+        <div class="mb-modal-layer">
+          <div
+            class={"mb-panel #{if Map.get(@state.minibuffer, :style) == "palette", do: "palette"}"}
+            role="dialog"
+            aria-modal="true"
+            aria-label={String.trim_trailing(@state.minibuffer.prompt, ": ")}
+          >
           <%= if Map.get(@state.minibuffer, :style) == "palette" do %>
             <div class="mb-head">
               <span class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</span>
@@ -1265,6 +1276,7 @@ defmodule Compos.Ui.EditorLive do
             <span class="mb-count">{count_text(@state.minibuffer)}</span>
           </div>
         </div>
+      </div>
       <% else %>
         <%= if @state.transient && @state.transient[:groups] do %>
           <div class={"mb-panel palette transient-panel #{if @state.transient[:detail], do: "with-rail"}"}>
@@ -1645,6 +1657,8 @@ defmodule Compos.Ui.EditorLive do
             buf={@node.buffer}
             stick={@node.agent.stick}
             scroll_top={@node.agent.scroll_top}
+            scroll_anchor={@node.agent.scroll_anchor}
+            scroll_offset={@node.agent.scroll_offset}
           />
           <%!-- messages queued mid-turn: muted rows from 'chat-queued,
                not transcript text. Outside the component, so a streamed
@@ -2161,6 +2175,9 @@ defmodule Compos.Ui.EditorLive do
   # the plain view; the rich view shows the activity row instead — both at
   # once would pulse twice for one wait
   defp ag_block([_s, _e, "waiting" | _], _text, _open), do: nil
+
+  defp ag_block([s, e, "status" | _], text, _open),
+    do: %{kind: :status, text: String.trim(safe_slice(text, s, e))}
 
   defp ag_block([s, e, "meta" | _], text, _open),
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
