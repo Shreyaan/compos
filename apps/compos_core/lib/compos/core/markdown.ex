@@ -115,21 +115,42 @@ defmodule Compos.Core.Markdown do
   # emphasis in a table stays as the author's asterisks.
   @inline_holders [:inline, :cell]
 
+  # A paragraph that runs past one line inside a list item or a quote keeps
+  # going on the next line, and the block grammar names the indent that
+  # carries it a `block_continuation` - inside the `inline` range, because
+  # the range spans both lines. Those are the block grammar's own bytes, not
+  # inline markup, so the range still has to be read. Asking for a childless
+  # node instead left every multi-line list item's links and emphasis drawn
+  # as the author's brackets and asterisks: a Hacker News page rendered one
+  # working link, the single-line one at the foot.
+  @block_structure [:continuation]
+
   defp expand_inlines(nodes, text, true) do
     Enum.map(nodes, fn node ->
-      if node.kind in @inline_holders and node.children == [] do
-        %{node | children: inline_nodes(text, node.start, node.stop)}
+      if node.kind in @inline_holders and inline_unread?(node.children) do
+        %{node | children: inline_children(node, text)}
       else
         %{node | children: expand_inlines(node.children, text, true)}
       end
     end)
   end
 
-  defp inline_nodes(text, start, stop) do
+  defp inline_unread?(children),
+    do: Enum.all?(children, &(&1.kind in @block_structure))
+
+  # The continuation keeps its place among the inline nodes. Its bytes are
+  # markup the renderer drops, and where emphasis spans the line break the
+  # ranges nest it inside that emphasis, which is where it belongs.
+  defp inline_children(node, text) do
+    (Enum.map(node.children, &{Atom.to_string(&1.kind), &1.start, &1.stop}) ++
+       inline_captures(text, node.start, node.stop))
+    |> nest()
+  end
+
+  defp inline_captures(text, start, stop) do
     "markdown-inline"
     |> TS.ts_query_nif(binary_part(text, start, stop - start), @inline_query)
     |> Enum.map(fn {kind, from, to} -> {kind, from + start, to + start} end)
-    |> nest()
   end
 
   @doc false

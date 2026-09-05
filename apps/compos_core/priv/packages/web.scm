@@ -1137,18 +1137,35 @@
 (define (web--apply-view! buf view)
   (buffer-set-local! buf 'browse-view view)
   (if (equal? view "source")
-      (when (minor-mode-on? buf "preview-mode")
-        (with-current-buffer buf (lambda () (disable-minor-mode! buf "preview-mode"))))
+      (with-current-buffer buf
+        (lambda ()
+          (when (minor-mode-on? buf "preview-mode")
+            (disable-minor-mode! buf "preview-mode"))
+          ;; Source is the Markdown the page became, and Markdown is read
+          ;; with its headings, emphasis and links drawn. Off the rendered
+          ;; page the reader was left with the author's raw asterisks.
+          (web--paint-source! buf)))
       (begin
         ;; the page stays rendered Markdown; only its type changes
         (preview-typography! view)
         (with-current-buffer buf
           (lambda ()
+            (web--unpaint-source! buf)
             (unless (minor-mode-on? buf "preview-mode")
               (enable-minor-mode! buf "preview-mode"))
             (preview-heal! buf)))))
   (web--update-modeline! buf)
   (message (string-append "browse: " (web--view-label view))))
+
+;; The painter belongs to markdown-mode, and browse is not in it. Ask for
+;; it by name, so a build without that package still browses.
+(define (web--paint-source! buf)
+  (when (boundp 'markdown-paint-on!) (markdown-paint-on! buf)))
+
+(define (web--unpaint-source! buf)
+  (when (and (boundp 'markdown-paint-off!)
+             (equal? (buffer-local buf 'markdown-paint) #t))
+    (markdown-paint-off! buf)))
 
 (define-command "browse-cycle-view"
   "Cycle browse between monospace, serif, and Markdown source"
@@ -1195,11 +1212,15 @@
       (unless (buffer-local buf 'browse-view)
         (buffer-set-local! buf 'browse-view (preview-typography)))
       (if (equal? (buffer-local buf 'browse-view) "source")
-          (when (minor-mode-on? buf "preview-mode")
-            (disable-minor-mode! buf "preview-mode"))
-          (if (minor-mode-on? buf "preview-mode")
-              (preview-heal! buf)
-              (enable-minor-mode! buf "preview-mode")))
+          (begin
+            (when (minor-mode-on? buf "preview-mode")
+              (disable-minor-mode! buf "preview-mode"))
+            (web--paint-source! buf))
+          (begin
+            (web--unpaint-source! buf)
+            (if (minor-mode-on? buf "preview-mode")
+                (preview-heal! buf)
+                (enable-minor-mode! buf "preview-mode"))))
       (web--install-keys! buf)
       (web--apply-meta-faces! buf)
       (web--apply-separator-faces! buf)
@@ -1219,6 +1240,11 @@
     ("r" "browse-hard-refresh")
     ("M-<left>" "browse-back")
     ("M-<right>" "browse-forward")
+    ;; A page is read the way any document is read: from one landmark to
+    ;; the next. morg already walks headings, paragraphs, blocks and links
+    ;; over Markdown text, and a browse page is Markdown text.
+    ("M-<up>" "morg-previous-landmark")
+    ("M-<down>" "morg-next-landmark")
     ("u" "browse-up")
     ("t" "browse-top")
     ("g" "browse-refresh")
@@ -1242,7 +1268,8 @@ the article alone; full shows the whole document. R switches
 between them without fetching again. RET follows the link at point,
 s-RET opens it as its own tab, and M-RET peeks it beside this window:
 the next M-RET replaces the peek, and M-RET on the same link keeps
-it. TAB and n/p walk the links. l and M-<left>
+it. TAB and n/p walk the links, and M-<up> and M-<down> walk
+every landmark: heading, paragraph, block and link. l and M-<left>
 go back, r and M-<right> go forward, and both return to the line
 you left. u goes to the parent path, t to the site root. g asks
 where to go: RET refetches this page, a visited site or a fresh URL

@@ -89,6 +89,20 @@ defmodule Compos.MarkdownTest do
       assert slice(text, find(tree, :code_span)) == "`code`"
     end
 
+    # A list item that runs onto a second line puts a block_continuation -
+    # the indent that carries it on - inside the paragraph's inline range.
+    # The inline grammar was run only over an inline node with no children
+    # at all, so every such item kept its links as brackets. A Hacker News
+    # page is nothing but these.
+    test "a list item that runs past one line still reads its inline markup" do
+      text = "1.  [Story](http://x.com/s) (x.com)  \n    *9 points, [4 comments](http://x.com/c)*\n"
+      {:ok, tree} = Markdown.parse(text)
+
+      assert slice(text, find(tree, :link)) == "[Story](http://x.com/s)"
+      assert slice(text, find(tree, :emphasis)) == "*9 points, [4 comments](http://x.com/c)*"
+      assert find(tree, :continuation)
+    end
+
     test "a table names itself and its cells" do
       text = "| a | b |\n| - | - |\n| 1 | 2 |\n"
       {:ok, tree} = Markdown.parse(text)

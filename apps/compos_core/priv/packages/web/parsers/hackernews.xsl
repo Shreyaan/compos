@@ -40,7 +40,7 @@
       <xsl:apply-templates select="//tr[contains(@class, 'comtr')]"/>
       <!-- the next page of a listing, by itself -->
       <xsl:if test="//a[@class='morelink']">
-        <p><a href="{//a[@class='morelink']/@href}">More</a></p>
+        <p><a href="{concat('https://news.ycombinator.com/', //a[@class='morelink']/@href)}">More</a></p>
       </xsl:if>
     </body></html>
   </xsl:template>
@@ -55,7 +55,17 @@
     <xsl:variable name="sub"
                   select="following-sibling::tr[1]//td[contains(@class, 'subtext')]"/>
     <li>
-      <a href="{.//span[@class='titleline']/a[1]/@href}">
+      <a>
+        <xsl:attribute name="href">
+          <xsl:choose>
+            <xsl:when test="starts-with(.//span[@class='titleline']/a[1]/@href, 'http://') or starts-with(.//span[@class='titleline']/a[1]/@href, 'https://')">
+              <xsl:value-of select=".//span[@class='titleline']/a[1]/@href"/>
+            </xsl:when>
+            <xsl:otherwise>
+              <xsl:value-of select="concat('https://news.ycombinator.com/', .//span[@class='titleline']/a[1]/@href)"/>
+            </xsl:otherwise>
+          </xsl:choose>
+        </xsl:attribute>
         <xsl:copy-of select=".//span[@class='titleline']/a[1]/node()"/>
       </a>
       <xsl:if test=".//span[@class='sitestr']">
@@ -81,7 +91,7 @@
                         select="$sub//a[contains(., 'comment') or contains(., 'discuss')]"/>
           <xsl:if test="$comments">
             <xsl:text>, </xsl:text>
-            <a href="{$comments[1]/@href}">
+            <a href="{concat('https://news.ycombinator.com/', $comments[1]/@href)}">
               <xsl:value-of select="normalize-space($comments[1])"/>
             </a>
           </xsl:if>
