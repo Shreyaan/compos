@@ -424,6 +424,7 @@
     'total (lambda (buf) (length (list-source-entries buf)))
     'local-filter #t
     'no-marks #t
+    'preview (lambda (buf chat) (whatsapp--open-chat! chat))
     'key (lambda (buf chat) (plist-get chat 'jid))
     'footer (lambda (buf)
               '(("RET" "read") ("r" "reply") ("/" "filter")
