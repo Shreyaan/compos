@@ -1,0 +1,103 @@
+[
+  {
+    "type": "body",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "chat",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "conversation",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "message",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "message",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "body",
+            "named": true
+          }
+        ]
+      },
+      "chat": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "chat",
+            "named": true
+          }
+        ]
+      },
+      "sender": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "sender",
+            "named": true
+          }
+        ]
+      },
+      "time": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "timestamp",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "sender",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": " Chat: ",
+    "named": false
+  },
+  {
+    "type": " From: ",
+    "named": false
+  },
+  {
+    "type": ":",
+    "named": false
+  },
+  {
+    "type": "[",
+    "named": false
+  },
+  {
+    "type": "]",
+    "named": false
+  },
+  {
+    "type": "timestamp",
+    "named": true
+  }
+]

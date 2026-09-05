@@ -225,11 +225,60 @@
     (buffer-append! buf text)
     (buffer-goto! buf (min p (buffer-size buf)))))
 
-(define (whatsapp--render-conversation! buf messages)
-  (let ((rows (whatsapp--parse-messages messages)))
-    (if rows
-        (whatsapp--render-message-rows! buf rows #f)
-        (whatsapp--render-message-rows! buf #f messages))))
+;; The view is a projection of the tree, rebuilt from the buffer text
+;; every time. Nothing about a message is kept anywhere else, so the
+;; blocks a reader sees and the text the grammar read cannot drift.
+(define (whatsapp--paint! buf)
+  (when (buffer-known? buf)
+    (let* ((rows (whatsapp--messages buf))
+           (current (whatsapp--message-at rows (buffer-point buf))))
+      (buffer-set-local! buf 'render-mode "blocks")
+      (buffer-set-local! buf 'render-blocks
+        (whatsapp--conversation-blocks rows current
+          (buffer-local buf 'whatsapp-notice)))
+      (buffer-set-local! buf 'modeline-info
+        (string-append
+          "WhatsApp · "
+          (whatsapp--text (buffer-local buf 'whatsapp-name) "chat")
+          (if current
+              (string-append " · " (whatsapp--msg-sender current))
+              ""))))))
+
+;; RAW is what the server printed. It goes in as it came: the grammar
+;; reads the buffer, so anything this rewrote would be a second
+;; opinion about what was said.
+(define (whatsapp--render-conversation! buf raw)
+  (let ((text (if (string? raw) raw "")))
+    (whatsapp--replace-text! buf text)
+    (buffer-set-local! buf 'whatsapp-notice text)
+    (buffer-set-local! buf 'whatsapp-messages-jid
+      (buffer-local buf 'whatsapp-jid))
+    (whatsapp--paint! buf)
+    (buffer-set-read-only! buf #t)))
+
+;; Motion belongs to the tree: the next message is the next sibling of
+;; the node point stands in, and every mode with a grammar moves this
+;; way.
+(define (whatsapp--select-at! buf pos)
+  (buffer-goto! buf pos)
+  (whatsapp--paint! buf))
+
+(define (whatsapp--goto-message! buf op)
+  (let* ((rows (whatsapp--messages buf))
+         (here (whatsapp--message-at rows (buffer-point buf))))
+    (if (not here)
+        (message "No messages here")
+        (let ((target
+                (with-current-buffer buf
+                  (lambda ()
+                    (ts-node "message"
+                             (whatsapp--msg-start here)
+                             (whatsapp--msg-end here) op)))))
+          (if target
+              (whatsapp--select-at! buf (nth 1 target))
+              (message (if (equal? op 'next)
+                           "Last message"
+                           "First message")))))))
 
 (domain! 'chat)
 (effects! '(read external))

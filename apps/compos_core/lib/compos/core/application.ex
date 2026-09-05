@@ -62,10 +62,11 @@ defmodule Compos.Core.Application do
         restart: :temporary
       },
       Compos.Core.LLMDb,
-      # one-shot: register user-installed grammars with the NIF
+      # one-shot: compile the bundled grammars if their sources moved,
+      # then register every grammar this machine has with the NIF
       %{
         id: :grammar_boot,
-        start: {Task, :start_link, [&Compos.Core.TreeSitter.load_installed/0]},
+        start: {Task, :start_link, [&Compos.Core.TreeSitter.load_all/0]},
         restart: :temporary
       }
     ]

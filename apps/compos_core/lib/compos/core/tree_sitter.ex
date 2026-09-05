@@ -1,7 +1,8 @@
 defmodule Compos.Core.TreeSitter do
   @moduledoc """
   Runtime grammar management — the compiled-in grammars (elixir, json,
-  rust, html) plus any the user installs from the app.
+  rust, html), the ones bundled as source under `priv/grammars`, and
+  any the user installs from the app.
 
   `install/2` is Emacs's treesit-install-language-grammar: clone the
   grammar repo shallow, find its named grammar, and use `cc -shared` on
@@ -42,17 +43,89 @@ defmodule Compos.Core.TreeSitter do
     |> Enum.sort()
   end
 
-  @doc "Register every installed grammar with the NIF (boot path)."
-  def load_installed do
-    for name <- installed() do
+  # Grammars the editor ships with. These are sources, not libraries:
+  # a release carries the .c files and the machine that runs it
+  # compiles them once, into the same directory an installed grammar
+  # uses. A bundled grammar therefore needs no install step and no
+  # network — it is simply there, like the compiled-in four.
+  def bundled_dir, do: Application.app_dir(:compos_core, "priv/grammars")
+
+  def bundled, do: bundled_dirs() |> Enum.map(&Path.basename/1) |> Enum.sort()
+
+  defp bundled_dirs do
+    bundled_dir()
+    |> Path.join("*")
+    |> Path.wildcard()
+    |> Enum.filter(&File.exists?(Path.join([&1, "src", "parser.c"])))
+  end
+
+  @doc "Register every grammar this machine has (boot path)."
+  def load_all do
+    built = load_bundled()
+    load_names(installed() -- built, "")
+  end
+
+  @doc "Compile any bundled grammar whose sources moved, then load them all."
+  def load_bundled do
+    names =
+      for src <- bundled_dirs(), reduce: [] do
+        acc ->
+          name = Path.basename(src)
+
+          case build_bundled(name, src) do
+            "ok" ->
+              [name | acc]
+
+            err ->
+              Logger.warning("grammar #{name}: #{err}")
+              acc
+          end
+      end
+
+    load_names(names, " (bundled)")
+  end
+
+  defp load_names(names, note) do
+    for name <- names do
       case load(name) do
-        "ok" -> Logger.info("grammar loaded: #{name}")
+        "ok" -> Logger.info("grammar loaded: #{name}#{note}")
         err -> Logger.warning("grammar #{name}: #{err}")
       end
     end
 
-    :ok
+    names
   end
+
+  # Rebuild only when a source moved. A boot that changed nothing
+  # costs one stat per file, not one cc per grammar.
+  defp build_bundled(name, src) do
+    lib = Path.join(grammars_dir(), name <> lib_ext())
+    query = Path.join(grammars_dir(), name <> "-highlights.scm")
+    sources = Path.wildcard(Path.join([src, "src", "*.c"]))
+    highlights = Path.join([src, "queries", "highlights.scm"])
+
+    if stale?(lib, sources) or stale?(query, [highlights]) do
+      File.mkdir_p!(grammars_dir())
+
+      with "ok" <- compile(name, src), do: copy_highlights(name, src)
+    else
+      "ok"
+    end
+  end
+
+  defp stale?(built, sources) do
+    case File.stat(built, time: :posix) do
+      {:ok, %{mtime: at}} -> Enum.any?(sources, &newer_than?(&1, at))
+      _ -> true
+    end
+  end
+
+  defp newer_than?(path, at) do
+    match?({:ok, %{mtime: m}} when m > at, File.stat(path, time: :posix))
+  end
+
+  @doc "Register every installed grammar with the NIF."
+  def load_installed, do: load_names(installed(), "")
 
   @doc "Register one installed grammar with the NIF."
   def load(name) do
@@ -66,7 +139,12 @@ defmodule Compos.Core.TreeSitter do
     end
   end
 
-  @doc "Clone, compile, and load a grammar. Slow — run in a Task."
+  @doc """
+  Clone, compile, and load a grammar. Slow — run in a Task.
+
+  A local directory is taken as the checkout itself, so a grammar
+  being written is installed from where it is written.
+  """
   def install(name, repo_url) do
     # A pasted URL brings its whitespace with it, and git reads everything
     # before "://" as the protocol: one leading space answers
@@ -76,13 +154,21 @@ defmodule Compos.Core.TreeSitter do
     repo_url = String.trim(repo_url)
 
     File.mkdir_p!(grammars_dir())
-    src = Path.join([grammars_dir(), "src", name])
-    File.rm_rf(src)
 
-    with "ok" <- clone(repo_url, src),
-         "ok" <- compile(name, src),
-         "ok" <- copy_highlights(name, src) do
-      load(name)
+    if File.dir?(repo_url) do
+      with "ok" <- compile(name, repo_url),
+           "ok" <- copy_highlights(name, repo_url) do
+        load(name)
+      end
+    else
+      src = Path.join([grammars_dir(), "src", name])
+      File.rm_rf(src)
+
+      with "ok" <- clone(repo_url, src),
+           "ok" <- compile(name, src),
+           "ok" <- copy_highlights(name, src) do
+        load(name)
+      end
     end
   end
 

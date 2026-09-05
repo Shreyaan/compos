@@ -1,0 +1,130 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
+  "name": "whatsapp",
+  "rules": {
+    "conversation": {
+      "type": "REPEAT",
+      "content": {
+        "type": "SYMBOL",
+        "name": "message"
+      }
+    },
+    "message": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "["
+        },
+        {
+          "type": "FIELD",
+          "name": "time",
+          "content": {
+            "type": "SYMBOL",
+            "name": "timestamp"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "]"
+        },
+        {
+          "type": "STRING",
+          "value": " Chat: "
+        },
+        {
+          "type": "FIELD",
+          "name": "chat",
+          "content": {
+            "type": "SYMBOL",
+            "name": "chat"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": " From: "
+        },
+        {
+          "type": "FIELD",
+          "name": "sender",
+          "content": {
+            "type": "SYMBOL",
+            "name": "sender"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "body",
+              "content": {
+                "type": "SYMBOL",
+                "name": "body"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_blank"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
+    },
+    "timestamp": {
+      "type": "PATTERN",
+      "value": "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"
+    },
+    "chat": {
+      "type": "SYMBOL",
+      "name": "_chat_text"
+    },
+    "sender": {
+      "type": "SYMBOL",
+      "name": "_sender_text"
+    },
+    "body": {
+      "type": "SYMBOL",
+      "name": "_body_text"
+    },
+    "_blank": {
+      "type": "PATTERN",
+      "value": "[ \\t]*\\n+"
+    }
+  },
+  "extras": [],
+  "conflicts": [],
+  "precedences": [],
+  "externals": [
+    {
+      "type": "SYMBOL",
+      "name": "_chat_text"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_sender_text"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_body_text"
+    }
+  ],
+  "inline": [],
+  "supertypes": [],
+  "reserved": {}
+}
