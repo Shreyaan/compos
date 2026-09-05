@@ -355,6 +355,8 @@ defmodule Compos.Core.SchemeAPI do
         "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs.",
       "face-clear!" =>
         "(face-clear! FACE) — forget every attribute of FACE; load-theme clears a face before it applies the theme.",
+      "face-batch!" =>
+        "(face-batch! OPS) — apply a list of face changes as one change: (clear FACE) forgets a face, (set FACE KEY VALUE ...) merges attributes. The page renders once, after the last one.",
       "face-attribute" =>
         "(face-attribute FACE ATTR) — the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here.",
       "face-list" => "(face-list) — the names of every face the editor holds.",
@@ -402,7 +404,7 @@ defmodule Compos.Core.SchemeAPI do
       "minibuffer-read" =>
         "(minibuffer-read PROMPT CANDIDATES [ON-COMPLETE] ON-CONFIRM) — activate the minibuffer.",
       "minibuffer-read*" =>
-        "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist, including an optional collect handler.",
+        "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail.",
       "global-set-key" =>
         "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally.",
       "global-unset-key" =>
@@ -1557,6 +1559,20 @@ defmodule Compos.Core.SchemeAPI do
         Editor.clear_face(plain(face))
         :void
       end,
+      "face-batch!" => fn [ops] ->
+        ops
+        |> Enum.map(fn
+          [{:sym, "clear"}, face] ->
+            {:clear, plain(face)}
+
+          [{:sym, "set"}, face | kvs] ->
+            {:set, plain(face),
+             kvs |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)}
+        end)
+        |> Editor.set_faces()
+
+        :void
+      end,
       "face-attribute" => fn [face, attr] ->
         case get_in(Editor.faces(), [plain(face), plain(attr)]) do
           nil -> false
@@ -1733,6 +1749,10 @@ defmodule Compos.Core.SchemeAPI do
               "collect" -> {:on_collect, v}
               # "palette" renders the prompt as a centered panel
               "style" -> {:style, v}
+              # the palette's own words: a footer note for the facts rail
+              # and a key legend for the head row, ((KEY LABEL) ...)
+              "note" -> {:note, v}
+              "legend" -> {:legend, v}
               key -> {String.to_existing_atom("on_" <> key), v}
             end
           end)
@@ -1760,28 +1780,14 @@ defmodule Compos.Core.SchemeAPI do
           :void
 
         [[title, groups]] ->
-          menu = %{
-            title: title,
-            groups:
-              Enum.map(groups, fn [heading, rows] ->
-                %{
-                  title: heading,
-                  items:
-                    Enum.map(rows, fn [key, description, value, kind, behavior, selected] ->
-                      %{
-                        key: key,
-                        description: description,
-                        value: value,
-                        kind: plain(kind),
-                        behavior: plain(behavior),
-                        selected: selected
-                      }
-                    end)
-                }
-              end)
-          }
+          Editor.set_transient(transient_menu(title, groups, []))
+          :void
 
-          Editor.set_transient(menu)
+        # (TITLE GROUPS META): META is an alist of header, rail, and legend
+        # parts. Scheme decides what each transient says; this only carries
+        # the strings to the frame.
+        [[title, groups, meta]] ->
+          Editor.set_transient(transient_menu(title, groups, meta))
           :void
       end,
       "local-set-key" => fn [seq, command] ->
@@ -2564,6 +2570,61 @@ defmodule Compos.Core.SchemeAPI do
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v
+
+  # The transient menu the frame renders. META rows: ("subtitle" TEXT),
+  # ("context" TEXT), ("chips" ((LABEL ACTIVE?) ...)), ("columns" ((TITLE ...) ...)),
+  # ("detail" (TITLE ((KEY VALUE TONE) ...) NOTE)), ("legend" ((KEY LABEL) ...)).
+  defp transient_menu(title, groups, meta) do
+    meta = Map.new(meta, fn [k, v] -> {plain(k), v} end)
+
+    columns =
+      case Map.get(meta, "columns") do
+        [_ | _] = cols -> Enum.map(cols, fn col -> Enum.map(col, &to_string/1) end)
+        # a menu with no columns of its own: one column per group
+        _ -> Enum.map(groups, fn [heading, _rows] -> [heading] end)
+      end
+
+    %{
+      title: title,
+      columns: columns,
+      subtitle: Map.get(meta, "subtitle", ""),
+      context: Map.get(meta, "context", ""),
+      chips:
+        Enum.map(Map.get(meta, "chips", []), fn [label, active] ->
+          %{label: label, active: active == true}
+        end),
+      detail: transient_detail(Map.get(meta, "detail", false)),
+      legend:
+        Enum.map(Map.get(meta, "legend", []), fn [key, label] -> %{key: key, label: label} end),
+      groups:
+        Enum.map(groups, fn [heading, rows] ->
+          %{
+            title: heading,
+            items:
+              Enum.map(rows, fn [key, description, value, kind, behavior, selected] ->
+                %{
+                  key: key,
+                  description: description,
+                  value: value,
+                  kind: plain(kind),
+                  behavior: plain(behavior),
+                  selected: selected
+                }
+              end)
+          }
+        end)
+    }
+  end
+
+  defp transient_detail([title, rows, note]) do
+    %{
+      title: title,
+      rows: Enum.map(rows, fn [k, v, tone] -> %{k: k, v: v, tone: plain(tone)} end),
+      note: note
+    }
+  end
+
+  defp transient_detail(_), do: nil
 
   # the desktop's tuple spec for a window tree — what restore_tree accepts
   defp tree_buffers({:leaf, b, _, _, _, _, _}), do: [b]

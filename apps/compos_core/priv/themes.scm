@@ -120,13 +120,21 @@
            ;; one does not must not survive. set-face-attribute! merges, so
            ;; every face either theme or a default names is cleared first,
            ;; then the package defaults apply, then the theme on top.
-           (for-each face-clear!
-             (theme--union (map car *face-defaults*)
-                           (theme--union (map car (theme-faces *current-theme*))
-                                         (map car (cadr t)))))
+           ;;
+           ;; The three passes go to the editor as ONE change (face-batch!).
+           ;; Hundreds of single writes each rendered the page, and a
+           ;; render between the clear and the defaults showed a default
+           ;; face with no size and a 'ui face with no zoom: every window
+           ;; reflowed and its scroll moved.
+           (face-batch!
+             (append
+               (map (lambda (f) (list 'clear f))
+                    (theme--union (map car *face-defaults*)
+                                  (theme--union (map car (theme-faces *current-theme*))
+                                                (map car (cadr t)))))
+               (map (lambda (d) (cons 'set d)) *face-defaults*)
+               (map (lambda (spec) (cons 'set spec)) (cadr t))))
            (set! *current-theme* name)
-           (for-each (lambda (d) (apply set-face-attribute! d)) *face-defaults*)
-           (for-each (lambda (spec) (apply set-face-attribute! spec)) (cadr t))
            (run-hooks 'theme-change-hook)
            #t))))
 
@@ -169,6 +177,7 @@
     (list 'accent 'fg "#26356b")
     (list 'link 'fg "#26356b" 'decoration "underline")
     (list 'llm-response 'fg "#26356b" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
     (list 'diff-block 'fg "#7a5a1a" 'style "italic")
     (list 'diff-block-source 'fg "#8a857a" 'style "italic")
     (list 'dim 'fg "#8a857a")
@@ -241,6 +250,7 @@
     (list 'accent 'fg "#9fb0ea")
     (list 'link 'fg "#9fb0ea" 'decoration "underline")
     (list 'llm-response 'fg "#9fb0ea" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
     (list 'diff-block 'fg "#d5ac66" 'style "italic")
     (list 'diff-block-source 'fg "#a79d8c" 'style "italic")
     (list 'dim 'fg "#a79d8c")
@@ -317,6 +327,7 @@
     (list 'accent 'fg "#7aa2f7")
     (list 'link 'fg "#7aa2f7" 'decoration "underline")
     (list 'llm-response 'fg "#7aa2f7" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
     (list 'diff-block 'fg "#e0af68" 'style "italic")
     (list 'diff-block-source 'fg "#8b8fa3" 'style "italic")
     (list 'dim 'fg "#8b8fa3")
@@ -379,6 +390,7 @@
     (list 'accent 'fg "#cba6f7")
     (list 'link 'fg "#89b4fa" 'decoration "underline")
     (list 'llm-response 'fg "#cba6f7" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
     (list 'diff-block 'fg "#fab387" 'style "italic")
     (list 'diff-block-source 'fg "#6c7086" 'style "italic")
     (list 'dim 'fg "#6c7086")

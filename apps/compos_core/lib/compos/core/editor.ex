@@ -388,6 +388,13 @@ defmodule Compos.Core.Editor do
   def set_face(name, attrs), do: GenServer.call(__MODULE__, {:set_face, name, attrs})
   @doc "Forget every attribute of a face. load-theme clears before it applies."
   def clear_face(name), do: GenServer.call(__MODULE__, {:clear_face, name})
+  @doc """
+  Apply OPS to the face table in one change: `{:clear, name}` forgets a
+  face, `{:set, name, attrs}` merges attrs. A theme is hundreds of face
+  writes; one broadcast keeps the page from rendering a half-applied
+  theme, where a cleared default size or zoom moved every window's scroll.
+  """
+  def set_faces(ops), do: GenServer.call(__MODULE__, {:set_faces, ops})
   @doc "The face table: name -> attrs."
   def faces, do: GenServer.call(__MODULE__, :faces)
 
@@ -1840,6 +1847,18 @@ defmodule Compos.Core.Editor do
     changed(:ok, %{state | faces: faces})
   end
 
+  def handle_call({:set_faces, ops}, _from, state) do
+    faces =
+      Enum.reduce(ops, state.faces, fn
+        {:clear, name}, faces -> Map.delete(faces, name)
+        {:set, name, attrs}, faces -> Map.update(faces, name, attrs, &Map.merge(&1, attrs))
+      end)
+
+    if faces == state.faces,
+      do: {:reply, :ok, state},
+      else: changed(:ok, %{state | faces: faces})
+  end
+
   def handle_call(:faces, _from, state), do: {:reply, state.faces, state}
 
   def handle_call({:clear_face, name}, _from, state) do
@@ -2498,7 +2517,18 @@ defmodule Compos.Core.Editor do
       completing: mb.on_complete not in [nil, false],
       # presentation, chosen by the prompt: nil = bottom panel,
       # "palette" = centered panel
-      style: Map.get(mb, :style)
+      style: Map.get(mb, :style),
+      # the prompt's own words for the palette: the rail's footer note and
+      # the head row's key legend. Scheme writes both; nothing is inferred.
+      note: (is_binary(Map.get(mb, :note)) && mb.note) || "",
+      legend:
+        case Map.get(mb, :legend) do
+          rows when is_list(rows) ->
+            for [key, label] <- rows, do: %{key: to_string(key), label: to_string(label)}
+
+          _ ->
+            []
+        end
     }
   end
 
