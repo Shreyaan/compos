@@ -20,8 +20,8 @@
   'group 'whatsapp 'type 'number)
 
 (define *whatsapp-buffer* "*WhatsApp*")
-(defcustom 'whatsapp-group ""
-  "Group to open WhatsApp in. Empty uses the current group."
+(defcustom 'whatsapp-group "whatsapp"
+  "Group to open WhatsApp in. Uses the named WhatsApp group."
   'group 'whatsapp 'type 'string)
 (define *whatsapp-show-buffer* "*WhatsApp conversation*")
 
