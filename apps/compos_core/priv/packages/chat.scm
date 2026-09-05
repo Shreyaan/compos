@@ -788,6 +788,15 @@
 (public! 'chat-title
   "(chat-title BUF TITLE) — set a chat's title by renaming its buffer")
 
+(define (chat-title--first-summary buf)
+  ;; the label the chat wore first: chat-summary-log is newest-first, so
+  ;; its last entry is the opening sentence. A chat that has one summary
+  ;; and no log yet answers with that.
+  (let ((log (buffer-local buf 'chat-summary-log)))
+    (if (pair? log)
+        (cadr (car (reverse log)))
+        (buffer-local buf 'chat-summary))))
+
 (define-command "chat-title" "Set the current chat's title"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -795,9 +804,22 @@
           (message "not a chat buffer")
           (minibuffer-read "Chat title: " '()
             (lambda (title)
-              (if (chat-title buf title)
-                  (message (string-append "Chat title: " (buffer-name buf)))
-                  (message "Chat title cannot be empty or is already taken"))))))))
+              ;; empty input takes the chat's first running summary, the
+              ;; sentence that already names the work
+              (let ((name (if (equal? (string-trim title) "")
+                              (chat-title--first-summary buf)
+                              title)))
+                (cond ((not name)
+                       (message "No summary yet; type a title"))
+                      ((chat-title buf name)
+                       (message (string-append "Chat title: " (buffer-name buf))))
+                      (else
+                       (message "Chat title cannot be empty or is already taken"))))))))))
+
+;; the title names the chat, so the key that sets it lives on chat-mode's
+;; own map beside C-c C-k and C-c C-v; M-x still reaches it from anywhere,
+;; where the chat-buffer? guard turns it away.
+(mode-keys! "chat-mode" '(("C-c C-t" "chat-title")))
 
 ;;; --- the conversation is named for its group ------------------------------------
 ;;; A chat's name is DERIVED, never invented: *chat:<group>*, and a group
