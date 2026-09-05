@@ -146,7 +146,8 @@ I want to start from a project or directory
 
 #### I want to switch to another group
 
-- Groups appear in this frame's MRU order, the current group excluded.
+- Every group appears, in this frame's MRU order; the group you stand in comes last.
+- Moving the highlight previews the whole group: the arrangement you would land in.
 - Accepting a group saves this layout and restores that group's layout.
 - **Command:** `switch`.
 
@@ -362,7 +363,9 @@ A kill is a scene change, not a window repair. The frame leaves G before the mem
 
 The kill buries a tombstone: the name, the record's fields, and each member's name and file. The graveyard keeps the last twenty tombstones and persists with the desktop. `group-revive` (`M-x`) completes over them, newest first, and shows each one's members. A name that an open group already has is refused.
 
-`group-switch` prompts with one container card per group: the group's name, how many buffers it holds, and its four most recent members as chips. `group-switch-style` picks the shape the prompt takes, `"modal"` by default: a centered panel over the windows, where the card and the facts rail say what the group holds. Set it to `"popup"` for an overlay on the bottom edge, or `"minibuffer"` for the bottom rows; under both the windows stay visible, so the switcher also previews the highlighted group's most recent buffer in the window the prompt came from. The preview waits for the highlight to rest (`group-switch-peek-ms`, 120 ms) before it draws, so holding `C-n` moves through the list without a draw per row. A modal covers the windows, so it draws no preview at all.
+`group-switch` prompts with one container card per group, every group the editor holds. The group you stand in is a card like the others: it goes last in its section and never leads, so the default an empty `RET` takes is still a switch. A card says the group's name, how many buffers it holds, and its four most recent members as chips.
+
+The prompt previews the WHOLE group, never one buffer of it. `group-switch-style` picks the shape the prompt takes, `"modal"` by default: a centered panel over the windows, where the facts rail previews the highlighted group entire - what it holds, the shape it opens in, and every member, not the four the card wears. Set it to `"popup"` for an overlay on the bottom edge, or `"minibuffer"` for the bottom rows; under both the windows stay visible, so the preview draws the group in the frame: the layout the group saved, else the arrangement arrival would build for it. The preview waits for the highlight to rest (`group-switch-peek-ms`, 120 ms) before it draws, so holding `C-n` moves through the list without a draw per row. A look is not an arrival: it writes no winner entry, moves no MRU, and leaves the frame's own group alone, and the prompt puts the whole arrangement you came from back when it closes. A modal covers the windows, so it draws no preview in them; its rail is its preview.
 
 ### The seed of `new`
 
@@ -489,11 +492,11 @@ The active groups are derived the same way: `(active-groups)` answers every grou
 
 ### Switch candidates
 
-`switch` completes over groups in frame-local MRU order. The current group is excluded. Groups with no MRU entry trail in creation order. The last row is `new`.
+`switch` completes over groups in frame-local MRU order. Every group is a candidate, the group you stand in too: it goes last in its section, so it is never the lead row and never the empty-input default. Groups with no MRU entry trail in creation order. The last row is `new`.
 
 ### Candidate preview
 
-Moving the highlight shows the group under it: its most recent member, in the window the prompt came from. The preview never moves the MRU ring and it saves no layout. `RET` puts that window back and then switches; `C-g` puts it back and changes nothing. The `new` row previews nothing.
+Moving the highlight shows the group under it, whole: the layout that group saved, else the arrangement arrival would build for it. The preview never moves the MRU ring, writes no winner entry, leaves the frame's own group alone, and saves no layout. `RET` puts the arrangement you came from back and then switches; `C-g` puts it back and changes nothing. The `new` row previews nothing. A modal prompt covers the windows, so it previews the group in its facts rail instead: what the group holds, the shape it opens in, and every member.
 
 ### Transient buffers
 

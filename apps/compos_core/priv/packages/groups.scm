@@ -1507,23 +1507,42 @@
   (let ((cell (assoc (group-resolve-id g) index)))
     (if cell (cdr cell) '())))
 
-(define (group-switch-candidate-in index g)
-  (let* ((names (map buffer-modeline-name (group-members-in index g)))
-         (n (length names)))
-    (list (group-name g)
+;; The rail says the whole group while the highlight rests on a card:
+;; what the group holds, the shape it opens in, and every member. The
+;; card wears the first four as chips, and a group is more than four.
+(define (group-switch-facts hint shape names)
+  (append (list (list "holds" hint)
+                (list "opens" shape))
           (if (null? names)
-              "no buffers"
-              (string-append (number->string n) " buffer" (if (= n 1) "" "s")))
+              '()
+              (cons (list "buffers" (car names))
+                    (map (lambda (name) (list "" name)) (cdr names))))))
+
+(define (group-switch-candidate-in index g)
+  (let* ((members (group-members-in index g))
+         (names (map buffer-modeline-name members))
+         (n (length names))
+         (hint (if (null? names)
+                   "no buffers"
+                   (string-append (number->string n) " buffer" (if (= n 1) "" "s")))))
+    (list (group-name g)
+          hint
           "container"
-          (take-n names 4))))
+          (take-n names 4)
+          ""
+          (group-switch-facts hint (group-preview-shape-in index g) names))))
 
 (define (group-switch-candidate g)
   (group-switch-candidate-in (group-members-index) g))
 
 (define (switch-to-group-candidates)
   (let* ((current (frame-group))
-         (recent (filter (lambda (id) (not (equal? id current)))
-                         (group-ids-mru)))
+         (all (group-ids-mru))
+         ;; every group, the one you stand in included: you came to see
+         ;; them all. It only never leads — it goes last in its section,
+         ;; so the empty-input default is still a switch
+         (recent (append (filter (lambda (id) (not (equal? id current))) all)
+                         (filter (lambda (id) (equal? id current)) all)))
          (mine (group-buffer-memberships (current-buffer)))
          (mine-recent (filter (lambda (id) (member id mine)) recent))
          (others (filter (lambda (id) (not (member id mine))) recent))
@@ -1548,25 +1567,78 @@
             (group-create-and-enter! name '() #f))))))
 
 ;; What the highlight shows while you move through the groups: the
-;; group's most recent member, in the window the prompt came from. The
-;; look uses window-preview-buffer!, so the MRU ring does not move and a
-;; cancel leaves the history as it was. A dormant member wakes for the
-;; look, and sleeps again when the prompt closes; buffer-sleep! refuses a
-;; buffer that is on screen, so the group you actually enter stays awake.
-(define (group-peek-buffer-in index g)
-  (let loop ((members (group-members-in index g)))
-    (cond ((null? members) #f)
-          ;; the work, not a companion: the group's chat and a scratch
-          ;; that belongs to a buffer are not where the work is
-          ((and (group-work-buffer? (car members))
-                (not (buffer-local (car members) 'scratch-owner)))
-           (car members))
-          (else (loop (cdr members))))))
+;; WHOLE group, not one buffer of it — the arrangement you would land
+;; in. The members a preview arranges are the work, so a look at a
+;; group is a look at what you would work on.
+(define (group-preview-members-in index g)
+  (filter (lambda (b)
+            ;; the work, not a companion: the group's chat and a scratch
+            ;; that belongs to a buffer are not where the work is
+            (and (group-work-buffer? b)
+                 (not (buffer-local b 'scratch-owner))))
+          (group-members-in index g)))
 
 ;; One index per prompt: group-buffers-mru scans every buffer twice per
 ;; group, and the highlight moved one group per key.
-(define (group-peek-buffer g)
-  (group-peek-buffer-in (group-members-index) g))
+(define (group-preview-members g)
+  (group-preview-members-in (group-members-index) g))
+
+;; The shape a group opens in, for the rail: the panes of its saved
+;; layout, else the panes arrival would build for it.
+(define (group-preview-shape-in index g)
+  (let* ((saved (group-layout g))
+         (panes (if saved
+                    (length (window-tree-buffers saved))
+                    (min 2 (length (group-preview-members-in index g))))))
+    (cond ((= panes 0) "nothing yet")
+          ((= panes 1) "one pane")
+          (else (string-append (number->string panes) " panes")))))
+
+;; A group with no saved layout opens the way group-default-layout!
+;; opens it: the work in the main pane, the next member beside it. The
+;; look draws it with window-preview-buffer!, so the MRU ring does not
+;; move and a mere look creates nothing.
+(define (group-preview-default! members)
+  (when (pair? members)
+    (delete-other-windows!)
+    ;; split first, then draw into each window by id: selecting a window
+    ;; would move the MRU ring, and a look moves nothing
+    (let ((main (active-window))
+          (two? (pair? (cdr members))))
+      (when two? (split-window! 'h 0.6))
+      (window-preview-buffer! (car members) main)
+      (let ((side (and two? (other-window-id main))))
+        (when side (window-preview-buffer! (car (cdr members)) side))))))
+
+;; Draw G in the frame, and answer the buffers the look woke. A look is
+;; not an arrival: it writes no winner entry, leaves the frame's own
+;; group alone, and saves no layout, and the prompt puts the windows
+;; back when it closes. A dormant member wakes for the look and sleeps
+;; again after; buffer-sleep! refuses a buffer that is on screen, so the
+;; group you actually enter stays awake.
+(define (group-preview-draw! index g)
+  (let* ((saved (group-layout g))
+         (members (group-preview-members-in index g))
+         (names (if saved (window-tree-buffers saved) members))
+         (asleep (filter (lambda (b) (and (buffer-known? b) (not (buffer-exists? b))))
+                         names))
+         (winner *winner-inhibit*)
+         (standing *group-current-inhibit*))
+    (set! *winner-inhibit* #t)
+    (set! *group-current-inhibit* #t)
+    (if saved
+        (begin (group-revive-layout-files! saved)
+               ;; a look: the layout is drawn, the history is not written
+               (window-tree-preview! saved))
+        (group-preview-default! members))
+    (set! *group-current-inhibit* standing)
+    (set! *winner-inhibit* winner)
+    (let loop ((rest asleep) (woken '()))
+      (cond ((null? rest) woken)
+            ((buffer-exists? (car rest))
+             (restore-buffer-runtime! (car rest))
+             (loop (cdr rest) (cons (car rest) woken)))
+            (else (loop (cdr rest) woken))))))
 
 ;; In the groups board a verb acts on the row; anywhere else it prompts.
 (define (in-groups-board?)
@@ -1580,14 +1652,15 @@
         (let* ((action (group-switch-new-action))
                (candidates (switch-to-group-candidates))
                (index (group-members-index))
-               (here (current-buffer))
+               ;; the arrangement you came from: a look replaces the
+               ;; whole frame, so the whole frame is what comes back
+               (here-windows (window-tree))
                ;; #f once the prompt closed: a look that was still
                ;; waiting must not draw after it
                (open #t)
                (woken '())
                (show-here!
-                 (lambda ()
-                   (when (buffer-known? here) (window-preview-buffer! here))))
+                 (lambda () (window-tree-preview! here-windows)))
                (sleep-woken!
                  (lambda ()
                    (for-each (lambda (buf) (buffer-sleep! buf)) woken)
@@ -1595,18 +1668,14 @@
                (peek-now!
                  (lambda (name)
                    (when open
-                   (let ((buf (group-peek-buffer-in index (string-trim name))))
-                     (if (and buf (buffer-known? buf))
-                         (let ((sleeping (not (buffer-exists? buf))))
-                           (window-preview-buffer! buf)
-                           (when (and sleeping (buffer-exists? buf))
-                             (restore-buffer-runtime! buf)
-                             (set! woken (cons buf woken))))
-                         ;; the new-context row previews nothing: it names
-                         ;; no group yet, so the window shows what it showed
-                         (show-here!))))))
+                     (let ((id (group-resolve-id (string-trim name))))
+                       (if id
+                           (set! woken (append (group-preview-draw! index id) woken))
+                           ;; the new-context row previews nothing: it names
+                           ;; no group yet, so the windows stay as they were
+                           (show-here!))))))
                ;; a look per highlight that RESTS: C-n held down moves the
-               ;; highlight faster than a window draws, and each look is a
+               ;; highlight faster than a frame draws, and each look is a
                ;; draw (and a wake, for a dormant member)
                (peek!
                  (lambda (name)
@@ -1619,7 +1688,7 @@
                 (lambda (name)
                   (set! open #f)
                   ;; the switch saves the layout you leave, so put the
-                  ;; window back before it looks: a peek is not the
+                  ;; windows back before it looks: a preview is not the
                   ;; arrangement you were working in
                   (show-here!)
                   (let ((id (group-resolve-id (string-trim name))))

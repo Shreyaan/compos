@@ -1109,7 +1109,9 @@ defmodule Compos.Ui.Layouts do
             flex: 0 0 172px;
             /* min-width:auto would let the long title win over the
                basis and swallow half the palette */
-            min-width: 0; overflow: hidden;
+            /* every member of a group is a fact row, so the rail
+               scrolls rather than swallowing the tail of a long group */
+            min-width: 0; overflow: hidden auto;
             border-left: 1px solid var(--border-bg, #e2dbc9);
             background: var(--default-bg, #efeadf);
             padding: 11px 12px 12px;
@@ -2634,7 +2636,13 @@ defmodule Compos.Ui.Layouts do
 
                   const focusedTerminal = document.activeElement?.closest?.(".terminal-view");
                   const staleEditable = document.activeElement?.closest?.(".window:not(.active) .buf[contenteditable]");
-                  if (document.hasFocus() && (editorOpen || (!terminal && focusedTerminal) || staleEditable)) {
+                  // A rendered Browse pane owns focus inside its iframe.
+                  // Switching into the adjacent rich chat leaves that iframe
+                  // inactive, but a rich chat has no contenteditable node of
+                  // its own to reclaim focus. Return to the editor's sink so
+                  // its key dispatch can receive the next chat input.
+                  const stalePreview = document.activeElement?.closest?.(".window:not(.active) iframe");
+                  if (document.hasFocus() && (editorOpen || (!terminal && focusedTerminal) || staleEditable || stalePreview)) {
                     this.sink?.focus();
                   }
                 };

@@ -467,7 +467,15 @@ defmodule Compos.Core.Editor do
 
   @doc "Replace a frame's window tree from a {:leaf, name} | {:split, dir, a, b} spec."
   def restore_tree(spec, active_buffer, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid)})
+    do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid), true})
+
+  @doc """
+  Arrange a frame as SPEC without touching the MRU ring: a look at a layout,
+  not a switch into it. The group switcher previews a whole group this way,
+  and puts the arrangement you came from back when it closes.
+  """
+  def preview_tree(spec, active_buffer, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid), false})
 
   # viewport: each client reports how many text rows fit its frame; wheel
   # scrolls server-side; any key re-enables point auto-follow
@@ -2047,7 +2055,7 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  def handle_call({:restore_tree, spec, active_buffer, fid}, _from, state) do
+  def handle_call({:restore_tree, spec, active_buffer, fid, bump_mru?}, _from, state) do
     f = frame(state, fid)
 
     # the old windows are gone — their stored points go with them
@@ -2073,12 +2081,17 @@ defmodule Compos.Core.Editor do
 
     # what the restored tree shows IS the recent history now: the active
     # buffer leads, the other windows follow. Without this a group
-    # switch left no trace in C-x b.
+    # switch left no trace in C-x b. A preview is not a switch, so a look
+    # at a layout leaves the history exactly as it was.
     shown = tree |> leaf_ids_buffers() |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
     active_buf = find_leaf(tree, active).buffer
 
     state =
-      Enum.reduce(Enum.reverse(shown -- [active_buf]) ++ [active_buf], state, &bump_mru(&2, &1))
+      if bump_mru? do
+        Enum.reduce(Enum.reverse(shown -- [active_buf]) ++ [active_buf], state, &bump_mru(&2, &1))
+      else
+        state
+      end
 
     changed(
       :ok,

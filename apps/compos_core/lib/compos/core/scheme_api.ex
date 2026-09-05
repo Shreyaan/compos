@@ -509,6 +509,8 @@ defmodule Compos.Core.SchemeAPI do
         "(set-mb-redirect! BOOL) — toggle redirection of current-buffer to the minibuffer's text.",
       "window-preview-buffer!" =>
         "(window-preview-buffer! BUF [WIN]) — show BUF in WIN (default: the active window) without MRU changes.",
+      "window-tree-preview!" =>
+        "(window-tree-preview! LAYOUT) — draw a layout from window-tree as a look: the windows change, the MRU ring does not.",
       "buffer-sleep!" =>
         "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned.",
       "minibuffer-set-candidates!" =>
@@ -1615,6 +1617,13 @@ defmodule Compos.Core.SchemeAPI do
       "window-tree-set!" => fn [%{tree: tree, active: active}]
                                when elem(tree, 0) in [:leaf, :split] ->
         Editor.restore_tree(tree, active)
+        :void
+      end,
+      # the same look, one level up from window-preview-buffer!: a whole
+      # arrangement drawn without an entry in the history
+      "window-tree-preview!" => fn [%{tree: tree, active: active}]
+                                   when elem(tree, 0) in [:leaf, :split] ->
+        Editor.preview_tree(tree, active)
         :void
       end,
       # A saved layout names buffers, and a name can outlive its buffer.

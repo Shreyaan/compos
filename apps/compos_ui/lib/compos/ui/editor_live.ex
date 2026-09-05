@@ -1510,6 +1510,11 @@ defmodule Compos.Ui.EditorLive do
       nil ->
         nil
 
+      # a row that wrote its own facts says them as they are: a group
+      # card writes the whole group, and the rail is where it fits
+      %{facts: [_ | _] = facts} = c ->
+        %{title: c.label, facts: facts, note: note}
+
       %{kind: "container"} = c ->
         chips = Map.get(c, :chips, [])
 

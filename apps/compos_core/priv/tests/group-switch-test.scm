@@ -1331,8 +1331,10 @@
       (check-equal! (t--sw-selected) "zzsw-recent" "the most recent other group leads")
       (check-true! (< (t--sw-at "zzsw-recent") (t--sw-at "zzsw-older"))
                    "the other groups keep MRU order")
-      (check-false! (member "zzsw-here" (t--sw-labels))
-                    "the current group is not a destination"))
+      (check-true! (and (member "zzsw-here" (t--sw-labels)) #t)
+                   "the group you stand in is a row too: the list shows them all")
+      (check-true! (< (t--sw-at "zzsw-older") (t--sw-at "zzsw-here"))
+                   "and it comes last: it never leads"))
     (t--sw-done!)))
 
 (deftest 'group-switch-puts-the-current-buffers-groups-first-in-a-mixed-frame
@@ -1438,12 +1440,16 @@
         (check-equal! (current-buffer) t--sw-third "the picked buffer has focus")))
     (t--sw-done!)))
 
-(deftest 'switch-to-group-previews-the-group-under-the-highlight
-  "moving the highlight shows the group's most recent member"
+(deftest 'switch-to-group-previews-the-whole-group-under-the-highlight
+  "moving the highlight draws the group entire, not one buffer of it"
   (lambda ()
     (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-peek-here"))
+    (let ((style group-switch-style)
+          (here (group-record-create! "zzsw-peek-here"))
           (there (group-record-create! "zzsw-peek-there")))
+      ;; a modal covers the windows and previews in its rail; these are
+      ;; the styles that preview in the frame itself
+      (set! group-switch-style "popup")
       (buffer-add-group! t--sw-first here)
       (buffer-add-group! t--sw-second there)
       (buffer-add-group! t--sw-third there)
@@ -1458,14 +1464,81 @@
       (t--sw-type! "zzsw-peek-there")
       ;; the look waits for the highlight to rest
       (check-true!
-        (wait-until (lambda () (equal? (cadr (car (window-list))) t--sw-second)) 1000 10)
-        "the window shows the group's leading member")
+        (wait-until (lambda ()
+                      (let ((shown (map cadr (window-list))))
+                        (and (member t--sw-second shown)
+                             (member t--sw-third shown)
+                             #t)))
+                    1000 10)
+        "every member is on screen, not the group's leading buffer alone")
       (check-equal! (car (buffer-list-mru)) t--sw-first
                     "and the preview moved no history")
 
       (t--sw-key! "cancel")
-      (check-equal! (cadr (car (window-list))) t--sw-first
-                    "cancelling puts the buffer you came from back"))
+      (check-equal! (map cadr (window-list)) (list t--sw-first)
+                    "cancelling puts the whole arrangement you came from back")
+      (set! group-switch-style style))
+    (t--sw-done!)))
+
+(deftest 'a-previewed-group-shows-the-layout-it-saved
+  "a group with a layout is previewed in that layout, and the look moves no history"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((style group-switch-style)
+          (here (group-record-create! "zzsw-look-here"))
+          (there (group-record-create! "zzsw-look-there")))
+      (set! group-switch-style "popup")
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second there)
+      (buffer-add-group! t--sw-third there)
+      ;; the layout the group saves when you work in it: its two members,
+      ;; one above the other
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-second)
+      (split-window! 'v 0.5)
+      (other-window!)
+      (t--sw-show-here! t--sw-third)
+      (group-layout-save! there)
+      ;; and the frame you look from: one window, your own buffer
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-first)
+      (set-frame-local! 'current-group here)
+
+      (let ((history (car (buffer-list-mru))))
+        (run-command "group-switch")
+        (t--sw-type! "zzsw-look-there")
+        (check-true!
+          (wait-until (lambda () (equal? (map cadr (window-list))
+                                        (list t--sw-second t--sw-third)))
+                      1000 10)
+          "the preview is the group's own saved layout, pane for pane")
+        (check-equal! (car (buffer-list-mru)) history
+                      "and the look moved no history")
+
+        (t--sw-key! "cancel")
+        (check-equal! (map cadr (window-list)) (list t--sw-first)
+                      "cancelling puts back the frame you came from"))
+      (set! group-switch-style style))
+    (t--sw-done!)))
+
+(deftest 'a-group-card-previews-the-whole-group-in-its-facts
+  "the card wears four chips; the rail it previews with names every member"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((g (group-record-create! "zzsw-facts")))
+      (for-each (lambda (b) (buffer-add-group! b g))
+                (list t--sw-first t--sw-second t--sw-third))
+      (let* ((row (group-switch-candidate g))
+             (facts (nth 5 row))
+             (said (map (lambda (f) (car (cdr f))) facts))
+             (members (map buffer-modeline-name (group-buffers-mru g))))
+        (check-equal! (nth 2 row) "container" "the row is a container card")
+        (check-equal! (car (car facts)) "holds" "the rail leads with what it holds")
+        (check-true! (and (member "3 buffers" said) #t) "and says how many")
+        (check-true! (and (member "opens" (map car facts)) #t)
+                     "and the shape the group opens in")
+        (check-equal! (filter (lambda (m) (not (member m said))) members) '()
+                      "every member of the group is a fact of its own")))
     (t--sw-done!)))
 
 (deftest 'switch-to-group-enters-the-group-it-previewed

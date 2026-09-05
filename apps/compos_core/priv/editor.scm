@@ -10406,6 +10406,13 @@
   (builtin-window-tree-set! tree)
   (window-state-changed!))
 
+;; a look at an arrangement, the way window-preview-buffer! is a look at
+;; a buffer: the windows change, the MRU ring does not
+(define builtin-window-tree-preview! window-tree-preview!)
+(define (window-tree-preview! tree)
+  (builtin-window-tree-preview! tree)
+  (window-state-changed!))
+
 (define builtin-delete-other-windows! delete-other-windows!)
 (define (delete-other-windows!)
   (winner-save!)
