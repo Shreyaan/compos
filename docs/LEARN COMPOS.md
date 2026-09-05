@@ -17,19 +17,7 @@
 
 Compos is an Emacs-style editor. You work in buffers, run named commands, and use a companion chat when you want help.
 
-
-
-
 You do not need to learn everything at once. Begin by opening a file, making a change, and saving it. The rest can be discovered as you work. If you want to know why emacs is built the way it is and why you should be interested, read Why?
-
-
-
-
-
-
-
-
-
 
 ## How to read Emacs notation
 
