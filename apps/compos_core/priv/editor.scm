@@ -1948,7 +1948,8 @@
     (buffer-set-local! buf 'list-layout-cache #f)
     ;; derived content (S15): the refresh below re-renders it from
     ;; rows-fn, so the desktop saves mode + locals, not the rows
-    (buffer-set-local! buf 'transient #t)
+    (buffer-set-local! buf 'transient
+      (if (member 'transient opts) (plist-get opts 'transient) #t))
     ;; the stamp names the rows of one render — a restart draws new ones
     (desktop-skip! buf 'list-stamp)
     ;; A list opens WIDE. The typed narrowing answers a question you asked
@@ -11685,6 +11686,44 @@
 (define-command "windmove-down" "Select the window below"
   (lambda () (windmove-focusable! 'down)))
 
+;; Move a view onto the neighboring stack; consume the source's previous
+;; entry instead of exchanging the two visible buffers. Splits stay intact.
+(define (window-move-view! dir)
+  (let* ((source (active-window))
+         (neighbor (window-in-direction dir))
+         (buf (window-buffer source))
+         (point (window-point source))
+         (past (window-buffer-history source))
+         (eligible (filter (lambda (b)
+                            (and (not (equal? b buf))
+                                 (buffer-known? b) (not (buffer-context-only? b))
+                                 (not (popup--class? b)) (not (peek-buffer? b))
+                                 (window-fill-member? b))) past)))
+    (cond ((not neighbor) (message "No neighboring pane"))
+          ((or (not (window-focusable? (car neighbor)))
+               (not (layout-visible-window? neighbor))
+               (not (layout-visible-window? (list source buf)))
+               (not (window-fill-member? buf)))
+           (message "Cannot move this view into that pane"))
+          ((null? eligible) (message "No previous buffer to reveal"))
+          (else
+            (switch-to-buffer-here! (car eligible))
+            (window-history-set! source
+              (filter (lambda (b) (not (equal? b buf))) past))
+            (window-quit-restore-forget! source)
+            (select-window! (car neighbor))
+            (switch-to-buffer-here! buf)
+            (window-set-point! (car neighbor) point)
+            (window-quit-restore-forget! (car neighbor))))))
+
+(for-each
+  (lambda (dir)
+    (let ((name (string-append "windmove-view-" (symbol->string dir))))
+      (define-command name "Move this view to the neighboring pane and reveal its previous buffer"
+        (lambda () (window-move-view! dir)))
+      (catalog-meta! 'command name 'domain 'windows 'effects '(write display))))
+  '(left right up down))
+
 ;; Swap this pane's buffer with the directional neighbor's and follow it
 ;; (Emacs windmove-swap-states-*)
 (define (window-swap! dir)
@@ -12256,7 +12295,7 @@
 (global-set-key "C-c p" "popup-buffer")
 ;; Cmd-arrows move between windows; Cmd-Shift-arrows carry the buffer over
 (windmove-default-keybindings 'super)
-(windmove-swap-states-default-keybindings '(shift super))
+(windmove-install-keybindings! '(shift super) "windmove-view-")
 (global-set-key "S-<left>" "previous-buffer")
 (global-set-key "S-<right>" "next-buffer")
 (global-set-key "C-x <left>" "previous-buffer")
@@ -12484,7 +12523,7 @@
 (public! 'buffer-mode-is? "(buffer-mode-is? BUF NAME) — #t when the buffer's major mode is NAME or descends from it")
 (public! 'mode-setup! "(mode-setup! NAME) — run NAME's setup in the current buffer, the way a derived mode inherits it")
 (public! 'define-list-mode!
-  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact."
+  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Set transient to #f for persistent app buffers (default #t). Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact."
   'ui)
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 (public! 'marginalia! "(marginalia! CATEGORY FN) — FN turns one candidate of CATEGORY ('file 'buffer 'command) into the text beside it; replaces the annotator for that category")

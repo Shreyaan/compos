@@ -71,6 +71,13 @@ defmodule Compos.WhatsappTest do
     :ok
   end
 
+  test "WhatsApp app buffers remain eligible for group layouts" do
+    open_chat()
+    assert eval!(~S|(buffer-local "*WhatsApp*" 'transient)|) == "#f"
+    assert eval!(~S|(buffer-local "*WhatsApp conversation*" 'transient)|) == "#f"
+    assert eval!(~S|(fill-candidate? "*WhatsApp*")|) == "#t"
+  end
+
   test "empty destination opens in the current group" do
     eval!(~S|(switch-to-group! (group-ensure-record! "zz-whatsapp-here"))|)
     eval!(~S|(set! whatsapp-group "") (run-command "whatsapp")|)
@@ -83,7 +90,9 @@ defmodule Compos.WhatsappTest do
     eval!(~S|(set! whatsapp-group "zz-whatsapp-destination") (run-command "whatsapp")|)
     assert eval!("(group-name (frame-group))") == ~S("zz-whatsapp-destination")
     assert eval!(~S|(buffer-in-group? "*WhatsApp*" "zz-whatsapp-destination")|) == "#t"
-    assert eval!(~S|(buffer-in-group? "*WhatsApp conversation*" "zz-whatsapp-destination")|) == "#t"
+
+    assert eval!(~S|(buffer-in-group? "*WhatsApp conversation*" "zz-whatsapp-destination")|) ==
+             "#t"
   end
 
   test "empty destination without a current group stays ungrouped" do
@@ -93,6 +102,7 @@ defmodule Compos.WhatsappTest do
     (set! whatsapp-group "")
     (run-command "whatsapp")
     """)
+
     assert eval!("(frame-group)") == "#f"
     assert eval!(~S|(buffer-group-ids "*WhatsApp*")|) == "()"
     assert eval!(~S|(buffer-group-ids "*WhatsApp conversation*")|) == "()"
@@ -102,8 +112,10 @@ defmodule Compos.WhatsappTest do
     eval!(~S|(run-command "whatsapp")|)
     assert eval!(~S|(group-name (frame-group))|) == ~S("whatsapp")
     assert eval!(~S|(window-buffer (scene-window 'index))|) == ~S("*WhatsApp*")
+
     assert eval!(~S|(window-buffer (scene-window 'show))|) ==
              ~S("*WhatsApp conversation*")
+
     assert eval!(~S|(group-name (buffer-group "*WhatsApp*"))|) == ~S("whatsapp")
     eval!(~S|(list-set-query! "*WhatsApp*" "jha")|)
 
@@ -123,20 +135,26 @@ defmodule Compos.WhatsappTest do
 
     assert eval!(~S|(group-name (buffer-group "*WhatsApp conversation*"))|) ==
              ~S("whatsapp")
+
     assert Buffer.text(@list_buffer) =~ "Mukund"
     assert Buffer.text(@list_buffer) =~ "me: it's the weekend"
     assert Buffer.text(@chat_buffer) =~ "09-05 11:49  Me"
     assert Buffer.text(@chat_buffer) =~ "it's the weekend"
     refute Buffer.text(@chat_buffer) =~ "Chat: "
     refute Buffer.text(@chat_buffer) =~ "From: "
+
     assert eval!(~S|(buffer-local "*WhatsApp conversation*" 'render-mode)|) ==
              ~S("blocks")
+
     assert eval!(~S|(length (buffer-local "*WhatsApp conversation*" 'render-blocks))|) ==
              "2"
+
     assert eval!(~S|(buffer-local "*WhatsApp conversation*" 'whatsapp-jid)|) ==
              ~S("123@s.whatsapp.net")
+
     assert eval!(~S|(window-buffer (scene-window 'show))|) ==
              ~S("*WhatsApp conversation*")
+
     assert eval!("*zz-whatsapp-message-fetches*") == "1"
 
     eval!(~S|(switch-to-buffer! "*WhatsApp conversation*")|)
@@ -191,6 +209,7 @@ defmodule Compos.WhatsappTest do
     """)
 
     refute Buffer.text(@chat_buffer) =~ "stale response"
+
     assert eval!(~S|(buffer-local "*WhatsApp conversation*" 'whatsapp-jid)|) ==
              ~S("new@lid")
   end
@@ -202,6 +221,7 @@ defmodule Compos.WhatsappTest do
     (with-current-buffer "*WhatsApp conversation*"
       (lambda () (set-mode! "whatsapp-chat-mode")))
     """)
+
     eval!(~S|(switch-to-buffer! "*WhatsApp conversation*")|)
     press("g")
 

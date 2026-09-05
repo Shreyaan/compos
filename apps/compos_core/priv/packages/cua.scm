@@ -65,10 +65,6 @@
     ("M-S-<right>" "cua-select-forward-word")
     ("C-S-<left>" "cua-select-backward-word")
     ("C-S-<right>" "cua-select-forward-word")
-    ("s-S-<left>" "cua-select-line-start")
-    ("s-S-<right>" "cua-select-line-end")
-    ("s-S-<up>" "cua-select-buffer-start")
-    ("s-S-<down>" "cua-select-buffer-end")
     ("C-S-<home>" "cua-select-buffer-start")
     ("C-S-<end>" "cua-select-buffer-end")
     ("S-<prior>" "cua-select-page-up")
@@ -83,6 +79,11 @@
 ;; global minor mode does in Emacs. Turning it off takes the map away and
 ;; leaves every other binding of those keys as it was.
 (define-keymap! "cua-mode-map")
+;; Cmd-Shift-arrows move views between panes. Remove old selection bindings
+;; on reload too; Shift-Home/End retain line selection.
+(for-each (lambda (dir)
+            (keymap-unset! "cua-mode-map" (string-append "s-S-<" dir ">")))
+          '("left" "right" "up" "down"))
 (for-each (lambda (k) (define-key "cua-mode-map" (car k) (cadr k))) cua--keys)
 
 (define (cua--others)

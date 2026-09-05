@@ -134,3 +134,10 @@ Then a peek takes a window the chain makes, the next peek takes that same window
 A display notes what it did to a window: `window` when it made the window, `other` when it took a window that showed another buffer. `q` (`quit-window`) undoes that first, then kills the listing: the window the display made goes, or the buffer the display replaced comes back. `window-quit-restore!` does the undo alone.
 
 Tests: `priv/tests/display-buffer-test.scm`, run by `test/compos/display_buffer_test.exs` in the test daemon (they rearrange windows).
+
+Cmd-Shift-arrows move the active view onto the neighboring pane's history,
+revealing the source pane's previous group buffer. Focus and point follow the
+view; split geometry stays fixed. With no neighbor or no eligible previous
+buffer, nothing moves. The named `windmove-swap-states-*` commands still swap.
+List modes may specify `'transient #f` for persistent app buffers such as
+WhatsApp; generated lists otherwise retain their transient default.

@@ -97,6 +97,81 @@ defmodule Compos.LayoutPolicyTest do
     end
   end
 
+  test "explicit columns includes a hidden persistent group app", %{frame: frame} do
+    assert {:ok, _} =
+             Session.eval(
+               """
+               (lp-start!) (lp-buffer! "b") (lp-buffer! "app")
+               (define-list-mode! "zz-lp-app-mode"
+               (list 'buffer "zz-lp-app" 'transient #f 'rows (lambda (buf) '())))
+               (list-mode-init! "zz-lp-app" "zz-lp-app-mode")
+               (tile-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+               (layout-target-set! 'two-pane)
+               """,
+               frame
+             )
+
+    for key <- ["M-x"] ++ String.graphemes("window-layout-columns") ++ ["RET"],
+        do: KeyDispatch.handle_key(frame, key)
+
+    assert {:ok, "#t"} =
+             Session.eval(
+               """
+               (and (equal? (map cadr (window-list)) '("zz-lp-a" "zz-lp-b" "zz-lp-app"))
+                    (equal? (layout-target) 'columns)
+                    (= (length (window-rects)) 3)
+                    (null? (filter (lambda (r) (>= (abs (- (list-ref r 4) (/ 1 3))) 0.001)) (window-rects))))
+               """,
+               frame
+             )
+  end
+
+  test "shift super right moves a view and reveals source history without changing splits", %{
+    frame: frame
+  } do
+    assert {:ok, _} =
+             Session.eval(
+               """
+               (lp-start!) (lp-buffer! "b") (lp-buffer! "c")
+               (tile-windows! 'two-pane '("zz-lp-b" "zz-lp-c"))
+               (layout-target-set! 'two-pane)
+               (switch-to-buffer-here! "zz-lp-a")
+               (define lp-move-source (active-window))
+               (define lp-move-dest (car (window-in-direction 'right)))
+               (window-set-point! lp-move-source 7)
+               (window-history-set! lp-move-source '("zz-lp-b"))
+               (window-history-set! lp-move-dest '())
+               (define lp-move-geometry (map (lambda (r) (cons (car r) (cddr r))) (window-rects)))
+               """,
+               frame
+             )
+
+    KeyDispatch.handle_key(frame, "s-S-<right>")
+
+    assert {:ok, "#t"} =
+             Session.eval(
+               """
+               (and (equal? (map cadr (window-list)) '("zz-lp-b" "zz-lp-a"))
+                    (equal? (active-window) lp-move-dest)
+                    (= (window-point lp-move-dest) 7)
+                    (equal? (window-buffer-history lp-move-source) '())
+                    (equal? (car (window-buffer-history lp-move-dest)) "zz-lp-c")
+                    (equal? lp-move-geometry (map (lambda (r) (cons (car r) (cddr r))) (window-rects)))
+                    (equal? (layout-target) 'two-pane))
+               """,
+               frame
+             )
+
+    assert {:ok, before} = Session.eval("(window-tree)", frame)
+    KeyDispatch.handle_key(frame, "s-S-<right>")
+    assert {:ok, ^before} = Session.eval("(window-tree)", frame)
+    assert {:ok, _} = Session.eval("(select-window! lp-move-source)", frame)
+    KeyDispatch.handle_key(frame, "s-S-<right>")
+
+    assert {:ok, "#t"} =
+             Session.eval("(equal? (map cadr (window-list)) '(\"zz-lp-b\" \"zz-lp-a\"))", frame)
+  end
+
   test "keyboard layout selection and pane closing reflow through the GUI path", %{frame: frame} do
     assert {:ok, _} = Session.eval("(lp-start!)", frame)
 
