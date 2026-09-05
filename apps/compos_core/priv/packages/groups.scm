@@ -2361,8 +2361,8 @@
               buf))
           (else #f))))
 
-;; ensure the two-pane layout (work left, group chat right) and select the
-;; chat window; returns the chat buffer name
+;; A new conversation replaces the selected view. Creating a buffer does
+;; not create panes or rearrange the buffers already on screen.
 (define (group-chat-new-name g)
   (let loop ((n 2))
     (let ((name (string-append "*chat:" (group-name g) ":"
@@ -2380,7 +2380,9 @@
           (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
           (when (boundp (quote workspace-chat-inherit!))
             (workspace-chat-inherit! buf (group-name id)))
-          (group-chat-buffer-show! buf)
+          (switch-to-buffer-here! buf)
+          (window-quit-restore-forget! (active-window))
+          (end-of-buffer!)
           buf))))
 
 (define-command "group-chat" "Show or create the current group's primary chat"

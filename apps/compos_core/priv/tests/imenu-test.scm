@@ -65,3 +65,17 @@
         (check-contains! (substring said mark (string-length said))
                          "no definitions" "the command reports instead of prompting")))
     (buffer-kill! t--imenu-buf)))
+
+(deftest 'imenu-previews-the-item-as-the-highlight-moves
+  "the highlight puts point on the definition, in the window you came from"
+  (lambda ()
+    (t--imenu-py!)
+    (switch-to-buffer! t--imenu-buf)
+    (buffer-goto! t--imenu-buf 0)
+    (with-current-buffer t--imenu-buf (lambda () (run-command "imenu")))
+    (check-true! (minibuffer-active?) "the prompt is up")
+    (run-command "minibuffer-next-candidate")
+    (let ((moved (buffer-point t--imenu-buf)))
+      (minibuffer-cancel!)
+      (check-true! (> moved 0) "the highlight moved point off the first line"))
+    (buffer-kill! t--imenu-buf)))

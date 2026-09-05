@@ -46,6 +46,57 @@ defmodule Compos.LayoutPolicyTest do
     end
   end
 
+  for side <- ["a", "b"] do
+    test "new chat replaces selected #{side} pane without rebuilding windows", %{frame: frame} do
+      assert {:ok, _} =
+               Session.eval(
+                 """
+                 (lp-start!) (lp-buffer! "b")
+                 (tile-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+                 (layout-target-set! 'two-pane)
+                 (select-window! (window-showing "zz-lp-#{unquote(side)}"))
+                 (define lp-chat-window (active-window))
+                 (define lp-chat-old (current-buffer))
+                 (define lp-chat-group (frame-group))
+                 (define lp-chat-windows (window-list))
+                 (define lp-chat-geometry (map (lambda (r) (cons (car r) (cddr r))) (window-rects)))
+                 """,
+                 frame
+               )
+
+      for key <- ["C-c", "n"], do: KeyDispatch.handle_key(frame, key)
+
+      assert {:ok, "#t"} =
+               Session.eval(
+                 """
+                 (and (chat-buffer? (current-buffer))
+                      (buffer-in-group? (current-buffer) lp-chat-group)
+                      (equal? (active-window) lp-chat-window)
+                      (equal? (layout-target) 'two-pane)
+                      (equal? lp-chat-geometry
+                        (map (lambda (r) (cons (car r) (cddr r))) (window-rects)))
+                      (equal? (car (window-buffer-history lp-chat-window)) lp-chat-old)
+                      (equal? (window-list)
+                        (map (lambda (r) (if (equal? (car r) lp-chat-window)
+                                             (list (car r) (current-buffer)) r)) lp-chat-windows)))
+                 """,
+                 frame
+               )
+
+      assert {:ok, "#t"} =
+               Session.eval(
+                 """
+                 (buffer-kill! (current-buffer))
+                 (and (equal? (window-list) lp-chat-windows)
+                      (equal? (active-window) lp-chat-window)
+                      (equal? lp-chat-geometry
+                        (map (lambda (r) (cons (car r) (cddr r))) (window-rects))))
+                 """,
+                 frame
+               )
+    end
+  end
+
   test "keyboard layout selection and pane closing reflow through the GUI path", %{frame: frame} do
     assert {:ok, _} = Session.eval("(lp-start!)", frame)
 

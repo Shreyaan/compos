@@ -1250,15 +1250,30 @@ defmodule Compos.Ui.Layouts do
             order: -2; padding: 12px 20px 9px;
             border-bottom: 1px solid var(--border-bg, #e2dbc9);
           }
+          /* the input is the last row of the frame, the candidates sit
+             above it: Emacs' minibuffer shape */
           .mb-panel:not(.palette) .mb-input-row {
-            order: -1; padding: 17px 20px 18px; font-size: 18px;
-            border-top: none; border-bottom: 1px solid var(--border-bg, #e2dbc9);
-            background: var(--window-bg, #fdfcf8);
+            padding: 10px 20px 11px; font-size: 18px;
           }
           .mb-panel:not(.palette) .mb-body { flex: 0 1 auto; min-height: 0; }
           .mb-panel:not(.palette) .mb-cands { max-height: min(48dvh, 440px); }
           .mb-panel:not(.palette) .prompt { font-size: 18px; margin-right: 8px; }
           .mb-panel:not(.palette) .mb-input { font-size: 18px; }
+          /* A plain completion prompt IS the minibuffer (editor.scm,
+             minibuffer-read*): the bottom rows of the frame, in the flow.
+             It takes its height from the window tree, which shrinks by
+             exactly that much and keeps every pane readable — it covers
+             nothing and dims nothing. Only .palette floats over them. */
+          .mb-modal-layer:has(.mb-panel:not(.palette)) {
+            position: static; inset: auto;
+            order: 100; flex: 0 0 auto;
+            display: block; padding: 0; background: none;
+          }
+          .mb-panel:not(.palette) {
+            width: 100%; max-width: none; max-height: none;
+            border: none; border-top: 2px solid var(--accent-fg, #26356b);
+            border-radius: 0; box-shadow: none;
+          }
           .mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 11.5px; }
           /* which-key is a keyboard-blocking overlay. Keep the buffer geometry
              unchanged while the prefix panel explains the pending keys. */

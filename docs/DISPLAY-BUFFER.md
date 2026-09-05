@@ -76,6 +76,7 @@ that deliberately construct a layout.
 
 | Action under a target | Result |
 | --- | --- |
+| New chat (`C-c n`) | replace the selected pane in place; keep geometry and its previous buffer in pane history |
 | Visit an already visible buffer | select its existing pane |
 | Open a new member below capacity | append a slot, reflow, select it |
 | Open a member at capacity | replace the selected slot |
