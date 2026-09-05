@@ -786,6 +786,17 @@
         (rename-buffer! buf name))))
 
 (public! 'chat-title
+
+(define-command "chat-title" "Set the current chat's title"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (chat-buffer? buf))
+          (message "not a chat buffer")
+          (minibuffer-read "Chat title: " '()
+            (lambda (title)
+              (if (chat-title buf title)
+                  (message (string-append "Chat title: " (buffer-name buf)))
+                  (message "Chat title cannot be empty or is already taken"))))))))
   "(chat-title BUF TITLE) — set a chat's title by renaming its buffer")
 
 ;;; --- the conversation is named for its group ------------------------------------
