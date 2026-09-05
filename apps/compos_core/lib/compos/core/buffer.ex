@@ -244,6 +244,9 @@ defmodule Compos.Core.Buffer do
   def rename(name, new_name, new_path),
     do: GenServer.call(via(name), {:rename, new_name, new_path})
 
+  @doc "Forget the buffer's file: text, point, locals and undo stay (Emacs: set-visited-file-name nil)."
+  def detach(name), do: GenServer.call(via(name), :detach)
+
   def goto(name, pos), do: GenServer.call(via(name), {:goto, pos})
 
   def mark(name), do: viewed(name, :mark, fn -> dormant_read(name, :mark, :mark) end)
@@ -972,6 +975,18 @@ defmodule Compos.Core.Buffer do
       {:error, {:already_registered, _}} ->
         {:reply, {:error, :already_exists}, state}
     end
+  end
+
+  # The buffer keeps its process and forgets its path. A save after this
+  # has no path to write, so a buffer that adopted a file by mistake
+  # (a chat given (buffer-save! PATH)) stops writing there.
+  defp on_call(:detach, _from, state) do
+    state = %{state | path: nil} |> touch_state() |> checkpoint_later()
+    state = write_checkpoint(state)
+    BufferStore.renamed(state.name, metadata(state))
+    Events.broadcast_editor(:locals)
+    broadcast(state, state.point, "", 0, :locals)
+    {:reply, :ok, state}
   end
 
   defp on_call(:modified?, _from, state),

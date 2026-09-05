@@ -3923,6 +3923,35 @@
               (else
                (message (string-append "Could not rename buffer " old))))))))))
 
+;;; --- detaching a buffer from its file ------------------------------------------
+;;; buffer-detach! is the mechanism (Emacs: set-visited-file-name with no
+;;; name): the buffer keeps its text, point, locals and undo, and forgets
+;;; its path. A buffer that adopted a file through (buffer-save! PATH) by
+;;; mistake writes nothing there after this; a save asks for a path again.
+
+(domain! 'buffers)
+(effects! '(write))
+
+;; Returns #t, or #f when no buffer has that name.
+(define (detach-buffer! name)
+  (and (buffer-known? name)
+       (buffer-detach! name)))
+
+(public! 'detach-buffer!
+  "(detach-buffer! NAME) — forget NAME's file and keep its text; #t, or #f when no buffer has that name")
+
+(define-command "buffer-detach" "Forget the current buffer's file; keep its text"
+  (lambda ()
+    (let ((name (current-buffer)))
+      (if (buffer-path name)
+          (begin
+            (detach-buffer! name)
+            (message (string-append "Buffer " name " no longer visits a file")))
+          (message (string-append "Buffer " name " visits no file"))))))
+
+(domain! 'unknown)
+(effects! '(unknown))
+
 ;; Packages derive policy from the accepted window state through this seam.
 ;; Preview uses a different primitive and does not call it.
 (define window-state-changed! (lambda () #t))

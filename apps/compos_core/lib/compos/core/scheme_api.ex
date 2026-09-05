@@ -298,6 +298,8 @@ defmodule Compos.Core.SchemeAPI do
         "(undo-exempt! COMMAND) — exempt COMMAND from the automatic undo-chain break.",
       "buffer-save!" =>
         "(buffer-save! [PATH]) — save the current buffer to its path; return the path or #f. With PATH, save there and adopt PATH as the buffer's path.",
+      "buffer-detach!" =>
+        "(buffer-detach! NAME) — forget NAME's file; text, point, locals and undo stay. Return #t, or #f when no live buffer has that name.",
       "kill-push!" => "(kill-push! TEXT) — push TEXT onto the kill ring.",
       "kill-top" => "(kill-top) — return the newest kill-ring entry, or \"\" when empty.",
       "kill-nth" => "(kill-nth I) — return kill-ring entry I (0 is newest), or \"\" when absent.",
@@ -1339,6 +1341,14 @@ defmodule Compos.Core.SchemeAPI do
         [path] ->
           {:ok, path} = Buffer.save(Editor.current_buffer(), path)
           path
+      end,
+      "buffer-detach!" => fn [name] ->
+        if Buffer.exists?(name) do
+          Buffer.detach(name)
+          true
+        else
+          false
+        end
       end,
 
       # kill ring
