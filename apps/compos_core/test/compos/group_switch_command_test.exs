@@ -156,24 +156,24 @@ defmodule Compos.GroupSwitchCommandTest do
 
     group = group_id("switch-marginalia")
 
-    row =
+    # the switcher's row is a container card: the group's name, what it
+    # holds, and its members as chips
+    [hint, kind, members] =
       eval!("""
       (begin
         (visit #{Jason.encode!(project_file)})
         (buffer-add-group! #{Jason.encode!(project_file)} "#{group}")
         (buffer-add-group! #{Jason.encode!(home_buffer)} "#{group}")
-        (group-switch-candidate "#{group}"))
+        (let ((row (group-switch-candidate "#{group}")))
+          (string-join
+            (list (cadr row) (nth 2 row) (string-join (nth 3 row) " · "))
+            " | ")))
       """)
       |> Jason.decode!()
-
-    # the switcher's row is a container card: the group's name, what it
-    # holds, and its members as chips
-    [_name, hint, kind, chips] = row
+      |> String.split(" | ")
 
     assert hint == "2 buffers"
     assert kind == "container"
-
-    members = Enum.join(chips, " · ")
 
     assert members =~ "lib/code.scm"
     assert members =~ "~/zz-switch-home-#{n}.scm"
