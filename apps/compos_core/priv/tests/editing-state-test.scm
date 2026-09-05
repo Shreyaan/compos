@@ -42,6 +42,24 @@
     (editing--after-command! "windmove-up")
     (check-equal! (editing-state? t--es-a) #f "windmove changes no state")))
 
+;; C-x 3 then a Cmd-arrow must move the focus: a window command is a
+;; landing. The catalog domain says which commands are window commands.
+(deftest 'a-window-command-returns-to-the-movement-state
+  "after a command in the windows domain the buffer is in the movement state"
+  (lambda ()
+    (t--es-setup!)
+    (editing--after-command! "forward-char")
+    (check-equal! (editing-state? t--es-a) #t "a command enters the editing state")
+    (check-equal! (editing--window-command? "split-window-right") #t
+                  "split-window-right is a window command by its catalog domain")
+    (check-equal! (editing--window-command? "forward-char") #f
+                  "forward-char is not a window command")
+    (editing--after-command! "split-window-right")
+    (check-equal! (editing-state? t--es-a) #f "a window command returns to the movement state")
+    (editing--after-command! "forward-char")
+    (editing--after-command! "delete-other-windows")
+    (check-equal! (editing-state? t--es-a) #f "the cached answer gives the same result")))
+
 (deftest 'a-new-landing-starts-in-the-movement-state
   "the editing state ends when the window shows another buffer"
   (lambda ()

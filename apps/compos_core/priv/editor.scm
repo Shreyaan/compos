@@ -1766,7 +1766,7 @@
                 (cons (list (car w) (and (number? p) (list-key-at-pos buf p))) acc))
               acc))
         '()
-        (window-list)))
+        (window-list-all)))
 
 ;; put each window back on its row after a rewrite (Emacs
 ;; dired-restore-positions). The rewrite clamped every stored window
@@ -11651,6 +11651,30 @@
 (define *editing-quit* #f)
 (define (editing-quit!) (set! *editing-quit* #t))
 
+;; A window command (split, delete, layout, windmove) changes what you
+;; look at, not the text. It is a landing: the buffer returns to the
+;; movement state, and the next Cmd-arrow moves the focus. The catalog's
+;; domain says which commands those are. One lookup walks the whole
+;; catalog (4ms), so the answer is kept per command name until the
+;; catalog changes.
+(define *editing--domain-cache* '())
+(define *editing--domain-gen* -1)
+
+(define (editing--window-command? cmd)
+  (and (string? cmd)
+       (or (string-prefix? "windmove-" cmd)
+           (begin
+             (unless (equal? *editing--domain-gen* (catalog-generation))
+               (set! *editing--domain-cache* '())
+               (set! *editing--domain-gen* (catalog-generation)))
+             (let ((hit (assoc cmd *editing--domain-cache*)))
+               (if hit
+                   (cadr hit)
+                   (let* ((e (catalog-entry 'command cmd))
+                          (yes (if (and e (equal? (catalog--get e 'domain) "windows")) #t #f)))
+                     (set! *editing--domain-cache* (cons (list cmd yes) *editing--domain-cache*))
+                     yes)))))))
+
 (define (editing--after-command! &optional cmd)
   (let ((buf (current-buffer))
         (cmd (or cmd (editing--command-name)))
@@ -11659,7 +11683,8 @@
     (cond ((not (and buf (buffer-exists? buf))) #t)
           ((buffer-read-only? buf) (editing-state-off! buf))
           ((or quit (equal? cmd "keyboard-quit")) (editing-state-off! buf))
-          ((and (string? cmd) (string-prefix? "windmove-" cmd)) #t)
+          ((equal? cmd "self-insert-command") (editing-state-on! buf))
+          ((editing--window-command? cmd) (editing-state-off! buf))
           (else (editing-state-on! buf)))))
 
 (add-hook! 'window-configuration-change-hook 'editing--check-landing!)
@@ -12272,7 +12297,7 @@
 (public! 'windmove-default-keybindings "(windmove-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to windmove-left/right/up/down")
 (public! 'editing-state? "(editing-state? BUF) — #t when BUF is in the editing state: editing-state-map is in force and the Cmd-arrows move point, not the focus")
 (public! 'editing-state-on! "(editing-state-on! BUF) — enter the editing state in BUF; the first command after a landing does this")
-(public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows run windmove; keyboard-quit and a new landing do this")
+(public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows run windmove; keyboard-quit, a window command, and a new landing do this")
 (public! 'editing-quit! "(editing-quit!) — mark the running command as a quit: after it the buffer is in the movement state; keyboard-quit calls this, and a command that aborts something calls it too")
 (public! 'windmove-swap-states-default-keybindings "(windmove-swap-states-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to windmove-swap-states-*")
 (public! 'windmove-chord "(windmove-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (windmove-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")

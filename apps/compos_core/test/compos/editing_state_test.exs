@@ -37,7 +37,8 @@ defmodule Compos.EditingStateTest do
       (global-set-key "<f9> w" "windmove-up")
       (define-command "zz-es-quit-by-proxy" "Run keyboard-quit from inside another command"
         (lambda () (run-command "keyboard-quit")))
-      (global-set-key "<f9> g" "zz-es-quit-by-proxy"))
+      (global-set-key "<f9> g" "zz-es-quit-by-proxy")
+      (global-set-key "<f9> s" "split-window-right"))
     """)
 
     on_exit(fn ->
@@ -48,7 +49,8 @@ defmodule Compos.EditingStateTest do
         (global-unset-key "<f9> e")
         (global-unset-key "<f9> q")
         (global-unset-key "<f9> w")
-        (global-unset-key "<f9> g"))
+        (global-unset-key "<f9> g")
+        (global-unset-key "<f9> s"))
       """)
 
       if Buffer.exists?(@buf), do: Compos.Core.kill_buffer(@buf)
@@ -70,6 +72,14 @@ defmodule Compos.EditingStateTest do
     assert editing?()
     press(["<f9>", "g"])
     refute editing?()
+  end
+
+  test "a window command returns the buffer to the movement state" do
+    press(["<f9>", "e"])
+    assert editing?()
+    press(["<f9>", "s"])
+    refute editing?()
+    Editor.delete_other_windows()
   end
 
   test "a windmove command after a landing keeps the movement state" do
