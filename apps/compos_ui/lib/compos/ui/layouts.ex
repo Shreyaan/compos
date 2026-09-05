@@ -68,13 +68,13 @@ defmodule Compos.Ui.Layouts do
                not shrink under zoom, so the height divides by it, or the
                modeline lands below the fold. */
             zoom: var(--ui-zoom, 1);
-            height: 100dvh;
+            /* Engines disagree on viewport units inside CSS zoom: Chrome
+               leaves 100dvh unzoomed, WebKit divides it by the zoom. Both
+               scale a px length by the zoom, so the boot script writes the
+               viewport height in px and the root divides it once. 100dvh
+               is only the fallback before the script runs. */
+            height: calc(var(--viewport-h, 100dvh) / var(--ui-zoom, 1));
           }
-          /* Engines disagree on viewport units inside CSS zoom. A boot
-             probe measures this engine and stamps html with the class
-             its math needs; naming engines would age badly. */
-          html.zoom-divides .editor-root { height: calc(100dvh / var(--ui-zoom, 1)); }
-          html.zoom-multiplies .editor-root { height: calc(100dvh * var(--ui-zoom, 1)); }
           .editor-root.instance-identified::before {
             content: attr(data-instance);
             position: absolute; top: 0; right: 14px; z-index: 70;
@@ -1347,19 +1347,14 @@ defmodule Compos.Ui.Layouts do
         <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
         <script>
-          // Which zoom math keeps the root exactly one viewport tall?
-          // Chrome leaves 100dvh unzoomed (the height must divide by the
-          // zoom); the observed WebKit shrinks it by the zoom (the height
-          // must multiply); a compensating engine needs neither. Measure a
-          // probe element once and stamp the class the CSS reads.
+          // The viewport height in px, for the editor root's height under
+          // the application zoom (see .editor-root). A px length scales by
+          // the zoom the same way in every engine; a viewport unit does not.
           (() => {
-            const d = document.createElement("div");
-            d.style.cssText = "position:absolute;visibility:hidden;zoom:2;height:100dvh;";
-            document.body.appendChild(d);
-            const f = d.getBoundingClientRect().height / innerHeight;
-            d.remove();
-            if (f > 1.5) document.documentElement.classList.add("zoom-divides");
-            else if (f < 0.75) document.documentElement.classList.add("zoom-multiplies");
+            const set = () =>
+              document.documentElement.style.setProperty("--viewport-h", innerHeight + "px");
+            set();
+            window.addEventListener("resize", set);
           })();
 
           const NAMED = {

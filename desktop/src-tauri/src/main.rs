@@ -27,6 +27,21 @@ use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::Manager;
 
+/// A hard reload: fetch the document and every script and stylesheet
+/// with `cache: "reload"`, so the cache holds fresh copies, then reload.
+/// The cookies stay, so the daemon sees the same client.
+const HARD_RELOAD_JS: &str = r#"
+(async () => {
+  const urls = [location.href];
+  document.querySelectorAll("script[src], link[rel=stylesheet][href]").forEach((el) => {
+    const u = el.src || el.href;
+    if (u && u.startsWith(location.origin)) urls.push(u);
+  });
+  await Promise.allSettled(urls.map((u) => fetch(u, { cache: "reload" })));
+  location.reload();
+})();
+"#;
+
 fn daemon_url() -> String {
     // localhost, not 127.0.0.1: origin-checked sockets (the PTY channel)
     // compare the Origin header against the configured host, and the two
@@ -108,19 +123,33 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
-            // the default menu, plus a Shell menu: Reload re-reads the page
-            // the way a browser tab would (Cmd-Shift-R)
+            // the default menu, plus a Shell menu with the two browser
+            // reloads: Cmd-R re-reads the page, Cmd-Shift-R first fetches
+            // the page and its scripts and styles past the cache. The
+            // editor claims no Cmd-R chord, so the accelerator reaches the
+            // menu.
             let menu = Menu::default(app.handle())?;
-            let reload =
-                MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+Shift+R"))?;
-            let shell_menu = Submenu::with_items(app, "Shell", true, &[&reload])?;
+            let reload = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
+            let hard_reload = MenuItem::with_id(
+                app,
+                "hard-reload",
+                "Hard Reload",
+                true,
+                Some("CmdOrCtrl+Shift+R"),
+            )?;
+            let shell_menu = Submenu::with_items(app, "Shell", true, &[&reload, &hard_reload])?;
             menu.append(&shell_menu)?;
             app.set_menu(menu)?;
             app.on_menu_event(|handle, event| {
-                if event.id() == "reload" {
-                    if let Some(w) = handle.get_webview_window("main") {
+                let Some(w) = handle.get_webview_window("main") else { return };
+                match event.id().as_ref() {
+                    "reload" => {
                         let _ = w.eval("location.reload()");
                     }
+                    "hard-reload" => {
+                        let _ = w.eval(HARD_RELOAD_JS);
+                    }
+                    _ => {}
                 }
             });
 
