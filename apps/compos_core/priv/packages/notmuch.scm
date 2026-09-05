@@ -780,20 +780,20 @@ when a message has no text/plain part." 'group 'notmuch)
             (list-move-in! buf 1))
           (message "No thread on this line")))))
 
-(define (nm--all-marked? buf)
-  (let ((es (list-entries buf)))
-    (and (pair? es)
-         (let loop ((es es))
-           (cond ((null? es) #t)
-                 ((member "m" (nm--th-tags (car es))) (loop (cdr es)))
-                 (else #f))))))
+(define (nm--any-marked? buf)
+  (let loop ((es (list-entries buf)))
+    (cond ((null? es) #f)
+          ((member "m" (nm--th-tags (car es))) #t)
+          (else (loop (cdr es))))))
 
-;; like list-mark-all: a second press, with every shown thread marked,
-;; reads as "never mind" and unmarks the search
+;; a second press reads as "never mind" and unmarks the search. The
+;; test is "any shown thread marked", not "every one": a mail that
+;; arrives after the first press is unmarked, and a rule that then
+;; marked again would never let the reader out.
 (define-command "notmuch-mark-all" "Mark every thread in this search; again unmarks them"
   (lambda ()
     (let* ((buf (current-buffer))
-           (unmark? (nm--all-marked? buf)))
+           (unmark? (nm--any-marked? buf)))
       (nm--run (string-append "tag " (if unmark? "-m" "+m") " -- "
                               (nm--quote (string-append "( " (nm--query-of buf) " )"))))
       (nm--refresh! buf)

@@ -504,13 +504,14 @@
     (t--nm-done!)))
 
 (deftest 'mark-all-again-unmarks-the-search
-  "every shown thread marked, a second mark-all removes the m tag"
+  "one shown thread marked is enough: the next mark-all removes the m tag"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
-    (t--nm-search-json-with! "\"tags\": [\"inbox\"" "\"tags\": [\"m\", \"inbox\"")
+    (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
+                             "\"tags\": [\"inbox\", \"m\", \"unread\"]")
     (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
-    (check-equal! (nm--all-marked? "*notmuch*") #t "every row is marked")
+    (check-equal! (nm--any-marked? "*notmuch*") #t "one row is marked, another is not")
     (run-command "notmuch-mark-all")
     (check-contains! (t--nm-calls) "tag -m -- ( tag:inbox )" "the second press unmarks the query")
     (t--nm-done!)))
