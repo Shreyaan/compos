@@ -542,7 +542,7 @@ defmodule Compos.Ui.EditorLive do
     # from. Nothing is the native-caret surface while a prompt is up: the
     # server draws the cursor and marks the current row again, and the
     # client scrolls that row into view.
-    caret_owner = state.active
+    caret_owner = if state.minibuffer, do: nil, else: state.active
 
     {tree, line_cache} =
       decorate(state.tree, socket.assigns.line_cache, state.faces, caret_owner)
