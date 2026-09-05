@@ -1679,8 +1679,7 @@
                ;; draw (and a wake, for a dormant member)
                (peek!
                  (lambda (name)
-                   (when (group-switch-peeks?)
-                     (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name)))))
+                   (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name))))
           (if (null? candidates)
               (message "No groups")
               (minibuffer-read-preview "Switch group: " candidates
@@ -1711,12 +1710,6 @@
 (defcustom 'group-switch-style "modal"
   "The shape the group switcher takes: \"modal\", \"popup\", or \"minibuffer\"."
   'group 'groups 'type 'string)
-
-;; The shape decides whether a look is worth drawing. A modal covers the
-;; windows, so a peek behind it shows nothing and the wake it costs buys
-;; nothing. Under a popup, or in the minibuffer, the windows stay visible
-;; and the peek runs as it always has.
-(define (group-switch-peeks?) (not (equal? group-switch-style "modal")))
 
 ;; Emacs-style toggle: the frame's previous group and its current one
 ;; trade places. switch-to-group! writes 'previous-group on every switch.

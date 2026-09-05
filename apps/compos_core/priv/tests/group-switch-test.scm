@@ -1447,9 +1447,9 @@
     (let ((style group-switch-style)
           (here (group-record-create! "zzsw-peek-here"))
           (there (group-record-create! "zzsw-peek-there")))
-      ;; a modal covers the windows and previews in its rail; these are
-      ;; the styles that preview in the frame itself
-      (set! group-switch-style "popup")
+      ;; the default shape: a modal is a panel with the frame around it,
+      ;; so it previews in the frame like every other shape
+      (set! group-switch-style "modal")
       (buffer-add-group! t--sw-first here)
       (buffer-add-group! t--sw-second there)
       (buffer-add-group! t--sw-third there)
