@@ -75,14 +75,21 @@ defmodule Compos.SwitchModalTest do
     :ok
   end
 
-  test "C-x b opens the modal switcher; the standing buffer is not an offer" do
+  test "C-x b opens the modal switcher; the standing buffer is an offer, and comes last" do
     open_switcher()
 
     assert Editor.current_buffer() == @switch
     entries = eval!(~s{(map car (list-entries "#{@switch}"))})
-    refute entries =~ "zz-mc", "the standing buffer is in the pool"
+    assert entries =~ "zz-mc", "the standing buffer is a row: the list shows the whole group"
     assert entries =~ "zz-ma"
     assert entries =~ "zz-mb"
+
+    # it is a row, never the lead one: the offer you want is somewhere else
+    rows =
+      ~s{(filter (lambda (e) (not (switch-separator? "#{@switch}" e))) (list-entries "#{@switch}"))}
+
+    assert eval!("(car (car (reverse #{rows})))") == ~s{"*zz-mc*"}
+    refute eval!("(car (car #{rows}))") == ~s{"*zz-mc*"}
   end
 
   test "typing narrows, DEL widens, and the query never outlives the open" do
@@ -210,14 +217,16 @@ defmodule Compos.SwitchModalTest do
     # *Messages* is a list over the message table; draw it to read it
     assert elem(Compos.Core.Session.eval("(messages-text)"), 1) =~ "killed 1 buffer"
 
-    # C-a marks every shown row, C-k kills them as a set
+    # C-a marks every shown row, C-k kills them as a set. The buffer you
+    # came from is a shown row, so it dies with them.
     press(["DEL", "DEL", "DEL", "DEL", "DEL", "DEL"])
     type("zz-m")
     press(["C-a"])
     press(["C-k"])
-    assert elem(Compos.Core.Session.eval("(messages-text)"), 1) =~ "killed 2 buffers"
+    assert elem(Compos.Core.Session.eval("(messages-text)"), 1) =~ "killed 3 buffers"
     refute eval!(~s{(buffer-known? "*zz-mb*")}) == "#t"
     refute eval!(~s{(buffer-known? "*zz-md*")}) == "#t"
+    refute eval!(~s{(buffer-known? "*zz-mc*")}) == "#t"
   end
 
   test "C-t puts the marked buffers in a group" do

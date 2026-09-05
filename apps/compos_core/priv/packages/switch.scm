@@ -90,11 +90,16 @@
 (define (switch-pool here my-group win)
   (let* ((source (switch-buffer-source (switch-history-pool my-group)))
          (standing (nth 1 source))
-         (pool (filter (lambda (c) (and (not (equal? (car c) here))
-                                        (not (equal? (car c) standing))
-                                        (not (equal? (car c) *switch-buffer*))
-                                        (not (peek-buffer? (car c)))))
-                       (car source)))
+         ;; the buffer you are on is a candidate like any other: you came
+         ;; here to see the group, and a group without its own buffer in
+         ;; it reads wrong. It only never LEADS, so the default pick and
+         ;; the first row are still somewhere else
+         (self? (lambda (c) (or (equal? (car c) here) (equal? (car c) standing))))
+         (cands (filter (lambda (c) (and (not (equal? (car c) *switch-buffer*))
+                                         (not (peek-buffer? (car c)))))
+                        (car source)))
+         (pool (filter (lambda (c) (not (self? c))) cands))
+         (self (filter self? cands))
          (mine (if (and win (window-exists? win)) (window-buffer-history win) '()))
          ;; one pass over the history picks its rows in history order;
          ;; a sort over the rows cost seconds at four hundred rows
@@ -104,7 +109,7 @@
                        (loop (cdr names) (cons (assoc (car names) pool) out)))
                       (else (loop (cdr names) out))))))
     (set! *switch-pick* (nth 2 source))
-    (append led (filter (lambda (c) (not (member c led))) pool))))
+    (append led (filter (lambda (c) (not (member c led))) pool) self)))
 
 ;; is NAME a member of the group with ID? A read of the buffer's own
 ;; locals, not buffer-in-group?: that one resolves every id against the
@@ -737,12 +742,15 @@
         ((switch-file-row? e) (list (car e) (string-append "file · " (nth 3 e)) "file"))
         (else e)))
 
-;; RET with nothing typed takes the first row that is not a heading, so
-;; the prompt advertises exactly that
-(define (switch-first-choice rows)
+;; RET with nothing typed takes the first row that is neither a heading
+;; nor the buffer you are already on, so the prompt advertises exactly that
+(define (switch-first-choice rows &optional here)
   (let loop ((rs rows))
     (cond ((null? rs) #f)
           ((switch-separator? #f (car rs)) (loop (cdr rs)))
+          ;; the buffer you are on is a row, never the default: RET on an
+          ;; empty input has to take you somewhere
+          ((and here (equal? (car (car rs)) here)) (loop (cdr rs)))
           (else (car (car rs))))))
 
 ;; TAB with an input that names exactly one group locks the prompt to it
@@ -783,7 +791,7 @@
            (rows (switch-buffer-only-rows
                    (switch-sectioned-rows here my-group (active-window))))
            (view 'buffers)
-           (fallback (switch-first-choice rows))
+           (fallback (switch-first-choice rows here))
            (row-of (lambda (name) (or (assoc name rows) (list name))))
            (restore-here! (lambda ()
                             (when (buffer-known? here) (window-preview-buffer! here))))

@@ -135,6 +135,24 @@
       (buffer-kill! noise))
     (t--sw-done!)))
 
+(deftest 'the-switcher-lists-the-buffer-you-are-on-but-never-leads-with-it
+  "you came to see the whole group; RET on an empty input still goes elsewhere"
+  (lambda ()
+    (t--sw-setup!)
+    (switch-to-buffer! t--sw-second)
+    (switch-to-buffer! t--sw-first)
+    (let* ((window (active-window))
+           (rows (switch-buffer-only-rows
+                   (switch-sectioned-rows t--sw-first #f window)))
+           (buffers (filter (lambda (e) (not (switch-separator? #f e))) rows)))
+      (check-true! (and (member t--sw-first (map car buffers)) #t)
+                   "the buffer you are on is a candidate")
+      (check-equal! (car (car (reverse buffers))) t--sw-first
+                    "and it comes last: it never leads")
+      (check-equal! (switch-first-choice rows t--sw-first) t--sw-second
+                    "so the empty-input default is the buffer you were on before"))
+    (t--sw-done!)))
+
 (deftest 'the-group-switcher-indexes-memberships-in-one-pass
   "the one-pass index lists the members a scan per group lists, in the same order"
   (lambda ()
@@ -657,8 +675,8 @@
     (let ((destination (group-record-create! "zzsw-marked-add")))
       (switch-open! 'buffers)
       (buffer-set-local! *switch-buffer* 'list-marks
-        ;; The switcher intentionally omits the home buffer (first): mark the
-        ;; two buffer rows the user can actually see.
+        ;; The home buffer (first) is a row too; this test marks only the
+        ;; two other buffer rows.
         (list (list t--sw-second *list-mark-char*)
               (list t--sw-third *list-mark-char*)))
       (run-command "group-add")
@@ -1044,11 +1062,13 @@
       (check-true! (member "in this group" labels) "the first heading")
       (check-true! (member "other buffers" labels) "the second")
       (check-true! (member t--sw-second labels) "a member is listed")
-      (check-false! (member t--sw-first labels) "and the buffer we are in is not"))
+      (check-true! (member t--sw-first labels) "and so is the buffer we are in"))
     (check-true! (< (t--sw-at "in this group") (t--sw-at t--sw-second))
                  "the heading comes before its member")
-    (check-true! (< (t--sw-at t--sw-second) (t--sw-at "other buffers"))
-                 "and the member before the next heading")
+    (check-true! (< (t--sw-at t--sw-second) (t--sw-at t--sw-first))
+                 "the buffer we are in comes after the rest of its section")
+    (check-true! (< (t--sw-at t--sw-first) (t--sw-at "other buffers"))
+                 "and before the next heading")
 
     ;; the panel renders a WINDOW of rows, so filter to the stranger
     (t--sw-type! t--sw-third)
@@ -1095,7 +1115,7 @@
     (let ((names (map car (list-entries "*switch*"))))
       (check-true! (and (member "in this group" names) #t) "the first heading")
       (check-true! (and (member "other buffers" names) #t) "the second")
-      (check-false! (member t--sw-first names) "the buffer we came from is not a row")
+      (check-true! (and (member t--sw-first names) #t) "the buffer we came from is a row too")
       (check-true! (< (t--sw-modal-at "in this group") (t--sw-modal-at t--sw-second))
                    "the heading comes before its member")
       (check-true! (< (t--sw-modal-at t--sw-second) (t--sw-modal-at "other buffers"))
