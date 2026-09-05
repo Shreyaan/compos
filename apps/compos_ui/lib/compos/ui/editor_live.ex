@@ -1188,7 +1188,7 @@ defmodule Compos.Ui.EditorLive do
       <div class="windows">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </div>
-      <div :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key">
+      <div :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key mb-geom-popup">
         <div class="wk-title">
           <span>
             {Enum.join(@state.pending, " ")} —
@@ -1216,12 +1216,12 @@ defmodule Compos.Ui.EditorLive do
       <%= if @state.minibuffer do %>
         <div class="mb-modal-layer">
           <div
-            class={"mb-panel #{if Map.get(@state.minibuffer, :style) == "palette", do: "palette"}"}
+            class={mb_panel_class(@state.minibuffer)}
             role="dialog"
             aria-modal="true"
             aria-label={String.trim_trailing(@state.minibuffer.prompt, ": ")}
           >
-          <%= if Map.get(@state.minibuffer, :style) == "palette" do %>
+          <%= if mb_geom(@state.minibuffer) == "modal" do %>
             <div class="mb-head">
               <span class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</span>
               <span class="mb-head-spacer"></span>
@@ -1263,7 +1263,7 @@ defmodule Compos.Ui.EditorLive do
               <% end %>
             </div>
             <div
-              :if={Map.get(@state.minibuffer, :style) == "palette" && mb_preview(@state.minibuffer)}
+              :if={mb_geom(@state.minibuffer) == "modal" && mb_preview(@state.minibuffer)}
               class="mb-preview"
             >
               <%= with p <- mb_preview(@state.minibuffer) do %>
@@ -1287,7 +1287,7 @@ defmodule Compos.Ui.EditorLive do
       </div>
       <% else %>
         <%= if @state.transient && @state.transient[:groups] do %>
-          <div class={"mb-panel palette transient-panel #{if @state.transient[:detail], do: "with-rail"}"}>
+          <div class={"mb-panel palette mb-geom-modal transient-panel #{if @state.transient[:detail], do: "with-rail"}"}>
             <div class="transient-head">
               <span class="transient-title">{@state.transient.title}</span>
               <span :if={@state.transient[:subtitle] not in [nil, ""]} class="transient-subtitle">{@state.transient.subtitle}</span>
@@ -1426,6 +1426,31 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp mb_split(mb), do: {mb.input, " ", ""}
+
+  # Keep the DOM geometry in lockstep with Editor.render_minibuffer/2.  The
+  # renderer includes `geometry` so a LiveView patch does not have to infer a
+  # panel shape from a presentation style; the style fallback keeps an older
+  # daemon and a freshly recompiled UI compatible during development.
+  defp mb_geom(%{geometry: geometry}) when geometry in ["minibuffer", "popup", "modal"],
+    do: geometry
+
+  defp mb_geom(mb) do
+    case Map.get(mb, :style) do
+      style when style in ["palette", "modal"] -> "modal"
+      "popup" -> "popup"
+      _ -> "minibuffer"
+    end
+  end
+
+  defp mb_panel_class(mb) do
+    case mb_geom(mb) do
+      # `palette` remains the visual vocabulary for the existing large
+      # completion panel; `mb-geom-modal` names its layout role.
+      "modal" -> "mb-panel palette mb-geom-modal"
+      "popup" -> "mb-panel mb-geom-popup"
+      "minibuffer" -> "mb-panel mb-geom-minibuffer"
+    end
+  end
 
   # A question is not a completion prompt. It takes one key, so it says
   # which keys answer it, and it counts nothing.

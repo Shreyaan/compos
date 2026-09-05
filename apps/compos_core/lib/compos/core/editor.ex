@@ -2494,8 +2494,15 @@ defmodule Compos.Core.Editor do
 
   defp render_minibuffer(mb, name) do
     prompt_sel = prompt_preselected?(mb)
-    # the palette is tall: show three times the bottom bar's slice
-    window = if Map.get(mb, :style) == "palette", do: 24, else: 8
+    geometry = mb_geometry(mb)
+    # each shape shows what it has room for: the modal is three times the
+    # bottom bar's slice, the popup sits between the two
+    window =
+      case geometry do
+        "modal" -> 24
+        "popup" -> 14
+        _ -> 8
+      end
 
     %{
       prompt: mb.prompt,
@@ -2515,9 +2522,11 @@ defmodule Compos.Core.Editor do
       sel: mb.list.sel,
       total: Candidates.total(mb.list),
       completing: mb.on_complete not in [nil, false],
-      # presentation, chosen by the prompt: nil = bottom panel,
-      # "palette" = centered panel
+      # the prompt's own flavour word, which picks the label row: nil,
+      # "palette", "modal", "popup", "question", "filter"
       style: Map.get(mb, :style),
+      # the shape it takes on screen, derived from the flavour
+      geometry: geometry,
       # the prompt's own words for the palette: the rail's footer note and
       # the head row's key legend. Scheme writes both; nothing is inferred.
       note: (is_binary(Map.get(mb, :note)) && mb.note) || "",
@@ -2530,6 +2539,23 @@ defmodule Compos.Core.Editor do
             []
         end
     }
+  end
+
+  # The three shapes a completion can take. A prompt names one with its
+  # 'style handler; nothing else about the prompt changes.
+  #   "minibuffer" — the bottom rows, in the flow; the window tree shrinks
+  #   "popup"      — an overlay on the bottom edge; nothing reflows
+  #   "modal"      — a centered panel over a scrim
+  # Every surface that covers the windows uses one of the three, which-key
+  # and the transient menus included. "palette" is the old spelling of
+  # "modal" and still answers to it.
+  defp mb_geometry(mb) do
+    case Map.get(mb, :style) do
+      "modal" -> "modal"
+      "palette" -> "modal"
+      "popup" -> "popup"
+      _ -> "minibuffer"
+    end
   end
 
   defp render_completion(c) do

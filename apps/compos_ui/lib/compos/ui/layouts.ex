@@ -1264,27 +1264,44 @@ defmodule Compos.Ui.Layouts do
              It takes its height from the window tree, which shrinks by
              exactly that much and keeps every pane readable — it covers
              nothing and dims nothing. Only .palette floats over them. */
-          .mb-modal-layer:has(.mb-panel:not(.palette)) {
+          .mb-modal-layer:has(.mb-panel.mb-geom-minibuffer) {
             position: static; inset: auto;
             order: 100; flex: 0 0 auto;
             display: block; padding: 0; background: none;
           }
-          .mb-panel:not(.palette) {
+          .mb-panel.mb-geom-minibuffer,
+          .mb-panel.mb-geom-popup {
             width: 100%; max-width: none; max-height: none;
             border: none; border-top: 2px solid var(--accent-fg, #26356b);
             border-radius: 0; box-shadow: none;
           }
+          /* The popup takes the minibuffer's rows without the minibuffer's
+             cost: it covers the windows instead of taking their space, so
+             opening and closing the prompt reflows nothing. The layer keeps
+             the keyboard and drops the scrim, so nothing below is dimmed. */
+          .mb-modal-layer:has(.mb-panel.mb-geom-popup) {
+            display: block; padding: 0; background: none;
+            /* the layer covers the frame but claims none of it: a click
+               lands on the window under the popup, not on empty air */
+            pointer-events: none;
+          }
+          .mb-panel.mb-geom-popup { max-height: 44dvh; pointer-events: auto; }
           .mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 11.5px; }
-          /* which-key is a keyboard-blocking overlay. Keep the buffer geometry
-             unchanged while the prefix panel explains the pending keys. */
-          .which-key {
+          /* The popup shape, and every surface that takes it says so with
+             this class. It docks to the bottom edge above the echo bar and
+             sits over the windows: it keeps the buffer geometry unchanged,
+             dims nothing and moves nothing. which-key was the only surface
+             with this shape; a completion prompt now asks for it by name. */
+          .mb-geom-popup {
             position: absolute; left: 0; right: 0; bottom: 30px; z-index: 50;
             background: var(--window-bg, #fdfcf8);
             border-top: 2px solid var(--accent-fg, #26356b);
-            padding: 10px 14px 12px;
             max-height: 44vh;
             overflow-y: auto;
             box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
+          }
+          .which-key {
+            padding: 10px 14px 12px;
             /* the panel stays hidden for the idle delay (appearance.scm
                which-key-idle-delay): a fast chord never draws it */
             animation: wk-idle 0s var(--ui-which-key-delay, 0.5s) both;

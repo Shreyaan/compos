@@ -517,6 +517,26 @@ defmodule Compos.Ui.EditorLiveTest do
     keys(view, ["C-g"])
   end
 
+  test "minibuffer styles select their declared geometry", %{conn: conn} do
+    {:ok, view, _} = live(conn, "/")
+
+    assert {:ok, _} =
+             Compos.Core.Session.eval(
+               ~S|(minibuffer-read* "Choose: " '("one") (list (list 'style "modal")))|
+             )
+
+    assert has_element?(view, ".mb-panel.palette.mb-geom-modal")
+    keys(view, ["C-g"])
+
+    assert {:ok, _} =
+             Compos.Core.Session.eval(
+               ~S|(minibuffer-read* "Choose: " '("one") (list (list 'style "popup")))|
+             )
+
+    assert has_element?(view, ".mb-panel.mb-geom-popup:not(.palette)")
+    keys(view, ["C-g"])
+  end
+
   test "which-key renders on C-x", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     html = keys(view, ["C-x"])

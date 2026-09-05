@@ -1605,7 +1605,8 @@
                ;; draw (and a wake, for a dormant member)
                (peek!
                  (lambda (name)
-                   (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name))))
+                   (when (group-switch-peeks?)
+                     (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name)))))
           (if (null? candidates)
               (message "No groups")
               (minibuffer-read-preview "Switch group: " candidates
@@ -1625,7 +1626,9 @@
                 (lambda ()
                   (set! open #f)
                   (show-here!)
-                  (sleep-woken!))))))))
+                  (sleep-woken!))
+                #f
+                group-switch-style))))))
 
 (defcustom 'group-switch-peek-ms 120
   "How long the highlight rests on a group before the switcher previews it, in milliseconds."
