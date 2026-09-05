@@ -32,6 +32,14 @@ The actions:
 
 `split-window-sensibly` is Emacs' rule: a window with `split-height-threshold` rows (80) splits below; else a window with `split-width-threshold` columns (160) splits beside; else the sole work window splits below whatever its size. Two windows side by side on a laptop meet neither threshold, so the next display takes the other window instead of making a third. Both thresholds are `defcustom`s in the `windows` group.
 
+## Layout presets
+
+`C-x l` opens the layout presets. The `two-pane` preset keeps the selected
+buffer on the left at two-thirds width. It shows the next visible buffer on the
+right. A frame with one pane gets its companion from the current group or the
+recent buffer list. The preset closes extra panes and makes `two-pane` the
+frame's layout target.
+
 ## Rules
 
 `(add-display-rule! PATTERN ACTION [PARAMS])` puts a rule in front. PATTERN is a substring of the buffer name, or `(category KIND)` for a kind of display the caller names in the alist. ACTION is one action name or a list of them. A rule's actions come before the base action and the fallback, so a rule that names `popup` always lands in the popup, and a rule that names `same-window` never splits.

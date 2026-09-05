@@ -25,6 +25,143 @@
          (<= end (string-byte-length text))
          (substring-bytes text start end))))
 
+;;; --- addressable blocks ----------------------------------------------------
+;;; A parsed fence is geometry. An addressable block is durable editor state.
+;;; It has an opaque buffer-scoped id and marker locals for both boundaries.
+;;; Blocks may contain other blocks, but their ranges may never cross.
+
+(define (block-records buf)
+  (or (buffer-local buf 'addressable-blocks) '()))
+
+(define (block--marker-name id edge)
+  (string->symbol (string-append "block-" id "-" edge)))
+
+(define (block--record buf id)
+  (let loop ((records (block-records buf)))
+    (cond ((null? records) #f)
+          ((equal? (plist-get (car records) 'id) id) (car records))
+          (else (loop (cdr records))))))
+
+(define (block--replace-record! buf id next)
+  (buffer-set-local! buf 'addressable-blocks
+    (map (lambda (record)
+           (if (equal? (plist-get record 'id) id) next record))
+         (block-records buf)))
+  next)
+
+(define (block--put pl key value)
+  (let loop ((rest pl) (out '()))
+    (cond ((null? rest) (append (reverse out) (list key value)))
+          ((equal? (car rest) key)
+           (append (reverse out) (list key value) (cddr rest)))
+          (else
+            (loop (cddr rest)
+                  (cons (cadr rest) (cons (car rest) out)))))))
+
+(define (block--next-id! buf)
+  (let ((n (+ 1 (or (buffer-local buf 'addressable-block-seq) 0))))
+    (buffer-set-local! buf 'addressable-block-seq n)
+    (string-append "b" (number->string n))))
+
+(define (block--crosses? a-start a-end b-start b-end)
+  (or (and (< a-start b-start) (< b-start a-end) (< a-end b-end))
+      (and (< b-start a-start) (< a-start b-end) (< b-end a-end))))
+
+(define (block--valid-range? buf start end parent)
+  (and (number? start) (number? end)
+       (<= 0 start) (<= start end) (<= end (buffer-size buf))
+       (let ((container (and parent (block-resolve-id buf parent))))
+         (or (not parent)
+             (and container
+                  (<= (plist-get container 'start) start)
+                  (<= end (plist-get container 'end)))))
+       (let loop ((records (block-records buf)))
+         (if (null? records)
+             #t
+             (let ((live (block-resolve-id buf (plist-get (car records) 'id))))
+               (if (and live
+                        (not (equal? (plist-get live 'state) 'deleted))
+                        (block--crosses?
+                          start end
+                          (plist-get live 'start) (plist-get live 'end)))
+                   #f
+                   (loop (cdr records))))))))
+
+(define (block-create! buf kind start end &optional parent state metadata)
+  (if (not (block--valid-range? buf start end parent))
+      (error "block-create!: invalid or crossing range")
+      (let* ((id (block--next-id! buf))
+             (start-local (block--marker-name id "start"))
+             (end-local (block--marker-name id "end"))
+             (record (list 'id id 'kind kind 'parent (or parent #f)
+                           'start-local start-local 'end-local end-local
+                           'state (or state 'complete)
+                           'metadata (or metadata '()))))
+        (buffer-marker-local! buf start-local 'stay)
+        (buffer-marker-local! buf end-local 'advance)
+        (buffer-set-local! buf start-local start)
+        (buffer-set-local! buf end-local end)
+        (buffer-set-local! buf 'addressable-blocks
+          (append (block-records buf) (list record)))
+        id)))
+
+(define (block-address buf id)
+  (and (block--record buf id) (list 'buffer buf 'block id)))
+
+(define (block-resolve address)
+  (let* ((buf (plist-get address 'buffer))
+         (id (plist-get address 'block))
+         (record (and (string? buf) (string? id) (buffer-known? buf)
+                      (block--record buf id))))
+    (and record
+         (let ((start (buffer-local buf (plist-get record 'start-local)))
+               (end (buffer-local buf (plist-get record 'end-local))))
+           (and (number? start) (number? end)
+                (list 'buffer buf
+                      'id id
+                      'kind (plist-get record 'kind)
+                      'parent (plist-get record 'parent)
+                      'start start
+                      'end end
+                      'state (plist-get record 'state)
+                      'metadata (plist-get record 'metadata)))))))
+
+(define (block-resolve-id buf id)
+  (block-resolve (list 'buffer buf 'block id)))
+
+(define (block-children buf parent)
+  (filter
+    (lambda (record)
+      (and record
+           (equal? (plist-get record 'parent) parent)
+           (not (equal? (plist-get record 'state) 'deleted))))
+    (map (lambda (record)
+           (block-resolve-id buf (plist-get record 'id)))
+         (block-records buf))))
+
+(define (block-set-state! buf id state)
+  (let ((record (block--record buf id)))
+    (and record
+         (block--replace-record! buf id (block--put record 'state state)))))
+
+(define (block-set-metadata! buf id metadata)
+  (let ((record (block--record buf id)))
+    (and record
+         (block--replace-record! buf id (block--put record 'metadata metadata)))))
+
+(define (block-close-end! buf id &optional position)
+  (let ((record (block--record buf id)))
+    (when record
+      (let ((end-local (plist-get record 'end-local)))
+        (buffer-marker-local! buf end-local 'advance)
+        (when position (buffer-set-local! buf end-local position))))))
+
+(define (block-retire-children! buf parent)
+  (for-each
+    (lambda (child)
+      (block-set-state! buf (plist-get child 'id) 'deleted))
+    (block-children buf parent)))
+
 ;; What the block needs after it. A document that already has a blank line
 ;; there needs nothing; a line that runs straight on needs one.
 (define (block-tail-for buf end)
@@ -231,6 +368,32 @@
 
 (public! 'block-body
   "(block-body BLOCK) — the text between BLOCK's fences; a block without both fences is returned whole")
+
+(public! 'block-records
+  "(block-records BUF) — the durable addressable block records in BUF")
+(public! 'block-create!
+  "(block-create! BUF KIND START END [PARENT STATE METADATA]) — create one addressable block and return its buffer-scoped id")
+(public! 'block-address
+  "(block-address BUF ID) — the stable address (buffer BUF block ID), or #f")
+(public! 'block-resolve
+  "(block-resolve ADDRESS) — resolve an address to its current range and metadata, or #f")
+(public! 'block-resolve-id
+  "(block-resolve-id BUF ID) — resolve one buffer-scoped block id, or #f")
+(public! 'block-children
+  "(block-children BUF PARENT) — the live direct children of PARENT")
+(public! 'block-set-state!
+  "(block-set-state! BUF ID STATE) — set an addressable block's state")
+(public! 'block-set-metadata!
+  "(block-set-metadata! BUF ID METADATA) — replace an addressable block's metadata")
+
+(catalog-meta! 'function "block-records" 'domain 'editing 'effects '(read))
+(catalog-meta! 'function "block-address" 'domain 'editing 'effects '(read))
+(catalog-meta! 'function "block-resolve" 'domain 'editing 'effects '(read))
+(catalog-meta! 'function "block-resolve-id" 'domain 'editing 'effects '(read))
+(catalog-meta! 'function "block-children" 'domain 'editing 'effects '(read))
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(write)))
+  '("block-create!" "block-set-state!" "block-set-metadata!"))
 
 ;; Do not leak this layer's catalog context into the loader.
 (package! block-parent-package block-parent-namespace)

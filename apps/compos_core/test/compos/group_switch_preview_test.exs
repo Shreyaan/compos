@@ -18,6 +18,7 @@ defmodule Compos.GroupSwitchPreviewTest do
     Editor.completion_dismiss()
     Editor.set_pending([])
     Editor.delete_other_windows()
+    eval!("(layout-target-set! #f)")
 
     suffix = System.unique_integer([:positive])
     source = "group-preview-source-#{suffix}"
@@ -52,5 +53,20 @@ defmodule Compos.GroupSwitchPreviewTest do
 
     assert eval!("(window-buffer #{home})") == Jason.encode!(source)
     assert Editor.render_state().minibuffer == nil
+  end
+
+  test "C-u C-x b opens the picked buffer in another window", context do
+    home = eval!("(active-window)") |> String.to_integer()
+
+    press(["C-u", "C-x", "b"])
+    type(context.target)
+    assert eval!("(window-buffer #{home})") == Jason.encode!(context.target)
+
+    press("RET")
+
+    assert eval!("(window-buffer #{home})") == Jason.encode!(context.source)
+    assert length(Editor.list_windows()) == 2
+    refute eval!("(active-window)") |> String.to_integer() == home
+    assert Editor.current_buffer() == context.target
   end
 end

@@ -95,6 +95,20 @@ defmodule Compos.Core.Candidates do
           face: face
         }
 
+      # FACTS are ((KEY VALUE) ...): what the palette's rail says about the
+      # row while it is highlighted. The prompt writes them; the frame
+      # shows them as they are.
+      [label, hint, kind, chips, face, facts]
+      when is_binary(label) and is_list(chips) and is_binary(face) and is_list(facts) ->
+        %{
+          label: label,
+          hint: to_string(hint),
+          kind: to_string(kind),
+          chips: Enum.map(chips, &to_string/1),
+          face: face,
+          facts: for([k, v] <- facts, do: {to_string(k), to_string(v)})
+        }
+
       %{label: _} = c ->
         c
 

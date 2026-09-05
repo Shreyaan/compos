@@ -73,6 +73,22 @@
       (set! *llm-bundles* '())
       (llm-bundle-save! "zz-work" '(connector "api" model "m1" effort "high"))
       (llm-bundle-save! "zz-read" '(connector "claude-code" model "haiku"))
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
+                    "the first bundle gets the first free key")
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                    "the next bundle gets a different key")
+      (set! *llm-bundles* (llm-bundles-assign-keys (reverse *llm-bundles*)))
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
+                    "loading persisted bundles preserves their keys")
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                    "persisted keys do not depend on list order")
+      (set! *llm-bundles*
+        (llm-bundles-assign-keys
+          (map (lambda (b) (llm-bundle-put b 'key "A")) *llm-bundles*)))
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
+                    "an upper-case key from the first menu is reassigned")
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                    "in list order")
       (check-equal! (llm-bundle-model (llm-bundle-named "zz-work")) "m1"
                     "a bundle answers to its name")
       (llm-bundle-save! "zz-work" '(connector "api" model "m2" effort "high"))
@@ -80,10 +96,16 @@
                     "saving over a name replaces that bundle")
       (check-equal! (llm-bundle-model (llm-bundle-named "zz-work")) "m2"
                     "the newer setup is the one kept")
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
+                    "updating and moving a bundle never changes its key")
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                    "reordering another bundle never changes this key")
       (llm-bundle-forget! "zz-work")
       (check-false! (llm-bundle-named "zz-work") "a forgotten bundle is gone")
       (check-true! (and (llm-bundle-named "zz-read") #t)
                    "and the others are not")
+      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                    "forgetting another bundle does not compact this key")
       (set! *llm-bundles* saved))))
 
 (deftest 'llm-config-history-offers-ten-numbered-choices
@@ -105,8 +127,8 @@
       (set! *llm-config-history* saved)
       (buffer-kill! buf))))
 
-(deftest 'llm-config-menu-shows-tools-permissions-and-bundles
-  "C-c b groups the whole setup: model, tools, permissions, bundles"
+(deftest 'llm-config-menu-has-two-levels
+  "C-c b: bundles and recents on one level, the fields one level down"
   (lambda ()
     (let ((saved *llm-bundles*)
           (buf (test-buffer! "zz-llm-config-groups" "")))
@@ -115,16 +137,126 @@
       (let* ((groups (llm-config--groups buf))
              (titles (map car groups))
              (bundles (assoc "Bundles" groups))
-             (keys (map (lambda (i) (plist-get i 'key)) (cdr bundles))))
+             (setup (assoc "Setup" groups))
+             (keys (map (lambda (i) (plist-get i 'key)) (cdr bundles)))
+             (actions (map (lambda (i) (plist-get i 'key)) (cdr setup))))
+        (check-true! (and (member "Bundles" titles) (member "Setup" titles) #t)
+                     "level one holds the bundles and the setup actions")
+        (check-false! (member "Model" titles)
+                      "and none of the fields")
+        (check-equal! keys '("a") "a saved bundle is one key away")
+        (check-equal! (plist-get (car (cdr bundles)) 'description) "zz-review"
+                      "the row is the name; the rail says the rest")
+        (check-true! (and (member "." actions) (member "s" actions)
+                          (member "x" actions) #t)
+                     "fine-tune, save, and forget are the setup actions"))
+      (let* ((groups (llm-fine-tune--groups buf))
+             (titles (map car groups)))
         (check-equal! (take-n titles 4)
-                      '("Model" "Tools" "Permissions" "Bundles")
-                      "every part of the setup has a place in the menu")
-        (check-true! (and (member "A" keys) #t)
-                     "a saved bundle is one key away")
-        (check-true! (and (member "s" keys) (member "x" keys) #t)
-                     "and the menu can save one and forget one"))
+                      '("Model" "Tools" "Prompt" "Permissions")
+                      "level two holds every field of the setup")
+        (check-true! (and (assoc "Setup" groups) #t)
+                     "with revert and save at the end"))
       (set! *llm-bundles* saved)
       (buffer-kill! buf))))
+
+(deftest 'llm-config-rail-marks-what-a-bundle-would-change
+  "The rail follows the highlighted bundle and colours the fields that differ"
+  (lambda ()
+    (let ((saved *llm-bundles*)
+          (buf (test-buffer! "zz-llm-config-rail" "")))
+      (set! *llm-bundles* '())
+      (buffer-set-local! buf 'llm-connector "api")
+      (buffer-set-local! buf 'llm-model "m1")
+      (llm-bundle-save! "zz-other" '(connector "api" model "m2" effort "default"))
+      (let* ((items (llm-config--bundle-items buf))
+             (detail (llm-config--detail buf (car items)))
+             (rows (cadr detail))
+             (model (assoc "model" rows))
+             (backend (assoc "backend" rows)))
+        (check-equal! (car detail) "zz-other" "the rail is titled by the bundle")
+        (check-equal! (cadr model) "m2" "and shows the bundle's value")
+        (check-equal! (caddr model) "drift" "a field that would change is marked")
+        (check-equal! (caddr backend) "" "a field that stays is not")
+        (check-equal! (assoc "tools" rows) '("tools" "editor only" "dim")
+                      "a field the bundle never recorded shows the live value, dimmed")
+        (check-contains! (caddr detail) "1 field changes"
+                         "the note counts the change")
+        (check-equal! (plist-get (car items) 'description) "zz-other"
+                      "the row is the bare name"))
+      (let ((detail (llm-config--detail buf #f)))
+        (check-equal! (car detail) "live setup"
+                      "with no bundle highlighted the rail shows the live setup")
+        (check-contains! (llm-config--subtitle buf) "off-bundle"
+                         "and the subtitle says no bundle equals it"))
+      (llm-bundle-save! "zz-same" (llm-config-combination buf))
+      (check-contains! (llm-config--subtitle buf) "on bundle zz-same"
+                       "a bundle equal to the live setup names itself")
+      (check-equal! (llm-config--bundle-active? buf (llm-bundle-named "zz-same")) #t
+                    "and its row reads active")
+      (set! *llm-bundles* saved)
+      (buffer-kill! buf))))
+
+(deftest 'llm-fine-tune-measures-drift-against-the-base
+  "Level two compares the live setup with the base bundle; u puts it back"
+  (lambda ()
+    (let ((saved *llm-bundles*)
+          (buf (test-buffer! "zz-llm-fine-tune" "")))
+      (set! *llm-bundles* '())
+      (buffer-set-local! buf 'llm-connector "api")
+      (buffer-set-local! buf 'llm-model "m1")
+      (llm-bundle-save! "zz-base" (llm-config-combination buf))
+      (set-frame-local! 'llm-config-base #f)
+      (llm-fine-tune--setup! buf)
+      (check-equal! (frame-local 'llm-config-base) "zz-base"
+                    "the base is the bundle the live setup equals")
+      (check-contains! (caddr (llm-fine-tune--detail buf #f)) "identical"
+                       "no drift yet")
+      (buffer-set-local! buf 'llm-model "m9")
+      (let ((detail (llm-fine-tune--detail buf #f)))
+        (check-equal! (caddr (assoc "model" (cadr detail))) "drift"
+                      "a changed field is marked")
+        (check-contains! (caddr detail) "1 field differs" "and counted"))
+      (with-current-buffer buf
+        (lambda ()
+          (transient-setup "llm-fine-tune" buf)
+          (run-command "llm-config-revert")
+          (run-command "transient-quit-all")))
+      (check-equal! (buffer-local buf 'llm-model) "m1"
+                    "revert puts the base bundle's model back")
+      (set-frame-local! 'llm-config-base #f)
+      (set! *llm-bundles* saved)
+      (buffer-kill! buf))))
+
+(deftest 'transient-menu-carries-header-rail-and-legend
+  "A prefix's header, rail, and legend options reach the menu as one alist"
+  (lambda ()
+    (transient-define-prefix "zz-meta-menu" "Meta"
+      (list (list "Rows" (transient-suffix "q" "one" "transient-quit-all")))
+      'subtitle-fn (lambda (_s) "sub")
+      'context-fn (lambda (_s) "ctx")
+      'detail-fn (lambda (_s item)
+                   (list "rail" (list (list "k" (plist-get item 'description) "drift")) "note"))
+      'legend-fn (lambda (_s) '(("q" "quit"))))
+    (let* ((prefix (transient-prefix "zz-meta-menu"))
+           (state (list 'prefix "zz-meta-menu" 'scope "x" 'selected 0 'values '()))
+           (items (transient--visible-items (transient--visible-groups prefix state)))
+           (meta (transient--menu-meta prefix state items)))
+      (check-equal! (cadr (assoc "subtitle" meta)) "sub" "the subtitle")
+      (check-equal! (cadr (assoc "context" meta)) "ctx" "the context")
+      (check-equal! (car (cadr (assoc "detail" meta))) "rail" "the rail title")
+      (check-equal! (cadr (assoc "detail" meta))
+                    (list "rail" (list (list "k" "one" "drift")) "note")
+                    "the rail rows come from the selected item")
+      (check-equal! (cadr (assoc "legend" meta)) '(("q" "quit")) "the legend"))
+    (let* ((plain (transient-define-prefix "zz-plain-menu" "Plain"
+                    (list (list "Rows" (transient-suffix "q" "one" "transient-quit-all")))))
+           (prefix (transient-prefix "zz-plain-menu"))
+           (state (list 'prefix "zz-plain-menu" 'scope "x" 'selected 0 'values '()))
+           (meta (transient--menu-meta prefix state '())))
+      (check-equal! (cadr (assoc "subtitle" meta)) "" "a menu with no options has an empty header")
+      (check-equal! (cadr (assoc "detail" meta)) #f "no rail")
+      (check-equal! (cadr (assoc "legend" meta)) '() "and the frame's default legend"))))
 
 (deftest 'the-tools-key-opens-a-menu-not-a-buffer
   "t stays in the transient world: a child prefix over the same scope.
@@ -133,7 +265,7 @@ The full text list is still one key deeper (l), for actual reading."
     (let ((buf (test-buffer! "zz-llm-tools-menu" "")))
       ;; the t row names a PREFIX — transient--invoke-command opens a
       ;; child menu for a prefix name, and runs a command otherwise
-      (let* ((groups (llm-config--groups buf))
+      (let* ((groups (llm-fine-tune--groups buf))
              (tools (assoc "Tools" groups))
              (t-row (let loop ((is (cdr tools)))
                       (cond ((null? is) #f)
@@ -160,3 +292,70 @@ The full text list is still one key deeper (l), for actual reading."
           (check-true! (and (member "p" keys) (member "r" keys) (member "l" keys) #t)
                        "presets, adopt, and the full list stay reachable")))
       (buffer-kill! buf))))
+
+(deftest 'prompt-sections-are-one-multi-select-transaction
+  "Prompt section switches stay in a draft until one apply commits all of them"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-prompt-multi-select" "")))
+      (buffer-set-local! buf 'prompt-disabled-parts '("reading"))
+      (let* ((items (llm-config--prompt-items buf))
+             (repository
+               (let loop ((rest items))
+                 (cond ((null? rest) #f)
+                       ((equal? (plist-get (car rest) 'description) "reading")
+                        (car rest))
+                       (else (loop (cdr rest))))))
+             (identity (car items)))
+        (check-false! (plist-get repository 'default)
+                      "a disabled section starts off")
+        (check-true! (plist-get identity 'default)
+                     "an enabled section starts on"))
+      (transient-setup "llm-prompt-sections" buf)
+      (transient--set-value! "--prompt-identity" #f)
+      (transient--set-value! "--prompt-general" #f)
+      (check-equal! (prompt-disabled-parts buf) '("reading")
+                    "editing the draft does not change the buffer")
+      (run-command "llm-config-apply-prompt-sections")
+      (check-equal! (take-n (prompt-disabled-parts buf) 2)
+                    '("identity" "general")
+                    "one apply commits every changed switch")
+      (buffer-kill! buf))))
+
+(deftest 'transient-columns-and-left-right
+  "A prefix names the groups that share a column; left and right move
+between columns on the same row, and the edges do not wrap"
+  (lambda ()
+    (transient-define-prefix "zz-col-menu" "Cols"
+      (list (list "A" (transient-suffix "1" "a1" "transient-quit-all")
+                      (transient-suffix "2" "a2" "transient-quit-all"))
+            (list "B" (transient-suffix "3" "b1" "transient-quit-all"))
+            (list "C" (transient-suffix "4" "c1" "transient-quit-all")
+                      (transient-suffix "5" "c2" "transient-quit-all")
+                      (transient-suffix "6" "c3" "transient-quit-all"))
+            (list "D" (transient-suffix "7" "d1" "transient-quit-all")))
+      'columns '(("A" "B") ("C")))
+    (let* ((prefix (transient-prefix "zz-col-menu"))
+           (state (list 'prefix "zz-col-menu" 'scope "x" 'selected 0 'values '()))
+           (groups (transient--visible-groups prefix state))
+           (columns (transient--columns prefix state groups)))
+      (check-equal! columns '(("A" "B") ("C") ("D"))
+                    "declared columns first, an unnamed group stands alone")
+      ;; items: a1=0 a2=1 b1=2 | c1=3 c2=4 c3=5 | d1=6
+      (check-equal! (transient--column-target groups columns 0 1) 3
+                    "right from the first row lands on the first row")
+      (check-equal! (transient--column-target groups columns 2 1) 5
+                    "the third row of the column, across group borders")
+      (check-equal! (transient--column-target groups columns 5 1) 6
+                    "a shorter column takes its last row")
+      (check-equal! (transient--column-target groups columns 6 1) 6
+                    "the last column does not wrap")
+      (check-equal! (transient--column-target groups columns 4 -1) 1
+                    "left goes back on the same row")
+      (check-equal! (transient--column-target groups columns 0 -1) 0
+                    "the first column does not wrap"))
+    (let* ((prefix (transient-prefix "zz-plain-menu"))
+           (state (list 'prefix "zz-plain-menu" 'scope "x" 'selected 0 'values '()))
+           (groups (transient--visible-groups prefix state)))
+      (check-equal! (transient--columns prefix state groups) '(("Rows"))
+                    "a menu with no columns option: one column per group"))))
+

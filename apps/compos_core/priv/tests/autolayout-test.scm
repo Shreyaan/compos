@@ -117,3 +117,15 @@
       (autolayout--on-change!)
       (check-equal! (window-rects) before "a second run leaves the frame alone"))
     (t--al-done!)))
+
+(deftest 'autolayout-mode-respects-an-explicit-layout-target
+  "a chosen layout target prevents autolayout from replacing its window tree"
+  (lambda ()
+    (t--al-setup!)
+    (customize-set! 'autolayout-mode #t)
+    (layout-target-set! 'two-pane)
+    (let ((before (window-rects)))
+      (autolayout--on-change!)
+      (check-equal! (window-rects) before "the target layout stays unchanged"))
+    (layout-target-set! #f)
+    (t--al-done!)))

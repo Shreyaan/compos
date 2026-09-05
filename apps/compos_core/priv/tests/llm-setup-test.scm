@@ -154,3 +154,18 @@ a hang, and the user never learns there was anything to answer."
         (check-contains! r "shell (execute): asks first" "what the shell does")
         (check-contains! r "git" "the deny patterns are listed"))
       (buffer-kill! buf))))
+
+(deftest 'a-bundle-remembers-disabled-prompt-sections
+  "prompt composition is part of the complete LLM setup"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-llm-prompt-bundle" "")))
+      (llm-bundle-apply! buf
+        '(connector "api" model "m1" effort "high"
+          prompt-disabled ("reading" "general")))
+      (check-equal! (prompt-disabled-parts buf) '("reading" "general")
+                    "the preset restores its prompt exceptions")
+      (check-contains! (llm-bundle-label
+                         '(connector "api" prompt-disabled ("reading" "general")))
+                       "2 prompt off"
+                       "saved bundle labels expose the change")
+      (buffer-kill! buf))))

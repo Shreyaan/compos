@@ -1202,9 +1202,19 @@ defmodule Compos.Ui.EditorLive do
       </div>
       <%= if @state.minibuffer do %>
         <div class={"mb-panel #{if Map.get(@state.minibuffer, :style) == "palette", do: "palette"}"}>
-          <div class="mb-label-row">
-            {label_row(@state.minibuffer)}
-          </div>
+          <%= if Map.get(@state.minibuffer, :style) == "palette" do %>
+            <div class="mb-head">
+              <span class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</span>
+              <span class="mb-head-spacer"></span>
+              <span class="mb-head-legend">
+                <span :for={row <- palette_legend(@state.minibuffer)} class="transient-legend"><span class="transient-legend-key">{row.key}</span> {row.label}</span>
+              </span>
+            </div>
+          <% else %>
+            <div class="mb-label-row">
+              {label_row(@state.minibuffer)}
+            </div>
+          <% end %>
           <div class="mb-body">
             <div class="mb-cands" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
               <%= for c <- @state.minibuffer.candidates do %>
@@ -1243,7 +1253,7 @@ defmodule Compos.Ui.EditorLive do
                   <span class="mb-preview-k">{k}</span>
                   <span class="mb-preview-v">{v}</span>
                 </div>
-                <div class="mb-preview-note">{p.note}</div>
+                <div :if={p.note != ""} class="mb-preview-note">{p.note}</div>
               <% end %>
             </div>
           </div>
@@ -1257,22 +1267,51 @@ defmodule Compos.Ui.EditorLive do
         </div>
       <% else %>
         <%= if @state.transient && @state.transient[:groups] do %>
-          <div class="mb-panel palette transient-panel">
-            <div class="transient-title">{@state.transient.title}</div>
-            <div class="transient-groups">
-              <section :for={group <- @state.transient.groups} class="transient-group">
-                <div class="transient-group-title">{group.title}</div>
-                <div
-                  :for={item <- group.items}
-                  class={"transient-item #{if item.selected, do: "selected"} #{item.behavior}"}
-                >
-                  <span class="transient-key">{item.key}</span>
-                  <span class="transient-description">{item.description}</span>
-                  <span :if={item.value != ""} class="transient-value">{item.value}</span>
-                </div>
-              </section>
+          <div class={"mb-panel palette transient-panel #{if @state.transient[:detail], do: "with-rail"}"}>
+            <div class="transient-head">
+              <span class="transient-title">{@state.transient.title}</span>
+              <span :if={@state.transient[:subtitle] not in [nil, ""]} class="transient-subtitle">{@state.transient.subtitle}</span>
+              <span class="transient-head-spacer"></span>
+              <span :if={@state.transient[:chips] not in [nil, []]} class="transient-chips">
+                <span :for={chip <- @state.transient.chips} class={"transient-chip #{if chip.active, do: "active"}"}>{chip.label}</span>
+              </span>
+              <span :if={@state.transient[:context] not in [nil, ""]} class="transient-context">{@state.transient.context}</span>
             </div>
-            <div class="transient-help">RET invoke · C-g quit · C-q quit all · C-z suspend · ↑/↓ select · ? help</div>
+            <div class="transient-body">
+              <div id="transient-groups" class="transient-groups" phx-hook="TransientScroll">
+                <div :for={column <- transient_columns(@state.transient)} class="transient-column">
+                  <section :for={group <- Enum.filter(@state.transient.groups, &(&1.title in column))} class="transient-group">
+                    <div class="transient-group-title">{group.title}</div>
+                    <div
+                      :for={item <- group.items}
+                      class={"transient-item #{if item.selected, do: "selected"} #{item.behavior}"}
+                    >
+                      <span class="transient-key">{item.key}</span>
+                      <span class="transient-description">{item.description}</span>
+                      <span :if={item.value != ""} class="transient-value">{item.value}</span>
+                    </div>
+                  </section>
+                </div>
+              </div>
+              <aside :if={@state.transient[:detail]} class="transient-rail">
+                <div class="transient-rail-title">{@state.transient.detail.title}</div>
+                <div :for={row <- @state.transient.detail.rows} class={"transient-rail-row #{row.tone}"}>
+                  <span class="transient-rail-k">{row.k}</span>
+                  <span class="transient-rail-v">{row.v}</span>
+                </div>
+                <div :if={@state.transient.detail.note != ""} class="transient-rail-note">{@state.transient.detail.note}</div>
+              </aside>
+            </div>
+            <div class="transient-help">
+              <%= if @state.transient[:legend] not in [nil, []] do %>
+                <span :for={row <- @state.transient.legend} class="transient-legend"><span class="transient-legend-key">{row.key}</span> {row.label}</span>
+              <% else %>
+                <span class="transient-legend"><span class="transient-legend-key">RET</span> invoke</span>
+                <span class="transient-legend"><span class="transient-legend-key">C-g</span> quit</span>
+                <span class="transient-legend"><span class="transient-legend-key">↑↓</span> select</span>
+                <span class="transient-legend"><span class="transient-legend-key">?</span> help</span>
+              <% end %>
+            </div>
           </div>
         <% else %>
         <% end %>
@@ -1398,9 +1437,30 @@ defmodule Compos.Ui.EditorLive do
     end
   end
 
-  # the palette's right-hand panel: facts about the highlighted row,
-  # read from the candidate's own columns — no extra state
+  # the columns Scheme decided for a transient; an older menu has none, so
+  # every group stands alone
+  defp transient_columns(%{columns: [_ | _] = cols}), do: cols
+  defp transient_columns(%{groups: groups}), do: Enum.map(groups, &[&1.title])
+
+  # the palette's head row legend: the prompt's own, else the completion keys
+  defp palette_legend(%{legend: [_ | _] = rows}), do: rows
+
+  defp palette_legend(_mb) do
+    [
+      %{key: "TAB", label: "complete"},
+      %{key: "RET", label: "accept"},
+      %{key: "C-n C-p", label: "select"},
+      %{key: "C-c C-o", label: "collect"},
+      %{key: "C-g", label: "quit"}
+    ]
+  end
+
+  # The palette's right-hand rail: facts about the highlighted row. A row
+  # brings its own facts (the prompt wrote them); a row without any shows
+  # its hint. The note under the facts is the prompt's, or nothing.
   defp mb_preview(mb) do
+    note = Map.get(mb, :note) || ""
+
     case Enum.find(mb.candidates, &Map.get(&1, :selected)) do
       nil ->
         nil
@@ -1413,29 +1473,24 @@ defmodule Compos.Ui.EditorLive do
           facts:
             [{"kind", "group"}, {"holds", c.hint |> String.split("·") |> hd() |> String.trim()}] ++
               if(chips == [], do: [], else: [{"members", Enum.join(chips, " · ")}]),
-          note: "RET restores this group's layout exactly as you left it."
+          note: note
         }
+
+      %{facts: [_ | _] = facts} = c ->
+        %{title: c.label, facts: facts, note: note}
 
       c ->
         fields = String.split(c.hint, ~r/\s{2,}/, trim: true)
-        {paths, kinds} = Enum.split_with(fields, &String.starts_with?(&1, "/"))
-
-        title =
-          if String.starts_with?(c.label, "*"), do: c.label, else: Path.basename(c.label)
 
         %{
-          title: title,
+          title: c.label,
           facts:
-            [{"mode", List.first(kinds) || "Fundamental"}] ++
-              case Enum.drop(kinds, 1) do
-                [] -> []
-                rest -> [{"context", Enum.join(rest, " · ")}]
-              end ++
-              case paths do
-                [] -> []
-                [p | _] -> [{"path", p}]
-              end,
-          note: "RET switches; a buffer from another group brings that layout with it."
+            case fields do
+              [] -> []
+              [one] -> [{"about", one}]
+              many -> Enum.with_index(many, fn f, i -> {if(i == 0, do: "about", else: ""), f} end)
+            end,
+          note: note
         }
     end
   end

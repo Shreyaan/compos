@@ -40,6 +40,14 @@ hold what a buffer is, and a mode change must not lose a chat. A mode
 that wants a clean buffer calls it. `permanent-local!` marks a local as
 one to keep. The chat identity locals are permanent.
 
+Each chat keeps `default-directory` as identity state. Commands and tools use
+that directory as the chat's working directory. The compact modeline shows its
+abbreviated path beside the chat name.
+
+Context narrowing is opt-in: `C-x n N` narrows both the visible buffer and
+the context sent by inline `llm-mode`; ordinary `C-x n n` remains visual.
+Every widen command clears the LLM context restriction as well.
+
 ## Minor modes
 
 ```scheme

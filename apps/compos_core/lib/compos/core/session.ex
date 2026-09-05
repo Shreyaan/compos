@@ -589,21 +589,31 @@ defmodule Compos.Core.Session do
   end
 
   def handle_call(:refresh_primitives, _from, state) do
-    interp = interp()
+    # A page load can ask for this while Hotload's swap has the primitive
+    # module unloaded for a moment. A raise here kills Session, and the
+    # core supervisor gives up (2026-09-05: "module Compos.Core.SchemeAPI is
+    # not available" took the daemon down). Refuse instead; Hotload rebinds
+    # again when its swap completes.
+    if Code.ensure_loaded?(Compos.Core.SchemeAPI) and
+         function_exported?(Compos.Core.SchemeAPI, :primitives, 0) do
+      interp = interp()
 
-    # Session's own primitives must go through the SAME rebind. A register
-    # after the rebind fixes two things badly. An alias holds a
-    # `{:builtin, "define-command", fun}` tuple that only the rebind walk
-    # reaches, so `define-command--raw` in editor.scm keeps the purged fun.
-    # A register also puts the raw primitive back over the Scheme wrapper
-    # that editor.scm defines for the same name.
-    extra =
-      Map.merge(Compos.Core.SchemeAPI.primitives(), session_primitives(interp.global))
+      # Session's own primitives must go through the SAME rebind. A register
+      # after the rebind fixes two things badly. An alias holds a
+      # `{:builtin, "define-command", fun}` tuple that only the rebind walk
+      # reaches, so `define-command--raw` in editor.scm keeps the purged fun.
+      # A register also puts the raw primitive back over the Scheme wrapper
+      # that editor.scm defines for the same name.
+      extra =
+        Map.merge(Compos.Core.SchemeAPI.primitives(), session_primitives(interp.global))
 
-    interp = Scheme.rebind_primitives(interp, extra)
-    :persistent_term.put(@pt, interp)
-    :persistent_term.put(@pt_stamp, primitive_stamp())
-    {:reply, :ok, state}
+      interp = Scheme.rebind_primitives(interp, extra)
+      :persistent_term.put(@pt, interp)
+      :persistent_term.put(@pt_stamp, primitive_stamp())
+      {:reply, :ok, state}
+    else
+      {:reply, {:error, :primitives_not_loaded}, state}
+    end
   end
 
   def handle_call({:reload_files, paths}, _from, state) do

@@ -23,8 +23,8 @@
           (acp (compos-acp-prompt-parts)))
       (check-equal! direct acp "the lane guidance is identical")
       (check-equal! (map car direct)
-                    '("compos-identity" "quiet-editor" "chat-context"
-                      "scheme-api" "discovery" "repository"
+                    '("compos-identity" "quiet-editor" "scope" "chat-context"
+                      "scheme-api" "discovery" "reading" "repository"
                       "scheme-authoring" "browser" "catalog" "recipes")
                     "the checked-in fragment order is explicit")
       (for-each
@@ -36,18 +36,22 @@
                     "hello is only the shared composition")
       (check-contains! (hello) "(chat-context)"
                        "every agent learns to inspect its context")
-      (check-contains! (hello) "Research as much as the task requires"
-                       "discovery is not artificially curtailed")
-      (check-contains! (hello) "continue with more batches"
-                       "research can use repeated concurrent batches")
-      (check-contains! (hello) "not that research stops after one batch"
-                       "one-shot applies to questions, not the whole phase")
-      (check-contains! (hello) "almost never read a full file"
+      (check-contains! (hello) "Batch up to four independent read-only calls"
+                       "independent discovery can run concurrently")
+      (check-contains! (hello) "Search each unknown once"
+                       "discovery stops repeating answered questions")
+      (check-contains! (hello) "Prefer `(code-outline BUF)`"
                        "agents prefer structural reads")
-      (check-contains! (hello) "Most source files have a tree-sitter grammar"
+      (check-contains! (hello) "(code-sexp-replace! BUF ANCHOR NEW [LEVELS])"
                        "agents know surgical source editing is available")
       (check-contains! (hello) "Write Scheme unless the user explicitly specifies another language"
-                       "Scheme remains the default implementation language"))))
+                       "Scheme remains the default implementation language")
+      (check-true! (< (string-length (prompt-file-text "quiet-editor.txt")) 600)
+                   "quiet-editor stays compact")
+      (check-true! (< (string-length (prompt-file-text "discovery.txt")) 850)
+                   "discovery stays compact")
+      (check-true! (< (string-length (prompt-file-text "repository.txt")) 1000)
+                   "repository guidance stays compact"))))
 
 (deftest 'chat-context-names-the-conversation-and-its-companions
   "the structured context reports identity and full ambient membership"
@@ -89,8 +93,8 @@
       (t--prompt-cleanup chat doc hidden)
       (group-record-delete! id))))
 
-(deftest 'group-members-are-pulled-as-ambient-context
-  "the chat names live context but does not attach member outlines or text"
+(deftest 'group-members-come-from-chat-context-not-the-system-prompt
+  "changing group membership leaves the cached prompt byte-identical"
   (lambda ()
     (let ((stale (group-resolve-id "prompt-ambient-group")))
       (when stale (group-record-delete! stale)))
@@ -101,30 +105,31 @@
       (test-buffer! source "def zz_ambient_secret, do: :hidden\n")
       (test-buffer! notes "# ZZ Ambient Heading\nprivate body text\n")
       (chat-set-group! chat id)
-      (buffer-add-group! source id)
-      (buffer-add-group! notes id)
-      (buffer-set-local! source 'mode-name "elixir-mode")
-      (buffer-set-local! notes 'mode-name "morg-mode")
-      (let ((preamble (chat-preamble chat)))
-        (check-contains! preamble "ambient context for this chat"
-                         "the members are standing context")
-        (check-contains! preamble "does not attach its outline or text"
-                         "the prompt states the pull contract")
-        (check-contains! preamble "(code-outline \"NAME\")"
-                         "source structure is pulled")
-        (check-contains! preamble "(markdown-outline \"NAME\")"
-                         "Markdown structure is pulled")
-        (check-false! (string-contains? preamble "zz_ambient_secret")
-                      "the source outline is not attached")
-        (check-false! (string-contains? preamble "ZZ Ambient Heading")
-                      "the Markdown outline is not attached")
-        (check-false! (string-contains? preamble "private body text")
-                      "the member text is not attached"))
+      (let ((before (chat-prompt-source-parts chat)))
+        (buffer-add-group! source id)
+        (buffer-add-group! notes id)
+        (buffer-set-local! source 'mode-name "elixir-mode")
+        (buffer-set-local! notes 'mode-name "morg-mode")
+        (let* ((after (chat-prompt-source-parts chat))
+               (context (cadr (assoc "context" after)))
+               (live (chat-context chat)))
+          (check-equal! after before
+                        "group changes do not invalidate the prompt prefix")
+          (check-contains! context "(chat-context)"
+                           "the static section tells the agent how to pull context")
+          (check-true! (member source (plist-get live 'group-members))
+                       "chat-context returns the new source member")
+          (check-true! (member notes (plist-get live 'group-members))
+                       "chat-context returns the new notes member")
+          (check-false! (string-contains? (prompt-parts-text after) source)
+                        "the system prompt does not hardcode buffer names")
+          (check-false! (string-contains? (prompt-parts-text after) "private body text")
+                        "the system prompt does not attach member text")))
       (t--prompt-cleanup chat source notes)
       (group-record-delete! id))))
 
 (deftest 'chat-show-prompt-shows-the-direct-prompt-and-its-composition
-  "the help page names each fragment and includes the canonical join"
+  "the help page names each section and includes the canonical join"
   (lambda ()
     (let ((chat (t--prompt-chat "*prompt-direct*" "api")))
       (chat-prompt-freeze! chat)
@@ -133,9 +138,9 @@
             (parts (chat-prompt-parts chat)))
         (check-contains! page "`*prompt-direct*` · direct API" "the page names the lane")
         (check-contains! page "## Composition" "the page explains the join")
-        (check-contains! page "`chat-preamble`" "the page names a fragment")
+        (check-contains! page "`general`" "the page names a fragment")
         (check-contains! page "## Final joined text" "the page includes the wire text")
-        (check-contains! page "frozen fragment set" "the page states the lifecycle")
+        (check-contains! page "frozen section set" "the page states the lifecycle")
         (check-contains! page (prompt-parts-text parts) "the joined value is exact")
         (check-equal! (chat-prompt-report chat) (chat-prompt-report chat)
                       "recomposition is byte-identical without state changes"))
@@ -152,14 +157,14 @@
            (page (chat-prompt-report chat))
            (parts (chat-prompt-parts chat)))
       (check-contains! page "ACP session append" "the page names the ACP lane")
-      (check-contains! page "prospective fragment set"
+      (check-contains! page "prospective section set"
                        "the page says that the prompt is not frozen yet")
       (check-contains! page "first send freezes it"
                        "the page states the conversation lifecycle")
-      (check-equal! (car (car parts)) "compos-identity"
-                    "ACP starts with the shared guidance")
-      (check-true! (assoc "chat-context" parts)
-                   "ACP receives the shared context guidance")
+      (check-equal! (car (car parts)) "identity"
+                    "ACP starts with the identity section")
+      (check-true! (assoc "context" parts)
+                   "ACP receives the context section")
       (t--prompt-cleanup chat))))
 
 (deftest 'modes-compose-named-buffer-local-prompt-fragments
@@ -220,4 +225,59 @@
         (chat-refresh-prompt! chat)
         (check-contains! (prompt-parts-text (chat-prompt-parts chat))
                          "changed ACP prompt" "refresh replaces the ACP snapshot"))
+      (t--prompt-cleanup chat))))
+
+(deftest 'prompt-sections-are-buffer-local-switches
+  "both lanes omit disabled sections while inspection still lists them"
+  (lambda ()
+    (let ((direct (t--prompt-chat "*prompt-switch-direct*" "api"))
+          (acp (t--prompt-chat "*prompt-switch-acp*" "codex-app-server")))
+      (prompt-parts-set-disabled! direct '("reading"))
+      (prompt-parts-set-disabled! acp '("reading"))
+      (check-false! (assoc "reading" (chat-prompt-live-parts direct))
+                    "the direct wire omits the section")
+      (check-false! (assoc "reading" (chat-prompt-live-parts acp))
+                    "the ACP wire omits the same section")
+      (check-true! (and (assoc "reading" (chat-prompt-source-parts direct)) #t)
+                   "inspection retains the available section")
+      (check-contains! (chat-prompt-report direct) "○ `reading`"
+                       "chat-show-prompt marks it off")
+      (t--prompt-cleanup direct acp))))
+
+(deftest 'semantic-sections-separate-reading-code-editing-and-scope
+  "general reading stays general; code owns code reads, edits, and versioning"
+  (lambda ()
+    (let* ((chat (t--prompt-chat "*prompt-taxonomy*" "api"))
+           (parts (chat-prompt-source-parts chat))
+           (general (cadr (assoc "general" parts)))
+           (reading (cadr (assoc "reading" parts)))
+           (code (cadr (assoc "code" parts))))
+      (check-contains! general "do only as much as the user asked"
+                       "general owns task scope")
+      (check-contains! general "does not require code changes"
+                       "general avoids unnecessary code editing")
+      (check-contains! reading "every file as structured content"
+                       "reading applies to every file")
+      (check-contains! reading "blocks, sections, definitions"
+                       "reading names general structure")
+      (check-contains! reading "(block-list BUF)"
+                       "reading discovers generic fenced blocks")
+      (check-contains! reading "(block-at-line BUF LINE)"
+                       "reading locates a generic block")
+      (check-contains! reading "(block-text BUF LINE)"
+                       "reading reads a generic block")
+      (check-contains! reading "(block-body BLOCK)"
+                       "reading extracts generic block contents")
+      (check-false! (string-contains? reading "(code-outline BUF)")
+                    "reading does not prescribe the code API")
+      (check-false! (string-contains? reading "(markdown-outline BUF)")
+                    "reading does not prescribe the writing API")
+      (check-contains! code "CODE READING"
+                       "code-specific reading belongs to code")
+      (check-contains! code "EDITING / VERSIONING"
+                       "versioning is inside editing")
+      (check-true! (< (string-length general) 2500)
+                   "the composed general section stays compact")
+      (check-true! (< (string-length code) 3200)
+                   "the composed code section stays compact")
       (t--prompt-cleanup chat))))

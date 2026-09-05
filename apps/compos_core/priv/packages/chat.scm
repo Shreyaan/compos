@@ -613,13 +613,23 @@
                   'frozen
                   'prospective))))
 
-(define (chat-live-system-prompt-parts buf &optional tools?)
+(define (chat-live-system-prompt-source-parts buf &optional tools?)
   (append
     (if (and tools?
              (boundp (quote chat-tool-system-parts)))
         (chat-tool-system-parts buf)
         '())
-    (list (list "chat-preamble" (chat-preamble buf)))))
+    (list (list "chat-preamble" (chat-preamble buf))
+          (list "code" (chat-code-prompt buf)))))
+
+(define (chat-live-system-prompt-parts buf &optional tools?)
+  (let* ((source (chat-live-system-prompt-source-parts buf tools?))
+         (parts (if (boundp (quote prompt-section-parts))
+                    (prompt-section-parts source)
+                    source)))
+    (if (boundp (quote prompt-parts-enabled))
+        (prompt-parts-enabled buf parts)
+        parts)))
 
 (define (chat-system-prompt-parts buf &optional tools?)
   (let ((live (chat-live-system-prompt-parts buf tools?)))
@@ -646,10 +656,12 @@
 (public! 'chat-context-tokens
   "(chat-context-tokens BUF) — (used U size S): what this chat occupies of its context window, as the backend counted it")
 (public! 'chat-live-system-prompt-parts
-  "(chat-live-system-prompt-parts BUF [TOOLS?]) — current direct prompt fragments before the conversation freeze")
+  "(chat-live-system-prompt-parts BUF [TOOLS?]) — current direct prompt sections before the conversation freeze")
+(public! 'chat-live-system-prompt-source-parts
+  "(chat-live-system-prompt-source-parts BUF [TOOLS?]) — unfiltered direct prompt fragments")
 (effects! '(write))
 (public! 'chat-system-prompt-parts
-  "(chat-system-prompt-parts BUF [TOOLS?]) — named system-prompt fragments in their exact send order")
+  "(chat-system-prompt-parts BUF [TOOLS?]) — named system-prompt sections in their exact send order")
 
 (llm-session-context-fn! (lambda (slug display) (chat-thread-context slug display)))
 

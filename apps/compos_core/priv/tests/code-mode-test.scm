@@ -63,17 +63,15 @@
         (plist-get (catalog-entry 'function "buffer-widen!") 'effects)
         '("write" "display") "widening is correctly stamped"))))
 
-(deftest 'the-side-chat-prompt-distinguishes-display-from-buffer-history
+(deftest 'the-code-section-distinguishes-display-from-buffer-history
   "open in the other buffer means another window; switch means buffer history"
   (lambda ()
-    (let* ((buf (test-buffer! "zz-code-mode.md" "text\n"))
-           (prompt (chat-preamble-body buf (list buf))))
+    (let ((prompt (chat-code-prompt #f)))
       (check-contains! prompt "\"open it in the other buffer\"" "it names the display request")
       (check-contains! prompt "(display-buffer-other-window! NAME)" "and uses another window")
       (check-contains! prompt "\"switch to the other buffer\"" "it names the history request")
       (check-contains! prompt "(run-command \"previous-buffer\")" "and uses buffer history")
-      (check-contains! prompt "when the target is clear" "and does not ask needlessly")
-      (buffer-kill! buf))))
+      (check-contains! prompt "when the target is clear" "and does not ask needlessly"))))
 
 ;;; --- from here down, the tests turn code-mode on --------------------------------
 ;;; That joins a group, opens a chat and loads the coding presets, which
@@ -118,33 +116,31 @@
                     'allow-always "the code chat may restart the daemon"))
     (t--cm-off!)))
 
-(deftest 'the-code-instructions-ride-in-both-prompt-paths
-  "and only for code buffers: the writing voice is the default"
+(deftest 'the-code-instructions-ride-in-both-system-prompt-paths
+  "direct, ACP, and inline prompts use the selectable code section"
   (lambda ()
-    (let* ((buf (t--cm-on!)))
-      ;; the shared edit protocol names the structural readers for any
-      ;; buffer; what code-mode adds is the coding voice and its own
-      ;; instructions
-      (let ((preamble (chat-preamble-body buf (list buf))))
-        (check-contains! preamble "coding companion" "the voice")
-        (check-contains! preamble "(code-outline \"BUF\")" "the read call")
-        (check-contains! preamble "(code-replace! \"BUF\" LINE NEW)" "the write call")
-        (check-contains! preamble "(buffer-insert-after! \"BUF\" ANCHOR TEXT)" "the insert call")
-        (check-contains! preamble "browser category is denied in code-mode by default"
-                         "and what is denied")
-        (check-contains! preamble "ask the user to enable M-x browser-mode" "and how to ask")
-        (check-false! (string-contains? preamble "Match the document's voice")
-                      "the writing instruction is gone"))
+    (let* ((buf (t--cm-on!))
+           (chat (group-chat buf))
+           (chat-code (cadr (assoc "code" (chat-prompt-source-parts chat))))
+           (inline-code (cadr (assoc "code" (chat-prompt-source-parts buf)))))
+      (check-contains! chat-code "direct tool action or read-only"
+                       "direct requests bypass repository reconnaissance")
+      (check-contains! chat-code "(code-outline \"BUF\")" "the read call")
+      (check-contains! chat-code "(code-replace! \"BUF\" LINE NEW)" "the write call")
+      (check-contains! chat-code "(buffer-insert-after! \"BUF\" ANCHOR TEXT)"
+                       "the insert call")
+      (check-contains! chat-code "browser category is denied in code-mode by default"
+                       "the code policy is present")
+      (check-contains! inline-code "(code-outline \"BUF\")"
+                       "M-o receives the code-reading instructions")
+      (check-false! (string-contains? (chat-preamble chat) "code-outline")
+                    "the general preamble does not duplicate code guidance")
 
-      ;; and M-o, on the same words
-      (check-contains! (llm-mode--group-note buf) "(code-outline \"BUF\")"
-                       "the M-o path carries them too")
-
-      ;; the user owns the words
+      ;; the user owns the configurable code words
       (let ((saved code-instructions))
         (customize-set! 'code-instructions "")
-        (check-false! (string-contains? (llm-mode--group-note buf) "buffer-insert-after!")
-                      "emptying the custom takes them out")
+        (check-false! (string-contains? (chat-code-prompt chat) "buffer-insert-after!")
+                      "emptying the custom takes its words out")
         (customize-set! 'code-instructions saved)))
     (t--cm-off!)))
 
@@ -217,27 +213,25 @@
       (check-true! (member "llm-mode" (buffer-local scratch 'minor-modes)) "and llm-mode on")
       (t--cm-off! scratch))))
 
-(deftest 'the-scratch-chats-system-prompt-names-the-buffer-to-edit
-  "an agent told to edit must be told which buffer"
+(deftest 'the-scratch-system-prompt-pulls-current-group-context
+  "buffer names come from chat-context, never the cached system prompt"
   (lambda ()
     (let* ((buf (t--cm-on!))
            (scratch (string-append "*scratch:" buf "*")))
       (run-command "scratch-buffer")
-      (let ((note (llm-mode--group-note scratch)))
-        (check-contains! note buf "it names the document")
-        (check-contains! note scratch "and the scratch")
-        (check-contains! note "buffer-replace!" "and the call that edits"))
-
-      ;; a buffer in no group says nothing: M-o on a lone document keeps
-      ;; the system prompt it always had
-      (let ((lone (test-buffer! "zz-cm-lone" "")))
-        ;; a buffer born while the frame is in a group inherits it, and
-        ;; 'group is only the legacy field. Drop the memberships to make
-        ;; this the groupless buffer the check is about.
-        (for-each (lambda (id) (buffer-remove-group! lone id))
-                  (buffer-group-ids lone))
-        (check-equal! (llm-mode--group-note lone) "" "a lone buffer adds nothing")
-        (buffer-kill! lone))
+      (let* ((parts (chat-prompt-source-parts scratch))
+             (wire (prompt-parts-text parts))
+             (context (chat-context scratch)))
+        (check-contains! (cadr (assoc "context" parts)) "(chat-context)"
+                         "the context section names the pull operation")
+        (check-false! (string-contains? wire buf)
+                      "the source buffer is not hardcoded")
+        (check-false! (string-contains? wire scratch)
+                      "the scratch buffer is not hardcoded")
+        (check-true! (member buf (plist-get context 'group-members))
+                     "chat-context returns the source buffer")
+        (check-true! (member scratch (plist-get context 'group-members))
+                     "chat-context returns the scratch buffer"))
       (t--cm-off! scratch))))
 
 (deftest 'a-scratch-already-open-picks-up-the-presets-when-code-mode-turns-on

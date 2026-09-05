@@ -33,6 +33,7 @@ defmodule Compos.EditorTest do
     Compos.Core.Session.eval(
       "(begin (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
     )
+
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
@@ -1150,6 +1151,7 @@ defmodule Compos.EditorTest do
 
   test "llm primitive: async completion drives a scheme handler", %{buf: buf} do
     Application.put_env(:compos_core, :llm_request_fun, fn prompt -> {:ok, "ECHO: " <> prompt} end)
+
     on_exit(fn -> Application.delete_env(:compos_core, :llm_request_fun) end)
 
     {:ok, _} =
@@ -1160,11 +1162,18 @@ defmodule Compos.EditorTest do
     assert eventually(fn -> Buffer.text(buf) == "ECHO: hi there" end)
   end
 
-  test "M-o sends the whole document and inserts a faced response below point", %{buf: buf} do
+  test "M-o sends the whole document and shows thinking, then inserts a faced result below point",
+       %{buf: buf} do
     parent = self()
 
     Application.put_env(:compos_core, :llm_chat_fun, fn req ->
-      send(parent, {:llm_prompt, req})
+      send(parent, {:llm_prompt, self(), req})
+
+      receive do
+        :release_llm -> :ok
+      after
+        5_000 -> :ok
+      end
 
       {:ok,
        %{
@@ -1182,7 +1191,7 @@ defmodule Compos.EditorTest do
 
     press(["M-o"])
 
-    assert_receive {:llm_prompt, req}
+    assert_receive {:llm_prompt, backend_pid, req}
     assert req.model == "openai:test-writer"
     # the editor bridge rides every LLM surface (mcp.scm chat-presets-of),
     # so an inline completion holds the same tools a chat does
@@ -1190,6 +1199,17 @@ defmodule Compos.EditorTest do
     assert "eval-scheme" in Enum.map(req.tools, & &1.name)
     assert [%{content: "The complete document is context."}] = req.messages
     assert "llm-mode" in Buffer.get_local(buf, "minor-modes")
+
+    assert Enum.any?(Buffer.overlays(buf), fn {_start, _finish, face} ->
+             String.starts_with?(face, "chrome-b:llm-thinking-spinner:")
+           end)
+
+    assert {:ok, "(llm-prompt llm-response llm-thinking llm-result)"} =
+             Compos.Core.Session.eval(
+               ~s{(map (lambda (record) (plist-get record 'kind)) (block-records "#{buf}"))}
+             )
+
+    send(backend_pid, :release_llm)
 
     assert eventually(fn ->
              Buffer.text(buf) ==
@@ -1213,6 +1233,30 @@ defmodule Compos.EditorTest do
     assert [[start, finish]] = Buffer.get_local(buf, "llm-responses")
     assert binary_part(Buffer.text(buf), start, finish - start) == "A useful continuation."
 
+    assert {:ok, "(llm-prompt llm-response llm-thinking llm-result paragraph)"} =
+             Compos.Core.Session.eval(
+               ~s{(map (lambda (record) (plist-get record 'kind)) (block-records "#{buf}"))}
+             )
+
+    assert {:ok, "(complete complete deleted complete complete)"} =
+             Compos.Core.Session.eval(
+               ~s{(map (lambda (record) (plist-get record 'state)) (block-records "#{buf}"))}
+             )
+
+    refute Enum.any?(Buffer.overlays(buf), fn {_start, _finish, face} ->
+             String.starts_with?(face, "chrome-b:llm-thinking-spinner:")
+           end)
+
+    assert {:ok, "#t"} =
+             Compos.Core.Session.eval("""
+             (let* ((records (block-records "#{buf}"))
+                    (response (cadr records))
+                    (result (car (block-children "#{buf}" (plist-get response 'id))))
+                    (paragraph (car (block-children "#{buf}" (plist-get result 'id)))))
+               (and (equal? (plist-get result 'kind) 'llm-result)
+                    (equal? (plist-get paragraph 'parent) (plist-get result 'id))))
+             """)
+
     :ok = Buffer.clear_overlays(buf)
     assert Buffer.overlays(buf) == []
     {:ok, _} = Compos.Core.Session.eval(~s{(llm-mode--sync-ranges! "#{buf}")})
@@ -1225,6 +1269,44 @@ defmodule Compos.EditorTest do
 
     # Vertical crossing is client-side in Markdown mode: the overlay's exact
     # range is embedded in the preview block instead of remapping next-line.
+  end
+
+  test "editing a completed LLM result makes it plain text", %{buf: buf} do
+    type("answer")
+
+    {:ok, _} =
+      Compos.Core.Session.eval("""
+      (let* ((response
+               (block-create! "#{buf}" 'llm-response 0 6 #f 'complete '()))
+             (result
+               (block-create! "#{buf}" 'llm-result 0 6 response 'complete '())))
+        (block-close-end! "#{buf}" response)
+        (block-close-end! "#{buf}" result)
+        (enable-minor-mode! "#{buf}" "llm-mode")
+        (goto-char! 2))
+      """)
+
+    assert Enum.any?(Buffer.overlays(buf), fn {_start, _finish, face} ->
+             face == "llm-response"
+           end)
+
+    type("!")
+
+    assert Buffer.text(buf) == "an!swer"
+    assert eventually(fn -> Buffer.get_local(buf, "llm-session-dirty") == true end)
+
+    assert eventually(fn ->
+             not Enum.any?(Buffer.overlays(buf), fn {_start, _finish, face} ->
+               face == "llm-response"
+             end)
+           end)
+
+    assert eventually(fn ->
+             {:ok, "(deleted deleted)"} ==
+               Compos.Core.Session.eval(
+                 ~s{(map (lambda (record) (plist-get record 'state)) (block-records "#{buf}"))}
+               )
+           end)
   end
 
   test "C-c b opens one shared backend/model/effort menu in chat and llm modes", %{buf: buf} do
@@ -1255,6 +1337,34 @@ defmodule Compos.EditorTest do
     assert Editor.render_state().minibuffer == nil
     assert Editor.render_state().transient != nil
     press(["C-g"])
+    assert Editor.render_state().transient == nil
+  end
+
+  test "prompt sections toggle together and apply once", %{buf: buf} do
+    {:ok, _} = Compos.Core.Session.eval(~s{(enable-minor-mode! "#{buf}" "llm-mode")})
+
+    {:ok, _} =
+      Compos.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'prompt-disabled-parts '())})
+
+    press(["C-c", "b", "i"])
+    menu = Editor.render_state().transient
+    assert menu.title == "Select the prompt sections, then apply them together"
+
+    items = Enum.flat_map(menu.groups, & &1.items)
+    assert Enum.any?(items, &(&1.description == "identity" and &1.value == "on"))
+    assert Enum.any?(items, &(&1.description == "general" and &1.value == "on"))
+
+    press(["1", "2"])
+    assert Buffer.get_local(buf, "prompt-disabled-parts") == []
+
+    press("x")
+
+    assert Buffer.get_local(buf, "prompt-disabled-parts") |> Enum.take(2) ==
+             ["identity", "general"]
+
+    assert Editor.render_state().transient.title == "Configure this buffer's language model"
+
+    press("C-g")
     assert Editor.render_state().transient == nil
   end
 
@@ -2842,7 +2952,9 @@ defmodule Compos.EditorTest do
       """)
 
     on_exit(fn ->
-      Compos.Core.Session.eval(~s[(begin (global-unset-key "<f9> a") (global-unset-key "<f9> b"))])
+      Compos.Core.Session.eval(
+        ~s[(begin (global-unset-key "<f9> a") (global-unset-key "<f9> b"))]
+      )
     end)
 
     press(["<f9>"])
@@ -2940,7 +3052,9 @@ defmodule Compos.EditorTest do
 
     # a theme that names the face wins
     {:ok, _} =
-      Compos.Core.Session.eval(~s{(define-theme "tt-theme" (list (list 'tt-gauge 'fg "#eeeeee")))})
+      Compos.Core.Session.eval(
+        ~s{(define-theme "tt-theme" (list (list 'tt-gauge 'fg "#eeeeee")))}
+      )
 
     {:ok, _} = Compos.Core.Session.eval(~s{(load-theme "tt-theme")})
     assert Editor.render_state().faces["tt-gauge"]["fg"] == "#eeeeee"
@@ -4115,6 +4229,58 @@ defmodule Compos.EditorTest do
           do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
     end
 
+    test "two-pane preset keeps two buffers at a two-thirds split", %{buf: buf} do
+      n = System.unique_integer([:positive])
+      second = "two-pane-second-#{n}"
+      third = "two-pane-third-#{n}"
+      for name <- [second, third], do: Compos.Core.create_buffer(name)
+
+      {:ok, _} =
+        Compos.Core.Session.eval("""
+        (begin (delete-other-windows!)
+               (switch-to-buffer! "#{buf}")
+               (split-window! 'h 0.5)
+               (other-window!)
+               (switch-to-buffer! "#{second}")
+               (split-window! 'h 0.5)
+               (other-window!)
+               (switch-to-buffer! "#{third}")
+               (select-window! (window-showing "#{buf}")))
+        """)
+
+      run("window-layout")
+      type("two-pane")
+      press(["RET"])
+
+      assert %{type: :split, dir: :h, ratio: ratio} = Editor.render_state().tree
+      assert_in_delta ratio, 2 / 3, 0.001
+      assert Editor.render_state().tree |> collect_buffers() == [buf, second]
+      assert Editor.current_buffer() == buf
+
+      for name <- [second, third],
+          do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
+    end
+
+    test "two-pane preset fills a missing companion from recent buffers", %{buf: buf} do
+      companion = "two-pane-companion-#{System.unique_integer([:positive])}"
+      Compos.Core.create_buffer(companion)
+
+      {:ok, _} =
+        Compos.Core.Session.eval("""
+        (begin (switch-to-buffer! "#{companion}")
+               (switch-to-buffer! "#{buf}")
+               (delete-other-windows!))
+        """)
+
+      run("window-layout-two-pane")
+
+      assert %{type: :split, dir: :h, ratio: ratio} = Editor.render_state().tree
+      assert_in_delta ratio, 2 / 3, 0.001
+      assert Editor.render_state().tree |> collect_buffers() == [buf, companion]
+
+      Compos.Core.Session.eval(~s{(buffer-kill! "#{companion}")})
+    end
+
     test "window layout selection previews and restores the layout on cancel", %{buf: buf} do
       second = "layout-preview-second-#{System.unique_integer([:positive])}"
       third = "layout-preview-third-#{System.unique_integer([:positive])}"
@@ -4341,7 +4507,9 @@ defmodule Compos.MinibufferEditingTest do
 
   # A writable preview takes edits, so motion keys move through its source.
   test "motion keys move point in a markdown preview" do
-    path = Path.join(System.tmp_dir!(), "compos-prevmove-#{System.unique_integer([:positive])}.md")
+    path =
+      Path.join(System.tmp_dir!(), "compos-prevmove-#{System.unique_integer([:positive])}.md")
+
     File.write!(path, "# Title\n\nbody\n")
 
     press(["C-x", "C-f"])

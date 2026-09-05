@@ -35,6 +35,22 @@
                     "the non-file buffer keeps its name")
       (buffer-kill! buf))))
 
+(deftest 'a-chat-shows-its-working-directory-in-the-modeline
+  "the chat modeline shows the directory where its tools run"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-directory*")
+          (dir (string-append (compos-home) "/")))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (buffer-set-local! buf 'default-directory dir)
+      (dashboard--sync! buf)
+      (check-equal! (buffer-directory buf) dir
+                    "the chat has its own working directory")
+      (check-equal! (buffer-local buf 'modeline-project)
+                    (abbreviate-file-name dir)
+                    "the compact modeline shows that directory")
+      (buffer-kill! buf))))
+
 ;; the dashboard line pulls the summary and the jj line from state, so a
 ;; buffer with no file shows both when it has them
 (define (t--dseg-value blocks key)
@@ -57,9 +73,14 @@
       (check-equal! (t--dseg-value (dashboard-line-blocks buf) "summary") #f
                     "no summary yet, no segment")
       (buffer-set-local! buf 'chat-summary "The user is testing the bar.")
-      (check-equal! (t--dseg-value (dashboard-line-blocks buf) "summary")
-                    "The user is testing the bar."
-                    "the segment shows the paragraph")
+      (let* ((blocks (dashboard-line-blocks buf))
+             (wide (car (reverse blocks)))
+             (kids (plist-get wide 'children)))
+        (check-equal! (length kids) 1
+                      "the summary has no redundant label")
+        (check-equal! (cadr (car (plist-get (car kids) 'segs)))
+                      "The user is testing the bar."
+                      "the segment shows the paragraph"))
       ;; the summary takes the one wide slot; the jj line steps back
       (let ((dir "/zz-modeline-sum-repo/") (root "/zz-modeline-sum-repo")
             (lines *jj-lines*) (roots *jj-dir-roots*))

@@ -210,12 +210,14 @@
          (transient--visible-items groups))
     (list (list "C-g" "transient-quit-one")
           (list "C-q" "transient-quit-all")
-          (list "ESC ESC ESC" "transient-quit-all")
+          (list "ESC" "transient-quit-one")
           (list "C-z" "transient-suspend")
           (list "?" "transient-toggle-help")
           (list "C-h" "transient-toggle-help")
           (list "<up>" "transient-previous")
           (list "<down>" "transient-next")
+          (list "<left>" "transient-column-left")
+          (list "<right>" "transient-column-right")
           (list "RET" "transient-invoke-selected")
           (list "M-RET" "transient-invoke-selected")
           (list "C-M-p" "transient-history-prev")
@@ -255,6 +257,119 @@
             (cdr group))))
       groups)))
 
+(define (transient--option-text prefix key scope)
+  (let ((fn (transient--prefix-option prefix key)))
+    (cond ((procedure? fn) (let ((v (fn scope))) (if (string? v) v "")))
+          ((string? fn) fn)
+          (else ""))))
+
+(define (transient--option-list prefix key scope)
+  (let ((fn (transient--prefix-option prefix key)))
+    (cond ((procedure? fn) (or (fn scope) '()))
+          ((pair? fn) fn)
+          (else '()))))
+
+;; The parts of the menu beyond its rows, each from a prefix option:
+;;   'subtitle-fn (SCOPE) -> text      under the title: the state in one line
+;;   'context-fn  (SCOPE) -> text      right of the title: what the menu acts on
+;;   'chips-fn    (SCOPE) -> ((LABEL ACTIVE?) ...)
+;;   'detail-fn   (SCOPE ITEM) -> (TITLE ((KEY VALUE TONE) ...) NOTE) or #f
+;;                                     the facts rail; ITEM is the selected row
+;;   'legend-fn   (SCOPE) -> ((KEY LABEL) ...)   the footer, or 'legend a list
+;; TONE is "" or "drift" (the value differs from what the rail compares to)
+;; or "dim". A prefix with none of these renders as before.
+(define (transient--menu-meta prefix state items)
+  (let* ((scope (plist-get state 'scope))
+         (index (or (plist-get state 'selected) 0))
+         (item (and (< index (length items)) (nth index items)))
+         (detail-fn (transient--prefix-option prefix 'detail-fn))
+         (detail (and (procedure? detail-fn) (detail-fn scope item))))
+    (list (list "subtitle" (transient--option-text prefix 'subtitle-fn scope))
+          (list "context" (transient--option-text prefix 'context-fn scope))
+          (list "chips" (transient--option-list prefix 'chips-fn scope))
+          (list "detail" (or detail #f))
+          (list "legend"
+                (let ((rows (transient--option-list prefix 'legend-fn scope)))
+                  (if (null? rows) (transient--option-list prefix 'legend scope) rows))))))
+
+;;; --- columns ----------------------------------------------------------------
+;;; The frame draws the groups in columns, and the keyboard moves between
+;;; them, so Scheme decides the columns. The prefix option 'columns names
+;;; the groups that share one: (("Bundles" "Setup") ("Recent")). Every
+;;; visible group it does not name stands in a column of its own, in menu
+;;; order. Left and right move to the same row of the next column.
+
+(define (transient--column-of title declared)
+  (let loop ((cs declared))
+    (cond ((null? cs) #f)
+          ((member title (car cs)) (car cs))
+          (else (loop (cdr cs))))))
+
+;; ((TITLE ...) ...) for the visible GROUPS: declared columns keep only
+;; their visible members and sit where their first member sits
+(define (transient--columns prefix state groups)
+  (let* ((declared (transient--option-list prefix 'columns (plist-get state 'scope)))
+         (titles (map car groups)))
+    (let loop ((ts titles) (out '()))
+      (if (null? ts)
+          (reverse out)
+          (let* ((declared-col (transient--column-of (car ts) declared))
+                 (col (if declared-col
+                          (filter (lambda (t) (member t titles)) declared-col)
+                          (list (car ts)))))
+            (loop (cdr ts) (if (member col out) out (cons col out))))))))
+
+;; the global item indexes one column holds, top to bottom
+(define (transient--column-indexes groups column)
+  (let loop ((gs groups) (index 0) (out '()))
+    (if (null? gs)
+        (reverse out)
+        (let* ((n (length (cdr (car gs))))
+               (mine? (member (car (car gs)) column)))
+          (loop (cdr gs) (+ index n)
+                ;; OUT is built newest-first and reversed at the end, so
+                ;; the indexes go on ascending
+                (if mine?
+                    (let add ((i index) (acc out))
+                      (if (>= i (+ index n)) acc (add (+ i 1) (cons i acc))))
+                    out))))))
+
+(define (transient--position x lst)
+  (let loop ((l lst) (i 0))
+    (cond ((null? l) 0)
+          ((equal? (car l) x) i)
+          (else (loop (cdr l) (+ i 1))))))
+
+;; the index DELTA columns away from SELECTED, on the same row or the
+;; last row that column has; the edge columns do not wrap
+(define (transient--column-target groups columns selected delta)
+  (let ((cols (filter pair? (map (lambda (c) (transient--column-indexes groups c))
+                                 columns))))
+    (let find ((cs cols) (ci 0))
+      (cond ((null? cs) selected)
+            ((member selected (car cs))
+             (let* ((offset (transient--position selected (car cs)))
+                    (target-ci (max 0 (min (- (length cols) 1) (+ ci delta))))
+                    (target (nth target-ci cols)))
+               (nth (min offset (- (length target) 1)) target)))
+            (else (find (cdr cs) (+ ci 1)))))))
+
+(define (transient--column-move delta)
+  (let* ((state (transient--active))
+         (prefix (and state (transient-prefix (plist-get state 'prefix)))))
+    (when prefix
+      (let* ((groups (transient--visible-groups prefix state))
+             (columns (transient--columns prefix state groups))
+             (target (transient--column-target
+                       groups columns (or (plist-get state 'selected) 0) delta)))
+        (transient--set-active! (transient--put state 'selected target))
+        (transient--render!)))))
+
+(define-command "transient-column-left" "Select the same row in the column to the left"
+  (lambda () (transient--column-move -1)))
+(define-command "transient-column-right" "Select the same row in the column to the right"
+  (lambda () (transient--column-move 1)))
+
 (define (transient--render!)
   (let* ((state (transient--active))
          (prefix (and state (transient-prefix (plist-get state 'prefix)))))
@@ -267,7 +382,9 @@
         (transient--set-active! state)
         (transient-keymap-install! (transient--bindings groups))
         (transient-show!
-          (list (cadr prefix) (transient--menu-groups groups state)))))))
+          (list (cadr prefix) (transient--menu-groups groups state)
+                (cons (list "columns" (transient--columns prefix state groups))
+                      (transient--menu-meta prefix state items))))))))
 
 (define (transient-setup name &optional scope)
   (let ((prefix (transient-prefix name)))
@@ -472,449 +589,6 @@
             (plist-get state 'prefix) (plist-get state 'values)))
         (message "Set transient values")))))
 
-;;; --- the editor's LLM configuration menu ----------------------------------
-
-(define (llm-config--connector buf)
-  (llm-bundle-connector (llm-config-core buf)))
-
-(define (llm-config--model buf)
-  (llm-bundle-model (llm-config-core buf)))
-
-(define (llm-config--effort buf)
-  (llm-bundle-effort (llm-config-core buf)))
-
-(define (llm-config--refresh!)
-  (when (transient--active) (transient--render!)))
-
-(define (llm-config--setup! _buf)
-  (set-frame-local! 'llm-config-selected #f))
-
-(define (llm-config--mark-selected!)
-  (set-frame-local! 'llm-config-selected #t))
-
-(define (llm-config--quit! buf)
-  (when (frame-local 'llm-config-selected)
-    (llm-config-remember! (llm-config-combination buf)))
-  (set-frame-local! 'llm-config-selected #f))
-
-;;; Presets are the tool selection: a preset names MCP servers, and the
-;;; servers serve the tools. So the menu picks presets and reports what
-;;; they serve; it never offers a tool list of its own.
-
-;; The session buffer a bundle's presets and stance belong to. editor.scm
-;; resolves it, because a bundle is written and applied there too.
-(define (llm-config--session buf) (llm-config-session buf))
-
-(define (llm-config--presets buf)
-  (if (boundp (quote chat-presets-of)) (chat-presets-of buf) '()))
-
-(define (llm-config--presets-label buf)
-  (let ((ps (llm-config--presets (llm-config--session buf))))
-    (if (null? ps) "none" (string-join (map symbol->string ps) " "))))
-
-;; how many tools one server serves right now, or #f while it connects
-(define (llm-config--server-tools server)
-  (if (equal? server 'compos)
-      (if (boundp (quote llm-tool-specs)) (length (llm-tool-specs)) 0)
-      (let ((d (mcp-server-detail (symbol->string server))))
-        (and (pair? d)
-             (equal? (plist-get d 'status) "ready")
-             (length (or (plist-get d 'tools) '()))))))
-
-;; What the presets serve, counted WITHOUT connecting anything: the menu
-;; redraws on every keystroke and a connect belongs to a send. A chat
-;; freezes its tool list at its first send, so say when the number is the
-;; frozen one — that list, not the live surface, is what the model sees.
-(define (llm-config--tools-label buf)
-  (let* ((session (llm-config--session buf))
-         (frozen (buffer-local session 'chat-tool-specs)))
-    (cond
-      ((pair? frozen)
-       (string-append (number->string (length frozen)) " tools · frozen"))
-      ((not (boundp (quote chat-active-servers))) "none")
-      (else
-        (let loop ((servers (chat-active-servers session)) (n 0) (pending 0))
-          (if (null? servers)
-              (string-append (number->string n) " tools"
-                (if (> pending 0)
-                    (string-append " · " (number->string pending) " connecting")
-                    ""))
-              (let ((count (llm-config--server-tools (car servers))))
-                (if count
-                    (loop (cdr servers) (+ n count) pending)
-                    (loop (cdr servers) n (+ pending 1))))))))))
-
-(define-command "llm-config-pick-preset" "Turn a tool preset on or off"
-  (lambda ()
-    (let ((buf (llm-config--session (transient-scope))))
-      (if (not (boundp (quote chat-preset-candidates)))
-          (message "No MCP presets — packages/mcp.scm is not loaded")
-          (llm-config-read! "Preset: "
-            (chat-preset-candidates buf)
-            (lambda (name)
-              (unless (equal? name "")
-                (chat-preset-toggle! buf (string->symbol name))
-                (llm-config--refresh!)))
-            (lambda () #f))))))
-
-(define-command "llm-config-pick-backend" "Choose the LLM backend"
-  (lambda ()
-    (let* ((buf (transient-scope))
-           (current (llm-config--connector buf)))
-      (llm-config-read! "Backend: "
-        (llm-config-current-first
-          (map (lambda (c) (list c (connector-description c))) (connector-names))
-          current)
-        (lambda (choice)
-          (unless (equal? choice "")
-            (llm-config-apply! buf choice "default" "default")
-            (llm-config--mark-selected!)
-            (llm-config--refresh!)))
-        (lambda () #f)))))
-
-(define-command "llm-config-pick-model" "Choose the LLM model"
-  (lambda ()
-    (let* ((buf (transient-scope))
-           (connector (llm-config--connector buf))
-           (current (llm-config--model buf)))
-      ;; the direct lane offers every model a provider lists, so a day-old
-      ;; catalog refreshes behind this list for the next time
-      (when (and (equal? connector "api")
-                 (boundp (quote llm-catalog-maybe-refresh!)))
-        (llm-catalog-maybe-refresh!))
-      (llm-config-read! "Model: "
-        (llm-config-current-first
-          (cons (list "default" "connector default")
-                (chat-model-options buf connector))
-          current)
-        (lambda (model)
-          (unless (equal? model "")
-            (llm-config-apply! buf connector model "default")
-            (llm-config--mark-selected!)
-            (llm-config--refresh!)))
-        (lambda () #f)))))
-
-(define-command "llm-config-pick-effort" "Choose the LLM reasoning effort"
-  (lambda ()
-    (let* ((buf (transient-scope))
-           (connector (llm-config--connector buf))
-           (model (llm-config--model buf))
-           (current (llm-config--effort buf))
-           (info (chat-model-effort-info buf connector model))
-           (efforts (car info))
-           (default (cadr info)))
-      (llm-config-read! "Effort: "
-        (llm-config-current-first
-          (cons (list "default"
-                      (if (equal? default "") "model default"
-                          (string-append "model default: " default)))
-                (map (lambda (e) (list e "reasoning effort")) efforts))
-          current)
-        (lambda (effort)
-          (unless (equal? effort "")
-            (llm-config-apply! buf connector model effort)
-            (llm-config--mark-selected!)
-            (llm-config--refresh!)))
-        (lambda () #f)))))
-
-;; Applying a bundle ends the menu: it just set everything the menu sets.
-(define (llm-config--apply-bundle! buf bundle)
-  (llm-bundle-apply! buf bundle)
-  (llm-config-remember! bundle)
-  (set-frame-local! 'llm-config-selected #f)
-  (run-command "transient-quit-all"))
-
-;;; --- what stops to ask ----------------------------------------------------
-;;; Permissions are part of the setup, not a separate subject: the same
-;;; menu that chooses the model chooses what that model may do without
-;;; asking. Three controls, and they are not the same control: the stance
-;;; is compos's own policy, the agent mode is the backend's (ACP names it,
-;;; and plan mode changes what a turn DOES), and the file switch says
-;;; whether the agent may go around buffers to the filesystem.
-
-(define (llm-config--permission-label buf)
-  (symbol->string (llm-config-permission (llm-config--session buf))))
-
-(define (llm-config--agent-mode-label buf)
-  (let ((m (buffer-local (llm-config--session buf) 'agent-mode)))
-    (if (or (not m) (equal? m "")) "none" m)))
-
-(define (llm-config--filesystem)
-  (if (boundp (quote agent-filesystem-tools)) agent-filesystem-tools "deny"))
-
-(define-command "llm-config-pick-permission" "Choose when this session stops to ask"
-  (lambda ()
-    (let ((buf (llm-config--session (transient-scope))))
-      (if (not (boundp (quote chat-permission-mode-set!)))
-          (message "No permission policy — packages/agent-permissions.scm is not loaded")
-          (llm-config-read! "Asks: "
-            (llm-config-current-first
-              (map (lambda (m) (list (symbol->string m)
-                                     (chat-permission-mode-note m)))
-                   *permission-modes*)
-              (symbol->string (llm-config-permission buf)))
-            (lambda (choice)
-              (unless (equal? choice "")
-                (chat-permission-mode-set! buf (string->symbol choice))
-                (llm-config--mark-selected!)
-                (llm-config--refresh!)))
-            (lambda () #f))))))
-
-(define-command "llm-config-pick-agent-mode" "Choose the agent session's own mode"
-  (lambda ()
-    (let* ((buf (llm-config--session (transient-scope)))
-           (modes (if (boundp (quote agent-mode-options))
-                      (agent-mode-options buf)
-                      '())))
-      (if (null? modes)
-          (message "no backend modes here — this session is not running one")
-          (llm-config-read! "Agent mode: "
-            (llm-config-current-first
-              modes (or (buffer-local buf 'agent-mode) ""))
-            (lambda (choice)
-              (unless (equal? choice "")
-                (if (agent-mode-set! buf choice)
-                    (begin (llm-config--mark-selected!)
-                           (llm-config--refresh!))
-                    (message "the agent refused that mode"))))
-            (lambda () #f))))))
-
-(define-command "llm-config-pick-filesystem" "Choose what the agent's own file tools may do"
-  (lambda ()
-    (llm-config-read! "Agent file tools: "
-      (llm-config-current-first
-        (list (list "deny" "the agent edits buffers, and saves them")
-              (list "ask" "each direct write asks first")
-              (list "allow" "the agent writes files itself"))
-        (llm-config--filesystem))
-      (lambda (choice)
-        (unless (equal? choice "")
-          (customize-save! 'agent-filesystem-tools choice)
-          (llm-config--refresh!)))
-      (lambda () #f))))
-
-;; the report never covers the chat that asked for it
-(add-display-rule! "*permissions*" 'popup)
-
-(define-command "llm-config-permission-report"
-  "Show everything this session's permission policy does"
-  (lambda ()
-    (let ((buf (llm-config--session (transient-scope))))
-      (if (not (boundp (quote permission-policy-report)))
-          (message "No permission policy — packages/agent-permissions.scm is not loaded")
-          (let ((out "*permissions*"))
-            (buffer-create out)
-            (buffer-set-read-only! out #f)
-            (buffer-delete-range! out 0 (buffer-size out))
-            (buffer-append! out (permission-policy-report buf))
-            (buffer-set-read-only! out #t)
-            (display-buffer out))))))
-
-;;; --- bundles --------------------------------------------------------------
-
-;; `t` opens this child menu: the tool surface as menu rows over the
-;; same scope, not a buffer covering the chat. A digit echoes one
-;; server's tools; l is the full text list for actual reading.
-(define (llm-config--chat-servers session)
-  (let ((frozen (buffer-local session 'chat-tool-specs)))
-    (if (pair? frozen)
-        (let loop ((specs frozen) (acc '()))
-          (if (null? specs) (reverse acc)
-              (loop (cdr specs)
-                    (let ((s (chat-tool-server (car (car specs)))))
-                      (if (member s acc) acc (cons s acc))))))
-        (map symbol->string (chat-active-servers session)))))
-
-(define (llm-config--server-row-count session server)
-  ;; never connects: the frozen list counts itself, a live server is
-  ;; only read through the registry's detail
-  (let ((frozen (buffer-local session 'chat-tool-specs)))
-    (if (pair? frozen)
-        (length (filter (lambda (s) (equal? (chat-tool-server (car s)) server))
-                        frozen))
-        (llm-config--server-tools (string->symbol server)))))
-
-(define (llm-config--server-tool-names session server)
-  (let ((frozen (buffer-local session 'chat-tool-specs)))
-    (cond
-      ((pair? frozen)
-       (map car (filter (lambda (s) (equal? (chat-tool-server (car s)) server))
-                        frozen)))
-      ((and (equal? server "compos") (boundp (quote llm-tool-specs)))
-       (map car (llm-tool-specs)))
-      (else
-        (let ((d (mcp-server-detail server)))
-          (map (lambda (t) (if (pair? t) (car t) t))
-               (or (and (pair? d) (plist-get d 'tools)) '())))))))
-
-(define (llm-config--tools-groups buf)
-  (let* ((session (llm-config--session buf))
-         (can (boundp (quote chat-tool-server)))
-         (servers (if can (llm-config--chat-servers session) '())))
-    (append
-      (if (null? servers)
-          '()
-          (list
-            (cons (string-append "Servers · " (llm-config--tools-label buf))
-              (let loop ((ss servers) (k 1) (acc '()))
-                (if (or (null? ss) (> k 9))
-                    (reverse acc)
-                    (loop (cdr ss) (+ k 1)
-                      (cons
-                        (let ((server (car ss)))
-                          (transient-suffix (number->string k) server
-                            (lambda ()
-                              (let ((names (llm-config--server-tool-names session server)))
-                                (message
-                                  (string-append server ": "
-                                    (if (null? names)
-                                        "no tools yet — still connecting?"
-                                        (string-join names ", "))))))
-                            'transient 'stay
-                            'value-fn
-                            (lambda (_scope)
-                              (let ((n (llm-config--server-row-count session server)))
-                                (if n
-                                    (string-append (number->string n) " tools")
-                                    "connecting")))))
-                        acc)))))))
-      (list
-        (list "Change"
-          (transient-infix "p" "Presets" "llm-config-pick-preset"
-            (lambda (scope) (llm-config--presets-label scope)))
-          (transient-suffix "r" "Adopt the editor's live tools" "chat-refresh-tools")
-          (transient-suffix "l" "The full list, with docs" "chat-tool-list"))))))
-
-(transient-define-prefix "chat-tools"
-  "This chat's tool surface"
-  llm-config--tools-groups)
-
-(define (llm-config--bundle-candidates)
-  (map (lambda (b) (list (or (llm-bundle-name b) "?") (llm-bundle-label b)))
-       *llm-bundles*))
-
-(define-command "llm-config-save-bundle" "Save this whole setup under a name"
-  (lambda ()
-    (let ((buf (transient-scope)))
-      ;; a free-text prompt, not a palette: the point is to type a NEW name,
-      ;; and the saved ones complete so that saving over one is easy
-      (minibuffer-read "Bundle name: " (llm-config--bundle-candidates)
-        (lambda (name)
-          (let ((n (string-trim name)))
-            (unless (equal? n "")
-              (llm-bundle-save! n (llm-config-combination buf))
-              (llm-config--refresh!)
-              (message (string-append "bundle " n ": "
-                         (llm-bundle-label (llm-bundle-named n)))))))))))
-
-(define-command "llm-config-use-bundle" "Apply a saved bundle"
-  (lambda ()
-    (let ((buf (transient-scope)))
-      (if (null? *llm-bundles*)
-          (message "no saved bundles — s saves this setup as one")
-          (llm-config-read! "Bundle: " (llm-config--bundle-candidates)
-            (lambda (name)
-              (let ((b (and (not (equal? name "")) (llm-bundle-named name))))
-                (when b (llm-config--apply-bundle! buf b))))
-            (lambda () #f))))))
-
-(define-command "llm-config-forget-bundle" "Forget a saved bundle"
-  (lambda ()
-    (if (null? *llm-bundles*)
-        (message "no saved bundles")
-        (llm-config-read! "Forget bundle: " (llm-config--bundle-candidates)
-          (lambda (name)
-            (unless (equal? name "")
-              (llm-bundle-forget! name)
-              (llm-config--refresh!)
-              (message (string-append "bundle " name " forgotten"))))
-          (lambda () #f)))))
-
-(define (llm-config--history-key index)
-  (if (= index 10) "0" (number->string index)))
-
-(define (llm-config--history-items buf)
-  (let loop ((choices *llm-config-history*) (index 1) (items '()))
-    (if (null? choices)
-        (reverse items)
-        (let ((choice (llm-bundle-normalize (car choices))))
-          (loop (cdr choices) (+ index 1)
-            (cons
-              (transient-suffix
-                (llm-config--history-key index)
-                (llm-bundle-label choice)
-                (lambda () (llm-config--apply-bundle! buf choice))
-                'transient 'stay)
-              items))))))
-
-;; Ten named bundles reach the menu by one key. The rest are not lost: u
-;; asks for a bundle by name, over every one there is.
-(define *llm-config-bundle-keys* '("A" "S" "D" "F" "G" "H" "J" "K" "L" "Z"))
-
-(define (llm-config--bundle-items buf)
-  (let loop ((bs *llm-bundles*) (keys *llm-config-bundle-keys*) (items '()))
-    (if (or (null? bs) (null? keys))
-        (reverse items)
-        (let ((b (car bs)))
-          (loop (cdr bs) (cdr keys)
-            (cons
-              (transient-suffix (car keys)
-                (string-append (or (llm-bundle-name b) "?") " — "
-                               (llm-bundle-label b))
-                (lambda () (llm-config--apply-bundle! buf b))
-                'transient 'stay)
-              items))))))
-
-(define (llm-config--groups buf)
-  (let ((history (llm-config--history-items buf))
-        (bundles (llm-config--bundle-items buf)))
-    (append
-      (list
-        (list "Model"
-          (transient-infix "b" "Backend" "llm-config-pick-backend"
-            (lambda (scope) (llm-config--connector scope)))
-          (transient-infix "m" "Model" "llm-config-pick-model"
-            (lambda (scope) (llm-config--model scope)))
-          (transient-infix "e" "Effort" "llm-config-pick-effort"
-            (lambda (scope) (llm-config--effort scope))))
-        (list "Tools"
-          (transient-infix "p" "Presets" "llm-config-pick-preset"
-            (lambda (scope) (llm-config--presets-label scope)))
-          (transient-suffix "t" "Tools" "chat-tools"
-            'value-fn (lambda (scope) (llm-config--tools-label scope))))
-        (list "Permissions"
-          (transient-infix "k" "Asks" "llm-config-pick-permission"
-            (lambda (scope) (llm-config--permission-label scope)))
-          (transient-infix "a" "Agent mode" "llm-config-pick-agent-mode"
-            (lambda (scope) (llm-config--agent-mode-label scope)))
-          (transient-infix "f" "Files" "llm-config-pick-filesystem"
-            (lambda (_scope) (llm-config--filesystem)))
-          (transient-suffix "d" "The whole policy" "llm-config-permission-report"
-            'value-fn (lambda (_scope)
-                        (if (boundp (quote *permission-deny-patterns*))
-                            (string-append (number->string
-                                             (length *permission-deny-patterns*))
-                                           " deny patterns")
-                            ""))))
-        (append
-          (list "Bundles"
-            (transient-suffix "s" "Save this setup as a bundle"
-              "llm-config-save-bundle" 'transient 'stay))
-          bundles
-          (if (null? *llm-bundles*)
-              '()
-              (list (transient-suffix "u" "Use a bundle by name"
-                      "llm-config-use-bundle" 'transient 'stay)
-                    (transient-suffix "x" "Forget a bundle"
-                      "llm-config-forget-bundle" 'transient 'stay)))))
-      (if (null? history) '() (list (cons "Recent" history))))))
-
-(transient-define-prefix "llm-configure"
-  "Configure this buffer's language model"
-  llm-config--groups
-  'on-setup llm-config--setup!
-  'on-quit llm-config--quit!)
-
 (define (transient--values-file)
   (string-append (compos-home) "/transient-values.scm"))
 
@@ -943,7 +617,7 @@
   (load (transient--values-file)))
 
 (public! 'transient-define-prefix
-  "(transient-define-prefix NAME DOC GROUPS [OPTIONS]) — define a temporary grouped command menu")
+  "(transient-define-prefix NAME DOC GROUPS [OPTIONS]) — define a temporary grouped command menu. OPTIONS: 'on-setup 'on-quit (SCOPE), 'columns ((TITLE ...) ...) the groups that share a column (left/right move between columns), 'subtitle-fn 'context-fn (SCOPE) -> text, 'chips-fn (SCOPE) -> ((LABEL ACTIVE?) ...), 'detail-fn (SCOPE ITEM) -> (TITLE ((KEY VALUE TONE) ...) NOTE) the facts rail, 'legend-fn (SCOPE) -> ((KEY LABEL) ...) the footer")
 (public! 'transient-suffix
   "(transient-suffix KEY DESCRIPTION COMMAND [PROPERTIES]) — define a menu command")
 (public! 'transient-infix

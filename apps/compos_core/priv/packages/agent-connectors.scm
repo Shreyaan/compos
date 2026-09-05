@@ -263,7 +263,7 @@
           (if (equal? note "") conf (agent-config-append-system conf note)))
         conf)))
 
-(define (agent-live-system-prompt-parts conf)
+(define (agent-live-system-prompt-source-parts conf)
   (let* ((buf (plist-get conf 'buffer))
          (mode-parts
            (if (and buf (boundp (quote prompt-buffer-parts)))
@@ -284,7 +284,21 @@
       (append
         (compos-acp-prompt-parts)
         (list (list "mcp" mcp-note))
+        (if buf
+            (list (list "chat-preamble" (chat-preamble buf))
+                  (list "code" (chat-code-prompt buf)))
+            '())
         mode-parts))))
+
+(define (agent-live-system-prompt-parts conf)
+  (let* ((buf (plist-get conf 'buffer))
+         (source (agent-live-system-prompt-source-parts conf))
+         (parts (if (boundp (quote prompt-section-parts))
+                    (prompt-section-parts source)
+                    source)))
+    (if (and buf (boundp (quote prompt-parts-enabled)))
+        (prompt-parts-enabled buf parts)
+        parts)))
 
 (define (agent-system-prompt-parts conf)
   (let* ((buf (plist-get conf 'buffer))
@@ -302,12 +316,14 @@
 (effects! '(read))
 
 (public! 'agent-live-system-prompt-parts
-  "(agent-live-system-prompt-parts CONF) — current ACP fragments before the conversation freeze")
+  "(agent-live-system-prompt-parts CONF) — current ACP prompt sections before the conversation freeze")
+(public! 'agent-live-system-prompt-source-parts
+  "(agent-live-system-prompt-source-parts CONF) — unfiltered ACP prompt fragments")
 
 (effects! '(write))
 
 (public! 'agent-system-prompt-parts
-  "(agent-system-prompt-parts CONF) — named ACP system-prompt fragments in session-start order")
+  "(agent-system-prompt-parts CONF) — named ACP system-prompt sections in session-start order")
 
 (define (agent-resolve-config* opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))

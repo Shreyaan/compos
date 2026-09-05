@@ -4649,6 +4649,41 @@
     (if (not (exchange-point-and-mark!))
         (message "No mark set in this buffer"))))
 
+;; Visual narrowing and model context are separate choices. These marker locals
+;; make an explicit context restriction follow edits without making ordinary
+;; C-x n n change what the model sees.
+(define (llm-context-range buf)
+  (let ((start (buffer-local buf 'llm-context-start))
+        (end (buffer-local buf 'llm-context-end)))
+    (and (number? start) (number? end) (<= start end) (list start end))))
+
+(define (llm-context-text buf text)
+  (let ((range (llm-context-range buf)))
+    (if range
+        (substring-bytes text (car range) (cadr range))
+        text)))
+
+(define (llm-context-clear! buf)
+  (let ((had (llm-context-range buf)))
+    (buffer-set-local! buf 'llm-context-start #f)
+    (buffer-set-local! buf 'llm-context-end #f)
+    (when (and had (minor-mode-on? buf "llm-mode")
+               (boundp (quote llm-mode-reset-runtime!)))
+      (llm-mode-reset-runtime! buf #f))
+    had))
+
+(define (llm-context-use-narrowing! buf)
+  (let ((range (buffer-narrow-range buf)))
+    (when range
+      (buffer-marker-local! buf 'llm-context-start 'stay)
+      (buffer-marker-local! buf 'llm-context-end 'advance)
+      (buffer-set-local! buf 'llm-context-start (car range))
+      (buffer-set-local! buf 'llm-context-end (cadr range))
+      (when (and (minor-mode-on? buf "llm-mode")
+                 (boundp (quote llm-mode-reset-runtime!)))
+        (llm-mode-reset-runtime! buf #f)))
+    range))
+
 (define-command "narrow-to-region" "Show only the text between point and mark"
   (lambda ()
     (if (and (mark) (< (region-beginning) (region-end)))
@@ -4657,13 +4692,29 @@
           (message "Narrowed to region"))
         (message "No region — set the mark first (C-SPC)"))))
 
+(define-command "narrow-context-also"
+  "Narrow the view and the LLM context to the same region or Morg section"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (run-command
+        (if (buffer-mode-is? buf "morg-mode") "morg-narrow" "narrow-to-region"))
+      (let ((range (llm-context-use-narrowing! buf)))
+        (when range
+          (message (string-append "Narrowed view and LLM context to "
+                                  (number->string (- (cadr range) (car range)))
+                                  " bytes")))))))
+
 (define-command "widen" "Show the complete current buffer"
   (lambda ()
+    (llm-context-clear! (current-buffer))
     (buffer-widen! (current-buffer))
     (message "Widened buffer")))
 
 (catalog-meta! 'command "narrow-to-region"
   'domain 'buffers 'effects '(write display))
+(catalog-meta! 'command "narrow-context-also"
+  'domain 'llm 'effects '(write display))
+
 (catalog-meta! 'command "widen"
   'domain 'buffers 'effects '(write display))
 
@@ -5095,6 +5146,16 @@
 ;; write-file makes the buffer BECOME the file buffer: visit reads the
 ;; file back and auto-mode applies — a chat saved as .chat opens as a
 ;; chat, forever after C-x C-s just saves.
+;; An answer that names a directory writes the buffer's own name into
+;; it, as Emacs does. A chat that a person writes somewhere on purpose
+;; works there from then on: the directory is chat identity, and the
+;; .chat header carries it across a restart.
+(define (write-file-target old path0)
+  (let ((p (expand-path (normalize-file-input (string-trim path0)))))
+    (if (file-directory? p)
+        (string-append p "/" (write-file-default-name old))
+        p)))
+
 (define (write-buffer-to-file! old path0)
   (unless (equal? (string-trim path0) "")
     (let ((p (write-file-target old path0)))
@@ -5114,6 +5175,9 @@
             (when g (buffer-set-local! (current-buffer) 'group g))
             (when record
               (buffer-set-local! (current-buffer) 'chat-wire-turns record))
+            (when chat?
+              (buffer-set-local! (current-buffer) 'chat-directory
+                                 (path-directory p)))
             (buffer-kill! old)
             (run-hooks 'after-save-hook)
             (message (string-append "Wrote " p)))))))
@@ -5137,6 +5201,14 @@
           ((equal? mode (cadr (car entries))) (car (car entries)))
           (else (loop (cdr entries))))))
 
+(define (write-file-default-name buf)
+  (let* ((stem (write-file-buffer-stem buf))
+         (mode (buffer-local buf 'mode-name))
+         (ext (if (auto-mode-for stem)
+                  ""
+                  (write-file-mode-extension mode))))
+    (string-append stem ext)))
+
 (define (write-file-default-path buf)
   (let ((path (buffer-path buf)))
     (if (and (string? path) (not (equal? path "")))
@@ -5144,16 +5216,6 @@
         (string-append (default-directory) (write-file-default-name buf)))))
 
 ;;; --- delete-file ---------------------------------------------------------------
-;; An answer that names a directory writes the buffer's own name into
-;; it, as Emacs does. A chat that a person writes somewhere on purpose
-;; works there from then on: the directory is chat identity, and the
-;; .chat header carries it across a restart.
-(define (write-file-target old path0)
-  (let ((p (expand-path (normalize-file-input (string-trim path0)))))
-    (if (file-directory? p)
-        (string-append p "/" (write-file-default-name old))
-        p)))
-
 ;;; Emacs delete-file, as a command. The prompt starts on this buffer's
 ;;; file, and a yes-or-no question stands between RET and the disk. The
 ;;; file goes to the trash (Emacs delete-by-moving-to-trash); a prefix
@@ -5170,9 +5232,6 @@
     (cond ((not (or (file-exists? full) (file-directory? full))) #f)
           (permanent? (delete-file! full) full)
           (else (trash-file! full) full))))
-            (when chat?
-              (buffer-set-local! (current-buffer) 'chat-directory
-                                 (path-directory p)))
 
 (define (delete-file--ask! path permanent?)
   (let ((full (expand-path (normalize-file-input path))))
@@ -5196,20 +5255,15 @@
     (read-file-name-initial "Delete file: " (delete-file-default (current-buffer))
       (lambda (input) (delete-file--ask! input (and arg #t))))))
 
-(define (write-file-default-name buf)
-  (let* ((stem (write-file-buffer-stem buf))
-         (mode (buffer-local buf 'mode-name))
-         (ext (if (auto-mode-for stem)
-                  ""
-                  (write-file-mode-extension mode))))
-    (string-append stem ext)))
-
 (public! 'delete-file-path!
   "(delete-file-path! PATH PERMANENT?) — move PATH to the trash, or delete it when PERMANENT?; the path, or #f when nothing is there")
 
 (define-command "write-file" "Write the buffer to a file; the buffer becomes that file's buffer"
   (lambda ()
     (let ((old (current-buffer)))
+      ;; the answer names a NEW file: RET writes the typed text, and a
+      ;; fuzzy match on a file already there does not take the write.
+      ;; C-n and TAB still pick a candidate on purpose.
       (read-file-name-initial (string-append "Write " old " to file: ")
         (write-file-default-path old)
         (lambda (p) (write-buffer-to-file! old p))
@@ -5262,9 +5316,6 @@
 ;; listing says which directory it listed. Every file prompt goes through
 ;; here, and nothing else has to know the annotator needs it.
 ;; A prompt shows eight rows at a time. Annotating every entry to show
-      ;; the answer names a NEW file: RET writes the typed text, and a
-      ;; fuzzy match on a file already there does not take the write.
-      ;; C-n and TAB still pick a candidate on purpose.
 ;; eight is the file prompt's worst case: the annotator stats the file and
 ;; reads auto-mode-alist for each one, so 5000 entries cost 1.8s on the
 ;; :ui lane and the editor stops between keystrokes. Past this many
@@ -7216,6 +7267,20 @@
           ((member (car rest) result) (loop (cdr rest) result))
           (else (loop (cdr rest) (append result (list (car rest))))))))
 
+;; The two-pane preset keeps the selected buffer and the next visible buffer.
+;; It fills a missing companion from the frame's group or MRU pool.
+(define (layout--two-panes buffers)
+  (let loop ((rest (window-fill-buffers))
+             (result (take-n buffers 2)))
+    (cond ((>= (length result) 2) result)
+          ((null? rest)
+           (let ((blank (window-fill-blank)))
+             (if (and blank (not (member blank result)))
+                 (append result (list blank))
+                 result)))
+          ((member (car rest) result) (loop (cdr rest) result))
+          (else (loop (cdr rest) (append result (list (car rest))))))))
+
 ;; Validate each requested pane without removing duplicate buffer names.
 (define (layout--known-buffers buffers)
   (let loop ((rest buffers) (acc '()))
@@ -7281,12 +7346,13 @@
             (layout--stack-zone! stack stack-dir))))))
 
 (define *window-layout-algorithms*
-  '(columns rows grid main-right main-left main-bottom main-top))
+  '(two-pane columns rows grid main-right main-left main-bottom main-top))
 
 ;; Arrange explicit buffers with a named tiling algorithm. The first buffer is
 ;; the main buffer and keeps focus. This is the stable agent-facing entry point.
 (define (tile-windows! algorithm buffers)
-  (let ((panes (layout--known-buffers buffers)))
+  (let* ((known (layout--known-buffers buffers))
+         (panes (if (equal? algorithm 'two-pane) (take-n known 2) known)))
     (cond
       ((not (member algorithm *window-layout-algorithms*))
        (message "Unknown window layout") #f)
@@ -7300,6 +7366,8 @@
         (set! *layout-histories* (layout--capture-histories))
         (delete-other-windows!)
         (cond
+          ((equal? algorithm 'two-pane)
+           (layout--fill-line! panes 'h (/ 2 3)))
           ((equal? algorithm 'columns)
            (layout--fill-line! panes 'h (/ 1 (length panes))))
           ((equal? algorithm 'rows)
@@ -7331,9 +7399,11 @@
 
 (define (tile-visible-windows! algorithm)
   (let* ((visible (layout-visible-buffers))
-         (panes (if (equal? algorithm 'columns)
-                    (layout--three-columns visible)
-                    visible)))
+         (panes (cond ((equal? algorithm 'two-pane)
+                       (layout--two-panes visible))
+                      ((equal? algorithm 'columns)
+                       (layout--three-columns visible))
+                      (else visible))))
     (if (< (length panes) 2)
         (begin (message "Open at least two work buffers") #f)
         (tile-windows! algorithm panes))))
@@ -7362,6 +7432,9 @@
 
 (define-command "window-layout-columns" "Tile visible buffers in equal columns"
   (window-layout-command 'columns))
+(define-command "window-layout-two-pane"
+  "Show two side-by-side panes; the selected pane takes two thirds"
+  (window-layout-command 'two-pane))
 (define-command "window-layout-rows" "Tile visible buffers in equal rows"
   (window-layout-command 'rows))
 (define-command "window-layout-grid" "Tile visible buffers in a balanced grid"
@@ -7389,6 +7462,7 @@
     (let ((saved (window-tree)))
       (minibuffer-read-preview "Window layout: "
         '( ("adaptive" "choose from usable monitor width")
+           ("two-pane" "2/3 + 1/3 side by side")
            ("columns" "3 columns")
            ("rows" "equal rows")
            ("grid" "balanced grid")
@@ -7412,7 +7486,8 @@
 
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
-  '("window-layout" "window-layout-free" "window-layout-columns" "window-layout-rows"
+  '("window-layout" "window-layout-free" "window-layout-two-pane"
+    "window-layout-columns" "window-layout-rows"
     "window-layout-grid" "window-layout-main-right" "window-layout-main-bottom"))
 
 ;; The engine's entry point: a mode turned on in BUF. Arrange the frame only
@@ -7995,27 +8070,148 @@
 ;; document itself.
 (define *llm-mode-hooks* '())
 
+(define (llm-mode--addressable-kind buf kind)
+  (filter
+    (lambda (record)
+      (and record
+           (equal? (plist-get record 'kind) kind)
+           (not (equal? (plist-get record 'state) 'deleted))))
+    (map (lambda (record)
+           (block-resolve-id buf (plist-get record 'id)))
+         (block-records buf))))
+
+(define (llm-mode--kind-ranges buf kind)
+  (map (lambda (record)
+         (list (plist-get record 'start) (plist-get record 'end)))
+       (llm-mode--addressable-kind buf kind)))
+
+(define (llm-mode--active-prompt-ranges buf)
+  (map (lambda (record)
+         (list (plist-get record 'start) (plist-get record 'end)))
+       (filter (lambda (record) (equal? (plist-get record 'state) 'sent))
+               (llm-mode--addressable-kind buf 'llm-prompt))))
+
+(define (llm-mode--range-overlaps? a b)
+  (and (< (car a) (cadr b)) (< (car b) (cadr a))))
+
+
+(define (llm-mode--range-overlaps-any? range ranges)
+  (cond ((null? ranges) #f)
+        ((llm-mode--range-overlaps? range (car ranges)) #t)
+        (else (llm-mode--range-overlaps-any? range (cdr ranges)))))
+(define (llm-mode--addressable-turn-ranges buf)
+  (filter (lambda (range) (< (car range) (cadr range)))
+          (append (llm-mode--kind-ranges buf 'llm-prompt)
+                  (llm-mode--kind-ranges buf 'llm-response))))
+
+(define (llm-mode--legacy-response-ranges buf)
+  (let ((legacy (or (buffer-local buf 'llm-legacy-responses)
+                    (if (null? (llm-mode--kind-ranges buf 'llm-response))
+                        (or (buffer-local buf 'llm-responses) '())
+                        '())))
+        (turns (llm-mode--addressable-turn-ranges buf)))
+    (filter
+      (lambda (range)
+        (and (number? (car range)) (number? (cadr range))
+             (< (car range) (cadr range))
+             (not (llm-mode--range-overlaps-any? range turns))))
+      legacy)))
+
+(define (llm-mode--visible-response-ranges buf)
+  (map (lambda (record)
+         (list (plist-get record 'start) (plist-get record 'end)))
+       (filter
+         (lambda (record)
+           (and (member (plist-get record 'state)
+                        '(streaming complete failed cancelled))
+                (< (plist-get record 'start) (plist-get record 'end))))
+         (llm-mode--addressable-kind buf 'llm-response))))
+
+(define (llm-mode--response-ranges buf)
+  (append (llm-mode--legacy-response-ranges buf)
+          (llm-mode--visible-response-ranges buf)))
+(define (llm-mode--thinking-chrome buf)
+  (map
+    (lambda (record)
+      (chrome-before
+        (plist-get record 'start)
+        (or (plist-get (plist-get record 'metadata) 'label) "Thinking")
+        "llm-thinking-spinner"))
+    (llm-mode--addressable-kind buf 'llm-thinking)))
+
+
 (define (llm-mode--paint! buf)
   (overlay-set! buf 'llm-mode-responses
     (map (lambda (range)
            (list (car range) (cadr range) 'llm-response))
-         (or (buffer-local buf 'llm-responses) '()))))
+         (llm-mode--response-ranges buf)))
+  (overlay-set! buf 'llm-mode-prompts
+    (map (lambda (range)
+           (list (car range) (cadr range) 'llm-prompt))
+         (llm-mode--active-prompt-ranges buf)))
+  (overlay-set! buf 'llm-mode-thinking (llm-mode--thinking-chrome buf)))
 
 (define (llm-mode--sync-ranges! buf)
-  ;; Overlays follow edits in the rope. Mirror their adjusted positions into
-  ;; a serializable local so desktop restore can repaint the response blocks.
+  ;; Addressable markers are the source of truth for new turns. Legacy
+  ;; desktops still mirror their overlay ranges until their first new send.
   (when (minor-mode-on? buf "llm-mode")
-    (let ((tracked
-            (filter (lambda (ov) (equal? (caddr ov) "llm-response"))
-                    (buffer-overlays buf))))
-      ;; Mode/desktop restoration has a short interval where locals are back
-      ;; but derived overlays are not. An unrelated setup edit during that
-      ;; interval must not erase the only durable copy of the ranges.
-      (when (or (pair? tracked)
-                (not (buffer-local buf 'llm-responses))
-                (null? (buffer-local buf 'llm-responses)))
-        (buffer-set-local! buf 'llm-responses
-          (map (lambda (ov) (list (car ov) (cadr ov))) tracked))))))
+    (if (pair? (llm-mode--kind-ranges buf 'llm-response))
+        (begin
+          (buffer-set-local! buf 'llm-responses
+            (llm-mode--response-ranges buf))
+          (llm-mode--paint! buf))
+        (let ((tracked
+                (filter (lambda (ov) (equal? (caddr ov) "llm-response"))
+                        (buffer-overlays buf))))
+          (when (or (pair? tracked)
+                    (not (buffer-local buf 'llm-responses))
+                    (null? (buffer-local buf 'llm-responses)))
+            (buffer-set-local! buf 'llm-responses
+              (map (lambda (ov) (list (car ov) (cadr ov))) tracked)))))))
+
+(define (llm-mode--agent-write? buf source)
+  (let ((inline (buffer-local buf 'llm-session-id)))
+    (and inline (equal? source (string-append "agent:" inline)))))
+
+(define (llm-mode--change-touches-result? result pos inserted deleted)
+  (let ((start (plist-get result 'start))
+        (end (plist-get result 'end))
+        (added (or inserted 0))
+        (removed (or deleted 0)))
+    (or (and (> added 0) (<= start pos) (< pos end))
+        (and (> removed 0)
+             (< pos (+ end removed))
+             (< start (+ pos removed))))))
+
+;; Authorship is a live property. The first non-agent edit inside a completed
+;; result retires its addressable turn and children; the bytes remain untouched.
+(define (llm-mode--declassify-edited-results! buf pos inserted deleted)
+  (let ((changed #f))
+    (for-each
+      (lambda (result)
+        (when (and (member (plist-get result 'state) '(complete failed cancelled))
+                   (llm-mode--change-touches-result?
+                     result pos inserted deleted))
+          ;; Freeze the compatibility layer before retiring the native turn.
+          ;; Otherwise the now-stale llm-responses mirror can be mistaken for
+          ;; an old desktop's legacy overlay and repaint the edited result.
+          (unless (buffer-local buf 'llm-legacy-responses)
+            (buffer-set-local! buf 'llm-legacy-responses
+              (llm-mode--legacy-response-ranges buf)))
+          (let ((response-id (plist-get result 'parent)))
+            (block-retire-children! buf (plist-get result 'id))
+            (block-set-state! buf (plist-get result 'id) 'deleted)
+            (when response-id
+              (llm-mode--retire-thinking! buf response-id)
+              (block-set-state! buf response-id 'deleted))
+            (set! changed #t))))
+      (llm-mode--addressable-kind buf 'llm-result))
+    (when changed
+      (buffer-set-local! buf 'llm-session-dirty #t)
+      (buffer-set-local! buf 'llm-responses
+        (llm-mode--response-ranges buf))
+      (llm-mode--paint! buf))
+    changed))
 
 (define (llm-mode--ensure-hook! buf)
   (unless (assoc buf *llm-mode-hooks*)
@@ -8023,21 +8219,18 @@
       (cons (list buf
                   (on-change! buf
                     (lambda (pos inserted deleted source)
+                      (unless (or (equal? source "locals")
+                                  (llm-mode--agent-write? buf source))
+                        (llm-mode--declassify-edited-results!
+                          buf pos inserted deleted))
                       (llm-mode--sync-ranges! buf)
                       ;; Text after the last answer is the next user turn.
                       ;; Editing anything earlier rewrites conversation
-                      ;; history, so the next send deliberately starts a new
-                      ;; native thread from the edited whole buffer.
-                      (let ((end (llm-mode--last-response-end buf))
-                            (inline (buffer-local buf 'llm-session-id)))
+                      ;; history, so the next send starts a new native thread.
+                      (let ((end (llm-mode--last-response-end buf)))
                         (when (and end
-                                   ;; Responses and mode-managed rewrites use
-                                   ;; the named-buffer :editor primitives;
-                                   ;; streamed replies use this buffer's agent.
-                                   (not (equal? source "editor"))
-                                   (not (and inline
-                                             (equal? source
-                                               (string-append "agent:" inline))))
+                                   (not (equal? source "locals"))
+                                   (not (llm-mode--agent-write? buf source))
                                    (< pos end))
                           (buffer-set-local! buf 'llm-session-dirty #t))))))
             *llm-mode-hooks*))))
@@ -8050,14 +8243,58 @@
         (remove (lambda (entry) (equal? (car entry) buf))
                 *llm-mode-hooks*)))))
 
+(define (llm-mode--retire-thinking! buf response-id)
+  (let* ((active-id (buffer-local buf 'llm-active-thinking))
+         (active (and active-id (block-resolve-id buf active-id))))
+    (for-each
+      (lambda (child)
+        (when (equal? (plist-get child 'kind) 'llm-thinking)
+          (block-set-state! buf (plist-get child 'id) 'deleted)))
+      (block-children buf response-id))
+    (when (and active (equal? (plist-get active 'parent) response-id))
+      (buffer-set-local! buf 'llm-active-thinking #f))
+    (llm-mode--paint! buf)))
+
+;; A restored or interrupted buffer cannot still have a live callback for an
+;; old pending/streaming block. Retire those records before their advancing end
+;; markers absorb later document edits. Preserve partial streamed text.
+(define (llm-mode--heal-orphaned-turns! buf)
+  (let ((active (buffer-local buf 'llm-active-response)))
+    (for-each
+      (lambda (response)
+        (let* ((id (plist-get response 'id))
+               (state (plist-get response 'state))
+               (metadata (plist-get response 'metadata))
+               (prompt-id (plist-get metadata 'prompt))
+               (result-id (plist-get metadata 'result)))
+          (when (and (member state '(pending streaming))
+                     (not (equal? id active)))
+            (llm-mode--retire-thinking! buf id)
+            (when (equal? state 'pending)
+              (block-close-end! buf id (plist-get response 'start))
+              (when result-id
+                (block-close-end! buf result-id (plist-get response 'start))))
+            (block-set-state! buf id 'cancelled)
+            (when result-id (block-set-state! buf result-id 'cancelled))
+            (when prompt-id (block-set-state! buf prompt-id 'complete)))))
+      (llm-mode--addressable-kind buf 'llm-response))
+    (let ((saved (buffer-local buf 'llm-legacy-responses)))
+      (when saved
+        (buffer-set-local! buf 'llm-legacy-responses
+          (llm-mode--legacy-response-ranges buf))))))
+
 (define (llm-mode--apply! buf)
+  (llm-mode--heal-orphaned-turns! buf)
+  (buffer-set-local! buf 'llm-responses (llm-mode--response-ranges buf))
   (llm-mode--paint! buf)
   (llm-mode--ensure-hook! buf))
 
 (define (llm-mode--teardown! buf)
   (llm-mode-reset-runtime! buf #f)
   (llm-mode--remove-hook! buf)
-  (overlay-clear! buf 'llm-mode-responses))
+  (overlay-clear! buf 'llm-mode-responses)
+  (overlay-clear! buf 'llm-mode-prompts)
+  (overlay-clear! buf 'llm-mode-thinking))
 
 ;; the change rule behind M-o's response ranges is registered under the name
 ;; the buffer had. A renamed chat needs the rule again, under the new one.
@@ -8073,7 +8310,8 @@
 
 (register-minor-mode! "llm-mode" llm-mode--apply! llm-mode--teardown!)
 (minor-mode-keys! "llm-mode"
-  '(("M-o" "llm-send-buffer") ("C-c m" "llm-set-model") ("C-c b" "llm-configure")))
+  '(("M-o" "llm-send-buffer") ("C-g" "llm-mode-abort")
+    ("C-c m" "llm-set-model") ("C-c b" "llm-configure")))
 
 (define-command "llm-mode" "Toggle in-buffer LLM interaction and response formatting"
   (lambda ()
@@ -8082,7 +8320,7 @@
         (message "LLM mode disabled"))))
 
 (mode-doc! "llm-mode"
-  "In-buffer LLM interaction. `M-o` sends the document and streams the response at point with a distinct response face; `C-c b` chooses backend, model, effort, and tool presets.")
+  "In-buffer LLM interaction. `M-o` shows transient thinking/tool activity at point, then streams the durable result there. `C-g` cancels an in-flight reply and restores the prompt face; `C-c b` chooses backend, model, effort, tools, and prompt sections.")
 
 ;; Inline sessions are durable agent conversations by default, matching
 ;; Codex's editor integrations: one native thread stays attached to the
@@ -8182,62 +8420,6 @@
             (llm-mode-reset-runtime! buf #t)
             (message (string-append "M-o · " model))))))))
 
-;; Which buffers is an M-o question about? A grouped buffer answers: a
-;; writing document, a code-mode source file, or the scratch beside either.
-;; The tools then read and edit those buffers by name, instead of guessing
-;; from (buffer-list). The names are sorted, so the note changes only when
-;; the membership changes — a plain buffer switch must not rewrite the
-;; cached prefix (see chat-preamble-body).
-(define (llm-mode--group-note buf)
-  (let* ((g (buffer-group buf))
-         ;; group-buffers reads the LIVE buffer list, and this walks the
-         ;; members. group-docs takes the MRU path, which still names
-         ;; buffers the user killed — one of those kills the send.
-         (docs (if g
-                   (remove (lambda (b)
-                             (or (chat-buffer? b) (equal? b (group-chat-name g))))
-                           (group-buffers g))
-                   '())))
-    (if (null? docs)
-        ""
-        (string-append
-          "\n\nThe user works in the editor buffer group \""
-          (group-display-name g) "\":\n"
-          (fold (lambda (acc d)
-                  (string-append acc "- \"" d "\""
-                    (let ((m (buffer-local d 'mode-name)))
-                      (if m (string-append " (" m ")") ""))
-                    "\n"))
-                "" (sort docs))
-          *chat-edit-protocol*
-          (chat-code-note docs)))))
-
-;; A group that holds a code-mode buffer adds that mode's own instructions.
-;; The mode owns the words (code-instructions, packages/code.scm); the two
-;; prompt paths ask for them here so both surfaces say the same thing. The
-;; package loads after this file, so a build without it changes nothing.
-(define (chat-code-note docs)
-  (if (boundp (quote code-mode-instructions))
-      (let ((note (code-mode-instructions docs)))
-        (if (equal? note "") "" (string-append "\n\n" note)))
-      ""))
-
-;; The prompt names ambient buffers but never copies their changing content.
-;; The agent pulls the structure it needs through the live outline APIs.
-(define (chat-ambient-context-note docs)
-  (if (null? docs)
-      ""
-      (string-append
-        "\n\nEach group member named above is ambient context for this chat. "
-        "The editor does not attach its outline or text. Pull each relevant "
-        "outline before you answer or edit. Use (code-outline \"NAME\") for "
-        "source and (markdown-outline \"NAME\") for Markdown.\n\n")))
-
-;; ...and the voice that goes with them: a chat over one code-mode buffer is
-;; not a writing companion, and telling it to match the document's voice
-;; asks a coding session to imitate prose.
-(define (chat-code-companion? docs)
-  (not (equal? (chat-code-note docs) "")))
 
 ;; Inline/document requests use the same session facade, connector resolution,
 ;; normalized event stream and tool loop as chat; only their presentation
@@ -8286,10 +8468,19 @@
         (completion result error)
         (when error (message (string-append "LLM failed · " error)))))))
 
+(define (llm-inline-note-activity! id event)
+  (let ((entry (assoc id *llm-inline-sends*)))
+    (when entry
+      (let ((buf (cadr entry)))
+        (when (buffer-exists? buf)
+          (llm-mode--note-activity! buf event))))))
+
 (define (llm-inline-events! id events)
   (for-each
     (lambda (event)
       (let ((type (plist-get event 'type)))
+        (when (member type '(thought tool-call tool-update plan permission question))
+          (llm-inline-note-activity! id event))
         (cond ((equal? type 'chunk)
                (llm-inline-add-chunk! id (or (plist-get event 'text) "")))
               ((equal? type 'thread-id)
@@ -8299,23 +8490,11 @@
                      (plist-get event 'id)))))
               ((equal? type 'error)
                ;; A failed turn ends in turn-failed, which the status machine
-               ;; consumes: no turn-end ever reaches this buffer. Finish the
-               ;; send here, or the reason stays invisible and the entry
-               ;; leaks. Finishing removes the entry, so a turn-end that does
-               ;; arrive after an error is a no-op.
+               ;; consumes: no turn-end ever reaches this buffer. Finish here.
                (llm-inline-error! id (or (plist-get event 'text) "request failed"))
                (llm-inline-finish! id))
-              ;; Codex asks before every MCP tool call (an elicitation
-              ;; becomes this event). A chat draws a permission block and
-              ;; waits for the user; an inline send has no such surface, so
-              ;; an unanswered ask parked the session in needs_attention and
-              ;; the turn died there — the tools looked absent. Inline sends
-              ;; already declare their policy as allow, so answer here.
               ((equal? type 'permission)
                (llm-inline-allow! id event))
-              ;; Codex represents an MCP server's own approval prompt as an
-              ;; elicitation question. Inline mode has no question surface,
-              ;; and its declared tool policy is already allow.
               ((equal? type 'question)
                (llm-inline-answer! id event))
               ((equal? type 'turn-end)
@@ -8377,28 +8556,38 @@
       (llm-session-open! id config
         (lambda (_id _display)
           (list 'turns '()
-                'system (string-append
-                          (if (boundp (quote chat-tool-system))
-                              (chat-tool-system buf)
-                              "")
-                          (llm-mode--group-note buf))
+                'system
+                (if (boundp (quote chat-prompt-live-parts))
+                    (prompt-parts-text (chat-prompt-live-parts buf))
+                    (chat-tool-system buf))
                 'tools (if (boundp (quote chat-extra-tool-specs))
                            (chat-extra-tool-specs buf)
                            '())
                 'dispatcher llm-tool-call))
         (lambda (_id events) (llm-inline-events! id events))
         (lambda (_id _role _blocks _wire) #t)
-        ;; Inline M-o historically executed its selected tools directly; chat
-        ;; sessions continue to use the shared permission policy and UI.
+        ;; Inline M-o historically executed its selected tools directly.
         (lambda (_id _name _kind _raw) 'allow)))
     (llm-session-send! id wire display)))
 
-(define (llm-mode--last-response-end buf)
-  (let loop ((ranges (or (buffer-local buf 'llm-responses) '())) (end #f))
-    (if (null? ranges) end (loop (cdr ranges) (cadr (car ranges))))))
+(define (llm-mode--last-response-range buf)
+  (let loop ((ranges (llm-mode--response-ranges buf)) (latest #f))
+    (cond ((null? ranges) latest)
+          ((or (not latest) (> (cadr (car ranges)) (cadr latest)))
+           (loop (cdr ranges) (car ranges)))
+          (else (loop (cdr ranges) latest)))))
 
-;; Record the newest response while it streams. Existing response ranges stay
-;; intact, and their overlays continue to follow edits elsewhere in the buffer.
+(define (llm-mode--last-response-end buf)
+  (let ((range (llm-mode--last-response-range buf)))
+    (and range (cadr range))))
+
+;; Keep the old range local current for clients and saved desktops that read it.
+(define (llm-mode--sync-addressable-responses! buf)
+  (let ((ranges (llm-mode--response-ranges buf)))
+    (when (pair? ranges) (buffer-set-local! buf 'llm-responses ranges))
+    (llm-mode--paint! buf)))
+
+;; The legacy writer remains for restored transcripts without block records.
 (define (llm-mode--stream-range! buf start end replace-last)
   (let* ((ranges (or (buffer-local buf 'llm-responses) '()))
          (before (if (and replace-last (pair? ranges))
@@ -8409,24 +8598,27 @@
     (llm-mode--paint! buf)))
 
 (define (llm-mode--last-response-start buf)
-  (let ((ranges (or (buffer-local buf 'llm-responses) '())))
-    (and (pair? ranges) (car (car (reverse ranges))))))
+  (let ((range (llm-mode--last-response-range buf)))
+    (and range (car range))))
 
 (define (llm-mode--stateful? buf)
   (not (connector-can? (buffer-llm-connector buf) 'stateless)))
 
 (define (llm-mode--wire-text buf snapshot)
-  (let ((end (llm-mode--last-response-end buf)))
+  (let* ((range (llm-context-range buf))
+         (end (llm-mode--last-response-end buf))
+         (relative-end
+           (if range
+               (and end (<= (car range) end) (<= end (cadr range))
+                    (- end (car range)))
+               end)))
     (if (and (llm-mode--stateful? buf)
-             end
-             ;; A legacy/restored transcript without a native thread has
-             ;; nothing server-side to continue. Seed its first thread with
-             ;; the whole buffer; only a live or resumable session gets a
-             ;; delta turn.
+             relative-end
              (or (llm-mode--runtime-live? buf)
                  (buffer-local buf 'llm-thread-id))
              (not (buffer-local buf 'llm-session-dirty)))
-        (let ((tail (substring-bytes snapshot end (string-byte-length snapshot))))
+        (let ((tail (substring-bytes snapshot relative-end
+                                     (string-byte-length snapshot))))
           (if (equal? (string-trim tail) "") "" tail))
         snapshot)))
 
@@ -8456,6 +8648,192 @@
              (loop (cdr es) #f end flushed))
             (else (loop (cdr es) (or open start) end acc)))))))
 
+;; A newly typed prompt can share a Morg paragraph with the result immediately
+;; before it. Cut the parsed span at every addressable boundary it would cross,
+;; keeping the side that contains point. Repeating handles nested old turns.
+(define (llm-mode--fit-prompt-range buf range pos)
+  (let ((records
+          (filter
+            (lambda (record)
+              (and record (not (equal? (plist-get record 'state) 'deleted))))
+            (map (lambda (raw)
+                   (block-resolve-id buf (plist-get raw 'id)))
+                 (block-records buf)))))
+    (let loop ((candidate range))
+      (let ((next
+              (fold
+                (lambda (current record)
+                  (let ((start (car current)) (end (cadr current))
+                        (rstart (plist-get record 'start))
+                        (rend (plist-get record 'end)))
+                    (cond
+                      ((and (< rstart start) (< start rend) (< rend end))
+                       (if (< pos rend) (list start rend) (list rend end)))
+                      ((and (< start rstart) (< rstart end) (< end rend))
+                       (if (<= pos rstart) (list start rstart) (list rstart end)))
+                      (else current))))
+                candidate records)))
+        (if (equal? next candidate) next (loop next))))))
+
+(define (llm-mode--block-range-at buf pos)
+  (let* ((at (max 0 (min pos (buffer-size buf))))
+         (raw
+           (let loop ((blocks (llm-mode--blocks buf)))
+             (cond ((null? blocks) (list at at))
+                   ((and (<= (car (car blocks)) at)
+                         (<= at (cadr (car blocks))))
+                    (car blocks))
+                   (else (loop (cdr blocks)))))))
+    (llm-mode--fit-prompt-range buf raw at)))
+
+;; Mark the prompt now and reserve one transient activity block plus one durable
+;; result block before the request starts. Only the final result owns text.
+(define (llm-mode--begin-turn! buf pos insert-at &optional model)
+  (let* ((prompt-range (llm-mode--block-range-at buf pos))
+         (_legacy
+           (when (not (buffer-local buf 'llm-legacy-responses))
+             (buffer-set-local! buf 'llm-legacy-responses
+               (or (buffer-local buf 'llm-responses) '()))))
+         ;; Validate/claim the prompt before touching the document. Insertion at
+         ;; its end advances the marker, so reset it to exclude the separator.
+         (prompt-id
+           (block-create! buf 'llm-prompt
+             (car prompt-range) (cadr prompt-range) #f 'sent '()))
+         (_separator (buffer-insert! buf insert-at "\n\n"))
+         (_prompt-end (block-close-end! buf prompt-id (cadr prompt-range)))
+         (response-at (+ insert-at 2))
+         (response-id
+           (block-create! buf 'llm-response response-at response-at
+             #f 'pending (list 'prompt prompt-id)))
+         (thinking-id
+           (block-create! buf 'llm-thinking response-at response-at response-id
+             'streaming
+             (list 'label (if model (string-append "Thinking · " model) "Thinking")
+                   'activity 'thinking)))
+         (result-id
+           (block-create! buf 'llm-result response-at response-at response-id
+             'pending '())))
+    (block-set-metadata! buf response-id
+      (list 'prompt prompt-id 'thinking thinking-id 'result result-id))
+    (block-set-metadata! buf prompt-id (list 'response response-id))
+    (buffer-set-local! buf 'llm-active-prompt prompt-id)
+    (buffer-set-local! buf 'llm-active-response response-id)
+    (buffer-set-local! buf 'llm-active-thinking thinking-id)
+    (buffer-set-local! buf 'llm-active-result result-id)
+    (llm-mode--aim! buf response-at)
+    (llm-mode--sync-addressable-responses! buf)
+    (list 'prompt prompt-id 'response response-id 'thinking thinking-id
+          'result result-id 'insert-at insert-at)))
+
+(define (llm-mode--clip-activity text)
+  (let* ((clean (string-trim (or text "")))
+         (line (if (equal? clean "") "" (car (string-split clean "\n")))))
+    (if (> (string-length line) 92)
+        (string-append (substring line 0 91) "…")
+        line)))
+
+(define (llm-mode--activity-label event)
+  (let ((type (plist-get event 'type)))
+    (cond
+      ((equal? type 'thought)
+       (let ((text (llm-mode--clip-activity (plist-get event 'text))))
+         (if (equal? text "") "Thinking" (string-append "Thinking · " text))))
+      ((equal? type 'tool-call)
+       (let* ((title (or (plist-get event 'title) (plist-get event 'name)
+                         (plist-get event 'kind) "tool"))
+              (shown (if (equal? title "") "tool" title)))
+         (string-append "Running · " (llm-mode--clip-activity shown))))
+      ((equal? type 'tool-update)
+       (let ((status (or (plist-get event 'status) "working")))
+         (string-append "Tool · " (if (equal? status "") "working" status))))
+      ((equal? type 'plan) "Planning")
+      ((equal? type 'permission) "Approving tool")
+      ((equal? type 'question) "Answering tool")
+      (else "Thinking"))))
+
+(define (llm-mode--note-activity! buf event)
+  (let* ((response-id (buffer-local buf 'llm-active-response))
+         (response (and response-id (block-resolve-id buf response-id)))
+         (thinking-id (and response
+                        (plist-get (plist-get response 'metadata) 'thinking)))
+         (thinking (and thinking-id (block-resolve-id buf thinking-id))))
+    (when (and thinking (equal? (plist-get thinking 'state) 'streaming))
+      (block-set-metadata! buf thinking-id
+        (list 'label (llm-mode--activity-label event)
+              'activity (plist-get event 'type)))
+      (llm-mode--paint! buf))))
+
+(define (llm-mode--append-response! buf response-id text)
+  (let* ((response (block-resolve-id buf response-id))
+         (result-id (and response
+                      (plist-get (plist-get response 'metadata) 'result))))
+    (if (or (equal? text "")
+            (not (member (plist-get response 'state) '(pending streaming))))
+        #f
+        (begin
+          (llm-mode--retire-thinking! buf response-id)
+          (agent-append! (llm-mode--session-id buf) text)
+          (block-set-state! buf response-id 'streaming)
+          (when result-id (block-set-state! buf result-id 'streaming))
+          (llm-mode--sync-addressable-responses! buf)
+          #t))))
+
+(define (llm-mode--fence-for-span buf span)
+  (let ((fence (block-at buf (car span))))
+    (and fence
+         (= (nth 0 fence) (car span))
+         (= (nth 1 fence) (cadr span))
+         fence)))
+
+;; A completed response contains one durable result block. Morg paragraphs and
+;; fences become children of that result; transient thinking remains a sibling.
+(define (llm-mode--adopt-response-children! buf response-id)
+  (let* ((response (block-resolve-id buf response-id))
+         (result-id (and response
+                      (plist-get (plist-get response 'metadata) 'result)))
+         (container-id (or result-id response-id))
+         (container (and response (block-resolve-id buf container-id))))
+    (when container
+      (block-retire-children! buf container-id)
+      (for-each
+        (lambda (span)
+          (when (and (<= (plist-get container 'start) (car span))
+                     (<= (cadr span) (plist-get container 'end))
+                     (< (car span) (cadr span)))
+            (let* ((fence (llm-mode--fence-for-span buf span))
+                   (language (and fence (block-lang fence)))
+                   (kind (cond ((and language (equal? language "scheme")) 'scheme)
+                               (fence 'code)
+                               (else 'paragraph)))
+                   (metadata (if language (list 'language language) '()))
+                   (id (block-create! buf kind (car span) (cadr span)
+                         container-id 'complete metadata)))
+              (block-close-end! buf id))))
+        (llm-mode--blocks buf)))))
+
+(define (llm-mode--finish-response! buf response-id streamed error)
+  (let* ((response (block-resolve-id buf response-id))
+         (end (plist-get response 'end))
+         (metadata (plist-get response 'metadata))
+         (prompt-id (plist-get metadata 'prompt))
+         (result-id (plist-get metadata 'result))
+         (cancelled (equal? (plist-get response 'state) 'cancelled))
+         (state (if cancelled 'cancelled (if error 'failed 'complete))))
+    (llm-mode--retire-thinking! buf response-id)
+    (when streamed (agent-append! (llm-mode--session-id buf) "\n"))
+    ;; The final line break belongs to the document, not to either result span.
+    (block-close-end! buf response-id end)
+    (when result-id (block-close-end! buf result-id end))
+    (block-set-state! buf response-id state)
+    (when result-id (block-set-state! buf result-id state))
+    (when prompt-id (block-set-state! buf prompt-id 'complete))
+    (when (equal? (buffer-local buf 'llm-active-response) response-id)
+      (buffer-set-local! buf 'llm-active-response #f)
+      (buffer-set-local! buf 'llm-active-result #f)
+      (buffer-set-local! buf 'llm-active-prompt #f))
+    (llm-mode--adopt-response-children! buf response-id)
+    (llm-mode--sync-addressable-responses! buf)))
+
 (define (llm-mode--insert-at buf pos)
   ;; Between two blocks POS is already the right place.
   (let* ((size (buffer-size buf))
@@ -8474,18 +8852,43 @@
   (unless (chat-buffer? buf)
     (buffer-set-local! buf 'agent-saved-mark at)))
 
+
+(define-command "llm-mode-abort" "Cancel the inline reply and restore the prompt face"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (response-id (buffer-local buf 'llm-active-response))
+           (response (and response-id (block-resolve-id buf response-id)))
+           (state (and response (plist-get response 'state)))
+           (prompt-id (buffer-local buf 'llm-active-prompt))
+           (result-id (and response
+                        (plist-get (plist-get response 'metadata) 'result))))
+      (if (not (member state '(pending streaming)))
+          (run-command "keyboard-quit")
+          (begin
+            (when (and (llm-mode--runtime-live? buf)
+                       (member (agent-status (llm-mode--session-id buf))
+                               '(running starting needs_attention)))
+              (llm-session-cancel! (llm-mode--session-id buf)))
+            (llm-mode--retire-thinking! buf response-id)
+            (block-set-state! buf response-id 'cancelled)
+            (when result-id
+              (block-set-state! buf result-id 'cancelled)
+              (block-close-end! buf result-id (plist-get response 'end)))
+            (when prompt-id (block-set-state! buf prompt-id 'complete))
+            (block-close-end! buf response-id (plist-get response 'end))
+            (buffer-set-local! buf 'llm-active-response #f)
+            (buffer-set-local! buf 'llm-active-result #f)
+            (buffer-set-local! buf 'llm-active-prompt #f)
+            (llm-mode--sync-addressable-responses! buf)
+            (message "LLM response cancelled"))))))
 (define-command "llm-send-buffer" "Send this document to the LLM and stream its reply below the block at point"
   (lambda ()
     (let* ((buf (current-buffer))
            (at (point))
-           (context (buffer-text (current-buffer)))
-           ;; Where the answer belongs: after the block point sits in. The
-           ;; agent mark on its own only remembers where the last reply
-           ;; ended, so a prompt typed below it would be answered above.
+           (context (llm-context-text buf (buffer-text buf)))
+           ;; Where the answer belongs: after the block point sits in.
            (insert-at (llm-mode--insert-at buf at))
            (model (buffer-llm-model (current-buffer))))
-      ;; Like gptel-send, the first invocation turns on the buffer-local
-      ;; interaction mode. writing-mode enables it eagerly.
       (unless (minor-mode-on? buf "llm-mode")
         (enable-minor-mode! buf "llm-mode"))
       ;; A rewritten earlier turn cannot be reconciled with a native thread.
@@ -8500,45 +8903,37 @@
             ((and (llm-mode--stateful? buf) (equal? wire ""))
              (message "Nothing new to send"))
             (else
-              (message (string-append "LLM thinking · " model))
-              (llm-mode--aim! buf insert-at)
-              (let ((streamed #f))
-                (llm-mode--complete buf wire context model insert-at
+              ;; Claim both sides of the turn before the request begins. The
+              ;; response marker is the only place callbacks may write.
+              (let* ((turn (llm-mode--begin-turn! buf at insert-at model))
+                     (response-id (plist-get turn 'response))
+                     (response (block-resolve-id buf response-id))
+                     (streamed #f))
+                (message (string-append "LLM thinking · " model))
+                (llm-mode--complete buf wire context model
+                  (plist-get response 'start)
                   (lambda (result error)
                     (if (not (buffer-exists? buf))
                         (message "LLM reply discarded — its buffer was killed")
-                        (let ((id (llm-mode--session-id buf)))
+                        (begin
                           ;; A non-streaming backend can still return one final
-                          ;; result. The normal path only appends the newline.
+                          ;; result. Both paths use the reserved response block.
                           (when (and (not streamed) (not (equal? result "")))
-                            (let* ((end (agent-append! id
-                                          (string-append "\n\n" result)))
-                                   (start (- end
-                                             (string-byte-length result))))
-                              (llm-mode--stream-range! buf start end #f)
+                            (when (llm-mode--append-response! buf response-id result)
                               (set! streamed #t)))
+                          (llm-mode--finish-response!
+                            buf response-id streamed error)
                           (when streamed
-                            (when (not error)
-                              ;; The streaming path has not written its final
-                              ;; line break yet. Keep it outside the response.
-                              (let* ((start (llm-mode--last-response-start buf))
-                                     (end (- (agent-append! id "\n") 1)))
-                                (llm-mode--stream-range! buf start end #t)))
-                            ;; The untouched suffix was part of the sent
-                            ;; snapshot when insertion happened in the middle.
+                            ;; An insertion in the middle dirties the native
+                            ;; thread because its untouched suffix was sent.
                             (buffer-set-local! buf 'llm-session-dirty
                               (< insert-at (string-byte-length context))))
-                          (when (not error) (message "LLM response inserted")))))
+                          (when (not error)
+                            (message "LLM response inserted")))))
                   (lambda (chunk)
-                    (when (buffer-exists? buf)
-                      (let* ((id (llm-mode--session-id buf))
-                             (first (not streamed))
-                             (end (agent-append! id
-                                    (if first (string-append "\n\n" chunk) chunk)))
-                             (start (if first
-                                        (- end (string-byte-length chunk))
-                                        (llm-mode--last-response-start buf))))
-                        (llm-mode--stream-range! buf start end (not first))
+                    (when (and (buffer-exists? buf)
+                               (not (equal? chunk "")))
+                      (when (llm-mode--append-response! buf response-id chunk)
                         (set! streamed #t)))))))))))))
 
 (global-set-key "M-o" "llm-send-buffer")
@@ -8716,90 +9111,44 @@
       (unless (chat-buffer? cur)
         (group-chat-show! (group-ensure! cur))))))
 
-;;; The system prompt is the cache prefix. Every byte of it is resent on
-;;; every turn and on every tool round, so nothing that CHANGES may live
-;;; here: one edit to a watched buffer used to invalidate the whole cached
-;;; prefix, and the chat paid the cache-write surcharge again from turn
-;;; one. So the system prompt names the group's buffers and states the
-;;; edit protocol. Both stay stable for the life of the chat. The agent reads
-;;; live context with tools on every turn. Chat never attaches document text.
+;;; The system prompt is the cache prefix. Every byte is resent on every turn
+;;; and tool round, so changing group membership must not change it. The static
+;;; context section tells the agent to call chat-context for current members,
+;;; roles, companions, workspace, and visible state.
 
-;; how to read and change a live buffer. One string: the two copies of
-;; this paragraph had drifted apart. Prompt composition adds it as the stable
-;; chat preamble after the shared guidance and MCP note.
+;; Stable instructions for reading and changing live buffers. Prompt composition
+;; places this text in the selectable code section.
 (define *chat-edit-protocol*
   (string-append
-    "Never guess a buffer's contents. For a source buffer, read the "
-    "structure first with eval-scheme: (code-outline \"NAME\") lists every "
-    "definition as (LINE KIND NAME DOC), (code-read \"NAME\" LINE) returns "
-    "the one definition that holds LINE, and (code-replace! \"NAME\" LINE "
-    "NEW) swaps it. (code-sexp \"NAME\" ANCHOR) selects the smallest "
-    "expression around unique ANCHOR text; (code-sexp-replace! \"NAME\" "
-    "ANCHOR NEW) replaces it. Do not call (buffer-text) on a whole source "
-    "buffer when the outline answers. Read a prose buffer with "
-    "(buffer-text \"NAME\"), and change any buffer with "
-    "(buffer-replace! \"NAME\" OLD NEW) — exact unique old string -> new; "
-    "it edits the live buffer, never the file. Make the smallest edit "
-    "that does the job. Treat \"buffer\" and \"window\" precisely. When the "
+    "Never guess buffer contents. With eval-scheme, inspect source via "
+    "(code-outline \"NAME\") and (code-read \"NAME\" LINE); edit via "
+    "(code-replace! \"NAME\" LINE NEW) or (code-sexp-replace! \"NAME\" "
+    "ANCHOR NEW). Read prose with (buffer-text \"NAME\") and make exact "
+    "text edits with (buffer-replace! \"NAME\" OLD NEW). Edits affect the "
+    "live buffer and never display it. Treat \"buffer\" and \"window\" precisely. When the "
     "user says \"open it in the other buffer\" or \"show it in the other "
     "buffer\", show the named target with (display-buffer-other-window! NAME). "
-    "This call preserves the selected window. When the user says \"switch to "
+    "When the user says \"switch to "
     "the other buffer\", run (run-command \"previous-buffer\"). Do not ask a "
     "question when the target is clear."))
 
-(define (chat-preamble buf)
-  (let* ((g (buffer-group buf))
-         (docs (if g (group-docs g) '())))
-    (chat-preamble-body g docs)))
+;; The dynamic group belongs to chat-context, not to the cached prompt.
+;; These fragments stay stable while buffers join, leave, or change roles.
+(define (chat-code-prompt _buf)
+  (string-append
+    *chat-edit-protocol*
+    (if (and (boundp (quote code-instructions))
+             (not (equal? code-instructions "")))
+        (string-append "\n\n" code-instructions)
+        "")))
 
-(define (chat-preamble-body g docs)
-  (cond
-      ((null? docs)
-       (string-append
-         "You are the assistant in an editor chat buffer. The transcript "
-         "follows; reply to the last user turn only, in markdown.\n\n"))
-      ((null? (cdr docs))
-       ;; one document: the writing-companion voice, or the coding one
-       (let* ((doc (car docs))
-              (code? (chat-code-companion? docs)))
-         (string-append
-           (if code?
-               "You are the user's coding companion in a side chat. They are "
-               "You are the user's writing companion in a side chat. They are ")
-           (if code? "working in " "writing in ")
-           "the editor buffer named \"" doc "\". "
-           (let ((role (and g (buffer-group-role doc g))))
-             (if role
-                 (string-append "This is the group's \"" role "\" buffer. ")
-                 ""))
-           (chat-ambient-context-note docs)
-           *chat-edit-protocol*
-           (if code? "" " Match the document's voice.")
-           (chat-code-note docs)
-           "\n\nThe chat transcript follows; reply to the last user turn "
-           "only, in markdown.\n\n")))
-      (else
-       ;; several buffers: enumerate the group in a fixed order. group-docs is
-       ;; MRU-ordered, so a plain switch between two members would reorder this
-       ;; list and rewrite the system prompt, and the prompt cache pays for the
-       ;; whole prefix again. sort by name: the order changes only when
-       ;; membership changes, not when the user switches buffers.
-       (string-append
-         "You are the user's companion in a side chat for their buffer "
-         "group \"" (group-display-name g) "\". The group's buffers:\n"
-         (fold (lambda (acc d)
-                 (string-append acc "- \"" d "\""
-                   (let ((role (buffer-group-role d g)))
-                     (if role (string-append " as " role) ""))
-                   (let ((m (buffer-local d 'mode-name)))
-                     (if m (string-append " (" m ")") ""))
-                   "\n"))
-               "" (sort docs))
-         (chat-ambient-context-note docs)
-         *chat-edit-protocol*
-         (chat-code-note docs)
-         "\n\nThe chat transcript follows; reply to the last user turn "
-         "only, in markdown.\n\n"))))
+(define (chat-preamble _buf)
+  (chat-preamble-body #f '()))
+
+(define (chat-preamble-body _g _docs)
+  (string-append
+    "You are the assistant in an editor chat buffer. The transcript "
+    "follows; reply to the last user turn only, in markdown.\n\n"))
 
 ;;; --- chat backends -------------------------------------------------------------
 ;;; A chat can ride an ACP agent (claude-code, codex — subscription billing)
@@ -8924,6 +9273,8 @@
       (if effort (string-append " effort " (value->string effort)) ""))
     (let ((ps (buffer-local buf 'chat-presets)))
       (if (pair? ps) (string-append " presets " (value->string ps)) ""))
+    (let ((d (buffer-local buf 'chat-directory)))
+      (if (string? d) (string-append " directory " (value->string d)) ""))
     (let ((s (buffer-local buf 'chat-summary)))
       (if (and (string? s) (not (equal? s "")))
           (string-append " summary " (value->string s))
@@ -9077,7 +9428,7 @@
     ;; typed does not match it, and that is what makes a manual rename stick
     chat-derived-name
     agent-connector agent-model agent-effort
-    chat-presets chat-permission-mode render-mode default-directory
+    chat-presets prompt-disabled-parts chat-permission-mode render-mode default-directory
     ;; the directory the spawner chose; group companions never override it
     chat-directory
     agent-permission-profile window-class header-line
@@ -9273,8 +9624,6 @@
       (else
         ;; identity that belongs to the OLD backend must not follow the
         ;; conversation across (a foreign model id is silently ignored by
-    (let ((d (buffer-local buf 'chat-directory)))
-      (if (string? d) (string-append " directory " (value->string d)) ""))
         ;; an adapter while the modeline keeps repeating it)
         (unless same-lane?
           (buffer-set-local! buf 'agent-models #f)
@@ -9313,7 +9662,7 @@
 ;;;
 ;;; The representation is a plist, so a new field costs nothing that is
 ;;; already on disk:
-;;;   (name "review" connector "claude-code" model "opus[1m]" effort "high"
+;;;   (name "review" key "A" connector "claude-code" model "opus[1m]" effort "high"
 ;;;    presets (compos web) permission "ask" agent-mode "plan")
 
 (define (llm-bundle-get bundle key fallback)
@@ -9342,6 +9691,7 @@
       b))
 
 (define (llm-bundle-name b) (llm-bundle-get b 'name #f))
+(define (llm-bundle-key b) (llm-bundle-get b 'key #f))
 (define (llm-bundle-connector b) (llm-bundle-get b 'connector *default-connector*))
 (define (llm-bundle-model b) (llm-bundle-get b 'model "default"))
 (define (llm-bundle-effort b) (llm-bundle-get b 'effort "default"))
@@ -9351,13 +9701,14 @@
 (define (llm-bundle-presets b) (llm-bundle-get b 'presets #f))
 (define (llm-bundle-permission b) (llm-bundle-get b 'permission #f))
 (define (llm-bundle-agent-mode b) (llm-bundle-get b 'agent-mode #f))
+(define (llm-bundle-prompt-disabled b) (llm-bundle-get b 'prompt-disabled #f))
 
 ;; What a bundle SETS, without its name: two bundles that configure the
 ;; same session are one recent choice, however each was reached.
 (define (llm-bundle-setup b)
   (list (llm-bundle-connector b) (llm-bundle-model b) (llm-bundle-effort b)
         (llm-bundle-presets b) (llm-bundle-permission b)
-        (llm-bundle-agent-mode b)))
+        (llm-bundle-agent-mode b) (llm-bundle-prompt-disabled b)))
 
 ;; The whole setup on one line, with every part that is already the default
 ;; left out: a label says what is unusual about this bundle.
@@ -9377,7 +9728,11 @@
       (let ((k (llm-bundle-permission b)))
         (if (or (not k) (equal? k "approve")) '() (list k)))
       (let ((a (llm-bundle-agent-mode b)))
-        (if (or (not a) (equal? a "") (equal? a "default")) '() (list a))))
+        (if (or (not a) (equal? a "") (equal? a "default")) '() (list a)))
+      (let ((off (llm-bundle-prompt-disabled b)))
+        (if (and off (pair? off))
+            (list (string-append (number->string (length off)) " prompt off"))
+            '())))
     " · "))
 
 ;; The buffer whose LLM session the presets and the stance belong to. A chat
@@ -9405,13 +9760,43 @@
 ;; forgets at ten, a named bundle is kept until it is forgotten by name.
 (define *llm-bundles* '())
 
+;; A named bundle keeps its first menu key. List order may change; identity does not.
+(define *llm-config-bundle-keys*
+  '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o" "p" "q" "r"
+    "t" "v" "w" "y" "z"))
+
+(define (llm-bundle-next-key used)
+  (let loop ((keys *llm-config-bundle-keys*))
+    (cond ((null? keys) #f)
+          ((member (car keys) used) (loop (cdr keys)))
+          (else (car keys)))))
+
+;; Old persisted bundles had no key, or an upper-case one from the first
+;; menu. Assign one from the pool once, and keep a key that is in the pool.
+;; The pool is the lower-case letters minus the menu's own keys (s u x).
+(define (llm-bundles-assign-keys bundles)
+  (let loop ((bs (map llm-bundle-normalize bundles)) (used '()) (out '()))
+    (if (null? bs)
+        (reverse out)
+        (let* ((bundle (car bs))
+               (saved (llm-bundle-key bundle))
+               (key (if (and (member saved *llm-config-bundle-keys*)
+                             (not (member saved used)))
+                        saved
+                        (llm-bundle-next-key used)))
+               (keyed (if key (llm-bundle-put bundle 'key key) bundle)))
+          (loop (cdr bs) (if key (cons key used) used) (cons keyed out))))))
+
 (persist-global! 'llm-config-history
   (lambda () *llm-config-history*)
   (lambda (v) (set! *llm-config-history* (map llm-bundle-normalize (or v '())))))
 
 (persist-global! 'llm-bundles
   (lambda () *llm-bundles*)
-  (lambda (v) (set! *llm-bundles* (map llm-bundle-normalize (or v '())))))
+  (lambda (v) (set! *llm-bundles* (llm-bundles-assign-keys (or v '())))))
+
+;; Hot reload also migrates bundles already restored into this process.
+(set! *llm-bundles* (llm-bundles-assign-keys *llm-bundles*))
 
 ;; The three parts that are always cheap to read: buffer-locals, and no
 ;; walk to find the session. The menu redraws on every keystroke, so what
@@ -9438,7 +9823,9 @@
         'permission
         (symbol->string (llm-config-permission session))
         'agent-mode
-        (or (buffer-local session 'agent-mode) "")))))
+        (or (buffer-local session 'agent-mode) "")
+        'prompt-disabled
+        (or (buffer-local session 'prompt-disabled-parts) '())))))
 
 (define (llm-config-remember! bundle)
   (let ((b (llm-bundle-normalize bundle)))
@@ -9458,9 +9845,14 @@
           ((equal? (llm-bundle-name (car bs)) name) (car bs))
           (else (loop (cdr bs))))))
 
-;; The name is the identity: saving over one replaces it, newest first.
+;; The name is the identity: saving over one replaces it without changing its key.
 (define (llm-bundle-save! name bundle)
-  (let ((b (llm-bundle-put (llm-bundle-normalize bundle) 'name name)))
+  (set! *llm-bundles* (llm-bundles-assign-keys *llm-bundles*))
+  (let* ((old (llm-bundle-named name))
+         (used (filter string? (map llm-bundle-key *llm-bundles*)))
+         (key (or (and old (llm-bundle-key old)) (llm-bundle-next-key used)))
+         (named (llm-bundle-put (llm-bundle-normalize bundle) 'name name))
+         (b (if key (llm-bundle-put named 'key key) named)))
     (set! *llm-bundles*
       (cons b (remove (lambda (old) (equal? (llm-bundle-name old) name))
                       *llm-bundles*)))
@@ -9507,11 +9899,15 @@
          (session (llm-config-session buf))
          (presets (llm-bundle-presets b))
          (permission (llm-bundle-permission b))
-         (mode (llm-bundle-agent-mode b)))
+         (mode (llm-bundle-agent-mode b))
+         (prompt-disabled (llm-bundle-prompt-disabled b)))
     (when (and permission (boundp (quote chat-permission-mode-set!)))
       (chat-permission-mode-set! session (string->symbol permission)))
     (when (and presets (boundp (quote chat-presets-set!)))
       (chat-presets-set! session presets))
+    (when (and (not (equal? prompt-disabled #f))
+               (boundp (quote chat-prompt-sections-set!)))
+      (chat-prompt-sections-set! session prompt-disabled))
     (llm-config-apply! buf (llm-bundle-connector b) (llm-bundle-model b)
                        (llm-bundle-effort b))
     (when (boundp (quote chat-apply-pending-presets!))
@@ -9591,22 +9987,34 @@
            entries)
       (map (lambda (m) (list m "")) (connector-models connector)))))
 
-(define (llm-config-read! prompt candidates confirm cancel)
+;; NOTE is the rail's footer: one line on what RET does here.
+(define (llm-config-read! prompt candidates confirm cancel &optional note)
   (minibuffer-read* prompt candidates
-    (list (list 'confirm confirm)
-          (list 'cancel cancel)
-          (list 'style "palette"))))
+    (append
+      (list (list 'confirm confirm)
+            (list 'cancel cancel)
+            (list 'style "palette")
+            (list 'legend '(("RET" "pick") ("C-n C-p" "select") ("TAB" "complete")
+                            ("C-g" "back"))))
+      (if (string? note) (list (list 'note note)) '()))))
+
+;; A palette row with facts: (LABEL HINT "" () "" ((KEY VALUE) ...)). The
+;; rail shows the facts while the row is highlighted.
+(define (llm-config-row label hint facts)
+  (list label hint "" '() "" facts))
 
 ;; Candidate palettes select their first row. Put CURRENT there and label it
 ;; explicitly; unlike pre-filling the minibuffer, this keeps every alternative
-;; visible while still showing which value is active.
+;; visible while still showing which value is active. A row's other columns
+;; (its facts) ride along.
 (define (llm-config-current-first candidates current)
   (let ((selected
           (map (lambda (c)
-                 (list (car c)
-                       (string-append "current"
-                         (if (equal? (cadr c) "") ""
-                             (string-append " · " (cadr c))))))
+                 (cons (car c)
+                       (cons (string-append "current"
+                               (if (equal? (cadr c) "") ""
+                                   (string-append " · " (cadr c))))
+                             (cddr c))))
                (filter (lambda (c) (equal? (car c) current)) candidates)))
         (others (filter (lambda (c) (not (equal? (car c) current))) candidates)))
     (append selected others)))
@@ -10243,8 +10651,11 @@
                 (if (equal? align 'right) "dseg dseg-r" "dseg")
                 (if extra-class (string-append " " extra-class) ""))
         'children
-        (list (list 'tag "div" 'class "dseg-k" 'text key)
-              (list 'tag "div" 'class "dseg-v" 'segs segs))))
+        (append
+          (if key
+              (list (list 'tag "div" 'class "dseg-k" 'text key))
+              '())
+          (list (list 'tag "div" 'class "dseg-v" 'segs segs)))))
 
 (define (dash--seg-rule)
   (list 'tag "span" 'class "dseg-rule"))
@@ -10323,7 +10734,7 @@
       ;; A click on it opens the log of every line it showed.
       (cond (summary
              (list (dash--seg-rule)
-                   (dash--wide-seg "summary" summary)))
+                   (dash--wide-seg #f summary)))
             (vcs
              (list (dash--seg-rule)
                    (dash--wide-seg "jj" vcs)))
@@ -10358,6 +10769,13 @@
         (string-append "peek · " name)
         name)))
 
+;; A file names its project beside its modeline name. A chat has no file,
+;; so that same context slot names the directory where its tools run.
+(define (buffer-modeline-context buf)
+  (if (chat-buffer? buf)
+      (abbreviate-file-name (buffer-directory buf))
+      (buffer-project-label buf)))
+
 (define (dashboard--sync! buf)
   (desktop-skip! buf 'dashboard-line)
   (desktop-skip! buf 'dashboard-line-blocks)
@@ -10366,9 +10784,9 @@
   (buffer-set-local! buf 'dashboard-line (dashboard-one-line buf))
   (buffer-set-local! buf 'dashboard-line-blocks (dashboard-line-blocks buf))
   (buffer-set-local! buf 'modeline-name (buffer-modeline-name buf))
-  ;; the project stands beside the name: the name says where in the
-  ;; project, the project says which one
-  (buffer-set-local! buf 'modeline-project (buffer-project-label buf)))
+  ;; The project stands beside a file name. A chat shows its working
+  ;; directory in the same context slot.
+  (buffer-set-local! buf 'modeline-project (buffer-modeline-context buf)))
 
 ;; The fingerprint reads locals only — never the live tool surface. It
 ;; runs after every command, and asking the surface there would start
@@ -11624,6 +12042,7 @@
 (global-set-key "C-x b" "switch-to-buffer-prompt")
 (global-set-key "C-x k" "kill-buffer")
 (global-set-key "C-x n n" "narrow-to-region")
+(global-set-key "C-x n N" "narrow-context-also")
 (global-set-key "C-x n w" "widen")
 
 (global-set-key "M-x" "execute-extended-command")
@@ -11788,7 +12207,7 @@
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window: the display chain with the selected window kept out of it")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
 (public! 'tile-windows!
-  "(tile-windows! ALGORITHM BUFFERS) — arrange names with columns, rows, grid, main-right, main-left, main-bottom, or main-top")
+  "(tile-windows! ALGORITHM BUFFERS) — arrange names with two-pane, columns, rows, grid, main-right, main-left, main-bottom, or main-top")
 (public! 'tile-visible-windows!
   "(tile-visible-windows! ALGORITHM) — rearrange visible work windows with a named tiler")
 (for-each

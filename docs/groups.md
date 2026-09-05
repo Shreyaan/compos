@@ -107,6 +107,7 @@ I want to start from a project or directory
 - The switcher lists this group's buffers first, in MRU order.
 - The project's other open files follow, then everything else.
 - `RET` shows the buffer and changes no membership.
+- `C-u C-x b` shows the chosen buffer in another window and selects it.
 - **Command:** `switch-to-buffer`.
 
 #### I want to look at a buffer from outside this group

@@ -300,7 +300,8 @@
 ;; the hook: the frame's panes changed, so the shape is re-made. Nothing
 ;; runs while a tiler runs, or while a prompt is open.
 (define (autolayout--on-change!)
-  (when (and autolayout-mode (not *layout-busy*) (not (minibuffer-state)))
+  (when (and autolayout-mode (not (layout-target))
+             (not *layout-busy*) (not (minibuffer-state)))
     (let ((panes (autolayout--panes (frame-local 'autolayout-main))))
       (when (and (pair? panes)
                  (not (autolayout--same-panes? panes (or (frame-local 'autolayout-panes) '()))))

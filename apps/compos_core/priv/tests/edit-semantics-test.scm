@@ -117,3 +117,21 @@
       (with-current-buffer buf (lambda () (run-command "widen")))
       (check-false! (buffer-narrow-range buf) "the core command widens")
       (t--drop-edit!))))
+
+(deftest 'context-narrowing-is-explicit-and-widen-always-clears-it
+  "C-x n N affects the next LLM context; ordinary narrowing does not"
+  (lambda ()
+    (let ((buf (t--edit-buffer "zero\none\ntwo\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (buffer-goto! buf 5)
+          (set-mark! 9)
+          (run-command "narrow-context-also")))
+      (check-equal! (buffer-narrow-range buf) '(5 9) "the view is narrow")
+      (check-equal! (llm-context-range buf) '(5 9) "the model context is narrow")
+      (check-equal! (llm-context-text buf (buffer-text buf)) "one\n"
+                    "only the selected bytes are sent")
+      (with-current-buffer buf (lambda () (run-command "widen")))
+      (check-false! (buffer-narrow-range buf) "the view widens")
+      (check-false! (llm-context-range buf) "and model context always widens")
+      (t--drop-edit!))))

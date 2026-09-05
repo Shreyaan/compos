@@ -158,15 +158,16 @@
         (check-equal! (length (filter (lambda (p) (equal? (car p) "code-agent"))
                                       tool-parts))
                       1 "the named code-agent fragment occurs once")
-        (check-equal! (car (car (reverse system-parts))) "chat-preamble"
-                      "the preamble remains the final fragment")
-        (check-equal! (car (car acp-parts)) "compos-identity"
-                      "ACP starts with the shared guidance")
-        (check-equal! (car (car (reverse acp-parts))) "code-agent"
-                      "ACP includes the mode fragment once")
-        (check-equal! (prompt-parts-text system-parts)
-                      (string-append first "\n\n" (chat-preamble chat))
-                      "named parts reproduce the wire prompt")
+        (check-equal! (map car system-parts) *prompt-section-order*
+                      "the direct wire uses the six semantic sections")
+        (check-equal! (map car acp-parts) *prompt-section-order*
+                      "the ACP wire uses the same six sections")
+        (check-contains! (cadr (assoc "code" system-parts))
+                         "CODE-EDITING SKILL"
+                         "the mode fragment is inside the code section")
+        (check-contains! (prompt-parts-text system-parts)
+                         (chat-preamble chat)
+                         "the general preamble is in the wire text")
         (check-equal! second first "asking twice answers the same prompt")
         (check-false! (buffer-local chat 'chat-note-once) "and notes nothing once"))
       (t--cam-reset! chat))))

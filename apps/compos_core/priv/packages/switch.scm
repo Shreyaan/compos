@@ -1,4 +1,4 @@
-;;; switch.scm --- ONE buffer switcher: C-x b, C-x C-b, and ibuffer merged.
+;;; switch.scm --- ONE buffer switcher: C-x b, C-u C-x b, C-x C-b, and ibuffer merged.
 ;;;
 ;;; A modal list buffer with its own keymap. Typing narrows — the filter
 ;;; is the default act, as in every list. Control chords act on rows:
@@ -771,10 +771,11 @@
           (else (loop (cdr rs) (cons (car rs) out))))))
 
 (define-command "switch-to-buffer-prompt"
-  "Switch to a buffer from a prompt; C-RET enters the buffer's group, TAB locks to a group"
+  "Switch to a buffer; with a prefix, show it in another window"
   (lambda ()
     (set! *mb-confirm-context* #f)
     (let* ((here (or (window-buffer (active-window)) (current-buffer)))
+           (other-window? (and (current-prefix-arg) #t))
            (my-group (or (buffer-group here) (frame-local 'current-group)))
            ;; opening the switcher snapshots this group's arrangement:
            ;; wherever you go next, the way back is exact
@@ -798,8 +799,10 @@
           (message "No other buffer available")
           (minibuffer-read-preview
             (if fallback
-                (string-append "Switch to (default " fallback "): ")
-                "Switch to: ")
+                (string-append
+                  (if other-window? "Other window buffer" "Switch to")
+                  " (default " fallback "): ")
+                (if other-window? "Other window buffer: " "Switch to: "))
             (map switch-prompt-row rows)
             ;; the invoking window live-previews the highlighted buffer; a
             ;; card or a tab leaves the window alone. The primitive wakes a
@@ -821,11 +824,20 @@
                 (cond
                   ((equal? picked "") #f)
                   ((buffer-known? picked)
-                   ;; a pick from outside the group floats: the window
-                   ;; takes back what it showed, and the switch floats it
-                   (switch-act! e view context?
-                     (lambda (keep)
-                       (when (and keep (display-foreign? keep)) (restore-here!)))))
+                   (if (and other-window? (not context?))
+                       (begin
+                         ;; Preview borrowed this window. Restore it before splitting.
+                         (restore-here!)
+                         (let ((win (display-buffer-other-window! picked)))
+                           (when win (select-window! win)))
+                         (group-current-recalculate!)
+                         (windows-shown-catchup!))
+                       ;; A pick from outside the group floats: the window
+                       ;; takes back what it showed, and the switch floats it.
+                       (switch-act! e view context?
+                         (lambda (keep)
+                           (when (and keep (display-foreign? keep))
+                             (restore-here!))))))
                   ((assoc picked rows)
                    ;; a card, a tab, a file or a recent row had no preview:
                    ;; put back what the window showed, then act

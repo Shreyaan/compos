@@ -62,3 +62,219 @@
     (check-equal! (buffer-local t--li-buf 'agent-saved-mark) 10
                   "the chat's own mark is untouched")
     (t--li-done!)))
+
+(deftest 'an-addressable-block-follows-edits
+  "a block id resolves to its current range after surrounding edits"
+  (lambda ()
+    (t--li! "xxalpha")
+    (let ((id (block-create! t--li-buf 'paragraph 2 7)))
+      (block-close-end! t--li-buf id)
+      (buffer-insert! t--li-buf 0 "Q")
+      (buffer-insert! t--li-buf 5 "!")
+      (let ((resolved (block-resolve (block-address t--li-buf id))))
+        (check-equal! (plist-get resolved 'start) 3 "start follows edits above")
+        (check-equal! (plist-get resolved 'end) 9 "end follows edits within")
+        (check-equal! (block-text-at t--li-buf
+                        (plist-get resolved 'start)
+                        (plist-get resolved 'end))
+                      "al!pha"
+                      "the address still selects the block")))
+    (t--li-done!)))
+
+(deftest 'a-new-prompt-stops-at-an-older-result-boundary
+  "a shared Morg paragraph is cut so the new prompt cannot cross an old block"
+  (lambda ()
+    (t--li! "xx\n\noldNew prompt")
+    (let ((old (block-create! t--li-buf 'llm-response 0 7 #f 'complete '())))
+      (block-close-end! t--li-buf old)
+      (let* ((turn (llm-mode--begin-turn! t--li-buf 7 17 "test-model"))
+             (prompt (block-resolve-id t--li-buf (plist-get turn 'prompt))))
+        (check-equal! (list (plist-get prompt 'start) (plist-get prompt 'end))
+                      '(7 17) "the prompt starts at the old result boundary")
+        (check-equal! (block-text-at t--li-buf 7 17) "New prompt"
+                      "only newly typed text becomes the prompt")))
+    (t--li-done!)))
+
+(deftest 'send-reserves-thinking-and-result-blocks-immediately
+  "a turn exposes transient activity and a durable result before the request starts"
+  (lambda ()
+    (t--li! "First\n\nPrompt")
+    (let* ((turn (llm-mode--begin-turn! t--li-buf 9 13 "test-model"))
+           (prompt (block-resolve-id t--li-buf (plist-get turn 'prompt)))
+           (response (block-resolve-id t--li-buf (plist-get turn 'response)))
+           (thinking-id (plist-get turn 'thinking))
+           (result-id (plist-get turn 'result))
+           (thinking (block-resolve-id t--li-buf thinking-id))
+           (result (block-resolve-id t--li-buf result-id)))
+      (check-equal! (plist-get prompt 'kind) 'llm-prompt "the active Morg block")
+      (check-equal! (block-text-at t--li-buf
+                      (plist-get prompt 'start) (plist-get prompt 'end))
+                    "Prompt" "only the prompt block is claimed")
+      (check-equal! (map (lambda (child) (plist-get child 'kind))
+                         (block-children t--li-buf (plist-get response 'id)))
+                    '(llm-thinking llm-result)
+                    "activity and result are separately addressable children")
+      (check-equal! (list (plist-get thinking 'state) (plist-get result 'state))
+                    '(streaming pending) "only thinking is active initially")
+      (check-equal! (plist-get (plist-get thinking 'metadata) 'label)
+                    "Thinking · test-model" "the spinner names the model")
+      (check-true!
+        (let loop ((ovs (buffer-overlays t--li-buf)))
+          (and (pair? ovs)
+               (or (string-prefix? "chrome-b:llm-thinking-spinner:" (caddr (car ovs)))
+                   (loop (cdr ovs)))))
+        "a prominent thinking chrome stands at the reserved result")
+      (llm-inline-put!
+        (list "inline-block-test" t--li-buf (lambda (_result _error) #t)
+              "" #f (lambda (_chunk) #t)))
+      (llm-inline-events! "inline-block-test"
+        (list (list 'type 'thought 'text "checking the types\nmore detail")))
+      (check-equal!
+        (plist-get (plist-get (block-resolve-id t--li-buf thinking-id) 'metadata)
+                   'label)
+        "Thinking · checking the types" "reasoning updates the interim block")
+      (llm-inline-events! "inline-block-test"
+        (list (list 'type 'tool-call 'title "inspect schema")))
+      (check-equal!
+        (plist-get (plist-get (block-resolve-id t--li-buf thinking-id) 'metadata)
+                   'label)
+        "Running · inspect schema" "tool calls reuse the interim block")
+      (set! *llm-inline-sends*
+        (remove (lambda (entry) (equal? (car entry) "inline-block-test"))
+                *llm-inline-sends*))
+      (llm-mode--retire-thinking! t--li-buf (plist-get response 'id))
+      (check-equal! (plist-get (block-resolve-id t--li-buf thinking-id) 'state)
+                    'deleted "interim activity is not preserved")
+      (check-equal! (plist-get (block-resolve-id t--li-buf result-id) 'state)
+                    'pending "the result address survives the transition"))
+    (t--li-done!)))
+
+(deftest 'a-response-contains-addressable-morg-blocks
+  "paragraphs and Scheme fences are direct children of the LLM response"
+  (lambda ()
+    (t--li! "Answer.\n\n```scheme\n(+ 1 1)\n```")
+    (let* ((response-id
+             (block-create! t--li-buf 'llm-response
+               0 (buffer-size t--li-buf) #f 'complete '()))
+           (_closed (block-close-end! t--li-buf response-id)))
+      (llm-mode--adopt-response-children! t--li-buf response-id)
+      (let ((children (block-children t--li-buf response-id)))
+        (check-equal! (map (lambda (child) (plist-get child 'kind)) children)
+                      '(paragraph scheme)
+                      "the response has typed nested blocks")
+        (check-equal! (map (lambda (child) (plist-get child 'parent)) children)
+                      (list response-id response-id)
+                      "both children address their containing response")
+        (let ((scheme (cadr children)))
+          (check-equal! (block-text-at t--li-buf
+                          (plist-get scheme 'start) (plist-get scheme 'end))
+                        "```scheme\n(+ 1 1)\n```"
+                        "the nested Scheme address resolves exactly"))))
+    (t--li-done!)))
+
+(deftest 'a-whole-block-replacement-keeps-the-address
+  "delete then insert at the same boundary gives the id the replacement"
+  (lambda ()
+    (t--li! "xxalpha")
+    (let ((id (block-create! t--li-buf 'paragraph 2 7)))
+      (block-close-end! t--li-buf id)
+      (buffer-delete-range! t--li-buf 2 5)
+      (buffer-insert! t--li-buf 2 "omega")
+      (let ((resolved (block-resolve-id t--li-buf id)))
+        (check-equal! (list (plist-get resolved 'start)
+                            (plist-get resolved 'end))
+                      '(2 7)
+                      "both boundaries surround the replacement")
+        (check-equal! (block-text-at t--li-buf 2 7) "omega"
+                      "the same id selects the new text")))
+    (t--li-done!)))
+
+(deftest 'the-first-addressable-send-keeps-legacy-responses
+  "an upgraded document retains every old response highlight"
+  (lambda ()
+    (t--li! "Old\n\nPrompt")
+    (buffer-set-local! t--li-buf 'llm-responses '((0 3)))
+    (llm-mode--begin-turn! t--li-buf 7 11)
+    (check-equal! (llm-mode--response-ranges t--li-buf)
+                  '((0 3))
+                  "the empty pending address exists but does not paint")
+    (t--li-done!)))
+
+(deftest 'addressable-block-ranges-never-cross
+  "nesting is valid, crossing and escaping a parent are rejected"
+  (lambda ()
+    (t--li! "0123456789")
+    (let ((parent (block-create! t--li-buf 'outer 1 8)))
+      (check-true!
+        (block-create! t--li-buf 'inner 2 5 parent 'complete '())
+        "a contained child is valid")
+      (check-false!
+        (ignore-errors
+          (lambda () (block-create! t--li-buf 'crossing 6 9)))
+        "crossing an existing block is rejected")
+      (check-false!
+        (ignore-errors
+          (lambda () (block-create! t--li-buf 'escaped 0 3 parent)))
+        "a child cannot escape its parent"))
+    (t--li-done!)))
+
+(deftest 'C-g-cancels-the-addressed-turn-and-restores-the-prompt
+  "cancellation retires the transient prompt face without losing either address"
+  (lambda ()
+    (t--li! "Prompt")
+    (with-current-buffer t--li-buf
+      (lambda ()
+        (enable-minor-mode! t--li-buf "llm-mode")
+        (llm-mode--begin-turn! t--li-buf 2 6)
+        (run-command "llm-mode-abort")))
+    (let ((records (block-records t--li-buf)))
+      (check-equal! (map (lambda (record) (plist-get record 'state)) records)
+                    '(complete cancelled deleted cancelled)
+                    "prompt/result cancel and transient thinking is retired")
+      (check-false! (buffer-local t--li-buf 'llm-active-prompt)
+                    "no prompt remains active")
+      (check-false!
+        (let loop ((ovs (buffer-overlays t--li-buf)))
+          (and (pair? ovs)
+               (or (string-prefix? "chrome-b:llm-thinking-spinner:" (caddr (car ovs)))
+                   (loop (cdr ovs)))))
+        "the thinking spinner is gone"))
+    (t--li-done!)))
+
+(deftest 'an-orphaned-pending-response-cannot-grow-over-the-document
+  "mode setup collapses an empty abandoned marker and removes its face"
+  (lambda ()
+    (t--li! "")
+    (let ((id (block-create! t--li-buf 'llm-response 0 0 #f 'pending '())))
+      (buffer-insert! t--li-buf 0 "whole document")
+      (enable-minor-mode! t--li-buf "llm-mode")
+      (let ((response (block-resolve-id t--li-buf id)))
+        (check-equal! (plist-get response 'state) 'cancelled
+                      "the orphan is retired")
+        (check-equal! (list (plist-get response 'start)
+                            (plist-get response 'end))
+                      '(0 0)
+                      "the abandoned empty response stays empty")
+        (check-equal! (llm-mode--response-ranges t--li-buf) '()
+                      "it contributes no response range")
+        (check-false!
+          (let loop ((ovs (buffer-overlays t--li-buf)))
+            (and (pair? ovs)
+                 (or (equal? (caddr (car ovs)) "llm-response")
+                     (loop (cdr ovs)))))
+          "the whole buffer has no response face")))
+    (t--li-done!)))
+
+(deftest 'legacy-response-ranges-cannot-overlap-addressable-turns
+  "a stale broad legacy face yields to the exact response block"
+  (lambda ()
+    (t--li! "012345")
+    (buffer-set-local! t--li-buf 'llm-legacy-responses '((0 6)))
+    (let ((id (block-create! t--li-buf 'llm-response 2 4 #f 'complete '())))
+      (block-close-end! t--li-buf id)
+      (enable-minor-mode! t--li-buf "llm-mode")
+      (check-equal! (buffer-local t--li-buf 'llm-legacy-responses) '()
+                    "the overlapping legacy range is removed")
+      (check-equal! (llm-mode--response-ranges t--li-buf) '((2 4))
+                    "only the exact addressable response remains"))
+    (t--li-done!)))

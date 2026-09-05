@@ -11,6 +11,37 @@ The registry lives in `priv/packages/morg/morg-kinds.scm`.
 3. Paint decorates ranges. It never replaces text.
 4. An action on a block lands text at the block: the result fence below it.
 
+## Addressable blocks
+
+Parsed fences and paragraphs are geometry; addressable blocks are durable
+editor state layered over that geometry. `block-create!` returns an opaque ID
+scoped to the buffer. `(block-address BUF ID)` produces `(buffer BUF block ID)`,
+and `block-resolve` returns the block's current range, kind, state, parent, and
+metadata. Both boundaries are marker locals, so the same address follows edits
+and survives desktop restore.
+
+Containment is explicit: a child stores its parent's ID, and `block-children`
+returns direct live children. Ranges may nest but must not cross. This lets a
+whole LLM turn remain one block, its durable `llm-result` remain separately
+addressable, and the result's Morg paragraphs and fenced code become nested
+children; a `scheme` fence is recorded as kind `scheme`.
+
+`llm-send-buffer` claims the Morg block at point as `llm-prompt` and reserves an
+empty `llm-response` turn before starting the request. That turn initially owns
+a zero-width `llm-thinking` child and a zero-width `llm-result` child. Thought,
+plan, tool, and permission events update the thinking child's chrome without
+inserting status text into the document. The first answer chunk retires thinking
+and streams only through the result marker. Completion closes both result and
+turn boundaries, then derives paragraph and fence children beneath `llm-result`.
+The `llm-responses` range local remains as a compatibility mirror for older
+clients and saved desktops.
+
+While a turn is active, its prompt wears the transient prompt face and the
+thinking child draws a prominent spinner. Completion or `C-g` removes both;
+cancellation leaves the response and result addresses in the `cancelled` state.
+Editing a completed result retires its result and turn addresses, removes the
+response face, and leaves the edited bytes as ordinary document text.
+
 The fence itself supplies finding (`block-list`/`block-at`, by the
 markdown tree-sitter grammar, scan-walked where no grammar is loaded),
 folding, the region lift, tracking while a block runs, and the result

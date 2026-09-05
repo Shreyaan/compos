@@ -449,6 +449,7 @@
 
 (define (morg-clear-narrow! buf)
   (buffer-set-local! buf 'morg-narrow-anchor #f)
+  (when (boundp (quote llm-context-clear!)) (llm-context-clear! buf))
   ;; Narrowing briefly used folds before it became a core buffer concept.
   ;; A hot-loaded buffer can still carry that tag, which would keep hiding
   ;; text after the real narrowing is widened and make TAB look ineffective.
@@ -1013,6 +1014,7 @@
     ("C-c C-c" "morg-babel")
     ("C-c C-x" "morg-tangle")
     ("C-x n n" "morg-narrow")
+    ("C-x n N" "narrow-context-also")
     ("C-x n w" "morg-widen")
     ("M-." "definition-peek")))
 
