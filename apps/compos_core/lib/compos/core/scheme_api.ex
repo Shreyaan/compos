@@ -1757,7 +1757,10 @@ defmodule Compos.Core.SchemeAPI do
               # A prompt can reuse a domain list when its filtered result is
               # collected. Scheme decides the target and receives the rows.
               "collect" -> {:on_collect, v}
-              # "palette" renders the prompt as a centered panel
+              # the shape the prompt takes: "modal" (a centered panel over
+              # a scrim, spelled "palette" before it had a name), "popup"
+              # (an overlay on the bottom edge that reflows nothing), or the
+              # minibuffer rows, which every other value asks for
               "style" -> {:style, v}
               # the palette's own words: a footer note for the facts rail
               # and a key legend for the head row, ((KEY LABEL) ...)

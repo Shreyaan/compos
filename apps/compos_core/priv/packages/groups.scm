@@ -1508,9 +1508,14 @@
     (if cell (cdr cell) '())))
 
 (define (group-switch-candidate-in index g)
-  (let ((names (map buffer-modeline-name (group-members-in index g))))
+  (let* ((names (map buffer-modeline-name (group-members-in index g)))
+         (n (length names)))
     (list (group-name g)
-          (if (pair? names) (string-join names " · ") "no buffers"))))
+          (if (null? names)
+              "no buffers"
+              (string-append (number->string n) " buffer" (if (= n 1) "" "s")))
+          "container"
+          (take-n names 4))))
 
 (define (group-switch-candidate g)
   (group-switch-candidate-in (group-members-index) g))

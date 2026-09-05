@@ -156,20 +156,29 @@ defmodule Compos.GroupSwitchCommandTest do
 
     group = group_id("switch-marginalia")
 
-    hint =
+    row =
       eval!("""
       (begin
         (visit #{Jason.encode!(project_file)})
         (buffer-add-group! #{Jason.encode!(project_file)} "#{group}")
         (buffer-add-group! #{Jason.encode!(home_buffer)} "#{group}")
-        (cadr (group-switch-candidate "#{group}")))
+        (group-switch-candidate "#{group}"))
       """)
       |> Jason.decode!()
 
-    assert hint =~ "lib/code.scm"
-    assert hint =~ "~/zz-switch-home-#{n}.scm"
-    refute hint =~ root
-    refute hint =~ home_buffer
+    # the switcher's row is a container card: the group's name, what it
+    # holds, and its members as chips
+    [_name, hint, kind, chips] = row
+
+    assert hint == "2 buffers"
+    assert kind == "container"
+
+    members = Enum.join(chips, " · ")
+
+    assert members =~ "lib/code.scm"
+    assert members =~ "~/zz-switch-home-#{n}.scm"
+    refute members =~ root
+    refute members =~ home_buffer
   end
 
   test "a new group record schedules desktop persistence" do
