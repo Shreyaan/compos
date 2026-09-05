@@ -1800,7 +1800,7 @@
 (define *group-graveyard* '())
 (define *group-graveyard-depth* 20)
 
-;; (NAME META LAYOUT NOISE CHAT-ID COLOR KILLED-AT ((BUFFER PATH) ...))
+;; (NAME META LAYOUT NOISE CHAT-ID COLOR KILLED-AT ((BUFFER PATH) ...) SETTINGS)
 (define (group-tombstone id members)
   (let ((record (group-record-by-id id)))
     (and record
@@ -1811,7 +1811,8 @@
                (group-record-primary-chat-id record)
                (group-record-color record)
                (current-time)
-               (map (lambda (b) (list b (buffer-path b))) members)))))
+               (map (lambda (b) (list b (buffer-path b))) members)
+               (group-record-settings record)))))
 
 (define (group-bury! tomb)
   (when tomb
@@ -1822,6 +1823,10 @@
     (desktop-dirty!)))
 
 (define (group-tombstone-members tomb) (nth 7 tomb))
+
+;;; A tombstone written before group settings existed has no eighth field.
+(define (group-tombstone-settings tomb)
+  (if (> (length tomb) 8) (or (nth 8 tomb) '()) '()))
 
 ;; every member the tombstone names that can come back: a known buffer,
 ;; or a file that still exists
@@ -1845,6 +1850,7 @@
               (group-record-update! id 'noise (or (nth 3 tomb) "quiet"))
               (group-record-update! id 'primary-chat-id (nth 4 tomb))
               (when (nth 5 tomb) (group-record-update! id 'color (nth 5 tomb)))
+              (group-record-update! id 'settings (group-tombstone-settings tomb))
               (let* ((members (group-tombstone-members tomb))
                      (back (filter (lambda (m) (group-revive-member! id m)) members))
                      (missing (- (length members) (length back))))
