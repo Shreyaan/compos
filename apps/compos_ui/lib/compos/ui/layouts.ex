@@ -572,11 +572,14 @@ defmodule Compos.Ui.Layouts do
           /* --- agent transcript (the Modern Emacs agent-chat design) ------- */
           .agent-view {
             flex: 1; display: flex; flex-direction: column; min-height: 0;
-            font-size: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
+            /* every size in the transcript is a share of this one base, so
+               a big buffer font does not leave the tool rows behind */
+            --ag-base: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
+            font-size: var(--ag-base);
           }
           .ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
           .ag-label {
-            font-family: var(--font-mono); font-size: calc(10px * var(--text-scale-factor, 1)); letter-spacing: 0.12em;
+            font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.55); letter-spacing: 0.12em;
             color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; padding-top: 3px;
           }
           .ag-user {
@@ -585,7 +588,7 @@ defmodule Compos.Ui.Layouts do
             border-radius: 8px; padding: 8px 12px;
           }
           .ag-user-text {
-            min-width: 0; font-family: var(--font-mono); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
+            min-width: 0; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.92);
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
           /* The measure belongs to the text, not to the block: five table
@@ -596,14 +599,14 @@ defmodule Compos.Ui.Layouts do
              `break-word` still breaks a long URL, and it leaves the
              minimum width alone. */
           .ag-prose {
-            font-family: var(--font-serif); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1)); line-height: 1.6;
+            font-family: var(--font-serif); font-size: var(--ag-base); line-height: 1.6;
             margin: 8px 0; overflow-wrap: break-word;
           }
           .ag-prose > * { max-width: 62ch; }
           .ag-prose > pre, .ag-prose > .ag-table, .ag-prose > .code-block { max-width: 100%; }
           .ag-prose .code-block pre { margin: 6px 0; }
           .ag-prose code, .ag-prose pre {
-            font-family: var(--font-mono); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
+            font-family: var(--font-mono); font-size: var(--ag-base);
             background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 4px;
           }
           .ag-prose code { padding: 1px 4px; }
@@ -631,7 +634,7 @@ defmodule Compos.Ui.Layouts do
           .ag-table { overflow-x: auto; margin: 10px 0; }
           .ag-prose table {
             width: auto; max-width: 100%; border-collapse: collapse;
-            font-family: var(--font-sans); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
+            font-family: var(--font-sans); font-size: var(--ag-base);
             font-variant-numeric: tabular-nums;
           }
           .ag-prose th, .ag-prose td {
@@ -642,7 +645,7 @@ defmodule Compos.Ui.Layouts do
           .ag-prose th { font-weight: 600; white-space: nowrap; }
           .ag-tool, .ag-thought {
             margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
-            border-radius: 7px; font-family: var(--font-mono); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
+            border-radius: 7px; font-family: var(--font-mono); font-size: var(--ag-base);
             background: color-mix(in srgb, var(--window-bg, #fdfcf8) 96%, var(--agent-tool-fg, #26356b));
           }
           .ag-tool summary, .ag-thought summary {
@@ -667,7 +670,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-chevron {
             width: 11px; flex: 0 0 11px; color: var(--agent-meta-fg, #8a8577);
-            font-family: var(--font-sans); font-size: calc(17px * var(--text-scale-factor, 1)); line-height: 1;
+            font-family: var(--font-sans); font-size: calc(var(--ag-base) * 1.0); line-height: 1;
             transform: rotate(0deg); transition: transform 100ms ease;
           }
           .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
@@ -678,7 +681,7 @@ defmodule Compos.Ui.Layouts do
           .ag-kind {
             padding: 1px 5px; border-radius: 4px; color: var(--agent-tool-fg, #26356b);
             background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 10%, transparent);
-            font-family: var(--font-sans); font-size: calc(9px * var(--text-scale-factor, 1)); font-weight: 700;
+            font-family: var(--font-sans); font-size: calc(var(--ag-base) * 0.5); font-weight: 700;
             letter-spacing: 0.05em; text-transform: uppercase;
           }
           .ag-summary-copy {
@@ -687,7 +690,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-title {
             display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-            white-space: nowrap; color: var(--window-fg, inherit); font-size: calc(11.5px * var(--text-scale-factor, 1));
+            white-space: nowrap; color: var(--window-fg, inherit); font-size: calc(var(--ag-base) * 0.8);
           }
           /* the argument is the interesting part: the tool name steps back,
              the argument carries the accent. A card with no argument keeps
@@ -698,18 +701,18 @@ defmodule Compos.Ui.Layouts do
           .ag-preview {
             display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; color: var(--agent-meta-fg, #8a8577);
-            font-family: var(--font-mono); font-size: calc(10px * var(--text-scale-factor, 1)); line-height: 1.25;
+            font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.72); line-height: 1.25;
           }
           .ag-preview::before { content: "↳ "; color: var(--agent-tool-fg, #26356b); }
           .ag-tstatus {
             color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
-            font-size: calc(9.5px * var(--text-scale-factor, 1)); letter-spacing: 0.02em;
+            font-size: calc(var(--ag-base) * 0.65); letter-spacing: 0.02em;
           }
           .ag-tstatus.done::before { content: "✓ "; color: var(--ok-fg, #4a7a4a); }
           .ag-tstatus.failed { color: var(--alert-fg, #a8342a); }
           .ag-duration {
             color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
-            font-size: calc(9.5px * var(--text-scale-factor, 1)); letter-spacing: 0.02em;
+            font-size: calc(var(--ag-base) * 0.65); letter-spacing: 0.02em;
             white-space: nowrap;
           }
           .ag-body {
@@ -718,17 +721,17 @@ defmodule Compos.Ui.Layouts do
             white-space: pre-wrap; overflow-wrap: anywhere; color: var(--agent-thought-fg, #6a675e);
             background: color-mix(in srgb, var(--agent-code-bg, rgba(0,0,0,0.06)) 60%, transparent);
           }
-          .ag-thought summary { color: var(--agent-thought-fg, #8a8577); font-size: calc(10.5px * var(--text-scale-factor, 1)); }
+          .ag-thought summary { color: var(--agent-thought-fg, #8a8577); font-size: calc(var(--ag-base) * 0.75); }
           .ag-thought-text { padding: 6px 10px; white-space: pre-wrap; color: var(--agent-thought-fg, #8a8577); }
           .ag-plan {
-            font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1)); margin: 8px 0;
+            font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85); margin: 8px 0;
             padding: 8px 12px; border-left: 2px solid var(--agent-card-border, rgba(0,0,0,0.15));
             white-space: pre-wrap;
           }
           .ag-perm {
             display: flex; align-items: center; gap: 10px; margin: 10px 0;
             border: 1px solid var(--agent-permission-fg, #e0af68); border-radius: 8px;
-            padding: 8px 12px; font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1));
+            padding: 8px 12px; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85);
           }
           .ag-perm-title { flex: 1; color: var(--agent-permission-fg, #a8741a); }
           .ag-question {
@@ -748,10 +751,10 @@ defmodule Compos.Ui.Layouts do
             color: var(--window-bg, #fdfcf8);
           }
           .ag-question-hint {
-            margin-top: 9px; color: var(--agent-meta-fg, #8a8577); font-size: calc(10px * var(--text-scale-factor, 1));
+            margin-top: 9px; color: var(--agent-meta-fg, #8a8577); font-size: calc(var(--ag-base) * 0.65);
           }
           .ag-btn {
-            font-family: var(--font-mono); font-size: calc(11px * var(--text-scale-factor, 1)); padding: 3px 12px;
+            font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.75); padding: 3px 12px;
             border-radius: 6px; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.2));
             background: transparent; color: inherit; cursor: pointer;
           }
@@ -764,7 +767,7 @@ defmodule Compos.Ui.Layouts do
           .ag-btn.session { border-color: var(--ok-fg, #4a7a4a); color: var(--ok-fg, #4a7a4a); }
           .ag-btn.deny { border-color: transparent; color: var(--alert-fg, #a8342a); opacity: 0.8; }
           .ag-wait {
-            font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1)); margin: 8px 0;
+            font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85); margin: 8px 0;
             color: var(--agent-thought-fg, #8a8577);
           }
           /* the turn pulse under the transcript: outside .ag-scroll, so it
@@ -774,7 +777,7 @@ defmodule Compos.Ui.Layouts do
             0%, 18% { transform: translateX(-120%); }
             82%, 100% { transform: translateX(120%); }
           }
-          .ag-meta { font-family: var(--font-mono); font-size: calc(11.5px * var(--text-scale-factor, 1)); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
+          .ag-meta { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.8); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
           @keyframes ag-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
           .ag-inputrow {
             display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;
@@ -783,14 +786,14 @@ defmodule Compos.Ui.Layouts do
             background: var(--window-bg, rgba(255,255,255,0.5));
           }
           .ag-input {
-            flex: 1; min-width: 0; font-family: var(--font-mono); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
+            flex: 1; min-width: 0; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.92);
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
           .ag-queued { color: var(--agent-queued-fg, #9a958a); }
           /* queued rows under the transcript: outside .ag-scroll, so they
              align with the input row, not the padded scroll area */
           .ag-queued-row { margin: 2px 18px; flex-shrink: 0; }
-          .ag-hint { font-family: var(--font-mono); font-size: calc(10px * var(--text-scale-factor, 1)); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
+          .ag-hint { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.65); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
           .ml-extra {
             display: flex; align-items: center; gap: 12px;
             font-family: var(--font-mono); font-size: 12.5px; padding: 0 8px;
