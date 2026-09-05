@@ -775,6 +775,19 @@
             (insert! (string-append "```\n" text "\n```\n"))
             (message "Region added to chat"))))))
 
+(domain! 'chat)
+(effects! '(write))
+
+;; Set a chat's title by renaming its buffer in place.
+(define (chat-title buf title)
+  (let ((name (string-trim title)))
+    (if (equal? name "")
+        #f
+        (rename-buffer! buf name))))
+
+(public! 'chat-title
+  "(chat-title BUF TITLE) — set a chat's title by renaming its buffer")
+
 ;;; --- the conversation is named for its group ------------------------------------
 ;;; A chat's name is DERIVED, never invented: *chat:<group>*, and a group
 ;;; founded on one buffer carries that buffer's name. So a chat reads as the
