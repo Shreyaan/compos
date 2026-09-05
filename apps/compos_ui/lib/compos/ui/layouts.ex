@@ -311,6 +311,28 @@ defmodule Compos.Ui.Layouts do
              a zero-length island the caret walks over */
           .chrome-seg { user-select: none; white-space: nowrap; }
           .chrome-seg[phx-click] { cursor: pointer; }
+          /* Inline llm-mode activity is chrome, not document text. Give it a
+             strong, stable pulse so a long reasoning/tool step never looks hung. */
+          .llm-thinking-spinner {
+            display: inline-flex; align-items: center; gap: .62em;
+            margin: .32em .35em .32em 0; padding: .42em .8em;
+            border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 42%, transparent);
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--accent-fg, #26356b) 10%, var(--window-bg, #fdfcf8));
+            color: var(--accent-fg, #26356b); box-shadow: 0 2px 10px rgba(0,0,0,.08);
+            font-family: var(--font-mono); font-size: .78em; font-weight: 750;
+            letter-spacing: .055em; text-transform: uppercase;
+          }
+          .llm-thinking-spinner::before {
+            content: ""; width: .9em; height: .9em; flex: 0 0 auto;
+            border: 2px solid color-mix(in srgb, var(--accent-fg, #26356b) 24%, transparent);
+            border-top-color: var(--accent-fg, #26356b); border-radius: 50%;
+            animation: llm-thinking-spin .72s linear infinite;
+          }
+          @keyframes llm-thinking-spin { to { transform: rotate(360deg); } }
+          @media (prefers-reduced-motion: reduce) {
+            .llm-thinking-spinner::before { animation: none; }
+          }
 
           /* the block shapes of a drawn page: the marker stepped back, the
              row takes the shape */
@@ -909,36 +931,160 @@ defmodule Compos.Ui.Layouts do
             /* rows keep their natural height — no stretching to fill */
             align-content: start;
           }
-          /* the name is the point: give it the room, ellipsize later */
-          .mb-panel.palette .mb-cand { font-size: 14.5px; }
-          .mb-panel.palette .mb-label { max-width: 80ch; }
-          .mb-panel.palette.transient-panel { height: auto; max-height: 62dvh; }
-          .transient-title {
-            padding: 13px 16px 11px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
-            font-size: 14px; font-weight: 650; color: var(--accent-fg, #26356b);
+          /* the name is the point: give it the room, ellipsize later. The
+             palette reads at the transient's size: names 20px, hints 17px,
+             one head row with the prompt's name and its key legend. */
+          .mb-panel.palette { width: min(1480px, 96vw); top: 9dvh; height: 74dvh; }
+          .mb-panel.palette .mb-cand {
+            font-size: 20px; padding: 7px 24px; min-height: 42px; column-gap: 22px;
+            border-left-width: 3px;
           }
+          .mb-panel.palette .mb-label { max-width: 80ch; }
+          .mb-panel.palette .mb-hint { font-size: 17px; }
+          .mb-panel.palette .mb-sep { padding: 14px 24px 6px; }
+          .mb-panel.palette .mb-sep-label { font-size: 13px; }
+          .mb-panel.palette .mb-input-row { padding: 12px 24px 13px; font-size: 20px; }
+          .mb-panel.palette .mb-count { font-size: 15px; }
+          .mb-head {
+            order: -2; flex: 0 0 auto;
+            display: flex; align-items: baseline; gap: 18px;
+            padding: 18px 28px 14px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
+            font-family: var(--font-mono);
+          }
+          .mb-head-title { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+          .mb-head-spacer { flex: 1; }
+          .mb-head-legend {
+            display: inline-flex; flex-wrap: wrap; gap: 6px 22px;
+            color: var(--dim-fg, #8a857a); font-size: 15px;
+          }
+          .mb-panel.palette .mb-preview {
+            flex: 0 0 30%; padding: 22px 28px 26px; gap: 4px; font-size: 18px;
+          }
+          .mb-panel.palette .mb-preview-title {
+            font-size: 22px; font-weight: 700; letter-spacing: 0; text-transform: none;
+            color: var(--default-fg, #1b1a17); margin-bottom: 14px; padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-bg, #e2dbc9);
+          }
+          .mb-panel.palette .mb-preview-fact { min-height: 40px; align-items: center; gap: 16px; }
+          .mb-panel.palette .mb-preview-k { flex: 0 0 11ch; }
+          .mb-panel.palette .mb-preview-note {
+            padding: 16px 18px; border-radius: 10px; font-size: 17px; line-height: 1.45;
+            border: 1px solid var(--border-bg, #e2dbc9); background: var(--window-bg, #fdfcf8);
+            color: var(--default-fg, #1b1a17);
+          }
+          /* The transient: a keyboard menu read across the room. One
+             header line names the menu and the scope; the body is the key
+             columns, with a facts rail on the right when the menu has one;
+             the footer legend comes from the menu's own keys. Type is sized
+             for reading at a distance: names 21px, keys in boxes, rail 18px. */
+          .mb-panel.palette.transient-panel {
+            height: auto; max-height: 78dvh; top: 9dvh;
+            width: min(1480px, 96vw);
+            font-family: var(--font-mono);
+          }
+          .transient-head {
+            display: flex; align-items: baseline; gap: 18px;
+            padding: 20px 28px 16px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
+          }
+          .transient-title {
+            font-size: 28px; font-weight: 700; letter-spacing: -0.01em;
+            color: var(--default-fg, #1b1a17);
+          }
+          .transient-subtitle { font-size: 18px; color: var(--dim-fg, #8a857a); }
+          .transient-head-spacer { flex: 1; }
+          .transient-chips { display: inline-flex; gap: 8px; align-items: center; }
+          .transient-chip {
+            padding: 4px 14px; border-radius: 999px; font-size: 16px;
+            border: 1px solid var(--border-bg, #e2dbc9); color: var(--dim-fg, #8a857a);
+          }
+          .transient-chip.active {
+            background: var(--accent-fg, #26356b); border-color: var(--accent-fg, #26356b);
+            color: var(--window-bg, #fdfcf8); font-weight: 600;
+          }
+          .transient-context { font-size: 16px; color: var(--dim-fg, #8a857a); }
+          .transient-body { display: flex; min-height: 0; flex: 1; }
+          /* The menu decides its columns (the 'columns option): the frame
+             draws each as a stack of groups, and left/right move between
+             them. A grid put every group on its own row and left the
+             space under a short column empty. The area scrolls, and the
+             hook keeps the selected row in view. */
           .transient-groups {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 18px 28px; padding: 16px; overflow: auto;
+            flex: 1; min-width: 0; min-height: 0;
+            display: flex; align-items: flex-start; gap: 40px;
+            padding: 22px 28px 26px; overflow: auto;
+          }
+          .transient-column {
+            flex: 0 0 auto; width: 460px; max-width: 100%;
+            display: flex; flex-direction: column; gap: 26px;
           }
           .transient-group-title {
-            margin-bottom: 7px; font-size: 10px; letter-spacing: .13em;
+            margin-bottom: 10px; font-size: 13px; letter-spacing: .14em;
             text-transform: uppercase; color: var(--dim-fg, #8a857a);
           }
           .transient-item {
-            display: grid; grid-template-columns: 7ch minmax(0, 1fr) auto;
-            gap: 10px; align-items: baseline; min-height: 26px; padding: 4px 7px;
-            border-radius: 5px; font-family: var(--font-mono); font-size: 12.5px;
+            display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
+            gap: 16px; align-items: center; min-height: 46px; padding: 5px 12px 5px 8px;
+            border-radius: 8px; border-left: 3px solid transparent; font-size: 21px;
           }
-          .transient-item.selected { background: var(--select-bg, #e7e9f1); }
-          .transient-key { color: var(--accent-fg, #26356b); font-weight: 650; }
+          .transient-item.selected {
+            background: var(--select-bg, #e7e9f1); border-left-color: var(--accent-fg, #26356b);
+          }
+          .transient-key {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 40px; height: 36px; border-radius: 8px;
+            background: var(--default-bg, #f4f0e6); color: var(--dim-fg, #8a857a);
+            font-size: 19px; font-weight: 650;
+          }
+          .transient-item.selected .transient-key {
+            background: var(--accent-fg, #26356b); color: var(--window-bg, #fdfcf8);
+          }
           .transient-item.stay .transient-key { color: var(--ok-fg, #2e6b45); }
-          .transient-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .transient-value { color: var(--dim-fg, #8a857a); white-space: nowrap; }
-          .transient-help {
-            padding: 9px 16px 10px; border-top: 1px solid var(--border-bg, #e2dbc9);
-            color: var(--dim-fg, #8a857a); font-family: var(--font-mono); font-size: 10.5px;
+          .transient-item.selected.stay .transient-key { color: var(--window-bg, #fdfcf8); }
+          /* a row's text is the reason the row exists: it wraps to a second
+             line rather than losing its tail behind an ellipsis */
+          .transient-description {
+            min-width: 0; overflow-wrap: anywhere; line-height: 1.25;
+            font-weight: 600; color: var(--default-fg, #1b1a17);
           }
+          .transient-item.selected .transient-description { color: var(--accent-fg, #26356b); }
+          .transient-value {
+            color: var(--dim-fg, #8a857a); white-space: nowrap; font-size: 18px;
+            max-width: 22ch; overflow: hidden; text-overflow: ellipsis;
+          }
+          .transient-rail {
+            flex: 0 0 34%; min-width: 0; overflow: auto;
+            border-left: 1px solid var(--border-bg, #e2dbc9);
+            background: var(--default-bg, #f4f0e6);
+            padding: 22px 28px 26px; display: flex; flex-direction: column; gap: 4px;
+          }
+          .transient-rail-title {
+            font-size: 22px; font-weight: 700; margin-bottom: 14px; padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-bg, #e2dbc9);
+          }
+          .transient-rail-title::before {
+            content: "resolves to"; display: block; font-size: 13px; font-weight: 400;
+            letter-spacing: .14em; text-transform: uppercase; color: var(--dim-fg, #8a857a);
+            margin-bottom: 8px;
+          }
+          .transient-rail-row {
+            display: grid; grid-template-columns: 15ch minmax(0, 1fr); gap: 16px;
+            font-size: 18px; min-height: 40px; align-items: center;
+          }
+          .transient-rail-k { color: var(--dim-fg, #8a857a); }
+          .transient-rail-v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .transient-rail-row.drift .transient-rail-v { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
+          .transient-rail-row.dim .transient-rail-v { color: var(--dim-fg, #8a857a); }
+          .transient-rail-note {
+            margin-top: auto; padding: 16px 18px; border-radius: 10px; font-size: 17px;
+            border: 1px solid var(--border-bg, #e2dbc9); background: var(--window-bg, #fdfcf8);
+            color: var(--default-fg, #1b1a17); white-space: pre-line;
+          }
+          .transient-help {
+            display: flex; flex-wrap: wrap; gap: 8px 26px;
+            padding: 14px 28px 16px; border-top: 1px solid var(--border-bg, #e2dbc9);
+            color: var(--dim-fg, #8a857a); font-size: 16px;
+          }
+          .transient-legend-key { color: var(--default-fg, #1b1a17); font-weight: 700; }
           /* the palette body: candidates left, the facts panel right */
           .mb-body { display: flex; flex: 1; min-height: 0; }
           .mb-body .mb-cands { flex: 1; min-width: 0; }
@@ -1094,8 +1240,11 @@ defmodule Compos.Ui.Layouts do
             max-height: 44vh;
             overflow-y: auto;
             box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
-
+            /* the panel stays hidden for the idle delay (appearance.scm
+               which-key-idle-delay): a fast chord never draws it */
+            animation: wk-idle 0s var(--ui-which-key-delay, 0.5s) both;
           }
+          @keyframes wk-idle { from { visibility: hidden; } to { visibility: visible; } }
           .wk-title {
             display: flex; justify-content: space-between; gap: 18px;
             font-family: var(--font-mono); font-size: 11.5px;
@@ -2277,6 +2426,16 @@ defmodule Compos.Ui.Layouts do
                 if (key !== null && key === this.last) return;
                 this.last = key;
                 cur.scrollIntoView({ block: "nearest" });
+              }
+            },
+            // the transient's selected row stays in view as the arrows move
+            // it; the area scrolls, the selection must not leave the screen
+            TransientScroll: {
+              mounted() { this.follow(); },
+              updated() { this.follow(); },
+              follow() {
+                const cur = this.el.querySelector(".transient-item.selected");
+                if (cur) cur.scrollIntoView({ block: "nearest" });
               }
             },
             Keys: {

@@ -72,6 +72,20 @@
 (set-face-attribute! 'ui 'echo-order
   (if (equal? echo-area-position 'bottom) "10" "-1"))
 
+;; The which-key panel waits before it shows, so a fast prefix chord
+;; never draws it (Emacs which-key-idle-delay). The delay is a 'ui face
+;; variable; the page reads it as the panel's animation delay.
+(define (which-key-delay-css seconds)
+  (string-append (number->string seconds) "s"))
+
+(defcustom 'which-key-idle-delay 0.5
+  "Seconds a prefix key waits before the which-key panel shows."
+  'group 'appearance
+  'set (lambda (seconds)
+         (set-face-attribute! 'ui 'which-key-delay (which-key-delay-css seconds))))
+
+(set-face-attribute! 'ui 'which-key-delay (which-key-delay-css which-key-idle-delay))
+
 ;; The size of buffer text is the default face's size. 13px was the
 ;; design size; the reading size stands two steps up the same 1.2 ladder
 ;; (13 x 1.44). A defface! default survives a theme load, because no
