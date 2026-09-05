@@ -173,8 +173,9 @@
                 (whatsapp--short-time (whatsapp--msg-time row)))
           (list "whatsapp-message-sender"
                 (string-append "  " (whatsapp--msg-sender row)))
-          (list "whatsapp-message-body"
-                (string-append "\n" (whatsapp--msg-body row)))))))
+          ;; the body is its own block in the grid, so it needs no
+          ;; newline of its own
+          (list "whatsapp-message-body" (whatsapp--msg-body row))))))
 
 ;; WhatsApp's own reply carries the message it answers. This transport
 ;; has no field for one, so the quote goes into the text — the reader
@@ -390,15 +391,18 @@
 
 (define-style! 'whatsapp
   "
+/* A log, not a chat app: one type size, one grid. The stamp is
+   11 cells wide and two cells of gutter follow it, so a body that
+   hangs at 13ch keeps its wrapped lines under the sender. */
 .whatsapp-actions { padding: 2px 8px 8px; }
-.whatsapp-message { margin: 0 0 4px; padding: 7px 9px; border-left: 2px solid transparent; }
+.whatsapp-message { margin: 0; padding: 3px 9px; border-left: 2px solid transparent; font-family: var(--font-mono); font-size: 12px; line-height: 1.45; }
 .whatsapp-message-me { background: var(--hl-line-bg); border-left-color: var(--accent-fg); }
 .whatsapp-message-current { outline: 1px solid var(--accent-fg); outline-offset: -1px; }
-.whatsapp-message-time { color: var(--dim-fg); font-size: 11px; }
+.whatsapp-message-time { color: var(--dim-fg); font-variant-numeric: tabular-nums; }
 .whatsapp-message-sender { color: var(--dim-fg); font-weight: 600; }
 .whatsapp-message-me .whatsapp-message-sender { color: var(--accent-fg); }
-.whatsapp-message-body { display: block; margin-top: 3px; color: var(--fg); white-space: pre-wrap; }
-.whatsapp-empty { margin: 4px 8px; }
+.whatsapp-message-body { display: block; padding-left: 13ch; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.whatsapp-empty { margin: 4px 8px; font-family: var(--font-mono); font-size: 12px; color: var(--dim-fg); }
 ")
 
 (on-block-click! 'whatsapp
