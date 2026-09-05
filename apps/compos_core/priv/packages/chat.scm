@@ -786,6 +786,7 @@
         (rename-buffer! buf name))))
 
 (public! 'chat-title
+  "(chat-title BUF TITLE) — set a chat's title by renaming its buffer")
 
 (define-command "chat-title" "Set the current chat's title"
   (lambda ()
@@ -797,7 +798,6 @@
               (if (chat-title buf title)
                   (message (string-append "Chat title: " (buffer-name buf)))
                   (message "Chat title cannot be empty or is already taken"))))))))
-  "(chat-title BUF TITLE) — set a chat's title by renaming its buffer")
 
 ;;; --- the conversation is named for its group ------------------------------------
 ;;; A chat's name is DERIVED, never invented: *chat:<group>*, and a group
