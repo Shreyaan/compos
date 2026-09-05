@@ -274,6 +274,9 @@
             ;; a chat that never attached a runtime renders 'chat-waiting
             (agent-clear-waiting! slug)
             (chat-clear-waiting! buf)
+            ;; C-g is a quit either way: the buffer returns to the
+            ;; movement state, and the Cmd-arrows move the focus again
+            (editing-quit!)
             (message "aborted"))
           (run-command "keyboard-quit")))))
 

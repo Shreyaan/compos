@@ -34,7 +34,10 @@ defmodule Compos.EditingStateTest do
       (editing--check-landing!)
       (global-set-key "<f9> e" "forward-char")
       (global-set-key "<f9> q" "keyboard-quit")
-      (global-set-key "<f9> w" "windmove-up"))
+      (global-set-key "<f9> w" "windmove-up")
+      (define-command "zz-es-quit-by-proxy" "Run keyboard-quit from inside another command"
+        (lambda () (run-command "keyboard-quit")))
+      (global-set-key "<f9> g" "zz-es-quit-by-proxy"))
     """)
 
     on_exit(fn ->
@@ -44,7 +47,8 @@ defmodule Compos.EditingStateTest do
       (begin
         (global-unset-key "<f9> e")
         (global-unset-key "<f9> q")
-        (global-unset-key "<f9> w"))
+        (global-unset-key "<f9> w")
+        (global-unset-key "<f9> g"))
       """)
 
       if Buffer.exists?(@buf), do: Compos.Core.kill_buffer(@buf)
@@ -58,6 +62,13 @@ defmodule Compos.EditingStateTest do
     press(["<f9>", "e"])
     assert editing?()
     press(["<f9>", "q"])
+    refute editing?()
+  end
+
+  test "a command that runs keyboard-quit inside itself leaves the editing state" do
+    press(["<f9>", "e"])
+    assert editing?()
+    press(["<f9>", "g"])
     refute editing?()
   end
 

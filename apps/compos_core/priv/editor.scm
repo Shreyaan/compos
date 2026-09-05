@@ -11398,6 +11398,7 @@
 
 (define-command "keyboard-quit" "Quit the current operation; close the active popup or clear the mark"
   (lambda ()
+    (editing-quit!)
     (set-mark! #f)
     (if (and (popup-open?) (equal? (active-window) (popup-window)))
         (popup-close!)
@@ -11643,12 +11644,21 @@
         this
         (last-command))))
 
+;; A quit returns the buffer to the movement state. keyboard-quit is one.
+;; A command that runs keyboard-quit inside itself (chat-abort when no
+;; reply runs) is one too: keyboard-quit sets this flag, and the hook
+;; reads it after the outer command, whatever that command is named.
+(define *editing-quit* #f)
+(define (editing-quit!) (set! *editing-quit* #t))
+
 (define (editing--after-command! &optional cmd)
   (let ((buf (current-buffer))
-        (cmd (or cmd (editing--command-name))))
+        (cmd (or cmd (editing--command-name)))
+        (quit *editing-quit*))
+    (set! *editing-quit* #f)
     (cond ((not (and buf (buffer-exists? buf))) #t)
           ((buffer-read-only? buf) (editing-state-off! buf))
-          ((equal? cmd "keyboard-quit") (editing-state-off! buf))
+          ((or quit (equal? cmd "keyboard-quit")) (editing-state-off! buf))
           ((and (string? cmd) (string-prefix? "windmove-" cmd)) #t)
           (else (editing-state-on! buf)))))
 
@@ -11659,6 +11669,7 @@
 (catalog-meta! 'function "editing-state?" 'domain 'windows 'effects '(read))
 (catalog-meta! 'function "editing-state-on!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-state-off!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "editing-quit!" 'domain 'windows 'effects '(write))
 
 ;; S-<left>/<right>: walk buffer history — S-<left> goes to the buffer you
 ;; just left (MRU), pressing again goes deeper; S-<right> walks back. The
@@ -12262,6 +12273,7 @@
 (public! 'editing-state? "(editing-state? BUF) — #t when BUF is in the editing state: editing-state-map is in force and the Cmd-arrows move point, not the focus")
 (public! 'editing-state-on! "(editing-state-on! BUF) — enter the editing state in BUF; the first command after a landing does this")
 (public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows run windmove; keyboard-quit and a new landing do this")
+(public! 'editing-quit! "(editing-quit!) — mark the running command as a quit: after it the buffer is in the movement state; keyboard-quit calls this, and a command that aborts something calls it too")
 (public! 'windmove-swap-states-default-keybindings "(windmove-swap-states-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to windmove-swap-states-*")
 (public! 'windmove-chord "(windmove-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (windmove-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")

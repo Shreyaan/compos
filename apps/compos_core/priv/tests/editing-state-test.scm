@@ -64,3 +64,30 @@
     (editing--after-command! "forward-char")
     (check-equal! (editing-state? t--es-a) #f "read-only: no editing state")
     (buffer-set-read-only! t--es-a #f)))
+
+;; chat-abort with no reply in flight runs keyboard-quit inside itself.
+;; The hook then sees the outer command's name, so the quit travels as a
+;; flag that keyboard-quit sets.
+(define-command "t--es-quit-by-proxy" "Run keyboard-quit from inside another command"
+  (lambda () (run-command "keyboard-quit")))
+
+(deftest 'a-command-that-runs-keyboard-quit-is-a-quit
+  "after a command that runs keyboard-quit inside itself the buffer is in the movement state"
+  (lambda ()
+    (t--es-setup!)
+    (editing--after-command! "forward-char")
+    (check-equal! (editing-state? t--es-a) #t "a command enters the editing state")
+    (run-command "t--es-quit-by-proxy")
+    (editing--after-command! "t--es-quit-by-proxy")
+    (check-equal! (editing-state? t--es-a) #f "the proxy quit returns to the movement state")
+    (editing--after-command! "forward-char")
+    (check-equal! (editing-state? t--es-a) #t "the quit flag does not outlive its command")))
+
+(deftest 'editing-quit-marks-any-command-as-a-quit
+  "a command that calls editing-quit! returns the buffer to the movement state"
+  (lambda ()
+    (t--es-setup!)
+    (editing--after-command! "forward-char")
+    (editing-quit!)
+    (editing--after-command! "forward-char")
+    (check-equal! (editing-state? t--es-a) #f "editing-quit! makes the command a quit")))
