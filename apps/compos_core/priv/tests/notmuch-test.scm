@@ -113,15 +113,15 @@
       (check-equal! (length auth) 1 "the author is on another")
       (check-false! (string-contains? (car subj) "Alice") "the two do not share a line")
       (check-contains! (car subj) "Today 06:50" "the date rides with the subject")
-      ;; "unread" is six characters, so the column shows it as "unr.."
-      (check-contains! (car auth) "inbox unr.." "the tags ride with the author"))
+      ;; the column has the room here, so both tags read under their names
+      (check-contains! (car auth) "inbox unread" "the tags ride with the author"))
     ;; a row is two lines, and one move is one thread
     (t--nm-run! "notmuch-next")
     (check-equal! (nm--th-subject (nm--thread-at "*notmuch*")) "Quarterly report"
                   "one move goes to the next thread")
     (t--nm-done!)))
 
-(deftest 'every-tag-shows-and-a-long-one-keeps-three-letters
+(deftest 'every-tag-reads-in-full-until-the-column-narrows
   "which tags a thread carries is what the column is for"
   (lambda ()
     (check-equal! (nm--short-tag "attachment") "att.." "a long tag keeps three letters")
@@ -129,12 +129,16 @@
     (check-equal! (nm--short-tag "sent") "sent" "and a short one is itself")
     (let ((tags '("attachment" "important" "inbox" "personal" "sent")))
       (check-equal! (nm--tags-text (list "0001" "s" "a" tags "d"))
-                    "att.. imp.. inbox per.. sent"
+                    "attachment important inbox personal sent"
                     "every tag reads, none of them goes")
       ;; the column takes what the busiest row needs
-      (check-equal! (nm--fit-tags "att.. imp.. inbox per.. sent" 28)
+      (check-equal! (nm--fit-tags "attachment important inbox personal sent" 40)
+                    "attachment important inbox personal sent"
+                    "the names stand when the column holds them")
+      ;; narrower than the names: the short forms
+      (check-equal! (nm--fit-tags "attachment important inbox personal sent" 28)
                     "att.. imp.. inbox per.. sent"
-                    "the short forms stand when the column holds them")
+                    "the short forms stand when the names will not fit")
       ;; too narrow even for those: one letter each, and the count reads
       (check-equal! (nm--fit-tags "attachment important inbox personal sent" 6)
                     "aiips" "no room: the initials, all five of them"))
@@ -239,7 +243,7 @@
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (t--nm-run! "notmuch-mark-toggle")
-    (check-contains! (t--nm-calls) "tag +m -- thread:0001" "the mark call")
+    (check-contains! (t--nm-calls) "tag +compos-mark -- thread:0001" "the mark call")
     (t--nm-done!)))
 
 (deftest 'reply-composes-from-the-threads-newest-message
@@ -456,7 +460,7 @@
     (check-equal! (nm--query-of "*notmuch*") "from:alice@example.com" "the sender filter")
 
     (run-command "notmuch-filter-marked")
-    (check-equal! (nm--query-of "*notmuch*") "tag:m" "the marked filter replaced it")
+    (check-equal! (nm--query-of "*notmuch*") "tag:compos-mark" "the marked filter replaced it")
 
     (run-command "notmuch-unfilter-last")
     (check-equal! (nm--query-of "*notmuch*") "from:alice@example.com" "and back to the sender")
@@ -480,20 +484,20 @@
     (t--nm-done!)))
 
 ;; the stub answers every search from search.json; a test that needs
-;; marked rows rewrites that file with the m tag on some threads
+;; marked rows rewrites that file with the mark tag on some threads
 (define (t--nm-replace s from to) (string-join (string-split s from) to))
 (define (t--nm-search-json-with! from to)
   (write-file! (string-append t--nm-dir "/search.json")
     (t--nm-replace (cadr (assoc "search.json" t--nm-files)) from to)))
 
 (deftest 'a-marked-thread-shows-the-list-mark-on-its-row
-  "the m tag becomes a list mark, so the row wears the mark column"
+  "the mark tag becomes a list mark, so the row wears the mark column"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (check-equal! (list-marks "*notmuch*") '() "no thread is marked at first")
     (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
-                             "\"tags\": [\"inbox\", \"m\", \"unread\"]")
+                             "\"tags\": [\"inbox\", \"compos-mark\", \"unread\"]")
     (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
     (check-equal! (list-marks "*notmuch*") (list (list "0001" "*"))
                   "the marked thread carries the list mark")
@@ -504,16 +508,16 @@
     (t--nm-done!)))
 
 (deftest 'mark-all-again-unmarks-the-search
-  "one shown thread marked is enough: the next mark-all removes the m tag"
+  "one shown thread marked is enough: the next mark-all removes the mark tag"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
-                             "\"tags\": [\"inbox\", \"m\", \"unread\"]")
+                             "\"tags\": [\"inbox\", \"compos-mark\", \"unread\"]")
     (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
     (check-equal! (nm--any-marked? "*notmuch*") #t "one row is marked, another is not")
     (run-command "notmuch-mark-all")
-    (check-contains! (t--nm-calls) "tag -m -- ( tag:inbox )" "the second press unmarks the query")
+    (check-contains! (t--nm-calls) "tag -compos-mark -- ( tag:inbox )" "the second press unmarks the query")
     (t--nm-done!)))
 
 (deftest 'mark-all-under-a-filter-tags-only-the-narrowed-query
@@ -524,13 +528,13 @@
     (run-command "notmuch-filter")
     (t--nm-answer! "from:alice")
     (run-command "notmuch-mark-all")
-    (check-contains! (t--nm-calls) "tag +m -- ( ( tag:inbox ) and from:alice )"
+    (check-contains! (t--nm-calls) "tag +compos-mark -- ( ( tag:inbox ) and from:alice )"
                      "the mark covers the filtered search, not the mailbox")
     (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
-                             "\"tags\": [\"inbox\", \"m\", \"unread\"]")
+                             "\"tags\": [\"inbox\", \"compos-mark\", \"unread\"]")
     (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
     (run-command "notmuch-mark-all")
-    (check-contains! (t--nm-calls) "tag -m -- ( ( tag:inbox ) and from:alice )"
+    (check-contains! (t--nm-calls) "tag -compos-mark -- ( ( tag:inbox ) and from:alice )"
                      "and so does the unmark")
     (t--nm-done!)))
 
@@ -540,11 +544,11 @@
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (run-command "notmuch-mark-all")
-    (check-contains! (t--nm-calls) "tag +m -- ( tag:inbox )" "every thread in the query is marked")
+    (check-contains! (t--nm-calls) "tag +compos-mark -- ( tag:inbox )" "every thread in the query is marked")
 
     (run-command "notmuch-archive-marked")
     (t--nm-answer! "yes")
-    (check-contains! (t--nm-calls) "tag -inbox -m -- ( tag:inbox ) and tag:m"
+    (check-contains! (t--nm-calls) "tag -inbox -compos-mark -- ( tag:inbox ) and tag:compos-mark"
                      "and the archive names the marked set")
     (t--nm-done!)))
 

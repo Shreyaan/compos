@@ -15,7 +15,7 @@
 ;;;   n/p next/prev (n marks read; both auto-preview) · RET open · SPC preview
 ;;;   a archive · d trash · u smart-untag · . toggle unread · @ by sender
 ;;;   m mark+advance · M or * mark all (again unmarks) · U unmark all · F show marked
-;;;   A archive marked · D trash marked · t tag marked · T tag this thread
+;;;   a archive marked · d trash marked · t tag marked · T tag this thread
 ;;;   / custom query filter · l add a tag filter · \ remove the last filter
 ;;;   s new search · g refresh · q quit
 ;;; Thread buffer keys:  v html/text view · a archive · r reply · q quit
@@ -178,6 +178,16 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--th-tags th) (list-ref th 3))
 (define (nm--th-date th) (list-ref th 4))
 
+;; The mark is a notmuch tag, so it has to be a name the mail server
+;; will never hand back as a label of its own. "m" was not such a name:
+;; this mailbox carries an "m" label on 12828 messages, so every thread
+;; read as marked and a bulk verb would have acted on the whole inbox
+;; instead of the handful the reader picked.
+(define nm-mark-tag "compos-mark")
+(define nm-mark-query (string-append "tag:" nm-mark-tag))
+(define nm-mark-add (string-append "+" nm-mark-tag))
+(define nm-mark-rem (string-append "-" nm-mark-tag))
+
 (define (nm--search-rows buf)
   (let ((rows (map (lambda (th) (list (nm--get th 'thread)
                                       (or (nm--get th 'subject) "")
@@ -190,7 +200,7 @@ when a message has no text/plain part." 'group 'notmuch)
     ;; every fetch, so a marked row shows the mark like any other list
     (buffer-set-local! buf 'list-marks
       (map (lambda (th) (list (nm--th-id th) *list-mark-char*))
-           (filter (lambda (th) (member "m" (nm--th-tags th))) rows)))
+           (filter (lambda (th) (member nm-mark-tag (nm--th-tags th))) rows)))
     ;; the tag column measures itself against the threads this search
     ;; found. It reads the number here, and not from the entries: a draw
     ;; lays the columns out while the entries it replaces are still the
@@ -205,10 +215,11 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; the second line, and the bar in front of the row says the tag you
 ;; read first: unread.
 ;;
-;; The reader sees EVERY tag a thread carries. A tag longer than five
-;; characters keeps its first three letters and says the rest is
-;; missing: "attachment" reads "att..". The author is what gives way
-;; when the window narrows.
+;; The reader sees EVERY tag a thread carries, and reads each one in
+;; full while the column has the room. A narrow window takes that room
+;; back: then a tag longer than five characters keeps its first three
+;; letters and says the rest is missing, so "attachment" reads "att..".
+;; The author is what gives way first.
 (define nm-tag-width 5)
 
 (define (nm--short-tag t)
@@ -218,15 +229,19 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define (nm--fit-tags s w)
   (let* ((tags (filter (lambda (t) (not (equal? t ""))) (string-split s " ")))
+         (full (string-join tags " "))
          (short (string-join (map nm--short-tag tags) " ")))
     (cond ((null? tags) "")
+          ;; the column asks for what the busiest row needs, so a tag
+          ;; normally reads under its own name
+          ((<= (string-length full) w) full)
           ((<= (string-length short) w) short)
           ;; not even the short forms fit: one letter per tag, and the
           ;; reader still counts them
           (else (string-join (map (lambda (t) (substring t 0 1)) tags) "")))))
 
 (define (nm--tags-text th)
-  (string-join (map nm--short-tag (nm--th-tags th)) " "))
+  (string-join (nm--th-tags th) " "))
 
 ;; The tag column is as wide as the busiest thread of this search needs,
 ;; so every thread shows every tag it has. It stops at half the window:
@@ -242,7 +257,7 @@ when a message has no text/plain part." 'group 'notmuch)
               (list "tags" (nm--tags-width buf) 'right nm--fit-tags))))
 
 (define (nm--subject-face tags)
-  (cond ((member "m" tags) "nm-marked")
+  (cond ((member nm-mark-tag tags) "nm-marked")
         ((member "unread" tags) "nm-unread")
         (else "nm-subject")))
 
@@ -286,12 +301,17 @@ when a message has no text/plain part." 'group 'notmuch)
     'meta nm--search-meta
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
-              '(("RET" "open") ("SPC" "preview") ("m" "mark")
-                ("a" "archive") ("d" "trash") ("t" "tag")
-                ("s" "search") ("/" "custom filter") ("l" "tag filter")
-                ("\\" "unfilter")
-                ("g" "refresh")
-                ("q" "mailboxes")))
+              (if (nm--any-marked? buf)
+                  '(("a" "archive marked") ("d" "trash marked")
+                    ("t" "tag marked") ("F" "show marked")
+                    ("U" "unmark all") ("m" "unmark this")
+                    ("RET" "open") ("g" "refresh") ("q" "mailboxes"))
+                  '(("RET" "open") ("SPC" "preview") ("m" "mark")
+                    ("a" "archive") ("d" "trash") ("T" "tag")
+                    ("s" "search") ("/" "custom filter") ("l" "tag filter")
+                    ("\\" "unfilter")
+                    ("g" "refresh")
+                    ("q" "mailboxes"))))
     'keys '(("n" "notmuch-next") ("p" "notmuch-prev")
             ("RET" "notmuch-open-thread") ("SPC" "notmuch-preview")
             ("M-<" "notmuch-first-thread") ("M->" "notmuch-last-thread")
@@ -605,10 +625,21 @@ when a message has no text/plain part." 'group 'notmuch)
           (message changes))
         (message "No thread on this line"))))
 
-(define-command "notmuch-archive" "Archive the thread at point (-inbox)"
-  (lambda () (nm--tag! (current-buffer) "-inbox")))
-(define-command "notmuch-trash" "Trash the thread at point (+trash -inbox -unread)"
-  (lambda () (nm--tag! (current-buffer) "+trash -inbox -unread")))
+;; A mark is a standing instruction, so the verb obeys the marks while
+;; there are any and the row under point when there are none. The reader
+;; learns one key for archiving, and the footer says which set it means.
+(define-command "notmuch-archive" "Archive the marked threads, or the thread at point (-inbox)"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (nm--any-marked? buf)
+          (nm--confirm-marked buf "Archive" (string-append "-inbox " nm-mark-rem))
+          (nm--tag! buf "-inbox")))))
+(define-command "notmuch-trash" "Trash the marked threads, or the thread at point (+trash -inbox -unread)"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (nm--any-marked? buf)
+          (nm--confirm-marked buf "Trash" (string-append "+trash -inbox -unread " nm-mark-rem))
+          (nm--tag! buf "+trash -inbox -unread")))))
 (catalog-meta! 'command "notmuch-trash" 'domain 'mail 'effects '(destroy))
 
 (define-command "notmuch-toggle-unread" "Toggle the unread tag on the thread at point"
@@ -767,7 +798,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--tag-marked! buf changes)
   (nm--run (string-append "tag " changes " -- "
                           (nm--quote (string-append "( " (nm--query-of buf)
-                                                    " ) and tag:m"))))
+                                                    " ) and " nm-mark-query))))
   (nm--refresh! buf))
 
 (define-command "notmuch-mark-toggle" "Toggle the m tag on this thread, move down"
@@ -775,7 +806,8 @@ when a message has no text/plain part." 'group 'notmuch)
     (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
       (if th
           (begin
-            (nm--tag! buf (if (member "m" (nm--th-tags th)) "-m" "+m"))
+            (nm--tag! buf (if (member nm-mark-tag (nm--th-tags th))
+                              nm-mark-rem nm-mark-add))
             ;; marking keeps the row — advance past it, dired-style
             (list-move-in! buf 1))
           (message "No thread on this line")))))
@@ -783,7 +815,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--any-marked? buf)
   (let loop ((es (list-entries buf)))
     (cond ((null? es) #f)
-          ((member "m" (nm--th-tags (car es))) #t)
+          ((member nm-mark-tag (nm--th-tags (car es))) #t)
           (else (loop (cdr es))))))
 
 ;; a second press reads as "never mind" and unmarks the search. The
@@ -794,7 +826,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let* ((buf (current-buffer))
            (unmark? (nm--any-marked? buf)))
-      (nm--run (string-append "tag " (if unmark? "-m" "+m") " -- "
+      (nm--run (string-append "tag " (if unmark? nm-mark-rem nm-mark-add) " -- "
                               (nm--quote (string-append "( " (nm--query-of buf) " )"))))
       (nm--refresh! buf)
       (message (if unmark? "Unmarked all" "Marked all")))))
@@ -802,7 +834,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-unmark-all" "Unmark every thread in this search"
   (lambda ()
     (let ((buf (current-buffer)))
-      (nm--run (string-append "tag -m -- "
+      (nm--run (string-append "tag " nm-mark-rem " -- "
                               (nm--quote (string-append "( " (nm--query-of buf) " )"))))
       (nm--refresh! buf)
       (message "Unmarked all"))))
@@ -810,7 +842,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-filter-marked" "Show only the marked threads"
   (lambda ()
     (let ((buf (current-buffer)))
-      (nm--query-push-only! buf "tag:m")
+      (nm--query-push-only! buf nm-mark-query)
       (nm--refresh! buf)
       (list-goto-first-entry buf))))
 
@@ -823,9 +855,11 @@ when a message has no text/plain part." 'group 'notmuch)
           (message "Cancelled")))))
 
 (define-command "notmuch-archive-marked" "Archive all marked threads"
-  (lambda () (nm--confirm-marked (current-buffer) "Archive" "-inbox -m")))
+  (lambda () (nm--confirm-marked (current-buffer) "Archive"
+                        (string-append "-inbox " nm-mark-rem))))
 (define-command "notmuch-trash-marked" "Trash all marked threads"
-  (lambda () (nm--confirm-marked (current-buffer) "Trash" "+trash -inbox -unread -m")))
+  (lambda () (nm--confirm-marked (current-buffer) "Trash"
+                        (string-append "+trash -inbox -unread " nm-mark-rem))))
 
 (define-command "notmuch-tag-marked" "Apply tag changes to all marked threads"
   (lambda ()
@@ -1245,7 +1279,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (list (list "archive"  (nm--email-tag-act "-inbox"))
         (list "trash"    (nm--email-tag-act "+trash -inbox -unread"))
         (list "unread"   (nm--email-tag-act "+unread"))
-        (list "mark"     (nm--email-tag-act "+m"))
+        (list "mark"     (nm--email-tag-act nm-mark-add))
         (list "read"     (lambda (id)
                            (nm--open-thread! id
                              (let ((th (nm--thread-at (current-buffer))))
