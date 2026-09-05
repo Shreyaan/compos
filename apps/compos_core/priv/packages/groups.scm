@@ -49,6 +49,11 @@
 (define (group-record-origin record)
   (and (> (length record) 8) (nth 8 record)))
 
+;; per-group overrides, the ninth field. A record written before group
+;; settings existed is shorter and answers none.
+(define (group-record-settings record)
+  (and (> (length record) 9) (nth 9 record)))
+
 (define (group-color-face value)
   (let* ((record (and value
                       (or (group-record-by-id value)
