@@ -470,7 +470,7 @@ defmodule Compos.Ui.EditorLiveTest do
     refute preview =~ "fresh_row"
   end
 
-  test "a plain input prompt renders as a centered modal dialog", %{conn: conn} do
+  test "a plain input prompt renders as the minibuffer panel", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
 
     assert {:ok, _} =
@@ -484,6 +484,24 @@ defmodule Compos.Ui.EditorLiveTest do
            )
 
     assert has_element?(view, ".mb-panel .mb-input-row .prompt", "Reply:")
+    keys(view, ["C-g"])
+  end
+  test "a prompt draws point in the window it came from", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    # with no prompt the active window owns the caret natively, so the
+    # server marks no row
+    refute has_element?(view, ".window.active .buf .line.hl-line")
+
+    assert {:ok, _} =
+             Compos.Core.Session.eval(
+               ~S|(read-string "Reply: " (lambda (value) value))|
+             )
+
+    # the browser stops syncing the caret while a prompt owns the keyboard
+    # (layouts.ex syncEditable), so the server draws point again — without
+    # this a preview that moves point (imenu) lands invisibly
+    assert has_element?(view, ".window.active .buf .line.hl-line")
     keys(view, ["C-g"])
   end
 

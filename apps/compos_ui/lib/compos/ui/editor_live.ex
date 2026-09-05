@@ -536,8 +536,16 @@ defmodule Compos.Ui.EditorLive do
 
     state_ms = System.monotonic_time(:millisecond) - t0
 
+    # While a prompt owns the keyboard the browser stops syncing the caret
+    # (layouts.ex syncEditable), so a preview that moves point — imenu,
+    # ripgrep, load-theme — would land invisibly in the window it came
+    # from. Nothing is the native-caret surface while a prompt is up: the
+    # server draws the cursor and marks the current row again, and the
+    # client scrolls that row into view.
+    caret_owner = state.active
+
     {tree, line_cache} =
-      decorate(state.tree, socket.assigns.line_cache, state.faces, state.active)
+      decorate(state.tree, socket.assigns.line_cache, state.faces, caret_owner)
 
     state = %{state | tree: tree}
 
