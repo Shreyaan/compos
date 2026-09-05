@@ -22,7 +22,7 @@
 
 ;; two windows: the left one on b after a, the right one on d after c
 (define (t--wh-setup!)
-  (set! *autolayout-mode* #f)
+  (customize-set! 'autolayout-mode #f)
   (layout-target-set! #f)
   (for-each (lambda (b) (test-buffer! b "")) t--wh-all)
   (delete-other-windows!)
@@ -67,7 +67,7 @@
   "the pane's past leads with a buffer the other window shows: the next one takes the place"
   (lambda ()
     (for-each (lambda (b) (test-buffer! b "")) t--wh-all)
-    (set! *autolayout-mode* #f)
+    (customize-set! 'autolayout-mode #f)
     (layout-target-set! #f)
     (delete-other-windows!)
     (switch-to-buffer! t--wh-b)

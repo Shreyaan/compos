@@ -253,8 +253,12 @@
 ;;; when a window comes or goes, the frame re-arranges, the main pane
 ;;; stays main while its buffer is visible, and a new buffer joins the
 ;;; stack. A popup and the minibuffer are not panes.
+;;; Cmd-RET (s-RET) runs autolayout: the window you are in becomes the main pane.
+;;; autolayout-mode is a custom, so the mode survives a restart.
 
-(define *autolayout-mode* #f)
+(defcustom 'autolayout-mode #f
+  "Keep the frame in the main-and-stack layout as windows come and go."
+  'group 'windows 'type 'boolean)
 
 ;; main pane on the left = the stack on the right, in the tiler's names
 (define (autolayout--algorithm)
@@ -296,7 +300,7 @@
 ;; the hook: the frame's panes changed, so the shape is re-made. Nothing
 ;; runs while a tiler runs, or while a prompt is open.
 (define (autolayout--on-change!)
-  (when (and *autolayout-mode* (not *layout-busy*) (not (minibuffer-state)))
+  (when (and autolayout-mode (not *layout-busy*) (not (minibuffer-state)))
     (let ((panes (autolayout--panes (frame-local 'autolayout-main))))
       (when (and (pair? panes)
                  (not (autolayout--same-panes? panes (or (frame-local 'autolayout-panes) '()))))
@@ -357,12 +361,18 @@
 (define-command "autolayout-mode"
   "Keep the frame in the main-and-stack layout as windows come and go; again turns it off"
   (lambda ()
-    (set! *autolayout-mode* (not *autolayout-mode*))
-    (if *autolayout-mode*
+    ;; customize-save! writes custom.scm, so the mode survives a restart
+    (customize-save! 'autolayout-mode (not autolayout-mode))
+    (if autolayout-mode
         (begin
           (autolayout-apply! (window-buffer (active-window)))
           (message "Autolayout on: the selected buffer is the main pane"))
         (message "Autolayout off"))))
+
+;; Cmd-RET makes the window you are in the main pane. The client claims
+;; the chord from the browser (CMD_KEYS in layouts.ex) and sends it as
+;; s-RET. The browse reader binds its own s-RET, and a local map wins.
+(global-set-key "s-RET" "autolayout")
 
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))

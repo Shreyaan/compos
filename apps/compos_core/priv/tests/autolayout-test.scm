@@ -17,7 +17,7 @@
 (define t--al-d "zz-al-d")
 
 (define (t--al-setup!)
-  (set! *autolayout-mode* #f)
+  (customize-set! 'autolayout-mode #f)
   (customize-set! 'window-layout-main-side 'left)
   (customize-set! 'window-layout-main-ratio 0.62)
   (customize-set! 'window-layout-stack 'column)
@@ -29,7 +29,7 @@
   (switch-to-buffer! t--al-b))
 
 (define (t--al-done!)
-  (set! *autolayout-mode* #f)
+  (customize-set! 'autolayout-mode #f)
   (delete-other-windows!)
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
             (list t--al-a t--al-b t--al-c t--al-d)))
@@ -106,7 +106,7 @@
       (split-window! 'v 0.5)
       (select-window! (layout--new-window before))
       (switch-to-buffer! t--al-c))
-    (set! *autolayout-mode* #t)
+    (customize-set! 'autolayout-mode #t)
     (autolayout--on-change!)
     (let ((main (t--al-rect t--al-a)) (c (t--al-rect t--al-c)))
       (check-true! (and main (t--al-near? (nth 2 main) 0) (t--al-near? (nth 4 main) 0.62))
