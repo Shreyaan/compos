@@ -1634,6 +1634,16 @@
   "How long the highlight rests on a group before the switcher previews it, in milliseconds."
   'group 'groups 'type 'number)
 
+(defcustom 'group-switch-style "modal"
+  "The shape the group switcher takes: \"modal\", \"popup\", or \"minibuffer\"."
+  'group 'groups 'type 'string)
+
+;; The shape decides whether a look is worth drawing. A modal covers the
+;; windows, so a peek behind it shows nothing and the wake it costs buys
+;; nothing. Under a popup, or in the minibuffer, the windows stay visible
+;; and the peek runs as it always has.
+(define (group-switch-peeks?) (not (equal? group-switch-style "modal")))
+
 ;; Emacs-style toggle: the frame's previous group and its current one
 ;; trade places. switch-to-group! writes 'previous-group on every switch.
 (define-command "group-switch-last" "Switch back to the group this frame just left"
