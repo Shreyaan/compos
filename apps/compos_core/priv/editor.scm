@@ -10835,14 +10835,15 @@
          (modes (cons (or (buffer-local buf 'mode-name) "Fundamental")
                       (or (buffer-local buf 'minor-modes) '())))
          (mode-text (string-join (map dashboard--mode-name modes) " · "))
+         (preset (dash--preset buf))
          (groups (if (pair? ids)
                      (string-join (map group-label ids) " · ")
                      "none")))
-    (string-append
-      "mode " mode-text
-      "   groups " groups
-      "   llm " (dash--model buf)
-      "   lane " (dash--lane buf))))
+    (string-append "mode " mode-text
+                   "   groups " groups
+                   (if preset (string-append "   preset " preset) "")
+                   "   llm " (dash--model buf)
+                   "   lane " (dash--lane buf))))
 
 ;;; The same facts, keyed. A flat run of tokens spends one weight on
 ;;; every word, so nothing reads first. Each segment puts a whisper-sized
@@ -10918,9 +10919,14 @@
        (let ((s (buffer-local buf 'chat-summary)))
          (and (string? s) (not (equal? s "")) s))))
 
+(define (dash--preset buf)
+  (and (boundp (quote llm-config-preset-name))
+       (llm-config-preset-name buf)))
+
 (define (dashboard-line-blocks buf)
   (let ((vcs (dash--vcs buf))
-        (summary (dash--summary buf)))
+        (summary (dash--summary buf))
+        (preset (dash--preset buf)))
     (append
       (list (dash--seg "mode" (dash--mode-segs buf) 'left)
             (dash--seg-rule)
@@ -10928,10 +10934,18 @@
             (dash--seg-rule)
             (list 'tag "div" 'class "dseg-stack"
                   'children
-                  (list (dash--seg "llm" (dash--model-segs buf) 'right "dseg-inline")
-                        (dash--seg "lane"
-                          (list (list "f-ok dseg-strong" (dash--lane buf)))
-                          'right "dseg-inline"))))
+                  (append
+                    ;; the preset names the whole setup, so it leads the stack
+                    ;; and only appears while one is actually in force
+                    (if preset
+                        (list (dash--seg "preset"
+                                (list (list "dseg-strong" preset))
+                                'right "dseg-inline"))
+                        '())
+                    (list (dash--seg "llm" (dash--model-segs buf) 'right "dseg-inline")
+                          (dash--seg "lane"
+                            (list (list "f-ok dseg-strong" (dash--lane buf)))
+                            'right "dseg-inline")))))
       ;; one wide segment at the end, wrapping to two lines with the key
       ;; inline: a chat says what it is doing, and every other buffer of
       ;; the repo names the open jj change, kept fresh by jj.scm

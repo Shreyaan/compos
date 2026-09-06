@@ -529,16 +529,34 @@
 
 ;; the saved bundle whose setup equals BUF's live setup, or #f
 (define (llm-config--matching-bundle buf)
-  (let ((setup (llm-bundle-setup (llm-config--current buf))))
-    (let loop ((bs *llm-bundles*))
-      (cond ((null? bs) #f)
-            ((equal? (llm-bundle-setup (llm-bundle-normalize (car bs))) setup)
-             (car bs))
-            (else (loop (cdr bs)))))))
+  (let loop ((bs *llm-bundles*))
+    (cond ((null? bs) #f)
+          ((llm-config--bundle-active? buf (car bs)) (car bs))
+          (else (loop (cdr bs))))))
 
+(define (llm-config--optional-match? want have)
+  (or (not want) (equal? want have)))
+
+;;; A bundle can leave a field unspecified, and llm-bundle-apply! then skips
+;;; it and leaves the buffer's own value alone: presets, permission and
+;;; prompt-disabled when #f, and agent-mode when #f or "". Such a field must
+;;; not count against the match, or a bundle that deliberately leaves the
+;;; agent mode alone reads as inactive the moment it is applied.
 (define (llm-config--bundle-active? buf b)
-  (equal? (llm-bundle-setup (llm-bundle-normalize b))
-          (llm-bundle-setup (llm-config--current buf))))
+  (let ((nb (llm-bundle-normalize b))
+        (cur (llm-config--current buf)))
+    (and (equal? (llm-bundle-connector nb) (llm-bundle-connector cur))
+         (equal? (llm-bundle-model nb) (llm-bundle-model cur))
+         (equal? (llm-bundle-effort nb) (llm-bundle-effort cur))
+         (llm-config--optional-match? (llm-bundle-presets nb)
+                                      (llm-bundle-presets cur))
+         (llm-config--optional-match? (llm-bundle-permission nb)
+                                      (llm-bundle-permission cur))
+         (or (equal? (llm-bundle-agent-mode nb) "")
+             (llm-config--optional-match? (llm-bundle-agent-mode nb)
+                                          (llm-bundle-agent-mode cur)))
+         (llm-config--optional-match? (llm-bundle-prompt-disabled nb)
+                                      (llm-bundle-prompt-disabled cur)))))
 
 ;; the bundle the fine-tune level measures drift against: the one applied
 ;; last in this frame, else the one the live setup equals, else #f
@@ -549,6 +567,13 @@
 
 (define (llm-config--base-name buf)
   (let ((b (llm-config--base buf)))
+    (and b (llm-bundle-name b))))
+
+;;; The name the dashboard line shows. It follows the buffer's own setup, not
+;;; the frame's last choice, so a chat that drifted off its bundle names no
+;;; preset and every other buffer keeps its own answer.
+(define (llm-config-preset-name buf)
+  (let ((b (llm-config--matching-bundle buf)))
     (and b (llm-bundle-name b))))
 
 ;; one field of a bundle as the rail shows it
