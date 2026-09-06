@@ -47,23 +47,38 @@ defmodule Compos.Ui.MobileLiveTest do
     refute has_element?(view, ".hh-fan")
   end
 
-  test "the fan opens on the prefixes Scheme names, and a prefix latches into its bindings", %{conn: conn} do
+  test "the keys panel lists the bindings by section, and a row presses its chord", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
     {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
     on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
 
     hook(view, "fan", %{"open" => true})
-    assert has_element?(view, ".hh-fan .hh-arc[data-lvl='1']")
+    assert has_element?(view, "#keys-panel .hh-keys-tab", "plain")
+    assert has_element?(view, "#keys-panel .hh-keys-tab", "<f9>")
 
-    # latch a prefix this test owns: the frame's pending keys become the
-    # modeline badge and the fan shows what hangs under it
-    hook(view, "arc", %{"k" => "<f9>", "lvl" => "1"})
+    hook(view, "fan_tab", %{"t" => "<f9>"})
+    assert has_element?(view, "#keys-panel .hh-keys-tab.on", "<f9>")
+    assert has_element?(view, "#keys-panel .hh-key-row .hh-key-cmd", "keyboard-quit")
+
+    # a row is the whole chord: the prefix and the key go through
+    hook(view, "fan_run", %{"s" => "<f9>", "k" => "q"})
+    refute has_element?(view, "#keys-panel")
+    assert has_element?(view, ".hh-echo", "Quit")
+    refute has_element?(view, ".hh-ml-pending")
+  end
+
+  test "the panel opens on the pending prefix's tab and does not press it twice", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/m")
+    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
+    on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
+
+    hook(view, "key", %{"k" => "<f9>"})
     assert has_element?(view, ".hh-ml-pending", "<f9>-")
-    assert has_element?(view, ".hh-fan .hh-arc[data-lvl='2'][data-arc='q']", "keyboard-quit")
+    hook(view, "fan", %{"open" => true})
+    assert has_element?(view, "#keys-panel .hh-keys-tab.on", "<f9>")
 
-    # the scrim is C-g: pending clears, the fan closes
-    hook(view, "fan_quit", %{})
-    refute has_element?(view, ".hh-fan")
+    hook(view, "fan_run", %{"s" => "<f9>", "k" => "q"})
+    assert has_element?(view, ".hh-echo", "Quit")
     refute has_element?(view, ".hh-ml-pending")
   end
 
@@ -106,31 +121,6 @@ defmodule Compos.Ui.MobileLiveTest do
     hook(view, "tab", %{"buf" => g})
     assert has_element?(view, ".hh-tab.on")
     assert has_element?(view, ".hh-ml-mode", "chat-mode")
-  end
-
-  test "the fan under a prefix follows Scheme's cut and offers the rest", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/m")
-    {:ok, _} = Compos.Core.Session.eval(~s{(set! handheld-fan-limit 2)})
-
-    for k <- ~w(a b c d) do
-      {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> #{k}" "keyboard-quit")})
-    end
-
-    on_exit(fn ->
-      Compos.Core.Session.eval(~s{(set! handheld-fan-limit 7)})
-      for k <- ~w(a b c d), do: Compos.Core.Session.eval(~s{(global-unset-key "<f9> #{k}")})
-    end)
-
-    hook(view, "fan", %{"open" => true})
-    hook(view, "arc", %{"k" => "<f9>", "lvl" => "1"})
-    assert has_element?(view, ".hh-arc[data-lvl='2'][data-arc='a']")
-    assert has_element?(view, ".hh-arc[data-lvl='2'][data-arc='b']")
-    refute has_element?(view, ".hh-arc[data-arc='c']")
-    assert has_element?(view, ".hh-arc[data-more='1']", "2 more")
-
-    hook(view, "fan_all", %{})
-    assert has_element?(view, ".hh-fan-row[data-arc='d']")
-    hook(view, "fan_quit", %{})
   end
 
   test "the rail moves point to the line the drag names", %{conn: conn} do

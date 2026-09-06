@@ -15,7 +15,10 @@ defmodule Compos.Ui.MobileLive do
   alias Compos.Core.{Editor, Events, Input, Session}
   alias Compos.Ui.EditorLive
 
-  @empty_view %{prefixes: [], limit: 6, tabs: [], chips: []}
+  @empty_view %{tabs: [], chips: []}
+
+  # the panel's sections that are not prefixes
+  @families ["plain", "C-", "M-", "s-", "S-"]
 
   @impl true
   def mount(params, _session, socket) do
@@ -38,8 +41,9 @@ defmodule Compos.Ui.MobileLive do
           line_cache: %{},
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           fan: false,
-          fan_all: false,
-          fan_rows: nil,
+          fan_tab: nil,
+          keys: [],
+          keys_key: nil,
           view: @empty_view,
           view_key: nil
         )
@@ -55,8 +59,9 @@ defmodule Compos.Ui.MobileLive do
          line_cache: %{},
          boot_id: :persistent_term.get(:compos_boot_id, "dev"),
          fan: false,
-         fan_all: false,
-         fan_rows: nil,
+         fan_tab: nil,
+         keys: [],
+         keys_key: nil,
          view: @empty_view,
          view_key: nil
        )}
@@ -71,44 +76,46 @@ defmodule Compos.Ui.MobileLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # a chord: the keys go in order through the same queue. "fan" says
-  # whether the chord fan stays open afterwards.
-  def handle_event("keys", %{"ks" => specs} = p, socket) when is_list(specs) or is_binary(specs) do
+  # a chord: the keys go in order through the same queue
+  def handle_event("keys", %{"ks" => specs}, socket) when is_list(specs) or is_binary(specs) do
     specs = if is_binary(specs), do: String.split(specs, " ", trim: true), else: specs
     Enum.each(specs, fn k -> if is_binary(k), do: Input.dispatch(socket.assigns.frame, k) end)
-    socket = if is_boolean(p["fan"]), do: assign(socket, fan: p["fan"], fan_all: false), else: socket
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # the chord key went down or up over nothing: the fan opens or stays
+  # the chord key: the keys panel opens or closes. Opening fetches the
+  # buffer's bindings from Scheme and lands on the pending prefix's tab
+  # when one is latched.
   def handle_event("fan", %{"open" => open}, socket) when is_boolean(open) do
-    {:noreply, socket |> assign(fan: open, fan_all: false) |> refresh()}
+    socket = if open, do: load_keys(socket), else: socket
+    {:noreply, socket |> assign(fan: open) |> refresh()}
   end
 
-  # the scrim, or the key while the fan is open: never mind
+  def handle_event("fan_tab", %{"t" => tab}, socket) when is_binary(tab) do
+    {:noreply, socket |> assign(fan_tab: tab) |> refresh()}
+  end
+
+  # the scrim, or the key while the panel is open: never mind
   def handle_event("fan_quit", _p, socket) do
     Input.dispatch(socket.assigns.frame, "C-g")
-    {:noreply, socket |> assign(fan: false, fan_all: false) |> drain() |> refresh()}
+    {:noreply, socket |> assign(fan: false) |> drain() |> refresh()}
   end
 
-  # the fan ran out of room: every binding under the prefix, as a list
-  def handle_event("fan_all", _p, socket) do
-    {:noreply, socket |> assign(fan_all: true) |> refresh()}
-  end
-
-  # one item of the fan. A prefix at level one latches: its key goes
-  # through and the fan stays for the next slide. Anything else runs and
-  # the fan closes.
-  def handle_event("arc", %{"k" => key} = p, socket) when is_binary(key) do
-    Enum.each(String.split(key, " ", trim: true), &Input.dispatch(socket.assigns.frame, &1))
-    stays = p["lvl"] == "1" and key not in ["C-g", "M-x"]
-    {:noreply, socket |> assign(fan: stays, fan_all: false) |> drain() |> refresh()}
+  # one row of the panel: its section and its key make the chord. A
+  # section that is already the frame's pending prefix is not pressed
+  # twice; a family section (plain, C-, M-) is not a key at all.
+  def handle_event("fan_run", %{"s" => section, "k" => key}, socket)
+      when is_binary(section) and is_binary(key) do
+    prefix = if section in @families, do: [], else: String.split(section, " ", trim: true)
+    prefix = if socket.assigns.state.pending == prefix, do: [], else: prefix
+    Enum.each(prefix ++ String.split(key, " ", trim: true), &Input.dispatch(socket.assigns.frame, &1))
+    {:noreply, socket |> assign(fan: false) |> drain() |> refresh()}
   end
 
   # the composer: prose, a chord, or M-x. Scheme decides which.
   def handle_event("compose", %{"text" => text}, socket) when is_binary(text) do
     Input.run(socket.assigns.frame, fn -> Session.call_named("handheld-compose!", [text]) end)
-    {:noreply, socket |> assign(fan: false, fan_all: false) |> drain() |> refresh()}
+    {:noreply, socket |> assign(fan: false) |> drain() |> refresh()}
   end
 
   # a command by name: the modeline's bundle segment names one
@@ -320,7 +327,7 @@ defmodule Compos.Ui.MobileLive do
 
     {view, view_key} = view_for(socket, state, leaf)
 
-    # a sheet owns the screen: the fan closes under it
+    # a sheet owns the screen: the panel closes under it
     fan = socket.assigns.fan and state.minibuffer == nil and state.transient == nil
 
     socket =
@@ -331,9 +338,7 @@ defmodule Compos.Ui.MobileLive do
         subscribed: subscribed,
         view: view,
         view_key: view_key,
-        fan: fan,
-        fan_all: socket.assigns.fan_all and fan,
-        fan_rows: if(fan and state.pending != [], do: fan_rows(fid, state), else: nil)
+        fan: fan
       )
 
     case fid && Editor.take_navigation(fid) do
@@ -342,24 +347,54 @@ defmodule Compos.Ui.MobileLive do
     end
   end
 
-  # which of the which-key rows the fan shows under the pending prefix,
-  # and how many it leaves out: Scheme's rule, over the frame's rows
-  defp fan_rows(fid, state) do
-    prefix = Enum.join(state.pending, " ")
-    rows = for w <- state.which_key || [], do: [w.key, w.command]
+  # the buffer's bindings in the panel's sections, from Scheme. One call
+  # per buffer and mode; the rows inside a section sort by rank, then key.
+  defp load_keys(socket) do
+    fid = socket.assigns.frame
+    leaf = socket.assigns.leaf
+    key = {leaf && leaf.buffer, leaf && leaf.mode}
 
-    case Input.run(fid, fn -> Session.call_named("handheld-fan", [prefix, rows]) end) do
-      {:ok, [shown, hidden]} when is_list(shown) ->
-        %{
-          shown: for([k, c] <- shown, do: %{key: str(k), label: str(c), lvl: "2"}),
-          hidden: if(is_number(hidden), do: trunc(hidden), else: 0)
-        }
+    keys =
+      if key == socket.assigns.keys_key and socket.assigns.keys != [] do
+        socket.assigns.keys
+      else
+        fetch_keys(fid, leaf && leaf.buffer)
+      end
+
+    pending = Enum.join(socket.assigns.state.pending, " ")
+    names = Enum.map(keys, & &1.name)
+
+    tab =
+      cond do
+        pending != "" and pending in names -> pending
+        socket.assigns.fan_tab in names -> socket.assigns.fan_tab
+        true -> List.first(names)
+      end
+
+    assign(socket, keys: keys, keys_key: key, fan_tab: tab)
+  end
+
+  defp fetch_keys(nil, _buf), do: []
+  defp fetch_keys(_fid, nil), do: []
+
+  defp fetch_keys(fid, buf) do
+    case Input.run(fid, fn -> Session.call_named("handheld-keys", [buf]) end) do
+      {:ok, sections} when is_list(sections) ->
+        for [name, rows] <- sections do
+          rows =
+            for [k, cmd, doc, rank] <- list(rows) do
+              %{key: str(k), command: str(cmd), doc: str(doc), rank: if(is_number(rank), do: rank, else: 2)}
+            end
+            |> Enum.sort_by(&{&1.rank, String.downcase(&1.key), &1.key})
+
+          %{name: str(name), rows: rows}
+        end
 
       _ ->
-        %{shown: for(w <- state.which_key || [], do: %{key: w.key, label: w.command, lvl: "2"}), hidden: 0}
+        []
     end
   rescue
-    _ -> %{shown: [], hidden: 0}
+    _ -> []
   end
 
   # what Scheme says the client shows. One call per change of the shown
@@ -379,10 +414,8 @@ defmodule Compos.Ui.MobileLive do
 
   defp fetch_view(fid, buf) do
     case Input.run(fid, fn -> Session.call_named("handheld-view", [buf]) end) do
-      {:ok, [prefixes, limit, tabs, chips]} ->
+      {:ok, [tabs, chips]} ->
         %{
-          prefixes: for([k, l] <- list(prefixes), do: %{key: str(k), label: str(l)}),
-          limit: if(is_number(limit), do: max(trunc(limit), 1), else: 6),
           tabs:
             for [n, l, k, c] <- list(tabs) do
               %{buf: str(n), label: str(l), kind: str(k), current: c == true}
@@ -492,11 +525,11 @@ defmodule Compos.Ui.MobileLive do
       </div>
 
       <div :if={@fan} class="hh-scrim" phx-click="fan_quit"></div>
-      <.fan :if={@fan} state={@state} view={@view} fan_rows={@fan_rows} fan_all={@fan_all} />
+      <.keys_panel :if={@fan} state={@state} keys={@keys} tab={@fan_tab} />
 
       <div id="chord-key" class={"hh-key #{if @fan, do: "on"}"}>
         <span class="hh-key-glyph">{key_glyph(@state)}</span>
-        <span class="hh-key-cap">{if @fan, do: "slide", else: "hold"}</span>
+        <span class="hh-key-cap">{if @fan, do: "close", else: "keys"}</span>
       </div>
 
       <.sheet :if={@state.minibuffer || (@state.transient && @state.transient[:groups])} state={@state} />
@@ -585,69 +618,44 @@ defmodule Compos.Ui.MobileLive do
     """
   end
 
-  # the chord fan: prefixes at level one, the frame's which-key rows under
-  # a pending prefix. Past the limit, one item opens the whole list.
-  defp fan(assigns) do
-    assigns =
-      assign(assigns, items: fan_items(assigns.state, assigns.view, assigns.fan_rows, assigns.fan_all))
+  # the keys panel: a tab per section, and the section's bindings as a
+  # scrolling list. A tap on a row presses the chord.
+  defp keys_panel(assigns) do
+    section = Enum.find(assigns.keys, &(&1.name == assigns.tab)) || List.first(assigns.keys)
+    assigns = assign(assigns, section: section)
 
     ~H"""
-    <div class="hh-fan">
-      <%= if @fan_all do %>
-        <div class="hh-fan-list">
-          <div
-            :for={it <- @items}
-            class="hh-fan-row"
-            data-arc={it.key}
-            data-lvl={it.lvl}
-            phx-click="arc"
-            phx-value-k={it.key}
-            phx-value-lvl={it.lvl}
-          >
-            <span class="hh-arc-key">{it.key}</span>
-            <span class="hh-arc-label">{it.label}</span>
+    <div class="hh-keys" id="keys-panel">
+      <div class="hh-keys-tabs">
+        <span
+          :for={s <- @keys}
+          class={"hh-keys-tab #{if @section && s.name == @section.name, do: "on"}"}
+          phx-click="fan_tab"
+          phx-value-t={s.name}
+        >{s.name}<small>{length(s.rows)}</small></span>
+        <span class="hh-spacer"></span>
+        <span class="hh-keys-quit" phx-click="fan_quit">C-g</span>
+      </div>
+      <div :if={@section} class="hh-keys-list" id={"keys-#{:erlang.phash2(@section.name)}"}>
+        <div
+          :for={r <- @section.rows}
+          class="hh-key-row"
+          phx-click="fan_run"
+          phx-value-s={@section.name}
+          phx-value-k={r.key}
+        >
+          <span class="hh-key-box">{r.key}</span>
+          <div class="hh-row-main">
+            <div class="hh-key-cmd">{r.command}</div>
+            <div :if={r.doc != ""} class="hh-key-doc">{r.doc}</div>
           </div>
         </div>
-      <% else %>
-        <div
-          :for={{it, i} <- Enum.with_index(@items)}
-          class={"hh-arc #{if it.key == "C-g" and it.lvl == "1", do: "quit"}"}
-          style={"bottom: #{fan_bottom(i)}px"}
-          data-arc={it.key}
-          data-lvl={it.lvl}
-          data-more={it[:more] && "1"}
-          phx-click={if it[:more], do: "fan_all", else: "arc"}
-          phx-value-k={it.key}
-          phx-value-lvl={it.lvl}
-        >
-          <span class="hh-arc-key">{it.key}</span>
-          <span class="hh-arc-label">{it.label}</span>
-        </div>
-      <% end %>
+        <div :if={@section.rows == []} class="hh-empty">nothing bound here</div>
+      </div>
+      <div :if={@keys == []} class="hh-empty">no bindings to show</div>
     </div>
     """
   end
-
-  defp fan_items(%{pending: []}, view, _rows, _all) do
-    Enum.map(view.prefixes, &%{key: &1.key, label: &1.label, lvl: "1"})
-  end
-
-  # the whole list when asked; else Scheme's cut, and one arc for the rest
-  defp fan_items(state, _view, rows, all) do
-    cond do
-      all ->
-        for w <- state.which_key || [], do: %{key: w.key, label: w.command, lvl: "2"}
-
-      rows == nil or rows.hidden == 0 ->
-        (rows && rows.shown) || []
-
-      true ->
-        rows.shown ++ [%{key: "…", label: "#{rows.hidden} more", lvl: "2", more: true}]
-    end
-  end
-
-  # the first item sits just above the chord key; each next one a row up
-  defp fan_bottom(i), do: 284 + i * 58
 
   defp sheet(%{state: %{minibuffer: mb}} = assigns) when is_map(mb) do
     assigns = assign(assigns, mb: mb, split: mb_split(mb))

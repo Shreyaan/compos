@@ -32,15 +32,14 @@ lives in the client. The policy lives in
   the chat when the group has none. A long press opens the group's
   buffers as a prompt sheet. `handheld-tabs` builds the rows,
   `handheld-tab!` answers the tap, and `handheld-tab-hold!` the press.
-- **The chord key.** Hold it and the fan opens on the prefixes in
-  `handheld-prefixes`. Slide onto a prefix and its bindings appear: they
-  are the frame's own which-key rows. Release over a row to run it.
-  A tap latches, so hold-and-slide and tap-tap-tap reach the same command.
-  `handheld-fan` picks what the fan shows under a prefix: the keys pinned
-  for that prefix in `handheld-fan-pins`, in that order; then single
-  letters and digits; then other single keys; then nested sequences. The
-  first `handheld-fan-limit` rows show, and a "more" arc opens the whole
-  list.
+- **The chord key.** A tap opens the keys panel. Its tabs are the
+  sections: `plain` for unmodified keys, `C-` and `M-` for modified
+  single keys, then one tab per prefix (`C-x`, `C-c`, `C-h`, ...). Each
+  tab is a scrolling list of the bindings under it, with the command and
+  the first line of its doc. A tap on a row presses the whole chord.
+  When a prefix is already pending the panel opens on that tab and does
+  not press the prefix again. `handheld-keys` builds the sections from
+  the buffer's whole keymap ladder; a local key wins over a global one.
 - **The sheets.** An active minibuffer renders as a sheet of rows. A tap
   on a row selects it and accepts. An active transient renders as a sheet
   of key boxes; a tap sends the key. Every prompt and every transient
@@ -57,10 +56,8 @@ lives in the client. The policy lives in
 
 ## Customs
 
-- `handheld-prefixes` — the `(KEY LABEL)` rows on the fan's first level.
-- `handheld-fan-pins` — `(PREFIX KEY ...)` rows: the keys the fan shows
-  first under each prefix.
-- `handheld-fan-limit` — how many rows the fan shows under a prefix.
+- `handheld-prefixes` — `(KEY LABEL)` rows: the prefixes the keys panel
+  lists first, after the families.
 
 ## Not built yet
 

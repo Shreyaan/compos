@@ -234,24 +234,34 @@ defmodule Compos.Ui.MobileLayouts do
           .hh-tab[data-kind="dir"] .hh-tab-kind { color: var(--green); }
           .hh-tab-title { font-family: var(--font-serif); font-size: 13.5px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-          /* ── the chord key and the fan ──────────────────────────── */
+          /* ── the chord key and the keys panel ───────────────────── */
           .hh-scrim { position: absolute; inset: 0; background: rgba(10, 10, 12, .28); z-index: 10; }
-          .hh-fan { position: absolute; inset: 0; z-index: 12; pointer-events: none; }
-          .hh-arc {
-            position: absolute; right: 16px; min-width: 176px; pointer-events: auto;
-            display: flex; align-items: center; gap: 10px; padding: 11px 14px;
-            background: var(--panel); color: var(--ink); border: 1px solid var(--rule);
-            box-shadow: 0 6px 18px rgba(10, 10, 12, .16);
+          .hh-keys {
+            position: absolute; left: 0; right: 0; bottom: var(--dock-h, 170px); z-index: 12;
+            max-height: 62%; display: flex; flex-direction: column;
+            background: var(--paper); border-top: 1px solid var(--ink);
+            box-shadow: 0 -6px 18px rgba(10, 10, 12, .12);
           }
-          .hh-arc.quit { color: var(--red); }
-          .hh-arc.hover, .hh-fan-row.hover { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-          .hh-arc-key { flex: none; font-weight: 600; font-size: 13px; min-width: 34px; }
-          .hh-arc-label { flex: 1; font-family: var(--font-serif); font-size: 14.5px; line-height: 1.2; text-align: right; }
-          .hh-fan-list {
-            position: absolute; left: 12px; right: 12px; bottom: 274px; max-height: 60dvh; overflow: auto; pointer-events: auto;
-            background: var(--paper); border: 1px solid var(--ink); box-shadow: 0 6px 18px rgba(10, 10, 12, .16);
+          .hh-keys-tabs {
+            flex: none; display: flex; align-items: center; gap: 4px; padding: 8px 10px;
+            border-bottom: 1px solid var(--rule); background: var(--panel);
+            overflow-x: auto; scrollbar-width: none;
           }
-          .hh-fan-row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 14px; border-bottom: 1px solid var(--rule-soft); }
+          .hh-keys-tabs::-webkit-scrollbar { display: none; }
+          .hh-keys-tab {
+            flex: none; padding: 7px 10px; border: 1px solid var(--rule); background: var(--paper);
+            font-size: 12px; font-weight: 600; letter-spacing: .04em; white-space: nowrap;
+          }
+          .hh-keys-tab small { margin-left: 5px; font-size: 9px; font-weight: 400; color: var(--faint); }
+          .hh-keys-tab.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+          .hh-keys-tab.on small { color: var(--paper); opacity: .7; }
+          .hh-keys-quit { flex: none; padding: 5px 10px; border: 1px solid var(--rule); font-size: 10.5px; letter-spacing: .1em; color: var(--faint); }
+          .hh-keys-list { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+          .hh-key-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; border-bottom: 1px solid var(--rule-soft); }
+          .hh-key-row:active { background: var(--sand); }
+          .hh-key-box { flex: none; min-width: 34px; padding: 4px 7px; border: 1px solid var(--rule); text-align: center; font-size: 12px; font-weight: 600; color: var(--indigo); white-space: nowrap; }
+          .hh-key-cmd { font-family: var(--font-serif); font-size: 15.5px; line-height: 1.2; }
+          .hh-key-doc { margin-top: 2px; font-size: 10.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .hh-key {
             position: absolute; z-index: 14; right: 18px; bottom: calc(200px + var(--safe-bottom));
             width: 62px; height: 62px; border-radius: 31px;
@@ -411,48 +421,15 @@ defmodule Compos.Ui.MobileLayouts do
                 if (rows !== this.rows) { this.rows = rows; this.push("viewport", { rows }); }
               },
 
-              // ── the chord key: hold, slide, release ────────────────
+              // ── the chord key: a tap opens the keys panel, a tap closes it ──
               bindKey() {
                 const key = document.getElementById("chord-key");
                 if (!key || key.dataset.bound) return;
                 key.dataset.bound = "1";
                 key.addEventListener("pointerdown", (e) => {
                   e.preventDefault();
-                  key.setPointerCapture(e.pointerId);
-                  this.hover = null;
-                  this.latched = null;
-                  if (key.classList.contains("on")) { this.push("fan_quit", {}); this.dragging = false; return; }
-                  this.dragging = true;
-                  this.push("fan", { open: true });
+                  this.push("fan", { open: !key.classList.contains("on") });
                 });
-                key.addEventListener("pointermove", (e) => {
-                  if (!this.dragging) return;
-                  const el = document.elementFromPoint(e.clientX, e.clientY);
-                  const hit = el && el.closest ? el.closest("[data-arc]") : null;
-                  const k = hit ? hit.getAttribute("data-arc") : null;
-                  if (k === this.hover) return;
-                  document.querySelectorAll("[data-arc].hover").forEach((n) => n.classList.remove("hover"));
-                  this.hover = k;
-                  if (hit) hit.classList.add("hover");
-                  // sliding onto a prefix at level one latches it at once,
-                  // so its bindings are under the thumb before it stops
-                  if (hit && hit.getAttribute("data-lvl") === "1" && k !== "C-g" && k !== "M-x" && this.latched !== k) {
-                    this.latched = k;
-                    this.hover = null;
-                    this.push("arc", { k, lvl: "1" });
-                  }
-                });
-                const up = (e) => {
-                  if (!this.dragging) return;
-                  this.dragging = false;
-                  const el = document.elementFromPoint(e.clientX, e.clientY);
-                  const hit = el && el.closest ? el.closest("[data-arc]") : null;
-                  if (!hit) return;
-                  if (hit.getAttribute("data-more")) { this.push("fan_all", {}); return; }
-                  this.push("arc", { k: hit.getAttribute("data-arc"), lvl: hit.getAttribute("data-lvl") });
-                };
-                key.addEventListener("pointerup", up);
-                key.addEventListener("pointercancel", () => { this.dragging = false; });
               },
 
               // ── the tab rail: a tap is the group, a hold is its buffers ──

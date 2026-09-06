@@ -19,34 +19,18 @@
 (defgroup 'handheld "The handheld client: the chord fan, the tab rail, the composer.")
 
 (defcustom 'handheld-prefixes
-  '(("C-c" "Compos verbs")
-    ("C-x" "Buffers and windows")
-    ("M-x" "Command by name")
-    ("C-h" "What does this do?")
-    ("C-g" "Never mind"))
-  "The keys the chord fan offers first. Each entry is (KEY LABEL)."
+  '(("C-x" "Buffers and windows")
+    ("C-c" "Compos verbs")
+    ("C-h" "What does this do?"))
+  "The prefixes the keys panel lists first, in this order. Each entry is (KEY LABEL)."
   'group 'handheld 'type 'list)
 
-(defcustom 'handheld-fan-limit 7
-  "How many bindings the chord fan shows under a prefix. The rest open as a list."
-  'group 'handheld 'type 'number)
-
-(defcustom 'handheld-fan-pins
-  '(("C-x" "b" "g" "C-f" "k" "s" "d")
-    ("C-c" "b" "c" "n" "a")
-    ("C-h" "b" "k" "m" "f"))
-  "The keys the fan shows first under a prefix, in this order. Each entry is (PREFIX KEY ...). A pinned key that the keymap does not bind is skipped."
-  'group 'handheld 'type 'list)
-
-;;; --- the fan: which keys sit under the thumb -------------------------------------
-;;; The frame's which-key rows are every binding under the prefix, and a
-;;; phone has room for a handful. The rule: the pinned keys for this
-;;; prefix first, then single letters and digits, then any other single
-;;; key, then the nested sequences. The limit cuts the list and the client
-;;; offers the rest as a scrolling list.
-
-(define (handheld-single-key? key)
-  (not (string-contains? key " ")))
+;;; --- the keys panel: every binding, in sections --------------------------------
+;;; The chord key opens a panel. Its tabs are the sections: "plain" for
+;;; unmodified single keys, "C-" and "M-" for modified single keys, and
+;;; one tab per prefix ("C-x", "C-c", ...). Each section is a scrolling
+;;; list of the bindings under it. The bindings are the buffer's whole
+;;; keymap ladder, the earlier map winning, and the global map last.
 
 (define *handheld-plain-chars*
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -55,38 +39,79 @@
   (and (= (string-length key) 1)
        (string-contains? *handheld-plain-chars* key)))
 
-(define (handheld-take xs n)
-  (if (or (null? xs) (<= n 0))
-      '()
-      (cons (car xs) (handheld-take (cdr xs) (- n 1)))))
-
-(define (handheld-fan-rank key)
+;; 0 for a letter or digit, 1 for any other single key, 2 for a sequence
+(define (handheld-key-rank key)
   (cond ((handheld-plain-key? key) 0)
-        ((handheld-single-key? key) 1)
-        (else 2)))
+        ((string-contains? key " ") 2)
+        (else 1)))
 
-(define (handheld-fan-pinned prefix)
-  (let ((e (assoc prefix handheld-fan-pins)))
-    (if e (cdr e) '())))
+;; the family of a single key: its modifier, or "plain"
+(define (handheld-key-family key)
+  (cond ((string-prefix? "C-" key) "C-")
+        ((string-prefix? "M-" key) "M-")
+        ((string-prefix? "s-" key) "s-")
+        ((string-prefix? "S-" key) "S-")
+        (else "plain")))
 
-;; ROWS are ((KEY COMMAND) ...) under PREFIX, as the frame reports them.
-;; Returns (SHOWN HIDDEN): SHOWN is ((KEY COMMAND) ...) in fan order, cut
-;; at handheld-fan-limit; HIDDEN counts the rows the cut left out.
-(define (handheld-fan prefix rows)
-  (let* ((pins (handheld-fan-pinned prefix))
-         (pinned (filter (lambda (r) r)
-                         (map (lambda (k) (assoc k rows)) pins)))
-         (rest (filter (lambda (r) (not (member (car r) pins))) rows))
-         (ranked (append
-                   (filter (lambda (r) (= (handheld-fan-rank (car r)) 0)) rest)
-                   (filter (lambda (r) (= (handheld-fan-rank (car r)) 1)) rest)
-                   (filter (lambda (r) (= (handheld-fan-rank (car r)) 2)) rest)))
-         (ordered (append pinned ranked))
-         (n (length ordered))
-         (limit (max 1 handheld-fan-limit)))
-    (if (<= n limit)
-        (list ordered 0)
-        (list (handheld-take ordered limit) (- n limit)))))
+;; (SECTION ROW-KEY) for a binding: a single key sits in its family; a
+;; sequence sits under its first key, the rest of the sequence as its row
+(define (handheld-key-place keys)
+  (let ((toks (string-split keys " ")))
+    (if (null? (cdr toks))
+        (list (handheld-key-family (car toks)) (car toks))
+        (list (car toks) (string-join (cdr toks) " ")))))
+
+;; every binding in force in BUF: ((KEYS COMMAND) ...), the earlier map
+;; winning, without the self-insert keys
+(define (handheld-bindings buf)
+  (let loop ((maps (buffer-keymaps buf)) (seen '()) (out '()))
+    (if (null? maps)
+        (reverse out)
+        (let inner ((rows (if (equal? (car maps) "global")
+                              (global-keys)
+                              (keymap-bindings (car maps))))
+                    (seen seen) (out out))
+          (cond ((null? rows) (loop (cdr maps) seen out))
+                ((or (member (car (car rows)) seen)
+                     (equal? (car (cdr (car rows))) "self-insert-command"))
+                 (inner (cdr rows) seen out))
+                (else (inner (cdr rows)
+                             (cons (car (car rows)) seen)
+                             (cons (car rows) out))))))))
+
+(define (handheld-doc-line cmd)
+  (let ((doc (command-doc cmd)))
+    (if (string? doc) (car (string-split doc "\n")) "")))
+
+;; the sections in order: the families, then the prefixes handheld-prefixes
+;; names, then every other prefix as it appears
+(define (handheld-section-order sections)
+  (let* ((named (append '("plain" "C-" "M-" "s-" "S-")
+                        (map car handheld-prefixes)))
+         (first (filter (lambda (s) (member s sections)) named))
+         (rest (filter (lambda (s) (not (member s named))) sections)))
+    (append first rest)))
+
+;; The panel: ((SECTION ((KEY COMMAND DOC RANK) ...)) ...). KEY is the
+;; row's own key inside its section; the client sends SECTION and KEY
+;; back as one chord.
+(define (handheld-keys buf)
+  (let loop ((rows (handheld-bindings buf)) (acc '()))
+    (if (null? rows)
+        (let ((sections (reverse (map car acc))))
+          (map (lambda (s) (list s (reverse (cdr (assoc s acc)))))
+               (handheld-section-order sections)))
+        (let* ((keys (car (car rows)))
+               (cmd (car (cdr (car rows))))
+               (place (handheld-key-place keys))
+               (section (car place))
+               (row (list (car (cdr place)) cmd (handheld-doc-line cmd)
+                          (handheld-key-rank (car (cdr place)))))
+               (e (assoc section acc)))
+          (loop (cdr rows)
+                (if e
+                    (map (lambda (x) (if (equal? (car x) section) (cons section (cons row (cdr x))) x)) acc)
+                    (cons (list section row) acc)))))))
 
 ;;; --- the tab rail: groups -------------------------------------------------------
 ;;; A phone switches groups, not buffers. The rail is the groups in MRU
@@ -106,11 +131,13 @@
 
 ;; A tap on a tab: switch to the group and show its chat, founding the
 ;; chat when the group has none yet. Returns the chat buffer, or #f.
+;; The current group is not switched to again: a switch restores the
+;; group's saved arrangement, and a tap on where you are means the chat.
 (define (handheld-tab! g)
   (let ((id (group-resolve-id g)))
     (cond ((not id) (message "No such group") #f)
           (else
-           (switch-to-group! id)
+           (unless (equal? id (frame-group)) (switch-to-group! id))
            (let ((chat (or (group-chat id) (group-chat-new! id))))
              (if chat
                  (group-chat-buffer-show! chat)
@@ -233,18 +260,15 @@
 
 (effects! '(read))
 
-;; Everything the client asks for in one call:
-;; (PREFIXES FAN-LIMIT TABS CHIPS)
+;; Everything the client asks for in one call: (TABS CHIPS)
 (define (handheld-view buf)
-  (list handheld-prefixes
-        handheld-fan-limit
-        (handheld-tabs)
+  (list (handheld-tabs)
         (handheld-chips buf)))
 
 (public! 'handheld-view
-  "(handheld-view BUF) -> (PREFIXES FAN-LIMIT TABS CHIPS): what the handheld client shows for BUF")
-(public! 'handheld-fan
-  "(handheld-fan PREFIX ROWS) -> (SHOWN HIDDEN): the which-key rows the fan shows under PREFIX, pins first, and how many it left out")
+  "(handheld-view BUF) -> (TABS CHIPS): what the handheld client shows for BUF")
+(public! 'handheld-keys
+  "(handheld-keys BUF) -> ((SECTION ((KEY COMMAND DOC RANK) ...)) ...): every binding in force in BUF, in the panel's sections")
 (public! 'handheld-classify
   "(handheld-classify TEXT) -> (empty) | (keys KEYS) | (command NAME) | (prose TEXT)")
 (public! 'handheld-compose!
