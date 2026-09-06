@@ -12385,6 +12385,9 @@
 (global-set-key "C-M-d" "down-list")
 
 (global-set-key "C-SPC" "set-mark-command")
+;; macOS gives C-SPC to the input-source switch, so the mark has a second
+;; key. Emacs' own M-SPC (cycle-spacing) is not bound here.
+(global-set-key "M-SPC" "set-mark-command")
 (global-set-key "C-w" "kill-region")
 (global-set-key "M-w" "copy-region-as-kill")
 (global-set-key "C-x C-x" "exchange-point-and-mark")

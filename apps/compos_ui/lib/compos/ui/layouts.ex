@@ -1395,6 +1395,8 @@ defmodule Compos.Ui.Layouts do
 
           function baseKey(e) {
             if (e.altKey) {
+              // Option-Space arrives as a no-break space in some engines
+              if (e.code === "Space") return "SPC";
               if (e.code.startsWith("Key")) return e.code.slice(3).toLowerCase();
               if (e.code.startsWith("Digit")) return e.code.slice(5);
               if (CODE_CHARS[e.code]) return CODE_CHARS[e.code][e.shiftKey ? 1 : 0];
@@ -3109,6 +3111,19 @@ defmodule Compos.Ui.Layouts do
                   const anchorByte = sel.anchorNode && buf.contains(sel.anchorNode) ? domByte(sel.anchorNode, sel.anchorOffset) : null;
                   const wantAnchor = mark === null || mark === pt ? pt : mark;
                   if (focusByte === pt && anchorByte === wantAnchor) { markCurrentRow(buf); return; }
+                  // The reader's selection outranks a stale point. A report
+                  // is on its way, or has gone and not come back: until the
+                  // server's point is the one reported, a patch (a chat
+                  // writing above the caret) must not put the selection back
+                  // where the server still thinks it is. A report the server
+                  // never echoes (it moved point past an insertion) waits
+                  // three seconds, then the server's point stands.
+                  if (this._selPending) { markCurrentRow(buf); return; }
+                  const rep = this._reported;
+                  if (rep && !rep.acked) {
+                    if (rep.point === pt && (rep.mark === null ? pt : rep.mark) === wantAnchor) rep.acked = true;
+                    else if (performance.now() - rep.at < 3000) { markCurrentRow(buf); return; }
+                  }
                   this._settingSel = true;
                   try {
                     if (wantAnchor !== pt) {
@@ -3146,6 +3161,12 @@ defmodule Compos.Ui.Layouts do
                   // (a text node under the caret replaced, a focus the
                   // page took) and is not a report.
                   if (performance.now() - (this._gestureAt || 0) > 1500) return;
+                  // The last hand on the DOM decides. A patch that landed
+                  // after the gesture (a chat writing above the caret)
+                  // replaced the nodes under the caret, and the caret it
+                  // left is the browser's, not the reader's. Reporting it
+                  // moved point and dropped the region on every edit.
+                  if ((this._patchAt || 0) > (this._gestureAt || 0)) return;
                   const a = document.activeElement;
                   const buf = a && a.closest ? a.closest(".buf[contenteditable]") : null;
                   if (!buf || buf.hasAttribute("phx-update")) return;
@@ -3160,7 +3181,9 @@ defmodule Compos.Ui.Layouts do
                   // it thirty times a second, and a server redraw per step
                   // starves the paint of the caret itself
                   clearTimeout(this._selt);
+                  this._selPending = true;
                   this._selt = setTimeout(() => {
+                    this._selPending = false;
                     if (this._settingSel) return;
                     // the surface that had the caret may have lost it since:
                     // a patch made the buffer read-only again, or another
@@ -3208,6 +3231,8 @@ defmodule Compos.Ui.Layouts do
                   // before it; at a soft wrap that row is the upper one
                   this._affinity = wrapAffinity(sel);
                   this.pushEvent("sel", { win: winIdOf(buf), point, mark, keep: !!keep });
+                  // syncEditable waits for the server to agree with this
+                  this._reported = { point, mark, at: performance.now(), acked: false };
                   return true;
                 };
                 // a motion command asks the browser's layout to move the
@@ -3790,6 +3815,9 @@ defmodule Compos.Ui.Layouts do
                 });
               },
               afterPatch() {
+                // the patch stamp: selChangeH compares it with the gesture
+                // stamp to tell a reader's caret move from a patch's
+                this._patchAt = performance.now();
                 this.applyWhichKeyFilter();
                 this.restoreClientScroll();
                 this.applyScrollRequests();
