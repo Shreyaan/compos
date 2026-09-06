@@ -4281,6 +4281,77 @@ defmodule Compos.EditorTest do
       Compos.Core.Session.eval(~s{(buffer-kill! "#{companion}")})
     end
 
+    test "window-eat takes the neighbor's rectangle, not the tree's sibling", %{buf: buf} do
+      second = "eat-second-#{System.unique_integer([:positive])}"
+      third = "eat-third-#{System.unique_integer([:positive])}"
+      for name <- [second, third], do: Compos.Core.create_buffer(name)
+
+      # three columns nested to the right: deleting the middle one would
+      # hand its space to the right pair. An eat hands it to the eater.
+      {:ok, _} =
+        Compos.Core.Session.eval("""
+        (begin (delete-other-windows!)
+               (switch-to-buffer! "#{buf}")
+               (split-window! 'h 0.4)
+               (other-window!)
+               (switch-to-buffer! "#{second}")
+               (split-window! 'h 0.5)
+               (other-window!)
+               (switch-to-buffer! "#{third}")
+               (select-window! (window-showing "#{buf}")))
+        """)
+
+      run("window-eat")
+
+      rects = Map.new(Editor.window_rects(), fn [_id, b, x, _y, w, _h] -> {b, {x, w}} end)
+      assert rects |> Map.keys() |> Enum.sort() == Enum.sort([buf, third])
+      assert_in_delta elem(rects[buf], 0), 0.0, 0.001
+      assert_in_delta elem(rects[buf], 1), 0.7, 0.001
+      assert_in_delta elem(rects[third], 0), 0.7, 0.001
+      assert_in_delta elem(rects[third], 1), 0.3, 0.001
+
+      for name <- [second, third], do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
+    end
+
+    test "window-eat only swallows a pane that makes one rectangle", %{buf: buf} do
+      second = "eat-column-#{System.unique_integer([:positive])}"
+      third = "eat-column-#{System.unique_integer([:positive])}"
+      for name <- [second, third], do: Compos.Core.create_buffer(name)
+
+      # one pane beside a column of two: neither half of the column shares
+      # a whole edge with it
+      {:ok, _} =
+        Compos.Core.Session.eval("""
+        (begin (delete-other-windows!)
+               (switch-to-buffer! "#{buf}")
+               (split-window! 'h 0.5)
+               (other-window!)
+               (switch-to-buffer! "#{second}")
+               (split-window! 'v 0.5)
+               (other-window!)
+               (switch-to-buffer! "#{third}")
+               (select-window! (window-showing "#{buf}")))
+        """)
+
+      run("window-eat")
+      assert length(Editor.window_rects()) == 3
+
+      # from the bottom of the column, the pane above it is a meal
+      {:ok, _} = Compos.Core.Session.eval(~s{(select-window! (window-showing "#{third}"))})
+
+      run("window-eat")
+
+      rects = Map.new(Editor.window_rects(), fn [_id, b, x, y, w, h] -> {b, {x, y, w, h}} end)
+      assert rects |> Map.keys() |> Enum.sort() == Enum.sort([buf, third])
+      {x, y, w, h} = rects[third]
+      assert_in_delta x, 0.5, 0.001
+      assert_in_delta y, 0.0, 0.001
+      assert_in_delta w, 0.5, 0.001
+      assert_in_delta h, 1.0, 0.001
+
+      for name <- [second, third], do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
+    end
+
     test "window layout selection previews and restores the layout on cancel", %{buf: buf} do
       second = "layout-preview-second-#{System.unique_integer([:positive])}"
       third = "layout-preview-third-#{System.unique_integer([:positive])}"

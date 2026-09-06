@@ -3154,6 +3154,12 @@ defmodule Compos.Ui.Layouts do
                   clearTimeout(this._selt);
                   this._selt = setTimeout(() => {
                     if (this._settingSel) return;
+                    // the surface that had the caret may have lost it since:
+                    // a patch made the buffer read-only again, or another
+                    // window went active. That caret is nobody's move.
+                    if (!buf.isConnected || !buf.hasAttribute("contenteditable")) return;
+                    const w = buf.closest(".window");
+                    if (!w || !w.classList.contains("active")) return;
                     const sel = window.getSelection();
                     const pt = parseInt(buf.dataset.pt, 10);
                     // a collapsed caret still on the server's point is no news

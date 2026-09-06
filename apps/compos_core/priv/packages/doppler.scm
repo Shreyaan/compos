@@ -256,19 +256,20 @@
                        (substring value (- n 4) n)))
       "••••"))
 
-(define (doppler--row-block buf name i)
-  ;; Four table header lines put the first secret on line five.
-  (component 'ui/row
-    (list 'segs
-          (list (list "doppler-secret-name" name)
-                (list "c-dim doppler-secret-value"
-                      (doppler--elide-value
-                        (doppler-secret-value
-                          (doppler--project buf) (doppler--config buf) name))))
-          'class "doppler-row"
-          'click (string-append "doppler:row:" (number->string i))
-          'lines (list (+ i 5) (+ i 5))
-          'mark "current")))
+(define (doppler--row-block buf name i first-line)
+  ;; FIRST-LINE is the 1-based text line of row 0: one past the header.
+  (let ((line (+ first-line i)))
+    (component 'ui/row
+      (list 'segs
+            (list (list "doppler-secret-name" name)
+                  (list "c-dim doppler-secret-value"
+                        (doppler--elide-value
+                          (doppler-secret-value
+                            (doppler--project buf) (doppler--config buf) name))))
+            'class "doppler-row"
+            'click (string-append "doppler:row:" (number->string i))
+            'lines (list line line)
+            'mark "current"))))
 
 (define (doppler--render-blocks! buf names)
   (desktop-skip! buf 'render-blocks)
@@ -284,11 +285,16 @@
         (component 'ui/section (list 'title "Secret names" 'count (length names))))
       (if (null? names)
           (list (component 'ui/empty (list 'text "No secrets in this project and config.")))
-          (let loop ((xs names) (i 0) (rows '()))
-            (if (null? xs)
-                (reverse rows)
-                (loop (cdr xs) (+ i 1)
-                      (cons (doppler--row-block buf (car xs) i) rows))))))))
+          ;; The header is what the list draws above row 0. Ask it, so the
+          ;; row blocks and the text lines agree: a hardcoded count put
+          ;; the highlight one row below point.
+          (let ((first-line (+ 1 (list-header-lines buf))))
+            (let loop ((xs names) (i 0) (rows '()))
+              (if (null? xs)
+                  (reverse rows)
+                  (loop (cdr xs) (+ i 1)
+                        (cons (doppler--row-block buf (car xs) i first-line)
+                              rows)))))))))
 
 (define (doppler--rows buf)
   (let* ((names (dp--secret-name-list (doppler--project buf) (doppler--config buf)))

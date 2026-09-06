@@ -1801,10 +1801,13 @@
            (cur? (equal? (current-buffer) buf))
            ;; the buffer's own point: a refresh runs while another buffer
            ;; is current (a hook, a prompt), and that list keeps its place
-           (p (buffer-point buf))
-           (ro (buffer-read-only? buf)))
-      ;; our own rewrite is not a user edit, and the buffer is read-only.
-      (buffer-set-read-only! buf #f)
+           (p (buffer-point buf)))
+      ;; The rewrite is a programmatic write: buffer-replace-range! bypasses
+      ;; read-only on its own. The flag stays where it is. A flip off and
+      ;; on reached the browser as two patches when a hook redrew the list
+      ;; outside a command, and for the patch between them the read-only
+      ;; buffer was editable: the client took the caret, lost its text
+      ;; node on the second patch, and reported end-of-buffer as point.
       ;; a paged list draws the first page of its rows; the entries keep
       ;; every row, so the counts and the filters see them all
       (let* ((shown (list-page-rows buf rows)))
@@ -1836,7 +1839,6 @@
           ;; the tag's old ranges go with this set: one change, not a
           ;; clear and then a set
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))))
-      (buffer-set-read-only! buf ro)
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
             (last (- (list-shown-count buf) 1)))
         (cond ((and i (pair? rows)) (list-goto-index! buf (min i last)))
@@ -11786,6 +11788,59 @@
     "windmove-swap-states-left" "windmove-swap-states-right"
     "windmove-swap-states-up" "windmove-swap-states-down"))
 
+;; Eat the pane next door: it goes away and this window takes exactly its
+;; rectangle. Only a neighbor that shares a whole edge is a meal, so the
+;; panes that are not eaten keep the space they had — the space does not
+;; fall to whichever sibling the split tree favours, the way a delete
+;; leaves it. Without a direction the first neighbor that merges is
+;; eaten, right and down first.
+(define *window-eat-order* '(right down left up))
+
+(define (window--rect id)
+  (let loop ((l (window-rects)))
+    (cond ((null? l) #f)
+          ((equal? (car (car l)) id) (car l))
+          (else (loop (cdr l))))))
+
+;; two panes make one rectangle when they meet along a whole shared edge
+(define (window-rects-merge? a b)
+  (let* ((eps 1.0e-6)
+         (near? (lambda (p q) (< (abs (- p q)) eps)))
+         (ax (list-ref a 2)) (ay (list-ref a 3))
+         (aw (list-ref a 4)) (ah (list-ref a 5))
+         (bx (list-ref b 2)) (by (list-ref b 3))
+         (bw (list-ref b 4)) (bh (list-ref b 5)))
+    (or (and (near? ay by) (near? ah bh)
+             (or (near? (+ ax aw) bx) (near? (+ bx bw) ax)))
+        (and (near? ax bx) (near? aw bw)
+             (or (near? (+ ay ah) by) (near? (+ by bh) ay))))))
+
+(define (window-eat! &optional dir)
+  (let ((me (active-window))
+        (mine (window--rect (active-window)))
+        (dirs (if dir (list dir) *window-eat-order*)))
+    (let loop ((l dirs) (refused #f))
+      (if (null? l)
+          (message (if refused
+                       "That pane and this one make no rectangle"
+                       "No neighboring pane"))
+          (let ((n (window-in-direction (car l))))
+            (cond ((not n) (loop (cdr l) refused))
+                  ((or (not (window-focusable? (car n)))
+                       (not (layout-visible-window? n))
+                       (not (window-rects-merge? mine n)))
+                   (loop (cdr l) #t))
+                  (else
+                    ;; winner records what a delete leaves behind, and an
+                    ;; eat is a delete: C-c <left> brings the pane back
+                    (winner-save!)
+                    (window-eat-id! me (car n))
+                    (message (string-append "Ate " (cadr n))))))))))
+
+(define-command "window-eat" "Eat the neighboring pane and take its space"
+  (lambda () (window-eat!)))
+(catalog-meta! 'command "window-eat" 'domain 'windows 'effects '(write display))
+
 ;; Emacs windmove has no default keys. A keymap installs them:
 ;; (windmove-default-keybindings MODIFIERS) binds the four arrows with
 ;; MODIFIERS to windmove-*. MODIFIERS is one symbol or a list of symbols
@@ -12326,6 +12381,7 @@
 (global-set-key "C-x 3" "split-window-right")
 (global-set-key "C-x 0" "delete-window")
 (global-set-key "C-x 1" "delete-other-windows")
+(global-set-key "C-x e" "window-eat")
 (global-set-key "C-x o" "other-window")
 (global-set-key "C-x l" "window-layout")
 (global-set-key "C-c p" "popup-buffer")
@@ -12481,13 +12537,15 @@
   "(tile-windows! ALGORITHM BUFFERS) — arrange names with two-pane, columns, rows, grid, main-right, main-left, main-bottom, or main-top")
 (public! 'tile-visible-windows!
   "(tile-visible-windows! ALGORITHM) — rearrange visible work windows with a named tiler")
+(public! 'window-eat!
+  "(window-eat! [DIR]) — the neighboring pane goes away and this window takes its rectangle; DIR is left, right, up or down")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'windows 'effects '(write display)))
   '("select-window!" "split-window!" "delete-window-id!"
     "delete-other-windows!" "other-window!" "display-buffer" "pop-to-buffer"
     "define-display-action!" "split-window-sensibly" "window-quit-restore!"
     "display-buffer-popup!" "display-buffer-other-window!" "apply-layout!"
-    "tile-windows!" "tile-visible-windows!"))
+    "tile-windows!" "tile-visible-windows!" "window-eat!"))
 (effects! '(write))
 (public! 'add-display-rule!
   "(add-display-rule! PATTERN ACTION [PARAMS]) — set display policy without showing a buffer. PATTERN is a name substring or (category KIND); ACTION is one action name or a list: popup, pop-up-window, reuse-window, use-some-window, same-window")

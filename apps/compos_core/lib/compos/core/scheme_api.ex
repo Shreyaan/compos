@@ -1605,6 +1605,9 @@ defmodule Compos.Core.SchemeAPI do
       end,
       "delete-window!" => fn [] -> Editor.delete_window() == :ok end,
       "delete-window-id!" => fn [id] -> Editor.delete_window_by_id(id) == :ok end,
+      # false when the two panes make no rectangle: only a whole shared
+      # edge can merge, so an eat never resizes a pane it leaves alone
+      "window-eat-id!" => fn [id, victim] -> Editor.eat_window(id, victim) == :ok end,
       "window-list" => fn [] -> Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end) end,
       # the layout round-trips as one opaque value: Scheme stores it in a
       # buffer-local and hands it back; only Elixir reads its insides.

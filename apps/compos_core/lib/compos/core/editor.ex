@@ -408,6 +408,7 @@ defmodule Compos.Core.Editor do
 
   def delete_window(fid \\ nil), do: GenServer.call(__MODULE__, {:delete_window, fid(fid)})
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
+  def eat_window(id, victim), do: GenServer.call(__MODULE__, {:eat_window, id, victim})
   def list_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:list_windows, fid(fid)})
   def window_rects(fid \\ nil), do: GenServer.call(__MODULE__, {:window_rects, fid(fid)})
 
@@ -1943,6 +1944,32 @@ defmodule Compos.Core.Editor do
   def handle_call({:list_windows, fid}, _from, state),
     do: {:reply, leaf_ids_buffers(frame(state, fid).tree), state}
 
+  # An eat is a delete that hands the freed space to the eater instead of
+  # to whichever sibling the split tree happens to favour. Only two panes
+  # that make one rectangle can merge, so every other pane keeps the
+  # rectangle it had; the tree is rebuilt around the new set of
+  # rectangles, leaves and all, so points, scroll and history survive.
+  def handle_call({:eat_window, id, victim}, _from, state) do
+    f = find_window_frame(state, id)
+    boxes = if f, do: leaf_boxes(f.tree, {0.0, 0.0, 1.0, 1.0}), else: []
+
+    with true <- id != victim,
+         {me, my_rect} <- Enum.find(boxes, fn {leaf, _} -> leaf.id == id end),
+         {eaten, their_rect} <- Enum.find(boxes, fn {leaf, _} -> leaf.id == victim end),
+         union when not is_nil(union) <- rect_union(my_rect, their_rect),
+         rest = Enum.reject(boxes, fn {leaf, _} -> leaf.id in [id, victim] end),
+         tree when not is_nil(tree) <- regrow([{me, union} | rest], {0.0, 0.0, 1.0, 1.0}) do
+      if Buffer.exists?(eaten.buffer),
+        do: wp_safely(fn -> Buffer.drop_win_point(eaten.buffer, victim) end)
+
+      active = if f.active == victim, do: id, else: f.active
+
+      changed(:ok, state |> put_frame(%{f | tree: tree, active: active}) |> resync_swap(), f.id)
+    else
+      _ -> {:reply, {:error, :cannot_eat}, state}
+    end
+  end
+
   def handle_call({:window_rects, fid}, _from, state),
     do: {:reply, leaf_rects(frame(state, fid).tree, {0.0, 0.0, 1.0, 1.0}), state}
 
@@ -2825,6 +2852,80 @@ defmodule Compos.Core.Editor do
 
   defp leaf_rects(%{type: :split, dir: :v, ratio: r, children: [a, b]}, {x, y, w, h}),
     do: leaf_rects(a, {x, y, w, h * r}) ++ leaf_rects(b, {x, y + h * r, w, h * (1 - r)})
+
+  # the same walk, keeping the leaf itself: a rebuild puts the very same
+  # leaves back, so nothing a window remembers is lost on the way
+  defp leaf_boxes(%{type: :leaf} = leaf, rect), do: [{leaf, rect}]
+
+  defp leaf_boxes(%{type: :split, dir: :h, ratio: r, children: [a, b]}, {x, y, w, h}),
+    do: leaf_boxes(a, {x, y, w * r, h}) ++ leaf_boxes(b, {x + w * r, y, w * (1 - r), h})
+
+  defp leaf_boxes(%{type: :split, dir: :v, ratio: r, children: [a, b]}, {x, y, w, h}),
+    do: leaf_boxes(a, {x, y, w, h * r}) ++ leaf_boxes(b, {x, y + h * r, w, h * (1 - r)})
+
+  @rect_eps 1.0e-6
+
+  # the one rectangle two panes make when they share a whole edge, or nil
+  defp rect_union({x1, y1, w1, h1}, {x2, y2, w2, h2}) do
+    same = fn a, b -> abs(a - b) < @rect_eps end
+
+    cond do
+      same.(y1, y2) and same.(h1, h2) and (same.(x1 + w1, x2) or same.(x2 + w2, x1)) ->
+        {min(x1, x2), y1, w1 + w2, h1}
+
+      same.(x1, x2) and same.(w1, w2) and (same.(y1 + h1, y2) or same.(y2 + h2, y1)) ->
+        {x1, min(y1, y2), w1, h1 + h2}
+
+      true ->
+        nil
+    end
+  end
+
+  # rebuild a split tree that gives every leaf the rectangle it is paired
+  # with: cut the region where no pane straddles the line, and recurse.
+  # nil when those rectangles are no guillotine tiling of the region.
+  defp regrow([{leaf, _rect}], _region), do: leaf
+
+  defp regrow(boxes, {x, y, w, h}) do
+    case first_cut(boxes, :h, x, w) || first_cut(boxes, :v, y, h) do
+      nil ->
+        nil
+
+      {dir, at, near, far} ->
+        {ra, rb} =
+          if dir == :h,
+            do: {{x, y, at - x, h}, {at, y, x + w - at, h}},
+            else: {{x, y, w, at - y}, {x, at, w, y + h - at}}
+
+        a = regrow(near, ra)
+        b = regrow(far, rb)
+
+        if a && b do
+          ratio = if dir == :h, do: (at - x) / w, else: (at - y) / h
+          %{type: :split, dir: dir, ratio: ratio, children: [a, b]}
+        end
+    end
+  end
+
+  # the first line across the region that every pane lies wholly on one
+  # side of, with panes on both sides
+  defp first_cut(boxes, dir, lo, len) do
+    span = fn {_leaf, {rx, ry, rw, rh}} ->
+      if dir == :h, do: {rx, rx + rw}, else: {ry, ry + rh}
+    end
+
+    boxes
+    |> Enum.map(&elem(span.(&1), 1))
+    |> Enum.filter(&(&1 > lo + @rect_eps and &1 < lo + len - @rect_eps))
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.find_value(fn at ->
+      {near, far} = Enum.split_with(boxes, &(elem(span.(&1), 1) <= at + @rect_eps))
+
+      if near != [] and far != [] and Enum.all?(far, &(elem(span.(&1), 0) >= at - @rect_eps)),
+        do: {dir, at, near, far}
+    end)
+  end
 
   defp leaf_ids(%{type: :leaf, id: id}), do: [id]
   defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)
