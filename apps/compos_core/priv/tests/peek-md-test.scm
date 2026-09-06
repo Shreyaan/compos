@@ -22,7 +22,7 @@
                 (loop (+ i 1))))
             (run-command "dired-visit")
             (check-equal! (current-buffer) d "after one peek: in dired")
-            (check-true! (popup-open?) "the peek is in the popup")
+            (check-true! (and (peek-shown) #t) "a look is on screen")
             (list-move-in! d 1)
             (run-command "dired-visit")
             (check-equal! (current-buffer) d "after two: in dired")
@@ -36,13 +36,13 @@
             (check-equal! (length (peek-buffers)) 1 "one peek")
             (run-command "dired-quit")
             (check-equal! (length (peek-buffers)) 0 "q took the peek")
-            (check-false! (popup-open?) "and the popup")
+            (check-false! (peek-shown) "and nothing is left on screen")
             (check-equal! (current-buffer) d "dired stays")
             (buffer-kill! d)
             (group-record-delete! id)))))))
 
 (deftest 'a-peek-keeps-its-mode-when-the-listing-under-it-is-killed
-  "killing dired with a peek up leaves the peek a peek, in the popup"
+  "killing dired with a peek up leaves the peek a peek, in its window"
   (lambda ()
     (t--peek-with
       (lambda ()
@@ -58,8 +58,7 @@
             (check-true! (peek-buffer? a) "a peek shows")
             (buffer-kill! d)
             (check-true! (peek-buffer? a) "the peek is still a peek")
-            (check-equal! (popup-buffer) a "still in the popup")
+            (check-true! (and (window-showing a) #t) "still on screen")
             (check-false! (equal? (window-buffer me) a)
                           (string-append "the work window did not fall onto it: " (or (window-buffer me) "none")))
-            (check-equal! (active-window) me
-                          (string-append "and stays selected; active " (number->string (active-window)) " popup " (number->string (or (popup-window) 0))))))))))
+            (check-equal! (active-window) me "and stays selected")))))))

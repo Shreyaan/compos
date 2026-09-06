@@ -1446,6 +1446,38 @@
 (public! 'active-groups
   "(active-groups) — every group with an open buffer, most recent first")
 
+;;; --- the frame tab rail ---------------------------------------------------
+;;; The frame modeline carries the groups the frame last stood in, most
+;;; recent first, and counts the ones it left out. A tab is one click to
+;;; another context; the count opens the board that holds the rest.
+
+(defcustom 'frame-tabs-limit 5
+  "How many groups the frame modeline shows as tabs. The rest count as one more."
+  'group 'groups 'type 'number)
+
+;; (((ID LABEL CURRENT?) ...) MORE)
+(define (frame-tabs)
+  (let* ((here (frame-group))
+         (ids (group-ids-mru))
+         (shown (take-n ids (max 1 frame-tabs-limit))))
+    (list (map (lambda (id) (list id (group-short-name id) (equal? id here)))
+               shown)
+          (max 0 (- (length ids) (length shown))))))
+
+;; A click on a tab: stand in that group. Already there, nothing moves.
+(define (frame-tab! g)
+  (let ((id (group-resolve-id g)))
+    (cond ((not id) (message "No such group") #f)
+          ((equal? id (frame-group)) id)
+          (else (switch-to-group! id) id))))
+
+(public! 'frame-tabs
+  "(frame-tabs) -> (((ID LABEL CURRENT?) ...) MORE) — the groups the frame modeline shows as tabs, most recent first, and how many the limit left out")
+(catalog-meta! 'function "frame-tabs" 'domain 'buffers 'effects '(read))
+(public! 'frame-tab!
+  "(frame-tab! GROUP) — stand in GROUP; returns its id, or #f when no group answers to it")
+(catalog-meta! 'function "frame-tab!" 'domain 'buffers 'effects '(write display))
+
 (define (group-buffer-memberships buf)
   (if (chat-buffer? buf)
       (let ((id (chat-group-id buf))) (if id (list id) '()))

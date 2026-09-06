@@ -869,21 +869,60 @@ defmodule Compos.Ui.Layouts do
           .echo-bar {
             order: var(--ui-echo-order, -1);
             display: flex; align-items: baseline; gap: 14px;
-            min-height: 30px; padding: 7px 14px 8px;
+            min-height: 34px; padding: 4px 14px 5px;
             flex-shrink: 0;
             background: var(--window-bg, #fdfcf8);
             border-bottom: 1px solid var(--border-bg, #cbc4b1);
             font-family: var(--font-mono); font-size: 14px;
           }
-          .echo { color: var(--dim-fg, #57534a); white-space: pre; }
+          .echo {
+            color: var(--dim-fg, #57534a); white-space: pre;
+            min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
+          }
           .ml-frame-path {
-            min-width: 0; max-width: 62vw; overflow: hidden; text-overflow: ellipsis;
+            min-width: 0; max-width: 62vw; flex: 0 1 auto;
+            overflow: hidden; text-overflow: ellipsis;
             color: var(--dim-fg, #57534a); font-size: 12.5px; white-space: nowrap;
           }
           .ml-frame-group {
             color: var(--frame-group-color, var(--accent-fg, #26356b)); font-size: 12.5px;
             font-weight: 650; white-space: nowrap;
           }
+          /* The frame tab rail: the groups the frame last stood in. It is
+             furniture, so it is the loudest thing on the bar, and the group
+             you stand in is a filled chip in that group's own colour. */
+          .ml-tabs {
+            display: flex; align-items: center; gap: 5px;
+            min-width: 0; flex: 0 1 auto; overflow: hidden;
+            align-self: center; padding-right: 12px;
+            border-right: 1px solid color-mix(in srgb, var(--border-bg, #cbc4b1) 70%, transparent);
+          }
+          .ml-tab {
+            cursor: pointer; white-space: nowrap;
+            font-size: 13px; font-weight: 600; letter-spacing: 0.15px;
+            padding: 3px 11px 4px; border-radius: 7px;
+            color: var(--dim-fg, #8a857a);
+            background: color-mix(in srgb, var(--border-bg, #cbc4b1) 30%, transparent);
+            border: 1px solid transparent;
+            max-width: 20ch; overflow: hidden; text-overflow: ellipsis;
+            transition: background 90ms ease, color 90ms ease;
+          }
+          .ml-tab:hover {
+            color: var(--fg, #2b2723);
+            background: color-mix(in srgb, var(--border-bg, #cbc4b1) 80%, transparent);
+          }
+          /* Mixed a shade down so the near-white label clears the lighter
+             group colours, and reads the same under a dark theme. */
+          .ml-tab-on, .ml-tab-on:hover {
+            color: #fdfcf8; font-weight: 700; max-width: 26ch;
+            background: color-mix(in srgb, var(--frame-group-color, var(--accent-fg, #26356b)) 84%, #14120e);
+            border-color: color-mix(in srgb, var(--frame-group-color, var(--accent-fg, #26356b)) 60%, #14120e);
+            box-shadow: 0 2px 9px color-mix(in srgb, var(--frame-group-color, var(--accent-fg, #26356b)) 34%, transparent);
+          }
+          .ml-tab-more {
+            background: transparent; font-weight: 500; opacity: 0.7;
+          }
+          .ml-tab-more:hover { opacity: 1; }
           .echo-hint {
             color: var(--dim-fg, #8a857a); opacity: 0.8; font-size: 12.5px;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

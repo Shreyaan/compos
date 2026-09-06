@@ -1,6 +1,6 @@
 ;;; peek-test.scm --- editor.scm's peek: look at a buffer without keeping it.
 ;;;
-;;; A peek shows in the popup, read-only. The next peek replaces it and
+;;; A peek shows in another window, read-only. The next peek replaces it and
 ;;; kills what the first peek made. A buffer that existed before is only
 ;;; shown. RET again, or M-RET, opens it as your own. q dismisses it. A
 ;;; replaced peek leaves a row in recent, and the switcher lists it.
@@ -29,8 +29,17 @@
     (run-command "delete-other-windows")
     out))
 
-(deftest 'a-peek-shows-in-the-popup-and-the-selected-window-stays
-  "the file is in the popup, marked, read-only, and the reader did not move"
+;; The stock rule sends no look to the popup. A rule of your own still
+;; can, and the tests of that path hold the rule while they run.
+(define (t--peek-in-popup thunk)
+  (let ((saved *display-buffer-alist*))
+    (add-display-rule! '(category preview) 'popup)
+    (let ((out (thunk)))
+      (set! *display-buffer-alist* saved)
+      out)))
+
+(deftest 'a-peek-shows-in-another-window-and-the-selected-window-stays
+  "the file is beside the reader, marked, read-only, and the reader did not move"
   (lambda ()
     (t--peek-with
       (lambda ()
@@ -40,8 +49,9 @@
           (check-equal! (current-buffer) "*scratch*" "the reader stays put")
           (check-equal! (active-window) me "in the same window")
           (check-true! (peek-buffer? a) "the file is a peek")
-          (check-true! (popup-open?) "the popup is open")
-          (check-equal! (popup-buffer) a "and shows the file")
+          (check-false! (popup-open?) "no popup opened")
+          (check-true! (and (window-showing a) #t) "a window shows the file")
+          (check-false! (equal? (window-showing a) me) "and it is not the reader's window")
           (check-true! (buffer-read-only? a) "read-only")
           (check-contains! (buffer-modeline-name a) "peek" "and its modeline says so"))))))
 
@@ -104,15 +114,15 @@
           (check-equal! (current-buffer) a "and the reader is in it")
           (check-false! (equal? (active-window) me) "in another window: never on top of the listing")
           (check-equal! (window-buffer me) "*scratch*" "the listing's window keeps the listing")
-          (check-false! (popup-open?) "the popup gave it up")
+          (check-false! (popup-open?) "and no popup was ever opened")
           (check-false! (buffer-read-only? a) "writable")
           (check-false! (string-contains? (buffer-modeline-name a) "peek")
                         "the modeline is plain again")
-          ;; the next peek gets a fresh popup; the opened buffer stays put
+          ;; the next peek gets a window; the opened buffer stays put
           (let ((b (t--peek-file "b.txt" "beta\n")))
             (peek-file! b)
-            (check-true! (popup-open?) "a fresh popup")
-            (check-equal! (popup-buffer) b "with the new peek")
+            (check-true! (and (window-showing b) #t) "the new peek shows in a window")
+            (check-false! (popup-open?) "still no popup")
             (check-equal! (current-buffer) a "and the opened buffer stays where it is")))))))
 
 (deftest 'a-peek-is-read-only-and-keep-makes-it-writable
@@ -215,8 +225,9 @@
             (check-equal! (dired-entry) "a.txt" "point is on the file")
             (run-command "dired-visit")
             (check-equal! (current-buffer) d "still in dired")
-            (check-true! (peek-buffer? a) "the file is a peek in the popup")
-            (check-equal! (popup-buffer) a "in the popup")
+            (check-true! (peek-buffer? a) "the file is a peek")
+            (check-false! (equal? (window-showing a) (window-showing d))
+                          "in a window beside dired")
             (let ((me (active-window)))
               (run-command "dired-visit")
               (check-equal! (current-buffer) a "the second RET opened it")
@@ -241,7 +252,7 @@
             (check-true! (peek-buffer? a) "a peek shows")
             (run-command "dired-quit")
             (check-false! (buffer-exists? a) "q took the peek")
-            (check-false! (popup-open?) "and the popup")
+            (check-false! (window-showing a) "and its window gave it up")
             (check-equal! (current-buffer) d "dired stays")
             (run-command "dired-quit")
             (check-false! (equal? (current-buffer) d) "q again leaves dired")))))))
@@ -275,7 +286,7 @@
             (set! *web-fetch* saved)))))))
 
 (deftest 'a-shown-peek-follows-the-dired-highlight
-  "no popup until RET; then the file under the rested highlight replaces the peek"
+  "no look until RET; then the file under the rested highlight replaces the peek"
   (lambda ()
     (t--peek-with
       (lambda ()
@@ -289,7 +300,7 @@
                 (loop (+ i 1))))
             ;; the highlight rests on a.txt with no peek showing: nothing
             (dired--preview d (dired-entry))
-            (check-false! (peek-buffer? a) "moving the highlight opens no popup")
+            (check-false! (peek-buffer? a) "moving the highlight opens no look")
             (run-command "dired-visit")
             (check-true! (peek-buffer? a) "RET peeks it")
             (list-move-in! d 1)
@@ -329,45 +340,48 @@
           (buffer-kill! "*zz-plain-popup*"))))))
 
 (deftest 'the-peek-floats-on-the-side-away-from-the-listing
-  "asked from the right window it floats left; from the left, right"
+  "with a rule that sends a look to the popup: asked from the right it floats left; from the left, right"
   (lambda ()
     (t--peek-with
       (lambda ()
-        (let ((a (t--peek-file "a.txt" "alpha\n"))
-              (left (active-window)))
-          (split-window! 'h 0.5)
-          (other-window!)
-          (let ((right (active-window)))
-            (peek-file! a)
-            (check-equal! (buffer-local a 'window-class) "popup popup-left"
-                          "from the right window the popup floats left")
-            (popup-close!)
-            (select-window! left)
-            (peek-file! a)
-            (check-equal! (buffer-local a 'window-class) "popup popup-right"
-                          "from the left window it floats right")))))))
+        (t--peek-in-popup
+          (lambda ()
+            (let ((a (t--peek-file "a.txt" "alpha\n"))
+                  (left (active-window)))
+              (split-window! 'h 0.5)
+              (other-window!)
+              (peek-file! a)
+              (check-equal! (buffer-local a 'window-class) "popup popup-left"
+                            "from the right window the popup floats left")
+              (popup-close!)
+              (select-window! left)
+              (peek-file! a)
+              (check-equal! (buffer-local a 'window-class) "popup popup-right"
+                            "from the left window it floats right"))))))))
 
 (deftest 'a-left-peek-leaves-the-listing-where-it-was
-  "the popup floats; the window it covers keeps its id and its place"
+  "a popup look floats; the window it covers keeps its id and its place"
   (lambda ()
     (t--peek-with
       (lambda ()
-        (let ((a (t--peek-file "a.txt" "alpha\n")))
-          (split-window! 'h 0.5)
-          (other-window!)
-          (let* ((me (active-window))
-                 (before (assoc me (window-rects))))
-            (peek-file! a)
-            (check-equal! (buffer-local a 'window-class) "popup popup-left" "it floats left")
-            (check-equal! (active-window) me "the reader's window is the same window")
-            (check-equal! (window-buffer me) "*scratch*" "and still shows the listing")
-            (check-equal! (nth 2 (assoc me (window-rects))) (nth 2 before)
-                          "and starts where it started")
-            ;; a second peek keeps the side, wherever it is asked from
-            (let ((b (t--peek-file "b.txt" "beta\n")))
-              (peek-file! b)
-              (check-equal! (buffer-local b 'window-class) "popup popup-left"
-                            "the side is chosen once"))))))))
+        (t--peek-in-popup
+          (lambda ()
+            (let ((a (t--peek-file "a.txt" "alpha\n")))
+              (split-window! 'h 0.5)
+              (other-window!)
+              (let* ((me (active-window))
+                     (before (assoc me (window-rects))))
+                (peek-file! a)
+                (check-equal! (buffer-local a 'window-class) "popup popup-left" "it floats left")
+                (check-equal! (active-window) me "the reader's window is the same window")
+                (check-equal! (window-buffer me) "*scratch*" "and still shows the listing")
+                (check-equal! (nth 2 (assoc me (window-rects))) (nth 2 before)
+                              "and starts where it started")
+                ;; a second peek keeps the side, wherever it is asked from
+                (let ((b (t--peek-file "b.txt" "beta\n")))
+                  (peek-file! b)
+                  (check-equal! (buffer-local b 'window-class) "popup popup-left"
+                                "the side is chosen once"))))))))))
 
 (deftest 'a-rested-look-fires-only-where-it-was-scheduled
   "the reader moved on: the look does nothing"
@@ -385,26 +399,27 @@
           (check-true! (peek-buffer? a) "back where it was scheduled, the look fires"))))))
 
 (deftest 'an-opened-peek-over-a-waiting-popup-stops-floating
-  "messages under the peek: open the peek, and it is a plain window while the popup shows messages"
+  "messages under a popup look: open the look, and it is a plain window while the popup shows messages"
   (lambda ()
     (t--peek-with
       (lambda ()
-        (let ((a (t--peek-file "a.txt" "alpha\n")))
-          (buffer-create "*zz-under*")
-          (popup-show "*zz-under*")
-          (select-window! (car (car (window-list))))
-          (switch-to-buffer! "*scratch*")
-          (peek-file! a)
-          (check-equal! (popup-stack) (list "*zz-under*") "the popup buffer waits under the peek")
-          (peek-open! a (lambda () a))
-          (check-equal! (buffer-local a 'window-class) #f "opened, the buffer does not float")
-          (check-equal! (popup-buffer) "*zz-under*" "the popup shows what waited")
-          (check-equal! (length (filter (lambda (w) (popup--class? (cadr w))) (window-list))) 1
-                        "one floating window, not more")
-          (check-equal! (current-buffer) a "the reader is in the opened buffer")
-          (popup-close!)
-          (buffer-kill! "*zz-under*"))))))
-
+        (t--peek-in-popup
+          (lambda ()
+            (let ((a (t--peek-file "a.txt" "alpha\n")))
+              (buffer-create "*zz-under*")
+              (popup-show "*zz-under*")
+              (select-window! (car (car (window-list))))
+              (switch-to-buffer! "*scratch*")
+              (peek-file! a)
+              (check-equal! (popup-stack) (list "*zz-under*") "the popup buffer waits under the peek")
+              (peek-open! a (lambda () a))
+              (check-equal! (buffer-local a 'window-class) #f "opened, the buffer does not float")
+              (check-equal! (popup-buffer) "*zz-under*" "the popup shows what waited")
+              (check-equal! (length (filter (lambda (w) (popup--class? (cadr w))) (window-list))) 1
+                            "one floating window, not more")
+              (check-equal! (current-buffer) a "the reader is in the opened buffer")
+              (popup-close!)
+              (buffer-kill! "*zz-under*"))))))))
 (deftest 'a-peek-takes-no-focus
   "showing and replacing a peek moves the selection nowhere; other-window passes the peek by"
   (lambda ()
@@ -450,9 +465,9 @@
           (run-command "delete-other-windows")
           (peek-file! c)
           (check-false! (peek-buffer? c) "it existed: not a peek")
-          (check-equal! (popup-buffer) c "but it is what the look shows")
+          (check-true! (and (window-showing c) #t) "but it is what the look shows")
           (check-true! (peek-dismiss!) "q takes it")
-          (check-false! (popup-open?) "the popup is gone")
+          (check-false! (window-showing c) "the window gave it up")
           (check-true! (buffer-exists? c) "and the buffer, which was yours, stays"))))))
 
 (deftest 'closing-a-peek-restores-nothing

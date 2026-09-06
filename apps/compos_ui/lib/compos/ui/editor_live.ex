@@ -18,6 +18,9 @@ defmodule Compos.Ui.EditorLive do
   # cursor a visible width. Keep the placeholder a non-breaking space.
   @cursor_placeholder "\u00a0"
 
+  # the frame tab rail before Scheme has answered, and when it cannot
+  @no_tabs %{tabs: [], more: 0}
+
   @impl true
   def mount(params, _session, socket) do
     identity = instance_identity()
@@ -57,6 +60,8 @@ defmodule Compos.Ui.EditorLive do
           frame: fid,
           subscribed: MapSet.new(),
           line_cache: %{},
+          tabs: @no_tabs,
+          tabs_key: nil,
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           instance_name: identity.name,
           instance_accent: identity.accent
@@ -71,6 +76,8 @@ defmodule Compos.Ui.EditorLive do
          state: nil,
          subscribed: MapSet.new(),
          line_cache: %{},
+         tabs: @no_tabs,
+         tabs_key: nil,
          boot_id: :persistent_term.get(:compos_boot_id, "dev"),
          instance_name: identity.name,
          instance_accent: identity.accent
@@ -169,6 +176,24 @@ defmodule Compos.Ui.EditorLive do
 
   # a tool card's summary: toggle its one open-state (S6) — the chat
   # local drives this view, the plain view's fold, and save/restore
+  # a click on the frame tab rail: stand in that group. The chip that
+  # counts the groups the rail left out opens the board instead.
+  def handle_event("frame_tab", %{"id" => id}, socket) when is_binary(id) and id != "" do
+    Input.run(socket.assigns.frame, fn ->
+      Compos.Core.Session.call_named("frame-tab!", [id])
+    end)
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  def handle_event("frame_tab", _params, socket) do
+    Input.run(socket.assigns.frame, fn ->
+      Compos.Core.Session.call_named("run-command", ["groups"])
+    end)
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   def handle_event("agent_card", %{"win" => win, "id" => id}, socket) do
     with {wid, ""} <- Integer.parse(to_string(win)) do
       Input.run(socket.assigns.frame, fn ->
@@ -576,7 +601,16 @@ defmodule Compos.Ui.EditorLive do
         socket.assigns.subscribed
       end
 
-    socket = assign(socket, state: state, subscribed: subscribed, line_cache: line_cache)
+    {tabs, tabs_key} = frame_tabs(socket, state)
+
+    socket =
+      assign(socket,
+        state: state,
+        subscribed: subscribed,
+        line_cache: line_cache,
+        tabs: tabs,
+        tabs_key: tabs_key
+      )
 
     # a command left text for this client's OS clipboard (copy-buffer-link)
     socket =
@@ -1191,7 +1225,7 @@ defmodule Compos.Ui.EditorLive do
         <span class="workspace-bar-root">{@state.workspace.root}</span>
         <span class="workspace-bar-help">C-x w new tab · C-x d switch daemon</span>
       </div>
-      <.frame_modeline state={@state} />
+      <.frame_modeline state={@state} tabs={@tabs} />
       <div class="windows">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </div>
@@ -1347,20 +1381,71 @@ defmodule Compos.Ui.EditorLive do
     """
   end
 
+  # The bar reads left to right from what stays to what passes: the tab
+  # rail is furniture and holds the left edge through a prompt, and the
+  # echo, the global mode string and the key hint are the ephemeral half,
+  # after the spacer. A message never moves a tab.
   defp frame_modeline(assigns) do
     ~H"""
     <div
       :if={true}
       class="echo-bar"
     >
-      <span class="echo">{@state.echo}</span>
+      <span :if={@tabs.tabs != []} class="ml-tabs">
+        <span
+          :for={t <- @tabs.tabs}
+          class={"ml-tab #{if t.current, do: "ml-tab-on"}"}
+          title={"switch to #{t.label}"}
+          phx-click="frame_tab"
+          phx-value-id={t.id}
+        >{t.label}</span>
+        <span
+          :if={@tabs.more > 0}
+          class="ml-tab ml-tab-more"
+          title="every group (C-x C-g l)"
+          phx-click="frame_tab"
+        >{@tabs.more} more</span>
+      </span>
       <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
       <span class="mb-spacer"></span>
-      <span :if={@state.minibuffer == nil && @state.transient == nil && @state.frame_group} class="ml-frame-group">group {@state.frame_group}</span>
+      <span class="echo">{@state.echo}</span>
       <span :if={@state.minibuffer == nil && @state.transient == nil && @state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><span class="ml-attention">{@state.modeline_extra}</span><% else %><span :for={{c, t} <- @state.modeline_extra} class={c}>{t}</span><% end %></span>
       <span class="echo-hint" :if={@state.minibuffer == nil && @state.transient == nil && @state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
     </div>
     """
+  end
+
+  # The groups the frame modeline offers as tabs. Scheme decides which
+  # ones and how many, and this asks again only when the frame's group or
+  # the buffer order moved: nothing per keystroke.
+  defp frame_tabs(socket, state) do
+    key = {state.frame_group, Compos.Core.Editor.buffer_mru()}
+
+    if key == socket.assigns[:tabs_key] do
+      {socket.assigns[:tabs] || @no_tabs, key}
+    else
+      {fetch_tabs(socket.assigns[:frame]), key}
+    end
+  end
+
+  defp fetch_tabs(nil), do: @no_tabs
+
+  defp fetch_tabs(fid) do
+    case Input.run(fid, fn -> Compos.Core.Session.call_named("frame-tabs", []) end) do
+      {:ok, [rows, more]} when is_list(rows) ->
+        %{
+          tabs:
+            for [id, label, current] <- rows do
+              %{id: to_string(id), label: to_string(label), current: current == true}
+            end,
+          more: if(is_number(more), do: trunc(more), else: 0)
+        }
+
+      _ ->
+        @no_tabs
+    end
+  rescue
+    _ -> @no_tabs
   end
 
   defp workspace_port(url) do

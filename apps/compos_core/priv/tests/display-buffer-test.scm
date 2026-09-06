@@ -233,7 +233,7 @@
         (popup-close!)))))
 
 (deftest 'a-peek-follows-the-preview-rule
-  "by the stock rule a peek is in the popup; a rule of your own sends it through the chain"
+  "by the stock rule a peek goes through the window chain; a rule of your own sends it to the popup"
   (lambda ()
     (t--db-with t--db-wide
       (lambda ()
@@ -241,13 +241,7 @@
               (b (t--db-file "b.txt" "beta\n"))
               (me (active-window)))
           (peek-file! a)
-          (check-true! (popup-open?) "stock: the peek is in the popup")
-          (check-equal! (popup-buffer) a "showing the file")
-          (peek-dismiss!)
-          (check-false! (popup-open?) "dismissed")
-          (add-display-rule! '(category preview) 'pop-up-window)
-          (peek-file! a)
-          (check-false! (popup-open?) "the rule: no popup")
+          (check-false! (popup-open?) "stock: no popup")
           (check-equal! (length (window-list)) 2 "a window beside")
           (check-equal! (active-window) me "point stays")
           (check-true! (peek-buffer? a) "it is a peek")
@@ -260,4 +254,11 @@
             (check-equal! (active-window) me "point still stays"))
           (peek-dismiss!)
           (check-equal! (length (window-list)) 1 "dismissed: the window the peek made is gone")
-          (check-false! (buffer-exists? b) "and the peek with it"))))))
+          (check-false! (buffer-exists? b) "and the peek with it")
+          ;; a rule of your own puts the look back in the popup
+          (add-display-rule! '(category preview) 'popup)
+          (peek-file! a)
+          (check-true! (popup-open?) "the rule: the popup")
+          (check-equal! (popup-buffer) a "showing the file")
+          (peek-dismiss!)
+          (check-false! (popup-open?) "dismissed"))))))

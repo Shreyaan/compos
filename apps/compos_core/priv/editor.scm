@@ -6015,11 +6015,13 @@
         (list "*opencode" 'popup '())
         (list "*Messages*" 'popup '())
         (list "*llm*" 'popup '())
-        ;; a peek goes to the popup, and so does a buffer from outside the
-        ;; frame's group: the group's panes stay sealed (docs/groups.md).
+        ;; a preview takes another window, never the popup: a popup moves
+        ;; the layout and hides the work under it, and buffer replacement
+        ;; puts the window back. A buffer from outside the frame's group
+        ;; still floats: the group's panes stay sealed (docs/groups.md).
         ;; Last, so a rule for a name wins, and a rule of your own
         ;; (add-display-rule! conses in front) wins too
-        (list '(category preview) 'popup '())
+        (list '(category preview) '(reuse-window use-some-window pop-up-window) '())
         (list '(category foreign) 'popup '())))
 
 ;; A buffer from outside the frame's group. groups.scm answers; with no
@@ -6827,20 +6829,21 @@
 ;;;   ONE peek at a time. The next peek replaces the last one. A buffer
 ;;;     that a peek MADE is killed when it is replaced. A buffer that
 ;;;     existed before the peek is only shown, never killed.
-;;;   THE PEEK WINDOW is the popup. A peek is a look, and the popup is
-;;;     where a look goes; the windows stay as they are. A popup buffer
-;;;     of its own waits under the peek and comes back when it goes.
+;;;   THE PEEK WINDOW is another window, never the popup. A look goes
+;;;     beside the listing: the peek takes a window that is not the
+;;;     reader's, and the next peek takes that same window again. The
+;;;     buffer it replaced comes back when the peek goes.
 ;;;   A PEEK IS READ-ONLY (peek-mode, a minor mode): a stray key changes
 ;;;     nothing, and q dismisses it.
-;;;   OPEN is M-RET on the row (peek-open!): the mark goes, the popup
-;;;     gives the buffer up, and the selected window shows it as a visit
-;;;     would. KEEP alone is M-x keep-buffer, or a change from outside
-;;;     the keyboard.
+;;;   OPEN is M-RET on the row (peek-open!): the mark goes, the peek
+;;;     window gives the buffer up, and the selected window shows it as
+;;;     a visit would. KEEP alone is M-x keep-buffer, or a change from
+;;;     outside the keyboard.
 ;;;   A replaced peek leaves a row in RECENT. The switcher lists recent
 ;;;     below the live buffers, and RET there peeks it again.
 ;;;
 ;;; The mark is the minor mode, and it is saved with the buffer: a peek
-;;; on screen at a restart comes back as a peek, in the popup, read-only.
+;;; on screen at a restart comes back as a peek, read-only.
 
 ;; The mode. A peek is read-only: a look changes nothing, and the
 ;; read-only keymap gives it q. The setup runs on enable and again on a
@@ -6857,7 +6860,7 @@
     (buffer-set-local! buf 'peek-own-read-only #f)))
 
 (mode-doc! "peek-mode"
-  "A look at a buffer without keeping it: read-only, in the popup. q dismisses it; M-RET on the row opens it as your own.")
+  "A look at a buffer without keeping it: read-only, in another window. q dismisses it; M-RET on the row opens it as your own.")
 
 (define (peek-buffer? name)
   (and (string? name) (buffer-exists? name) (minor-mode-on? name "peek-mode")))
@@ -6939,27 +6942,22 @@
 ;; leaves no mark behind, and the next peek must still land in the
 ;; same window instead of splitting again. Keeping the buffer in the
 ;; slot releases the window (peek-keep!).
-;; show NAME as the peek: in the popup, always. A peek is a look, and
-;; the popup is where a look goes; the windows stay as they are, and the
-;; selected window and its point stay. The buffer the popup showed
-;; stops floating; a popup buffer of its own (the messages) waits under
-;; the peek and comes back when the peek is dismissed. Returns the popup
-;; window.
-;; the side away from the window the peek was asked from: the popup
-;; never covers the listing. A window on the right half of the frame
+;; show NAME as the peek: in another window, always. The selected
+;; window and its point stay. Returns the window the peek took.
+;; the side away from the window the peek was asked from. The stock
+;; rule sends no peek to the popup any more, so this answers only a
+;; rule of your own that does. A window on the right half of the frame
 ;; gets the popup on the left; any other, the right.
 (define (peek-side-away-from win)
   (let ((r (assoc win (window-rects))))
     (if (and r (> (+ (nth 2 r) (* 0.5 (nth 4 r))) 0.5)) 'left 'right)))
 
-;; the side is chosen once, when the popup opens; a peek that replaces
-;; another keeps the side the popup has, so the popup never flips
-;; A peek is a preview: it takes no focus. The popup shows it without
+;; A peek is a preview: it takes no focus. The window shows it without
 ;; a selection change, and the focus commands pass it by.
-;; A peek is a display of category preview. The stock rule sends it to the
-;; popup; a rule of your own ((add-display-rule! '(category preview)
-;; 'pop-up-window)) sends it through the window chain instead, and the
-;; next peek takes the window the last one had.
+;; A peek is a display of category preview. The stock rule sends it
+;; through the window chain, and the next peek takes the window the last
+;; one had. A rule of your own ((add-display-rule! '(category preview)
+;; 'popup)) puts it back in the popup, and the popup path below answers.
 (define (peek-show! name)
   (let* ((me (active-window))
          (actions (display-buffer-actions-for name '(category preview)))
@@ -6967,7 +6965,7 @@
                   (peek-show-in-popup! name me)
                   (peek-show-in-window! name me))))
     (set-frame-local! 'peek-window win)
-    ;; what the look put in the popup, by name: a buffer that existed
+    ;; what the look put on screen, by name: a buffer that existed
     ;; before wears no mode, and q must still take it away
     (set-frame-local! 'peek-shown name)
     (peek-drop-others! name)
