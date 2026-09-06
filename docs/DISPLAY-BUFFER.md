@@ -115,19 +115,19 @@ with a disposable-frame runner and keyboard-path test in
 
 The callers pass an alist, a plist:
 
-- `'category KIND`: the kind of display. A peek passes `preview`. The stock rule `((category preview) popup)` is last in the alist, so a rule for a name wins over it.
+- `'category KIND`: the kind of display. A peek passes `preview`. The stock rule `((category preview) (reuse-window use-some-window pop-up-window))` is last in the alist, so a rule for a name wins over it.
 - A display of a buffer from outside the frame's group that names no category is a display of category `foreign` (`display-foreign?`, answered by groups.scm). The stock rule `((category foreign) popup)` sends it to the popup, so a group's panes stay sealed (docs/groups.md). `switch-to-buffer!` obeys this rule (Emacs `switch-to-buffer-obey-display-actions`); a mechanism that fills a window it chose calls `switch-to-buffer-here!`. To route foreign buffers through the window chain instead: `(add-display-rule! '(category foreign) 'pop-up-window)`.
 - `'inhibit-same-window #t`: keep the selected window out of the chain. `display-buffer-other-window!` is `display-buffer` with this set.
 
 ## Previews are a rule
 
-A peek (docs/PEEK.md) is a display of category `preview`. By the stock rule it goes to the popup: dired and the browser show a file beside the listing without keeping it, and the windows stay as they are. To preview through the window chain instead, in `init.scm`:
+A peek (docs/PEEK.md) is a display of category `preview`. By the stock rule it goes through the window chain: dired and the browser show a file beside the listing without keeping it, in a window that is not the reader's. A popup moves the layout and hides the work under it, so no preview takes one. The next peek takes the same window, and dismissing the peek puts the window back. To preview in the popup instead, in `init.scm`:
 
 ```scheme
-(add-display-rule! '(category preview) 'pop-up-window)
+(add-display-rule! '(category preview) 'popup)
 ```
 
-Then a peek takes a window the chain makes, the next peek takes that same window, and dismissing the peek removes the window. Point stays in the listing either way.
+Point stays in the listing either way.
 
 ## quit-window
 

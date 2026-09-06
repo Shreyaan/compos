@@ -28,7 +28,7 @@
   "How many samples each chart keeps."
   'group 'perf 'type 'number)
 
-(defcustom 'perf-process-rows 15
+(defcustom 'perf-process-rows 20
   "How many process rows the table shows."
   'group 'perf 'type 'number)
 
@@ -37,7 +37,7 @@
 (define *perf-heat-width* 30)
 (define *perf-core-width* 24)
 (define *perf-spark-width* 16)
-(define *perf-log-rows* 10)
+(define *perf-log-rows* 8)
 
 ;; the buffer text: line 1 is the summary, line 2 the filter, line 3 blank,
 ;; line 4 the table head, and the rows start on line 5
@@ -603,7 +603,7 @@
          (rows (perf--get procs 'rows '()))
          (sparks (buffer-local buf 'perf-sparks))
          (filter-text (or (buffer-local buf 'perf-filter) "")))
-    (perf--panel 7 "Fig. 7"
+    (perf--panel 12 "Fig. 7"
       (string-append "Processes · sorted by " (perf--sort-name buf))
       (list (perf--txt "" (string-append (number->string (perf--get procs 'matched 0)) " of "
                                          (number->string (perf--get procs 'count 0)) " processes"))
@@ -645,7 +645,7 @@
   (let* ((disks (perf--get (perf--get s 'os '()) 'disks '()))
          (logs (last-n (messages-events) *perf-log-rows*))
          (newest (reverse logs)))
-    (perf--panel 5 "Fig. 8" "Storage & messages"
+    (perf--panel 12 "Fig. 8" "Storage & messages"
       (list (perf--txt "" (string-append (number->string (length disks)) " volumes")))
       (perf--div "perf-disks"
         (if (null? disks)
@@ -666,12 +666,38 @@
         ((> util 50) (list "under load" "perf-warm"))
         (else (list "nominal" "perf-ok"))))
 
+(define *perf-pages* '((1 "vitals") (2 "detail")))
+
+;; the monitor shows one page at a time: page 1 the vitals, page 2 the detail.
+;; a page is two rows of panels, so every panel is wide and nothing scrolls.
+(define (perf--page buf)
+  (if (equal? (buffer-local buf 'perf-page) 2) 2 1))
+
+(define (perf--page-name n)
+  (let ((hit (filter (lambda (p) (= (car p) n)) *perf-pages*)))
+    (if (null? hit) "" (cadr (car hit)))))
+
+(define (perf--goto-page! buf n)
+  (buffer-set-local! buf 'perf-page n)
+  (perf--refresh! buf)
+  (message (string-append "perf page " (number->string n) " " (perf--page-name n))))
+
+(define (perf--tab buf n label)
+  (list 'tag "div"
+        'class (string-append "perf-tab" (if (= n (perf--page buf)) " current" ""))
+        'click (string-append "perf:page:" (number->string n))
+        'children (list (perf--txt "" (string-append (number->string n) " " label)))))
+
+(define (perf--tabs buf)
+  (perf--div "perf-tabs"
+    (map (lambda (p) (perf--tab buf (car p) (cadr p))) *perf-pages*)))
+
 (define (perf--header buf s)
   (let* ((os (perf--get s 'os '()))
          (state (perf--state-class (perf--get s 'sched-util 0))))
     (perf--div "perf-bar perf-top"
       (perf--txt "perf-strong perf-brand" "Compos")
-      (perf--txt "" (string-append "system monitor · buffer " *perf-buffer*))
+      (perf--tabs buf)
       (perf--txt "perf-dim"
                  (string-append "host " (perf--get s 'host "") " · "
                                 (number->string (length (perf--get s 'schedulers '()))) " schedulers · "
@@ -693,7 +719,7 @@
   (perf--div "perf-bar perf-bottom"
     (perf--txt "perf-strong" *perf-buffer*)
     (perf--txt "" "g refresh") (perf--txt "" "/ filter") (perf--txt "" "s sort")
-    (perf--txt "" "RET info") (perf--txt "" "k kill") (perf--txt "" "SPC pause") (perf--txt "" "t text")
+    (perf--txt "" "RET info") (perf--txt "" "k kill") (perf--txt "" "SPC pause") (perf--txt "" "t text") (perf--txt "" "1 2 TAB page")
     (perf--txt "perf-spacer" "")
     (perf--txt (if (buffer-local buf 'perf-paused) "perf-warm" "perf-dim")
                (if (buffer-local buf 'perf-paused) "paused" (string-append "tick " (number->string (or (buffer-local buf 'perf-tick) 0)))))
@@ -706,14 +732,15 @@
          (ser (or (buffer-local buf 'perf-series) '()))
          (sorted (or (buffer-local buf 'perf-render-ms) '()))
          (render-ms (if (null? sorted) 0 (car (reverse sorted))))
-         (panels (list (perf--cpu-panel s ser)
-                       (perf--memory-panel s)
-                       (perf--io-panel s ser)
-                       (perf--cores-panel s ser)
-                       (perf--frame-panel sorted)
-                       (perf--heat-panel (or (buffer-local buf 'perf-heat) '()))
-                       (perf--process-panel buf)
-                       (perf--storage-panel s))))
+         (panels (if (= (perf--page buf) 2)
+                     (list (perf--cores-panel s ser)
+                           (perf--frame-panel sorted)
+                           (perf--heat-panel (or (buffer-local buf 'perf-heat) '()))
+                           (perf--storage-panel s))
+                     (list (perf--cpu-panel s ser)
+                           (perf--memory-panel s)
+                           (perf--io-panel s ser)
+                           (perf--process-panel buf)))))
     (list (perf--div "perf-root"
             (perf--header buf s)
             (perf--div "perf-grid" panels)
@@ -786,22 +813,30 @@
     ("k" "perf-process-kill")
     ("SPC" "perf-pause")
     ("t" "perf-toggle-text")
+    ("TAB" "perf-page")
+    ("1" "perf-page-1")
+    ("2" "perf-page-2")
     ("n" "next-line")
     ("p" "previous-line")
     ("q" "quit-window")))
 
 (mode-doc! "perf-mode"
-  "The system monitor. Schedulers, memory, port IO, render time, event latency, the process table, volumes, and messages, sampled every perf-tick-ms. `/` filters the table, `s` cycles the sort, RET shows a process, `k` kills it after confirmation, SPC pauses.")
+  "The system monitor. Schedulers, memory, port IO, render time, event latency, the process table, volumes, and messages, sampled every perf-tick-ms. Page 1 holds the vitals and the process table, page 2 the per-core, render, latency and storage detail; TAB turns the page, `1` and `2` name one, and a tab click does too. `/` filters the table, `s` cycles the sort, RET shows a process, `k` kills it after confirmation, SPC pauses.")
 
 (on-block-click! 'perf
   (lambda (buf id)
     (and (buffer-mode-is? buf "perf-mode")
-         (string-prefix? "perf:row:" id)
-         (let ((line (string->number (substring id 9 (string-length id)))))
-           (when (number? line)
-             (with-current-buffer buf
-               (lambda () (goto-char! (line-start-position line)))))
-           #t))))
+         (cond ((string-prefix? "perf:row:" id)
+                (let ((line (string->number (substring id 9 (string-length id)))))
+                  (when (number? line)
+                    (with-current-buffer buf
+                      (lambda () (goto-char! (line-start-position line)))))
+                  #t))
+               ((string-prefix? "perf:page:" id)
+                (let ((n (string->number (substring id 10 (string-length id)))))
+                  (when (number? n) (perf--goto-page! buf n))
+                  #t))
+               (else #f)))))
 
 (register-context-provider! "perf-mode"
   (lambda (buf)
@@ -852,6 +887,18 @@
            (text? (equal? (buffer-local buf 'render-mode) "text")))
       (buffer-set-local! buf 'render-mode (if text? "blocks" "text"))
       (message (if text? "perf panels" "perf text")))))
+
+(define-command "perf-page-1" "Show page one of the monitor: the vitals"
+  (lambda () (perf--goto-page! (current-buffer) 1)))
+
+(define-command "perf-page-2" "Show page two of the monitor: the detail"
+  (lambda () (perf--goto-page! (current-buffer) 2)))
+
+(define-command "perf-page" "Turn to the other page of the monitor: vitals or detail"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (next (if (= (perf--page buf) 1) 2 1)))
+      (perf--goto-page! buf next))))
 
 (define-command "perf-pause" "Pause or resume the samples"
   (lambda ()
@@ -1005,24 +1052,27 @@
 (defface! 'perf-green 'fg "#3a8a58")
 
 (define-style! 'perf "
-.perf-root { font-family: var(--font-mono); font-size: 11px; color: var(--default-fg); -webkit-font-smoothing: antialiased; }
-.perf-bar { display: flex; align-items: center; gap: 16px; padding: 5px 10px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim-fg); white-space: nowrap; overflow: hidden; }
+.perf-root { font-family: var(--font-mono); font-size: 12.5px; color: var(--default-fg); -webkit-font-smoothing: antialiased; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.perf-bar { display: flex; align-items: center; gap: 16px; padding: 6px 12px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim-fg); white-space: nowrap; overflow: hidden; }
 .perf-top { border-bottom: 1px solid var(--border-bg); }
 .perf-bottom { border-top: 1px solid var(--border-bg); }
 .perf-brand { letter-spacing: .2em; }
+.perf-tabs { display: flex; gap: 2px; }
+.perf-tab { padding: 3px 12px; border: 1px solid var(--border-bg); color: var(--dim-fg); cursor: pointer; letter-spacing: .14em; }
+.perf-tab.current { color: var(--default-fg); background: var(--hl-line-bg); font-weight: 600; }
 .perf-spacer { flex: 1; }
 .perf-strong { color: var(--default-fg); font-weight: 600; }
 .perf-dim { color: var(--dim-fg); }
 .perf-state { padding: 2px 8px; border: 1px solid var(--border-bg); font-weight: 600; }
-.perf-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: minmax(200px, auto); gap: 1px; background: var(--border-bg); border: 1px solid var(--border-bg); }
+.perf-grid { display: grid; flex: 1; min-height: 0; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: minmax(220px, 1fr); gap: 1px; background: var(--border-bg); border: 1px solid var(--border-bg); }
 .perf-panel { background: var(--default-bg, transparent); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.perf-c3 { grid-column: span 3; } .perf-c4 { grid-column: span 4; } .perf-c5 { grid-column: span 5; } .perf-c7 { grid-column: span 7; }
-.perf-head { display: flex; align-items: baseline; gap: 10px; padding: 5px 10px; border-bottom: 1px solid var(--border-bg); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim-fg); white-space: nowrap; }
+.perf-c3 { grid-column: span 3; } .perf-c4 { grid-column: span 4; } .perf-c5 { grid-column: span 5; } .perf-c7 { grid-column: span 7; } .perf-c12 { grid-column: span 12; }
+.perf-head { display: flex; align-items: baseline; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--border-bg); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim-fg); white-space: nowrap; }
 .perf-head-inner { border-top: 1px solid var(--border-bg); }
 .perf-head-right { display: flex; gap: 10px; }
 .perf-fig { color: var(--default-fg); font-weight: 600; }
 .perf-legend { display: flex; align-items: center; gap: 4px; }
-.perf-swatch { width: 7px; height: 7px; display: inline-block; flex: none; }
+.perf-swatch { width: 8px; height: 8px; display: inline-block; flex: none; }
 .perf-sw-user { background: var(--perf-indigo-fg, #3b5bb5); }
 .perf-sw-sys { background: var(--perf-amber-fg, #b07a2a); }
 .perf-sw-io { background: var(--perf-red-fg, #c24a3a); }
@@ -1031,7 +1081,7 @@
 .perf-sw-sand { background: color-mix(in srgb, var(--perf-amber-fg, #b07a2a) 40%, transparent); }
 .perf-sw-dim { background: var(--hl-line-bg); }
 .perf-body-row { flex: 1; display: flex; min-height: 0; }
-.perf-chart { flex: 1; position: relative; min-width: 0; min-height: 110px; }
+.perf-chart { flex: 1; position: relative; min-width: 0; min-height: 170px; }
 .perf-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .perf-rule { stroke: var(--border-bg); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .perf-user { fill: var(--perf-indigo-fg, #3b5bb5); fill-opacity: .85; }
@@ -1054,43 +1104,43 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
 span.perf-cool { color: var(--perf-indigo-fg, #3b5bb5); }
 span.perf-ok { color: var(--perf-green-fg, #3a8a58); }
 span.perf-idle { color: var(--dim-fg); }
-.perf-corner { position: absolute; font-size: 9px; color: var(--dim-fg); }
+.perf-corner { position: absolute; font-size: 10px; color: var(--dim-fg); }
 .perf-corner-tl { left: 6px; top: 4px; } .perf-corner-bl { left: 6px; bottom: 3px; } .perf-corner-tr { right: 6px; top: 3px; }
-.perf-side { flex: 0 0 150px; padding: 6px 10px; display: flex; flex-direction: column; gap: 3px; border-left: 1px solid var(--border-bg); overflow: hidden; }
-.perf-big { font-family: var(--font-serif); font-size: 30px; line-height: .9; letter-spacing: -1.5px; font-weight: 300; margin-bottom: 4px; }
-.perf-unit { font-size: 16px; color: var(--dim-fg); }
-.perf-stat { display: flex; align-items: baseline; gap: 8px; font-size: 10px; border-bottom: 1px dotted var(--border-bg); padding-bottom: 2px; }
-.perf-stat-k { color: var(--dim-fg); flex: 1; letter-spacing: .08em; text-transform: uppercase; font-size: 9px; }
+.perf-side { flex: 0 0 180px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; border-left: 1px solid var(--border-bg); overflow: hidden; }
+.perf-big { font-family: var(--font-serif); font-size: 34px; line-height: .9; letter-spacing: -1.5px; font-weight: 300; margin-bottom: 4px; }
+.perf-unit { font-size: 18px; color: var(--dim-fg); }
+.perf-stat { display: flex; align-items: baseline; gap: 8px; font-size: 11px; border-bottom: 1px dotted var(--border-bg); padding-bottom: 3px; }
+.perf-stat-k { color: var(--dim-fg); flex: 1; letter-spacing: .08em; text-transform: uppercase; font-size: 10px; }
 .perf-stat-v { font-weight: 500; }
 .perf-stats3, .perf-stats4 { display: grid; border-top: 1px solid var(--border-bg); }
 .perf-stats3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .perf-stats4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.perf-stats3 .perf-stat, .perf-stats4 .perf-stat { flex-direction: column; gap: 0; padding: 4px 9px; border-bottom: 0; border-right: 1px solid var(--border-bg); }
-.perf-stats3 .perf-stat-v, .perf-stats4 .perf-stat-v { font-size: 13px; }
-.perf-rings { display: flex; justify-content: space-around; padding: 8px 10px 4px; }
+.perf-stats3 .perf-stat, .perf-stats4 .perf-stat { flex-direction: column; gap: 0; padding: 6px 11px; border-bottom: 0; border-right: 1px solid var(--border-bg); }
+.perf-stats3 .perf-stat-v, .perf-stats4 .perf-stat-v { font-size: 15px; }
+.perf-rings { display: flex; justify-content: space-around; padding: 10px 12px 6px; }
 .perf-ring { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.perf-ring-box { position: relative; width: 62px; height: 62px; }
-.perf-ring-svg { width: 62px; height: 62px; display: block; transform: rotate(-90deg); }
+.perf-ring-box { position: relative; width: 76px; height: 76px; }
+.perf-ring-svg { width: 76px; height: 76px; display: block; transform: rotate(-90deg); }
 .perf-ring-track { fill: none; stroke: var(--hl-line-bg); stroke-width: 5; }
 .perf-ring-arc { fill: none; stroke-width: 5; }
 .perf-ring-arc.perf-user { stroke: var(--perf-indigo-fg, #3b5bb5); } .perf-ring-arc.perf-sys { stroke: var(--perf-amber-fg, #b07a2a); }
 .perf-ring-arc.perf-io { stroke: var(--perf-red-fg, #c24a3a); } .perf-ring-arc.perf-ok { stroke: var(--perf-green-fg, #3a8a58); }
-.perf-ring-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
-.perf-ring-label { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); }
-.perf-ring-sub { font-size: 9.5px; color: var(--dim-fg); }
-.perf-segbar { display: flex; height: 12px; margin: 2px 10px; border: 1px solid var(--border-bg); overflow: hidden; }
+.perf-ring-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; }
+.perf-ring-label { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); }
+.perf-ring-sub { font-size: 10.5px; color: var(--dim-fg); }
+.perf-segbar { display: flex; height: 14px; margin: 3px 12px; border: 1px solid var(--border-bg); overflow: hidden; }
 .perf-seg { height: 100%; }
-.perf-seglist { padding: 0 10px 6px; display: flex; flex-direction: column; gap: 3px; font-size: 10px; }
+.perf-seglist { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
 .perf-segrow { display: flex; align-items: center; gap: 7px; }
-.perf-cores { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: minmax(44px, 1fr); }
+.perf-cores { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: minmax(48px, 1fr); overflow: hidden; }
 .perf-core { position: relative; border-right: 1px solid var(--border-bg); border-bottom: 1px solid var(--border-bg); padding: 2px 4px; min-width: 0; overflow: hidden; }
-.perf-core-label { position: relative; display: flex; justify-content: space-between; font-size: 9px; }
-.perf-histo { flex: 1; min-height: 90px; display: flex; align-items: flex-end; gap: 1px; padding: 8px 10px 4px; }
+.perf-core-label { position: relative; display: flex; justify-content: space-between; font-size: 10px; }
+.perf-histo { flex: 1; min-height: 130px; display: flex; align-items: flex-end; gap: 1px; padding: 10px 12px 6px; }
 .perf-hbar { flex: 1; min-width: 0; }
 .perf-hbar.perf-fill.perf-hot { background: var(--perf-red-fg, #c24a3a); } .perf-hbar.perf-fill.perf-warm { background: var(--perf-amber-fg, #b07a2a); } .perf-hbar.perf-fill.perf-cool { background: var(--perf-indigo-fg, #3b5bb5); }
-.perf-axis { display: flex; justify-content: space-between; padding: 0 10px 4px; font-size: 9px; color: var(--dim-fg); }
-.perf-heat { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 6px 10px; gap: 3px; }
-.perf-heat-row { flex: 1; display: flex; align-items: center; gap: 6px; min-height: 18px; }
-.perf-heat-label { flex: 0 0 54px; font-size: 9px; color: var(--dim-fg); text-align: right; }
+.perf-axis { display: flex; justify-content: space-between; padding: 0 12px 6px; font-size: 10px; color: var(--dim-fg); }
+.perf-heat { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 12px; gap: 4px; }
+.perf-heat-row { flex: 1; display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.perf-heat-label { flex: 0 0 62px; font-size: 10px; color: var(--dim-fg); text-align: right; }
 .perf-heat-cells { flex: 1; display: flex; gap: 1px; height: 100%; min-width: 0; }
 .perf-cell { flex: 1; min-width: 0; }
 .perf-h0 { background: var(--hl-line-bg); }
@@ -1099,28 +1149,28 @@ span.perf-idle { color: var(--dim-fg); }
 .perf-h3 { background: color-mix(in srgb, var(--perf-amber-fg, #b07a2a) 60%, transparent); }
 .perf-h4 { background: color-mix(in srgb, var(--perf-red-fg, #c24a3a) 65%, transparent); }
 .perf-h5 { background: var(--perf-red-fg, #c24a3a); }
-.perf-heat-val { flex: 0 0 32px; font-size: 9px; text-align: right; }
+.perf-heat-val { flex: 0 0 38px; font-size: 10px; text-align: right; }
 .perf-plist { flex: 1; min-height: 0; overflow-y: auto; }
-.perf-prow { display: grid; grid-template-columns: 78px minmax(0, 1.4fr) 62px 66px 34px 56px minmax(0, 1fr) 80px; gap: 8px; align-items: center; padding: 2px 10px; border-bottom: 1px dotted var(--border-bg); font-size: 10.5px; cursor: pointer; }
+.perf-prow { display: grid; grid-template-columns: 88px minmax(0, 1.4fr) 72px 76px 40px 64px minmax(0, 1fr) 92px; gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 12px; cursor: pointer; }
 .perf-prow > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .perf-prow.current { background: var(--hl-line-bg); }
-.perf-phead { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); border-bottom: 1px solid var(--border-bg); cursor: default; }
+.perf-phead { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); border-bottom: 1px solid var(--border-bg); cursor: default; }
 .perf-name { color: var(--default-fg); }
 .perf-num { text-align: right; }
-.perf-current-fn { font-size: 9.5px; }
-.perf-spark-box { height: 14px; }
-.perf-spark-svg { position: static; width: 100%; height: 14px; }
+.perf-current-fn { font-size: 11px; }
+.perf-spark-box { height: 16px; }
+.perf-spark-svg { position: static; width: 100%; height: 16px; }
 .perf-spark { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; stroke: var(--dim-fg); }
 .perf-spark-box.perf-hot .perf-spark { stroke: var(--perf-red-fg, #c24a3a); } .perf-spark-box.perf-warm .perf-spark { stroke: var(--perf-amber-fg, #b07a2a); } .perf-spark-box.perf-cool .perf-spark { stroke: var(--perf-indigo-fg, #3b5bb5); }
-.perf-disks { flex: none; }
-.perf-disk { display: grid; grid-template-columns: 150px 1fr 70px 44px; gap: 8px; align-items: center; padding: 3px 10px; border-bottom: 1px dotted var(--border-bg); font-size: 10px; }
-.perf-diskbar { height: 8px; border: 1px solid var(--border-bg); background: var(--hl-line-bg); }
+.perf-disks { flex: none; max-height: 200px; overflow-y: auto; }
+.perf-disk { display: grid; grid-template-columns: 170px 1fr 80px 50px; gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 11px; }
+.perf-diskbar { height: 9px; border: 1px solid var(--border-bg); background: var(--hl-line-bg); }
 .perf-diskfill { height: 100%; }
 .perf-diskfill.perf-hot { background: var(--perf-red-fg, #c24a3a); } .perf-diskfill.perf-warm { background: var(--perf-amber-fg, #b07a2a); } .perf-diskfill.perf-cool { background: var(--perf-indigo-fg, #3b5bb5); } .perf-diskfill.perf-idle { background: var(--perf-green-fg, #3a8a58); }
-.perf-logs { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0; }
-.perf-log { display: flex; gap: 8px; padding: 1.5px 10px; font-size: 10px; }
+.perf-logs { flex: 1; min-height: 0; overflow-y: auto; padding: 3px 0; }
+.perf-log { display: flex; gap: 10px; padding: 3px 12px; font-size: 11.5px; }
 .perf-log-new { background: var(--hl-line-bg); }
-.perf-lvl { flex: none; width: 38px; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; font-weight: 600; }
+.perf-lvl { flex: none; width: 44px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; font-weight: 600; }
 .perf-log-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 ")
 

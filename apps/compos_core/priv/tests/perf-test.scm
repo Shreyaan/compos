@@ -81,6 +81,28 @@
         (check-true! (and row (string? (cadr row))) "the row at point names a pid"))
       (buffer-kill! buf))))
 
+(define (perf-test--panels buf)
+  (let* ((root (car (perf--blocks buf)))
+         (grid (cadr (plist-get root 'children))))
+    (plist-get grid 'children)))
+
+(deftest 'perf-shows-one-page-at-a-time
+  "the monitor opens on the vitals; the second page holds the detail; the table stays"
+  (lambda ()
+    (let ((buf (perf-test--buffer)))
+      (buffer-create buf)
+      (with-current-buffer buf (lambda () (set-mode! "perf-mode")))
+      (check-equal! (perf--page buf) 1 "it opens on page one")
+      (check-equal! (length (perf-test--panels buf)) 4 "page one draws four panels")
+      (perf--goto-page! buf 2)
+      (check-equal! (perf--page buf) 2 "the page turns")
+      (check-equal! (length (perf-test--panels buf)) 4 "page two draws four panels")
+      (check-true! (pair? (buffer-local buf 'perf-rows))
+                   "the process table survives the turn, so RET and k still work")
+      (buffer-set-local! buf 'perf-page "bogus")
+      (check-equal! (perf--page buf) 1 "an unknown page is page one")
+      (buffer-kill! buf))))
+
 (deftest 'perf-filter-narrows-the-table
   "a filter keeps only the processes whose name contains it"
   (lambda ()
