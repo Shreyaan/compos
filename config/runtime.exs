@@ -90,7 +90,7 @@ if config_env() != :test do
   end
 
   if port = get.("COMPOS_PORT", "port") do
-    config :compos_ui, Compos.Ui.Endpoint, http: [ip: {127, 0, 0, 1}, port: String.to_integer(port)]
+    config :compos_ui, Compos.Ui.Endpoint, http: [ip: {0, 0, 0, 0}, port: String.to_integer(port)]
   end
 
   # the preview-app origin; a second daemon must move this port too

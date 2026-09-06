@@ -12,7 +12,9 @@ import Config
 config :compos_ui, Compos.Ui.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   url: [host: "localhost"],
-  http: [ip: {127, 0, 0, 1}, port: 4004],
+  # every interface, so a browser on the tailnet reaches the editor;
+  # Compos.Ui.Reach admits loopback and tailnet addresses only
+  http: [ip: {0, 0, 0, 0}, port: 4004],
   server: true,
   check_origin: false,
   secret_key_base: "compos-dev-secret-key-base-0123456789-0123456789-0123456789-0123456789",

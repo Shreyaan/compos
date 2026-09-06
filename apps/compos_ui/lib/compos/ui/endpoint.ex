@@ -10,11 +10,12 @@ defmodule Compos.Ui.Endpoint do
 
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
-  # every loopback spelling is this machine: the Tauri shell dials
-  # 127.0.0.1 while a browser tab says localhost, and a PTY refused by
-  # origin renders as a dead terminal buffer
+  # every spelling of this machine is this machine: the Tauri shell dials
+  # 127.0.0.1, a browser tab says localhost, a phone on the tailnet says
+  # the host's name. A PTY refused by origin renders as a dead terminal
+  # buffer, so the rule lives in one place, Compos.Ui.Reach.
   socket("/terminal", Compos.Ui.TerminalSocket,
-    websocket: [check_origin: ["//localhost", "//127.0.0.1", "//[::1]"]],
+    websocket: [check_origin: {Compos.Ui.Reach, :local_origin?, []}],
     longpoll: false
   )
 
@@ -34,6 +35,10 @@ defmodule Compos.Ui.Endpoint do
     websocket: [check_origin: {__MODULE__, :browser_origin?, []}, path: "/"],
     longpoll: false
   )
+
+  # the port listens on every interface; this admits loopback and the
+  # tailnet and refuses the rest before anything else runs
+  plug(Compos.Ui.Reach)
 
   # LiveView's browser JS is shipped prebuilt inside the hex packages —
   # serve it straight from deps; no node/esbuild toolchain.
