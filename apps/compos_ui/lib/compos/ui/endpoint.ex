@@ -43,13 +43,6 @@ defmodule Compos.Ui.Endpoint do
   # the PWA manifest and icons — Chrome installs the editor as its own app
   plug(Plug.Static, at: "/", from: :compos_ui, only: ~w(manifest.webmanifest icons images))
 
-  # Tidewave is an MCP server over the running daemon: a coding agent evaluates
-  # Elixir in this VM, reads the logs, and reads the docs of the locked deps.
-  # It mounts at /tidewave/mcp. Dev only, so a release never carries it.
-  if Mix.env() == :dev do
-    plug(Tidewave)
-  end
-
   if code_reloading? do
     plug(Phoenix.LiveReloader)
     # No Phoenix.CodeReloader here. That plug compiles in this VM on a page

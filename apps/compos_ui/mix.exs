@@ -36,9 +36,7 @@ defmodule Compos.Ui.MixProject do
       {:telemetry_poller, "~> 1.3"},
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
-      {:lazy_html, ">= 0.1.0", only: :test},
-      # runtime MCP server for coding agents: /tidewave/mcp on the editor port
-      {:tidewave, "~> 0.9", only: :dev}
+      {:lazy_html, ">= 0.1.0", only: :test}
     ]
   end
 end
