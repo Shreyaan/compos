@@ -626,26 +626,14 @@
   (let ((i (string-rindex p "/")))
     (if i (substring-bytes p 0 (+ i 1)) p)))
 
-;; A chat works in its companions' project. The group's first file member
-;; names the tree, and that tree's git root is the chat's directory. The
-;; chat's own save file lives under the chats home, and a search or a
-;; shell that starts there reads config, not the project.
+;; A chat works in its companion's project. The companion directory is
+;; chat identity: chat-stamp-directory! writes it once, when the chat is
+;; born, from the directory of the buffer that started the chat. Nothing
+;; derives it again, so a group of any size costs a chat nothing per
+;; command. An explicit spawn directory (a worktree, a foreign repo) is
+;; the same local, written by the spawner.
 (define (buffer-companion-directory buf)
-  (and (boundp (quote buffer-group))
-       (buffer-local buf 'agent-slug)
-       (or
-         ;; an explicit spawn directory (a worktree, a foreign repo) is
-         ;; chat identity and beats the derivation
-         (buffer-local buf 'chat-directory)
-         (let ((g (buffer-group buf)))
-           (and g
-                (let loop ((ms (group-buffers g)))
-                  (cond ((null? ms) #f)
-                        ((and (not (equal? (car ms) buf)) (buffer-path (car ms)))
-                         (let* ((dir (path-directory (buffer-path (car ms))))
-                                (root (git-root dir)))
-                           (if (string? root) (string-append root "/") dir)))
-                        (else (loop (cdr ms))))))))))
+  (buffer-local buf 'chat-directory))
 
 (define (default-directory) (buffer-directory (current-buffer)))
 

@@ -9183,6 +9183,18 @@
   (chat-finalize-hung-tools! buf)
   (message "chat unstuck: the hung turn is cleared, RET sends again"))
 
+;; The chat's companion directory: the git root of the directory the chat
+;; was born in (buffer-create copies the spawner's default-directory), or
+;; that directory outside a repo. One git-root call per chat, at birth.
+(define (chat-stamp-directory! buf)
+  (let* ((born (or (buffer-local buf 'default-directory)
+                   (string-append (expand-path "~") "/")))
+         (root (git-root born)))
+    (buffer-set-local! buf 'chat-directory
+      (if (and (string? root) (not (equal? root "")))
+          (string-append root "/")
+          born))))
+
 (define-mode "chat-mode"
   (lambda ()
     (let ((buf (current-buffer))
@@ -9206,6 +9218,9 @@
       ;; old (role text) pairs — read them once, here, so a restored chat
       ;; has a record like any other
       (chat-record-migrate! buf)
+      ;; the companion directory is identity: stamped once, never derived
+      (unless (buffer-local buf 'chat-directory)
+        (chat-stamp-directory! buf))
       ;; a .chat file just opened from disk: if we wrote it, its header
       ;; restores the identity and its transcript becomes the record, so
       ;; the conversation continues instead of restarting. Headerless files
@@ -11019,16 +11034,16 @@
 ;; buffer rebuilds itself — modes, group, model all change under it
 (define (post-command!)
   (let ((buf (current-buffer)))
+    ;; the dashboard of the buffer the command ran in. A silent buffer
+    ;; costs nothing here: the event that changes its dashboard (a jj
+    ;; line, a summary, a restore) calls dashboard--sync! on it itself.
     (dashboard--sync! buf)
     (list-post-command! buf)
     ;; a list on screen shows what is, not what was: the command may have
-    ;; killed a buffer the list beside it still names. Every visible
-    ;; buffer keeps its own modeline, so an inactive window says the truth
-    ;; without waiting for you to visit it.
+    ;; killed a buffer the list beside it still names
     (for-each (lambda (w)
                 (unless (equal? (cadr w) buf)
-                  (list-post-command! (cadr w))
-                  (dashboard--sync! (cadr w))))
+                  (list-post-command! (cadr w))))
               (window-list))
     (when (buffer-local buf 'modeline-expanded)
       (let ((fp (dash--fingerprint buf)))

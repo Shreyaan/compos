@@ -184,3 +184,66 @@
       (set! *jj-dir-roots* roots)
       (set! *jj-history* hist)
       (buffer-kill! buf))))
+
+;; The companion directory is chat identity: the chat-mode setup stamps it
+;; once from the directory the chat was born in, and no later change to the
+;; group or the born directory moves it.
+(deftest 'a-chat-stamps-its-companion-directory-once-at-birth
+  "the chat's directory is the git root of the spawner's directory, fixed at birth"
+  (lambda ()
+    (t--modeline-reset!)
+    (make-directory! (string-append t--modeline-root "/lib"))
+    (shell-command->string "git init -q" t--modeline-root)
+    (let ((buf "*chat:zz-modeline-stamp*")
+          (born (string-append t--modeline-root "/lib/")))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'default-directory born)
+      (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
+      (check-equal! (buffer-local buf 'chat-directory)
+                    (string-append (git-root born) "/")
+                    "the setup stamps the git root of the born directory")
+      (check-equal! (buffer-directory buf) (buffer-local buf 'chat-directory)
+                    "the chat works in that directory")
+      ;; the born directory moves; the companion does not
+      (buffer-set-local! buf 'default-directory (string-append (compos-home) "/"))
+      (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
+      (check-equal! (buffer-directory buf) (string-append (git-root born) "/")
+                    "a second setup keeps the stamp")
+      (buffer-kill! buf))
+    (t--modeline-reset!)))
+
+(deftest 'a-chat-outside-a-repo-stamps-its-born-directory
+  "with no git root the born directory itself is the companion directory"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-stamp-plain*")
+          (born (string-append (compos-home) "/zz-modeline-plain/")))
+      (make-directory! born)
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'default-directory born)
+      (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
+      (check-equal! (buffer-local buf 'chat-directory) born
+                    "the born directory is the stamp")
+      (buffer-kill! buf))))
+
+;; A silent buffer costs nothing: post-command! rebuilds the dashboard of
+;; the buffer the command ran in, and of no other buffer.
+(deftest 'post-command-syncs-the-dashboard-of-the-current-buffer-only
+  "an inactive buffer's dashboard line stays as it was after a command elsewhere"
+  (lambda ()
+    (let ((here "*zz-modeline-here*")
+          (other "*zz-modeline-other*"))
+      (test-buffer! here "")
+      (test-buffer! other "")
+      (dashboard--sync! other)
+      (let ((before (buffer-local other 'dashboard-line)))
+        (buffer-set-local! other 'minor-modes '("zz-silent-mode"))
+        (with-current-buffer here (lambda () (post-command!)))
+        (check-equal! (buffer-local other 'dashboard-line) before
+                      "the other buffer's line did not rebuild")
+        (check-true! (string? (buffer-local here 'dashboard-line))
+                     "the current buffer's line did")
+        (dashboard--sync! other)
+        (check-true! (string-contains? (buffer-local other 'dashboard-line) "zz-silent")
+                     "a sync asked for by name rebuilds it"))
+      (buffer-kill! here)
+      (buffer-kill! other))))
