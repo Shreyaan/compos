@@ -112,14 +112,25 @@ defmodule Compos.Ui.MobileLiveTest do
     assert has_element?(view, ".hh-echo", "No command named hh-no-such-command")
   end
 
-  test "the tab rail is the groups, and a tap lands in the group's chat", %{conn: conn} do
+  test "the tab rail is the groups: the current one opens its buffers, another one its chat", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
     buf = Compos.Core.Editor.current_buffer()
     {:ok, g} = Compos.Core.Session.eval(~s{(group-ensure! "#{buf}")})
     g = String.trim(g, "\"")
     render(view)
-    hook(view, "tab", %{"buf" => g})
     assert has_element?(view, ".hh-tab.on")
+
+    # founding the group put the frame in it: a tap is the buffer prompt
+    hook(view, "tab", %{"buf" => g})
+    assert has_element?(view, "#hh[data-mb='true']")
+    hook(view, "key", %{"k" => "C-g"})
+    refute has_element?(view, "#hh[data-mb='true']")
+
+    # a second group takes the frame; the tap on the first is a switch
+    other = "hh-g2-#{System.unique_integer([:positive])}"
+    {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-group! (group-record-create! "#{other}"))})
+    render(view)
+    hook(view, "tab", %{"buf" => g})
     assert has_element?(view, ".hh-ml-mode", "chat-mode")
   end
 

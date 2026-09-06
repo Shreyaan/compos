@@ -57,11 +57,23 @@
         (check-true! row "the rail names the group")
         (check-equal! (nth 2 row) "group" "every tab is a group")
         (check-equal! (nth 3 row) #t "and the current one is flagged"))
-      (let ((chat (handheld-tab! g)))
-        (check-true! (and chat (chat-buffer? chat)) "the tap lands in the group's chat")
-        (check-equal! (current-buffer) chat "and that chat is current"))
+      ;; founding the group put the frame in it, so this tap is on the
+      ;; current group: the buffers come up as a prompt
+      (check-equal! (handheld-tab! g) g "a tap on the current group answers the group")
+      (check-true! (minibuffer-active?) "and opens its buffers as a prompt")
+      (run-command "minibuffer-cancel")
+      ;; a second group takes the frame away; the tap on the first is a switch
+      (let ((g2 (or (group-resolve-id "zz-handheld-second")
+                    (group-record-create! "zz-handheld-second"))))
+        (switch-to-group! g2)
+        (check-true! (and g2 (not (equal? g2 g)) (equal? (frame-group) g2))
+                     "the frame stands in a second group")
+        (let ((chat (handheld-tab! g)))
+          (check-true! (and chat (chat-buffer? chat)) "the tap on another group lands in its chat")
+          (check-equal! (current-buffer) chat "and that chat is current")
+          (check-equal! (frame-group) g "and the frame stands in the group")))
       (check-equal! (handheld-tab-hold! g) g "a hold answers the group")
-      (check-true! (minibuffer-active?) "and opens the buffer switcher as a prompt")
+      (check-true! (minibuffer-active?) "and opens the prompt too")
       (run-command "minibuffer-cancel")
       (check-false! (minibuffer-active?) "C-g closes it"))))
 

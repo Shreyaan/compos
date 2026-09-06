@@ -28,10 +28,11 @@ lives in the client. The policy lives in
   bound to its command, or `M-x NAME` when nothing binds it. A tap sends
   the chord through the composer. `handheld-chips` names them.
 - **The tab rail.** The groups in MRU order. A phone switches groups,
-  not buffers. A tap switches to the group and shows its chat, founding
-  the chat when the group has none. A long press opens the group's
-  buffers as a prompt sheet. `handheld-tabs` builds the rows,
-  `handheld-tab!` answers the tap, and `handheld-tab-hold!` the press.
+  not buffers. A tap on another group switches to it and shows its chat,
+  founding the chat when the group has none. A tap on the current group,
+  or a long press on any group, opens that group's buffers as a prompt
+  sheet. `handheld-tabs` builds the rows, `handheld-tab!` answers the
+  tap, and `handheld-tab-hold!` the press.
 - **The chord key.** A tap opens the keys panel. Its tabs are the
   sections: `plain` for unmodified keys, `C-` and `M-` for modified
   single keys, then one tab per prefix (`C-x`, `C-c`, `C-h`, ...). Each

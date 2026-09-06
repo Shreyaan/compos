@@ -129,15 +129,16 @@
 
 (effects! '(write))
 
-;; A tap on a tab: switch to the group and show its chat, founding the
-;; chat when the group has none yet. Returns the chat buffer, or #f.
-;; The current group is not switched to again: a switch restores the
-;; group's saved arrangement, and a tap on where you are means the chat.
+;; A tap on a tab. Another group: switch to it and show its chat, founding
+;; the chat when the group has none yet; returns the chat buffer. The
+;; current group: open its buffers as a prompt, the same as a long press;
+;; returns the group id.
 (define (handheld-tab! g)
   (let ((id (group-resolve-id g)))
     (cond ((not id) (message "No such group") #f)
+          ((equal? id (frame-group)) (handheld-tab-hold! id))
           (else
-           (unless (equal? id (frame-group)) (switch-to-group! id))
+           (switch-to-group! id)
            (let ((chat (or (group-chat id) (group-chat-new! id))))
              (if chat
                  (group-chat-buffer-show! chat)
@@ -280,7 +281,7 @@
 (public! 'handheld-tabs
   "(handheld-tabs [CUR]) -> ((ID LABEL KIND CURRENT?) ...): the groups in MRU order; CUR is the current group")
 (public! 'handheld-tab!
-  "(handheld-tab! GROUP) — switch to GROUP and show its chat; returns the chat buffer or #f")
+  "(handheld-tab! GROUP) — switch to GROUP and show its chat; for the current group, open its buffers as a prompt")
 (catalog-meta! 'function "handheld-tab!" 'domain 'interaction 'effects '(write display))
 (public! 'handheld-tab-hold!
   "(handheld-tab-hold! GROUP) — switch to GROUP and open the buffer switcher as a prompt; returns the group id or #f")
