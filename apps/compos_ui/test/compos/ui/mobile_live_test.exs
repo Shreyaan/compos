@@ -61,10 +61,18 @@ defmodule Compos.Ui.MobileLiveTest do
     assert has_element?(view, "#keys-panel .hh-key-row .hh-key-cmd", "keyboard-quit")
 
     # a row is the whole chord: the prefix and the key go through
-    hook(view, "fan_run", %{"s" => "<f9>", "k" => "q"})
+    hook(view, "fan_run", %{"s" => "<f9>", "k" => "q", "c" => "keyboard-quit"})
     refute has_element?(view, "#keys-panel")
     assert has_element?(view, ".hh-echo", "Quit")
     refute has_element?(view, ".hh-ml-pending")
+
+    # the command it ran leads the recent tab, and a recent row runs by name
+    hook(view, "fan", %{"open" => true})
+    assert has_element?(view, "#keys-panel .hh-keys-tab", "recent")
+    assert has_element?(view, "#keys-panel [data-section='recent'] .hh-key-row .hh-key-cmd", "keyboard-quit")
+    hook(view, "fan_run", %{"s" => "recent", "k" => "<f9> q", "c" => "keyboard-quit"})
+    assert has_element?(view, ".hh-echo", "Quit")
+    refute has_element?(view, "#keys-panel")
   end
 
   test "the panel opens on the pending prefix's tab and does not press it twice", %{conn: conn} do

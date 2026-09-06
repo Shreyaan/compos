@@ -104,6 +104,27 @@
       (global-unset-key "<f9> a")
       (global-unset-key "<f9> b"))))
 
+(deftest 'recents-lead-the-panel-and-a-recent-row-runs-by-name
+  "a command the phone ran comes first under recent, with the key that reaches it"
+  (lambda ()
+    (handheld-test-reset!)
+    (let ((buf (test-buffer! "zz-handheld-recent" "")))
+      (delete-other-windows!)
+      (switch-to-buffer! buf)
+      (global-set-key "<f9> r" "handheld-test-dummy")
+      (check-true! (handheld-run-command! "handheld-test-dummy") "a known name runs")
+      (check-true! (handheld-test-fired? 'dummy) "and the command ran")
+      (let* ((panel (handheld-keys buf))
+             (recent (assoc "recent" panel)))
+        (check-true! recent "the panel has a recent section")
+        (check-equal! (car (car panel)) "recent" "and it comes first")
+        (check-equal! (car (car (cdr recent))) '("<f9> r" "handheld-test-dummy" "Test command: record that it ran" 0)
+                      "the newest command leads, with the key that reaches it"))
+      (global-unset-key "<f9> r")
+      (check-equal! (car (car (car (cdr (assoc "recent" (handheld-keys buf)))))) "M-x"
+                    "an unbound recent shows M-x")
+      (check-false! (handheld-run-command! "handheld-no-such-command") "an unknown name is refused"))))
+
 (deftest 'a-chip-teaches-the-key-bound-to-its-command
   "a chip carries the chord bound to its command, or M-x when nothing binds it"
   (lambda ()

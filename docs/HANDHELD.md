@@ -34,13 +34,17 @@ lives in the client. The policy lives in
   sheet. `handheld-tabs` builds the rows, `handheld-tab!` answers the
   tap, and `handheld-tab-hold!` the press.
 - **The chord key.** A tap opens the keys panel. Its tabs are the
-  sections: `plain` for unmodified keys, `C-` and `M-` for modified
-  single keys, then one tab per prefix (`C-x`, `C-c`, `C-h`, ...). Each
-  tab is a scrolling list of the bindings under it, with the command and
-  the first line of its doc. A tap on a row presses the whole chord.
-  When a prefix is already pending the panel opens on that tab and does
-  not press the prefix again. `handheld-keys` builds the sections from
-  the buffer's whole keymap ladder; a local key wins over a global one.
+  sections: `recent` for the commands the phone ran last, `plain` for
+  unmodified keys, `C-` and `M-` for modified single keys, then one tab
+  per prefix (`C-x`, `C-c`, `C-h`, ...). Each tab is a scrolling list of
+  the bindings under it, with the command and the first line of its doc.
+  A tap on a row presses the whole chord; a recent row runs by name.
+  Typing in the filter field narrows every section at once, each term
+  matching the key, the command, or the doc. When a prefix is already
+  pending the panel opens on that tab and does not press the prefix
+  again. `handheld-keys` builds the sections from the buffer's whole
+  keymap ladder; a local key wins over a global one. `handheld-recents`
+  reads the phone's own history and the desk's M-x history.
 - **The sheets.** An active minibuffer renders as a sheet of rows. A tap
   on a row selects it and accepts. An active transient renders as a sheet
   of key boxes; a tap sends the key. Every prompt and every transient

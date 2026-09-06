@@ -103,13 +103,25 @@ defmodule Compos.Ui.MobileLive do
 
   # one row of the panel: its section and its key make the chord. A
   # section that is already the frame's pending prefix is not pressed
-  # twice; a family section (plain, C-, M-) is not a key at all.
-  def handle_event("fan_run", %{"s" => section, "k" => key}, socket)
+  # twice; a family section (plain, C-, M-) is not a key at all. A recent
+  # row runs by name. Every row's command joins the recents.
+  def handle_event("fan_run", %{"s" => section, "k" => key} = p, socket)
       when is_binary(section) and is_binary(key) do
-    prefix = if section in @families, do: [], else: String.split(section, " ", trim: true)
-    prefix = if socket.assigns.state.pending == prefix, do: [], else: prefix
-    Enum.each(prefix ++ String.split(key, " ", trim: true), &Input.dispatch(socket.assigns.frame, &1))
-    {:noreply, socket |> assign(fan: false) |> drain() |> refresh()}
+    fid = socket.assigns.frame
+    cmd = p["c"]
+
+    if section == "recent" and is_binary(cmd) do
+      Input.run(fid, fn -> Session.call_named("handheld-run-command!", [cmd]) end)
+    else
+      if is_binary(cmd),
+        do: Input.run(fid, fn -> Session.call_named("handheld-note-command!", [cmd]) end)
+
+      prefix = if section in @families, do: [], else: String.split(section, " ", trim: true)
+      prefix = if socket.assigns.state.pending == prefix, do: [], else: prefix
+      Enum.each(prefix ++ String.split(key, " ", trim: true), &Input.dispatch(fid, &1))
+    end
+
+    {:noreply, socket |> assign(fan: false, keys: []) |> drain() |> refresh()}
   end
 
   # the composer: prose, a chord, or M-x. Scheme decides which.
@@ -619,40 +631,61 @@ defmodule Compos.Ui.MobileLive do
   end
 
   # the keys panel: a tab per section, and the section's bindings as a
-  # scrolling list. A tap on a row presses the chord.
+  # scrolling list. A tap on a row presses the chord. Every section is in
+  # the DOM; the hook shows the selected one, or, while the filter field
+  # holds text, every row that matches, whatever its section.
   defp keys_panel(assigns) do
     section = Enum.find(assigns.keys, &(&1.name == assigns.tab)) || List.first(assigns.keys)
-    assigns = assign(assigns, section: section)
+    assigns = assign(assigns, current: section && section.name)
 
     ~H"""
-    <div class="hh-keys" id="keys-panel">
+    <div class="hh-keys" id="keys-panel" data-current={@current}>
       <div class="hh-keys-tabs">
         <span
           :for={s <- @keys}
-          class={"hh-keys-tab #{if @section && s.name == @section.name, do: "on"}"}
+          class={"hh-keys-tab #{if s.name == @current, do: "on"}"}
           phx-click="fan_tab"
           phx-value-t={s.name}
         >{s.name}<small>{length(s.rows)}</small></span>
         <span class="hh-spacer"></span>
         <span class="hh-keys-quit" phx-click="fan_quit">C-g</span>
       </div>
-      <div :if={@section} class="hh-keys-list" id={"keys-#{:erlang.phash2(@section.name)}"}>
-        <div
-          :for={r <- @section.rows}
-          class="hh-key-row"
-          phx-click="fan_run"
-          phx-value-s={@section.name}
-          phx-value-k={r.key}
-        >
-          <span class="hh-key-box">{r.key}</span>
-          <div class="hh-row-main">
-            <div class="hh-key-cmd">{r.command}</div>
-            <div :if={r.doc != ""} class="hh-key-doc">{r.doc}</div>
-          </div>
-        </div>
-        <div :if={@section.rows == []} class="hh-empty">nothing bound here</div>
+      <div class="hh-keys-filter" id="keys-filter" phx-update="ignore">
+        <span class="hh-prompt">/</span>
+        <input
+          id="keys-filter-input"
+          class="hh-input"
+          type="search"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="type to filter every section"
+        />
       </div>
-      <div :if={@keys == []} class="hh-empty">no bindings to show</div>
+      <div class="hh-keys-list">
+        <div :for={s <- @keys} class="hh-keys-section" data-section={s.name} hidden={s.name != @current}>
+          <div class="hh-keys-section-title">{s.name}</div>
+          <div
+            :for={r <- s.rows}
+            class="hh-key-row"
+            data-text={String.downcase("#{r.key} #{r.command} #{r.doc} #{s.name}")}
+            phx-click="fan_run"
+            phx-value-s={s.name}
+            phx-value-k={r.key}
+            phx-value-c={r.command}
+          >
+            <span class="hh-key-box">{r.key}</span>
+            <div class="hh-row-main">
+              <div class="hh-key-cmd">{r.command}</div>
+              <div :if={r.doc != ""} class="hh-key-doc">{r.doc}</div>
+            </div>
+          </div>
+          <div :if={s.rows == []} class="hh-empty">nothing bound here</div>
+        </div>
+        <div class="hh-empty hh-keys-none" hidden>nothing matches</div>
+        <div :if={@keys == []} class="hh-empty">no bindings to show</div>
+      </div>
     </div>
     """
   end

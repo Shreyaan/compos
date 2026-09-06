@@ -92,15 +92,47 @@
          (rest (filter (lambda (s) (not (member s named))) sections)))
     (append first rest)))
 
+;;; --- recents ---------------------------------------------------------------------
+;;; The commands the phone ran last, newest first: a row of the panel or
+;;; the composer's M-x register notes the command, and M-x history from
+;;; the desk counts too. A recent row carries the key that reaches the
+;;; command in BUF, or "M-x" when nothing binds it.
+
+(define *handheld-recents-max* 30)
+
+(define (handheld-note-command! name)
+  (when (and (string? name) (not (equal? name "")))
+    (history-push! 'handheld name))
+  name)
+
+(define (handheld-recents buf)
+  (let loop ((names (append (history-items 'handheld) (history-items 'M-x)))
+             (seen '()) (out '()) (n 0))
+    (cond ((or (null? names) (>= n *handheld-recents-max*)) (reverse out))
+          ((or (member (car names) seen)
+               (not (member (car names) (command-names))))
+           (loop (cdr names) seen out n))
+          (else
+           (let* ((name (car names))
+                  (key (key-for-command name buf)))
+             (loop (cdr names) (cons name seen)
+                   (cons (list (if (and (string? key) (not (equal? key ""))) key "M-x")
+                               name (handheld-doc-line name) 0)
+                         out)
+                   (+ n 1)))))))
+
 ;; The panel: ((SECTION ((KEY COMMAND DOC RANK) ...)) ...). KEY is the
 ;; row's own key inside its section; the client sends SECTION and KEY
-;; back as one chord.
+;; back as one chord. The "recent" section comes first when it has rows;
+;; its rows run by name.
 (define (handheld-keys buf)
   (let loop ((rows (handheld-bindings buf)) (acc '()))
     (if (null? rows)
-        (let ((sections (reverse (map car acc))))
-          (map (lambda (s) (list s (reverse (cdr (assoc s acc)))))
-               (handheld-section-order sections)))
+        (let* ((sections (reverse (map car acc)))
+               (recent (handheld-recents buf))
+               (keyed (map (lambda (s) (list s (reverse (cdr (assoc s acc)))))
+                           (handheld-section-order sections))))
+          (if (null? recent) keyed (cons (list "recent" recent) keyed)))
         (let* ((keys (car (car rows)))
                (cmd (car (cdr (car rows))))
                (place (handheld-key-place keys))
@@ -234,6 +266,13 @@
             buf)
           (begin (message "No chat receives this message") #f)))))
 
+;; Run a command by name and remember it. Returns #t, or #f for a name
+;; that is not a command.
+(define (handheld-run-command! name)
+  (if (member name (command-names))
+      (begin (handheld-note-command! name) (run-command name) #t)
+      (begin (message (string-append "No command named " name)) #f)))
+
 ;; The composer's one entry. Returns the register it used.
 (define (handheld-compose! text)
   (let ((c (handheld-classify text)))
@@ -244,11 +283,7 @@
            (dispatch-keys (car (cdr c)))
            'keys)
           ((equal? (car c) 'command)
-           (let ((name (car (cdr c))))
-             (if (member name (command-names))
-                 (begin (run-command name) 'command)
-                 (begin (message (string-append "No command named " name))
-                        'unknown))))
+           (if (handheld-run-command! (car (cdr c))) 'command 'unknown))
           (else (handheld-say! (car (cdr c))) 'prose))))
 
 ;; The point rail: move point to the start of line N in the current
@@ -269,7 +304,13 @@
 (public! 'handheld-view
   "(handheld-view BUF) -> (TABS CHIPS): what the handheld client shows for BUF")
 (public! 'handheld-keys
-  "(handheld-keys BUF) -> ((SECTION ((KEY COMMAND DOC RANK) ...)) ...): every binding in force in BUF, in the panel's sections")
+  "(handheld-keys BUF) -> ((SECTION ((KEY COMMAND DOC RANK) ...)) ...): every binding in force in BUF, in the panel's sections, recents first")
+(public! 'handheld-note-command!
+  "(handheld-note-command! NAME) — remember NAME as a command the phone ran; the recent section lists it first")
+(catalog-meta! 'function "handheld-note-command!" 'domain 'interaction 'effects '(write))
+(public! 'handheld-run-command!
+  "(handheld-run-command! NAME) — run the command NAME and remember it; #f when no such command")
+(catalog-meta! 'function "handheld-run-command!" 'domain 'interaction 'effects '(write))
 (public! 'handheld-classify
   "(handheld-classify TEXT) -> (empty) | (keys KEYS) | (command NAME) | (prose TEXT)")
 (public! 'handheld-compose!

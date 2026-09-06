@@ -256,8 +256,15 @@ defmodule Compos.Ui.MobileLayouts do
           .hh-keys-tab.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
           .hh-keys-tab.on small { color: var(--paper); opacity: .7; }
           .hh-keys-quit { flex: none; padding: 5px 10px; border: 1px solid var(--rule); font-size: 10.5px; letter-spacing: .1em; color: var(--faint); }
+          .hh-keys-filter { flex: none; display: flex; align-items: center; gap: 8px; padding: 2px 14px; border-bottom: 1px solid var(--rule-soft); }
+          .hh-keys-filter .hh-input { font-size: 15px; padding: 7px 0; }
           .hh-keys-list { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+          .hh-keys-section-title { display: none; padding: 7px 14px 3px; background: var(--panel-dim); font-size: 9.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint); }
+          .hh-keys.filtering .hh-keys-section-title { display: block; }
           .hh-key-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; border-bottom: 1px solid var(--rule-soft); }
+          /* the filter hides rows with the hidden attribute; a display of
+             its own would win over the attribute */
+          .hh-key-row[hidden], .hh-keys-section[hidden], .hh-keys-none[hidden] { display: none !important; }
           .hh-key-row:active { background: var(--sand); }
           .hh-key-box { flex: none; min-width: 34px; padding: 4px 7px; border: 1px solid var(--rule); text-align: center; font-size: 12px; font-weight: 600; color: var(--indigo); white-space: nowrap; }
           .hh-key-cmd { font-family: var(--font-serif); font-size: 15.5px; line-height: 1.2; }
@@ -380,11 +387,14 @@ defmodule Compos.Ui.MobileLayouts do
                 this.bindRail();
                 this.bindComposer();
                 this.bindTabs();
+                this.bindFilter();
               },
               updated() {
                 this.remember();
                 this.bootCheck();
                 this.dock();
+                this.bindFilter();
+                this.applyFilter();
                 this.bindKey();
                 this.bindRail();
                 this.bindComposer();
@@ -430,6 +440,47 @@ defmodule Compos.Ui.MobileLayouts do
                   e.preventDefault();
                   this.push("fan", { open: !key.classList.contains("on") });
                 });
+              },
+
+              // ── the keys panel's filter: type, and every section narrows ──
+              // The field is outside the patch (phx-update="ignore"), so
+              // its text survives a re-render; the filter is applied again
+              // after each patch. Empty text shows the selected tab alone.
+              bindFilter() {
+                const input = document.getElementById("keys-filter-input");
+                if (!input || input.dataset.bound) return;
+                input.dataset.bound = "1";
+                input.addEventListener("input", () => this.applyFilter());
+                input.addEventListener("keydown", (e) => {
+                  if (e.key === "Escape") { e.preventDefault(); input.value = ""; this.applyFilter(); input.blur(); }
+                });
+              },
+              applyFilter() {
+                const panel = document.getElementById("keys-panel");
+                const input = document.getElementById("keys-filter-input");
+                if (!panel || !input) return;
+                const terms = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+                const current = panel.dataset.current;
+                panel.classList.toggle("filtering", terms.length > 0);
+                let shown = 0;
+                panel.querySelectorAll(".hh-keys-section").forEach((sec) => {
+                  if (terms.length === 0) {
+                    sec.hidden = sec.dataset.section !== current;
+                    sec.querySelectorAll(".hh-key-row").forEach((r) => { r.hidden = false; });
+                    return;
+                  }
+                  let any = 0;
+                  sec.querySelectorAll(".hh-key-row").forEach((r) => {
+                    const t = r.dataset.text || "";
+                    const hit = terms.every((q) => t.includes(q));
+                    r.hidden = !hit;
+                    if (hit) any++;
+                  });
+                  sec.hidden = any === 0;
+                  shown += any;
+                });
+                const none = panel.querySelector(".hh-keys-none");
+                if (none) none.hidden = !(terms.length > 0 && shown === 0);
               },
 
               // ── the tab rail: a tap is the group, a hold is its buffers ──
