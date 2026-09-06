@@ -44,6 +44,7 @@ defmodule Compos.Ui.MobileLive do
           fan_tab: nil,
           keys: [],
           keys_key: nil,
+          search: nil,
           view: @empty_view,
           view_key: nil
         )
@@ -62,6 +63,7 @@ defmodule Compos.Ui.MobileLive do
          fan_tab: nil,
          keys: [],
          keys_key: nil,
+         search: nil,
          view: @empty_view,
          view_key: nil
        )}
@@ -88,7 +90,21 @@ defmodule Compos.Ui.MobileLive do
   # when one is latched.
   def handle_event("fan", %{"open" => open}, socket) when is_boolean(open) do
     socket = if open, do: load_keys(socket), else: socket
-    {:noreply, socket |> assign(fan: open) |> refresh()}
+    {:noreply, socket |> assign(fan: open, search: nil) |> refresh()}
+  end
+
+  # the filter field: every command the text names, bound or not, from
+  # Scheme. Empty text is the tabs again.
+  def handle_event("fan_filter", %{"q" => q}, socket) when is_binary(q) do
+    search =
+      if String.trim(q) == "" do
+        nil
+      else
+        leaf = socket.assigns.leaf
+        fetch_search(socket.assigns.frame, leaf && leaf.buffer, q)
+      end
+
+    {:noreply, socket |> assign(search: search) |> refresh()}
   end
 
   def handle_event("fan_tab", %{"t" => tab}, socket) when is_binary(tab) do
@@ -98,19 +114,20 @@ defmodule Compos.Ui.MobileLive do
   # the scrim, or the key while the panel is open: never mind
   def handle_event("fan_quit", _p, socket) do
     Input.dispatch(socket.assigns.frame, "C-g")
-    {:noreply, socket |> assign(fan: false) |> drain() |> refresh()}
+    {:noreply, socket |> assign(fan: false, search: nil) |> drain() |> refresh()}
   end
 
   # one row of the panel: its section and its key make the chord. A
   # section that is already the frame's pending prefix is not pressed
   # twice; a family section (plain, C-, M-) is not a key at all. A recent
-  # row runs by name. Every row's command joins the recents.
+  # row and a search match run by name. Every row's command joins the
+  # recents.
   def handle_event("fan_run", %{"s" => section, "k" => key} = p, socket)
       when is_binary(section) and is_binary(key) do
     fid = socket.assigns.frame
     cmd = p["c"]
 
-    if section == "recent" and is_binary(cmd) do
+    if section in ["recent", "matches"] and is_binary(cmd) do
       Input.run(fid, fn -> Session.call_named("handheld-run-command!", [cmd]) end)
     else
       if is_binary(cmd),
@@ -121,7 +138,7 @@ defmodule Compos.Ui.MobileLive do
       Enum.each(prefix ++ String.split(key, " ", trim: true), &Input.dispatch(fid, &1))
     end
 
-    {:noreply, socket |> assign(fan: false, keys: []) |> drain() |> refresh()}
+    {:noreply, socket |> assign(fan: false, keys: [], search: nil) |> drain() |> refresh()}
   end
 
   # the composer: prose, a chord, or M-x. Scheme decides which.
@@ -393,12 +410,7 @@ defmodule Compos.Ui.MobileLive do
     case Input.run(fid, fn -> Session.call_named("handheld-keys", [buf]) end) do
       {:ok, sections} when is_list(sections) ->
         for [name, rows] <- sections do
-          rows =
-            for [k, cmd, doc, rank] <- list(rows) do
-              %{key: str(k), command: str(cmd), doc: str(doc), rank: if(is_number(rank), do: rank, else: 2)}
-            end
-            |> Enum.sort_by(&{&1.rank, String.downcase(&1.key), &1.key})
-
+          rows = rows |> parse_rows() |> Enum.sort_by(&{&1.rank, String.downcase(&1.key), &1.key})
           %{name: str(name), rows: rows}
         end
 
@@ -407,6 +419,27 @@ defmodule Compos.Ui.MobileLive do
     end
   rescue
     _ -> []
+  end
+
+  # the commands the filter text names, in Scheme's order: bound first
+  defp fetch_search(fid, buf, _q) when is_nil(fid) or is_nil(buf), do: %{name: "matches", rows: []}
+
+  defp fetch_search(fid, buf, q) do
+    rows =
+      case Input.run(fid, fn -> Session.call_named("handheld-search", [buf, q]) end) do
+        {:ok, rows} when is_list(rows) -> parse_rows(rows)
+        _ -> []
+      end
+
+    %{name: "matches", rows: rows}
+  rescue
+    _ -> %{name: "matches", rows: []}
+  end
+
+  defp parse_rows(rows) do
+    for [k, cmd, doc, rank] <- list(rows) do
+      %{key: str(k), command: str(cmd), doc: str(doc), rank: if(is_number(rank), do: rank, else: 2)}
+    end
   end
 
   # what Scheme says the client shows. One call per change of the shown
@@ -537,7 +570,7 @@ defmodule Compos.Ui.MobileLive do
       </div>
 
       <div :if={@fan} class="hh-scrim" phx-click="fan_quit"></div>
-      <.keys_panel :if={@fan} state={@state} keys={@keys} tab={@fan_tab} />
+      <.keys_panel :if={@fan} state={@state} keys={@keys} tab={@fan_tab} search={@search} />
 
       <div id="chord-key" class={"hh-key #{if @fan, do: "on"}"}>
         <span class="hh-key-glyph">{key_glyph(@state)}</span>
@@ -631,15 +664,15 @@ defmodule Compos.Ui.MobileLive do
   end
 
   # the keys panel: a tab per section, and the section's bindings as a
-  # scrolling list. A tap on a row presses the chord. Every section is in
-  # the DOM; the hook shows the selected one, or, while the filter field
-  # holds text, every row that matches, whatever its section.
+  # scrolling list. A tap on a row presses the chord. While the filter
+  # field holds text, the list is the search instead: every command the
+  # text names, from Scheme, and a tap runs it by name.
   defp keys_panel(assigns) do
     section = Enum.find(assigns.keys, &(&1.name == assigns.tab)) || List.first(assigns.keys)
     assigns = assign(assigns, current: section && section.name)
 
     ~H"""
-    <div class="hh-keys" id="keys-panel" data-current={@current}>
+    <div class={"hh-keys #{if @search, do: "filtering"}"} id="keys-panel">
       <div class="hh-keys-tabs">
         <span
           :for={s <- @keys}
@@ -660,31 +693,44 @@ defmodule Compos.Ui.MobileLive do
           autocorrect="off"
           autocapitalize="off"
           spellcheck="false"
-          placeholder="type to filter every section"
+          placeholder="type to search every command"
         />
       </div>
       <div class="hh-keys-list">
-        <div :for={s <- @keys} class="hh-keys-section" data-section={s.name} hidden={s.name != @current}>
-          <div class="hh-keys-section-title">{s.name}</div>
-          <div
-            :for={r <- s.rows}
-            class="hh-key-row"
-            data-text={String.downcase("#{r.key} #{r.command} #{r.doc} #{s.name}")}
-            phx-click="fan_run"
-            phx-value-s={s.name}
-            phx-value-k={r.key}
-            phx-value-c={r.command}
-          >
-            <span class="hh-key-box">{r.key}</span>
-            <div class="hh-row-main">
-              <div class="hh-key-cmd">{r.command}</div>
-              <div :if={r.doc != ""} class="hh-key-doc">{r.doc}</div>
-            </div>
+        <%= if @search do %>
+          <div class="hh-keys-section" data-section="matches">
+            <div class="hh-keys-section-title">matches</div>
+            <.key_rows section="matches" rows={@search.rows} />
+            <div :if={@search.rows == []} class="hh-empty">nothing matches</div>
           </div>
-          <div :if={s.rows == []} class="hh-empty">nothing bound here</div>
-        </div>
-        <div class="hh-empty hh-keys-none" hidden>nothing matches</div>
-        <div :if={@keys == []} class="hh-empty">no bindings to show</div>
+        <% else %>
+          <div :for={s <- @keys} class="hh-keys-section" data-section={s.name} hidden={s.name != @current}>
+            <div class="hh-keys-section-title">{s.name}</div>
+            <.key_rows section={s.name} rows={s.rows} />
+            <div :if={s.rows == []} class="hh-empty">nothing bound here</div>
+          </div>
+          <div :if={@keys == []} class="hh-empty">no bindings to show</div>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  # one section's rows: the key, the command, the first doc line
+  defp key_rows(assigns) do
+    ~H"""
+    <div
+      :for={r <- @rows}
+      class="hh-key-row"
+      phx-click="fan_run"
+      phx-value-s={@section}
+      phx-value-k={r.key}
+      phx-value-c={r.command}
+    >
+      <span class="hh-key-box">{r.key}</span>
+      <div class="hh-row-main">
+        <div class="hh-key-cmd">{r.command}</div>
+        <div :if={r.doc != ""} class="hh-key-doc">{r.doc}</div>
       </div>
     </div>
     """

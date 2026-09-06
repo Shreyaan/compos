@@ -145,6 +145,49 @@
                     (map (lambda (x) (if (equal? (car x) section) (cons section (cons row (cdr x))) x)) acc)
                     (cons (list section row) acc)))))))
 
+;;; --- search: every command, not only the bound ones ---------------------------
+;;; The filter field asks for every command TEXT names, bound or not.
+;;; Each space-separated term must match the key, the name, or the first
+;;; doc line, in any order. A command bound in BUF ranks before one that
+;;; only M-x reaches; names keep their order inside a rank. The row shape
+;;; is the panel's, so a tap runs the command by name.
+
+(define *handheld-search-max* 80)
+
+(define (handheld-terms text)
+  (filter (lambda (s) (not (equal? s "")))
+          (string-split (string-downcase (string-trim text)) " ")))
+
+(define (handheld-terms-match? terms hay)
+  (let loop ((ts terms))
+    (cond ((null? ts) #t)
+          ((string-contains? hay (car ts)) (loop (cdr ts)))
+          (else #f))))
+
+(define (handheld-search buf text)
+  (let ((terms (handheld-terms text)))
+    (if (null? terms)
+        '()
+        (let ((by-cmd (map (lambda (b) (list (car (cdr b)) (car b)))
+                           (handheld-bindings buf))))
+          (let loop ((names (command-names)) (bound '()) (loose '()) (n 0))
+            (if (or (null? names) (>= n *handheld-search-max*))
+                (append (reverse bound) (reverse loose))
+                (let* ((name (car names))
+                       (e (assoc name by-cmd))
+                       (key (and e (car (cdr e))))
+                       (doc (handheld-doc-line name))
+                       (hay (string-downcase
+                              (string-append (if key key "") " " name " " doc))))
+                  (cond ((not (handheld-terms-match? terms hay))
+                         (loop (cdr names) bound loose n))
+                        (key
+                         (loop (cdr names)
+                               (cons (list key name doc 0) bound) loose (+ n 1)))
+                        (else
+                         (loop (cdr names) bound
+                               (cons (list "M-x" name doc 1) loose) (+ n 1)))))))))))
+
 ;;; --- the tab rail: groups -------------------------------------------------------
 ;;; A phone switches groups, not buffers. The rail is the groups in MRU
 ;;; order, and a tap lands in that group's chat.
@@ -305,6 +348,8 @@
   "(handheld-view BUF) -> (TABS CHIPS): what the handheld client shows for BUF")
 (public! 'handheld-keys
   "(handheld-keys BUF) -> ((SECTION ((KEY COMMAND DOC RANK) ...)) ...): every binding in force in BUF, in the panel's sections, recents first")
+(public! 'handheld-search
+  "(handheld-search BUF TEXT) -> ((KEY COMMAND DOC RANK) ...): every command TEXT names, bound in BUF first, then the ones only M-x reaches; empty TEXT is no rows")
 (public! 'handheld-note-command!
   "(handheld-note-command! NAME) — remember NAME as a command the phone ran; the recent section lists it first")
 (catalog-meta! 'function "handheld-note-command!" 'domain 'interaction 'effects '(write))

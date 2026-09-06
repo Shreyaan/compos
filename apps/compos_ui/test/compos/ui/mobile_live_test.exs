@@ -75,6 +75,42 @@ defmodule Compos.Ui.MobileLiveTest do
     refute has_element?(view, "#keys-panel")
   end
 
+  test "typing in the panel searches every command, and a match runs by name", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/m")
+
+    {:ok, _} =
+      Compos.Core.Session.eval(
+        ~s{(define-command "zz-hh-search-target" "Search target for the handheld test" (lambda () (message "zz target ran")))}
+      )
+
+    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
+    on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
+
+    hook(view, "fan", %{"open" => true})
+    assert has_element?(view, "#keys-panel .hh-keys-tab", "plain")
+
+    # a command no key reaches is found by a word of its doc, and M-x is its key
+    hook(view, "fan_filter", %{"q" => "search target handheld"})
+    assert has_element?(view, "#keys-panel [data-section='matches'] .hh-key-row .hh-key-cmd", "zz-hh-search-target")
+    assert has_element?(view, "#keys-panel [data-section='matches'] .hh-key-row .hh-key-box", "M-x")
+    refute has_element?(view, "#keys-panel [data-section='plain']")
+
+    # a bound command is found too
+    hook(view, "fan_filter", %{"q" => "keyboard-quit"})
+    assert has_element?(view, "#keys-panel [data-section='matches'] .hh-key-row .hh-key-cmd", "keyboard-quit")
+
+    # empty text is the tabs again
+    hook(view, "fan_filter", %{"q" => "  "})
+    refute has_element?(view, "#keys-panel [data-section='matches']")
+    assert has_element?(view, "#keys-panel [data-section='plain']")
+
+    # a tap on a match runs the command by name and closes the panel
+    hook(view, "fan_filter", %{"q" => "zz-hh-search"})
+    hook(view, "fan_run", %{"s" => "matches", "k" => "M-x", "c" => "zz-hh-search-target"})
+    refute has_element?(view, "#keys-panel")
+    assert has_element?(view, ".hh-echo", "zz target ran")
+  end
+
   test "the panel opens on the pending prefix's tab and does not press it twice", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
     {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})

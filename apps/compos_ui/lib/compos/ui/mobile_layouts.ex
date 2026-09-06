@@ -394,7 +394,6 @@ defmodule Compos.Ui.MobileLayouts do
                 this.bootCheck();
                 this.dock();
                 this.bindFilter();
-                this.applyFilter();
                 this.bindKey();
                 this.bindRail();
                 this.bindComposer();
@@ -442,45 +441,24 @@ defmodule Compos.Ui.MobileLayouts do
                 });
               },
 
-              // ── the keys panel's filter: type, and every section narrows ──
+              // ── the keys panel's filter: type, and Scheme searches every command ──
               // The field is outside the patch (phx-update="ignore"), so
-              // its text survives a re-render; the filter is applied again
-              // after each patch. Empty text shows the selected tab alone.
+              // its text survives a re-render. Each edit goes to the
+              // server after a short pause; the reply is the list.
               bindFilter() {
                 const input = document.getElementById("keys-filter-input");
                 if (!input || input.dataset.bound) return;
                 input.dataset.bound = "1";
-                input.addEventListener("input", () => this.applyFilter());
+                input.addEventListener("input", () => this.pushFilter());
                 input.addEventListener("keydown", (e) => {
-                  if (e.key === "Escape") { e.preventDefault(); input.value = ""; this.applyFilter(); input.blur(); }
+                  if (e.key === "Escape") { e.preventDefault(); input.value = ""; this.pushFilter(); input.blur(); }
                 });
               },
-              applyFilter() {
-                const panel = document.getElementById("keys-panel");
+              pushFilter() {
                 const input = document.getElementById("keys-filter-input");
-                if (!panel || !input) return;
-                const terms = input.value.toLowerCase().split(/\s+/).filter(Boolean);
-                const current = panel.dataset.current;
-                panel.classList.toggle("filtering", terms.length > 0);
-                let shown = 0;
-                panel.querySelectorAll(".hh-keys-section").forEach((sec) => {
-                  if (terms.length === 0) {
-                    sec.hidden = sec.dataset.section !== current;
-                    sec.querySelectorAll(".hh-key-row").forEach((r) => { r.hidden = false; });
-                    return;
-                  }
-                  let any = 0;
-                  sec.querySelectorAll(".hh-key-row").forEach((r) => {
-                    const t = r.dataset.text || "";
-                    const hit = terms.every((q) => t.includes(q));
-                    r.hidden = !hit;
-                    if (hit) any++;
-                  });
-                  sec.hidden = any === 0;
-                  shown += any;
-                });
-                const none = panel.querySelector(".hh-keys-none");
-                if (none) none.hidden = !(terms.length > 0 && shown === 0);
+                if (!input) return;
+                clearTimeout(this.filterT);
+                this.filterT = setTimeout(() => this.push("fan_filter", { q: input.value }), 60);
               },
 
               // ── the tab rail: a tap is the group, a hold is its buffers ──

@@ -125,6 +125,32 @@
                     "an unbound recent shows M-x")
       (check-false! (handheld-run-command! "handheld-no-such-command") "an unknown name is refused"))))
 
+(deftest 'typing-in-the-panel-searches-every-command
+  "a term finds a command by name, key, or doc, bound or not; a bound row leads with its key"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-handheld-search" "")))
+      (delete-other-windows!)
+      (switch-to-buffer! buf)
+      (check-equal! (handheld-search buf "") '() "empty text is no rows")
+      (check-equal! (handheld-search buf "   ") '() "blank text is no rows")
+      (check-equal! (handheld-search buf "zz-no-such-command-anywhere") '()
+                    "a term nothing carries is no rows")
+      (check-equal! (car (handheld-search buf "handheld-test-dummy"))
+                    '("M-x" "handheld-test-dummy" "Test command: record that it ran" 1)
+                    "an unbound command is found by name, and M-x reaches it")
+      (check-equal! (car (cdr (car (handheld-search buf "record that it RAN dummy"))))
+                    "handheld-test-dummy" "terms match the doc in any order and any case")
+      (global-set-key "<f9> s" "handheld-test-dummy")
+      (check-equal! (car (handheld-search buf "dummy"))
+                    '("<f9> s" "handheld-test-dummy" "Test command: record that it ran" 0)
+                    "a bound command carries its key and ranks first")
+      (check-equal! (car (cdr (car (handheld-search buf "<f9> s"))))
+                    "handheld-test-dummy" "a key is a term too")
+      (let ((rows (handheld-search buf "quit")))
+        (check-true! (pair? rows) "quit names commands")
+        (check-true! (<= (length rows) *handheld-search-max*) "the list is capped"))
+      (global-unset-key "<f9> s"))))
+
 (deftest 'a-chip-teaches-the-key-bound-to-its-command
   "a chip carries the chord bound to its command, or M-x when nothing binds it"
   (lambda ()

@@ -39,8 +39,11 @@ lives in the client. The policy lives in
   per prefix (`C-x`, `C-c`, `C-h`, ...). Each tab is a scrolling list of
   the bindings under it, with the command and the first line of its doc.
   A tap on a row presses the whole chord; a recent row runs by name.
-  Typing in the filter field narrows every section at once, each term
-  matching the key, the command, or the doc. When a prefix is already
+  Typing in the filter field searches every command, bound or not:
+  each term must match the key, the name, or the first doc line, in any
+  order. A command with a key in this buffer comes first; the rest show
+  `M-x` as their key. A tap on a match runs it by name. `handheld-search`
+  builds the rows. When a prefix is already
   pending the panel opens on that tab and does not press the prefix
   again. `handheld-keys` builds the sections from the buffer's whole
   keymap ladder; a local key wins over a global one. `handheld-recents`
