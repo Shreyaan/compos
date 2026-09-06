@@ -249,11 +249,15 @@
     ("doppler:refresh" "Refresh" "g")))
 
 (define (doppler--elide-value value)
-  ;; Keep enough hidden text that a short value never appears in full.
-  (if (and (string? value) (> (string-length value) 12))
-      (let ((n (string-length value)))
-        (string-append (substring value 0 4) "…"
-                       (substring value (- n 4) n)))
+  ;; Up to ten characters at each end, cut back on a shorter value so that
+  ;; at least five characters always stay hidden.
+  (if (string? value)
+      (let* ((n (string-length value))
+             (side (min 10 (quotient (- n 5) 2))))
+        (if (< side 4)
+            "••••"
+            (string-append (substring value 0 side) "…"
+                           (substring value (- n side) n))))
       "••••"))
 
 (define (doppler--row-block buf name i first-line)
@@ -449,15 +453,15 @@
 (define-list-mode! "doppler-mode"
   (list
     'doc (string-append
-           "The secret names in one Doppler project and config. Values show only their first and last four characters. "
-           "Short values stay fully hidden. Click a row to select it, then use the action bar or the matching key. "
+           "The secret names in one Doppler project and config. Values show only up to their first and last ten characters. "
+           "Shorter values show less, and the shortest stay fully hidden. Click a row to select it, then use the action bar or the matching key. "
            "`RET` copies one value. `+` adds a secret, and `e` replaces one value. "
            "`P` selects a project, and `C` selects a config. `d` flags secrets, and "
            "`x` deletes them after confirmation.")
     'buffer *doppler-buffer*
     'rows doppler--rows
     'key (lambda (buf name) name)
-    'columns (lambda (buf) (list (list "secret" #f) (list "value" 11)))
+    'columns (lambda (buf) (list (list "secret" #f) (list "value" 21)))
     'cells (lambda (buf name)
              (list name
                    (doppler--elide-value
