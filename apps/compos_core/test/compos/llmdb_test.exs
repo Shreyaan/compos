@@ -42,9 +42,14 @@ defmodule Compos.LLMDbTest do
     assert LLMDb.price("no-such-model") == nil
   end
 
-  test "the deepseek prefix strips to the first-party catalog" do
+  test "DeepSeek output limits use the provider limit" do
     assert LLMDb.max_tokens("deepseek:deepseek-chat") == 8_000
     assert LLMDb.context_limit("deepseek:deepseek-chat") == 64_000
+
+    # models.dev currently mistakes V4's 1M context window for its output
+    # limit. DeepSeek's documented maximum generated output is 384K.
+    assert LLMDb.max_tokens("deepseek:deepseek-v4-pro") == 393_216
+    assert LLMDb.max_tokens("deepseek:deepseek-v4-flash") == 393_216
   end
 
   test "cost sums all four token buckets per million" do

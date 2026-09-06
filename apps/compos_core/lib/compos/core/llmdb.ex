@@ -53,17 +53,26 @@ defmodule Compos.Core.LLMDb do
   """
   def max_tokens(model) do
     model = strip_provider(model)
-    db = :persistent_term.get(:compos_llmdb, %{})
 
-    Enum.find_value(["anthropic", "openai", "openrouter"] ++ Map.keys(db), fn p ->
-      with %{"models" => models} <- db[p],
-           %{"limit" => %{"output" => out}} <- models[model] || models[Path.basename(model)],
-           true <- is_integer(out) and out > 0 do
-        out
-      else
-        _ -> nil
-      end
-    end)
+    case model do
+      model when model in ["deepseek-v4-pro", "deepseek-v4-flash"] ->
+        # models.dev currently reports the 1M context window as the output
+        # limit. DeepSeek documents a 384K maximum generated output.
+        384 * 1024
+
+      _ ->
+        db = :persistent_term.get(:compos_llmdb, %{})
+
+        Enum.find_value(["anthropic", "openai", "openrouter"] ++ Map.keys(db), fn p ->
+          with %{"models" => models} <- db[p],
+               %{"limit" => %{"output" => out}} <- models[model] || models[Path.basename(model)],
+               true <- is_integer(out) and out > 0 do
+            out
+          else
+            _ -> nil
+          end
+        end)
+    end
   end
 
   @doc """
