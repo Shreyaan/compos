@@ -83,6 +83,7 @@
 (load-bundled-package "sockets.scm")
 (load-bundled-package "spotify.scm")
 (load-bundled-package "switch.scm")
+(load-bundled-package "handheld.scm")
 (load-bundled-package "telemetry.scm")
 (load-bundled-package "perf.scm")
 (load-bundled-package "test.scm")

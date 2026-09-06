@@ -644,6 +644,13 @@ defmodule Compos.Ui.EditorLive do
 
   defp event_buffers(_), do: []
 
+  @doc """
+  The display list for a window tree, for another client of the same
+  payload (the handheld view). ACTIVE is the window that owns the caret,
+  nil while a prompt is up. Returns the decorated tree and the cache.
+  """
+  def decorate_tree(tree, cache, faces, active), do: decorate(tree, cache, faces, active)
+
   # two-level cache: the raw line split is keyed by buffer VERSION only, so
   # cursor motion never re-splits the buffer; span decoration (cursor/region/
   # hl-line) is recomputed per render but only for lines it actually touches

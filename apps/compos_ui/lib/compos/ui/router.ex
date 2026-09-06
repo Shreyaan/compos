@@ -10,6 +10,21 @@ defmodule Compos.Ui.Router do
     plug(:put_root_layout, html: {Compos.Ui.Layouts, :root})
   end
 
+  pipeline :handheld do
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:protect_from_forgery)
+    plug(:put_root_layout, html: {Compos.Ui.MobileLayouts, :root})
+  end
+
+  # the handheld client: the same frame payload, drawn for one thumb.
+  # /m/b/NAME is the buffer link for a phone.
+  scope "/m" do
+    pipe_through(:handheld)
+    live("/", Compos.Ui.MobileLive)
+    live("/b/:buffer", Compos.Ui.MobileLive)
+  end
+
   scope "/" do
     pipe_through(:browser)
     live("/", Compos.Ui.EditorLive)
