@@ -3,8 +3,9 @@
 ;;; The handheld client (/m) is a second client of the same frame payload
 ;;; the desktop renders. Elixir draws it and forwards every gesture as a
 ;;; key. This file decides what the client offers: the prefixes on the
-;;; chord fan, the size of the fan, the tab rail, the chips above the
-;;; composer, and what the composer does with a line of text.
+;;; chord fan, which keys the fan shows under a prefix, the tab rail, the
+;;; chips above the composer, and what the composer does with a line of
+;;; text.
 ;;;
 ;;; The composer has three registers. A literal chord dispatches its keys.
 ;;; "M-x NAME" runs the named command. Anything else goes to the group's
@@ -26,38 +27,107 @@
   "The keys the chord fan offers first. Each entry is (KEY LABEL)."
   'group 'handheld 'type 'list)
 
-(defcustom 'handheld-fan-limit 6
+(defcustom 'handheld-fan-limit 7
   "How many bindings the chord fan shows under a prefix. The rest open as a list."
   'group 'handheld 'type 'number)
 
-;;; --- what a buffer is, in one word --------------------------------------------
+(defcustom 'handheld-fan-pins
+  '(("C-x" "b" "g" "C-f" "k" "s" "d")
+    ("C-c" "b" "c" "n" "a")
+    ("C-h" "b" "k" "m" "f"))
+  "The keys the fan shows first under a prefix, in this order. Each entry is (PREFIX KEY ...). A pinned key that the keymap does not bind is skipped."
+  'group 'handheld 'type 'list)
 
-;; the kind word on a tab: the mode name without its -mode suffix
-(define (handheld-buffer-kind buf)
-  (let ((mode (or (buffer-local buf 'mode-name) "Fundamental")))
-    (cond ((chat-buffer? buf) "chat")
-          ((equal? mode "Dired") "dir")
-          ((string-suffix? "-mode" mode)
-           (substring mode 0 (- (string-length mode) 5)))
-          (else (string-downcase mode)))))
+;;; --- the fan: which keys sit under the thumb -------------------------------------
+;;; The frame's which-key rows are every binding under the prefix, and a
+;;; phone has room for a handful. The rule: the pinned keys for this
+;;; prefix first, then single letters and digits, then any other single
+;;; key, then the nested sequences. The limit cuts the list and the client
+;;; offers the rest as a scrolling list.
 
-(define (handheld-tab-label buf)
-  (or (buffer-local buf 'modeline-name)
-      (switch-buffer-label buf)))
+(define (handheld-single-key? key)
+  (not (string-contains? key " ")))
 
-;; The tab rail: the current group's buffers in MRU order. Outside a
-;; group, the buffer MRU. CUR is the buffer the window shows, and it is
-;; always on the rail; it defaults to the current buffer.
-;; Each row is (NAME LABEL KIND CURRENT?).
+(define *handheld-plain-chars*
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+
+(define (handheld-plain-key? key)
+  (and (= (string-length key) 1)
+       (string-contains? *handheld-plain-chars* key)))
+
+(define (handheld-take xs n)
+  (if (or (null? xs) (<= n 0))
+      '()
+      (cons (car xs) (handheld-take (cdr xs) (- n 1)))))
+
+(define (handheld-fan-rank key)
+  (cond ((handheld-plain-key? key) 0)
+        ((handheld-single-key? key) 1)
+        (else 2)))
+
+(define (handheld-fan-pinned prefix)
+  (let ((e (assoc prefix handheld-fan-pins)))
+    (if e (cdr e) '())))
+
+;; ROWS are ((KEY COMMAND) ...) under PREFIX, as the frame reports them.
+;; Returns (SHOWN HIDDEN): SHOWN is ((KEY COMMAND) ...) in fan order, cut
+;; at handheld-fan-limit; HIDDEN counts the rows the cut left out.
+(define (handheld-fan prefix rows)
+  (let* ((pins (handheld-fan-pinned prefix))
+         (pinned (filter (lambda (r) r)
+                         (map (lambda (k) (assoc k rows)) pins)))
+         (rest (filter (lambda (r) (not (member (car r) pins))) rows))
+         (ranked (append
+                   (filter (lambda (r) (= (handheld-fan-rank (car r)) 0)) rest)
+                   (filter (lambda (r) (= (handheld-fan-rank (car r)) 1)) rest)
+                   (filter (lambda (r) (= (handheld-fan-rank (car r)) 2)) rest)))
+         (ordered (append pinned ranked))
+         (n (length ordered))
+         (limit (max 1 handheld-fan-limit)))
+    (if (<= n limit)
+        (list ordered 0)
+        (list (handheld-take ordered limit) (- n limit)))))
+
+;;; --- the tab rail: groups -------------------------------------------------------
+;;; A phone switches groups, not buffers. The rail is the groups in MRU
+;;; order, and a tap lands in that group's chat.
+;;; Each row is (ID LABEL KIND CURRENT?).
+
 (define (handheld-tabs &optional cur)
-  (let* ((g (frame-group))
-         (cur (or cur (current-buffer)))
-         (pool (filter buffer-exists?
-                       (if g (group-user-buffers-mru g) (buffer-list-mru))))
-         (pool (if (member cur pool) pool (cons cur pool))))
-    (map (lambda (b)
-           (list b (handheld-tab-label b) (handheld-buffer-kind b) (equal? b cur)))
-         pool)))
+  (let ((here (or cur (frame-group))))
+    (map (lambda (id)
+           (list id
+                 (group-display-name id)
+                 "group"
+                 (equal? id here)))
+         (group-ids-mru))))
+
+(effects! '(write))
+
+;; A tap on a tab: switch to the group and show its chat, founding the
+;; chat when the group has none yet. Returns the chat buffer, or #f.
+(define (handheld-tab! g)
+  (let ((id (group-resolve-id g)))
+    (cond ((not id) (message "No such group") #f)
+          (else
+           (switch-to-group! id)
+           (let ((chat (or (group-chat id) (group-chat-new! id))))
+             (if chat
+                 (group-chat-buffer-show! chat)
+                 (message "This group has no chat"))
+             chat)))))
+
+;; A long press on a tab: switch to the group and open the buffer switcher
+;; as a prompt, so the group's buffers come up as tappable rows.
+(define (handheld-tab-hold! g)
+  (let ((id (group-resolve-id g)))
+    (cond ((not id) (message "No such group") #f)
+          (else
+           (unless (equal? id (frame-group)) (switch-to-group! id))
+           (run-command "switch-to-buffer-prompt")
+           id))))
+
+(effects! '(read))
 
 ;;; --- chips ----------------------------------------------------------------------
 
@@ -168,11 +238,13 @@
 (define (handheld-view buf)
   (list handheld-prefixes
         handheld-fan-limit
-        (handheld-tabs buf)
+        (handheld-tabs)
         (handheld-chips buf)))
 
 (public! 'handheld-view
   "(handheld-view BUF) -> (PREFIXES FAN-LIMIT TABS CHIPS): what the handheld client shows for BUF")
+(public! 'handheld-fan
+  "(handheld-fan PREFIX ROWS) -> (SHOWN HIDDEN): the which-key rows the fan shows under PREFIX, pins first, and how many it left out")
 (public! 'handheld-classify
   "(handheld-classify TEXT) -> (empty) | (keys KEYS) | (command NAME) | (prose TEXT)")
 (public! 'handheld-compose!
@@ -182,6 +254,12 @@
   "(handheld-scrub! N) — move point to the start of line N; returns the line reached")
 (catalog-meta! 'function "handheld-scrub!" 'domain 'interaction 'effects '(write))
 (public! 'handheld-tabs
-  "(handheld-tabs [CUR]) -> ((NAME LABEL KIND CURRENT?) ...): the tab rail; CUR is the shown buffer")
+  "(handheld-tabs [CUR]) -> ((ID LABEL KIND CURRENT?) ...): the groups in MRU order; CUR is the current group")
+(public! 'handheld-tab!
+  "(handheld-tab! GROUP) — switch to GROUP and show its chat; returns the chat buffer or #f")
+(catalog-meta! 'function "handheld-tab!" 'domain 'interaction 'effects '(write display))
+(public! 'handheld-tab-hold!
+  "(handheld-tab-hold! GROUP) — switch to GROUP and open the buffer switcher as a prompt; returns the group id or #f")
+(catalog-meta! 'function "handheld-tab-hold!" 'domain 'interaction 'effects '(write display))
 (public! 'handheld-chips
   "(handheld-chips BUF) -> ((LABEL CHORD) ...): the composer chips for BUF")

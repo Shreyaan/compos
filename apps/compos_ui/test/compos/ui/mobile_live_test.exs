@@ -41,7 +41,7 @@ defmodule Compos.Ui.MobileLiveTest do
     {:ok, view, html} = live(conn, "/m")
     assert has_element?(view, "#hh > .hh-modeline")
     assert has_element?(view, "#hh > .hh-composer #composer")
-    assert has_element?(view, "#hh > .hh-tabs .hh-tab.on")
+    assert has_element?(view, "#hh > .hh-tabs")
     assert has_element?(view, "#chord-key")
     assert html =~ "hh-test-"
     refute has_element?(view, ".hh-fan")
@@ -97,13 +97,40 @@ defmodule Compos.Ui.MobileLiveTest do
     assert has_element?(view, ".hh-echo", "No command named hh-no-such-command")
   end
 
-  test "a tab tap switches the window's buffer", %{conn: conn} do
+  test "the tab rail is the groups, and a tap lands in the group's chat", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
-    other = "hh-other-#{System.unique_integer([:positive])}"
-    {:ok, _} = Compos.Core.Session.eval(~s{(buffer-create "#{other}")})
-    hook(view, "tab", %{"buf" => other})
-    assert has_element?(view, ".hh-tab.on", other)
-    assert has_element?(view, ".hh-ml-name", other)
+    buf = Compos.Core.Editor.current_buffer()
+    {:ok, g} = Compos.Core.Session.eval(~s{(group-ensure! "#{buf}")})
+    g = String.trim(g, "\"")
+    render(view)
+    hook(view, "tab", %{"buf" => g})
+    assert has_element?(view, ".hh-tab.on")
+    assert has_element?(view, ".hh-ml-mode", "chat-mode")
+  end
+
+  test "the fan under a prefix follows Scheme's cut and offers the rest", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/m")
+    {:ok, _} = Compos.Core.Session.eval(~s{(set! handheld-fan-limit 2)})
+
+    for k <- ~w(a b c d) do
+      {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> #{k}" "keyboard-quit")})
+    end
+
+    on_exit(fn ->
+      Compos.Core.Session.eval(~s{(set! handheld-fan-limit 7)})
+      for k <- ~w(a b c d), do: Compos.Core.Session.eval(~s{(global-unset-key "<f9> #{k}")})
+    end)
+
+    hook(view, "fan", %{"open" => true})
+    hook(view, "arc", %{"k" => "<f9>", "lvl" => "1"})
+    assert has_element?(view, ".hh-arc[data-lvl='2'][data-arc='a']")
+    assert has_element?(view, ".hh-arc[data-lvl='2'][data-arc='b']")
+    refute has_element?(view, ".hh-arc[data-arc='c']")
+    assert has_element?(view, ".hh-arc[data-more='1']", "2 more")
+
+    hook(view, "fan_all", %{})
+    assert has_element?(view, ".hh-fan-row[data-arc='d']")
+    hook(view, "fan_quit", %{})
   end
 
   test "the rail moves point to the line the drag names", %{conn: conn} do

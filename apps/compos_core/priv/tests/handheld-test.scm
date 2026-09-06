@@ -47,17 +47,42 @@
     (check-true! (handheld-test-fired? 'dummy) "and the command ran")
     (check-equal! (handheld-compose! "M-x handheld-no-such-command") 'unknown "an unknown name is refused")))
 
-(deftest 'the-tab-rail-carries-the-current-buffer-flagged
-  "the current buffer is on the rail and marked current"
+(deftest 'the-tab-rail-is-the-groups-and-a-tap-lands-in-the-chat
+  "a buffer's group is on the rail; the tap switches to it and shows its chat"
   (lambda ()
-    (let ((buf (test-buffer! "zz-handheld-tab" "one\ntwo\n")))
-      (delete-other-windows!)
-      (switch-to-buffer! buf)
-      (set-mode! "text-mode")
-      (let ((row (assoc buf (handheld-tabs))))
-        (check-true! row "the rail names the current buffer")
-        (check-equal! (nth 2 row) "text" "the kind is the mode without its suffix")
-        (check-equal! (nth 3 row) #t "and it is flagged current")))))
+    (let* ((buf (test-buffer! "zz-handheld-tab" "one\ntwo\n"))
+           (g (begin (delete-other-windows!) (switch-to-buffer! buf) (group-ensure! buf))))
+      (check-true! g "the buffer founded a group")
+      (let ((row (assoc g (handheld-tabs g))))
+        (check-true! row "the rail names the group")
+        (check-equal! (nth 2 row) "group" "every tab is a group")
+        (check-equal! (nth 3 row) #t "and the current one is flagged"))
+      (let ((chat (handheld-tab! g)))
+        (check-true! (and chat (chat-buffer? chat)) "the tap lands in the group's chat")
+        (check-equal! (current-buffer) chat "and that chat is current"))
+      (check-equal! (handheld-tab-hold! g) g "a hold answers the group")
+      (check-true! (minibuffer-active?) "and opens the buffer switcher as a prompt")
+      (run-command "minibuffer-cancel")
+      (check-false! (minibuffer-active?) "C-g closes it"))))
+
+(deftest 'the-fan-shows-pins-first-then-plain-keys-then-nested-sequences
+  "the fan's order and its cut, on rows this test makes up"
+  (lambda ()
+    (let ((rows '(("<left>" "winner-previous") ("a a" "agent-goto") ("q" "quit-it")
+                  ("g" "go") ("b" "buffers") ("C-f" "find") ("z" "zap"))))
+      (set! handheld-fan-pins '(("<f9>" "b" "g" "nope")))
+      (set! handheld-fan-limit 4)
+      (let ((fan (handheld-fan "<f9>" rows)))
+        (check-equal! (map car (car fan)) '("b" "g" "q" "z")
+                      "pins in their order, then plain keys; a pin the map lacks is skipped")
+        (check-equal! (nth 1 fan) 3 "the cut counts what it left out"))
+      (set! handheld-fan-limit 20)
+      (check-equal! (map car (car (handheld-fan "<f9>" rows)))
+                    '("b" "g" "q" "z" "<left>" "C-f" "a a")
+                    "past the plain keys come the other single keys, then the nested ones")
+      (check-equal! (nth 1 (handheld-fan "<f9>" rows)) 0 "nothing hidden under a wide limit")
+      (check-equal! (map car (car (handheld-fan "C-q" '(("x" "one")))))
+                    '("x") "a prefix with no pins ranks the rows alone"))))
 
 (deftest 'a-chip-teaches-the-key-bound-to-its-command
   "a chip carries the chord bound to its command, or M-x when nothing binds it"

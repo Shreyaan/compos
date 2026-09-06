@@ -39,6 +39,7 @@ defmodule Compos.Ui.MobileLive do
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           fan: false,
           fan_all: false,
+          fan_rows: nil,
           view: @empty_view,
           view_key: nil
         )
@@ -55,6 +56,7 @@ defmodule Compos.Ui.MobileLive do
          boot_id: :persistent_term.get(:compos_boot_id, "dev"),
          fan: false,
          fan_all: false,
+         fan_rows: nil,
          view: @empty_view,
          view_key: nil
        )}
@@ -115,8 +117,15 @@ defmodule Compos.Ui.MobileLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  def handle_event("tab", %{"buf" => buf}, socket) when is_binary(buf) do
-    Input.run(socket.assigns.frame, fn -> Session.call_named("switch-to-buffer!", [buf]) end)
+  # a tab is a group: Scheme switches to it and shows its chat
+  def handle_event("tab", %{"buf" => id}, socket) when is_binary(id) do
+    Input.run(socket.assigns.frame, fn -> Session.call_named("handheld-tab!", [id]) end)
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  # a held tab: the group's buffers, as a prompt
+  def handle_event("tab_hold", %{"buf" => id}, socket) when is_binary(id) do
+    Input.run(socket.assigns.frame, fn -> Session.call_named("handheld-tab-hold!", [id]) end)
     {:noreply, socket |> drain() |> refresh()}
   end
 
@@ -323,13 +332,34 @@ defmodule Compos.Ui.MobileLive do
         view: view,
         view_key: view_key,
         fan: fan,
-        fan_all: socket.assigns.fan_all and fan
+        fan_all: socket.assigns.fan_all and fan,
+        fan_rows: if(fan and state.pending != [], do: fan_rows(fid, state), else: nil)
       )
 
     case fid && Editor.take_navigation(fid) do
       url when is_binary(url) -> push_event(socket, "navigate", %{url: url})
       _ -> socket
     end
+  end
+
+  # which of the which-key rows the fan shows under the pending prefix,
+  # and how many it leaves out: Scheme's rule, over the frame's rows
+  defp fan_rows(fid, state) do
+    prefix = Enum.join(state.pending, " ")
+    rows = for w <- state.which_key || [], do: [w.key, w.command]
+
+    case Input.run(fid, fn -> Session.call_named("handheld-fan", [prefix, rows]) end) do
+      {:ok, [shown, hidden]} when is_list(shown) ->
+        %{
+          shown: for([k, c] <- shown, do: %{key: str(k), label: str(c), lvl: "2"}),
+          hidden: if(is_number(hidden), do: trunc(hidden), else: 0)
+        }
+
+      _ ->
+        %{shown: for(w <- state.which_key || [], do: %{key: w.key, label: w.command, lvl: "2"}), hidden: 0}
+    end
+  rescue
+    _ -> %{shown: [], hidden: 0}
   end
 
   # what Scheme says the client shows. One call per change of the shown
@@ -452,6 +482,7 @@ defmodule Compos.Ui.MobileLive do
           :for={t <- @view.tabs}
           class={"hh-tab #{if t.current, do: "on"}"}
           data-kind={t.kind}
+          data-tab={t.buf}
           phx-click="tab"
           phx-value-buf={t.buf}
         >
@@ -461,7 +492,7 @@ defmodule Compos.Ui.MobileLive do
       </div>
 
       <div :if={@fan} class="hh-scrim" phx-click="fan_quit"></div>
-      <.fan :if={@fan} state={@state} view={@view} fan_all={@fan_all} />
+      <.fan :if={@fan} state={@state} view={@view} fan_rows={@fan_rows} fan_all={@fan_all} />
 
       <div id="chord-key" class={"hh-key #{if @fan, do: "on"}"}>
         <span class="hh-key-glyph">{key_glyph(@state)}</span>
@@ -557,7 +588,8 @@ defmodule Compos.Ui.MobileLive do
   # the chord fan: prefixes at level one, the frame's which-key rows under
   # a pending prefix. Past the limit, one item opens the whole list.
   defp fan(assigns) do
-    assigns = assign(assigns, items: fan_items(assigns.state, assigns.view, assigns.fan_all))
+    assigns =
+      assign(assigns, items: fan_items(assigns.state, assigns.view, assigns.fan_rows, assigns.fan_all))
 
     ~H"""
     <div class="hh-fan">
@@ -596,25 +628,21 @@ defmodule Compos.Ui.MobileLive do
     """
   end
 
-  defp fan_items(%{pending: []}, view, _all) do
+  defp fan_items(%{pending: []}, view, _rows, _all) do
     Enum.map(view.prefixes, &%{key: &1.key, label: &1.label, lvl: "1"})
   end
 
-  # one key per arc first: a nested sequence (a prefix under the prefix)
-  # is reachable, but the thumb's row is for the keys that finish here
-  defp fan_items(state, view, all) do
-    rows =
-      (state.which_key || [])
-      |> Enum.map(&%{key: &1.key, label: &1.command, lvl: "2"})
-      |> Enum.sort_by(fn r -> if String.contains?(r.key, " "), do: 1, else: 0 end)
-
+  # the whole list when asked; else Scheme's cut, and one arc for the rest
+  defp fan_items(state, _view, rows, all) do
     cond do
-      all or length(rows) <= view.limit ->
-        rows
+      all ->
+        for w <- state.which_key || [], do: %{key: w.key, label: w.command, lvl: "2"}
+
+      rows == nil or rows.hidden == 0 ->
+        (rows && rows.shown) || []
 
       true ->
-        shown = Enum.take(rows, view.limit - 1)
-        shown ++ [%{key: "…", label: "#{length(rows) - length(shown)} more", lvl: "2", more: true}]
+        rows.shown ++ [%{key: "…", label: "#{rows.hidden} more", lvl: "2", more: true}]
     end
   end
 

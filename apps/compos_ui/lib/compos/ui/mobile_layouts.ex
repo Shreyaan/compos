@@ -81,8 +81,13 @@ defmodule Compos.Ui.MobileLayouts do
           .hh {
             position: relative; height: 100dvh; width: 100vw;
             display: flex; flex-direction: column;
-            background: var(--paper); color: var(--ink);
-            user-select: none; -webkit-user-select: none; overflow: hidden;
+            background: var(--paper); color: var(--ink); overflow: hidden;
+          }
+          /* no text selection on the chrome. Not on the root: an input under
+             a -webkit-user-select:none ancestor never raises the keyboard
+             on iOS. */
+          .hh-modeline, .hh-tabs, .hh-key, .hh-fan, .hh-chips, .hh-rail, .hh-sheet-head, .hh-sheet-legend {
+            user-select: none; -webkit-user-select: none;
           }
           .hh-splash { display: flex; align-items: center; justify-content: center; height: 100%; opacity: .5; }
           .hh-spacer { flex: 1; }
@@ -364,6 +369,7 @@ defmodule Compos.Ui.MobileLayouts do
                 this.bindKey();
                 this.bindRail();
                 this.bindComposer();
+                this.bindTabs();
               },
               updated() {
                 this.remember();
@@ -447,6 +453,36 @@ defmodule Compos.Ui.MobileLayouts do
                 };
                 key.addEventListener("pointerup", up);
                 key.addEventListener("pointercancel", () => { this.dragging = false; });
+              },
+
+              // ── the tab rail: a tap is the group, a hold is its buffers ──
+              // One listener on the rail, so re-rendered tabs need no
+              // rebinding. A hold that moves is a scroll, not a press.
+              bindTabs() {
+                const rail = this.el.querySelector(".hh-tabs");
+                if (!rail || rail.dataset.bound) return;
+                rail.dataset.bound = "1";
+                const cancel = () => { clearTimeout(this.holdT); this.holdT = null; };
+                rail.addEventListener("pointerdown", (e) => {
+                  const tab = e.target.closest && e.target.closest("[data-tab]");
+                  if (!tab) return;
+                  this.holdX = e.clientX; this.holdY = e.clientY; this.held = false;
+                  cancel();
+                  this.holdT = setTimeout(() => {
+                    this.held = true;
+                    this.push("tab_hold", { buf: tab.dataset.tab });
+                  }, 450);
+                });
+                rail.addEventListener("pointermove", (e) => {
+                  if (this.holdT && (Math.abs(e.clientX - this.holdX) > 8 || Math.abs(e.clientY - this.holdY) > 8)) cancel();
+                });
+                rail.addEventListener("pointerup", cancel);
+                rail.addEventListener("pointercancel", cancel);
+                // the tap that ends a hold is not a tap on the tab
+                rail.addEventListener("click", (e) => {
+                  if (this.held) { this.held = false; e.stopPropagation(); e.preventDefault(); }
+                }, true);
+                rail.addEventListener("contextmenu", (e) => e.preventDefault());
               },
 
               // ── the rail: a drag is point ──────────────────────────

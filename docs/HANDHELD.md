@@ -27,13 +27,20 @@ lives in the client. The policy lives in
 - **The chips.** Three commands above the field. Each chip shows the key
   bound to its command, or `M-x NAME` when nothing binds it. A tap sends
   the chord through the composer. `handheld-chips` names them.
-- **The tab rail.** The current group's buffers in MRU order. A tap
-  switches the window to that buffer. `handheld-tabs` builds the rows.
+- **The tab rail.** The groups in MRU order. A phone switches groups,
+  not buffers. A tap switches to the group and shows its chat, founding
+  the chat when the group has none. A long press opens the group's
+  buffers as a prompt sheet. `handheld-tabs` builds the rows,
+  `handheld-tab!` answers the tap, and `handheld-tab-hold!` the press.
 - **The chord key.** Hold it and the fan opens on the prefixes in
   `handheld-prefixes`. Slide onto a prefix and its bindings appear: they
   are the frame's own which-key rows. Release over a row to run it.
   A tap latches, so hold-and-slide and tap-tap-tap reach the same command.
-  The fan shows `handheld-fan-limit` rows and a "more" row for the rest.
+  `handheld-fan` picks what the fan shows under a prefix: the keys pinned
+  for that prefix in `handheld-fan-pins`, in that order; then single
+  letters and digits; then other single keys; then nested sequences. The
+  first `handheld-fan-limit` rows show, and a "more" arc opens the whole
+  list.
 - **The sheets.** An active minibuffer renders as a sheet of rows. A tap
   on a row selects it and accepts. An active transient renders as a sheet
   of key boxes; a tap sends the key. Every prompt and every transient
@@ -51,6 +58,8 @@ lives in the client. The policy lives in
 ## Customs
 
 - `handheld-prefixes` — the `(KEY LABEL)` rows on the fan's first level.
+- `handheld-fan-pins` — `(PREFIX KEY ...)` rows: the keys the fan shows
+  first under each prefix.
 - `handheld-fan-limit` — how many rows the fan shows under a prefix.
 
 ## Not built yet
