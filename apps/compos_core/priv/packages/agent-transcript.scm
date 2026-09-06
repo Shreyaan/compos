@@ -430,6 +430,27 @@
       (when (and (string? label) (string-prefix? "tool · " label))
         (message label)))))
 
+;; The live label a `thought` event shows on the activity row. A deepseek
+;; model streams its hidden chain of thought in `text`; that is the one
+;; glimpse into the reasoning worth flashing past, so the row shows its
+;; latest line as it scrolls by. Only the last line fits, and only the
+;; first word survives the clip.
+(define (agent-activity-preview e)
+  (let ((text (or (plist-get e 'text) "")))
+    (if (equal? text "")
+        "thinking…"
+        (let* ((nl (string-rindex text "\n"))
+               (line (if nl
+                         (substring-bytes text (+ nl 1) (string-byte-length text))
+                         text))
+               (trimmed (string-trim line))
+               (shown (if (equal? trimmed "")
+                          "thinking…"
+                          (string-append "thinking · " trimmed))))
+          (if (> (string-byte-length shown) 160)
+              (string-append (substring-bytes shown 0 159) "…")
+              shown)))))
+
 (define (agent-show-waiting! slug)
   (let ((buf (agent-buf slug)))
     ;; idempotent: a queued echo re-shows it, and the turn start shows it

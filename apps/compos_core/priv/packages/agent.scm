@@ -89,7 +89,7 @@
       ((equal? type 'thought)
        (let ((start (agent-render! slug (plist-get e 'text) "agent-thought")))
          (agent-block-extend-or-push! buf start (agent-mark slug) "thought"))
-       (chat-activity! buf "thinking…"))
+       (chat-activity! buf (agent-activity-preview e)))
 
       ((equal? type 'tool-call)
        (chat-activity! buf (string-append "tool · " (agent-tool-title e)))
