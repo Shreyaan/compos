@@ -20,8 +20,8 @@
 
 (define *perf-buffer* "*perf*")
 
-(defcustom 'perf-tick-ms 1000
-  "Milliseconds between two samples of the *perf* buffer."
+(defcustom 'perf-tick-ms 2000
+  "Milliseconds between two samples of a shown *perf* buffer. Every sample is one patch to the browser."
   'group 'perf 'type 'number)
 
 (defcustom 'perf-history 60
@@ -289,23 +289,24 @@
 (define (perf--newest-time events)
   (fold (lambda (m r) (max m (plist-get r 'time-ms))) 0 events))
 
+;; one change: every local a sample writes lands in one buffer-set-locals!,
+;; so the frame refreshes once for the sample, not once per local
 (define (perf--sample! buf)
   (let* ((s (vm-sample))
          (procs (vm-processes perf-process-rows (perf--sort-name buf)
                               (or (buffer-local buf 'perf-filter) "")))
          (events (telemetry-events 400))
          (since (or (buffer-local buf 'perf-heat-since) 0)))
-    (buffer-set-local! buf 'perf-sample s)
-    (buffer-set-local! buf 'perf-procs procs)
-    (buffer-set-local! buf 'perf-series
-      (perf--advance (or (buffer-local buf 'perf-series) '()) s))
-    (buffer-set-local! buf 'perf-heat
-      (perf--advance-heat (or (buffer-local buf 'perf-heat) '()) since events))
-    (buffer-set-local! buf 'perf-heat-since (max since (perf--newest-time events)))
-    (buffer-set-local! buf 'perf-sparks
-      (perf--advance-sparks (buffer-local buf 'perf-sparks) (perf--get procs 'rows '())))
-    (buffer-set-local! buf 'perf-render-ms (perf--render-durations events))
-    (buffer-set-local! buf 'perf-tick (+ 1 (or (buffer-local buf 'perf-tick) 0)))))
+    (buffer-set-locals! buf
+      (list 'perf-sample s
+            'perf-procs procs
+            'perf-series (perf--advance (or (buffer-local buf 'perf-series) '()) s)
+            'perf-heat (perf--advance-heat (or (buffer-local buf 'perf-heat) '()) since events)
+            'perf-heat-since (max since (perf--newest-time events))
+            'perf-sparks (perf--advance-sparks (buffer-local buf 'perf-sparks)
+                                               (perf--get procs 'rows '()))
+            'perf-render-ms (perf--render-durations events)
+            'perf-tick (+ 1 (or (buffer-local buf 'perf-tick) 0))))))
 
 ;;; --- the text ----------------------------------------------------------------------
 
@@ -356,17 +357,17 @@
   (let ((line (car (buffer-line-at-point buf))))
     (assoc line (or (buffer-local buf 'perf-rows) '()))))
 
-;; rewrite the text; point stays on its line
+;; rewrite the text in one change; point stays on its line. The write is
+;; programmatic: buffer-replace-range! bypasses read-only, so the flag does
+;; not flip off and on (two more patches, and a caret the client took).
 (define (perf--replace-text! buf text)
-  (let ((line (car (buffer-line-at-point buf)))
-        (last (perf--line-count text)))
-    (buffer-set-read-only! buf #f)
-    (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-append! buf text)
-    (buffer-set-read-only! buf #t)
-    (with-current-buffer buf
-      (lambda ()
-        (goto-char! (line-start-position (max 1 (min line last))))))))
+  (let* ((line (car (buffer-line-at-point buf)))
+         (last (perf--line-count text))
+         (want (max 1 (min line last))))
+    (buffer-replace-range! buf 0 (buffer-size buf) text)
+    (unless (= (car (buffer-line-at-point buf)) want)
+      (with-current-buffer buf
+        (lambda () (goto-char! (line-start-position want)))))))
 
 ;;; --- the panels ----------------------------------------------------------------------
 
@@ -720,10 +721,14 @@
 
 ;;; --- the tick ---------------------------------------------------------------------
 
+;; a render is two changes: the text, then the rows and the blocks together.
+;; The blocks carry only the current page (perf--blocks), so a tick ships
+;; one page, once.
 (define (perf--render! buf)
   (perf--replace-text! buf (perf--text buf))
-  (buffer-set-local! buf 'perf-rows (perf--rows buf))
-  (buffer-set-local! buf 'render-blocks (perf--blocks buf)))
+  (buffer-set-locals! buf
+    (list 'perf-rows (perf--rows buf)
+          'render-blocks (perf--blocks buf))))
 
 (define (perf--refresh! buf)
   (perf--sample! buf)
@@ -732,6 +737,8 @@
 (define (perf--arm! buf ms)
   (debounce! (string-append "perf-tick:" buf) ms perf--tick buf))
 
+;; the interval is the custom perf-tick-ms, read on every arm, so a
+;; customize takes effect on the next tick
 (define (perf--tick buf)
   (when (buffer-exists? buf)
     (if (and (window-showing buf) (not (buffer-local buf 'perf-paused)))

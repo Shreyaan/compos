@@ -155,3 +155,17 @@
       (check-equal! (assoc 'display-memory *global-mode-string*) #f "the segment is gone when off")
       (customize-set! 'display-memory-mode was)
       (display-memory--tick #f))))
+
+(deftest 'perf-refresh-writes-through-read-only
+  "a refresh rewrites the text of the read-only buffer without a flip: the flag stays on, the sample and the blocks land"
+  (lambda ()
+    (let ((buf (perf-test--buffer)))
+      (buffer-create buf)
+      (with-current-buffer buf (lambda () (set-mode! "perf-mode")))
+      (let ((tick (or (buffer-local buf 'perf-tick) 0)))
+        (perf--refresh! buf)
+        (check-equal! (buffer-local buf 'perf-tick) (+ tick 1) "the sample landed")
+        (check-true! (pair? (buffer-local buf 'render-blocks)) "the blocks landed")
+        (check-true! (string-prefix? "*perf*" (buffer-text buf)) "the text was rewritten")
+        (check-true! (buffer-read-only? buf) "the buffer stays read-only through the write"))
+      (buffer-kill! buf))))

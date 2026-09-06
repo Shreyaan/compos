@@ -553,8 +553,10 @@
               (when (and (not (equal? normalized ids))
                          (equal? (length normalized) (length ids)))
                 (buffer-set-local! b 'group-ids normalized))
-              (buffer-set-local! b 'group #f)
-              (buffer-set-local! b 'companion-of #f)
+              ;; a write only when a legacy name is still there: every
+              ;; local write is a change the frame refreshes for
+              (when (buffer-local b 'group) (buffer-set-local! b 'group #f))
+              (when (buffer-local b 'companion-of) (buffer-set-local! b 'companion-of #f))
               normalized)
             (let ((legacy (or (buffer-local b 'group)
                               (buffer-local b 'companion-of))))
@@ -2266,14 +2268,24 @@
   (let ((id (frame-local 'current-group)))
     (and id (group-window-as id role))))
 
+;; The buffers the walk below already normalized. group-ids runs on
+;; every frame-tabs call, so on every render that moved the buffer order,
+;; and the walk touched every buffer each time: 50 ms per keystroke with
+;; a hundred buffers. A buffer is migrated once; a buffer born later gets
+;; its turn on the next call, and a killed one drops out of the list.
+(define *group-migrated-buffers* '())
+
 (define (group-migrate-live!)
-  (for-each
-    (lambda (buf)
-      (if (chat-buffer? buf)
-          (chat-group-id buf)
-          (buffer-group-ids buf))
-      (buffer-modeline-group-refresh! buf))
-    (buffer-list))
+  (let ((live (buffer-list)))
+    (for-each
+      (lambda (buf)
+        (unless (member buf *group-migrated-buffers*)
+          (if (chat-buffer? buf)
+              (chat-group-id buf)
+              (buffer-group-ids buf))
+          (buffer-modeline-group-refresh! buf)))
+      live)
+    (set! *group-migrated-buffers* live))
   #t)
 
 (define (group-ids)

@@ -349,3 +349,31 @@
       (group-noise-set! id "unknown")
       (check-equal! (group-noise id) "quiet" "unknown reads as quiet")
       (t--gs-drop! id))))
+
+;;; --- the migration walk ----------------------------------------------------------
+
+(deftest 'group-migrate-live-normalizes-each-buffer-once-and-every-newcomer
+  "a buffer holding a group NAME gets the id on the first walk; a buffer born after that walk gets it on the next"
+  (lambda ()
+    (let* ((id (group-record-create! "zz-migrate-walk"))
+           (name (group-name id))
+           (a (test-buffer! "*zz-gs-migrate-a*" ""))
+           (b "*zz-gs-migrate-b*"))
+      (buffer-set-local! a 'group-ids (list name))
+      (group-ids)
+      (check-equal! (buffer-local a 'group-ids) (list id) "the first walk rewrote the name to the id")
+      (check-equal! (buffer-local a 'modeline-groups) (list name) "the first walk set the modeline segment")
+      (check-true! (member a *group-migrated-buffers*) "the buffer is on the migrated list")
+      ;; the walk skips a migrated buffer: a name put back by hand stays
+      (buffer-set-local! a 'group-ids (list name))
+      (group-ids)
+      (check-equal! (buffer-local a 'group-ids) (list name) "a second walk does not touch a migrated buffer")
+      ;; a newcomer is migrated on the next walk
+      (test-buffer! b "")
+      (buffer-set-local! b 'group-ids (list name))
+      (group-ids)
+      (check-equal! (buffer-local b 'group-ids) (list id) "the newcomer got the id")
+      (t--gs-kill! a b)
+      (group-ids)
+      (check-false! (member a *group-migrated-buffers*) "a killed buffer leaves the list")
+      (t--gs-drop! id))))
