@@ -1092,52 +1092,121 @@
 ;; That is the fail-closed rule, applied where it bites.
 ;; author: the proxy sends its thread's slug (COMPOS_AGENT), so edits an
 ;; external agent makes through this bridge land in buffer-authors
+(define *mcp-proxy-grants* '())
+
+;; What "always" remembers, as (SLUG KEY). The key is the VERB the
+;; policy tripped on, never the tool: always-allowing a whatsapp tool must
+;; not also allow the next irreversible verb it can reach, and "always"
+;; on eval-scheme must never blanket-allow every future eval — that tool's
+;; name says nothing about what it runs. With no key worth keeping,
+;; always simply means once.
+(define (mcp-proxy--grant-key name raw)
+  (or (and (boundp (quote permission-denied-verb?))
+           (permission-denied-verb? raw))
+      (and (not (equal? name "eval-scheme")) name)))
+
+(define (mcp-proxy--granted? slug name raw)
+  (let ((key (and slug (mcp-proxy--grant-key name raw))))
+    (and key (member (list slug key) *mcp-proxy-grants*) #t)))
+
+(define (mcp-proxy--grant! slug name raw)
+  (let ((key (and slug (mcp-proxy--grant-key name raw))))
+    (when key
+      (set! *mcp-proxy-grants* (cons (list slug key) *mcp-proxy-grants*)))))
+
+(define (mcp-proxy--refused raw verdict tail)
+  (base64-encode
+    (string-append
+      "refused: compos's permission policy did not allow this ("
+      (or (and (boundp (quote permission-denied-verb?))
+               (permission-denied-verb? raw))
+          (symbol->string verdict))
+      "). " tail)))
+
+(define (mcp-proxy--run name args-json author)
+  ;; The async lane. An eval-scheme payload whose whole program is
+  ;; one shell command must not hold the Session for its runtime —
+  ;; this is the exact payload behind every logged Session timeout.
+  ;; eval-defer! keeps the caller's reply slot, the command runs in
+  ;; a Task, and eval-resolve! answers with the output when the
+  ;; command ends. Keys, saves and other evals run meanwhile.
+  (let* ((parts (and (equal? name "eval-scheme")
+                     (mcp-proxy--shell-code args-json)))
+         (read-only? (llm-tool-read-only? name))
+         (token (and (or parts read-only?) (eval-defer!))))
+    (cond
+      ((and token parts)
+        (let ((resolve (lambda (out)
+                         (eval-resolve! token
+                           (base64-encode (value->string out))))))
+          (if (cadr parts)
+              (shell-command->string (car parts) (cadr parts) resolve)
+              (shell-command->string (car parts) resolve))
+          'pending))
+      ((and token read-only?)
+       (task-run!
+         (lambda ()
+           (base64-encode (mcp-proxy--sync name args-json author)))
+         (lambda (ok value)
+           (eval-resolve! token
+             (if ok value
+                 (base64-encode (string-append "error: " (value->string value)))))))
+       'pending)
+      (else
+        (base64-encode (mcp-proxy--sync name args-json author))))))
+
+;; Ask, on a lane that has no backend to ask through. This arm did not
+;; exist: the cond ran allow and refused everything else, so a verdict of
+;; ask fell into the refusal — the policy said "stop and ask" and the lane
+;; answered no, with no card and nothing for the user to answer. The proxy
+;; raises the card itself now, through the same door the ACP lane uses.
+;; The wait happens in a Task behind eval-defer!, so the Session stays
+;; free while the card sits there, and the chat's own C-c C-y / C-c C-n
+;; answer it like any other.
+(define (mcp-proxy--ask slug name args-json author raw)
+  (let ((token (eval-defer!)))
+    (task-run!
+      (lambda ()
+        (let ((answer (agent-ask-permission! slug name raw)))
+          (list answer
+                (if (member answer '(allow always))
+                    (base64-encode (mcp-proxy--sync name args-json author))
+                    (base64-encode
+                      "refused: denied in the chat. Do not retry it — ask what to do instead.")))))
+      (lambda (ok value)
+        (if (not ok)
+            (eval-resolve! token
+              (base64-encode (string-append "error: " (value->string value))))
+            (begin
+              ;; the grant is recorded HERE, on the Session, where the
+              ;; global lives — the Task that waited has its own heap
+              (when (equal? (car value) 'always)
+                (mcp-proxy--grant! slug name raw))
+              (eval-resolve! token (cadr value))))))
+    'pending))
+
 (define (mcp-proxy-call name args-b64 &optional author)
   (let* ((args-json (base64-decode args-b64))
          (raw (string-append name " " args-json))
-         (verdict (if (boundp (quote *permission-policy*))
-                      (*permission-policy* #f name "tool" raw)
-                      'allow)))
+         ;; the author names the thread when one is attributed; otherwise
+         ;; the chat this eval runs in is the one that has to answer
+         (slug (or (and author (string-prefix? "agent:" author)
+                        (substring author 6 (string-length author)))
+                   (agent-slug-of (current-buffer))))
+         (verdict (cond ((mcp-proxy--granted? slug name raw) 'allow-always)
+                        ((boundp (quote *permission-policy*))
+                         (*permission-policy* #f name "tool" raw))
+                        (else 'allow))))
     (cond
       ((member verdict '(allow allow-always))
-       ;; The async lane. An eval-scheme payload whose whole program is
-       ;; one shell command must not hold the Session for its runtime —
-       ;; this is the exact payload behind every logged Session timeout.
-       ;; eval-defer! keeps the caller's reply slot, the command runs in
-       ;; a Task, and eval-resolve! answers with the output when the
-       ;; command ends. Keys, saves and other evals run meanwhile.
-       (let* ((parts (and (equal? name "eval-scheme")
-                          (mcp-proxy--shell-code args-json)))
-              (read-only? (llm-tool-read-only? name))
-              (token (and (or parts read-only?) (eval-defer!))))
-         (cond
-           ((and token parts)
-             (let ((resolve (lambda (out)
-                              (eval-resolve! token
-                                (base64-encode (value->string out))))))
-               (if (cadr parts)
-                   (shell-command->string (car parts) (cadr parts) resolve)
-                   (shell-command->string (car parts) resolve))
-               'pending))
-           ((and token read-only?)
-            (task-run!
-              (lambda ()
-                (base64-encode (mcp-proxy--sync name args-json author)))
-              (lambda (ok value)
-                (eval-resolve! token
-                  (if ok value
-                      (base64-encode (string-append "error: " (value->string value)))))))
-            'pending)
-           (else
-             (base64-encode (mcp-proxy--sync name args-json author))))))
+       (mcp-proxy--run name args-json author))
+      ((and (equal? verdict 'ask) slug (agent-info slug))
+       (mcp-proxy--ask slug name args-json author raw))
+      ;; no chat to ask in means nobody can answer, and the honest
+      ;; answer to an unanswerable ask is still no
       (else
-        (base64-encode
-          (string-append
-            "refused: compos's permission policy did not allow this ("
-            (or (and (boundp (quote permission-denied-verb?))
-                     (permission-denied-verb? raw))
-                (symbol->string verdict))
-            "). Ask the user to run it, or to approve it in the chat."))))))
+        (mcp-proxy--refused raw verdict
+          "Ask the user to run it, or to approve it in the chat.")))))
 
 ;; the inline path, with the agent's edits attributed to its thread
 (define (mcp-proxy--sync name args-json author)

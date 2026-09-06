@@ -1106,6 +1106,8 @@ defmodule Compos.Core.Session do
         "(agent-dequeue! SLUG TEXT) — remove one queued prompt whose text is TEXT; return #t or #f.",
       "agent-permission-respond!" =>
         "(agent-permission-respond! SLUG RPC-ID OPTION-ID) — answer a pending permission request.",
+      "agent-ask-permission!" =>
+        "(agent-ask-permission! SLUG TITLE RAW) — raise a permission card in the chat and block until it is answered; return 'allow, 'always or 'deny.",
       "agent-question-respond!" =>
         "(agent-question-respond! SLUG ID ANSWER) — answer a pending branching question.",
       "agent-append!" =>
@@ -2079,6 +2081,22 @@ defmodule Compos.Core.Session do
         case Compos.Core.Agent.respond_permission(s(slug), rpc_id, option) do
           :ok -> :void
           {:error, r} -> raise_scheme("agent-permission-respond!: #{inspect(r)}")
+        end
+      end,
+      # WE ask, on our own lane. The proxy gate reaches a verdict of ask
+      # and has no backend rpc to ride, so it raises the SAME card the ACP
+      # lane raises and waits on the answer. This blocks the calling
+      # process — never the Session, because the caller is a Task behind
+      # eval-defer!.
+      "agent-ask-permission!" => fn [slug, title, raw] ->
+        case Compos.Core.Agent.ask_permission(s(slug), %{
+               title: to_string(title),
+               kind: "tool",
+               raw: to_string(raw)
+             }) do
+          :always -> {:sym, "always"}
+          :allow -> {:sym, "allow"}
+          _ -> {:sym, "deny"}
         end
       end,
       "agent-question-respond!" => fn [slug, question_id, answer] ->

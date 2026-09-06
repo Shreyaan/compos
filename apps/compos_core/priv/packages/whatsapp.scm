@@ -20,8 +20,8 @@
   'group 'whatsapp 'type 'number)
 
 (define *whatsapp-buffer* "*WhatsApp*")
-(defcustom 'whatsapp-group "whatsapp"
-  "Group to open WhatsApp in. Uses the named WhatsApp group."
+(defcustom 'whatsapp-group "*WhatsApp*"
+  "Group to open WhatsApp in. Uses the exact *WhatsApp* group."
   'group 'whatsapp 'type 'string)
 (define *whatsapp-show-buffer* "*WhatsApp conversation*")
 
@@ -529,7 +529,12 @@
       (as chat group-chat)))
 
 (define-command "whatsapp" "Open the WhatsApp workspace"
-  (lambda () (scene-open! "whatsapp" whatsapp-group)))
+  (lambda ()
+    (let ((destination (if (equal? whatsapp-group "") "whatsapp" whatsapp-group)))
+      (scene-open! "whatsapp" destination)
+      ;; scene construction can be followed by current-group derivation from
+      ;; the old visible panes; make the requested destination authoritative.
+      (switch-to-group! destination))))
 
 (define-command "whatsapp-open" "Read the WhatsApp chat on this row"
   (lambda ()
