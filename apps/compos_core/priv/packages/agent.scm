@@ -330,9 +330,9 @@
                          (if t (symbol->string t) "?"))
                        " failed — transcript may be missing a piece"))))
         events)
-      ;; fleet surfaces track every batch: the erc-track segment + *chats*
-      (agents-modeline-refresh!)
-      (agents-refresh!))))
+      ;; fleet surfaces track every batch: the modeline says at once who
+      ;; needs you, and the list settles once the burst stops
+      (agents-note-event!))))
 
 ;; Branching questions are not permission requests. Their answer goes back
 ;; to the model as the result of its `ask` tool call.

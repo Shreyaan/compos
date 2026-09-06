@@ -44,8 +44,8 @@
   (let ((slug (buffer-local b 'agent-slug)))
     (if slug (agent-status slug) 'api)))
 
-(define (agents-sorted)
-  (let ((bs (chat-list-bufs)))
+(define (agents-sorted &optional bufs)
+  (let ((bs (or bufs (chat-list-bufs))))
     (let loop ((rank 0) (acc '()))
       (if (> rank 3) (reverse acc)
           (loop (+ rank 1)
@@ -86,10 +86,35 @@
 (define (chats-archived-row? e)
   (and (string? e) (not (buffer-known? e))))
 
+;; The name of a saved chat is the sentence its header carries, not the
+;; group slug its file is named for. The header is line one, and an
+;; archived file no longer changes, so one read per path answers for the
+;; whole session.
+(define *chats-archived-summaries* '())
+
+(define (chats-archived-summary--read path)
+  (let ((text (ignore-errors (lambda () (read-file path)))))
+    (and (string? text)
+         (let* ((nl (string-index text "\n"))
+                (head (chat-parse-header
+                        (if nl (substring-bytes text 0 nl) text)))
+                (s (and head (plist-get head 'summary))))
+           (and (string? s) (not (equal? s "")) s)))))
+
+(define (chats-archived-summary path)
+  (let ((hit (assoc path *chats-archived-summaries*)))
+    (if hit
+        (cadr hit)
+        (let ((title (chats-archived-summary--read path)))
+          (set! *chats-archived-summaries*
+                (cons (list path title) *chats-archived-summaries*))
+          title))))
+
 (define (chats-archived-title path)
-  (let* ((leaf (chat-log-leaf path))
-         (title (re-replace "\\.chat$" (re-replace "^[0-9]+-" leaf "") "")))
-    (if (equal? title "") leaf title)))
+  (or (chats-archived-summary path)
+      (let* ((leaf (chat-log-leaf path))
+             (title (re-replace "\\.chat$" (re-replace "^[0-9]+-" leaf "") "")))
+        (if (equal? title "") leaf title))))
 
 (define (chats-archived-cells path)
   (list (list "." "faint")
@@ -147,9 +172,33 @@
                    " chats · attention first · "
                    (number->string saved) " saved")))
 
+;; A streaming turn hands the fleet an event batch many times a second,
+;; and the old refresh drew the list for every one of them. That is what
+;; made it jump: the rows re-sort under the reader as a status flips, and
+;; every draw is a patch to the browser. Two rules settle it. A list
+;; nobody is looking at is not drawn at all, and a burst of events draws
+;; once, when it stops.
+(define *agents-refresh-ms* 800)
+
+(define (agents-buffer-shown?)
+  (and (buffer-exists? *agents-buffer*)
+       (or (equal? (current-buffer) *agents-buffer*)
+           (let loop ((ws (window-list-all)))
+             (cond ((null? ws) #f)
+                   ((equal? (cadr (car ws)) *agents-buffer*) #t)
+                   (else (loop (cdr ws))))))))
+
 (define (agents-refresh!)
-  (when (buffer-exists? *agents-buffer*)
+  (when (agents-buffer-shown?)
     (list-refresh! *agents-buffer*)))
+
+;; the fleet's surfaces after an event batch: the modeline answers at
+;; once, because a chat that needs you is news; the list settles.
+(define (agents-note-event!)
+  (agents-modeline-refresh!)
+  (when (agents-buffer-shown?)
+    (debounce! "agents-refresh" *agents-refresh-ms*
+      (lambda (ignored) (agents-refresh!)) #f)))
 
 (define (agents-current-buf) (list-current *agents-buffer*))
 
@@ -311,6 +360,124 @@
 (define-command "chat-list" "List every chat: agent threads and API companions"
   (lambda () (list-mode-show! "chats-mode")))
 
+;;; --- C-x c: the chats, as a prompt ----------------------------------------
+;;; C-x b, for chats alone. You know a chat by what it is about, so every
+;;; row leads with its title -- the name somebody gave it, or the sentence
+;;; its running summary wrote -- and the title is what you type at. The
+;;; buffer name and the status follow as the annotation, which tells two
+;;; chats apart when they read alike. The saved conversations come under
+;;; the live ones, and RET on one reads its file back.
+
+(define *chat-prompt-label-width* 62)
+
+(define (chat-prompt-clip s)
+  (if (> (string-length s) *chat-prompt-label-width*)
+      (string-append (substring s 0 (- *chat-prompt-label-width* 3)) "...")
+      s))
+
+;; a titled chat wears its title as its buffer name (chat-title renames
+;; it). A derived *chat:group* name is not a title, so the running
+;; summary -- the sentence saying what the chat is about -- stands in.
+(define (chat-prompt-label b)
+  (if (not (string-prefix? "*" b))
+      b
+      (let ((s (buffer-local b 'chat-summary)))
+        (if (and (string? s) (not (equal? s ""))) (chat-prompt-clip s) b))))
+
+;; a row is (LABEL ANNOTATION KIND TARGET); the prompt gets the first
+;; three, and the annotation's first two fields are typeable kinds, so
+;; "run" narrows to the running chats and "saved" to the archive
+(define (chat-prompt-live-row b)
+  (list (chat-prompt-label b)
+        (string-append (symbol->string (chat-row-status b)) "  " b)
+        "chat"
+        b))
+
+(define (chat-prompt-saved-row path)
+  (list (chat-prompt-clip (chats-archived-title path))
+        (string-append "saved  " (format-time (file-mtime path) "%Y-%m-%d %H:%M"))
+        "saved"
+        path))
+
+;; attention first, then the order you last used them: the chat you were
+;; last in is the one you come back to
+(define (chat-prompt-live-bufs)
+  (let* ((bs (chat-list-bufs))
+         (mru (filter (lambda (b) (member b bs)) (buffer-list-mru))))
+    (agents-sorted (append mru (filter (lambda (b) (not (member b mru))) bs)))))
+
+(define (chat-prompt-tag r)
+  (if (equal? (nth 2 r) "saved") (chat-log-leaf (nth 3 r)) (nth 3 r)))
+
+;; two chats can wear one sentence, and the prompt answers with the
+;; label: a repeat takes its buffer name and stays its own row
+(define (chat-prompt-rows)
+  (let loop ((rs (append (map chat-prompt-live-row (chat-prompt-live-bufs))
+                         (map chat-prompt-saved-row (chats-archived-rows))))
+             (seen '())
+             (out '()))
+    (if (null? rs)
+        (reverse out)
+        (let* ((r (car rs))
+               (label (if (member (car r) seen)
+                          (string-append (car r) "  (" (chat-prompt-tag r) ")")
+                          (car r))))
+          (loop (cdr rs) (cons label seen) (cons (cons label (cdr r)) out))))))
+
+(define-command "chat-switch-prompt"
+  "Switch to a chat by its title; with a prefix, show it in another window"
+  (lambda ()
+    (let* ((other-window? (and (current-prefix-arg) #t))
+           (here (or (window-buffer (active-window)) (current-buffer)))
+           (rows (chat-prompt-rows))
+           (row-of (lambda (label) (assoc label rows)))
+           (restore-here! (lambda ()
+                            (when (buffer-known? here) (window-preview-buffer! here))))
+           ;; the preview wakes a sleeping chat; every one nobody picked
+           ;; goes back to sleep (the switcher's contract)
+           (woken '())
+           (sleep-woken! (lambda (keep)
+                           (for-each (lambda (b)
+                                       (unless (equal? b keep) (buffer-sleep! b)))
+                                     woken)
+                           (set! woken '()))))
+      (if (null? rows)
+          (message "No chats")
+          (minibuffer-read-preview
+            "Chat: "
+            (map (lambda (r) (list (nth 0 r) (nth 1 r) (nth 2 r))) rows)
+            ;; the invoking window previews the live chat under the
+            ;; cursor; a saved conversation is a file, and waits for RET
+            (lambda (label)
+              (let ((r (row-of label)))
+                (when (and r (equal? (nth 2 r) "chat") (buffer-known? (nth 3 r)))
+                  (let* ((b (nth 3 r))
+                         (sleeping (not (buffer-exists? b))))
+                    (window-preview-buffer! b)
+                    (when (and sleeping (buffer-exists? b))
+                      (restore-buffer-runtime! b)
+                      (set! woken (cons b woken)))))))
+            (lambda (label)
+              (let ((r (row-of label)))
+                (cond
+                  ((not r) (restore-here!) (message "No chat by that name"))
+                  ((equal? (nth 2 r) "saved")
+                   (restore-here!)
+                   (visit-in-group (nth 3 r) (frame-group))
+                   (end-of-buffer!))
+                  (other-window?
+                   (restore-here!)
+                   (let ((win (display-buffer-other-window! (nth 3 r))))
+                     (when win (select-window! win))))
+                  (else (switch-to-buffer! (nth 3 r)) (end-of-buffer!)))
+                (sleep-woken! (and r (nth 3 r)))))
+            ;; C-g: the window takes back what it was showing
+            (lambda () (restore-here!) (sleep-woken! #f))
+            ;; the status and the buffer name match what you type, so a
+            ;; chat is found by its title first and by its state second
+            2)))))
+
+
 (define (agents-attention)
   (let loop ((ts (agent-threads)) (acc '()))
     (cond ((null? ts) (reverse acc))
@@ -318,12 +485,17 @@
            (loop (cdr ts) (cons (car (car ts)) acc)))
           (else (loop (cdr ts) acc)))))
 
+(define *agents-attention-last* #f)
+
 (define (agents-modeline-refresh!)
-  (let ((att (agents-attention)))
-    (global-mode-string-set! 'agents-attention
-      (if (null? att)
-          #f
-          (list "ml-attention" (string-append "! " (string-join att " ")))))))
+  (let* ((att (agents-attention))
+         (text (if (null? att) #f (string-append "! " (string-join att " ")))))
+    ;; unchanged is not news: the old refresh repainted the modeline of
+    ;; every frame on every event batch to say the same thing
+    (unless (equal? text *agents-attention-last*)
+      (set! *agents-attention-last* text)
+      (global-mode-string-set! 'agents-attention
+        (if text (list "ml-attention" text) #f)))))
 
 (define-command "agent-goto-attention" "Jump to the first thread needing attention"
   (lambda ()
@@ -338,3 +510,7 @@
 (define-key "agent-map" "l" "chat-list")
 
 (define-key "agent-map" "a" "agent-goto-attention")
+
+;; C-x b is the buffers; C-x c is the chats. The same prompt, the same
+;; keys, one pool.
+(global-set-key "C-x c" "chat-switch-prompt")
