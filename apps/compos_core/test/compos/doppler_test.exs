@@ -52,6 +52,34 @@ defmodule Compos.DopplerTest do
     {:ok, calls: calls}
   end
 
+  # The blocks view paints the row whose 'lines hold the line of point.
+  # The row blocks take their first line from the list header, so the
+  # highlight and the verbs name the same secret. A hardcoded header
+  # count put the highlight one row below point: `e` then set the secret
+  # above the highlighted row.
+  test "the highlighted row block is the row at point" do
+    eval!(~s{(run-command "doppler")})
+
+    for i <- 0..1 do
+      eval!(~s{(with-current-buffer "*doppler*" (lambda () (list-goto-index! "*doppler*" #{i})))})
+
+      hit =
+        eval!("""
+        (let* ((buf "*doppler*")
+               (before (substring-bytes (buffer-text buf) 0 (buffer-point buf)))
+               (line (length (string-split before "\\n")))
+               (blocks (buffer-local buf 'render-blocks)))
+          (map (lambda (b) (plist-get b 'click))
+               (filter (lambda (b)
+                         (let ((ls (plist-get b 'lines)))
+                           (and ls (<= (car ls) line) (<= line (cadr ls)))))
+                       blocks)))
+        """)
+
+      assert hit == ~s{("doppler:row:#{i}")}
+    end
+  end
+
   test "doppler-mode lists names without fetching values", %{calls: calls} do
     eval!(~s{(run-command "doppler")})
     text = eval!(~s{(buffer-text "*doppler*")})
