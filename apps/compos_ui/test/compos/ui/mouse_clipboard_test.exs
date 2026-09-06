@@ -84,6 +84,23 @@ defmodule Compos.Ui.MouseClipboardTest do
     assert Editor.kill_top() == "there"
   end
 
+  # a prompt is an ordinary buffer, so the text lands there; the prompt only
+  # learns what its buffer says on the key path, which a paste never takes
+  test "paste while a prompt is up goes into the prompt", %{conn: conn} do
+    buf = fresh_buffer("mc-paste-prompt-#{System.unique_integer([:positive])}", "keep me")
+    {:ok, view, _html} = live(conn, "/")
+
+    assert {:ok, _} = Session.eval(~s[(minibuffer-read "Paste key: " '() (lambda (v) v))])
+    assert Editor.current_buffer() == Editor.minibuf_name()
+
+    view |> element("#editor") |> render_hook("paste", %{"text" => "sk-secret"})
+
+    assert Editor.render_state().minibuffer.input == "sk-secret"
+    assert Buffer.text(buf) == "keep me"
+
+    Editor.minibuffer_close()
+  end
+
   test "image paste prompts from the buffer directory, creates directories, and inserts Markdown",
        %{
          conn: conn

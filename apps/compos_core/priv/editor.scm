@@ -12209,7 +12209,12 @@
     ;; region, then leave point active rather than continuing selection mode.
     (when (mark) (delete-region!))
     (insert! text)
-    (set-mark! #f)))
+    (set-mark! #f)
+    ;; A prompt is an ordinary buffer, so the text went into it. Only the key
+    ;; path tells the prompt what its buffer now says, and a paste arrives off
+    ;; that path, so say it here and let the prompt's live filter run.
+    (when (minibuffer-active?)
+      (minibuffer-change! (buffer-text (minibuffer-buffer))))))
 
 (define (clipboard-image-paste! data mime)
   (unless (run-paste-hooks! "image" data mime)
