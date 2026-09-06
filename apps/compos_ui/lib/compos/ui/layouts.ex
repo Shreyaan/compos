@@ -3138,6 +3138,12 @@ defmodule Compos.Ui.Layouts do
                 // composition in progress are not reports.
                 this.selChangeH = () => {
                   if (this._settingSel) return;
+                  // Point moves only when the user moves it. A key or a
+                  // pointer stamps the time; a selectionchange with no
+                  // gesture behind it is the browser reacting to a patch
+                  // (a text node under the caret replaced, a focus the
+                  // page took) and is not a report.
+                  if (performance.now() - (this._gestureAt || 0) > 1500) return;
                   const a = document.activeElement;
                   const buf = a && a.closest ? a.closest(".buf[contenteditable]") : null;
                   if (!buf || buf.hasAttribute("phx-update")) return;
@@ -3172,6 +3178,16 @@ defmodule Compos.Ui.Layouts do
                   }, 150);
                 };
                 document.addEventListener("selectionchange", this.selChangeH);
+                // the gesture stamp: a held key repeats keydown, a drag
+                // moves the pointer with a button down, a click ends on
+                // pointerup. Capture phase, so a handler that stops the
+                // event still stamps it.
+                this.gestureH = (e) => {
+                  if (e.type === "pointermove" && !e.buttons) return;
+                  this._gestureAt = performance.now();
+                };
+                ["keydown", "pointerdown", "pointerup", "pointermove", "touchstart", "touchend"]
+                  .forEach((t) => window.addEventListener(t, this.gestureH, true));
                 this.syncEditable();
                 // the selection of the active editable surface, as bytes
                 // KEEP: a keyboard motion leaves the mark alone (Emacs: the
@@ -3817,6 +3833,8 @@ defmodule Compos.Ui.Layouts do
                 window.removeEventListener("blur", this.blurH);
                 window.removeEventListener("pointerdown", this.proveFocusH, true);
                 window.removeEventListener("pointerdown", this.pointerMarkH, true);
+                ["keydown", "pointerdown", "pointerup", "pointermove", "touchstart", "touchend"]
+                  .forEach((t) => window.removeEventListener(t, this.gestureH, true));
                 window.removeEventListener("keydown", this.proveFocusH, true);
                 window.removeEventListener("mousedown", this.linkDownH, true);
                 document.removeEventListener("visibilitychange", this.visibilityH);
