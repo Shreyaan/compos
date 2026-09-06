@@ -32,6 +32,22 @@
 (defcustom 'notmuch-profile ""
   "NOTMUCH_PROFILE for every call; \"\" uses the default database."
   'group 'notmuch)
+;;; The mail store can live on another machine. One host at a time: search,
+;;; show, count and tag all run where the database is, so a thread id always
+;;; means the same thing.
+(defcustom 'notmuch-host ""
+  "Machine that owns the mail store; empty is this one, anything else is an ssh destination."
+  'group 'notmuch)
+
+(defcustom 'notmuch-hosts '("")
+  "The machines notmuch-switch-host offers; empty is this one."
+  'group 'notmuch)
+
+(defcustom 'notmuch-ssh-program
+  "ssh -o BatchMode=yes -o ControlMaster=auto -o ControlPath=~/.compos/ssh-%C -o ControlPersist=300"
+  "How a remote mail host is reached; one multiplexed connection keeps a call cheap."
+  'group 'notmuch)
+
 (defcustom 'notmuch-search-limit 50
   "How many threads a search buffer shows." 'group 'notmuch)
 (defcustom 'notmuch-default-query "tag:inbox"
@@ -121,11 +137,19 @@ when a message has no text/plain part." 'group 'notmuch)
   (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
 
 (define (nm--cmd args)
-  (string-append
-    (if (equal? notmuch-profile "")
-        ""
-        (string-append "NOTMUCH_PROFILE=" (nm--quote notmuch-profile) " "))
-    notmuch-program " " args))
+  (let ((here (string-append
+                (if (equal? notmuch-profile "")
+                    ""
+                    (string-append "NOTMUCH_PROFILE=" (nm--quote notmuch-profile) " "))
+                notmuch-program " " args)))
+    (if (equal? notmuch-host "")
+        here
+        ;; the remote shell reads the whole call as one word
+        (string-append notmuch-ssh-program " " (nm--quote notmuch-host)
+                       " " (nm--quote here)))))
+
+(define (nm--host-label)
+  (if (equal? notmuch-host "") "this machine" notmuch-host))
 
 (define (nm--run args)
   (shell-command->string (nm--cmd args)))
@@ -297,7 +321,10 @@ when a message has no text/plain part." 'group 'notmuch)
     'selection-face "select"
     'row-columns nm--search-columns
     'row-cells nm--search-cells
-    'title (lambda (buf) "Mail")
+    'title (lambda (buf)
+               (if (equal? notmuch-host "")
+                   "Mail"
+                   (string-append "Mail on " notmuch-host)))
     'meta nm--search-meta
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
@@ -436,17 +463,21 @@ when a message has no text/plain part." 'group 'notmuch)
                (list (list "mailbox" 16) (list "unread" 7 'right)
                      (list "total" 7 'right) (list "query" #f)))
     'cells nm--hello-cells
-    'title (lambda (buf) "Mailboxes")
+    'title (lambda (buf)
+               (if (equal? notmuch-host "")
+                   "Mailboxes"
+                   (string-append "Mailboxes on " notmuch-host)))
     'meta (lambda (buf)
             (string-append (number->string (length (list-entries buf))) " saved searches"))
     'total (lambda (buf) (length (list-source-entries buf)))
     'local-filter #t
     'footer (lambda (buf)
               '(("RET" "open") ("s" "search") ("/" "filter")
-                ("g" "refresh") ("q" "quit")))
+                ("h" "host") ("g" "refresh") ("q" "quit")))
     'keys '(("n" "next-line") ("p" "previous-line")
             ("RET" "notmuch-hello-open") ("g" "notmuch-hello-refresh")
             ("j" "notmuch-jump") ("s" "notmuch-search")
+            ("h" "notmuch-switch-host")
             ("q" "quit-window"))))
 
 (define-command "notmuch" "Open the mailboxes (saved searches)"
@@ -466,6 +497,29 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define-command "notmuch-hello-refresh" "Refresh the mailbox counts"
   (lambda () (list-refresh! (current-buffer)) (message "Refreshed")))
+
+;;; A thread id belongs to one database, so a host change makes every cached
+;;; view stale. Drop the rows and read again rather than keep ids that no
+;;; longer resolve.
+(define (nm--host-changed! buf)
+  (for-each (lambda (b)
+              (when (buffer-exists? b) (buffer-set-local! b 'list-entries '())))
+            (list *notmuch-search-buffer* *notmuch-hello-buffer*))
+  (when (buffer-exists? *notmuch-search-buffer*)
+    (nm--query-reset! *notmuch-search-buffer* notmuch-default-query))
+  (list-refresh! buf)
+  (message (string-append "Mail on " (nm--host-label))))
+
+(define-command "notmuch-switch-host" "Read mail from another machine"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Mail host: "
+        (map (lambda (h) (if (equal? h "") "local" h)) notmuch-hosts)
+        (lambda (h)
+          (let* ((typed (string-trim h))
+                 (host (if (or (equal? typed "local") (equal? typed "")) "" typed)))
+            (customize-save! 'notmuch-host host)
+            (nm--host-changed! buf)))))))
 
 ;; the mail views are derived state — killing them loses nothing. The
 ;; chat survives (it holds a conversation); a scene toggle in init.scm
