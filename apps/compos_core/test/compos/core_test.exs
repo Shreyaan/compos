@@ -6,6 +6,8 @@ defmodule Compos.CoreTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  def mfa_handler(me, tag, changes), do: send(me, {:mfa, tag, changes})
+
   describe "Rope" do
     test "insert/delete/slice round-trip" do
       rope = Rope.new("hello world")
@@ -81,6 +83,72 @@ defmodule Compos.CoreTest do
   end
 
   describe "Reactor" do
+    test "an MFA handler fires with the changes appended to its args" do
+      name = uniq("mfa")
+      {:ok, _} = Core.create_buffer(name)
+
+      {:ok, _id} =
+        Reactor.on_change(name, :any, {__MODULE__, :mfa_handler, [self(), :tagged]}, eager: true)
+
+      Buffer.append(name, "one\n")
+      assert_receive {:mfa, :tagged, [%{inserted: "one\n"}]}, 500
+    end
+
+    # A hot reload replaces a module and purges the version before it. A fun
+    # captured from the purged version raises on every call after that. The
+    # module here is compiled twice so the first version is purged, the way
+    # Hotload purges Session after a save.
+    test "a rule survives a reload of the module that owns its handler" do
+      name = uniq("reload")
+      {:ok, _} = Core.create_buffer(name)
+      me = self()
+
+      source = fn tag ->
+        """
+        defmodule Compos.CoreTest.ReloadedHandler do
+          def fire(me, changes), do: send(me, {:reloaded, #{inspect(tag)}, changes})
+          # a fun born inside the module: it belongs to this version's code
+          def fun(me), do: fn changes -> fire(me, changes) end
+        end
+        """
+      end
+
+      Code.put_compiler_option(:ignore_module_conflict, true)
+      Code.compile_string(source.(:v1))
+      stale_fun = apply(Compos.CoreTest.ReloadedHandler, :fun, [me])
+
+      {:ok, _} =
+        Reactor.on_change(name, :any, {Compos.CoreTest.ReloadedHandler, :fire, [me]},
+          eager: true
+        )
+
+      {:ok, stale_id} = Reactor.on_change(name, :any, stale_fun, eager: true)
+
+      Code.compile_string(source.(:v2))
+      :code.purge(Compos.CoreTest.ReloadedHandler)
+
+      Buffer.append(name, "after\n")
+      assert_receive {:reloaded, :v2, [%{inserted: "after\n"}]}, 500
+
+      # the fun-shaped rule is the one that dies; it keeps its changes pending
+      assert eventually(fn ->
+               rule = Enum.find(Reactor.rules(), &(&1.id == stale_id))
+               rule != nil and rule.pending != [] and rule.in_flight == false
+             end)
+    end
+
+    test "on-change! registers an MFA handler, not a fun" do
+      name = uniq("scm-on-change")
+      {:ok, _} = Core.create_buffer(name)
+
+      {:ok, id} =
+        Session.eval(~s{(on-change! "#{name}" (lambda (pos ins del src) (list pos ins del src)))})
+
+      id = String.to_integer(id)
+      rule = Enum.find(Reactor.rules(), &(&1.id == id))
+      assert {Compos.Core.Session, :fire_change, [_callback]} = rule.handler
+    end
+
     test "fires debounced on matching changes, accumulating them" do
       name = uniq("log")
       {:ok, _} = Core.create_buffer(name)

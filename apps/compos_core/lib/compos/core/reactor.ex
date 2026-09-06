@@ -271,6 +271,19 @@ defmodule Compos.Core.Reactor do
     %{rule | timer: Process.send_after(self(), {:fire, rule.id}, rule.debounce)}
   end
 
+  # A handler is a fun or `{module, function, args}`; the MFA form gets the
+  # changes appended. Use the MFA form for a rule that outlives a hot reload:
+  # a fun belongs to one version of its module's code, and the next reload of
+  # that module purges the version, so the fun raises on every fire after it.
+  # An external call resolves to the current version every time.
+  defp run_handler({m, f, args}, changes) when is_atom(m) and is_atom(f) and is_list(args) do
+    {:ok, apply(m, f, args ++ [changes])}
+  rescue
+    e -> {:error, Exception.message(e)}
+  catch
+    kind, reason -> {:error, "#{kind}: #{inspect(reason)}"}
+  end
+
   defp run_handler(handler, changes) do
     {:ok, handler.(changes)}
   rescue

@@ -2429,12 +2429,15 @@ defmodule Compos.Core.Session do
       # current buffer's group; other changes park and fire once when the
       # buffer comes back into scope. (on-change! BUF FN 'eager) opts out
       # for work whose output leaves the buffer.
+      # The handler is an MFA, never a fun: a fun from this module dies
+      # when a hot reload purges the module version it came from, and the
+      # rule then fails on every change until a restart.
       "on-change!" => fn [buf, callback | rest] ->
         {:ok, id} =
           Compos.Core.Reactor.on_change(
             buf,
             :any,
-            fn changes -> apply_callback(callback, change_args(changes)) end,
+            {__MODULE__, :fire_change, [callback]},
             debounce: 30,
             sources: :all,
             eager: Enum.any?(rest, &match?({:sym, "eager"}, &1))
@@ -2709,6 +2712,9 @@ defmodule Compos.Core.Session do
   defp mb_confirm_value(mb, store), do: {mb[:selected] || mb.input, store}
 
   # debounce coalesces bursts: first pos, all inserted text, total deleted
+  @doc "The Reactor's door for an `on-change!` rule: apply CALLBACK to the change args."
+  def fire_change(callback, changes), do: apply_callback(callback, change_args(changes))
+
   defp change_args(changes) do
     [
       hd(changes).pos,

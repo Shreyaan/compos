@@ -1305,8 +1305,10 @@ defmodule Compos.Ui.Layouts do
           .which-key {
             padding: 10px 14px 12px;
             /* the panel stays hidden for the idle delay (appearance.scm
-               which-key-idle-delay): a fast chord never draws it */
-            animation: wk-idle 0s var(--ui-which-key-delay, 0.5s) both;
+               which-key-idle-delay): a fast chord never draws it. The
+               duration is 1ms, not 0s: WebKit does not run a 0s animation,
+               so the shell showed the panel at once. */
+            animation: wk-idle 1ms var(--ui-which-key-delay, 0.5s) both;
           }
           @keyframes wk-idle { from { visibility: hidden; } to { visibility: visible; } }
           .wk-title {
