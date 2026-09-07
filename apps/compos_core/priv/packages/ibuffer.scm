@@ -11,7 +11,10 @@
 ;;; the mode, and the time since the buffer was last seen. The keys
 ;;; follow traditional Emacs ibuffer: m marks, * marks all rows, d flags
 ;;; for killing, x executes, u and U unmark, RET visits, g refreshes, and
-;;; q quits. / narrows the table by name, mode, or path.
+;;; q quits. / narrows the table by name, mode, or path. RET takes you to
+;;; the row's buffer where it lives: the frame enters the group that
+;;; holds it, and the buffer takes a pane there. C-. acts on the row, or
+;;; on the marks, with the verbs that have no key of their own.
 ;;;
 ;;; A VIEW is one table buffer with its own scope: *ibuffer* lists every
 ;;; workspace buffer, *chats* lists the chats. The window form is an
@@ -102,11 +105,23 @@
           (filter (lambda (k) (not (equal? (car k) name))) *ibuffer-kinds*))))
 
 ;; a row with no buffer is a file
-(define (ibuffer-row-kind b)
+(define (ibuffer-row-kind* b)
   (let loop ((ks *ibuffer-kinds*))
     (cond ((null? ks) (if (buffer-known? b) 'buffer 'file))
           (((plist-get (cadr (car ks)) 'when?) b) (car (car ks)))
           (else (loop (cdr ks))))))
+
+;; every cell of a row asks its kind, and each ask reads the buffer's
+;; process. A fetch notes the kind of every row once; a draw reads the
+;; note. A row the note does not hold (a section a view adds) is asked.
+(define *ibuffer-kind-notes* '())
+
+(define (ibuffer-note-kinds! rows)
+  (set! *ibuffer-kind-notes* (map (lambda (b) (list b (ibuffer-row-kind* b))) rows)))
+
+(define (ibuffer-row-kind b)
+  (let ((e (assoc b *ibuffer-kind-notes*)))
+    (if e (cadr e) (ibuffer-row-kind* b))))
 
 (define (ibuffer-kind-fn kind key)
   (let ((k (assoc kind *ibuffer-kinds*)))
@@ -478,6 +493,7 @@
 (define (ibuffer-rows buf)
   (let ((rows (ibuffer-source buf))
         (grouping (ibuffer-grouping buf)))
+    (ibuffer-note-kinds! rows)
     (cond ((equal? grouping 'mode) (ibuffer-mode-sections buf rows))
           ((equal? grouping 'directory) (ibuffer-directory-sections buf rows))
           (else (ibuffer-group-sections
@@ -747,7 +763,11 @@
     (display-buffer buf)
     (let ((w (window-showing-other buf from)))
       (if w (select-window! w) (switch-to-buffer! buf)))
-    (set-mode! (or mode "ibuffer-mode"))
+    ;; the mode goes on the VIEW, whatever buffer is current: a prompt
+    ;; can be current here, and a floated switch leaves the work buffer
+    ;; current. A set-mode! in the current buffer once turned a chat
+    ;; into a read-only table.
+    (with-current-buffer buf (lambda () (set-mode! (or mode "ibuffer-mode"))))
     (ibuffer-refresh! buf)
     (list-goto-first-entry buf)))
 
@@ -772,7 +792,8 @@
   (when (and (popup-open?) (equal? (window-buffer (popup-window)) view))
     (popup-dismiss!)))
 
-;; the filter line in front of VIEW, whose RET calls PICK with the row
+;; the filter line in front of VIEW, whose RET calls (PICK ROW CLOSE!):
+;; CLOSE! puts the table away, and PICK says when
 (define (ibuffer-prompt-line! view label pick)
   (let* ((narrow (lambda (q)
                    (list-set-query! view q)
@@ -792,9 +813,8 @@
                       (cond ((ibuffer-heading? row)
                              (ibuffer-toggle-fold! (ibuffer-heading-key row) view))
                             (else
-                             (ibuffer-prompt-close! view)
                              (list-set-query! view "")
-                             (when row (pick row)))))))
+                             (pick row (lambda () (ibuffer-prompt-close! view))))))))
             (list 'cancel
                   (lambda ()
                     (done)
@@ -807,36 +827,34 @@
   (ibuffer-open! scope view mode)
   (ibuffer-prompt-line! view label pick))
 
-;; what RET does with a row: a buffer is switched to, a file is visited;
-;; OTHER-WINDOW? shows it beside the work instead
-(define (ibuffer-pick! row other-window?)
-  (cond ((not (string? row)) #f)
-        ((and other-window? (buffer-known? row))
+;; what RET does with a row, in the window form and in the minibuffer
+;; form alike: a buffer shows in the other window, the table closes
+;; (CLOSE!), and that window is selected, so the frame enters the row's
+;; group. A file no buffer holds is visited where the table came from.
+(define (ibuffer-pick! row close!)
+  (cond ((not (string? row)) (message "no buffer here"))
+        ((buffer-known? row)
          (let ((w (display-buffer-other-window! row)))
-           (when w (select-window! w))))
-        ((buffer-known? row) (switch-to-buffer! row))
+           (close!)
+           (when (and w (window-exists? w)) (select-window! w))
+           (switch-to-buffer! row)))
         ((file-exists? row)
+         (close!)
          (visit-in-group row (and (boundp 'frame-group) (frame-group))))
         (else (message "no buffer here"))))
 
 (define-command "ibuffer" "List buffers in a traditional management table"
   (lambda () (ibuffer-open! #f)))
 
+;; RET in the window form and RET in the minibuffer form are one act
+;; (ibuffer-pick!). Only the presentation differs.
 (define-command "ibuffer-visit"
-  "Visit the selected row in another window; on a folded heading, open the section"
+  "Visit the selected row in the other window; on a folded heading, open the section"
   (lambda ()
     (let ((b (ibuffer-current)))
-      (cond ((ibuffer-heading? b) (ibuffer-toggle-fold! (ibuffer-heading-key b)))
-            ((and (string? b) (buffer-known? b))
-             (let ((w (display-buffer-other-window! b)))
-               (run-command "quit-window")
-               (when (and w (window-exists? w)) (select-window! w))
-               (switch-to-buffer! b)))
-            ;; a file no buffer holds: visit it where the table came from
-            ((and (string? b) (file-exists? b))
-             (run-command "quit-window")
-             (visit-in-group b (and (boundp 'frame-group) (frame-group))))
-            (else (message "no buffer here"))))))
+      (if (ibuffer-heading? b)
+          (ibuffer-toggle-fold! (ibuffer-heading-key b))
+          (ibuffer-pick! b (lambda () (run-command "quit-window")))))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer table"
   (lambda () (ibuffer-refresh!)))
@@ -889,6 +907,87 @@
 
 (define-command "ibuffer-prev" "Move up and preview the selected buffer"
   (lambda () (list-move! -1)))
+
+
+;;; --- C-. on a row: the verbs the row has no key for ---------------------------
+;;; The row at point is a typed target, so the stock embark menu offers
+;;; the buffer verbs. A verb acts on the marked rows when the table has
+;;; marks, and on the row at point when it has none: the rule every list
+;;; follows. "here" always means the group the frame stands in.
+
+(effects! '(write))
+
+;; every table that draws ibuffer rows answers with the same target
+(define (ibuffer-target-at buf)
+  (let ((row (list-current buf)))
+    (and (string? row) (list 'buffer row row))))
+
+(for-each
+  (lambda (mode) (register-target-provider! mode ibuffer-target-at))
+  '("ibuffer-mode" "ichat-mode"))
+
+;; the buffers a C-. verb acts on: the table's targets in a table, else
+;; the one row the menu named
+(define (ibuffer-act-buffers id)
+  (let ((buf (current-buffer)))
+    (filter buffer-known?
+            (if (ibuffer-view? buf)
+                (filter string? (list-targets buf))
+                (list id)))))
+
+(define (ibuffer-act-refresh!)
+  (let ((buf (current-buffer)))
+    (when (ibuffer-view? buf) (list-refresh! buf))))
+
+;; a verb that takes the whole selection; ACT reads the buffer names
+(define (ibuffer-act act)
+  (lambda (id)
+    (let ((targets (ibuffer-act-buffers id)))
+      (if (null? targets)
+          (message "no buffer here")
+          (begin (act targets) (ibuffer-act-refresh!))))))
+
+(register-actions! 'buffer
+  (list
+    (list "go"
+          (lambda (id)
+            (when (buffer-known? id)
+              (run-command "quit-window")
+              (switch-to-buffer-in-group! id))))
+    (list "add here"
+          (ibuffer-act
+            (lambda (targets)
+              (let ((id (group-here)))
+                (if id
+                    (group-add-buffers-to! targets id)
+                    (message "There is no group here"))))))
+    (list "move here" (ibuffer-act group-move-buffers-here!))
+    ;; the two that ask for a group are the commands themselves: they
+    ;; read the same marks the table shows
+    (list "add to group" (lambda (id) (run-command "group-add")))
+    (list "move to group" (lambda (id) (run-command "group-move")))
+    (list "remove here"
+          (ibuffer-act
+            (lambda (targets)
+              (let ((id (group-here)))
+                (if id
+                    (begin
+                      (for-each (lambda (b) (buffer-remove-group! b id)) targets)
+                      (run-hooks 'group-membership-hook)
+                      (message (string-append "Removed " (number->string (length targets))
+                                              " from " (group-name id))))
+                    (message "There is no group here"))))))
+    (list "save"
+          (ibuffer-act
+            (lambda (targets)
+              (for-each (lambda (b)
+                          (with-current-buffer b (lambda () (buffer-save!))))
+                        (filter buffer-path targets))
+              (message "saved"))))
+    (list "kill"
+          (lambda (id)
+            (let ((buf (current-buffer)))
+              (ibuffer-kill-targets! buf (ibuffer-act-buffers id) 0 0))))))
 
 (effects! '(destroy))
 
@@ -974,8 +1073,10 @@
            "and \\ widens it. m marks one row, SPC toggles the mark, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "
-           "in a group, and K kills the group at point. RET visits, g "
-           "refreshes, and q quits.")
+           "in a group, and K kills the group at point. RET enters the "
+           "group of the row and focuses its buffer. C-. offers the "
+           "verbs with no key: add here, move here, remove here, add to "
+           "group, move to group, save. g refreshes, and q quits.")
     'buffer *ibuffer-buffer*
     'category 'buffer
     'rows (lambda (buf) (ibuffer-rows buf))
@@ -1064,6 +1165,6 @@
 (public! 'ibuffer-scope! "(ibuffer-scope! NAME THUNK) — register a named scope; a view's 'ibuffer-scope local names it")
 (public! 'ibuffer-view! "(ibuffer-view! BUF . DEFAULTS) — register a table buffer with its default 'sort, 'grouping, and 'footer fn")
 (public! 'ibuffer-mode-opts "(ibuffer-mode-opts OVERRIDES) — the template's list-mode options with OVERRIDES; 'keys add to the template's")
-(public! 'ibuffer-prompt! "(ibuffer-prompt! SCOPE VIEW MODE LABEL PICK) — the table in the minibuffer form: a bottom popup with its filter line; RET calls (PICK ROW)")
-(public! 'ibuffer-pick! "(ibuffer-pick! ROW OTHER-WINDOW?) — switch to a buffer row or visit a file row")
+(public! 'ibuffer-prompt! "(ibuffer-prompt! SCOPE VIEW MODE LABEL PICK) — the table in the minibuffer form: a bottom popup with its filter line; RET calls (PICK ROW CLOSE!)")
+(public! 'ibuffer-pick! "(ibuffer-pick! ROW CLOSE!) — show a buffer row in the other window, close the table with CLOSE!, select that window; visit a file row")
 (public! 'ibuffer-group-buckets "(ibuffer-group-buckets ROWS CURRENT MEMBERSHIPS-OF) — rows in (LABEL KEY MEMBERS FACE) buckets: this group, the others by name, ungrouped")

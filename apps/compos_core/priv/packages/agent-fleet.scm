@@ -420,13 +420,12 @@
 (ibuffer-view! *ichat-prompt-buffer* 'sort 'recent 'footer (lambda (buf) (chats-footer buf)))
 
 (define-command "ichat-prompt"
-  "Switch to a chat from the table; with a prefix, show it in another window"
+  "Switch to a chat from the table"
   (lambda ()
-    (let ((other-window? (and (current-prefix-arg) #t)))
-      (ibuffer-prompt! 'chats *ichat-prompt-buffer* "ichat-mode" "Chat: "
-        (lambda (row)
-          (ibuffer-pick! row other-window?)
-          (when (buffer-known? row) (end-of-buffer!)))))))
+    (ibuffer-prompt! 'chats *ichat-prompt-buffer* "ichat-mode" "Chat: "
+      (lambda (row close!)
+        (ibuffer-pick! row close!)
+        (when (buffer-known? row) (end-of-buffer!))))))
 
 (define-command "chat-list" "List every chat: agent threads and API companions"
   (lambda () (ichat-open!)))
@@ -624,8 +623,6 @@
                  (end-of-buffer!))))))
 
 (define-key "agent-map" "n" "agent-open")
-
-(define-key "agent-map" "l" "chat-list")
 
 ;; C-x C-b is the buffers in a window; C-x C-c is the chats in the same table
 (define-key "ctl-x-map" "C-c" "ichat")
