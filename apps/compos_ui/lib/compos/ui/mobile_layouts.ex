@@ -250,13 +250,6 @@ defmodule Compos.Ui.MobileLayouts do
             overflow-x: auto; scrollbar-width: none;
           }
           .hh-keys-tabs::-webkit-scrollbar { display: none; }
-          .hh-keys-tab {
-            flex: none; padding: 7px 10px; border: 1px solid var(--rule); background: var(--paper);
-            font-size: 12px; font-weight: 600; letter-spacing: .04em; white-space: nowrap;
-          }
-          .hh-keys-tab small { margin-left: 5px; font-size: 9px; font-weight: 400; color: var(--faint); }
-          .hh-keys-tab.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-          .hh-keys-tab.on small { color: var(--paper); opacity: .7; }
           .hh-keys-quit { flex: none; padding: 5px 10px; border: 1px solid var(--rule); font-size: 10.5px; letter-spacing: .1em; color: var(--faint); }
           .hh-keys-filter { flex: none; display: flex; align-items: center; gap: 8px; padding: 2px 14px; border-bottom: 1px solid var(--rule-soft); }
           .hh-keys-filter .hh-input { font-size: 15px; padding: 7px 0; }
