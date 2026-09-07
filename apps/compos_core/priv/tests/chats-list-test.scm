@@ -81,6 +81,7 @@
     (check-equal! (ibuffer-row-kind "*zz-chats-a*") 'chat "a chat row wears the chat kind")
     (check-contains! (buffer-text "*chats*") "Chats" "the title")
     (check-contains! (buffer-text "*chats*") "3 chats" "the noun is chat")
+    (check-contains! (buffer-text "*chats*") "s steer" "the key bar is the chats' own")
     (chats-test-reset!)))
 
 (deftest 'chats-sections-by-group

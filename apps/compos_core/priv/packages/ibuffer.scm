@@ -950,6 +950,15 @@
 ;;; flags. Its keys ADD to the template's, and a flag key binds last, so
 ;;; a view's flag wins over the template's command on the same key.
 
+;; a view's own key bar, else the template's
+(define (ibuffer-footer buf default)
+  (let ((own (ibuffer-view-default buf 'footer)))
+    (if own (own buf) (default buf))))
+
+;; Every fn here is called by NAME through a lambda: the plist is built
+;; once, and a hot reload that redefines a fn must reach the mode. A
+;; procedure stored by value stays the old one, and the old cells fn
+;; calling a new heading fn was an arity error in the live editor.
 (define *ibuffer-opts*
   (list
     'doc (string-append
@@ -966,35 +975,35 @@
            "refreshes, and q quits.")
     'buffer *ibuffer-buffer*
     'category 'buffer
-    'rows ibuffer-rows
-    'separator? ibuffer-separator?
+    'rows (lambda (buf) (ibuffer-rows buf))
+    'separator? (lambda (buf b) (ibuffer-separator? buf b))
     'section? (lambda (buf b) (ibuffer-heading? b))
     'markable? (lambda (buf b) (string? b))
     'key (lambda (buf b)
            (if (ibuffer-heading? b)
                (string-append "section:" (ibuffer-heading-key b))
                b))
-    'match ibuffer-match?
-    'overlays ibuffer-row-overlays
+    'match (lambda (buf row input) (ibuffer-match? buf row input))
+    'overlays (lambda (buf b off) (ibuffer-row-overlays buf b off))
     'local-filter #t
     'stamp (lambda (buf) (length (buffer-list-mru)))
     'layouts
       (list
         (list 'name 'compact
               'max-cols (lambda (buf) (- ibuffer-compact-cols 1))
-              'columns ibuffer-compact-columns
-              'cells ibuffer-compact-cells
-              'meta ibuffer-compact-meta
-              'footer ibuffer-compact-footer)
+              'columns (lambda (buf) (ibuffer-compact-columns buf))
+              'cells (lambda (buf b) (ibuffer-compact-cells buf b))
+              'meta (lambda (buf) (ibuffer-compact-meta buf))
+              'footer (lambda (buf) (ibuffer-footer buf ibuffer-compact-footer)))
         (list 'name 'wide
               'default #t
-              'columns ibuffer-wide-columns
-              'cells ibuffer-wide-cells
-              'meta ibuffer-wide-meta
-              'footer ibuffer-wide-footer))
+              'columns (lambda (buf) (ibuffer-wide-columns buf))
+              'cells (lambda (buf b) (ibuffer-wide-cells buf b))
+              'meta (lambda (buf) (ibuffer-wide-meta buf))
+              'footer (lambda (buf) (ibuffer-footer buf ibuffer-wide-footer))))
     'title (lambda (buf) "Buffers")
-    'meta ibuffer-meta
-    'total ibuffer-total
+    'meta (lambda (buf) (ibuffer-meta buf))
+    'total (lambda (buf) (ibuffer-total buf))
     'compact #t
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
@@ -1050,7 +1059,7 @@
 (public! 'ibuffer-age-label "(ibuffer-age-label SECONDS) — \"now\", \"40s\", \"5m\", \"2h\", \"3d\", or \"\" for #f")
 (public! 'ibuffer-kind! "(ibuffer-kind! NAME PLIST) — register a row kind: 'when? 'dot 'name 'size 'label 'last 'match 'face 'modified? fns of a row")
 (public! 'ibuffer-scope! "(ibuffer-scope! NAME THUNK) — register a named scope; a view's 'ibuffer-scope local names it")
-(public! 'ibuffer-view! "(ibuffer-view! BUF . DEFAULTS) — register a table buffer with its default 'sort and 'grouping")
+(public! 'ibuffer-view! "(ibuffer-view! BUF . DEFAULTS) — register a table buffer with its default 'sort, 'grouping, and 'footer fn")
 (public! 'ibuffer-mode-opts "(ibuffer-mode-opts OVERRIDES) — the template's list-mode options with OVERRIDES; 'keys add to the template's")
 (public! 'ibuffer-prompt! "(ibuffer-prompt! SCOPE VIEW MODE LABEL PICK) — the table in the minibuffer form: a bottom popup with its filter line; RET calls (PICK ROW)")
 (public! 'ibuffer-pick! "(ibuffer-pick! ROW OTHER-WINDOW?) — switch to a buffer row or visit a file row")

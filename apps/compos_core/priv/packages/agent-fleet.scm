@@ -212,7 +212,14 @@
         'modified? (lambda (b) #f)))
 
 (ibuffer-scope! 'chats (lambda () (chat-list-bufs)))
-(ibuffer-view! *agents-buffer* 'sort 'recent)
+
+(define (chats-footer buf)
+  '(("RET" "visit") ("SPC" "mark") ("s" "steer") ("y/n" "permission")
+    ("a" "archive") ("r" "retitle") ("k/d" "flag") ("x" "execute")
+    ("TAB" "fold") ("," "sort") (";" "group by") ("+" "new")
+    ("/" "filter") ("g" "refresh") ("q" "quit")))
+
+(ibuffer-view! *agents-buffer* 'sort 'recent 'footer (lambda (buf) (chats-footer buf)))
 
 ;; the table's rows, then the saved conversations as the last section
 (define (chats-rows buf)
@@ -387,7 +394,7 @@
       'category 'chat
       'title (lambda (buf) "Chats")
       'noun "chat"
-      'rows chats-rows
+      'rows (lambda (buf) (chats-rows buf))
       ;; two flags, both destructive, neither irreversible: k stops a runtime
       ;; and keeps the transcript, d drops the chat as well
       'flags (list (list "k" "K" "kill runtime"
@@ -400,29 +407,9 @@
       ;; a heading is not a chat, and an archive row has no runtime, so no
       ;; verb here can act on either
       'markable? (lambda (buf e) (and (string? e) (buffer-known? e)))
-      'layouts
-        (list
-          (list 'name 'compact
-                'max-cols (lambda (buf) (- ibuffer-compact-cols 1))
-                'columns ibuffer-compact-columns
-                'cells ibuffer-compact-cells
-                'meta ibuffer-compact-meta
-                'footer (lambda (buf) (chats-footer buf)))
-          (list 'name 'wide
-                'default #t
-                'columns ibuffer-wide-columns
-                'cells ibuffer-wide-cells
-                'meta ibuffer-wide-meta
-                'footer (lambda (buf) (chats-footer buf))))
       'keys '(("s" "agents-steer") ("y" "agents-allow") ("n" "agents-deny")
               ("a" "chats-archive") ("r" "chats-retitle")
               ("+" "agent-open")))))
-
-(define (chats-footer buf)
-  '(("RET" "visit") ("SPC" "mark") ("s" "steer") ("y/n" "permission")
-    ("a" "archive") ("r" "retitle") ("k/d" "flag") ("x" "execute")
-    ("TAB" "fold") ("," "sort") (";" "group by") ("+" "new")
-    ("/" "filter") ("g" "refresh") ("q" "quit")))
 
 (define (ichat-open!)
   (ibuffer-open! 'chats *agents-buffer* "ichat-mode"))
@@ -431,7 +418,7 @@
 ;; the sort and the folds of *chats* stay what you set them to
 (define *ichat-prompt-buffer* " *chats*")
 (add-display-rule! *ichat-prompt-buffer* 'popup '(side bottom size 0.4))
-(ibuffer-view! *ichat-prompt-buffer* 'sort 'recent)
+(ibuffer-view! *ichat-prompt-buffer* 'sort 'recent 'footer (lambda (buf) (chats-footer buf)))
 
 (define-command "ichat-prompt"
   "Switch to a chat from the table; with a prefix, show it in another window"
