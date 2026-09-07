@@ -783,6 +783,33 @@
            (loop (cdr rs) out))
           (else (loop (cdr rs) (cons (car rs) out))))))
 
+;; the buffers C-x b offers, in the window's history order: the pool
+;; without its cards, then the files a peek let go
+(define (switch-prompt-buffers here my-group win)
+  (append
+    (map car (filter (lambda (c) (not (switch-container? c)))
+                     (switch-pool here my-group win)))
+    (map car (switch-recent-rows))))
+
+;; C-x b in the editor: the ibuffer table in the minibuffer form. The
+;; candidate prompt below stays for the surfaces that draw only a prompt.
+(define-command "ibuffer-prompt"
+  "Switch to a buffer from the table; with a prefix, show it in another window"
+  (lambda ()
+    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
+           (other-window? (and (current-prefix-arg) #t))
+           (my-group (or (buffer-group here) (frame-local 'current-group)))
+           (_ (group-layout-save-if-shown! my-group))
+           (rows (switch-prompt-buffers here my-group (active-window))))
+      (if (null? (filter (lambda (b) (not (equal? b here))) rows))
+          (message "No other buffer available")
+          (ibuffer-prompt! rows *ibuffer-prompt-buffer* "ibuffer-mode" "Switch to: "
+            (lambda (row)
+              (ibuffer-pick! row other-window?)
+              (group-current-recalculate!)))))))
+
+(global-set-key "C-x b" "ibuffer-prompt")
+
 (define-command "switch-to-buffer-prompt"
   "Switch to a buffer; with a prefix, show it in another window"
   (lambda ()

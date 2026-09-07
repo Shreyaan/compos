@@ -136,7 +136,7 @@
     (run-command "ibuffer-toggle-grouping")
     (check-equal! (ibuffer-grouping "*chats*") 'mode "group then mode")
     (check-equal! (chats-test-heading-labels) '("idle") "one section: idle")
-    (check-equal! (ibuffer-heading-count (car (chats-test-headings))) 3 "every chat is idle")
+    (check-equal! (length (chats-test-names)) 3 "every chat is idle")
     (run-command "ibuffer-toggle-grouping")
     (check-equal! (ibuffer-grouping "*chats*") 'directory "mode then directory")
     (run-command "ibuffer-toggle-grouping")

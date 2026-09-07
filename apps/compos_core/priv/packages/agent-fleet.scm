@@ -427,6 +427,21 @@
 (define (ichat-open!)
   (ibuffer-open! 'chats *agents-buffer* "ichat-mode"))
 
+;; C-x c: the same table in the minibuffer form, with its own view so
+;; the sort and the folds of *chats* stay what you set them to
+(define *ichat-prompt-buffer* " *chats*")
+(add-display-rule! *ichat-prompt-buffer* 'popup '(side bottom size 0.4))
+(ibuffer-view! *ichat-prompt-buffer* 'sort 'recent)
+
+(define-command "ichat-prompt"
+  "Switch to a chat from the table; with a prefix, show it in another window"
+  (lambda ()
+    (let ((other-window? (and (current-prefix-arg) #t)))
+      (ibuffer-prompt! 'chats *ichat-prompt-buffer* "ichat-mode" "Chat: "
+        (lambda (row)
+          (ibuffer-pick! row other-window?)
+          (when (buffer-known? row) (end-of-buffer!)))))))
+
 (define-command "chat-list" "List every chat: agent threads and API companions"
   (lambda () (ichat-open!)))
 
@@ -631,9 +646,10 @@
 
 (define-key "agent-map" "a" "agent-goto-attention")
 
-;; C-x b is the buffers; C-x c is the chats. The same prompt, the same
-;; keys, one pool.
-(global-set-key "C-x c" "chat-switch-prompt")
+;; C-x b is the buffers; C-x c is the chats: the same table, the same
+;; keys. chat-switch-prompt, the candidate prompt, stays for the surfaces
+;; that draw only a prompt.
+(global-set-key "C-x c" "ichat-prompt")
 
 (category! 'chat)
 (catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))

@@ -1615,6 +1615,9 @@
 ;;; the prompt on the row you chose. You type, and then you select.
 (define *mb-list-buffer* #f)
 (define *list-filter-prompt* "Filter: ")
+;; the label of the prompt that stands in front of *mb-list-buffer*: the
+;; filter's own, or the one a table's prompt form chose
+(define *mb-list-prompt* #f)
 
 ;; #t means the arrows moved a list. #f means no list stands behind this
 ;; prompt, so the minibuffer keeps its own arrows. The prompt line is the
@@ -1624,7 +1627,7 @@
   (let ((buf *mb-list-buffer*)
         (mb (minibuffer-state)))
     (if (and buf mb (buffer-exists? buf)
-             (equal? (plist-get mb 'prompt) *list-filter-prompt*))
+             (equal? (plist-get mb 'prompt) (or *mb-list-prompt* *list-filter-prompt*)))
         (begin (with-invoking-buffer (lambda () (list-move-in! buf step))) #t)
         #f)))
 
@@ -1641,8 +1644,9 @@
            (narrow (lambda (q)
                      (list-set-query! buf q)
                      (list-goto-first-entry buf)))
-           (done (lambda () (set! *mb-list-buffer* #f))))
+           (done (lambda () (set! *mb-list-buffer* #f) (set! *mb-list-prompt* #f))))
       (set! *mb-list-buffer* buf)
+      (set! *mb-list-prompt* *list-filter-prompt*)
       (minibuffer-read* *list-filter-prompt* '()
         (list (list 'change narrow)
               ;; RET keeps the narrowing AND the row: the arrows moved the

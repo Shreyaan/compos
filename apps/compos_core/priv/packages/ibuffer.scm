@@ -755,6 +755,70 @@
   (ibuffer-open! (dedupe-names (filter buffer-known? buffers)))
   (list-preview! *ibuffer-buffer*))
 
+;;; --- the minibuffer form ------------------------------------------------------
+;;; C-x b and C-x c draw the same table in the minibuffer's form: the
+;;; view opens in a popup under the work, and its filter line opens at
+;;; once. You type and the rows narrow; C-n and C-p move the highlight;
+;;; RET takes the row you are on; C-g closes the table and puts the
+;;; window back. RET on a heading folds or unfolds it and leaves the
+;;; table open. The form has its own view buffer, so the sort and the
+;;; folds of the window form stay what you set them to.
+
+(define *ibuffer-prompt-buffer* " *buffers*")
+(add-display-rule! *ibuffer-prompt-buffer* 'popup '(side bottom size 0.4))
+(ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent)
+
+(define (ibuffer-prompt-close! view)
+  (when (and (popup-open?) (equal? (window-buffer (popup-window)) view))
+    (popup-dismiss!)))
+
+;; the filter line in front of VIEW, whose RET calls PICK with the row
+(define (ibuffer-prompt-line! view label pick)
+  (let* ((narrow (lambda (q)
+                   (list-set-query! view q)
+                   (list-goto-first-entry view)))
+         (done (lambda ()
+                 (set! *mb-list-buffer* #f)
+                 (set! *mb-list-prompt* #f))))
+    (set! *mb-list-buffer* view)
+    (set! *mb-list-prompt* label)
+    (minibuffer-read* label '()
+      (list (list 'change narrow)
+            (list 'confirm
+                  (lambda (q)
+                    (done)
+                    (unless (equal? q (list-query view)) (narrow q))
+                    (let ((row (list-current view)))
+                      (cond ((ibuffer-heading? row)
+                             (ibuffer-toggle-fold! (ibuffer-heading-key row) view))
+                            (else
+                             (ibuffer-prompt-close! view)
+                             (list-set-query! view "")
+                             (when row (pick row)))))))
+            (list 'cancel
+                  (lambda ()
+                    (done)
+                    (list-set-query! view "")
+                    (ibuffer-prompt-close! view)))
+            (list 'style "filter")))))
+
+;; open VIEW on SCOPE in MODE as a popup, then its prompt line
+(define (ibuffer-prompt! scope view mode label pick)
+  (ibuffer-open! scope view mode)
+  (ibuffer-prompt-line! view label pick))
+
+;; what RET does with a row: a buffer is switched to, a file is visited;
+;; OTHER-WINDOW? shows it beside the work instead
+(define (ibuffer-pick! row other-window?)
+  (cond ((not (string? row)) #f)
+        ((and other-window? (buffer-known? row))
+         (let ((w (display-buffer-other-window! row)))
+           (when w (select-window! w))))
+        ((buffer-known? row) (switch-to-buffer! row))
+        ((file-exists? row)
+         (visit-in-group row (and (boundp 'frame-group) (frame-group))))
+        (else (message "no buffer here"))))
+
 (define-command "ibuffer" "List buffers in a traditional management table"
   (lambda () (ibuffer-open! #f)))
 
@@ -988,4 +1052,6 @@
 (public! 'ibuffer-scope! "(ibuffer-scope! NAME THUNK) — register a named scope; a view's 'ibuffer-scope local names it")
 (public! 'ibuffer-view! "(ibuffer-view! BUF . DEFAULTS) — register a table buffer with its default 'sort and 'grouping")
 (public! 'ibuffer-mode-opts "(ibuffer-mode-opts OVERRIDES) — the template's list-mode options with OVERRIDES; 'keys add to the template's")
+(public! 'ibuffer-prompt! "(ibuffer-prompt! SCOPE VIEW MODE LABEL PICK) — the table in the minibuffer form: a bottom popup with its filter line; RET calls (PICK ROW)")
+(public! 'ibuffer-pick! "(ibuffer-pick! ROW OTHER-WINDOW?) — switch to a buffer row or visit a file row")
 (public! 'ibuffer-group-buckets "(ibuffer-group-buckets ROWS CURRENT MEMBERSHIPS-OF) — rows in (LABEL KEY MEMBERS FACE) buckets: this group, the others by name, ungrouped")
