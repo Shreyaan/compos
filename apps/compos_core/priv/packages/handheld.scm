@@ -144,6 +144,14 @@
                 (if e
                     (map (lambda (x) (if (equal? (car x) section) (cons section (cons row (cdr x))) x)) acc)
                     (cons (list section row) acc)))))))
+;; Every binding in force in BUF as one flat list, ((KEYS COMMAND DOC RANK)
+;; ...). The panel walks a chord one press at a time, so it wants the whole
+;; key and no sections: "C-c C-k" is C-, then c, then C-, then k.
+(define (handheld-flat-keys buf)
+  (map (lambda (b)
+         (let ((keys (car b)) (cmd (car (cdr b))))
+           (list keys cmd (handheld-doc-line cmd) (handheld-key-rank keys))))
+       (handheld-bindings buf)))
 
 ;;; --- search: every command, not only the bound ones ---------------------------
 ;;; The filter field asks for every command TEXT names, bound or not.
@@ -348,6 +356,8 @@
   "(handheld-view BUF) -> (TABS CHIPS): what the handheld client shows for BUF")
 (public! 'handheld-keys
   "(handheld-keys BUF) -> ((SECTION ((KEY COMMAND DOC RANK) ...)) ...): every binding in force in BUF, in the panel's sections, recents first")
+(public! 'handheld-flat-keys
+  "(handheld-flat-keys BUF) -> ((KEYS COMMAND DOC RANK) ...): every binding in force in BUF as whole key sequences, no sections")
 (public! 'handheld-search
   "(handheld-search BUF TEXT) -> ((KEY COMMAND DOC RANK) ...): every command TEXT names, bound in BUF first, then the ones only M-x reaches; empty TEXT is no rows")
 (public! 'handheld-note-command!

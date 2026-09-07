@@ -17,11 +17,13 @@ defmodule Compos.Ui.MobileLive do
 
   @empty_view %{tabs: [], chips: []}
 
-  # the panel's sections that are not prefixes
-  @families ["plain", "C-", "M-", "s-", "S-"]
-
-  # a modifier is a cap of its own: it latches, and the keys it arms come next
+  # a modifier is a cap of its own: it latches, and the keys it arms come
+  # next. They lead the panel, because every chord starts with one.
   @mods ["C-", "M-", "s-", "S-"]
+
+  # the panel's sections that are not prefixes: the plain caps and the
+  # modifiers themselves
+  @families ["plain" | @mods]
 
   @impl true
   def mount(params, _session, socket) do
@@ -44,7 +46,6 @@ defmodule Compos.Ui.MobileLive do
           line_cache: %{},
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           fan: false,
-          fan_tab: nil,
           fan_path: [],
           keys: [],
           keys_key: nil,
@@ -64,7 +65,6 @@ defmodule Compos.Ui.MobileLive do
          line_cache: %{},
          boot_id: :persistent_term.get(:compos_boot_id, "dev"),
          fan: false,
-         fan_tab: nil,
          fan_path: [],
          keys: [],
          keys_key: nil,
