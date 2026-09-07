@@ -1413,17 +1413,20 @@
 (define (list-goto-index! buf i)
   (let ((offs (list-offsets buf)))
     (when (and (>= i 0) (< i (length offs)))
-      (let ((p (nth i offs)))
+      (let ((p (nth i offs))
+            (shown (filter (lambda (w) (equal? (cadr w) buf)) (window-list-all))))
         (if (equal? (current-buffer) buf)
             (goto-char! p)
             (begin
               (buffer-goto! buf p)
-              ;; a prompt moves the list from outside: the windows showing
-              ;; it keep their own point, and the client keeps each
+              ;; a prompt can move the list from outside: the windows
+              ;; showing it keep their own point, and the client keeps each
               ;; window's point line in view, so the row follows on screen
-              (for-each (lambda (w)
-                          (when (equal? (cadr w) buf) (window-set-point! (car w) p)))
-                        (window-list-all))))
+              (for-each (lambda (w) (window-set-point! (car w) p)) shown)))
+        ;; the client's own follow scroll reports back and pins the window,
+        ;; and only a key IN that window unpins it. Under a prompt the keys
+        ;; go to the minibuffer, so a move unpins the windows here.
+        (when (pair? shown) (buffer-windows-follow-point! buf))
         (list-update-selection! buf)))))
 
 (define (list-first-selectable-index buf)
