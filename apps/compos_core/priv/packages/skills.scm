@@ -231,10 +231,10 @@
 ;;; profiles — from DSH_HOME. The editor gives it a home it owns instead of
 ;;; ~/.dsh, so the user's personal config never reaches an editor thread.
 ;;; The home also carries the profile, and the profile carries the patch
-;;; that turns the harness's own tools and prompt off: the editor names
-;;; every tool through MCP and writes the whole system prompt, so a tool the
-;;; editor did not name, or text the editor did not write, has no way in.
-;;; A project's own .agents/skills stays native here, the same as for codex.
+;;; that turns the harness's own tools off: the editor names every tool
+;;; through MCP, so a tool the editor did not name has no way in. The
+;;; harness keeps its own persona, and a project's own .agents/skills stays
+;;; native here, the same as for codex.
 
 (effects! '(write))
 
@@ -248,9 +248,9 @@
     "tool-web" "tool-todo" "tool-goal" "tool-ralph" "tool-workflow"
     "tool-subagent" "tool-subagent-control" "tool-subagent-list-agents"
     "tool-subagent-fork"
-    "commands" "command-feedback" "command-goal" "command-compact"
-    "goal" "goal-round-driver" "plan-mode" "repeat-tool-reminder")
-  "DeepSeek Harness plugins an editor thread turns off, by entry id. Each one adds a tool the editor did not name or text the editor did not write. The skill plugins stay on: they read the editor's own catalog."
+    ;; not spelled tool-, but it serves exit_plan_mode
+    "plan-mode")
+  "DeepSeek Harness plugins an editor thread turns off, by entry id. Each one adds a tool the editor did not name. tool-skill stays on: what it reads is the editor's own catalog."
   'group 'chat 'type 'list)
 
 (define (dsh-home) (string-append (compos-home) "/dsh-home"))
@@ -264,11 +264,8 @@
 
 (define (dsh-profile-patch)
   (string-append
-    "# compos writes this file. The editor owns the thread's tools and its\n"
-    "# system prompt, so the harness contributes neither.\n"
-    "- id: system-prompt\n"
-    "  config:\n"
-    "    persona: ''\n"
+    "# compos writes this file. The editor names every tool the thread has,\n"
+    "# so the harness adds none of its own.\n"
     (string-join
       (map (lambda (id) (string-append "- id: " id "\n  disabled: true"))
            dsh-disabled-plugins)

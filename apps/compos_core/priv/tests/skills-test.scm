@@ -89,11 +89,12 @@
     (check-true! (file-exists? (string-append (dsh-home) "/profiles/acp/package.json"))
                  "the editor owns the profile")))
 
-(deftest 'the-dsh-profile-patch-turns-the-harnesss-own-tools-and-prompt-off
-  "the editor names every tool through MCP and writes the whole prompt"
+(deftest 'the-dsh-profile-patch-turns-the-harnesss-own-tools-off
+  "the editor names every tool through MCP, so the harness adds none"
   (lambda ()
     (let ((patch (dsh-profile-patch)))
-      (check-contains! patch "persona: ''" "the harness persona is blank")
+      (check-false! (string-contains? patch "system-prompt")
+                    "the harness keeps its own persona")
       (for-each
         (lambda (id)
           (check-contains! patch (string-append "- id: " id "\n  disabled: true")
