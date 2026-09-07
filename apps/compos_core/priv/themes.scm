@@ -51,6 +51,15 @@
 (define (theme-face-spec face)
   (assoc face (theme-faces *current-theme*)))
 
+;; the value a face wears now, theme first and the package default after,
+;; which is the order defface! resolves them in. #f when neither names ATTR.
+(define (face-color face attr)
+  (let* ((spec (theme-face-spec face))
+         (themed (and spec (plist-get (cdr spec) attr))))
+    (or themed
+        (let ((default (assoc face *face-defaults*)))
+          (and default (plist-get (cdr default) attr))))))
+
 (define (theme--hex-digit text at)
   (let ((digit (substring-bytes (string-downcase text) at (+ at 1))))
     (let loop ((digits (string-split "0123456789abcdef" "")) (value 0))
