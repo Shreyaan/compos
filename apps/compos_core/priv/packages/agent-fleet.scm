@@ -318,7 +318,7 @@
            (fold (lambda (out id)
                    (append out
                      (chats-section
-                       (or (group-name id) id)
+                       (if (equal? id current) "in this group" (or (group-name id) id))
                        (string-append "group:" id)
                        (filter (lambda (b) (equal? (of b) id)) rows)
                        (group-color-face id)
@@ -857,11 +857,8 @@
 
 ;; two chats can wear one sentence, and the prompt answers with the
 ;; label: a repeat takes its buffer name and stays its own row
-(define (chat-prompt-rows)
-  (let loop ((rs (append (map chat-prompt-live-row (chat-prompt-live-bufs))
-                         (map chat-prompt-saved-row (chats-archived-rows))))
-             (seen '())
-             (out '()))
+(define (chat-prompt-unique-rows rows)
+  (let loop ((rs rows) (seen '()) (out '()))
     (if (null? rs)
         (reverse out)
         (let* ((r (car rs))
@@ -870,13 +867,60 @@
                           (car r))))
           (loop (cdr rs) (cons label seen) (cons (cons label (cdr r)) out))))))
 
+;; a heading row is (LABEL "" "separator"): the prompt steps over it and
+;; drops it when its section empties, as C-x b does
+(define (chat-prompt-separator label) (list label "" "separator"))
+
+(define (chat-prompt-separator? r) (equal? (nth 2 r) "separator"))
+
+(define (chat-prompt-section label rows)
+  (if (pair? rows) (cons (chat-prompt-separator label) rows) '()))
+
+;; the rows in sections by group, the way C-x b is: this group's chats
+;; first, then the other groups by name, then the chats no group claims,
+;; then the saved conversations
+(define (chat-prompt-sectioned-rows live saved current)
+  (let* ((tagged (map (lambda (r) (cons (buffer-group (nth 3 r)) r)) live))
+         (rows-of (lambda (id)
+                    (map cdr (filter (lambda (t) (equal? (car t) id)) tagged))))
+         (named (sort (map (lambda (id)
+                             (list (string-downcase (or (group-name id) "")) id))
+                           (filter (lambda (id) (not (equal? id current)))
+                                   (group-ids)))))
+         (ordered (append (if current (list current) '()) (map cadr named)))
+         (ungrouped (map cdr (filter (lambda (t) (not (member (car t) ordered)))
+                                     tagged))))
+    (append
+      (fold (lambda (out id)
+              (append out
+                (chat-prompt-section
+                  (if (equal? id current) "in this group" (or (group-name id) id))
+                  (rows-of id))))
+            '() ordered)
+      (chat-prompt-section "ungrouped" ungrouped)
+      (chat-prompt-section "saved" saved))))
+
+(define (chat-prompt-rows &optional current)
+  (let ((rows (chat-prompt-unique-rows
+                (append (map chat-prompt-live-row (chat-prompt-live-bufs))
+                        (map chat-prompt-saved-row (chats-archived-rows))))))
+    (chat-prompt-sectioned-rows
+      (filter (lambda (r) (equal? (nth 2 r) "chat")) rows)
+      (filter (lambda (r) (equal? (nth 2 r) "saved")) rows)
+      current)))
+
 (define-command "chat-switch-prompt"
   "Switch to a chat by its title; with a prefix, show it in another window"
   (lambda ()
     (let* ((other-window? (and (current-prefix-arg) #t))
            (here (or (window-buffer (active-window)) (current-buffer)))
-           (rows (chat-prompt-rows))
-           (row-of (lambda (label) (assoc label rows)))
+           (rows (chat-prompt-rows
+                   (or (buffer-group here)
+                       (and (boundp 'frame-group) (frame-group)))))
+           ;; a heading is not a chat: typing its label names nothing
+           (row-of (lambda (label)
+                     (let ((r (assoc label rows)))
+                       (and r (not (chat-prompt-separator? r)) r))))
            (restore-here! (lambda ()
                             (when (buffer-known? here) (window-preview-buffer! here))))
            ;; the preview wakes a sleeping chat; every one nobody picked

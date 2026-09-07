@@ -143,3 +143,20 @@
     (check-equal! (chats-test-heading-labels) '("zz-chats-two") "under its group")
     (check-contains! (buffer-text "*chats*") "Narrowed the retry budget" "the row leads with the sentence")
     (chats-test-reset!)))
+
+(deftest 'chat-prompt-splits-by-group
+  "C-x c: the rows come in sections by group, each heading before its chats"
+  (lambda ()
+    (chats-test-open! 'group 'title)
+    (let* ((rows (chat-prompt-rows))
+           (mine (filter (lambda (r)
+                           (or (member (car r) '("zz-chats-one" "zz-chats-two"))
+                               (and (not (chat-prompt-separator? r))
+                                    (string-prefix? "*zz-chats-" (nth 3 r)))))
+                         rows)))
+      (check-equal! (map car mine)
+                    '("zz-chats-one" "*zz-chats-a*" "*zz-chats-b*" "zz-chats-two" "*zz-chats-c*")
+                    "one heading per group, its chats under it")
+      (check-true! (chat-prompt-separator? (car mine)) "the heading is a separator row")
+      (check-equal! (length (car mine)) 3 "a heading has label, annotation, kind"))
+    (chats-test-reset!)))
