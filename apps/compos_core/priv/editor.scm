@@ -1414,7 +1414,16 @@
   (let ((offs (list-offsets buf)))
     (when (and (>= i 0) (< i (length offs)))
       (let ((p (nth i offs)))
-        (if (equal? (current-buffer) buf) (goto-char! p) (buffer-goto! buf p))
+        (if (equal? (current-buffer) buf)
+            (goto-char! p)
+            (begin
+              (buffer-goto! buf p)
+              ;; a prompt moves the list from outside: the windows showing
+              ;; it keep their own point, and the client keeps each
+              ;; window's point line in view, so the row follows on screen
+              (for-each (lambda (w)
+                          (when (equal? (cadr w) buf) (window-set-point! (car w) p)))
+                        (window-list-all))))
         (list-update-selection! buf)))))
 
 (define (list-first-selectable-index buf)

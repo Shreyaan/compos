@@ -9,7 +9,6 @@
 
 (define *agents-buffer* "*chats*")
 
-(add-display-rule! *agents-buffer* 'popup)
 
 (define (agent-threads)
   (map (lambda (b) (list (buffer-local b 'agent-slug) (chat-row-status b)))

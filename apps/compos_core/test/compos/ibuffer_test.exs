@@ -185,7 +185,7 @@ defmodule Compos.IbufferTest do
     assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, "*zz-ibuffer-b*")
   end
 
-  test "keyboard-quit dismisses scoped ibuffer and restores the covered layout" do
+  test "a scoped ibuffer opens as an ordinary buffer, and q restores the covered layout" do
     eval!(~s{(begin
       (buffer-create "*zz-ibuffer-a*")
       (buffer-create "*zz-ibuffer-b*")
@@ -199,47 +199,21 @@ defmodule Compos.IbufferTest do
       (other-window!)
       (switch-to-buffer! "*zz-unrelated*"))})
 
-    before = eval!("(window-tree)")
+    # the buffers in the windows, in order: display-buffer picks the window
+    # the table borrows, and q puts that window's buffer back
+    tree = fn -> eval!("(map cadr (window-list))") end
+    before = tree.()
 
     eval!(~s{(ibuffer-open-buffers! (list "*zz-collected-one*"))})
     assert Editor.current_buffer() == "*ibuffer*"
-    assert eval!("(popup-open?)") == "#t"
-    refute eval!("(window-tree)") == before
-
-    press("C-g")
-
+    # the table is a buffer in a window, not the popup
     assert eval!("(popup-open?)") == "#f"
-    assert eval!("(window-tree)") == before
-    assert Editor.current_buffer() == "*zz-unrelated*"
-  end
+    refute tree.() == before
 
-  test "keyboard-quit restores ibuffer layout after runtime popup state is lost" do
-    eval!(~s{(begin
-      (buffer-create "*zz-ibuffer-a*")
-      (buffer-create "*zz-ibuffer-b*")
-      (buffer-create "*zz-collected-one*")
-      (switch-to-buffer! "*zz-ibuffer-a*")
-      (split-window! 'h 0.58)
-      (other-window!)
-      (switch-to-buffer! "*zz-ibuffer-b*"))})
+    eval!(~s[(run-command "quit-window")])
 
-    before = eval!("(window-tree)")
-    eval!(~s{(ibuffer-open-buffers! (list "*zz-collected-one*"))})
-
-    # A daemon restart loses frame locals. The popup buffer keeps the opaque
-    # pre-popup layout, and its restored window keeps the popup class.
-    eval!(~s{(begin
-      (set-frame-local! 'popup-window #f)
-      (set-frame-local! 'popup-buffer #f)
-      (set-frame-local! 'popup-return #f)
-      (set-frame-local! 'popup-work #f)
-      (set-frame-local! 'popup-layout #f))})
-
-    press("C-g")
-
-    assert eval!("(popup-open?)") == "#f"
-    assert eval!("(window-tree)") == before
-    assert Editor.current_buffer() == "*zz-ibuffer-b*"
+    assert tree.() == before
+    refute Editor.current_buffer() == "*ibuffer*"
   end
 
   test "d flags a row and x kills it through key dispatch" do
@@ -287,8 +261,9 @@ defmodule Compos.IbufferTest do
     assert text =~ "*zz-collected-two*"
     refute text =~ "*zz-unrelated*"
 
-    # The first scoped row previews in the source window immediately.
-    assert eval!("(window-list)") =~ "*zz-collected"
+    # An ordinary buffer previews nothing: a preview into a work window
+    # would leave a trace nothing puts back. The minibuffer form previews.
+    refute eval!("(window-list)") =~ "*zz-collected"
 
     # The reused ibuffer owns ordinary marks and moves the whole marked set.
     eval!(~s{(local-set-key* "*ibuffer*" "<f8>" "list-mark")})

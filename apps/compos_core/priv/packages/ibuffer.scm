@@ -14,7 +14,9 @@
 ;;; q quits. / narrows the table by name, mode, or path.
 ;;;
 ;;; A VIEW is one table buffer with its own scope: *ibuffer* lists every
-;;; workspace buffer, *chats* lists the chats. A view's mode takes the
+;;; workspace buffer, *chats* lists the chats. The window form is an
+;;; ordinary buffer in an ordinary window; the minibuffer form (below)
+;;; is a popup under the work. A view's mode takes the
 ;;; template's options and overrides the few that differ (ibuffer-mode-opts).
 ;;;
 ;;; A ROW KIND says what a row shows: a buffer, a chat, a file no buffer
@@ -44,8 +46,6 @@
   'group 'buffers 'type 'choice)
 
 (define *ibuffer-buffer* "*ibuffer*")
-
-(add-display-rule! *ibuffer-buffer* 'popup)
 
 ;; the sort modes and the groupings, in the order the toggles cycle
 (define *ibuffer-sorts* '(name recent size))
@@ -872,13 +872,16 @@
       (ibuffer-set-grouping! next)
       (message (string-append "grouped by " (symbol->string next))))))
 
-;; the row under the highlight shows in the window this listing covers,
-;; and leaves no trace: not a peek, which goes to the popup this listing
-;; is in
+;; the row under the highlight shows in the other window, and leaves no
+;; trace: closing the popup puts the work windows back. Only the
+;; minibuffer form previews: its table is the popup. The window form is
+;; an ordinary buffer, and nothing would put a previewed window back.
 (define (ibuffer-preview! &optional buf b)
-  (let ((b (or b (ibuffer-current buf)))
+  (let ((buf (or buf (ibuffer-view)))
+        (b (or b (ibuffer-current buf)))
         (w (other-window-id (active-window))))
-    (when (and w (string? b) (buffer-known? b))
+    (when (and w (string? b) (buffer-known? b)
+               (popup-open?) (equal? (window-buffer (popup-window)) buf))
       (window-preview-buffer! b w))))
 
 (define-command "ibuffer-next" "Move down and preview the selected buffer"
