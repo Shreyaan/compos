@@ -58,17 +58,21 @@ defmodule Compos.Ui.MobileLiveTest do
 
     hook(view, "fan_tab", %{"t" => "<f9>"})
     assert has_element?(view, "#keys-panel .hh-keys-tab.on", "<f9>")
-    assert has_element?(view, "#keys-panel .hh-key-row .hh-key-cmd", "keyboard-quit")
+    # a chord section draws caps: the keycode the tab leaves, and its command
+    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "q")
+    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-cmd", "keyboard-quit")
 
-    # a row is the whole chord: the prefix and the key go through
+    # a cap is the whole chord: the prefix and the key go through
     hook(view, "fan_run", %{"s" => "<f9>", "k" => "q", "c" => "keyboard-quit"})
     refute has_element?(view, "#keys-panel")
     assert has_element?(view, ".hh-echo", "Quit")
     refute has_element?(view, ".hh-ml-pending")
 
-    # the command it ran leads the recent tab, and a recent row runs by name
+    # the command it ran leads the recent tab, and a recent row runs by name.
+    # The panel draws the tab it stands on, so the tab comes first.
     hook(view, "fan", %{"open" => true})
     assert has_element?(view, "#keys-panel .hh-keys-tab", "recent")
+    hook(view, "fan_tab", %{"t" => "recent"})
     assert has_element?(view, "#keys-panel [data-section='recent'] .hh-key-row .hh-key-cmd", "keyboard-quit")
     hook(view, "fan_run", %{"s" => "recent", "k" => "<f9> q", "c" => "keyboard-quit"})
     assert has_element?(view, ".hh-echo", "Quit")
@@ -102,6 +106,7 @@ defmodule Compos.Ui.MobileLiveTest do
     # empty text is the tabs again
     hook(view, "fan_filter", %{"q" => "  "})
     refute has_element?(view, "#keys-panel [data-section='matches']")
+    hook(view, "fan_tab", %{"t" => "plain"})
     assert has_element?(view, "#keys-panel [data-section='plain']")
 
     # a tap on a match runs the command by name and closes the panel

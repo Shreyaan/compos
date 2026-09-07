@@ -20,6 +20,9 @@ defmodule Compos.Ui.MobileLive do
   # the panel's sections that are not prefixes
   @families ["plain", "C-", "M-", "s-", "S-"]
 
+  # a modifier is a cap of its own: it latches, and the keys it arms come next
+  @mods ["C-", "M-", "s-", "S-"]
+
   @impl true
   def mount(params, _session, socket) do
     if connected?(socket) do
@@ -42,6 +45,7 @@ defmodule Compos.Ui.MobileLive do
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           fan: false,
           fan_tab: nil,
+          fan_path: [],
           keys: [],
           keys_key: nil,
           search: nil,
@@ -61,6 +65,7 @@ defmodule Compos.Ui.MobileLive do
          boot_id: :persistent_term.get(:compos_boot_id, "dev"),
          fan: false,
          fan_tab: nil,
+         fan_path: [],
          keys: [],
          keys_key: nil,
          search: nil,
@@ -108,7 +113,35 @@ defmodule Compos.Ui.MobileLive do
   end
 
   def handle_event("fan_tab", %{"t" => tab}, socket) when is_binary(tab) do
-    {:noreply, socket |> assign(fan_tab: tab) |> refresh()}
+    {:noreply, socket |> assign(fan_tab: tab, fan_path: seed(tab)) |> refresh()}
+  end
+
+  # a cap with more to press behind it: a modifier, or a prefix. The step
+  # joins the path and the panel redraws with what that step leaves. No
+  # key reaches the frame, so nothing is committed yet.
+  def handle_event("fan_step", %{"p" => step}, socket) when is_binary(step) do
+    {:noreply, socket |> assign(fan_path: socket.assigns.fan_path ++ [step]) |> refresh()}
+  end
+
+  # a crumb: the path drops that step and every one after it. A tap on the
+  # last crumb releases what it latched, which is how a chord is undone.
+  def handle_event("fan_up", %{"n" => n}, socket) do
+    seed = seed(socket.assigns.fan_tab)
+
+    case Integer.parse(to_string(n)) do
+      {n, ""} when n >= 0 ->
+        kept = socket.assigns.fan_path |> Enum.drop(length(seed)) |> Enum.take(n)
+        {:noreply, socket |> assign(fan_path: seed ++ kept) |> refresh()}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  # the frame itself is holding a prefix: drop it, and stay open
+  def handle_event("fan_release", _p, socket) do
+    Input.dispatch(socket.assigns.frame, "C-g")
+    {:noreply, socket |> assign(fan_path: seed(socket.assigns.fan_tab)) |> drain() |> refresh()}
   end
 
   # the scrim, or the key while the panel is open: never mind
@@ -400,7 +433,7 @@ defmodule Compos.Ui.MobileLive do
         true -> List.first(names)
       end
 
-    assign(socket, keys: keys, keys_key: key, fan_tab: tab)
+    assign(socket, keys: keys, keys_key: key, fan_tab: tab, fan_path: seed(tab))
   end
 
   defp fetch_keys(nil, _buf), do: []
@@ -570,7 +603,7 @@ defmodule Compos.Ui.MobileLive do
       </div>
 
       <div :if={@fan} class="hh-scrim" phx-click="fan_quit"></div>
-      <.keys_panel :if={@fan} state={@state} keys={@keys} tab={@fan_tab} search={@search} />
+      <.keys_panel :if={@fan} state={@state} keys={@keys} tab={@fan_tab} path={@fan_path} search={@search} />
 
       <div id="chord-key" class={"hh-key #{if @fan, do: "on"}"}>
         <span class="hh-key-glyph">{key_glyph(@state)}</span>
@@ -663,13 +696,27 @@ defmodule Compos.Ui.MobileLive do
     """
   end
 
-  # the keys panel: a tab per section, and the section's bindings as a
-  # scrolling list. A tap on a row presses the chord. While the filter
-  # field holds text, the list is the search instead: every command the
-  # text names, from Scheme, and a tap runs it by name.
+  # the keys panel: a tab per section, and the section's bindings as
+  # keycaps. A cap is one thing to press. A cap that ends a binding runs
+  # the whole chord; a modifier or a prefix latches instead and the caps
+  # become what it arms, so C-c leads to C- and C- leads to k. While the
+  # filter field holds text, the list is the search instead: every command
+  # the text names, from Scheme, and a tap runs it by name.
   defp keys_panel(assigns) do
     section = Enum.find(assigns.keys, &(&1.name == assigns.tab)) || List.first(assigns.keys)
-    assigns = assign(assigns, current: section && section.name)
+    name = section && section.name
+    rows = (section && section.rows) || []
+
+    assigns =
+      assign(assigns,
+        current: name,
+        rows: rows,
+        caps:
+          if(name && name != "recent",
+            do: caps(rows, assigns.path, name, Enum.map(assigns.keys, & &1.name)),
+            else: []
+          )
+      )
 
     ~H"""
     <div class={"hh-keys #{if @search, do: "filtering"}"} id="keys-panel">
@@ -704,10 +751,13 @@ defmodule Compos.Ui.MobileLive do
             <div :if={@search.rows == []} class="hh-empty">nothing matches</div>
           </div>
         <% else %>
-          <div :for={s <- @keys} class="hh-keys-section" data-section={s.name} hidden={s.name != @current}>
-            <div class="hh-keys-section-title">{s.name}</div>
-            <.key_rows section={s.name} rows={s.rows} />
-            <div :if={s.rows == []} class="hh-empty">nothing bound here</div>
+          <div :if={@current} class="hh-keys-section" data-section={@current}>
+            <div :if={@current == "recent"} class="hh-keys-section-title">recent</div>
+            <.crumbs :if={@current != "recent"} section={@current} path={@path} pending={@state.pending} />
+            <.key_rows :if={@current == "recent"} section={@current} rows={@rows} />
+            <.key_caps :if={@current != "recent"} section={@current} caps={@caps} />
+            <div :if={@rows == []} class="hh-empty">nothing bound here</div>
+            <div :if={@rows != [] and @current != "recent" and @caps == []} class="hh-empty">nothing left to press</div>
           </div>
           <div :if={@keys == []} class="hh-empty">no bindings to show</div>
         <% end %>
@@ -735,6 +785,160 @@ defmodule Compos.Ui.MobileLive do
     </div>
     """
   end
+
+  # where the panel stands: the section, then every step latched under it.
+  # A tap on a crumb drops that step and the ones after it, so the last
+  # crumb releases what it just latched. A prefix the frame itself holds
+  # gets its own release, because C-g is the only thing that drops that.
+  defp crumbs(assigns) do
+    assigns = assign(assigns, extra: Enum.drop(assigns.path, length(seed(assigns.section))))
+
+    ~H"""
+    <div class="hh-crumbs">
+      <span class="hh-crumb" phx-click="fan_up" phx-value-n="0">{@section}</span>
+      <span
+        :for={{step, i} <- Enum.with_index(@extra)}
+        class="hh-crumb on"
+        phx-click="fan_up"
+        phx-value-n={i}
+      >{step}</span>
+      <span :if={@pending != []} class="hh-crumb-release" phx-click="fan_release">release {Enum.join(@pending, " ")}</span>
+    </div>
+    """
+  end
+
+  # a chord section: one square cap per thing to press next, several to a
+  # row, the keycode large. A cap that ends a binding runs the whole
+  # chord; a modifier or a prefix latches and the caps become what it
+  # arms; a prefix that has a tab of its own goes to that tab.
+  defp key_caps(assigns) do
+    ~H"""
+    <div class="hh-key-caps">
+      <div
+        :for={c <- @caps}
+        class={"hh-keycap " <> to_string(c.kind)}
+        phx-click={cap_event(c.kind)}
+        phx-value-s={@section}
+        phx-value-k={c.key}
+        phx-value-c={c.command}
+        phx-value-p={c.step}
+        phx-value-t={c.key}
+      >
+        <span class={cap_key_class(c.step)}>{c.step}</span>
+        <span class="hh-cap-cmd">{c.label}</span>
+      </div>
+    </div>
+    """
+  end
+
+  defp cap_event(:run), do: "fan_run"
+  defp cap_event(:drill), do: "fan_step"
+  defp cap_event(:jump), do: "fan_tab"
+
+  # a cap with a long keycode gets smaller type
+  defp cap_key_class(label) when byte_size(label) > 3, do: "hh-cap-key long"
+  defp cap_key_class(_label), do: "hh-cap-key"
+
+  # -- the caps under a path -------------------------------------------
+  # A section's rows are key sequences with the section's own prefix
+  # already taken off. The path is what the panel has latched since. What
+  # is left of each row decides the caps: one cap per distinct next step,
+  # in the rows' own order.
+
+  # the family a section has already spent
+  defp seed(section) when section in @mods, do: [section]
+  defp seed(_section), do: []
+
+  # the next thing to press for what is left of a sequence: a bare
+  # modifier when the head key carries one, else the whole head key
+  defp next_step(rest) do
+    tok = rest |> String.split(" ", parts: 2) |> hd()
+    Enum.find(@mods, &(String.starts_with?(tok, &1) and tok != &1)) || tok
+  end
+
+  # what is left of KEYS after STEP, or :no when STEP does not start it or
+  # spends it whole
+  defp strip_step(step, keys) when step in @mods do
+    if String.starts_with?(keys, step), do: String.replace_prefix(keys, step, ""), else: :no
+  end
+
+  defp strip_step(step, keys) do
+    if String.starts_with?(keys, step <> " "),
+      do: String.replace_prefix(keys, step <> " ", ""),
+      else: :no
+  end
+
+  # the rows still reachable under PATH, each carrying what is left to press
+  defp rows_under(rows, path) do
+    Enum.reduce(path, Enum.map(rows, &Map.put(&1, :rest, &1.key)), fn step, acc ->
+      Enum.flat_map(acc, fn r ->
+        case strip_step(step, r.rest) do
+          :no -> []
+          rest -> [%{r | rest: rest}]
+        end
+      end)
+    end)
+  end
+
+  defp caps(rows, path, section, names) do
+    under = rows_under(rows, path)
+
+    under
+    |> Enum.map(&next_step(&1.rest))
+    |> Enum.uniq()
+    |> Enum.map(&cap(&1, under, path, section, names))
+  end
+
+  defp cap(step, under, path, section, names) do
+    group = Enum.filter(under, &(next_step(&1.rest) == step))
+    here = Enum.find(group, &(&1.rest == step))
+    kids = Enum.reject(group, &(&1.rest == step))
+    chord = chord_of(section, path ++ [step])
+
+    cond do
+      here && not prefix_row?(here) ->
+        %{step: step, kind: :run, key: here.key, command: here.command, label: here.command}
+
+      kids != [] ->
+        %{step: step, kind: :drill, key: nil, command: "", label: map_label(here, length(kids))}
+
+      chord in names ->
+        %{step: step, kind: :jump, key: chord, command: "", label: map_label(here, 0)}
+
+      true ->
+        %{step: step, kind: :run, key: cap_key(here, step), command: "", label: map_label(here, 0)}
+    end
+  end
+
+  defp cap_key(nil, step), do: step
+  defp cap_key(row, _step), do: row.key
+
+  # a row whose command is a keymap marks a prefix, not a binding
+  defp prefix_row?(%{command: "keymap:" <> _rest}), do: true
+  defp prefix_row?(_row), do: false
+
+  # what a branch cap says under its keycode: the keymap it opens, or how
+  # many bindings wait behind it
+  defp map_label(%{command: "keymap:" <> name}, _n), do: name
+  defp map_label(_row, n) when n > 0, do: to_string(n) <> " keys"
+  defp map_label(_row, _n), do: ""
+
+  # the whole chord a cap presses: the section's prefix, then the path
+  defp chord_of(section, steps) when section in @families, do: join_steps(steps)
+  defp chord_of(section, steps), do: String.trim(section <> " " <> join_steps(steps))
+
+  # steps back into a key sequence: a modifier glues to the key it arms
+  defp join_steps(steps) do
+    {toks, mods} =
+      Enum.reduce(steps, {[], ""}, fn step, {toks, mods} ->
+        if step in @mods, do: {toks, mods <> step}, else: {toks ++ [mods <> step], ""}
+      end)
+
+    Enum.join(join_tail(toks, mods), " ")
+  end
+
+  defp join_tail(toks, ""), do: toks
+  defp join_tail(toks, mods), do: toks ++ [mods]
 
   defp sheet(%{state: %{minibuffer: mb}} = assigns) when is_map(mb) do
     assigns = assign(assigns, mb: mb, split: mb_split(mb))
