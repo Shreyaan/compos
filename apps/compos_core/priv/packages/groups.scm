@@ -1594,11 +1594,6 @@
                (if (or (< j 0) (>= j (length ids)))
                    #f
                    (let ((to (nth j ids)))
-                     (set-frame-local! 'tab-order
-                       (map (lambda (id)
-                              (cond ((equal? id here) to)
-                                    ((equal? id to) here)
-                                    (else id))) ids))
                      (switch-to-group! to)
                      to))))
             (else (find (cdr rest) (+ i 1)))))))
@@ -1612,6 +1607,10 @@
 
 (global-set-key "M-S-<left>" "group-tab-left")
 (global-set-key "M-S-<right>" "group-tab-right")
+
+;; CUA's global minor-mode map has precedence over global bindings.
+(define-key "cua-mode-map" "M-S-<left>" "group-tab-left")
+(define-key "cua-mode-map" "M-S-<right>" "group-tab-right")
 
   (let* ((here (frame-group))
          (mru (group-ids-mru))
