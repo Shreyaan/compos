@@ -305,7 +305,9 @@
                       (if (equal? field 'parent) new-value
                           (group-record-parent record))
                       (if (equal? field 'origin) new-value
-                          (group-record-origin record)))))
+                          (group-record-origin record))
+                      (if (equal? field 'settings) new-value
+                          (group-record-settings record)))))
           *group-records*))
       (desktop-dirty!)
       (when (member field '(name color))
@@ -365,7 +367,7 @@
          (record (and id (group-record-by-id id))))
     (set-frame-group-style!
       (and record (group-display-label-in id frame))
-      (and record (group-record-color record))
+      (and record (group-color-hex (group-record-color record)))
       frame)))
 
 (define (group-frame-styles-refresh!)
@@ -632,7 +634,7 @@
     (let* ((known (filter string? names))
            (group (buffer-color-group b))
            (record (and group (group-record-by-id group)))
-           (color (and record (group-record-color record))))
+           (color (and record (group-color-hex (group-record-color record)))))
       (unless (equal? (buffer-local b 'modeline-groups) known)
         (buffer-set-local! b 'modeline-groups known))
       (unless (equal? (buffer-local b 'modeline-group-color) color)
@@ -979,6 +981,13 @@
 
 ;; a reattached frame keeps its group in *frame-locals*, but the Elixir
 ;; frame behind it is new and its label is empty — so push it on attach
+;; A group's colour is a slot, so a theme switch changes the hex the frame
+;; style and the modeline locals hold. Both are caches; re-derive them.
+(define (group-colors-retheme!)
+  (group-frame-styles-refresh!)
+  (modeline-groups-refresh!))
+
+(add-hook! 'theme-change-hook 'group-colors-retheme!)
 (add-hook! 'frame-attach-hook 'frame-group-label-refresh!)
 
 ;;; --- scenes: a declared group arrangement -------------------------------------
