@@ -200,3 +200,37 @@
         '((0 7 "tool" "tc" "Read" "read" "done" 2 1234))
         "excision repairs offsets and keeps the duration")
       (buffer-kill! buf))))
+
+(deftest 'agent-add-overlay-joins-a-contiguous-same-face-range
+  "a range that starts at the newest range's end with its face extends it"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-agent-overlay-join*" "abcdefghijklmnopqrst")))
+      (buffer-set-local! buf 'agent-overlays '())
+      (agent-add-overlay! buf 0 3 "agent-thought")
+      (agent-add-overlay! buf 3 6 "agent-thought")
+      (agent-add-overlay! buf 6 9 "agent-thought")
+      (check-equal! (buffer-local buf 'agent-overlays)
+        '((0 9 "agent-thought"))
+        "three contiguous deltas are one range")
+      (agent-add-overlay! buf 9 12 "agent-prose")
+      (check-equal! (buffer-local buf 'agent-overlays)
+        '((9 12 "agent-prose") (0 9 "agent-thought"))
+        "a different face starts a new range")
+      (agent-add-overlay! buf 14 16 "agent-prose")
+      (check-equal! (buffer-local buf 'agent-overlays)
+        '((14 16 "agent-prose") (9 12 "agent-prose") (0 9 "agent-thought"))
+        "a gap starts a new range")
+      (check-equal! (length (buffer-overlays buf)) 3
+        "the painted overlays match the local")
+      (buffer-kill! buf))))
+
+(deftest 'agent-overlays-coalesce-joins-a-legacy-list
+  "a saved per-delta list collapses to one range per contiguous face run"
+  (lambda ()
+    (check-equal!
+      (agent-overlays-coalesce
+        '((12 14 "agent-meta") (9 12 "agent-prose") (6 9 "agent-thought")
+          (3 6 "agent-thought") (0 3 "agent-thought")))
+      '((12 14 "agent-meta") (9 12 "agent-prose") (0 9 "agent-thought"))
+      "adjacent same-face ranges join; order stays newest first")
+    (check-equal! (agent-overlays-coalesce '()) '() "an empty list stays empty")))

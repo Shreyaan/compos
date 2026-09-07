@@ -97,11 +97,43 @@ defmodule Compos.Core.BufferView do
 
   @doc "One field of a buffer's view, or nil when it has no row."
   def get(name, key) do
-    case fetch(name) do
-      {:ok, view} -> Map.get(view, key)
+    case field(name, key) do
+      {:ok, value} -> value
       :error -> nil
     end
   end
+
+  @doc """
+  One field of a buffer's view, as `{:ok, value}`, or `:error` when the
+  buffer has no row.
+
+  The match spec projects the field inside ETS, so the caller copies that
+  field and nothing else. `fetch/1` copies the whole row: every local,
+  every overlay range, every fold. A read of one small local from a chat
+  with forty thousand overlay ranges copied all of them, on every delta
+  the stream sent, and one lane passed its heap limit that way.
+  """
+  def field(%Ref{id: id}, key) do
+    case lookup({:id, id}) do
+      [{_, name}] -> field(name, key)
+      [] -> :error
+    end
+  end
+
+  def field(name, key) when is_binary(name) and is_atom(key) do
+    # the guard keeps a missing KEY out of the body: a body that raises
+    # answers the atom EXIT, not a failed match
+    spec = [{{name, :"$1"}, [{:is_map_key, key, :"$1"}], [{:map_get, key, :"$1"}]}]
+
+    case :ets.select(@table, spec) do
+      [value] -> {:ok, value}
+      [] -> :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  def field(_, _), do: :error
 
   @doc """
   The buffer text. The writer's flattened copy when it published one,

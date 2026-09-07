@@ -176,9 +176,12 @@ defmodule Compos.Core.Buffer do
   # A name with neither a process nor a checkpoint reads as empty, not as
   # nil: a list renders a row for every name the catalog holds, and one
   # buffer that died mid-render used to raise out of the whole render.
+  #
+  # `BufferView.field/2` copies the one field, not the row. A local read
+  # from a chat buffer must not copy its overlay set.
   defp viewed(name, key, fallback) do
-    case BufferView.fetch(name) do
-      {:ok, view} -> Map.fetch!(view, key)
+    case BufferView.field(name, key) do
+      {:ok, value} -> value
       :error -> fallback.()
     end
   end

@@ -278,4 +278,28 @@ defmodule Compos.BufferViewTest do
       true -> Process.sleep(10) && wait_until(fun, tries - 1)
     end
   end
+
+  describe "a field read" do
+    test "copies the one field, not the row", %{name: name} do
+      Buffer.set_local(name, "agent-overlays", Enum.map(1..2000, &[&1, &1 + 1, "f"]))
+      Buffer.set_local(name, "small", 1)
+
+      assert {:ok, 0} = BufferView.field(name, :point)
+      assert {:ok, %{"small" => 1}} = BufferView.field(name, :locals)
+      assert Buffer.get_local(name, "small") == 1
+
+      # the projection copies the field alone: the row is far larger
+      {:ok, view} = BufferView.fetch(name)
+      assert :erts_debug.flat_size(view) > 10 * :erts_debug.flat_size(BufferView.field(name, :version))
+    end
+
+    test "a name without a row reads as :error" do
+      assert BufferView.field("*no-such-view-#{System.unique_integer()}*", :locals) == :error
+      assert BufferView.field(:not_a_name, :locals) == :error
+    end
+
+    test "a key the row lacks reads as :error", %{name: name} do
+      assert BufferView.field(name, :no_such_field) == :error
+    end
+  end
 end

@@ -40,8 +40,30 @@
   (let ((info (agent-info slug)))
     (if info (plist-get info 'status) 'dead)))
 
+;; A streamed block arrives as many deltas with one face. A range that
+;; starts where the newest range ends, with the same face, extends that
+;; range. Before this, each delta added its own range: one thinking
+;; stream left 41,000 ranges in 'agent-overlays, and every later read of
+;; any local copied them all.
+(define (agent--overlay-join r ovs)
+  (if (and (pair? ovs)
+           (equal? (nth 2 (car ovs)) (nth 2 r))
+           (= (nth 1 (car ovs)) (nth 0 r)))
+      (cons (list (nth 0 (car ovs)) (nth 1 r) (nth 2 r)) (cdr ovs))
+      (cons r ovs)))
+
+;; OVS with every adjacent same-face pair joined. OVS is newest first, and
+;; so is the result. A chat saved before the join above holds one range
+;; per delta; restore runs this once over it.
+(define (agent-overlays-coalesce ovs)
+  (let loop ((rest (reverse ovs)) (acc '()))
+    (if (null? rest)
+        acc
+        (loop (cdr rest) (agent--overlay-join (car rest) acc)))))
+
 (define (agent-add-overlay! buf s e face)
-  (let ((ranges (cons (list s e face) (or (buffer-local buf 'agent-overlays) '()))))
+  (let ((ranges (agent--overlay-join (list s e face)
+                                     (or (buffer-local buf 'agent-overlays) '()))))
     (buffer-set-local! buf 'agent-overlays ranges)
     (overlay-set! buf 'agent ranges)))
 

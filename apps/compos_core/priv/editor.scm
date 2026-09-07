@@ -9263,8 +9263,14 @@
             ;; prose the dead runtime streamed but never revealed joins
             ;; the prose block
             (agent-adopt-prose-tail! buf))
+          ;; coalesced once here: a chat saved before the join in
+          ;; agent-add-overlay! holds one range per streamed delta
           (let ((ovs (buffer-local buf 'agent-overlays)))
-            (when ovs (overlay-set! buf 'agent ovs)))
+            (when ovs
+              (let ((joined (agent-overlays-coalesce ovs)))
+                (unless (= (length joined) (length ovs))
+                  (buffer-set-local! buf 'agent-overlays joined))
+                (overlay-set! buf 'agent joined))))
           (agent-apply-folds! buf))
         ;; the modeline states the chat's identity — its connector, which
         ;; survives everything. A chat that has never attached one will
