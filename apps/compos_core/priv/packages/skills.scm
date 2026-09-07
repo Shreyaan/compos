@@ -164,7 +164,7 @@
 ;; rendered once per daemon; a skills-scan! or reload starts fresh
 (define *codex-home-ready* #f)
 
-(define (codex-home-render-skills! home)
+(define (skills-render-into! home)
   ;; the rendered set must EQUAL the catalog. A skill that left the
   ;; catalog loses its SKILL.md here, so codex cannot load it again.
   ;; No subprocess: this runs inside the session lane, and a shell call
@@ -193,7 +193,7 @@
 (define (codex-home-ensure!)
   (unless *codex-home-ready*
     (let ((home (codex-home)))
-      (codex-home-render-skills! home)
+      (skills-render-into! home)
       ;; login once through the real codex; copy, do not symlink — codex
       ;; rewrites auth.json on token refresh, and a rename-over-symlink
       ;; would silently fork the user's session file
@@ -225,3 +225,104 @@
   "(codex-config-with-env CONF) — the codex thread config with the sanitized CODEX_HOME environment")
 (effects! '(pure))
 (public! 'codex-home "(codex-home) — the editor-owned CODEX_HOME directory")
+
+;;; --- the sanitized DeepSeek Harness home ---------------------------------------
+;;; The harness reads its per-user state — settings, provider keys, skills,
+;;; profiles — from DSH_HOME. The editor gives it a home it owns instead of
+;;; ~/.dsh, so the user's personal config never reaches an editor thread.
+;;; The home also carries the profile, and the profile carries the patch
+;;; that turns the harness's own tools and prompt off: the editor names
+;;; every tool through MCP and writes the whole system prompt, so a tool the
+;;; editor did not name, or text the editor did not write, has no way in.
+;;; A project's own .agents/skills stays native here, the same as for codex.
+
+(effects! '(write))
+
+(defcustom 'dsh-home-sanitized #t
+  "Give DeepSeek Harness threads an editor-owned DSH_HOME with the catalog's skills. Set #f to let the harness read ~/.dsh."
+  'group 'chat 'type 'boolean)
+
+(defcustom 'dsh-disabled-plugins
+  '("tool-bash" "tool-pwsh" "tool-jobs"
+    "tool-fs" "tool-fs-search" "tool-str-replace-editor"
+    "tool-web" "tool-todo" "tool-goal" "tool-ralph" "tool-workflow"
+    "tool-subagent" "tool-subagent-control" "tool-subagent-list-agents"
+    "tool-subagent-fork"
+    "commands" "command-feedback" "command-goal" "command-compact"
+    "goal" "goal-round-driver" "plan-mode" "repeat-tool-reminder")
+  "DeepSeek Harness plugins an editor thread turns off, by entry id. Each one adds a tool the editor did not name or text the editor did not write. The skill plugins stay on: they read the editor's own catalog."
+  'group 'chat 'type 'list)
+
+(define (dsh-home) (string-append (compos-home) "/dsh-home"))
+
+;; rendered once per daemon; a reload of this file starts fresh
+(define *dsh-home-ready* #f)
+
+;; the profile names its bundles, so the harness never writes its own
+(define dsh-profile-manifest
+  "{\n  \"name\": \"dsh-profile-acp\",\n  \"private\": true,\n  \"dependencies\": {},\n  \"dsh\": {\n    \"profile\": {\n      \"bundles\": [\"@deepseek-ai/dsh-base\", \"@deepseek-ai/dsh-acp-app\"],\n      \"patchReload\": \"startup\"\n    }\n  }\n}\n")
+
+(define (dsh-profile-patch)
+  (string-append
+    "# compos writes this file. The editor owns the thread's tools and its\n"
+    "# system prompt, so the harness contributes neither.\n"
+    "- id: system-prompt\n"
+    "  config:\n"
+    "    persona: ''\n"
+    (string-join
+      (map (lambda (id) (string-append "- id: " id "\n  disabled: true"))
+           dsh-disabled-plugins)
+      "\n")
+    "\n"))
+
+;; the editor's key chain is the one source: the harness resolves the name,
+;; and dsh-config-with-env puts the value in the subprocess environment.
+(define (dsh-settings)
+  (string-append
+    "# compos writes this file.\n"
+    "llm-pi-ai:\n"
+    "  providers:\n"
+    "    deepseek-official:\n"
+    "      apiKeyEnv: DEEPSEEK_API_KEY\n"))
+
+(define (dsh-home-ensure!)
+  (unless *dsh-home-ready*
+    (let ((home (dsh-home)))
+      (skills-render-into! home)
+      (write-file! (string-append home "/profiles/acp/package.json")
+                   dsh-profile-manifest)
+      (write-file! (string-append home "/profiles/acp/cordis.patch.yml")
+                   (dsh-profile-patch))
+      (if (llm-key "deepseek")
+          (write-file! (string-append home "/settings.yaml") (dsh-settings))
+          ;; no registered key: fall back to the credentials the harness
+          ;; wrote for itself, copied once, so a thread still authenticates
+          (let ((creds (string-append home "/.credentials.yaml")))
+            (unless (file-exists? creds)
+              (let ((src (read-file "~/.dsh/.credentials.yaml")))
+                (when src (write-file! creds src))))))
+      (set! *dsh-home-ready* #t)
+      home)))
+
+;; agent-resolve-config calls this for every thread whose connector declares
+;; 'sanitize "dsh": point the subprocess at the editor's home and hand it
+;; the key by name. A #f value deletes the variable.
+(define (dsh-config-with-env conf)
+  (if (not dsh-home-sanitized)
+      conf
+      (begin
+        (dsh-home-ensure!)
+        (append
+          (list 'env
+                (append (list (list "DSH_HOME" (dsh-home)))
+                        (let ((k (llm-key "deepseek")))
+                          (if k (list (list "DEEPSEEK_API_KEY" k)) '()))
+                        (or (plist-get conf 'env) '())))
+          conf))))
+
+(public! 'dsh-home-ensure!
+  "(dsh-home-ensure!) — render the sanitized DeepSeek Harness home: catalog skills, the editor's profile and its patch")
+(public! 'dsh-config-with-env
+  "(dsh-config-with-env CONF) — the harness thread config with the sanitized DSH_HOME environment")
+(effects! '(pure))
+(public! 'dsh-home "(dsh-home) — the editor-owned DSH_HOME directory")

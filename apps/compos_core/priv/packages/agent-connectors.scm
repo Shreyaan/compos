@@ -69,6 +69,10 @@
     model-config #t
     ;; the harness drops _meta, so our prompt sections ride the first turn
     system-in-prompt #t
+    ;; the thread runs in an editor-owned DSH_HOME (skills.scm), which
+    ;; carries the profile patch that turns the harness's own tools and
+    ;; prompt off
+    sanitize "dsh"
     models ("deepseek-v4-pro" "deepseek-v4-flash" "deepseek-v4-flash-vision-exp")))
 
 (define-connector! "api"
@@ -222,9 +226,15 @@
          (codex? (let ((tl (member (quote backend) conf0)))
                    (and tl (pair? (cdr tl))
                         (equal? (car (cdr tl)) "codex-app-server"))))
-         (conf (if (and codex? (boundp (quote codex-config-with-env)))
-                   (codex-config-with-env conf0)
-                   conf0)))
+         (conf (cond ((and codex? (boundp (quote codex-config-with-env)))
+                      (codex-config-with-env conf0))
+                     ;; a DeepSeek Harness thread reads an editor-owned
+                     ;; DSH_HOME for the same reason: the user's own
+                     ;; settings, keys and skills stay out of it
+                     ((and (equal? (plist-get conf0 (quote sanitize)) "dsh")
+                           (boundp (quote dsh-config-with-env)))
+                      (dsh-config-with-env conf0))
+                     (else conf0))))
     ;; ACP threads get exactly the servers their presets name. The editor's
     ;; own tools are the `compos` preset, not an implicit exception. The
     ;; direct lane needs no server config: it reads the same preset surface

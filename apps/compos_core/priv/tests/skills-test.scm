@@ -79,6 +79,42 @@
                   "no environment is added")
     (customize-set! 'codex-home-sanitized #t)))
 
+(deftest 'dsh-config-with-env-points-at-the-sanitized-home
+  "the harness reads our skills and our key, and never the user's ~/.dsh"
+  (lambda ()
+    (let ((env (plist-get (dsh-config-with-env '(sanitize "dsh")) 'env)))
+      (check-true! (assoc "DSH_HOME" env) "the home is named"))
+    (check-true! (file-exists? (string-append (dsh-home) "/skills/code-editing/SKILL.md"))
+                 "the skill is rendered into the home")
+    (check-true! (file-exists? (string-append (dsh-home) "/profiles/acp/package.json"))
+                 "the editor owns the profile")))
+
+(deftest 'the-dsh-profile-patch-turns-the-harnesss-own-tools-and-prompt-off
+  "the editor names every tool through MCP and writes the whole prompt"
+  (lambda ()
+    (let ((patch (dsh-profile-patch)))
+      (check-contains! patch "persona: ''" "the harness persona is blank")
+      (for-each
+        (lambda (id)
+          (check-contains! patch (string-append "- id: " id "\n  disabled: true")
+                           (string-append id " is off")))
+        dsh-disabled-plugins))))
+
+(deftest 'agent-resolve-config-gives-every-harness-thread-the-sanitized-env
+  "one resolution point, so no thread misses it"
+  (lambda ()
+    (check-true! (assoc "DSH_HOME"
+                        (plist-get (agent-resolve-config '(connector "deepseek")) 'env))
+                 "the home is named")))
+
+(deftest 'dsh-home-sanitized-false-leaves-the-config-alone
+  "the sweep is a setting, and off means off"
+  (lambda ()
+    (customize-set! 'dsh-home-sanitized #f)
+    (check-false! (plist-get (dsh-config-with-env '(sanitize "dsh")) 'env)
+                  "no environment is added")
+    (customize-set! 'dsh-home-sanitized #t)))
+
 (deftest 'the-api-lane-keeps-its-own-environment
   "only the codex lane reads a codex home"
   (lambda ()
@@ -126,7 +162,7 @@
       (shell-command->string (string-append "mkdir -p " stale))
       (write-file! (string-append stale "/SKILL.md") "gone soon")
 
-      (codex-home-render-skills! home)
+      (skills-render-into! home)
 
       (check-true! (file-exists? system) "the .system directory survives the sweep")
       (check-false! (file-exists? (string-append stale "/SKILL.md"))
