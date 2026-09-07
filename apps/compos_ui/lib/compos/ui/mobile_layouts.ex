@@ -437,33 +437,62 @@ defmodule Compos.Ui.MobileLayouts do
                 if (rows !== this.rows) { this.rows = rows; this.push("viewport", { rows }); }
               },
 
-              // ── the chord key: tap toggles; dragging repositions it ──
+              // ── the chord key: a tap toggles the panel, a drag moves it ──
+              // Called after every patch and every resize: it places the key
+              // and binds it once. The place is a property of the hook, not
+              // of the element, because a re-render writes the element's
+              // attributes again and an inline style set here does not
+              // survive that.
               bindKey() {
                 const key = document.getElementById("chord-key");
-                if (!key || key.dataset.bound) return;
-                key.dataset.bound = "1";
-                let dragging = false, moved = false, startX = 0, startY = 0, offsetX = 0, offsetY = 0;
+                if (!key) return;
+                this.placeKey(key);
+                if (key.hhBound) return;
+                key.hhBound = true;
+                let moved = false, startX = 0, startY = 0, offsetX = 0, offsetY = 0;
                 key.addEventListener("pointerdown", (e) => {
                   e.preventDefault(); key.setPointerCapture(e.pointerId);
                   const r = key.getBoundingClientRect(); startX = e.clientX; startY = e.clientY;
                   offsetX = e.clientX - r.left; offsetY = e.clientY - r.top;
-                  dragging = true; moved = false; key.classList.add("dragging");
+                  this.keyDrag = true; moved = false; key.classList.add("dragging");
                 });
                 key.addEventListener("pointermove", (e) => {
-                  if (!dragging) return;
+                  if (!this.keyDrag) return;
                   if (Math.abs(e.clientX - startX) > 6 || Math.abs(e.clientY - startY) > 6) moved = true;
                   if (!moved) return;
-                  const maxX = window.innerWidth - key.offsetWidth, maxY = window.innerHeight - key.offsetHeight;
-                  key.style.left = Math.max(0, Math.min(maxX, e.clientX - offsetX)) + "px";
-                  key.style.top = Math.max(0, Math.min(maxY, e.clientY - offsetY)) + "px";
-                  key.style.right = "auto"; key.style.bottom = "auto";
+                  this.keyPos = { x: e.clientX - offsetX, y: e.clientY - offsetY };
+                  this.placeKey(key);
                 });
                 const stop = (e) => {
-                  if (!dragging) return; dragging = false; key.classList.remove("dragging");
-                  if (!moved) this.push("fan", { open: !key.classList.contains("on") });
-                  if (e.pointerId != null) key.releasePointerCapture(e.pointerId);
+                  if (!this.keyDrag) return;
+                  this.keyDrag = false; key.classList.remove("dragging");
+                  if (e.pointerId != null && key.hasPointerCapture(e.pointerId)) key.releasePointerCapture(e.pointerId);
+                  if (moved) this.saveKeyPos();
+                  else this.push("fan", { open: !key.classList.contains("on") });
                 };
                 key.addEventListener("pointerup", stop); key.addEventListener("pointercancel", stop);
+              },
+              // the key stays inside the window: a smaller window, or a
+              // turn of the phone, brings it back in without losing where
+              // the user put it
+              placeKey(key) {
+                if (!this.keyPos) return;
+                const maxX = Math.max(0, window.innerWidth - key.offsetWidth);
+                const maxY = Math.max(0, window.innerHeight - key.offsetHeight);
+                key.style.left = Math.max(0, Math.min(maxX, this.keyPos.x)) + "px";
+                key.style.top = Math.max(0, Math.min(maxY, this.keyPos.y)) + "px";
+                key.style.right = "auto"; key.style.bottom = "auto";
+              },
+              // the place survives a reload, like the frame does
+              loadKeyPos() {
+                try {
+                  const raw = localStorage.getItem("compos-key-pos");
+                  const pos = raw && JSON.parse(raw);
+                  if (pos && typeof pos.x === "number" && typeof pos.y === "number") this.keyPos = pos;
+                } catch (e) {}
+              },
+              saveKeyPos() {
+                try { localStorage.setItem("compos-key-pos", JSON.stringify(this.keyPos)); } catch (e) {}
               },
 
               // ── the keys panel's filter: type, and Scheme searches every command ──
