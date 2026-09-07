@@ -710,9 +710,9 @@ defmodule Compos.Ui.MobileLive do
   # the same square. A cap that ends a binding runs the whole chord; a
   # modifier or a prefix latches instead and the caps become what it arms,
   # so C- leads to c and C-c leads to C- leads to k. The back control
-  # above lets go of a latched step again. While the filter field holds text, the
-  # list is the search instead: every command the text names, from
-  # Scheme, and a tap runs it by name.
+  # above lets go of a latched step again. While the filter field holds
+  # text, the list is the search instead: every command the text names,
+  # from Scheme, and a tap runs it by name.
   defp keys_panel(assigns) do
     names = Enum.map(assigns.keys, & &1.name)
     name = if assigns.tab in names, do: assigns.tab, else: @root
@@ -762,7 +762,7 @@ defmodule Compos.Ui.MobileLive do
         <% else %>
           <div class="hh-keys-section" data-section={@current}>
             <.key_caps section={@current} caps={@caps} />
-            <div :if={@caps == []} class="hh-empty">nothing left to press</div>
+            <div :if={@caps == []} class="hh-empty">{empty_word(@current)}</div>
           </div>
         <% end %>
       </div>
@@ -813,6 +813,11 @@ defmodule Compos.Ui.MobileLive do
     </div>
     """
   end
+
+  # nothing to draw: at the root that means no bindings reached the panel
+  # at all, and deeper it means the step before it armed nothing
+  defp empty_word(@root), do: "no bindings to show"
+  defp empty_word(_name), do: "nothing left to press"
 
   defp cap_event(:run), do: "fan_run"
   defp cap_event(:drill), do: "fan_step"
