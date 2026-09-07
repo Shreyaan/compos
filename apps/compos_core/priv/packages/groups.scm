@@ -323,18 +323,32 @@
       (desktop-dirty!)
       (modeline-groups-refresh!))))
 
+;; Field 6 held a raw hex before it held a slot, and a hex cannot follow a
+;; theme. A record written then takes the slot its hex stood for; a record
+;; with no colour at all takes the slot its position gives it.
+(define *group-colors-legacy*
+  '("#d05a47" "#3f7cac" "#4f8a5b" "#9b6ab3" "#c28a2c" "#347f7a"))
+
+(define (group-color-slot value index)
+  (if (group-color-slot? value)
+      value
+      (let loop ((rest *group-colors-legacy*) (slot 1))
+        (cond ((null? rest) (+ 1 (modulo index *group-colors*)))
+              ((equal? (car rest) value) slot)
+              (else (loop (cdr rest) (+ slot 1)))))))
+
 (define (group-record-colors-restore records)
   (let loop ((rest records) (index 0) (out '()))
     (if (null? rest)
         (reverse out)
         (let* ((record (car rest))
-               (color (or (group-record-color record)
-                          (nth (modulo index (length *group-colors*))
-                               *group-colors*))))
+               (slot (group-color-slot (group-record-color record) index)))
           (loop (cdr rest) (+ index 1)
-                (cons (append (take-n record 6) (list color)
-                              (list (group-record-parent record)
-                                    (group-record-origin record)))
+                (cons (append (take-n record 6)
+                              (list slot
+                                    (group-record-parent record)
+                                    (group-record-origin record)
+                                    (group-record-settings record)))
                       out))))))
 
 (define (group-state-restore! saved)
