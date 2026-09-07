@@ -114,3 +114,16 @@
         (check-equal! (length three) 3 "a third column is found")
         (check-equal! (nth 2 three) recent "it is the most recent other buffer"))
       (for-each buffer-kill! (list a b recent)))))
+
+(deftest 'dashboard-sync-writes-its-four-locals-together
+  "one sync lands the line, the blocks, the modeline name and the context"
+  (lambda ()
+    (let ((buf "zz-dashboard-sync"))
+      (test-buffer! buf "hello\n")
+      (dashboard--sync! buf)
+      (check-true! (string? (buffer-local buf 'dashboard-line)) "the compact line landed")
+      (check-true! (pair? (buffer-local buf 'dashboard-line-blocks)) "the blocks landed")
+      (check-equal! (buffer-local buf 'modeline-name) buf "the modeline name landed")
+      (check-true! (member 'dashboard-line (buffer-local buf 'desktop-skip-locals))
+                   "the line is runtime state the desktop skips")
+      (buffer-kill! buf))))

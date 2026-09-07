@@ -9934,13 +9934,23 @@
 ;; or an llm-mode buffer is its own session; a grouped work buffer shares its
 ;; group chat's session. This never CREATES a chat: the menu redraws on every
 ;; keystroke.
+;; The session of a work buffer is its group's most recent chat. The scan
+;; walks the MRU list once and asks each buffer the cheap question first
+;; (is it a chat?); group-buffers-mru asked every buffer for its groups,
+;; which was 60 ms per call in a hundred-buffer editor, and the dashboard
+;; asks after every command. A group whose chat never reached the MRU
+;; answers with its primary chat.
 (define (llm-config-session buf)
   (cond ((or (chat-buffer? buf) (minor-mode-on? buf "llm-mode")) buf)
-        ((and (boundp (quote buffer-group)) (boundp (quote group-buffers-mru))
-              (buffer-group buf))
-         (let ((chats (filter chat-buffer?
-                              (group-buffers-mru (buffer-group buf)))))
-           (if (pair? chats) (car chats) buf)))
+        ((and (boundp (quote buffer-group)) (buffer-group buf))
+         (let* ((g (buffer-group buf))
+                (chats (filter (lambda (b)
+                                 (and (chat-buffer? b)
+                                      (equal? (chat-group-id b) g)))
+                               (buffer-list-mru))))
+           (cond ((pair? chats) (car chats))
+                 ((and (boundp (quote group-primary-chat)) (group-primary-chat g)))
+                 (else buf))))
         (else buf)))
 
 (define (llm-config-permission buf)
@@ -10828,12 +10838,15 @@
 
 ;; The compact dashboard stays at the top of the window. It keeps the LLM
 ;; context and every group visible in one line, then opens the full panel.
-(define (dashboard-one-line buf)
+;; PRESET-CELL, when given, is (list PRESET): the sync reads the preset
+;; once for both the line and the blocks, because the read walks the
+;; saved bundles against the live setup
+(define (dashboard-one-line buf &optional preset-cell)
   (let* ((ids (dashboard--group-ids buf))
          (modes (cons (or (buffer-local buf 'mode-name) "Fundamental")
                       (or (buffer-local buf 'minor-modes) '())))
          (mode-text (string-join (map dashboard--mode-name modes) " · "))
-         (preset (dash--preset buf))
+         (preset (if preset-cell (car preset-cell) (dash--preset buf)))
          (groups (if (pair? ids)
                      (string-join (map group-label ids) " · ")
                      "none")))
@@ -10922,10 +10935,10 @@
   (and (boundp (quote llm-config-preset-name))
        (llm-config-preset-name buf)))
 
-(define (dashboard-line-blocks buf)
+(define (dashboard-line-blocks buf &optional preset-cell)
   (let ((vcs (dash--vcs buf))
         (summary (dash--summary buf))
-        (preset (dash--preset buf)))
+        (preset (if preset-cell (car preset-cell) (dash--preset buf))))
     (append
       (list (dash--seg "mode" (dash--mode-segs buf) 'left)
             (dash--seg-rule)
@@ -10994,12 +11007,16 @@
   (desktop-skip! buf 'dashboard-line-blocks)
   (desktop-skip! buf 'modeline-name)
   (desktop-skip! buf 'modeline-project)
-  (buffer-set-local! buf 'dashboard-line (dashboard-one-line buf))
-  (buffer-set-local! buf 'dashboard-line-blocks (dashboard-line-blocks buf))
-  (buffer-set-local! buf 'modeline-name (buffer-modeline-name buf))
-  ;; The project stands beside a file name. A chat shows its working
-  ;; directory in the same context slot.
-  (buffer-set-local! buf 'modeline-project (buffer-modeline-context buf)))
+  ;; one preset read for the line and the blocks; one change for the four
+  ;; locals, so the frame refreshes once for the sync
+  (let ((preset-cell (list (dash--preset buf))))
+    (buffer-set-locals! buf
+      (list 'dashboard-line (dashboard-one-line buf preset-cell)
+            'dashboard-line-blocks (dashboard-line-blocks buf preset-cell)
+            'modeline-name (buffer-modeline-name buf)
+            ;; The project stands beside a file name. A chat shows its
+            ;; working directory in the same context slot.
+            'modeline-project (buffer-modeline-context buf)))))
 
 ;; The fingerprint reads locals only — never the live tool surface. It
 ;; runs after every command, and asking the surface there would start

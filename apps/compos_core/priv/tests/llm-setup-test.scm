@@ -169,3 +169,27 @@ a hang, and the user never learns there was anything to answer."
                        "2 prompt off"
                        "saved bundle labels expose the change")
       (buffer-kill! buf))))
+
+(deftest 'llm-config-session-is-the-groups-most-recent-chat
+  "a chat is its own session; a work buffer in a group answers the group's most recently used chat; a buffer with no group answers itself"
+  (lambda ()
+    (let* ((id (group-record-create! "zz-llm-session-group"))
+           (chat "*zz-llm-session-chat*")
+           (work "*zz-llm-session-work*")
+           (lone "*zz-llm-session-lone*")
+           (was (current-buffer)))
+      (test-buffer! chat "")
+      (buffer-set-local! chat 'mode-name "chat-mode")
+      (buffer-set-local! chat 'group-id id)
+      (test-buffer! work "")
+      (buffer-set-local! work 'group-ids (list id))
+      (test-buffer! lone "")
+      (switch-to-buffer! chat)
+      (switch-to-buffer! was)
+      (check-equal! (llm-config-session chat) chat "a chat is its own session")
+      (check-equal! (llm-config-session work) chat "a work buffer answers its group's recent chat")
+      (check-equal! (llm-config-session lone) lone "a buffer with no group answers itself")
+      (buffer-kill! chat)
+      (buffer-kill! work)
+      (buffer-kill! lone)
+      (group-record-delete! id))))

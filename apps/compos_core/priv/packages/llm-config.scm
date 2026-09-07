@@ -528,11 +528,15 @@
   (llm-bundle-normalize (llm-config-combination buf)))
 
 ;; the saved bundle whose setup equals BUF's live setup, or #f
+;; The live setup is read once for the whole walk: llm-config--current
+;; asks the session, and the session is a buffer scan. Six bundles read
+;; it six times, after every command, in the dashboard sync.
 (define (llm-config--matching-bundle buf)
-  (let loop ((bs *llm-bundles*))
-    (cond ((null? bs) #f)
-          ((llm-config--bundle-active? buf (car bs)) (car bs))
-          (else (loop (cdr bs))))))
+  (let ((cur (llm-config--current buf)))
+    (let loop ((bs *llm-bundles*))
+      (cond ((null? bs) #f)
+            ((llm-config--bundle-active-against? cur (car bs)) (car bs))
+            (else (loop (cdr bs)))))))
 
 (define (llm-config--optional-match? want have)
   (or (not want) (equal? want have)))
@@ -543,8 +547,11 @@
 ;;; not count against the match, or a bundle that deliberately leaves the
 ;;; agent mode alone reads as inactive the moment it is applied.
 (define (llm-config--bundle-active? buf b)
-  (let ((nb (llm-bundle-normalize b))
-        (cur (llm-config--current buf)))
+  (llm-config--bundle-active-against? (llm-config--current buf) b))
+
+;; CUR is the normalized live setup, read once by the caller
+(define (llm-config--bundle-active-against? cur b)
+  (let ((nb (llm-bundle-normalize b)))
     (and (equal? (llm-bundle-connector nb) (llm-bundle-connector cur))
          (equal? (llm-bundle-model nb) (llm-bundle-model cur))
          (equal? (llm-bundle-effort nb) (llm-bundle-effort cur))
