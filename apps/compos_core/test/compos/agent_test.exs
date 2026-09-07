@@ -1985,7 +1985,7 @@ defmodule Compos.AgentTest do
     press(["x"])
     assert eventually(fn -> Buffer.text(buf) =~ "[agent stopped]" end)
     assert eventually(fn -> Agent.list() == [] end)
-    assert Buffer.text("*chats*") =~ "x  #{buf}"
+    assert Buffer.text("*chats*") =~ "stopped"
     # the flag is gone with the runtime it killed
     refute Buffer.get_local("*chats*", "list-marks") |> Enum.any?()
 

@@ -346,5 +346,4 @@
 
 ;; Session and fleet APIs depend on the event coordinator above.
 (load-bundled-package "agent-session.scm")
-(load-bundled-package "agent-fleet.scm")
 (package! 'agent)

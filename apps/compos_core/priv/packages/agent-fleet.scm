@@ -116,65 +116,17 @@
              (title (re-replace "\\.chat$" (re-replace "^[0-9]+-" leaf "") "")))
         (if (equal? title "") leaf title))))
 
-;;; --- the table: sections, order, folds -----------------------------------------
-;;; C-x b splits the buffers by group, and so does this list. A section is
-;;; a group, a state, or a model; `;` cycles it. Inside a section the rows
-;;; order by urgency, recency, title, or context size; `,` cycles that.
-;;; TAB folds the section at point. A row takes two lines: the title and
-;;; its numbers, then the running summary and the model. The saved
-;;; conversations make the last section. The view state lives on the list
-;;; buffer, so it survives a quit and a reopen the way the filters do.
-
-(defcustom 'chats-default-grouping 'group
-  "What a section of the *chats* list is: 'group, 'state, or 'model."
-  'group 'chat 'type 'choice)
-
-(defcustom 'chats-default-sort 'urgency
-  "The order inside a section: 'urgency, 'recent, 'title, or 'tokens."
-  'group 'chat 'type 'choice)
-
-(defface! 'chats-heading 'bg "rgba(128, 128, 128, 0.10)")
-(defface! 'chats-marked 'bg "rgba(213, 172, 102, 0.13)")
-
-(define *chats-groupings* '(group state model))
-(define *chats-sorts* '(urgency recent title tokens))
-
-(define (chats-grouping)
-  (or (buffer-local *agents-buffer* 'chats-grouping) chats-default-grouping))
-
-(define (chats-sort)
-  (or (buffer-local *agents-buffer* 'chats-sort) chats-default-sort))
-
-(define (chats-collapsed)
-  (or (buffer-local *agents-buffer* 'chats-collapsed) '()))
-
-(define (chats-cycle-after item items)
-  (let ((rest (member item items)))
-    (if (and rest (pair? (cdr rest))) (cadr rest) (car items))))
-
-(define (chats-set-grouping! mode)
-  (buffer-set-locals! *agents-buffer*
-    (list 'chats-grouping mode 'chats-collapsed '()))
-  (when (buffer-known? *agents-buffer*) (list-refresh! *agents-buffer*)))
-
-(define (chats-set-sort! mode)
-  (buffer-set-local! *agents-buffer* 'chats-sort mode)
-  (when (buffer-known? *agents-buffer*) (list-refresh! *agents-buffer*)))
-
-(define (chats-folded? key) (if (member key (chats-collapsed)) #t #f))
-
-(define (chats-toggle-fold! key)
-  (let ((now (chats-collapsed)))
-    (buffer-set-local! *agents-buffer* 'chats-collapsed
-      (if (member key now)
-          (filter (lambda (k) (not (equal? k key))) now)
-          (cons key now)))
-    (list-refresh! *agents-buffer*)))
+;;; --- the chat rows in the ibuffer template --------------------------------------
+;;; *chats* is the ibuffer table over the chat buffers: the same sections,
+;;; sort, folds, marks and keys, with the chat verbs added. The table
+;;; asks a row's kind what to show; the chat kind and the archived kind
+;;; are registered here. C-x C-c opens it in a window, as C-x C-b opens
+;;; the buffers; C-x c is the same rows as a prompt.
 
 ;;; --- last activity ------------------------------------------------------------
 ;;; The editor keeps no clock on a chat. This table notes the time the
 ;;; last event batch reached each chat. It starts empty at boot, so a
-;;; chat with no event since the restart shows no age.
+;;; chat with no event since the restart shows the time it was last seen.
 
 (define *chats-activity* '())
 
@@ -193,8 +145,6 @@
 
 ;;; --- one row's facts ----------------------------------------------------------
 
-(define (chats-row-buffer? e) (and (string? e) (buffer-known? e)))
-
 ;; the state in the words the row shows: what the chat waits for
 (define (chats-state-label status)
   (cond ((equal? status 'needs_attention) "your turn")
@@ -210,349 +160,66 @@
         ((equal? status 'dead) "faint")
         (else "dim")))
 
-(define (chats-live? b)
-  (and (chats-row-buffer? b)
-       (buffer-local b 'agent-slug)
-       (not (equal? (chat-row-status b) 'dead))))
-
-(define (chats-waiting? b)
-  (and (chats-row-buffer? b) (equal? (chat-row-status b) 'needs_attention)))
-
 (define (chats-model b)
   (or (buffer-local b 'agent-model) (buffer-local b 'llm-model) ""))
 
+;; the context tokens stand in for the size of a chat: what the size
+;; column shows, what the size sort reads, what a heading adds up
 (define (chats-tokens b)
-  (let ((n (and (chats-row-buffer? b) (buffer-local b 'chat-context-used))))
-    (if (number? n) n 0)))
-
-(define (chats-tokens-label n)
-  (if (> n 0) (chat-tokens-short n) ""))
+  (let ((n (buffer-local b 'chat-context-used)))
+    (and (number? n) (> n 0) n)))
 
 (define (chats-summary b)
   (let ((s (buffer-local b 'chat-summary)))
     (and (string? s) (not (equal? s "")) s)))
 
-(define (chats-titled? b) (not (string-prefix? "*" b)))
-
-;; line one names the chat the way the C-x c prompt does: its title, else
+;; the row names the chat the way the C-x c prompt does: its title, else
 ;; the sentence its summary wrote, else its buffer name
 (define (chats-title b) (chat-prompt-label b))
 
-;; line two says what the chat is about, unless line one already did;
-;; then it says which buffer that is
-(define (chats-detail b)
-  (let ((s (chats-summary b)))
-    (cond ((chats-titled? b) (or s ""))
-          (s b)
-          (else ""))))
+(define (chats-match-text b)
+  (string-append (chats-title b) " "
+                 (or (chats-summary b) "") " "
+                 (chats-model b) " "
+                 (chats-state-label (chat-row-status b)) " "
+                 (or (buffer-local b 'agent-slug) "")))
 
-;;; --- headings -----------------------------------------------------------------
-;;; A heading row is a list: (LABEL "" KIND KEY LIVE WAITING COUNT TOKENS
-;;; FACE MEMBERS). KIND is "separator" for an open section, whose rows
-;;; follow it, or "folded" for a closed one, whose rows it stands for. A
-;;; folded heading is a row of its own: the narrowing keeps it when a
-;;; member matches, the highlight can rest on it, and RET or TAB opens it.
+(ibuffer-kind! 'chat
+  (list 'when? (lambda (b) (and (buffer-known? b) (chat-buffer? b)))
+        'dot (lambda (b)
+               (let ((s (chat-row-status b)))
+                 (list (agent-status-glyph s) (chats-state-face s))))
+        'name (lambda (b) (list "" (chats-title b)))
+        'size chats-tokens
+        'label (lambda (b) (chats-state-label (chat-row-status b)))
+        'last (lambda (b)
+                (let ((t (chats-activity-at b)))
+                  (if t (chats-age-label t) (ibuffer-last-label b))))
+        'match chats-match-text
+        'face (lambda (b)
+                (if (equal? (chat-row-status b) 'needs_attention) "alert" "accent"))
+        'modified? (lambda (b) #f)))
 
-(define (chats-heading label key kind members face)
-  (list label "" kind key
-        (length (filter chats-live? members))
-        (length (filter chats-waiting? members))
-        (length members)
-        (fold (lambda (n b) (+ n (chats-tokens b))) 0 members)
-        face
-        members))
+;; a saved conversation is a file no buffer holds
+(ibuffer-kind! 'archived
+  (list 'when? (lambda (b) (and (not (buffer-known? b)) (string-suffix? ".chat" b)))
+        'dot (lambda (b) (list "." "faint"))
+        'name (lambda (b) (list "" (chats-archived-title b)))
+        'size (lambda (b) #f)
+        'label (lambda (b) "archived")
+        'match (lambda (b) (string-append (chats-archived-title b) " archived"))
+        'face (lambda (b) "dim")
+        'modified? (lambda (b) #f)))
 
-(define (chats-heading? row) (and (pair? row) (> (length row) 2)))
-(define (chats-heading-label row) (car row))
-(define (chats-heading-key row) (nth 3 row))
-(define (chats-heading-live row) (nth 4 row))
-(define (chats-heading-waiting row) (nth 5 row))
-(define (chats-heading-count row) (nth 6 row))
-(define (chats-heading-tokens row) (nth 7 row))
-(define (chats-heading-face row) (nth 8 row))
-(define (chats-heading-members row) (nth 9 row))
-(define (chats-heading-folded? row) (equal? (nth 2 row) "folded"))
+(ibuffer-scope! 'chats (lambda () (chat-list-bufs)))
+(ibuffer-view! *agents-buffer* 'sort 'recent)
 
-(define (chats-separator? buf row)
-  (and (chats-heading? row) (equal? (nth 2 row) "separator")))
-
-;; MEMBERS arrive in the order the section keeps; ORDER? #t sorts them.
-;; The heading holds its members in the order the rows show.
-(define (chats-section label key members face order?)
-  (if (null? members)
-      '()
-      (let ((ordered (if order? (chats-sort-rows members) members)))
-        (if (chats-folded? key)
-            (list (chats-heading label key "folded" ordered face))
-            (cons (chats-heading label key "separator" ordered face) ordered)))))
-
-;;; --- sorting ------------------------------------------------------------------
-
-(define (chats-mru-order rows)
-  (let ((mru (filter (lambda (b) (member b rows)) (buffer-list-mru))))
-    (append mru (filter (lambda (b) (not (member b mru))) rows))))
-
-(define (chats-sort-rows rows)
-  (let ((mode (chats-sort)))
-    (cond ((equal? mode 'recent) (chats-mru-order rows))
-          ((equal? mode 'title)
-           (map cadr (sort (map (lambda (b) (list (string-downcase (chats-title b)) b))
-                                rows))))
-          ((equal? mode 'tokens)
-           (map cadr (sort (map (lambda (b) (list (- 0 (chats-tokens b)) b)) rows))))
-          (else (agents-sorted (chats-mru-order rows))))))
-
-;;; --- sections -----------------------------------------------------------------
-
-;; the current group first, then the groups by name, then the chats no
-;; group claims. A chat belongs to one group, so each row appears once.
-(define (chats-group-sections rows current)
-  (let* ((owner (map (lambda (b) (list b (buffer-group b))) rows))
-         (of (lambda (b) (cadr (assoc b owner))))
-         (named (sort (map (lambda (id)
-                             (list (string-downcase (or (group-name id) "")) id))
-                           (filter (lambda (id) (not (equal? id current)))
-                                   (group-ids)))))
-         (ordered (append (if current (list current) '()) (map cadr named)))
-         (grouped
-           (fold (lambda (out id)
-                   (append out
-                     (chats-section
-                       (if (equal? id current) "in this group" (or (group-name id) id))
-                       (string-append "group:" id)
-                       (filter (lambda (b) (equal? (of b) id)) rows)
-                       (group-color-face id)
-                       #t)))
-                 '() ordered))
-         (ungrouped (filter (lambda (b) (not (member (of b) ordered))) rows)))
-    (append grouped (chats-section "ungrouped" "group:" ungrouped "faint" #t))))
-
-;; the rows bucketed by a key fn, one section per key, in ORDER; a key
-;; ORDER does not name comes after the named ones, by name
-(define (chats-keyed-sections rows key-of face-of order)
-  (let* ((keys (dedupe-names (map key-of rows)))
-         (rest (map cadr (sort (map (lambda (k) (list (string-downcase k) k))
-                                    (filter (lambda (k) (not (member k order))) keys)))))
-         (ordered (append (filter (lambda (k) (member k keys)) order) rest)))
-    (fold (lambda (out k)
-            (append out
-              (chats-section k (string-append "key:" k)
-                (filter (lambda (b) (equal? (key-of b) k)) rows)
-                (face-of k)
-                #t)))
-          '() ordered)))
-
-(define *chats-state-order*
-  '("your turn" "streaming" "starting" "idle" "stopped"))
-
-(define (chats-state-sections rows)
-  (chats-keyed-sections rows
-    (lambda (b) (chats-state-label (chat-row-status b)))
-    (lambda (k) (cond ((equal? k "your turn") "alert")
-                      ((or (equal? k "streaming") (equal? k "starting")) "accent")
-                      (else "dim")))
-    *chats-state-order*))
-
-(define (chats-model-sections rows)
-  (chats-keyed-sections rows
-    (lambda (b) (let ((m (chats-model b))) (if (equal? m "") "no model" m)))
-    (lambda (k) "accent")
-    '()))
-
-;; the saved conversations, newest first, as they come
-(define (chats-archived-section)
-  (chats-section "archived" "archived" (chats-archived-rows) "faint" #f))
-
-;; The list fetches its rows on open, on g, and when a burst of events
-;; settles. A mark or a narrowing redraws the rows it already has.
-(define (chats-rows)
-  (let* ((bufs (chat-list-bufs))
-         (grouping (chats-grouping))
-         (live (cond ((equal? grouping 'state) (chats-state-sections bufs))
-                     ((equal? grouping 'model) (chats-model-sections bufs))
-                     (else (chats-group-sections
-                             bufs (and (boundp 'frame-group) (frame-group)))))))
-    (append live (chats-archived-section))))
+;; the table's rows, then the saved conversations as the last section
+(define (chats-rows buf)
+  (append (ibuffer-rows buf)
+          (ibuffer-section buf "archived" "archived" (chats-archived-rows) "faint" #t)))
 
 (effects! '(write))
-
-;;; --- columns and cells --------------------------------------------------------
-;;; Two lines per row. The first names the chat and gives its numbers:
-;;; the queue, the turns, the context tokens, the state, and the age of
-;;; its last event. The second is the running summary and the model.
-
-(define (chats-columns buf)
-  (list (list (list "" 1) (list "chat" #f 'left 'end) (list "queue" 5 'right)
-              (list "turns" 5 'right) (list "ctx" 6 'right) (list "state" 10)
-              (list "last" 4 'right))
-        (list (list "" 1) (list "summary" #f 'left 'end) (list "model" 24 'right))))
-
-(define (chats-live-lines b)
-  (let* ((slug (buffer-local b 'agent-slug))
-         (status (chat-row-status b))
-         (info (and slug (agent-info slug)))
-         (face (chats-state-face status))
-         (queued (if info (or (plist-get info 'queued) 0) 0)))
-    (list (list (list (agent-status-glyph status) face)
-                (list (chats-title b)
-                      (if (equal? status 'needs_attention) "alert" "accent"))
-                (list (if (> queued 0) (string-append "+" (number->string queued)) "")
-                      "warn")
-                (list (number->string (chat-turn-count b)) "dim")
-                (list (chats-tokens-label (chats-tokens b)) "dim")
-                (list (chats-state-label status) face)
-                (list (chats-age-label (chats-activity-at b)) "dim"))
-          (list ""
-                (list (chats-detail b) "dim")
-                (list (chats-model b) "faint")))))
-
-(define (chats-archived-lines path)
-  (let ((at (file-mtime path)))
-    (list (list (list "." "faint")
-                (list (chats-archived-title path) "dim")
-                "" "" ""
-                (list "archived" "faint")
-                (list (chats-age-label at) "faint"))
-          (list ""
-                (list (format-time at "%Y-%m-%d %H:%M") "faint")
-                ""))))
-
-;; the counts a heading carries, as words; a zero says nothing
-(define (chats-tally row)
-  (let ((live (chats-heading-live row))
-        (waiting (chats-heading-waiting row))
-        (count (chats-heading-count row))
-        (tokens (chats-heading-tokens row)))
-    (string-join
-      (append
-        (if (> live 0) (list (string-append (number->string live) " live")) '())
-        (if (> waiting 0) (list (string-append (number->string waiting) " waiting")) '())
-        (list (string-append (number->string count) (if (= count 1) " chat" " chats")))
-        (if (> tokens 0) (list (string-append (chat-tokens-short tokens) " tok")) '()))
-      " · ")))
-
-(define (chats-chevron row) (if (chats-heading-folded? row) "▸" "▾"))
-
-(define (chats-heading-lines row)
-  (list (list (list (chats-chevron row) "dim")
-              (list (string-append (chats-heading-label row) "  " (chats-tally row))
-                    (or (chats-heading-face row) "accent"))
-              "" "" "" "" "")))
-
-(define (chats-cells buf e)
-  (cond ((chats-heading? e) (chats-heading-lines e))
-        ((chats-archived-row? e) (chats-archived-lines e))
-        (else (chats-live-lines e))))
-
-;;; --- bands --------------------------------------------------------------------
-;;; A heading and a marked row wear a background over their whole width.
-;;; The tally on a heading is dim: a span over the tail of the label
-;;; cell, which starts after the mark, the chevron, and two gaps.
-
-(define (chats-row-bytes buf e)
-  (fold (lambda (n line) (+ n (string-byte-length (car line)) 1))
-        0 (list-row-lines buf e)))
-
-(define (chats-band buf e off face)
-  (list (list off (+ off (chats-row-bytes buf e) -1) face)))
-
-(define (chats-tally-overlay buf row off)
-  (let* ((line (car (car (list-row-lines buf row))))
-         (start (+ off 2 (string-byte-length (chats-chevron row)) 2
-                   (string-byte-length (chats-heading-label row)) 2))
-         (end (min (+ start (string-byte-length (chats-tally row)))
-                   (+ off (string-byte-length line)))))
-    (if (< start end) (list (list start end "dim")) '())))
-
-(define (chats-row-overlays buf e off)
-  (cond ((chats-heading? e)
-         (append (chats-band buf e off "chats-heading")
-                 (chats-tally-overlay buf e off)))
-        ((not (equal? (list-mark-of buf e) " "))
-         (chats-band buf e off "chats-marked"))
-        (else '())))
-
-;;; --- the head, the narrowing, the key bar -------------------------------------
-
-(define (chats-counts-line n live waiting saved tokens)
-  (string-append
-    (number->string n) (if (= n 1) " chat" " chats")
-    " · " (number->string live) " live"
-    " · " (number->string waiting) " waiting on you"
-    (if (> saved 0) (string-append " · " (number->string saved) " saved") "")
-    (if (> tokens 0) (string-append " · " (chat-tokens-short tokens) " tok") "")))
-
-(define (chats-meta buf)
-  (let loop ((rows (list-entries buf)) (n 0) (live 0) (waiting 0) (saved 0) (tokens 0))
-    (cond ((null? rows)
-           (ibuffer-join-parts
-             (append
-               (list (list (chats-counts-line n live waiting saved tokens) "dim")
-                     (list "   " #f))
-               (ibuffer-chips "GROUP" (map symbol->string *chats-groupings*)
-                              (symbol->string (chats-grouping)))
-               (list (list "   " #f))
-               (ibuffer-chips "SORT" (map symbol->string *chats-sorts*)
-                              (symbol->string (chats-sort))))))
-          ((chats-heading? (car rows))
-           (let ((row (car rows)))
-             (if (not (chats-heading-folded? row))
-                 (loop (cdr rows) n live waiting saved tokens)
-                 (if (equal? (chats-heading-key row) "archived")
-                     (loop (cdr rows) n live waiting
-                           (+ saved (chats-heading-count row)) tokens)
-                     (loop (cdr rows)
-                           (+ n (chats-heading-count row))
-                           (+ live (chats-heading-live row))
-                           (+ waiting (chats-heading-waiting row))
-                           saved
-                           (+ tokens (chats-heading-tokens row)))))))
-          ((chats-archived-row? (car rows))
-           (loop (cdr rows) n live waiting (+ saved 1) tokens))
-          (else
-           (let ((b (car rows)))
-             (loop (cdr rows) (+ n 1)
-                   (+ live (if (chats-live? b) 1 0))
-                   (+ waiting (if (chats-waiting? b) 1 0))
-                   saved
-                   (+ tokens (chats-tokens b))))))))
-
-;; what `/` reads: the title, the summary, the model, the state, the slug,
-;; and the buffer name; a heading matches when a member does
-(define (chats-match? buf row input)
-  (cond ((chats-heading? row)
-         (let loop ((ms (chats-heading-members row)))
-           (and (pair? ms)
-                (or (chats-match? buf (car ms) input) (loop (cdr ms))))))
-        ((chats-archived-row? row)
-         (completion-match?
-           (string-append (chats-archived-title row) " archived saved " row)
-           input 'substring))
-        (else
-         (completion-match?
-           (string-append row " " (chats-title row) " "
-                          (or (chats-summary row) "") " "
-                          (chats-model row) " "
-                          (chats-state-label (chat-row-status row)) " "
-                          (or (buffer-local row 'agent-slug) ""))
-           input 'substring))))
-
-(define (chats-footer buf)
-  '(("RET" "resume") ("SPC" "mark") ("a" "archive") ("r" "retitle")
-    ("TAB" "fold") ("," "sort") (";" "group by") ("s" "steer")
-    ("y/n" "permission") ("k/d" "flag") ("x" "execute") ("+" "new")
-    ("/" "filter") ("g" "refresh") ("q" "quit")))
-
-;; the heading of the section the highlight is in: the row itself when
-;; it is a heading, else the nearest heading above it
-(define (chats-section-at)
-  (let ((i (list-clamped-index *agents-buffer*))
-        (es (list-entries *agents-buffer*)))
-    (and i
-         (let loop ((k (min i (- (length es) 1))))
-           (cond ((< k 0) #f)
-                 ((chats-heading? (nth k es)) (nth k es))
-                 (else (loop (- k 1))))))))
 
 ;; A streaming turn hands the fleet an event batch many times a second,
 ;; and the old refresh drew the list for every one of them. That is what
@@ -597,54 +264,9 @@
                (string-append verb " " (car bs))
                (string-append verb " " (number->string (length bs)) " chats"))))
 
-(define (agents-visit-current)
-  (let ((b (agents-current-buf)))
-    (cond ((not b) #f)
-          ((chats-heading? b) (chats-toggle-fold! (chats-heading-key b)))
-          ((chats-archived-row? b)
-           (visit-in-group b (frame-group))
-           (end-of-buffer!))
-          (else (switch-to-buffer! b) (end-of-buffer!)))))
-
-;; the row under the highlight shows in the other window and leaves no
-;; trace there: a preview, not a switch, so the recency order holds still
-(define (agents-preview! buf b)
-  (when (and (string? b) (buffer-exists? b))
-    (let ((w (other-window-id (active-window))))
-      (if w
-          (window-preview-buffer! b w)
-          (display-buffer-other-window! b)))))
-
-(define-command "agents-next" "Move down and preview the chat in another window"
-  (lambda () (list-move! 1)))
-
-(define-command "agents-prev" "Move up and preview the chat in another window"
-  (lambda () (list-move! -1)))
-
-(define-command "chats-toggle-fold" "Fold or unfold the section at point"
-  (lambda ()
-    (let ((row (chats-section-at)))
-      (if row
-          (chats-toggle-fold! (chats-heading-key row))
-          (message "no section here")))))
-
-(define-command "chats-toggle-sort"
-  "Cycle the order inside a section: urgency, recent, title, tokens"
-  (lambda ()
-    (let ((next (chats-cycle-after (chats-sort) *chats-sorts*)))
-      (chats-set-sort! next)
-      (message (string-append "sorted by " (symbol->string next))))))
-
-(define-command "chats-toggle-grouping"
-  "Cycle what a section is: group, state, model"
-  (lambda ()
-    (let ((next (chats-cycle-after (chats-grouping) *chats-groupings*)))
-      (chats-set-grouping! next)
-      (message (string-append "grouped by " (symbol->string next))))))
-
 (define-command "chats-retitle" "Give the chat at point a title"
   (lambda ()
-    (let ((b (agents-current-buf)))
+    (let ((b (ibuffer-current *agents-buffer*)))
       (if (not (and (string? b) (buffer-exists? b)))
           (message "no chat here")
           (minibuffer-read
@@ -654,9 +276,6 @@
               (unless (equal? name "")
                 (chat-title b name)
                 (list-refresh! *agents-buffer*))))))))
-
-(define-command "agents-visit" "Visit the thread on the current line"
-  (lambda () (agents-visit-current)))
 
 (define (agents-live-slug buf)
   (let ((slug (or (buffer-local buf 'agent-slug) (chat-ensure-runtime! buf))))
@@ -744,67 +363,75 @@
             (list-refresh! *agents-buffer*)
             (agents-report "archived" bs))))))
 
-(mode-icon! "chats-mode" "")
+(mode-icon! "ichat-mode" "")
 
-(define-list-mode! "chats-mode"
-  (list
-    'doc (string-append
-           "Every chat and agent thread in one table, split by group the way "
-           "C-x b is. A section is a group, a state, or a model; ; cycles "
-           "the grouping. Rows inside a section order by urgency, recency, "
-           "title, or context size; , cycles the order. TAB folds the "
-           "section at point. A row is two lines: the title with its "
-           "queue, turns, context, state, and age; then the running summary "
-           "and the model. m marks a chat, SPC toggles the mark, u unmarks "
-           "it and U drops every mark. s steers, y and n answer a permission "
-           "request for the marked chats, or for the chat at point when "
-           "nothing is marked. a archives now and r sets a title. k flags a "
-           "runtime to kill, d flags a whole chat to archive, and x runs "
-           "the flags. RET opens the chat at point. The last section holds "
-           "the newest saved conversations; RET on one reads its file back "
-           "and revives the chat.")
-    'buffer *agents-buffer*
-    'rows (lambda (buf) (chats-rows))
-    'row-columns chats-columns
-    'row-cells chats-cells
-    'separator? chats-separator?
-    'section? (lambda (buf e) (chats-heading? e))
-    'key (lambda (buf e)
-           (if (chats-heading? e)
-               (string-append "section:" (chats-heading-key e))
-               e))
-    'match chats-match?
-    'overlays chats-row-overlays
-    'local-filter #t
-    'title (lambda (buf) "Chats")
-    'meta chats-meta
-    'total (lambda (buf) (length (filter string? (list-entries buf))))
-    'footer chats-footer
-    ;; two flags, both destructive, neither irreversible: k stops a runtime
-    ;; and keeps the transcript, d drops the chat as well
-    'flags (list (list "k" "K" "kill runtime"
-                       (lambda (buf b)
-                         (and (buffer-exists? b) (agents-kill-runtime! b))))
-                 (list "d" "D" "archive"
-                       (lambda (buf b)
-                         (and (buffer-exists? b)
-                              (begin (agents-archive! b) #t)))))
-    'noun "chat"
-    ;; a heading is not a chat, and an archive row has no runtime, so no
-    ;; verb here can act on either
-    'markable? (lambda (buf e) (and (string? e) (not (chats-archived-row? e))))
-    'preview agents-preview!
-    'keys '(("RET" "agents-visit") ("SPC" "list-toggle-mark")
-            ("a" "chats-archive") ("r" "chats-retitle")
-            ("TAB" "chats-toggle-fold") ("," "chats-toggle-sort")
-            (";" "chats-toggle-grouping")
-            ("s" "agents-steer") ("y" "agents-allow") ("n" "agents-deny")
-            ("g" "agents-refresh") ("+" "agent-open") ("q" "quit-window"))
-    ;; line movement remaps to move-and-preview (n is taken: deny)
-    'remap '(("next-line" "agents-next") ("previous-line" "agents-prev"))))
+(define-list-mode! "ichat-mode"
+  (ibuffer-mode-opts
+    (list
+      'doc (string-append
+             "Every chat and agent thread in the ibuffer table, split by "
+             "group the way C-x b is. A section is a group, a state, or a "
+             "model-less mode; ; cycles the grouping. Rows inside a section "
+             "sort by name, recency, or context size; , cycles the sort. "
+             "TAB folds the section at point. A row shows the state glyph, "
+             "the title, and on the right the context tokens, the state, "
+             "and the age of the last event. m marks a chat, SPC toggles "
+             "the mark, u unmarks it and U drops every mark. s steers, y and "
+             "n answer a permission request for the marked chats, or for the "
+             "chat at point when nothing is marked. a archives now and r "
+             "sets a title. k flags a runtime to kill, d flags a whole chat "
+             "to archive, and x runs the flags. RET opens the chat at point. "
+             "The last section holds the newest saved conversations; RET on "
+             "one reads its file back and revives the chat.")
+      'buffer *agents-buffer*
+      'category 'chat
+      'title (lambda (buf) "Chats")
+      'noun "chat"
+      'rows chats-rows
+      ;; two flags, both destructive, neither irreversible: k stops a runtime
+      ;; and keeps the transcript, d drops the chat as well
+      'flags (list (list "k" "K" "kill runtime"
+                         (lambda (buf b)
+                           (and (buffer-exists? b) (agents-kill-runtime! b))))
+                   (list "d" "D" "archive"
+                         (lambda (buf b)
+                           (and (buffer-exists? b)
+                                (begin (agents-archive! b) #t)))))
+      ;; a heading is not a chat, and an archive row has no runtime, so no
+      ;; verb here can act on either
+      'markable? (lambda (buf e) (and (string? e) (buffer-known? e)))
+      'layouts
+        (list
+          (list 'name 'compact
+                'max-cols (lambda (buf) (- ibuffer-compact-cols 1))
+                'columns ibuffer-compact-columns
+                'cells ibuffer-compact-cells
+                'meta ibuffer-compact-meta
+                'footer (lambda (buf) (chats-footer buf)))
+          (list 'name 'wide
+                'default #t
+                'columns ibuffer-wide-columns
+                'cells ibuffer-wide-cells
+                'meta ibuffer-wide-meta
+                'footer (lambda (buf) (chats-footer buf))))
+      'keys '(("s" "agents-steer") ("y" "agents-allow") ("n" "agents-deny")
+              ("a" "chats-archive") ("r" "chats-retitle")
+              ("+" "agent-open")))))
+
+(define (chats-footer buf)
+  '(("RET" "visit") ("SPC" "mark") ("s" "steer") ("y/n" "permission")
+    ("a" "archive") ("r" "retitle") ("k/d" "flag") ("x" "execute")
+    ("TAB" "fold") ("," "sort") (";" "group by") ("+" "new")
+    ("/" "filter") ("g" "refresh") ("q" "quit")))
+
+(define (ichat-open!)
+  (ibuffer-open! 'chats *agents-buffer* "ichat-mode"))
 
 (define-command "chat-list" "List every chat: agent threads and API companions"
-  (lambda () (list-mode-show! "chats-mode")))
+  (lambda () (ichat-open!)))
+
+(define-command "ichat" "List every chat in the ibuffer table"
+  (lambda () (ichat-open!)))
 
 ;;; --- C-x c: the chats, as a prompt ----------------------------------------
 ;;; C-x b, for chats alone. You know a chat by what it is about, so every
@@ -841,7 +468,7 @@
 
 (define (chat-prompt-saved-row path)
   (list (chat-prompt-clip (chats-archived-title path))
-        (string-append "saved  " (format-time (file-mtime path) "%Y-%m-%d %H:%M"))
+        (string-append "archived  " (format-time (file-mtime path) "%Y-%m-%d %H:%M"))
         "saved"
         path))
 
@@ -878,7 +505,7 @@
 
 ;; the rows in sections by group, the way C-x b is: this group's chats
 ;; first, then the other groups by name, then the chats no group claims,
-;; then the saved conversations
+;; then the archived conversations
 (define (chat-prompt-sectioned-rows live saved current)
   (let* ((tagged (map (lambda (r) (cons (buffer-group (nth 3 r)) r)) live))
          (rows-of (lambda (id)
@@ -898,7 +525,7 @@
                   (rows-of id))))
             '() ordered)
       (chat-prompt-section "ungrouped" ungrouped)
-      (chat-prompt-section "saved" saved))))
+      (chat-prompt-section "archived" saved))))
 
 (define (chat-prompt-rows &optional current)
   (let ((rows (chat-prompt-unique-rows
@@ -999,6 +626,9 @@
 
 (define-key "agent-map" "l" "chat-list")
 
+;; C-x C-b is the buffers in a window; C-x C-c is the chats in the same table
+(define-key "ctl-x-map" "C-c" "ichat")
+
 (define-key "agent-map" "a" "agent-goto-attention")
 
 ;; C-x b is the buffers; C-x c is the chats. The same prompt, the same
@@ -1007,12 +637,6 @@
 
 (category! 'chat)
 (catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))
-(public! 'chats-set-grouping!
-  "(chats-set-grouping! MODE) — section the *chats* table by 'group, 'state, or 'model")
-(public! 'chats-set-sort!
-  "(chats-set-sort! MODE) — order the rows of a section by 'urgency, 'recent, 'title, or 'tokens")
-(public! 'chats-toggle-fold!
-  "(chats-toggle-fold! KEY) — fold or unfold the section KEY names")
 (public! 'chats-note-activity!
   "(chats-note-activity! BUF) — stamp the time of the last event that reached the chat BUF")
 (public! 'chats-state-label

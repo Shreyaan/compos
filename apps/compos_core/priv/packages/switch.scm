@@ -6,9 +6,10 @@
 ;;; C-t sets the group, C-o shows groups and projects, TAB locks to a
 ;;; group, C-g and ESC quit. DEL widens the narrowing by one character.
 ;;;
-;;; The rows are the C-x b pool in four sections: the current group's
-;;; buffers, the other groups' cards, every other buffer (and whatever
-;;; the switch-buffer-source seam adds — chrome adds browser tabs), then
+;;; The rows are the C-x b pool in sections by group, as ibuffer sections
+;;; them: the current group's buffers, every other group's buffers under
+;;; its name, the ungrouped buffers (and whatever the switch-buffer-source
+;;; seam adds — chrome adds browser tabs), the other groups' cards, then
 ;;; what peeks let go. Inside a section the order is recency. A heading
 ;;; is not a choice: the highlight steps over it, and a filter that
 ;;; empties a section drops its heading too.
@@ -125,32 +126,36 @@
            (let ((legacy (and (not (chat-buffer? name)) (buffer-local name 'group))))
              (and (string? legacy) (equal? (group-resolve-id legacy) id)))))))
 
-;; the pool in sections: this group's buffers, the other groups' cards,
-;; every other buffer and tab, then what peeks let go. Without a current
-;; group there is no first section: all buffers lead, history first, so
-;; RET with nothing typed still goes back to the previous buffer, and
-;; the group cards follow. WIN is the window the rows are for; its
-;; history leads each section.
+;; the group ids a row's buffer holds, read from its own locals the way
+;; switch-member? reads them: no resolve per row
+(define (switch-memberships name)
+  (let ((raw (if (chat-buffer? name)
+                 (buffer-local name 'group-id)
+                 (buffer-local name 'group-ids))))
+    (cond ((pair? raw) raw)
+          ((string? raw) (list raw))
+          (else
+           (let ((legacy (and (not (chat-buffer? name)) (buffer-local name 'group))))
+             (let ((id (and (string? legacy) (group-resolve-id legacy))))
+               (if id (list id) '())))))))
+
+;; the pool in sections, the ibuffer way: this group's buffers, then
+;; every other group's buffers under the group's name, then the buffers
+;; no group claims (and whatever the switch-buffer-source seam adds —
+;; chrome adds browser tabs), then the other groups' cards, then what
+;; peeks let go. Inside a section the order is the window's history.
+;; WIN is the window the rows are for.
 (define (switch-sectioned-rows here my-group &optional win)
   (let* ((pool (switch-pool here my-group win))
          (id (and my-group (group-resolve-id my-group)))
-         (mine (filter (lambda (c)
-                         (and id
-                              (not (switch-container? c))
-                              (switch-member? (car c) id)))
-                       pool))
          (cards (filter switch-container? pool))
-         (others (filter (lambda (c)
-                           (and (not (switch-container? c))
-                                (not (member c mine))))
-                         pool)))
+         (bufs (filter (lambda (c) (not (switch-container? c))) pool)))
     (append
-      (if id
-          (append (switch-section "in this group" mine)
-                  (switch-section "other groups" cards)
-                  (switch-section (if (pair? mine) "other buffers" "all buffers") others))
-          (append (switch-section "all buffers" others)
-                  (switch-section "groups" cards)))
+      (fold (lambda (out bucket)
+              (append out (switch-section (car bucket) (nth 2 bucket))))
+            '()
+            (ibuffer-group-buckets bufs id (lambda (c) (switch-memberships (car c)))))
+      (switch-section (if id "other groups" "groups") cards)
       (switch-section "recent" (switch-recent-rows)))))
 
 ;; the buffers view of the modal: the rows are for the home window

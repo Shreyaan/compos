@@ -100,7 +100,7 @@
 
 ;; every heading the rows can carry; none of them is a choice
 (define t--sw-headings
-  '("in this group" "other groups" "groups" "other buffers" "all buffers" "recent"))
+  '("in this group" "other groups" "groups" "ungrouped" "zzsw-foreign" "recent"))
 
 (deftest 'switch-to-buffer-prompt-opens-its-candidate-prompt
   "the prompt form opens the prompt under the switcher's name"
@@ -1053,28 +1053,28 @@
     (t--sw-done!)))
 
 (deftest 'a-broadened-switcher-lists-every-buffer-under-two-headings
-  "C-u lists the group's own first, then the rest"
+  "C-u lists the group's own first, then the other groups by name"
   (lambda ()
     (t--sw-setup!)
     (t--sw-three-groups!)
     (t--sw-open-all!)
     (let ((labels (t--sw-labels)))
       (check-true! (member "in this group" labels) "the first heading")
-      (check-true! (member "other buffers" labels) "the second")
+      (check-true! (member "zzsw-foreign" labels) "the stranger's group is the second")
       (check-true! (member t--sw-second labels) "a member is listed")
       (check-true! (member t--sw-first labels) "and so is the buffer we are in"))
     (check-true! (< (t--sw-at "in this group") (t--sw-at t--sw-second))
                  "the heading comes before its member")
     (check-true! (< (t--sw-at t--sw-second) (t--sw-at t--sw-first))
                  "the buffer we are in comes after the rest of its section")
-    (check-true! (< (t--sw-at t--sw-first) (t--sw-at "other buffers"))
+    (check-true! (< (t--sw-at t--sw-first) (t--sw-at "zzsw-foreign"))
                  "and before the next heading")
 
     ;; the panel renders a WINDOW of rows, so filter to the stranger
     (t--sw-type! t--sw-third)
     (check-true! (member t--sw-third (t--sw-labels)) "the stranger is reachable")
-    (check-true! (< (t--sw-at "other buffers") (t--sw-at t--sw-third))
-                 "under the other-buffers heading")
+    (check-true! (< (t--sw-at "zzsw-foreign") (t--sw-at t--sw-third))
+                 "under its group's heading")
     (t--sw-done!)))
 
 (deftest 'a-heading-takes-no-selection-and-no-count
@@ -1114,14 +1114,14 @@
     (check-equal! (current-buffer) "*switch*" "the modal opened")
     (let ((names (map car (list-entries "*switch*"))))
       (check-true! (and (member "in this group" names) #t) "the first heading")
-      (check-true! (and (member "other buffers" names) #t) "the second")
+      (check-true! (and (member "zzsw-foreign" names) #t) "the stranger's group is the second")
       (check-true! (and (member t--sw-first names) #t) "the buffer we came from is a row too")
       (check-true! (< (t--sw-modal-at "in this group") (t--sw-modal-at t--sw-second))
                    "the heading comes before its member")
-      (check-true! (< (t--sw-modal-at t--sw-second) (t--sw-modal-at "other buffers"))
+      (check-true! (< (t--sw-modal-at t--sw-second) (t--sw-modal-at "zzsw-foreign"))
                    "and the member before the next heading")
-      (check-true! (< (t--sw-modal-at "other buffers") (t--sw-modal-at t--sw-third))
-                   "the stranger sits under it"))
+      (check-true! (< (t--sw-modal-at "zzsw-foreign") (t--sw-modal-at t--sw-third))
+                   "the stranger sits under its group"))
     (let ((row (list-current "*switch*")))
       (check-equal! (and row (car row)) t--sw-second "point rests on the first real row"))
     ;; narrowing to the stranger empties this group's section: its heading goes
