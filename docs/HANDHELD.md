@@ -24,7 +24,7 @@ lives in the client. The policy lives in
   as `C-x b`, dispatches its keys. `M-x NAME` runs the command. Any other
   text goes to the group's chat as a message. `handheld-compose!` decides.
   While a prompt is open, the field feeds the prompt one key at a time.
-- **The chips.** Three commands above the field. Each chip shows the key
+- **The chips.** Commands above the field, one per context. Each chip shows the key
   bound to its command, or `M-x NAME` when nothing binds it. A tap sends
   the chord through the composer. `handheld-chips` names them.
 - **The tab rail.** The groups in MRU order. A phone switches groups,
