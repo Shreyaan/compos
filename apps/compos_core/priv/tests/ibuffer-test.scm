@@ -378,3 +378,55 @@
                    "the marked row that point does not rest on joined too")
       (check-true! (buffer-in-group? "*zz-ib-b*" two) "and kept the group it was in")
       (ibuffer-test-groups-reset! ids))))
+
+;;; --- the window form previews too ------------------------------------------
+;;; The minibuffer form previews into the window its popup covers. The
+;;; window form is an ordinary buffer, so it peeks: the row under the
+;;; highlight shows in another window, the table keeps its own window,
+;;; and the selection never moves.
+
+(deftest 'ibuffer-window-form-previews-the-row-in-another-window
+  "a move in the table shows the row's buffer beside it, and takes no focus"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (let ((me (active-window)))
+      (check-equal! (window-buffer me) "*ibuffer*" "the table has the selected window")
+      (list-goto-first-entry "*ibuffer*")
+      (list-preview! "*ibuffer*")
+      (let* ((row (ibuffer-current "*ibuffer*"))
+             (w (window-showing row)))
+        (check-true! (string? row) "there is a row to preview")
+        (check-true! (and w #t) "the row's buffer is on screen")
+        (check-false! (equal? w me) "in another window, never the table's")
+        (check-equal! (active-window) me "the selection stayed on the table")
+        (check-equal! (window-buffer me) "*ibuffer*" "and the table kept its window")
+        (check-false! (popup-open?) "no popup was opened")))
+    (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-window-form-previews-reuse-one-window
+  "walking the rows shows each in the same window, and never splits again"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (list-goto-first-entry "*ibuffer*")
+    (list-preview! "*ibuffer*")
+    (let ((slot (window-showing (ibuffer-current "*ibuffer*")))
+          (count (length (window-list))))
+      (list-move! 1)
+      (let ((row (ibuffer-current "*ibuffer*")))
+        (check-equal! (window-showing row) slot "the next row took the same window")
+        (check-equal! (length (window-list)) count "no window was added")
+        (check-false! (peek-buffer? row) "a buffer that existed is never marked a peek")))
+    (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-quit-takes-the-preview-then-the-table
+  "q gives the previewed window back, and q again closes the table"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (list-goto-first-entry "*ibuffer*")
+    (list-preview! "*ibuffer*")
+    (let ((row (ibuffer-current "*ibuffer*")))
+      (check-true! (and (window-showing row) #t) "the preview is on screen")
+      (run-command "quit-window")
+      (check-false! (and (window-showing row) #t) "q took the preview away")
+      (check-equal! (current-buffer) "*ibuffer*" "and left the table"))
+    (ibuffer-test-reset!)))

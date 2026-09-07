@@ -209,7 +209,16 @@ defmodule Compos.IbufferTest do
     # the table is a buffer in a window, not the popup
     assert eval!("(popup-open?)") == "#f"
     refute tree.() == before
+    # the row under the highlight previews beside the table
+    assert eval!("(peek-shown)") == ~s{"*zz-collected-one*"}
+    assert tree.() =~ "*zz-collected-one*"
 
+    # q takes the look first, and the previewed window shows what it showed
+    eval!(~s[(run-command "quit-window")])
+    assert Editor.current_buffer() == "*ibuffer*"
+    refute tree.() =~ "*zz-collected-one*"
+
+    # q again takes the table, and the layout is what it was
     eval!(~s[(run-command "quit-window")])
 
     assert tree.() == before
@@ -261,9 +270,10 @@ defmodule Compos.IbufferTest do
     assert text =~ "*zz-collected-two*"
     refute text =~ "*zz-unrelated*"
 
-    # An ordinary buffer previews nothing: a preview into a work window
-    # would leave a trace nothing puts back. The minibuffer form previews.
-    refute eval!("(window-list)") =~ "*zz-collected"
+    # The window form previews too: the row under the highlight shows in
+    # another window as a peek, and q gives that window back.
+    assert eval!("(window-list)") =~ "*zz-collected-one*"
+    assert eval!("(peek-shown)") == ~s{"*zz-collected-one*"}
 
     # The reused ibuffer owns ordinary marks and moves the whole marked set.
     eval!(~s{(local-set-key* "*ibuffer*" "<f8>" "list-mark")})

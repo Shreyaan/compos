@@ -913,12 +913,17 @@
 ;; buffer holds is visited where the table came from.
 (define (ibuffer-pick! row close!)
   (cond ((not (string? row)) (message "no buffer here"))
-        ;; the table closes first: the arrangement the group it leaves
+        ;; the look goes first: quit-window takes a peek before it takes
+        ;; the table, so a table that peeked must give the peek back here
+        ;; or CLOSE! spends itself on the peek and leaves the table up.
+        ;; Then the table closes: the arrangement the group it leaves
         ;; saves must not hold the window this table was in
         ((buffer-known? row)
+         (peek-dismiss!)
          (close!)
          (switch-to-buffer-in-group! row))
         ((file-exists? row)
+         (peek-dismiss!)
          (close!)
          (visit-in-group row (and (boundp 'group-here) (group-here))))
         (else (message "no buffer here"))))
@@ -971,16 +976,23 @@
       (message (string-append "grouped by " (symbol->string next))))))
 
 ;; the row under the highlight shows in the other window, and leaves no
-;; trace: closing the popup puts the work windows back. Only the
-;; minibuffer form previews: its table is the popup. The window form is
-;; an ordinary buffer, and nothing would put a previewed window back.
+;; trace. Both forms preview, and each puts the window back its own way.
+;; The minibuffer form draws its table in the popup, so it previews into
+;; the window the popup covers: dismissing the popup restores the work
+;; windows. The window form is an ordinary buffer in an ordinary window,
+;; so it peeks: the peek takes another window, takes no focus, and q
+;; gives the window back.
 (define (ibuffer-preview! &optional buf b)
   (let ((buf (or buf (ibuffer-view)))
-        (b (or b (ibuffer-current buf)))
-        (w (other-window-id (active-window))))
-    (when (and w (string? b) (buffer-known? b)
-               (popup-open?) (equal? (window-buffer (popup-window)) buf))
-      (window-preview-buffer! b w))))
+        (b (or b (ibuffer-current buf))))
+    (when (and (string? b) (buffer-known? b) (not (equal? b buf)))
+      (if (and (popup-open?) (equal? (window-buffer (popup-window)) buf))
+          (let ((w (other-window-id (active-window))))
+            (when w (window-preview-buffer! b w)))
+          ;; the window form: preview only from the table's own window,
+          ;; so a move in a table nobody looks at moves no other window
+          (when (equal? (window-buffer (active-window)) buf)
+            (peek! b (lambda () b)))))))
 
 (define-command "ibuffer-next" "Move down and preview the selected buffer"
   (lambda () (list-move! 1)))
