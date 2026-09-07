@@ -1272,7 +1272,12 @@ defmodule Compos.Ui.EditorLive do
             </div>
           <% else %>
             <div class="mb-label-row">
-              {label_row(@state.minibuffer)}
+              <%= case Map.get(@state.minibuffer, :legend, []) do %>
+                <% [_ | _] = legend -> %>
+                  <span :for={row <- legend} class="transient-legend"><span class="transient-legend-key">{row.key}</span> {row.label}</span>
+                <% _ -> %>
+                  {label_row(@state.minibuffer)}
+              <% end %>
             </div>
           <% end %>
           <div class="mb-body">
@@ -1550,7 +1555,8 @@ defmodule Compos.Ui.EditorLive do
     do: "#{String.trim_trailing(mb.prompt, " ")} · y answers yes · n answers no · C-g quits"
 
   # a filter narrows the list behind it; the list itself shows the count,
-  # so the prompt says what the keys do and nothing more
+  # so the prompt says what the keys do and nothing more. A prompt that
+  # wrote its own legend says that instead — see the label row.
   defp label_row(%{style: "filter"} = mb),
     do:
       "#{String.trim_trailing(mb.prompt, ": ")} · type to narrow · DEL widens · " <>

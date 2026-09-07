@@ -136,3 +136,56 @@
                   "the table is closed")
     (check-equal! (current-buffer) "*zz-ibp-chat*" "the chat is current")
     (ibp-reset!)))
+
+(deftest 'the-prompt-popup-wears-no-chrome
+  "a switcher you close in one keystroke shows no line numbers and no modeline"
+  (lambda ()
+    (ibp-setup!)
+    (run-command "ibuffer-prompt")
+    (check-equal! (buffer-local " *buffers*" 'line-numbers) "off" "no line numbers")
+    (check-true! (string-contains? (buffer-local " *buffers*" 'window-class) "bare")
+                 "the window wears the bare class")
+    (check-true! (and (member '("TAB" "fold") (plist-get (minibuffer-state) 'legend)) #t)
+                 "the prompt says the keys it answers")
+    (ibp-reset!)))
+
+(deftest 'the-prompt-folds-the-section-at-hand
+  "TAB's command folds the section the highlight is in, and folds it back"
+  (lambda ()
+    (ibp-setup!)
+    (run-command "ibuffer-prompt")
+    (minibuffer-change! "zz-ibp-")
+    (check-equal! (ibp-mine " *buffers*") '("*zz-ibp-b*" "*zz-ibp-a*" "*zz-ibp-c*")
+                  "both sections show their rows")
+    (run-command "minibuffer-complete")
+    (check-equal! (ibp-mine " *buffers*") '("*zz-ibp-c*")
+                  "the first section stands for its rows")
+    (run-command "minibuffer-complete")
+    (check-equal! (ibp-mine " *buffers*") '("*zz-ibp-b*" "*zz-ibp-a*" "*zz-ibp-c*")
+                  "and unfolds again")
+    (ibp-reset!)))
+
+(deftest 'the-prompt-cycles-what-a-section-is
+  "the regroup command moves the table from group to mode and on to directory"
+  (lambda ()
+    (ibp-setup!)
+    (run-command "ibuffer-prompt")
+    (check-equal! (ibuffer-grouping " *buffers*") 'group "the table starts by group")
+    (run-command "minibuffer-regroup")
+    (check-equal! (ibuffer-grouping " *buffers*") 'mode "then by mode")
+    (run-command "minibuffer-regroup")
+    (check-equal! (ibuffer-grouping " *buffers*") 'directory "then by directory")
+    (ibp-reset!)))
+
+(deftest 'the-prompt-jumps-section-to-section
+  "the section commands land on the first row of the next section, never on a heading"
+  (lambda ()
+    (ibp-setup!)
+    (run-command "ibuffer-prompt")
+    (minibuffer-change! "zz-ibp-")
+    (check-equal! (list-current " *buffers*") "*zz-ibp-b*" "the highlight starts in this group")
+    (run-command "minibuffer-next-section")
+    (check-equal! (list-current " *buffers*") "*zz-ibp-c*" "the next section's first row")
+    (run-command "minibuffer-previous-section")
+    (check-equal! (list-current " *buffers*") "*zz-ibp-b*" "and back to the first section's first row")
+    (ibp-reset!)))

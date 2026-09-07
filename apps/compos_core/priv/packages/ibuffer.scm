@@ -531,11 +531,16 @@
   (let ((noun (or (list-opt buf 'noun) "buffer")))
     (string-append (number->string n) " " noun (if (= n 1) "" "s"))))
 
-;; A heading carries one number: how many rows it stands for. The bytes
-;; and the modified count belong to the whole table, and the meta line
-;; says them once.
+;; A heading carries how many rows it stands for, and how many of them
+;; hold edits the disk does not have. The bytes belong to the whole
+;; table, and the meta line says them once. The modified count does not:
+;; it says which section holds the work you have not saved.
 (define (ibuffer-heading-details buf row)
-  (number->string (ibuffer-heading-count row)))
+  (let ((dirty (ibuffer-heading-modified row)))
+    (string-append (number->string (ibuffer-heading-count row))
+                   (if (> dirty 0)
+                       (string-append " · " (number->string dirty) " modified")
+                       ""))))
 
 (define (ibuffer-chevron row) (if (ibuffer-heading-folded? row) "▸" "▾"))
 
@@ -759,7 +764,17 @@
 
 ;; the counts say "modified" only when something is: with the count
 ;; honest, a zero there is a word that never changes
+;; A query that matches nothing leaves an empty table under a head that
+;; says "0 buffers". The reader typed those letters: say them back, so
+;; the empty table reads as an answer and not as a broken list.
 (define (ibuffer-counts-parts buf n dirty bytes)
+  (if (and (= n 0) (not (equal? (list-query buf) "")))
+      (list (list (string-append "no " (or (list-opt buf 'noun) "buffer")
+                                 " matches " (list-query buf))
+                  "warn"))
+      (ibuffer-counts-text buf n dirty bytes)))
+
+(define (ibuffer-counts-text buf n dirty bytes)
   (list (list (string-append
                 (ibuffer-noun buf n)
                 (if (> dirty 0)
@@ -833,6 +848,20 @@
         (string-append row " " (ibuffer-row-title row) " " (ibuffer-row-match row))
         input 'substring)))
 
+;; Put the highlight back on the section KEY names, so one key folds and
+;; unfolds the same section. A folded heading is a row of its own and
+;; takes the highlight; an open one is not, so the first row under it does.
+(define (ibuffer-goto-section! buf key)
+  (let loop ((es (list-entries buf)) (i 0))
+    (cond ((null? es) #f)
+          ((and (ibuffer-heading? (car es))
+                (equal? (ibuffer-heading-key (car es)) key))
+           (list-goto-index! buf
+             (if (list-selectable? buf (car es))
+                 i
+                 (list-step-selectable-index buf i 1))))
+          (else (loop (cdr es) (+ i 1))))))
+
 (define (ibuffer-current &optional buf) (list-current (or buf (ibuffer-view))))
 (define (ibuffer-filter-push! f &optional buf) (list-filter-push! (or buf (ibuffer-view)) f))
 
@@ -879,14 +908,31 @@
 ;;; C-x b and C-x c draw the same table in the minibuffer's form: the
 ;;; view opens in a popup under the work, and its filter line opens at
 ;;; once. You type and the rows narrow; C-n and C-p move the highlight;
-;;; RET takes the row you are on; C-g closes the table and puts the
-;;; window back. RET on a heading folds or unfolds it and leaves the
-;;; table open. The form has its own view buffer, so the sort and the
-;;; folds of the window form stay what you set them to.
+;;; M-n and M-p jump section to section; TAB folds the section at hand;
+;;; M-g cycles the grouping; RET takes the row you are on; C-g closes the
+;;; table and puts the window back. RET on a heading folds or unfolds it
+;;; and leaves the table open. The form has its own view buffer, so the
+;;; sort and the folds of the window form stay what you set them to.
+;;;
+;;; The popup wears no chrome. A switcher you close in one keystroke
+;;; needs no line numbers, no dashboard line and no modeline: the rows
+;;; and the filter line are the whole surface.
 
 (define *ibuffer-prompt-buffer* " *buffers*")
 (add-display-rule! *ibuffer-prompt-buffer* 'popup '(side bottom size 0.4))
 (ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent)
+
+(define-style! 'ibuffer-prompt "
+.window.bare .dash-top { display: none; }
+.window.bare .modeline { display: none; }
+.window.bare .buf { padding-top: 2px; }
+.window.bare.active .line.hl-line { box-shadow: inset 2px 0 0 var(--accent-fg, #26356b); }
+")
+
+;; the keys the filter line answers while the table stands behind it
+(define *ibuffer-prompt-legend*
+  '(("C-n/C-p" "move") ("M-n/M-p" "section") ("TAB" "fold")
+    ("M-g" "regroup") ("RET" "visit") ("C-g" "close")))
 
 (define (ibuffer-prompt-close! view)
   (when (and (popup-open?) (equal? (window-buffer (popup-window)) view))
@@ -920,10 +966,15 @@
                     (done)
                     (list-set-query! view "")
                     (ibuffer-prompt-close! view)))
+            (list 'legend *ibuffer-prompt-legend*)
             (list 'style "filter")))))
 
-;; open VIEW on SCOPE in MODE as a popup, then its prompt line
+;; open VIEW on SCOPE in MODE as a popup, then its prompt line. The
+;; classes and the line numbers go on before the display rule floats the
+;; buffer: popup-float! reads them when it writes the window class.
 (define (ibuffer-prompt! scope view mode label pick)
+  (buffer-create view)
+  (buffer-set-locals! view (list 'line-numbers "off" 'window-classes "bare"))
   (ibuffer-open! scope view mode)
   (ibuffer-prompt-line! view label pick))
 
@@ -1199,6 +1250,19 @@
                (string-append "section:" (ibuffer-heading-key b))
                b))
     'match (lambda (buf row input) (ibuffer-match? buf row input))
+    ;; what TAB and M-g mean to a prompt standing in front of this table
+    'fold (lambda (buf)
+            (let ((row (ibuffer-section-at buf)))
+              (if row
+                  (let ((key (ibuffer-heading-key row)))
+                    (ibuffer-toggle-fold! key buf)
+                    (ibuffer-goto-section! buf key))
+                  (message "no section here"))))
+    'regroup (lambda (buf)
+               (let ((next (ibuffer-cycle-after (ibuffer-grouping buf)
+                                                *ibuffer-groupings*)))
+                 (ibuffer-set-grouping! next buf)
+                 (message (string-append "grouped by " (symbol->string next)))))
     'overlays (lambda (buf b off) (ibuffer-row-overlays buf b off))
     'local-filter #t
     'stamp (lambda (buf) (length (buffer-list-mru)))

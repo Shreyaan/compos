@@ -78,7 +78,11 @@
     (let ((second (nth 1 (filter ibuffer-heading? (list-entries "*ibuffer*")))))
       (check-equal! (ibuffer-heading-count second) 2 "the zz-ib heading counts two")
       (check-equal! (ibuffer-heading-details "*ibuffer*" second) "2"
-                    "and a heading says that one number, nothing else"))
+                    "and a heading with nothing unsaved says that one number")
+      (check-equal! (ibuffer-heading-details "*ibuffer*"
+                      (list "zz" "" "separator" "zz" 3 2 0 #f '()))
+                    "3 · 2 modified"
+                    "a heading says how many of its rows hold unsaved edits"))
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-sections-by-directory-put-no-file-last

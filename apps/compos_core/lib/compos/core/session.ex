@@ -1180,7 +1180,7 @@ defmodule Compos.Core.Session do
       "delete-frame!" =>
         "(delete-frame! [ID]) — delete the frame and run its prompt's cancel handler.",
       "minibuffer-buffer" => "(minibuffer-buffer) — return the minibuffer's buffer name.",
-      "minibuffer-state" => "(minibuffer-state) — return the active prompt as a plist, or #f.",
+      "minibuffer-state" => "(minibuffer-state) — return the active prompt as a plist (prompt, input, sel, total, legend, candidates), or #f.",
       "minibuffer-input!" => "(minibuffer-input! INPUT) — set the minibuffer input text.",
       "minibuffer-change!" =>
         "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler.",
@@ -2522,6 +2522,9 @@ defmodule Compos.Core.Session do
               mb.list.sel,
               {:sym, "total"},
               Compos.Core.Candidates.total(mb.list),
+              # the prompt's own key legend, as Scheme wrote it
+              {:sym, "legend"},
+              Map.get(mb, :legend) || [],
               {:sym, "candidates"},
               Enum.map(Compos.Core.Candidates.rows(mb.list), fn c ->
                 [{:sym, "label"}, c.label, {:sym, "hint"}, c.hint || ""]

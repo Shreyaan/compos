@@ -1229,6 +1229,15 @@ defmodule Compos.Ui.Layouts do
             letter-spacing: 0.13em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a);
           }
+          /* a prompt that carries its own legend says keys, and a key is
+             not a word: the row keeps its size and drops the uppercase */
+          .mb-label-row:has(.transient-legend) {
+            display: flex; flex-wrap: wrap; gap: 3px 18px;
+            letter-spacing: 0.02em; text-transform: none;
+          }
+          .mb-label-row .transient-legend-key {
+            color: var(--accent-fg, #26356b); font-weight: 600; margin-right: 4px;
+          }
           /* the names column expands to the longest name in the whole set
              (--mb-label-w, from the core) — marginalia sits immediately
              after it and the column never reflows while narrowing */

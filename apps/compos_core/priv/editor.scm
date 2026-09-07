@@ -413,6 +413,9 @@
 ;;;            separator?. A selectable start (a folded section) stays
 ;;;            when its section is empty and it matches by itself.
 ;;;   selection-face  face name for the row at point. Omit it for no highlight.
+;;;   fold    (buf) -> fold or unfold the section at point. TAB in a
+;;;           prompt standing in front of this list calls it.
+;;;   regroup (buf) -> cycle what a section is. M-g in that prompt calls it.
 
 (define *list-modes* '())
 
@@ -1641,13 +1644,74 @@
 ;; prompt, so the minibuffer keeps its own arrows. The prompt line is the
 ;; proof: a prompt can also close behind Scheme's back, and a stale list
 ;; must never steal the arrows from the next palette.
-(define (mb-list-move! step)
+(define (mb-list-target)
   (let ((buf *mb-list-buffer*)
         (mb (minibuffer-state)))
-    (if (and buf mb (buffer-exists? buf)
-             (equal? (plist-get mb 'prompt) (or *mb-list-prompt* *list-filter-prompt*)))
+    (and buf mb (buffer-exists? buf)
+         (equal? (plist-get mb 'prompt) (or *mb-list-prompt* *list-filter-prompt*))
+         buf)))
+
+(define (mb-list-move! step)
+  (let ((buf (mb-list-target)))
+    (if buf
         (begin (with-invoking-buffer (lambda () (list-move-in! buf step))) #t)
         #f)))
+
+;; The prompt in front of a list drives that list. Each of these answers
+;; #t when a list stood behind the prompt and took the key, so the
+;; minibuffer's own meaning for the key stays the fallback. What the key
+;; MEANS is the list mode's: 'fold and 'regroup are fns of the buffer.
+(define (mb-list-call! key)
+  (let ((buf (mb-list-target)))
+    (and buf
+         (let ((f (list-opt buf key)))
+           (and f (begin (with-invoking-buffer (lambda () (f buf))) #t))))))
+
+;; the index of the next row that starts a section, walking STEP from
+;; the row at point; #f when there is none that way
+(define (list-section-index buf from step)
+  (let* ((es (list-entries buf))
+         (n (length es)))
+    (let loop ((i (+ from step)))
+      (cond ((or (< i 0) (>= i n)) #f)
+            ((list-section-start? buf (nth i es)) i)
+            (else (loop (+ i step)))))))
+
+;; the index of the section the row at FROM belongs to: the nearest
+;; section start at or above it, or #f above the first one
+(define (list-section-here buf from)
+  (let ((es (list-entries buf)))
+    (let loop ((i from))
+      (cond ((< i 0) #f)
+            ((list-section-start? buf (nth i es)) i)
+            (else (loop (- i 1)))))))
+
+;; A section jump lands on the section's first ROW, not on its heading:
+;; the jump is how you reach the rows over there, and RET must visit one.
+;; A folded heading stands for its rows, so the jump rests on it.
+;; Backwards means the section BEFORE this one, so the walk starts at
+;; this section's own heading and not at the row you are on.
+;;
+;; The key belongs to the list whenever a list stands behind the prompt.
+;; At the first section, backwards does nothing — it must not fall
+;; through to the history and type a past answer into the filter.
+(define (mb-list-section! step)
+  (let ((buf (mb-list-target)))
+    (and buf
+         (let* ((i (list-clamped-index buf))
+                (from (if (and i (< step 0)) (or (list-section-here buf i) i) i))
+                (head (and from (list-section-index buf from step))))
+           (when head
+             (let* ((entries (list-entries buf))
+                    (target (if (list-selectable? buf (nth head entries))
+                                head
+                                (list-step-selectable-index buf head 1))))
+               (with-invoking-buffer
+                 (lambda ()
+                   (list-ensure-shown! buf target)
+                   (list-goto-index! buf target)
+                   (list-preview! buf)))))
+           #t))))
 
 ;; The narrowing is live, and the input IS it. The prompt opens holding
 ;; the query the list already has, so `/` edits the narrowing instead of
@@ -2338,8 +2402,6 @@
   (lambda () (minibuffer-confirm-input!)))
 (define-command "minibuffer-cancel" "Cancel the minibuffer prompt"
   (lambda () (minibuffer-cancel!)))
-(define-command "minibuffer-complete" "Complete the minibuffer input"
-  (lambda () (minibuffer-complete!)))
 (define-command "minibuffer-next-candidate" "Select the next minibuffer candidate"
   (lambda ()
     (if (mb-list-move! 1) #t (begin (minibuffer-next!) (mb-select-notify!)))))
@@ -2348,6 +2410,18 @@
     (if (mb-list-move! -1) #t (begin (minibuffer-prev!) (mb-select-notify!)))))
 (define-command "minibuffer-delete-backward" "Delete the character before point"
   (lambda () (minibuffer-del!)))
+(define-command "minibuffer-complete"
+  "Fold the section at hand in the list behind the prompt, else complete the input"
+  (lambda () (if (mb-list-call! 'fold) #t (minibuffer-complete!))))
+(define-command "minibuffer-regroup"
+  "Cycle what a section is in the list behind the prompt"
+  (lambda () (if (mb-list-call! 'regroup) #t (message "no list here"))))
+(define-command "minibuffer-next-section"
+  "Move to the next section in the list behind the prompt, else the next history entry"
+  (lambda () (if (mb-list-section! 1) #t (run-command "next-history-element"))))
+(define-command "minibuffer-previous-section"
+  "Move to the previous section in the list behind the prompt, else the previous history entry"
+  (lambda () (if (mb-list-section! -1) #t (run-command "previous-history-element"))))
 
 ;;; --- candidate preview (the consult mechanism) -------------------------------
 ;;; Emacs previews by hooking SELECTION, not windows: consult registers a
@@ -2625,8 +2699,11 @@
   (local-set-key* mb "<down>" "minibuffer-next-candidate")
   (local-set-key* mb "C-p" "minibuffer-previous-candidate")
   (local-set-key* mb "<up>" "minibuffer-previous-candidate")
-  (local-set-key* mb "M-p" "previous-history-element")
-  (local-set-key* mb "M-n" "next-history-element")
+  ;; a list behind the prompt takes these first; with no list they are
+  ;; the history walk they have always been
+  (local-set-key* mb "M-p" "minibuffer-previous-section")
+  (local-set-key* mb "M-n" "minibuffer-next-section")
+  (local-set-key* mb "M-g" "minibuffer-regroup")
   ;; a search repeats from inside its own prompt
   (local-set-key* mb "C-s" "isearch-repeat-forward")
   (local-set-key* mb "C-r" "isearch-repeat-backward")
@@ -6306,10 +6383,19 @@
       (disable-minor-mode! name "popup-mode"))
   (buffer-set-local! name 'popup-keys (and floating? #t)))
 
+;; A buffer can ask for more window classes than the popup gives it. The
+;; extra words come after the side, so popup-side-of still reads the side.
+(define (popup--extra-classes name)
+  (let ((extra (buffer-local name 'window-classes)))
+    (if (and (string? extra) (not (equal? extra "")))
+        (string-append " " extra)
+        "")))
+
 (define (popup-float! name side &optional size)
   (let ((had-keys (buffer-local name 'popup-keys)))
     (buffer-set-local! name 'window-class
-      (and side (string-append "popup popup-" (symbol->string side))))
+      (and side (string-append "popup popup-" (symbol->string side)
+                               (popup--extra-classes name))))
     ;; the share is a number, and CSS cannot read a Scheme list — hand it
     ;; over as a custom property the stylesheet already reads
     (buffer-set-local! name 'window-style
@@ -6355,11 +6441,14 @@
                  (- 1 size))
   (other-window!))
 
-;; the side a floating buffer wears, from its class, or #f
+;; the side a floating buffer wears, from its class, or #f. The class can
+;; carry more words after the side, so the side is the first word.
 (define (popup-side-of buf)
   (let ((c (and buf (buffer-local buf 'window-class))))
     (and c (string-prefix? "popup popup-" c)
-         (string->symbol (substring c (string-length "popup popup-") (string-length c))))))
+         (let* ((rest (substring c (string-length "popup popup-") (string-length c)))
+                (space (string-index rest " ")))
+           (string->symbol (if space (substring rest 0 space) rest))))))
 
 ;; The popup shows one buffer at a time. A buffer shown over another
 ;; keeps it underneath (popper's stack): dismiss the top one and the one
