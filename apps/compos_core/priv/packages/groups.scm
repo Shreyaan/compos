@@ -58,18 +58,29 @@
 (define (group-record-settings record)
   (and (> (length record) 9) (nth 9 record)))
 
+;; VALUE names a group, or is a colour slot already. -> the face name for
+;; that slot, or "accent" for anything off the scale.
 (define (group-color-face value)
   (let* ((record (and value
                       (or (group-record-by-id value)
                           (group-record-by-name value))))
-         (color (if record (group-record-color record) value)))
-    (cond ((equal? color "#d05a47") "group-color-1")
-          ((equal? color "#3f7cac") "group-color-2")
-          ((equal? color "#4f8a5b") "group-color-3")
-          ((equal? color "#9b6ab3") "group-color-4")
-          ((equal? color "#c28a2c") "group-color-5")
-          ((equal? color "#347f7a") "group-color-6")
-          (else "accent"))))
+         (slot (if record (group-record-color record) value)))
+    (if (group-color-slot? slot)
+        (string-append "group-color-" (number->string slot))
+        "accent")))
+
+;; #t for a slot the scale has a face for
+(define (group-color-slot? slot)
+  (and (number? slot) (>= slot 1) (<= slot *group-colors*)))
+
+;; The render paths that take a colour value rather than a face name: the
+;; frame style and the modeline. The hex is the current theme's, read back
+;; through the face, so it changes with the theme.
+(define (group-color-hex slot)
+  (and (group-color-slot? slot)
+       (face-color (string->symbol (string-append "group-color-"
+                                                  (number->string slot)))
+                   'fg)))
 
 (define (buffer-color-group buf)
   (if (chat-buffer? buf)
@@ -94,7 +105,7 @@
         (candidate-face-for-base category name))))
 
 (define (group-next-color)
-  (nth (modulo (- *group-next-id* 1) (length *group-colors*)) *group-colors*))
+  (+ 1 (modulo (- *group-next-id* 1) *group-colors*)))
 
 (define (group-record-by-id id)
   (let loop ((records *group-records*))
