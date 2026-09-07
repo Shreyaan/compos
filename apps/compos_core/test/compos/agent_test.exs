@@ -1348,6 +1348,152 @@ defmodule Compos.AgentTest do
     assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "opencode/big-pickle" end)
   end
 
+  test "deepseek connector: grouped options, opaque model values, reasoning effort" do
+    assert {:ok, names} = Session.eval(~s[(connector-names)])
+    assert names =~ "deepseek"
+
+    # 'model-config: the model rides protocol config, not a command flag
+    assert {:ok, "#f"} =
+             Session.eval(
+               ~s[(plist-get (agent-resolve-config '(connector "deepseek" model "deepseek-v4-pro")) 'env)]
+             )
+
+    {:ok, backend} =
+      Backend.ACP.start(
+        %{
+          "cmd" => "fake",
+          "cwd" => File.cwd!(),
+          "model" => "deepseek-v4-pro",
+          "effort" => "max"
+        },
+        self()
+      )
+
+    on_exit(fn -> Backend.ACP.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    flash = ~s(["deepseek-official","deepseek-v4-flash"])
+    pro = ~s(["deepseek-official","deepseek-v4-pro"])
+
+    # dsh groups its models by provider and spells each value as a JSON
+    # ["provider", "model"] pair
+    model_option = fn current ->
+      %{
+        "id" => "model",
+        "name" => "Model",
+        "category" => "model",
+        "type" => "select",
+        "currentValue" => current,
+        "options" => [
+          %{
+            "group" => "deepseek-official",
+            "name" => "DeepSeek",
+            "options" => [
+              %{"value" => flash, "name" => "DeepSeek-V4-Flash"},
+              %{"value" => pro, "name" => "DeepSeek-V4-Pro"}
+            ]
+          }
+        ]
+      }
+    end
+
+    effort_option = %{
+      "id" => "reasoning_effort",
+      "name" => "Reasoning effort",
+      "category" => "thought_level",
+      "type" => "select",
+      "currentValue" => "high",
+      "options" => [
+        %{"value" => "off", "name" => "Off"},
+        %{"value" => "low", "name" => "Low"},
+        %{"value" => "high", "name" => "High"},
+        %{"value" => "max", "name" => "Max"}
+      ]
+    }
+
+    inject(backend, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{
+        "sessionId" => "ses-ds",
+        "configOptions" => [model_option.(flash), effort_option]
+      }
+    })
+
+    # the group heading is not a model: only its leaves reach the picker,
+    # each named by the model alone and carrying the effort levels
+    assert_receive {:backend_event, state}, 1_000
+    assert Backend.event_type(state) == "model-state"
+    assert Backend.plist_get(state, "current") == "deepseek-v4-flash"
+
+    assert Backend.plist_get(state, "available") == [
+             ["deepseek-v4-flash", "DeepSeek-V4-Flash", ["off", "low", "high", "max"], "high"],
+             ["deepseek-v4-pro", "DeepSeek-V4-Pro", ["off", "low", "high", "max"], "high"]
+           ]
+
+    # both pins ride set_config_option, and the model pin writes back the
+    # opaque value the session named, never the id the picker shows
+    assert_receive {:frame, %{"method" => "session/set_config_option", "params" => pin}}, 1_000
+
+    assert pin == %{"sessionId" => "ses-ds", "configId" => "model", "value" => pro}
+
+    assert_receive {:frame, %{"method" => "session/set_config_option", "params" => ep}}, 1_000
+
+    assert ep == %{"sessionId" => "ses-ds", "configId" => "reasoning_effort", "value" => "max"}
+
+    # a later pick reads the same map
+    :ok = Backend.ACP.set_model(backend, "deepseek-v4-pro")
+    assert_receive {:frame, %{"method" => "session/set_config_option", "params" => sp}}, 1_000
+    assert sp["value"] == pro
+
+    :ok = Backend.ACP.set_effort(backend, "low")
+    assert_receive {:frame, %{"method" => "session/set_config_option", "params" => xp}}, 1_000
+    assert xp == %{"sessionId" => "ses-ds", "configId" => "reasoning_effort", "value" => "low"}
+  end
+
+  test "an adapter that drops _meta takes our sections on the first turn only" do
+    # 'system-in-prompt: the connector says its adapter has no system-prompt
+    # channel, so the resolved config carries the sections as text
+    {:ok, conf} =
+      Session.eval(
+        ~s{(let ((c (agent-resolve-config '(connector "deepseek" presets (compos))))) (list (if (plist-get c 'system) "HAS-SYSTEM" "NONE") (if (plist-get c 'meta) "HAS-META" "NO-META")))}
+      )
+
+    assert conf =~ "HAS-SYSTEM"
+    assert conf =~ "NO-META"
+
+    {:ok, backend} =
+      Backend.ACP.start(
+        %{"cmd" => "fake", "cwd" => File.cwd!(), "system" => "Edit through the buffers."},
+        self()
+      )
+
+    on_exit(fn -> Backend.ACP.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "ses-sp"}})
+
+    :ok = Backend.ACP.prompt(backend, "first", nil)
+    assert_receive {:frame, %{"method" => "session/prompt", "params" => p1}}, 1_000
+    assert p1["prompt"] == [
+             %{
+               "type" => "text",
+               "text" => "<system>\nEdit through the buffers.\n</system>\n\nfirst"
+             }
+           ]
+
+    # the second turn pays for its own text alone — the sections stay in the
+    # cached prefix
+    :ok = Backend.ACP.prompt(backend, "second", nil)
+    assert_receive {:frame, %{"method" => "session/prompt", "params" => p2}}, 1_000
+    assert p2["prompt"] == [%{"type" => "text", "text" => "second"}]
+  end
+
   test "permission request: needs_attention, inline banner, C-c C-y answers allow option" do
     {slug, buf, agent} = boot("")
 

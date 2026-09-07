@@ -44,11 +44,14 @@ defmodule Compos.Core.Agent.Backend.ACP do
   def set_mode(pid, mode_id), do: GenServer.call(pid, {:set_mode, mode_id})
 
   @impl Backend
+  def set_effort(pid, effort), do: GenServer.call(pid, {:set_effort, effort})
+
+  @impl Backend
   def respond_permission(pid, rpc_id, option_id),
     do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
-  def capabilities, do: [:models, :streaming, :session_modes]
+  def capabilities, do: [:models, :streaming, :session_modes, :reasoning_effort]
 
   # --- server -----------------------------------------------------------------
 
@@ -73,9 +76,18 @@ defmodule Compos.Core.Agent.Backend.ACP do
       # exposes, and the model id it currently runs
       config_option_ids: [],
       config_model: nil,
+      # a config-option model value is opaque on the wire (dsh spells it
+      # ["provider","model"]), so keep display id -> wire value
+      config_model_wire: %{},
+      # the reasoning-effort option, when the session offers one
+      config_efforts: [],
+      config_effort: nil,
       # monotonic start per running tool call id; the completing
       # tool-update reads it to stamp duration-ms
-      tool_started: %{}
+      tool_started: %{},
+      # an adapter with no system-prompt channel takes our sections on the
+      # session's first turn, and only that one
+      system_sent: false
     }
 
     {:ok,
@@ -89,6 +101,8 @@ defmodule Compos.Core.Agent.Backend.ACP do
 
   @impl GenServer
   def handle_call({:prompt, text}, _from, state) do
+    {state, text} = with_system_preamble(state, text)
+
     {:reply, :ok,
      request(state, "session/prompt", %{
        "sessionId" => state.session_id,
@@ -161,6 +175,19 @@ defmodule Compos.Core.Agent.Backend.ACP do
     end
   end
 
+  def handle_call({:set_effort, effort}, _from, state) do
+    cond do
+      is_nil(state.session_id) ->
+        {:reply, {:error, :no_session}, state}
+
+      "reasoning_effort" in state.config_option_ids ->
+        {:reply, :ok, set_config_option(state, "reasoning_effort", effort)}
+
+      true ->
+        {:reply, {:error, :unsupported}, state}
+    end
+  end
+
   def handle_call({:respond_permission, rpc_id, option_id}, _from, state) do
     outcome =
       if option_id,
@@ -168,6 +195,24 @@ defmodule Compos.Core.Agent.Backend.ACP do
         else: %{"outcome" => "cancelled"}
 
     {:reply, :ok, respond(state, rpc_id, %{"outcome" => outcome})}
+  end
+
+  # An adapter that reads _meta.systemPrompt needs nothing here. One that
+  # drops protocol metadata (dsh) declares 'system-in-prompt, and its
+  # sections lead the session's first user message: the head of the prefix
+  # the provider caches, so the second turn pays for the new text alone.
+  defp with_system_preamble(%{system_sent: true} = state, text), do: {state, text}
+
+  defp with_system_preamble(state, text) do
+    case Map.get(state.config, "system") do
+      system when is_binary(system) and system != "" ->
+        # the tags are the boundary: without them the model reads our
+        # sections and the user's first words as one question
+        {%{state | system_sent: true}, "<system>\n" <> system <> "\n</system>\n\n" <> text}
+
+      _ ->
+        {%{state | system_sent: true}, text}
+    end
   end
 
   # --- incoming bytes (real port or fake transport) ---------------------------
@@ -319,6 +364,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
         # session config options instead of the two keys above
         state = ingest_config_options(state, Map.get(result, "configOptions"))
         state = push_pinned_model(state)
+        state = push_pinned_effort(state)
 
         emit(state, type: :ready)
 
@@ -570,53 +616,126 @@ defmodule Compos.Core.Agent.Backend.ACP do
 
   defp emit_mode_state(state, _), do: state
 
-  # --- session config options (ACP extension; opencode) -----------------------
+  # --- session config options (ACP extension; opencode, dsh) ------------------
   # The "model" and "mode" options map onto the same model-state/mode-state
   # events the two session/new keys produce, so everything above the seam —
-  # modeline, C-c m, permission-mode sync — works unchanged. Other option
-  # ids (opencode's per-model "effort") are ignored for now.
+  # modeline, C-c m, permission-mode sync — works unchanged. The
+  # "reasoning_effort" option rides on the model entries, which is where the
+  # picker reads a model's effort levels from.
 
   defp ingest_config_options(state, nil), do: state
 
   defp ingest_config_options(state, options) when is_list(options) do
     state = %{state | config_option_ids: Enum.map(options, & &1["id"])}
 
-    state =
-      case Enum.find(options, &(&1["id"] == "model")) do
-        %{"currentValue" => cur} = opt ->
-          %{state | config_model: cur}
-          |> emit(
-            type: :"model-state",
-            current: cur,
-            available:
-              for m <- Map.get(opt, "options", []) do
-                [Map.get(m, "value"), Map.get(m, "name", "")]
-              end
-          )
-
-        _ ->
-          state
-      end
-
-    case Enum.find(options, &(&1["id"] == "mode")) do
-      %{"currentValue" => cur} = opt ->
-        emit(state,
-          type: :"mode-state",
-          current: cur,
-          available:
-            for m <- Map.get(opt, "options", []) do
-              [Map.get(m, "value"), Map.get(m, "name", ""), Map.get(m, "description", "")]
-            end
-        )
-
-      _ ->
-        state
-    end
+    state
+    |> ingest_effort_option(Enum.find(options, &(&1["id"] == "reasoning_effort")))
+    |> ingest_model_option(Enum.find(options, &(&1["id"] == "model")))
+    |> ingest_mode_option(Enum.find(options, &(&1["id"] == "mode")))
   end
 
   defp ingest_config_options(state, _), do: state
 
-  defp set_config_option(state, id, value) do
+  # An option list nests: an entry that carries its own "options" is a group
+  # heading (dsh groups its models by provider), not a value you can select.
+  defp option_leaves(list) when is_list(list) do
+    Enum.flat_map(list, fn o ->
+      case Map.get(o, "options") do
+        inner when is_list(inner) -> option_leaves(inner)
+        _ -> [o]
+      end
+    end)
+  end
+
+  defp option_leaves(_), do: []
+
+  defp ingest_effort_option(state, %{"currentValue" => cur} = opt) do
+    %{
+      state
+      | config_effort: cur,
+        config_efforts: for(o <- option_leaves(Map.get(opt, "options")), do: Map.get(o, "value"))
+    }
+  end
+
+  defp ingest_effort_option(state, _), do: state
+
+  defp ingest_model_option(state, %{"currentValue" => cur} = opt) do
+    leaves = option_leaves(Map.get(opt, "options"))
+    wires = for o <- leaves, do: Map.get(o, "value")
+    ids = model_ids(wires)
+    wire_by_id = Map.new(Enum.zip(ids, wires))
+    names = for o <- leaves, do: Map.get(o, "name", "")
+
+    current = Enum.find(ids, fn id -> Map.get(wire_by_id, id) == cur end) || model_id(cur)
+
+    %{state | config_model: current, config_model_wire: wire_by_id}
+    |> emit(
+      type: :"model-state",
+      current: current,
+      available:
+        for {id, name} <- Enum.zip(ids, names) do
+          # the picker reads a model's effort levels from its own entry
+          if state.config_efforts == [],
+            do: [id, name],
+            else: [id, name, state.config_efforts, state.config_effort || ""]
+        end
+    )
+  end
+
+  defp ingest_model_option(state, _), do: state
+
+  defp ingest_mode_option(state, %{"currentValue" => cur} = opt) do
+    emit(state,
+      type: :"mode-state",
+      current: cur,
+      available:
+        for m <- option_leaves(Map.get(opt, "options")) do
+          [Map.get(m, "value"), Map.get(m, "name", ""), Map.get(m, "description", "")]
+        end
+    )
+  end
+
+  defp ingest_mode_option(state, _), do: state
+
+  # A model option value is opaque on the wire. dsh spells it as a JSON
+  # ["provider", "model"] pair, which no menu and no modeline can show, so
+  # name the model and keep the wire string for the write back. Two
+  # providers that serve the same model name keep their whole paths.
+  defp model_ids(wires) do
+    ids = Enum.map(wires, &model_id/1)
+    ambiguous = ids -- Enum.uniq(ids)
+    for {wire, id} <- Enum.zip(wires, ids), do: if(id in ambiguous, do: model_path(wire), else: id)
+  end
+
+  defp model_id(wire) do
+    case model_parts(wire) do
+      [_ | _] = parts -> List.last(parts)
+      _ -> wire
+    end
+  end
+
+  defp model_path(wire) do
+    case model_parts(wire) do
+      [_ | _] = parts -> Enum.join(parts, "/")
+      _ -> wire
+    end
+  end
+
+  defp model_parts(wire) when is_binary(wire) do
+    case Jason.decode(wire) do
+      {:ok, [_ | _] = parts} -> if Enum.all?(parts, &is_binary/1), do: parts, else: nil
+      _ -> nil
+    end
+  end
+
+  defp model_parts(_), do: nil
+
+  defp set_config_option(state, "model", value),
+    do: write_config_option(state, "model", Map.get(state.config_model_wire, value, value))
+
+  defp set_config_option(state, id, value), do: write_config_option(state, id, value)
+
+  defp write_config_option(state, id, value) do
     request(state, "session/set_config_option", %{
       "sessionId" => state.session_id,
       "configId" => id,
@@ -633,6 +752,16 @@ defmodule Compos.Core.Agent.Backend.ACP do
     if is_binary(model) and "model" in state.config_option_ids and model != state.config_model,
       do: set_config_option(state, "model", model),
       else: state
+  end
+
+  # the same for a pinned reasoning effort
+  defp push_pinned_effort(state) do
+    effort = Map.get(state.config, "effort")
+
+    if is_binary(effort) and "reasoning_effort" in state.config_option_ids and
+         effort != state.config_effort,
+       do: set_config_option(state, "reasoning_effort", effort),
+       else: state
   end
 
   # connector 'meta plists -> JSON. Nested plists become objects, so a
@@ -667,7 +796,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
     else
       %{
         "name" => m["name"],
-        "command" => m["command"],
+        "command" => absolute_command(m["command"]),
         "args" => m["args"] || [],
         # every stdio server learns which thread spawned it — the compos
         # proxy sends it back as the edit author (buffer-authors)
@@ -677,6 +806,18 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   defp acp_server(other, _slug), do: other
+
+  # A stdio server names its program, and PATH lookup is the adapter's job on
+  # most lanes. dsh refuses a relative command, so resolve it here: every
+  # adapter accepts the absolute path, and an unresolvable name still travels
+  # as written, where the adapter's own error names it.
+  defp absolute_command(command) when is_binary(command) do
+    if Path.type(command) == :absolute,
+      do: command,
+      else: System.find_executable(command) || command
+  end
+
+  defp absolute_command(command), do: command
 
   defp slug_env(_pairs, nil), do: []
 

@@ -57,6 +57,20 @@
             "opencode/claude-opus-5" "opencode/claude-haiku-4-5"
             "opencode/gemini-3.1-pro")))
 
+(define-connector! "deepseek"
+  ;; DeepSeek Harness over ACP. The direct API lane bills every request for
+  ;; the whole prefix; the harness keeps one session, so DeepSeek's context
+  ;; cache serves the prefix and only the new turn is full price.
+  ;; Install: `npm install @deepseek-ai/dsh` in ~/src/dsh-acp. The provider
+  ;; key lives in ~/.dsh/.credentials.yaml, which the harness writes.
+  '(cmd "/Users/svs/.asdf/installs/nodejs/24.0.2/bin/node /Users/svs/src/dsh-acp/node_modules/@deepseek-ai/dsh/lib/bin.js --profile acp"
+    ;; the session reports model and reasoning effort as ACP config
+    ;; options, so the model rides in protocol config, not the command line
+    model-config #t
+    ;; the harness drops _meta, so our prompt sections ride the first turn
+    system-in-prompt #t
+    models ("deepseek-v4-pro" "deepseek-v4-flash" "deepseek-v4-flash-vision-exp")))
+
 (define-connector! "api"
   (list 'backend "req-llm"
         ;; User choices stay first as favorites; ReqLLM contributes every
@@ -230,16 +244,25 @@
         conf
         (agent-config-append-system conf primer))))
 
+(define (agent-system-text had text)
+  (if (equal? had "") text (string-append had "\n\n" text)))
+
+;; Most ACP adapters read our sections from _meta.systemPrompt. DeepSeek
+;; Harness does not: its ACP surface drops protocol metadata before the
+;; model request, so a connector that declares 'system-in-prompt carries
+;; the same text in the session's first user message instead. That message
+;; is the head of the prefix, which is what the provider caches.
 (define (agent-config-append-system conf text)
-  (let* ((meta (or (plist-get conf 'meta) '()))
-         (sp (or (plist-get meta 'systemPrompt) '()))
-         (had (or (plist-get sp 'append) "")))
-    (append (list 'meta (append (list 'systemPrompt
-                                      (list 'append (if (equal? had "")
-                                                        text
-                                                        (string-append had "\n\n" text))))
-                                meta))
-            conf)))
+  (if (plist-get conf 'system-in-prompt)
+      (append (list 'system (agent-system-text (or (plist-get conf 'system) "") text))
+              conf)
+      (let* ((meta (or (plist-get conf 'meta) '()))
+             (sp (or (plist-get meta 'systemPrompt) '()))
+             (had (or (plist-get sp 'append) "")))
+        (append (list 'meta (append (list 'systemPrompt
+                                          (list 'append (agent-system-text had text)))
+                                    meta))
+                conf))))
 
 (define (agent-config-with-mcp-note conf)
   (let ((note (if (and (boundp (quote mcp-system-note))
@@ -360,6 +383,8 @@
   (let ((backend (or (plist-get (connector-config name) 'backend) "acp")))
     (cond ((equal? name "opencode")
            "OpenCode — multi-provider ACP agent")
+          ((equal? name "deepseek")
+           "DeepSeek Harness — session-cached DeepSeek models")
           ((equal? name "gemini-nano")
            "Chrome Gemini Nano — local browser inference")
           ((equal? backend "req-llm")
