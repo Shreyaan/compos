@@ -254,11 +254,9 @@
 
 (define (handheld-chips buf)
   (if (chat-buffer? buf)
-      (list (handheld-chip "Configure chat" "llm-configure" buf)
-            (handheld-chip "Switch buffer" "switch-to-buffer" buf)
+      (list (handheld-chip "config" "llm-configure" buf)
             (handheld-chip "Every command" "execute-extended-command" buf))
       (list (handheld-chip "Chat about this" "chat" buf)
-            (handheld-chip "Switch buffer" "switch-to-buffer" buf)
             (handheld-chip "Every command" "execute-extended-command" buf))))
 
 ;;; --- the composer: prose, a chord, or M-x ---------------------------------------
