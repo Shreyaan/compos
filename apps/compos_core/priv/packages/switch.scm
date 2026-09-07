@@ -234,6 +234,14 @@
 (define (switch-ann e)
   (if (and (> (length e) 1) (string? (nth 1 e))) (nth 1 e) ""))
 
+;; A chat is known by its title, not by *chat:GROUP:N*. A titled chat has
+;; been renamed already; an untitled one keeps its derived name, and the
+;; first label its running summary wrote stands in for it. Every other
+;; buffer answers with its own name.
+(define (switch-chat-label name)
+  (let ((label (and (boundp 'chat-prompt-label) (chat-prompt-label name))))
+    (if (and (string? label) (not (equal? label ""))) label name)))
+
 ;; File buffers are named by their absolute path. Showing that as the row
 ;; label and then repeating marginalia's path in the detail cell wastes the
 ;; wide part of the switcher while truncating the one thing a person needs:
@@ -243,7 +251,7 @@
   (let ((path (buffer-path name)))
     (if (and (string? path) (not (equal? path "")))
         (cadr (path-split path))
-        name)))
+        (switch-chat-label name))))
 
 (define (switch-parent-label path)
   (let* ((dir (car (path-split path)))
@@ -311,7 +319,10 @@
 ;; "*scratch*" is a name and "Foo" finds foo
 (define (switch-match? buf e input)
   (let ((text (string-join
-                (cons (car e) (cons (switch-ann e) (switch-chips e))) " ")))
+                (cons (car e)
+                      (cons (switch-chat-label (car e))
+                            (cons (switch-ann e) (switch-chips e))))
+                " ")))
     (completion-match? text input 'substring)))
 
 (define (switch-meta buf)
@@ -745,7 +756,47 @@
 (define (switch-prompt-row e)
   (cond ((switch-recent-row? e) (list (car e) (nth 1 e) "recent"))
         ((switch-file-row? e) (list (car e) (string-append "file · " (nth 3 e)) "file"))
+        ((buffer-known? (car e)) (cons (switch-chat-label (car e)) (cdr e)))
         (else e)))
+
+;; the rows the prompt offers, labelled the way you would name them: a
+;; chat by its title. A label must name ONE row, so a title another row
+;; already wears -- as its own name or as an earlier label -- is dropped
+;; for the buffer's own name, which is unique.
+(define (switch-prompt-rows rows)
+  (let ((names (map car rows)))
+    (let loop ((rs rows) (seen '()) (out '()))
+      (if (null? rs)
+          (reverse out)
+          (let* ((e (car rs))
+                 (r (switch-prompt-row e))
+                 (label (if (or (equal? (car r) (car e))
+                                (and (not (member (car r) names))
+                                     (not (member (car r) seen))))
+                            (car r)
+                            (car e))))
+            (loop (cdr rs) (cons label seen) (cons (cons label (cdr r)) out)))))))
+
+;; (LABEL NAME) for every row the prompt offers: what the candidate says
+;; and what it means
+(define (switch-prompt-pairs rows)
+  (let loop ((rs rows) (cs (switch-prompt-rows rows)) (out '()))
+    (if (or (null? rs) (null? cs))
+        (reverse out)
+        (loop (cdr rs) (cdr cs)
+              (cons (list (car (car cs)) (car (car rs))) out)))))
+
+;; a pick says a label; every path past it names a buffer. Text that names
+;; no row comes back as it was typed -- it is a new group's name.
+(define (switch-prompt-name rows label)
+  (let ((p (assoc label (switch-prompt-pairs rows))))
+    (if p (nth 1 p) label)))
+
+(define (switch-prompt-label-of rows name)
+  (let loop ((ps (switch-prompt-pairs rows)))
+    (cond ((null? ps) name)
+          ((equal? (nth 1 (car ps)) name) (car (car ps)))
+          (else (loop (cdr ps))))))
 
 ;; RET with nothing typed takes the first row that is neither a heading
 ;; nor the buffer you are already on, so the prompt advertises exactly that
@@ -851,25 +902,28 @@
             (if fallback
                 (string-append
                   (if other-window? "Other window buffer" "Switch to")
-                  " (default " fallback "): ")
+                  " (default " (switch-prompt-label-of rows fallback) "): ")
                 (if other-window? "Other window buffer: " "Switch to: "))
-            (map switch-prompt-row rows)
+            (switch-prompt-rows rows)
             ;; the invoking window live-previews the highlighted buffer; a
             ;; card or a tab leaves the window alone. The primitive wakes a
             ;; sleeper; the mode setup must follow, or switch-to-buffer!
             ;; later sees the buffer live and skips its own restore
-            (lambda (b)
-              (when (buffer-known? b)
-                (let ((sleeping (not (buffer-exists? b))))
-                  (window-preview-buffer! b)
-                  (when (and sleeping (buffer-exists? b))
-                    (restore-buffer-runtime! b)
-                    (set! woken (cons b woken))))))
+            (lambda (label)
+              (let ((b (switch-prompt-name rows label)))
+                (when (buffer-known? b)
+                  (let ((sleeping (not (buffer-exists? b))))
+                    (window-preview-buffer! b)
+                    (when (and sleeping (buffer-exists? b))
+                      (restore-buffer-runtime! b)
+                      (set! woken (cons b woken)))))))
             (lambda (name)
               (let* ((context? (let ((x *mb-confirm-context*))
                                  (set! *mb-confirm-context* #f)
                                  x))
-                     (picked (if (equal? name "") (or fallback "") name))
+                     (picked (if (equal? name "")
+                                 (or fallback "")
+                                 (switch-prompt-name rows name)))
                      (e (row-of picked)))
                 (cond
                   ((equal? picked "") #f)
@@ -917,21 +971,24 @@
             (lambda (input selected)
               (let ((lock (switch-prompt-lock-target input)))
                 (cond
-                  (selected (list selected (map switch-prompt-row rows)))
+                  (selected (list selected (switch-prompt-rows rows)))
                   (lock
                    (set! rows (switch-prompt-locked-rows lock))
                    (set! view (list 'locked lock))
-                   (list "" (map switch-prompt-row rows)))
+                   (list "" (switch-prompt-rows rows)))
                   ((let ((st (minibuffer-state)))
                      (and st (= 1 (plist-get st 'total)) (minibuffer-selected)))
-                   (list (minibuffer-selected) (map switch-prompt-row rows)))
+                   (list (minibuffer-selected) (switch-prompt-rows rows)))
                   (else #f))))
             ;; C-c C-o collects the narrowed rows into ibuffer; headings
             ;; and cards are not buffers
             (lambda (picked)
               (restore-here!)
               (sleep-woken! #f)
-              (let ((buffers (filter buffer-known? (map car picked))))
+              (let ((buffers (filter buffer-known?
+                                     (map (lambda (r)
+                                            (switch-prompt-name rows (car r)))
+                                          picked))))
                 (if (null? buffers)
                     (message "No buffer candidates to collect")
                     (ibuffer-open-buffers! buffers)))))))))
