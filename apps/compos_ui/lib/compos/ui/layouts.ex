@@ -887,7 +887,7 @@ defmodule Compos.Ui.Layouts do
             font-family: var(--font-mono); font-size: 14px;
           }
           .echo {
-            color: var(--dim-fg, #57534a); white-space: pre;
+            color: var(--default-fg, #1b1a17); white-space: pre;
             min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
           }
           .ml-frame-path {

@@ -2724,7 +2724,8 @@
     (let ((buffers (group-visible-work-buffers)))
       (if (null? buffers)
           (message "No work buffers visible")
-          (group-move-read-destination! buffers)))))
+          ;; Everything on screen goes, so the windows stay as they are.
+          (group-move-read-destination! buffers #t)))))
 
 (define-command "buffer-new" "Create a buffer in the current group"
   (lambda ()
@@ -2961,7 +2962,7 @@
     (group-restore-sanitize! here)
     (group-layout-save! here)))
 
-(define (group-move-buffers-to! buffers destination)
+(define (group-move-buffers-to! buffers destination &optional keep-windows?)
   (let ((id (group-ensure-record! destination)))
     (cond
       ((not id) (message "No destination group"))
@@ -2975,7 +2976,13 @@
               (here (frame-group)))
           (set! *group-current-inhibit* #t)
           (for-each (lambda (buf) (buffer-move-to-group! buf id)) eligible)
-          (group-move-sweep! here id)
+          ;; When the frame shows nothing but the buffers that are moving,
+          ;; the move is a membership change alone: the destination adopts
+          ;; these windows, so entering it leaves the screen as it stands.
+          ;; Otherwise the old group repairs the panes the buffers left.
+          (if keep-windows?
+              (group-layout-save! id)
+              (group-move-sweep! here id))
           (set! *group-current-inhibit* #f)
           ;; Moving is a context change as well as a membership change: after
           ;; the buffers leave, enter the destination so the user is not left
@@ -3186,7 +3193,7 @@
             ((null? names) (message "The group has no buffer to remove"))
             (else (group-remove-read! g names '()))))))
 
-(define (group-move-read-destination! buffers)
+(define (group-move-read-destination! buffers &optional keep-windows?)
   (minibuffer-read "Move buffers to group: "
     (cons (list "New group" "create without entering") (group-names))
     (lambda (destination)
@@ -3194,11 +3201,11 @@
           (group-read-new-name "New destination group: "
             (lambda (name)
               (let ((id (group-record-create! name)))
-                (when id (group-move-buffers-to! buffers id)))))
+                (when id (group-move-buffers-to! buffers id keep-windows?)))))
           (let ((id (or (group-resolve-id destination)
                         (group-record-create! destination))))
             (group-confirm-target! id
-              (lambda () (group-move-buffers-to! buffers id))))))))
+              (lambda () (group-move-buffers-to! buffers id keep-windows?))))))))
 
 ;; `members` (docs/groups.md): the switcher, narrowed to one group. In the
 ;; board it is the group at point; elsewhere the current buffer's group.
