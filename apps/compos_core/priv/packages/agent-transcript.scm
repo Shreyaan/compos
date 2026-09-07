@@ -448,9 +448,9 @@
 (define (chat-activity! buf label)
   (when (and buf (buffer-exists? buf))
     (unless (equal? (buffer-local buf 'chat-activity) label)
-      (buffer-set-local! buf 'chat-activity label)
-      (when (and (string? label) (string-prefix? "tool · " label))
-        (message label)))))
+      ;; Tool activity lives in the chat UI alone. It never overwrites the
+      ;; user's echo area and never adds a line to *Messages*.
+      (buffer-set-local! buf 'chat-activity label))))
 
 ;; A thought run streams as many deltas; only the label on the activity
 ;; row shows the reasoning while it runs. The transcript gets the whole

@@ -330,8 +330,6 @@ defmodule Compos.Core.LLM do
   # Returns {result-text, error?}: the wire marks a failed tool result, and
   # the record keeps the mark.
   defp run_tool(_dispatcher, "mcp__" <> _ = name, input, _concurrent?) do
-    Session.message("tool: #{name} #{inspect(input)}")
-
     case Compos.Core.MCP.call_qualified(name, input) do
       {:ok, text} -> {text, false}
       {:error, msg} -> {"error: #{msg}", true}
@@ -339,8 +337,6 @@ defmodule Compos.Core.LLM do
   end
 
   defp run_tool(dispatcher, name, input, concurrent?) do
-    Session.message("tool: #{name} #{inspect(input)}")
-
     # the tool loop's own lane: a slow Scheme tool holds this loop, not
     # the UI — self() is the loop task, so each loop serializes alone
     result =
