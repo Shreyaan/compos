@@ -47,36 +47,37 @@ defmodule Compos.Ui.MobileLiveTest do
     refute has_element?(view, ".hh-fan")
   end
 
-  test "the keys panel lists the bindings by section, and a row presses its chord", %{conn: conn} do
+  test "the panel opens on the modifiers and the plain keys, and a cap presses its chord", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
     {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
     on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
 
+    # the root: a square for every modifier and every plain key, nothing
+    # latched, so there is nothing to go back to
     hook(view, "fan", %{"open" => true})
-    assert has_element?(view, "#keys-panel .hh-keys-tab", "plain")
-    assert has_element?(view, "#keys-panel .hh-keys-tab", "<f9>")
+    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "C-")
+    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "<f9>")
+    refute has_element?(view, "#keys-panel .hh-keys-back")
 
+    # a modifier or a prefix presses nothing: the caps become what it
+    # leaves to press, and the back control says where the panel stands
     hook(view, "fan_tab", %{"t" => "<f9>"})
-    assert has_element?(view, "#keys-panel .hh-keys-tab.on", "<f9>")
-    # a chord section draws caps: the keycode the tab leaves, and its command
+    assert has_element?(view, "#keys-panel .hh-keys-back", "<f9>")
     assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "q")
     assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-cmd", "keyboard-quit")
 
-    # a cap is the whole chord: the prefix and the key go through
+    # back lets the step go: the root again
+    hook(view, "fan_back", %{})
+    refute has_element?(view, "#keys-panel .hh-keys-back")
+    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "<f9>")
+
+    # a cap that ends a binding is the whole chord: the prefix and the key
+    # both go through
+    hook(view, "fan_tab", %{"t" => "<f9>"})
     hook(view, "fan_run", %{"s" => "<f9>", "k" => "q", "c" => "keyboard-quit"})
     refute has_element?(view, "#keys-panel")
     assert has_element?(view, ".hh-echo", "Quit")
     refute has_element?(view, ".hh-ml-pending")
-
-    # the command it ran leads the recent tab, and a recent row runs by name.
-    # The panel draws the tab it stands on, so the tab comes first.
-    hook(view, "fan", %{"open" => true})
-    assert has_element?(view, "#keys-panel .hh-keys-tab", "recent")
-    hook(view, "fan_tab", %{"t" => "recent"})
-    assert has_element?(view, "#keys-panel [data-section='recent'] .hh-key-row .hh-key-cmd", "keyboard-quit")
-    hook(view, "fan_run", %{"s" => "recent", "k" => "<f9> q", "c" => "keyboard-quit"})
-    assert has_element?(view, ".hh-echo", "Quit")
-    refute has_element?(view, "#keys-panel")
   end
 
   test "typing in the panel searches every command, and a match runs by name", %{conn: conn} do
@@ -91,7 +92,7 @@ defmodule Compos.Ui.MobileLiveTest do
     on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
 
     hook(view, "fan", %{"open" => true})
-    assert has_element?(view, "#keys-panel .hh-keys-tab", "plain")
+    assert has_element?(view, "#keys-panel .hh-keycap")
 
     # a command no key reaches is found by a word of its doc, and M-x is its key
     hook(view, "fan_filter", %{"q" => "search target handheld"})
@@ -103,11 +104,10 @@ defmodule Compos.Ui.MobileLiveTest do
     hook(view, "fan_filter", %{"q" => "keyboard-quit"})
     assert has_element?(view, "#keys-panel [data-section='matches'] .hh-key-row .hh-key-cmd", "keyboard-quit")
 
-    # empty text is the tabs again
+    # empty text is the caps again
     hook(view, "fan_filter", %{"q" => "  "})
     refute has_element?(view, "#keys-panel [data-section='matches']")
-    hook(view, "fan_tab", %{"t" => "plain"})
-    assert has_element?(view, "#keys-panel [data-section='plain']")
+    assert has_element?(view, "#keys-panel .hh-keycap")
 
     # a tap on a match runs the command by name and closes the panel
     hook(view, "fan_filter", %{"q" => "zz-hh-search"})
@@ -124,10 +124,24 @@ defmodule Compos.Ui.MobileLiveTest do
     hook(view, "key", %{"k" => "<f9>"})
     assert has_element?(view, ".hh-ml-pending", "<f9>-")
     hook(view, "fan", %{"open" => true})
-    assert has_element?(view, "#keys-panel .hh-keys-tab.on", "<f9>")
+    assert has_element?(view, "#keys-panel .hh-keys-back", "<f9>")
+    # the frame is the one holding it, so the panel offers to let it go
+    assert has_element?(view, "#keys-panel .hh-keys-release", "<f9>")
 
     hook(view, "fan_run", %{"s" => "<f9>", "k" => "q"})
     assert has_element?(view, ".hh-echo", "Quit")
+    refute has_element?(view, ".hh-ml-pending")
+  end
+
+  test "the release lets the frame's prefix go and keeps the panel open", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/m")
+    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
+    on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
+
+    hook(view, "key", %{"k" => "<f9>"})
+    hook(view, "fan", %{"open" => true})
+    hook(view, "fan_release", %{})
+    assert has_element?(view, "#keys-panel")
     refute has_element?(view, ".hh-ml-pending")
   end
 

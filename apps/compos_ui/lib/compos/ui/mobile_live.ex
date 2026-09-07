@@ -25,6 +25,10 @@ defmodule Compos.Ui.MobileLive do
   # modifiers themselves
   @families ["plain" | @mods]
 
+  # where the panel opens: no section yet, so the caps are the modifiers
+  # and the plain keys together
+  @root ""
+
   @impl true
   def mount(params, _session, socket) do
     if connected?(socket) do
@@ -46,6 +50,7 @@ defmodule Compos.Ui.MobileLive do
           line_cache: %{},
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           fan: false,
+          fan_tab: @root,
           fan_path: [],
           keys: [],
           keys_key: nil,
@@ -65,6 +70,7 @@ defmodule Compos.Ui.MobileLive do
          line_cache: %{},
          boot_id: :persistent_term.get(:compos_boot_id, "dev"),
          fan: false,
+         fan_tab: @root,
          fan_path: [],
          keys: [],
          keys_key: nil,
@@ -91,10 +97,14 @@ defmodule Compos.Ui.MobileLive do
   end
 
   # the chord key: the keys panel opens or closes. Opening fetches the
-  # buffer's bindings from Scheme and lands on the pending prefix's tab
-  # when one is latched.
+  # buffer's bindings from Scheme and stands at the root, unless a prefix
+  # is latched, which is a section of its own.
   def handle_event("fan", %{"open" => open}, socket) when is_boolean(open) do
-    socket = if open, do: load_keys(socket), else: socket
+    socket =
+      if open,
+        do: socket |> assign(fan_tab: @root, fan_path: []) |> load_keys(),
+        else: socket
+
     {:noreply, socket |> assign(fan: open, search: nil) |> refresh()}
   end
 
@@ -116,26 +126,25 @@ defmodule Compos.Ui.MobileLive do
     {:noreply, socket |> assign(fan_tab: tab, fan_path: seed(tab)) |> refresh()}
   end
 
+  # a step back: the last latched step goes, and the caps become what the
+  # step before it armed. Back from the first step is the root again: the
+  # modifiers and the plain keys, nothing latched.
+  def handle_event("fan_back", _p, socket) do
+    path = socket.assigns.fan_path
+
+    socket =
+      if length(path) > length(seed(socket.assigns.fan_tab)),
+        do: assign(socket, fan_path: Enum.drop(path, -1)),
+        else: assign(socket, fan_tab: @root, fan_path: [])
+
+    {:noreply, refresh(socket)}
+  end
+
   # a cap with more to press behind it: a modifier, or a prefix. The step
   # joins the path and the panel redraws with what that step leaves. No
   # key reaches the frame, so nothing is committed yet.
   def handle_event("fan_step", %{"p" => step}, socket) when is_binary(step) do
     {:noreply, socket |> assign(fan_path: socket.assigns.fan_path ++ [step]) |> refresh()}
-  end
-
-  # a crumb: the path drops that step and every one after it. A tap on the
-  # last crumb releases what it latched, which is how a chord is undone.
-  def handle_event("fan_up", %{"n" => n}, socket) do
-    seed = seed(socket.assigns.fan_tab)
-
-    case Integer.parse(to_string(n)) do
-      {n, ""} when n >= 0 ->
-        kept = socket.assigns.fan_path |> Enum.drop(length(seed)) |> Enum.take(n)
-        {:noreply, socket |> assign(fan_path: seed ++ kept) |> refresh()}
-
-      _ ->
-        {:noreply, socket}
-    end
   end
 
   # the frame itself is holding a prefix: drop it, and stay open
@@ -430,7 +439,7 @@ defmodule Compos.Ui.MobileLive do
       cond do
         pending != "" and pending in names -> pending
         socket.assigns.fan_tab in names -> socket.assigns.fan_tab
-        true -> List.first(names)
+        true -> @root
       end
 
     assign(socket, keys: keys, keys_key: key, fan_tab: tab, fan_path: seed(tab))
@@ -696,38 +705,38 @@ defmodule Compos.Ui.MobileLive do
     """
   end
 
-  # the keys panel: a tab per section, and the section's bindings as
-  # keycaps. A cap is one thing to press. A cap that ends a binding runs
-  # the whole chord; a modifier or a prefix latches instead and the caps
-  # become what it arms, so C-c leads to C- and C- leads to k. While the
-  # filter field holds text, the list is the search instead: every command
-  # the text names, from Scheme, and a tap runs it by name.
+  # the keys panel: the keycaps you can press next. It opens at the root,
+  # where the modifiers lead and the plain keys follow, and every cap is
+  # the same square. A cap that ends a binding runs the whole chord; a
+  # modifier or a prefix latches instead and the caps become what it arms,
+  # so C- leads to c and C-c leads to C- leads to k. The back control
+  # above lets go of a latched step again. While the filter field holds text, the
+  # list is the search instead: every command the text names, from
+  # Scheme, and a tap runs it by name.
   defp keys_panel(assigns) do
-    section = Enum.find(assigns.keys, &(&1.name == assigns.tab)) || List.first(assigns.keys)
-    name = section && section.name
+    names = Enum.map(assigns.keys, & &1.name)
+    name = if assigns.tab in names, do: assigns.tab, else: @root
+    section = Enum.find(assigns.keys, &(&1.name == name))
     rows = (section && section.rows) || []
 
     assigns =
       assign(assigns,
         current: name,
-        rows: rows,
+        chord: chord_of(name, assigns.path),
+        pending: assigns.state.pending,
         caps:
-          if(name && name != "recent",
-            do: caps(rows, assigns.path, name, Enum.map(assigns.keys, & &1.name)),
-            else: []
+          if(name == @root,
+            do: root_caps(assigns.keys),
+            else: caps(rows, assigns.path, name, names)
           )
       )
 
     ~H"""
     <div class={"hh-keys #{if @search, do: "filtering"}"} id="keys-panel">
       <div class="hh-keys-tabs">
-        <span
-          :for={s <- @keys}
-          class={"hh-keys-tab #{if s.name == @current, do: "on"}"}
-          phx-click="fan_tab"
-          phx-value-t={s.name}
-        >{s.name}<small>{length(s.rows)}</small></span>
+        <span :if={@chord != ""} class="hh-keys-back" phx-click="fan_back">‹ {@chord}</span>
         <span class="hh-spacer"></span>
+        <span :if={@pending != []} class="hh-keys-release" phx-click="fan_release">release {Enum.join(@pending, " ")}</span>
         <span class="hh-keys-quit" phx-click="fan_quit">C-g</span>
       </div>
       <div class="hh-keys-filter" id="keys-filter" phx-update="ignore">
@@ -751,15 +760,10 @@ defmodule Compos.Ui.MobileLive do
             <div :if={@search.rows == []} class="hh-empty">nothing matches</div>
           </div>
         <% else %>
-          <div :if={@current} class="hh-keys-section" data-section={@current}>
-            <div :if={@current == "recent"} class="hh-keys-section-title">recent</div>
-            <.crumbs :if={@current != "recent"} section={@current} path={@path} pending={@state.pending} />
-            <.key_rows :if={@current == "recent"} section={@current} rows={@rows} />
-            <.key_caps :if={@current != "recent"} section={@current} caps={@caps} />
-            <div :if={@rows == []} class="hh-empty">nothing bound here</div>
-            <div :if={@rows != [] and @current != "recent" and @caps == []} class="hh-empty">nothing left to press</div>
+          <div class="hh-keys-section" data-section={@current}>
+            <.key_caps section={@current} caps={@caps} />
+            <div :if={@caps == []} class="hh-empty">nothing left to press</div>
           </div>
-          <div :if={@keys == []} class="hh-empty">no bindings to show</div>
         <% end %>
       </div>
     </div>
@@ -782,27 +786,6 @@ defmodule Compos.Ui.MobileLive do
         <div class="hh-key-cmd">{r.command}</div>
         <div :if={r.doc != ""} class="hh-key-doc">{r.doc}</div>
       </div>
-    </div>
-    """
-  end
-
-  # where the panel stands: the section, then every step latched under it.
-  # A tap on a crumb drops that step and the ones after it, so the last
-  # crumb releases what it just latched. A prefix the frame itself holds
-  # gets its own release, because C-g is the only thing that drops that.
-  defp crumbs(assigns) do
-    assigns = assign(assigns, extra: Enum.drop(assigns.path, length(seed(assigns.section))))
-
-    ~H"""
-    <div class="hh-crumbs">
-      <span class="hh-crumb" phx-click="fan_up" phx-value-n="0">{@section}</span>
-      <span
-        :for={{step, i} <- Enum.with_index(@extra)}
-        class="hh-crumb on"
-        phx-click="fan_up"
-        phx-value-n={i}
-      >{step}</span>
-      <span :if={@pending != []} class="hh-crumb-release" phx-click="fan_release">release {Enum.join(@pending, " ")}</span>
     </div>
     """
   end
@@ -879,6 +862,51 @@ defmodule Compos.Ui.MobileLive do
       end)
     end)
   end
+
+  # The caps the panel opens with: one per modifier that has a section,
+  # then the plain keys, and last the prefixes that are a plain key of
+  # their own. A modifier reads the same as a key it arms; the difference
+  # is what the tap does, which is to jump to that section, where the caps
+  # are what the modifier leaves to press. The root latches nothing, so it
+  # reads no path.
+  defp root_caps(keys) do
+    names = Enum.map(keys, & &1.name)
+    plain = Enum.find(keys, &(&1.name == "plain"))
+    mods = Enum.flat_map(@mods, &section_cap(keys, &1))
+
+    # a prefix under a modifier, like C-x, is reached by pressing that
+    # modifier first. One that is a plain key, like <f9>, is not under
+    # anything, so the root is the only place it can be pressed.
+    bare =
+      keys
+      |> Enum.map(& &1.name)
+      |> Enum.reject(&(&1 in ["recent" | @families] or mod_led?(&1)))
+      |> Enum.flat_map(&section_cap(keys, &1))
+
+    mods ++ caps((plain && plain.rows) || [], [], "plain", names) ++ bare
+  end
+
+  # one cap for a whole section: the tap goes there, and the caps become
+  # what that step leaves to press
+  defp section_cap(keys, name) do
+    case Enum.find(keys, &(&1.name == name)) do
+      nil ->
+        []
+
+      section ->
+        [
+          %{
+            step: name,
+            kind: :jump,
+            key: name,
+            command: "",
+            label: map_label(nil, length(section.rows))
+          }
+        ]
+    end
+  end
+
+  defp mod_led?(name), do: Enum.any?(@mods, &String.starts_with?(name, &1))
 
   defp caps(rows, path, section, names) do
     under = rows_under(rows, path)

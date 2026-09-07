@@ -276,14 +276,10 @@ defmodule Compos.Ui.MobileLayouts do
           .hh-cap-key { font-size: 22px; font-weight: 600; line-height: 1; color: var(--indigo); white-space: nowrap; }
           .hh-cap-key.long { font-size: 13px; }
           .hh-cap-cmd { font-family: var(--font-serif); font-size: 11px; line-height: 1.15; color: var(--faint); overflow-wrap: anywhere; }
-          .hh-keycap.drill, .hh-keycap.jump { background: var(--sand); }
-          .hh-keycap.drill .hh-cap-key, .hh-keycap.jump .hh-cap-key { text-decoration: underline; text-underline-offset: 3px; }
-          .hh-crumbs { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--rule-soft); overflow-x: auto; }
-          .hh-crumb { flex: none; padding: 3px 8px; border: 1px solid var(--rule); font-size: 12px; font-weight: 600; color: var(--indigo); white-space: nowrap; }
-          .hh-crumb.on { background: var(--sand); }
-          .hh-crumb:active { background: var(--indigo); color: var(--panel); }
-          .hh-crumb-release { flex: none; margin-left: auto; padding: 3px 8px; font-size: 11px; color: var(--faint); white-space: nowrap; }
-          .hh-crumb-release:active { color: var(--indigo); }
+          .hh-keys-back { flex: none; padding: 5px 10px; border: 1px solid var(--rule); font-size: 12px; font-weight: 600; color: var(--indigo); white-space: nowrap; }
+          .hh-keys-back:active { background: var(--indigo); color: var(--panel); }
+          .hh-keys-release { flex: none; padding: 5px 10px; font-size: 11px; color: var(--faint); white-space: nowrap; }
+          .hh-keys-release:active { color: var(--indigo); }
           .hh-key-doc { margin-top: 2px; font-size: 10.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .hh-key {
             position: absolute; z-index: 14; right: 18px; bottom: calc(200px + var(--safe-bottom));
