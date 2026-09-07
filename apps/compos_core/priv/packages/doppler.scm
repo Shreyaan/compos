@@ -26,6 +26,10 @@
 (defcustom 'key-doppler-config "dev"
   "The Doppler config the key chain reads." 'group 'doppler)
 
+(defcustom 'doppler-fallback-dir ""
+  "Directory for Doppler's encrypted fallback files. Empty means <compos-home>/doppler."
+  'group 'doppler)
+
 (define *doppler-buffer* "*doppler*")
 (define *doppler-group* "doppler")
 
@@ -112,6 +116,8 @@
   (string-append project "/" config "/" name))
 
 (define (dp--cache-drop! project config name)
+  ;; a write makes the local fallback copy wrong, so drop it with the entry
+  (dp--fallback-drop! project config)
   (let ((key (dp--cache-key project config name)))
     (set! *dp-value-cache*
       (remove (lambda (e) (equal? (car e) key)) *dp-value-cache*))))
@@ -134,14 +140,43 @@
 (define (dp--config-key project config)
   (string-append project "/" config))
 
+(define (dp--fallback-dir)
+  (if (equal? doppler-fallback-dir "")
+      (string-append (compos-home) "/doppler")
+      doppler-fallback-dir))
+
+(define (dp--fallback-path project config)
+  (string-append (dp--fallback-dir) "/" project "." config ".json"))
+
+(define (dp--fallback-drop! project config)
+  (delete-file-path! (dp--fallback-path project config) #t))
+
+;; Doppler writes an encrypted copy of the config to the fallback file after
+;; every successful fetch, and reads that copy back under --fallback-only
+;; without contacting the service: 540ms becomes 78ms. That read ignores
+;; --format and prints two info lines on stderr, which the shell merges into
+;; the output, so the local read drops stderr; an empty answer means there is
+;; no file yet and the caller pays for the fetch.
+(define (dp--download project config local?)
+  (let ((cmd (string-append "secrets download --no-file --format json"
+                            " --project " (dp--quote project)
+                            " --config " (dp--quote config)
+                            " --fallback " (dp--quote (dp--fallback-path project config)))))
+    (if local?
+        (dp--run (string-append cmd " --fallback-only 2>/dev/null"))
+        (begin
+          (shell-command->string (string-append "mkdir -p " (dp--quote (dp--fallback-dir))))
+          (dp--run cmd)))))
+
 (define (dp--warm-config! project config)
   (let ((ck (dp--config-key project config)))
     (unless (member ck *dp-config-warmed*)
       ;; mark first: a config that errors must not be retried per name
       (set! *dp-config-warmed* (cons ck *dp-config-warmed*))
-      (let ((out (dp--run (string-append "secrets download --no-file --format json"
-                                         " --project " (dp--quote project)
-                                         " --config " (dp--quote config)))))
+      (let* ((local (dp--download project config #t))
+             (out (if (or (equal? (string-trim local) "") (dp--error? local))
+                      (dp--download project config #f)
+                      local)))
         (unless (dp--error? out)
           (let ((data (json-parse out)))
             (when (pair? data)
@@ -333,8 +368,12 @@
 (domain! 'secrets)
 (effects! '(read external execute))
 
-(define-command "doppler-refresh" "Read the secret names again"
-  (lambda () (list-refresh! (current-buffer))))
+(define-command "doppler-refresh" "Read the secrets again from Doppler, not the local copy"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (dp--fallback-drop! (doppler--project buf) (doppler--config buf))
+      (doppler-forget!)
+      (list-refresh! buf))))
 
 (define-command "doppler-select-config" "Select the Doppler config to list"
   (lambda ()
