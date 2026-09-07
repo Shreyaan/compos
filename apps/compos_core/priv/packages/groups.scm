@@ -1583,7 +1583,36 @@
     order))
 
 ;; (((ID LABEL CURRENT?) ...) MORE)
+(define (group-tab-step! dir)
+  (let* ((here (frame-group))
+         (tabs (car (frame-tabs)))
+         (ids (map car tabs)))
+    (let find ((rest ids) (i 0))
+      (cond ((null? rest) #f)
+            ((equal? (car rest) here)
+             (let ((j (+ i dir)))
+               (if (or (< j 0) (>= j (length ids)))
+                   #f
+                   (let ((to (nth j ids)))
+                     (set-frame-local! 'tab-order
+                       (map (lambda (id)
+                              (cond ((equal? id here) to)
+                                    ((equal? id to) here)
+                                    (else id))) ids))
+                     (switch-to-group! to)
+                     to))))
+            (else (find (cdr rest) (+ i 1)))))))
+
 (define (frame-tabs)
+(define-command "group-tab-left" "Switch to the group shown immediately to the left in the top bar"
+  (lambda () (or (group-tab-step! -1) (message "No group to the left"))))
+
+(define-command "group-tab-right" "Switch to the group shown immediately to the right in the top bar"
+  (lambda () (or (group-tab-step! 1) (message "No group to the right"))))
+
+(global-set-key "M-S-<left>" "group-tab-left")
+(global-set-key "M-S-<right>" "group-tab-right")
+
   (let* ((here (frame-group))
          (mru (group-ids-mru))
          (shown (frame-tab-order here mru)))
