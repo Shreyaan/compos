@@ -2068,19 +2068,18 @@ defmodule Compos.Core.Buffer do
   # A run of typed characters stays one step because nothing commits until the
   # run breaks.
 
-  # An undo stack belongs to a scope, not to one actor id. A command that the
-  # user invoked edits as `system:editor`, and Emacs undoes it as the user's
-  # own work, so the user's scope owns every kind except the ones that act on
-  # their own: agents and processes.
-  #
-  # Agents share one scope with each other. No caller needs them apart yet.
-  defp undo_scope(%{kind: "agent"} = actor), do: actor.id
+  # One undo tree per buffer. Emacs keeps one undo list per buffer, and an
+  # agent is an extension of the user here: text an agent added is the user's
+  # to walk back with C-/. So the user's scope records every actor that writes
+  # the buffer's content - user, agent, editor, mode, legacy. Only `process`
+  # output (a terminal transcript, not content anyone wrote to keep) stays on
+  # its own scope, out of the user's undo.
   defp undo_scope(%{kind: "process"}), do: "process"
   defp undo_scope(_actor), do: "user"
 
-  defp undo_excludes("user"), do: ~w(agent process)
+  defp undo_excludes("user"), do: ~w(process)
   defp undo_excludes("process"), do: ~w(user agent system mode legacy unknown)
-  defp undo_excludes(_agent), do: ~w(user process system mode legacy unknown)
+  defp undo_excludes(_other), do: ~w(user process system mode legacy unknown)
 
   defp close_undo_step(state), do: commit_history(state)
 
