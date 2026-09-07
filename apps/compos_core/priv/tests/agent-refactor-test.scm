@@ -234,3 +234,34 @@
       '((12 14 "agent-meta") (9 12 "agent-prose") (0 9 "agent-thought"))
       "adjacent same-face ranges join; order stays newest first")
     (check-equal! (agent-overlays-coalesce '()) '() "an empty list stays empty")))
+
+(deftest 'a-thought-run-buffers-until-its-reveal
+  "thinking deltas accumulate in memory; the reveal returns the whole run"
+  (lambda ()
+    (agent-thought-forget! "zz-thought")
+    (check-false! (agent-thought-full "zz-thought")
+                  "no run is buffered before the first delta")
+    (check-true! (agent-thought-note! "zz-thought" "First. ")
+                 "the first delta pushes a label")
+    (check-equal! (agent-thought-note! "zz-thought" "Second. ") #f
+                  "the next deltas push no label until the cadence")
+    (check-equal! (agent-thought-note! "zz-thought" "Third. ") #f
+                  "a middle delta still pushes none")
+    (agent-thought-note! "zz-thought" "Fourth. ")
+    (check-equal! (agent-thought-full "zz-thought")
+                  "First. Second. Third. Fourth. "
+                  "the whole run stays available as one string")
+    (check-true! (agent-thought-note! "zz-thought" "Fifth. ")
+                 "the cadence label returns at every fourth delta")
+    (agent-thought-forget! "zz-thought")
+    (check-false! (agent-thought-full "zz-thought")
+                  "forget drops the buffered run")))
+
+(deftest 'reveal-without-a-live-agent-only-forgets
+  "a dead slug's buffered run is discarded, never written"
+  (lambda ()
+    (agent-thought-forget! "zz-dead")
+    (agent-thought-note! "zz-dead" "ghost. ")
+    (agent-thought-reveal! "zz-dead")
+    (check-false! (agent-thought-full "zz-dead")
+                  "the reveal cleared the dead run without writing")))

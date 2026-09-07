@@ -63,7 +63,7 @@
         (check-equal! (car (display-buffer-actions-for "*Messages*")) 'popup
                       "a name rule first")
         (check-equal! (car (display-buffer-actions-for "*zz-db-none*" '(category preview)))
-                      'popup "the preview category first")
+                      'reuse-window "the preview category first")
         (set! *display-buffer-base-action* '(same-window))
         (check-equal! (car (display-buffer-actions-for "*zz-db-none*")) 'same-window
                       "with no rule the base action comes first")

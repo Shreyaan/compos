@@ -452,35 +452,61 @@
       (when (and (string? label) (string-prefix? "tool · " label))
         (message label)))))
 
-;; The live label a `thought` event shows on the activity row. A deepseek
-;; model streams its hidden chain of thought in `text`; that is the one
-;; glimpse into the reasoning worth flashing past, so the row shows its
-;; latest line as it scrolls by. Only the last line fits, and only the
-;; first word survives the clip.
+;; A thought run streams as many deltas; only the label on the activity
+;; row shows the reasoning while it runs. The transcript gets the whole
+;; run as ONE thought block, written when the first non-thought event
+;; follows the run (agent-thought-reveal!). Before this, every delta
+;; appended its own text: one long reasoning stream made one buffer
+;; write, one re-decorate, and one transcript diff per token, and the
+;; input row starved behind them.
 (define *agent-thought-tails* '())
 
-;; Push a new label only every N deltas: the tail still accumulates on
-;; every token, but the chat-activity buffer-local — and the repaint it
-;; broadcasts — is spared most of them.
+;; A new label only every N deltas. The tail still accumulates on every
+;; token; the chat-activity buffer-local — and the repaint it broadcasts —
+;; is spared most of them.
 (define *agent-thought-label-every* 4)
 
+;; An entry is (SLUG TAIL COUNT CHUNKS-REV). TAIL is the newest 240
+;; bytes, for the label. CHUNKS-REV is the whole run as a reversed delta
+;; list: one delta costs one cons, and the reveal joins the list once.
 (define (agent-thought-note! slug delta)
   (let* ((entry (assoc slug *agent-thought-tails*))
          (prev (if entry (cadr entry) ""))
          (count (if entry (caddr entry) 0))
+         (chunks (if entry (car (cdr (cdr (cdr entry)))) '()))
          (grown (string-append prev delta))
          (n (string-byte-length grown))
          (tail (if (> n 240)
                    (substring-bytes grown (- n 240) n)
                    grown)))
     (set! *agent-thought-tails*
-      (cons (list slug tail (+ count 1))
+      (cons (list slug tail (+ count 1) (cons delta chunks))
             (remove (lambda (x) (equal? (car x) slug)) *agent-thought-tails*)))
     (and (= 0 (modulo count *agent-thought-label-every*)) tail)))
+
+;; The whole buffered run as one string, or #f when none is buffered.
+(define (agent-thought-full slug)
+  (let ((entry (assoc slug *agent-thought-tails*)))
+    (and entry
+         (let ((chunks (car (cdr (cdr (cdr entry))))))
+           (and (pair? chunks) (string-join (reverse chunks) ""))))))
 
 (define (agent-thought-forget! slug)
   (set! *agent-thought-tails*
     (remove (lambda (x) (equal? (car x) slug)) *agent-thought-tails*)))
+
+;; Write the buffered run to the transcript as one thought block. The
+;; caller runs this before the first non-thought event of the run and at
+;; turn-end. A dead agent has no transcript left to write into; discard
+;; its buffered text instead.
+(define (agent-thought-reveal! slug)
+  (let ((full (agent-thought-full slug)))
+    (when (and full (member slug (agent-list)))
+      (let ((buf (agent-buf slug)))
+        (agent-clear-waiting! slug)
+        (let ((start (agent-render! slug full "agent-thought")))
+          (agent-block-extend-or-push! buf start (agent-mark slug) "thought"))))
+    (agent-thought-forget! slug)))
 
 ;; the byte where the current (in-progress) sentence begins in S. A
 ;; sentence terminator that is the final character means that sentence

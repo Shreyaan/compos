@@ -24,8 +24,14 @@
       (agent-flush-prose! slug #f))
     ;; any sign of life ends the waiting state; a pending chunk keeps the
     ;; waiting line until its first paragraph reveals
-    (unless (member type '(user-msg status chunk))
+    (unless (member type '(user-msg status chunk thought))
       (agent-clear-waiting! slug))
+    ;; a thought run streams into memory; the event that follows it
+    ;; reveals the whole reasoning as ONE block (agent-thought-reveal!)
+    (unless (member type
+                    '(thought user-msg status model-state mode-state
+                      usage context question-answer))
+      (agent-thought-reveal! slug))
     (when (member type *agent-output-kinds*)
       (buffer-set-local! buf 'agent-turn-any #t))
     (cond
@@ -88,8 +94,6 @@
        (chat-activity! buf "streaming"))
 
       ((equal? type 'thought)
-       (let ((start (agent-render! slug (plist-get e 'text) "agent-thought")))
-         (agent-block-extend-or-push! buf start (agent-mark slug) "thought"))
        (let ((tail (agent-thought-note! slug (or (plist-get e 'text) ""))))
          (when tail
            (chat-activity! buf (agent-activity-preview tail)))))

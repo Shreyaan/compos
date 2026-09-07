@@ -39,6 +39,8 @@
 (load-bundled-package "daemons.scm")
 (load-bundled-package "db.scm")
 (load-bundled-package "diff-mode.scm")
+(load-bundled-package "doom-lite.scm")
+(load-bundled-package "doom.scm")
 (load-bundled-package "doppler.scm")
 (load-bundled-package "endpoint.scm")
 (load-bundled-package "irc.scm")
