@@ -204,6 +204,14 @@
     (list 'org-level-2 'fg "#7a5a1a" 'weight "600")
     (list 'org-level-3 'fg "#3d6b4f" 'weight "600")
     (list 'org-level-4 'fg "#6b3d5b" 'weight "600")
+    ;; the group scale: six colours a group is allotted by slot, told
+    ;; apart at a glance and readable against this theme's background
+    (list 'group-color-1 'fg "#a4402f")
+    (list 'group-color-2 'fg "#26356b")
+    (list 'group-color-3 'fg "#3d6b4f")
+    (list 'group-color-4 'fg "#6b3d5b")
+    (list 'group-color-5 'fg "#7a5a1a")
+    (list 'group-color-6 'fg "#1f5f5c")
     (list 'org-todo 'fg "#a03020" 'weight "700")
     (list 'org-done 'fg "#3d6b4f" 'decoration "line-through")
     (list 'org-priority 'fg "#7a5a1a" 'weight "600")
@@ -277,6 +285,14 @@
     (list 'org-level-2 'fg "#d5ac66" 'weight "600")
     (list 'org-level-3 'fg "#79bd93" 'weight "600")
     (list 'org-level-4 'fg "#c99ac2" 'weight "600")
+    ;; the group scale: six colours a group is allotted by slot, told
+    ;; apart at a glance and readable against this theme's background
+    (list 'group-color-1 'fg "#e08d78")
+    (list 'group-color-2 'fg "#9fb0ea")
+    (list 'group-color-3 'fg "#79bd93")
+    (list 'group-color-4 'fg "#c99ac2")
+    (list 'group-color-5 'fg "#d5ac66")
+    (list 'group-color-6 'fg "#7cc3bd")
     (list 'org-todo 'fg "#e0705a" 'weight "700")
     (list 'org-done 'fg "#79bd93" 'decoration "line-through")
     (list 'org-priority 'fg "#d5ac66" 'weight "600")
