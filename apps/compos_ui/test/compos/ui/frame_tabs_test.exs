@@ -26,6 +26,11 @@ defmodule Compos.Ui.FrameTabsTest do
 
   defp tab(id), do: ~s{.echo-bar .ml-tab[phx-value-id="#{id}"]}
 
+  defp rail do
+    assert {:ok, [rows, more]} = Session.call_named("frame-tabs", [])
+    {Enum.map(rows, fn [id, _label, _current] -> id end), more}
+  end
+
   defp reset!(limit) do
     Session.eval("""
     (begin
@@ -36,6 +41,7 @@ defmodule Compos.Ui.FrameTabsTest do
       (set-frame-local! 'current-group #f)
       (set-frame-local! 'previous-group #f)
       (set-frame-local! 'pinned-group #f)
+      (set-frame-local! 'tab-order '())
       (frame-group-label-refresh!))
     """)
   end
@@ -56,9 +62,28 @@ defmodule Compos.Ui.FrameTabsTest do
   end
 
   test "frame-tabs cuts at the limit and counts what it left out", %{ids: ids} do
-    assert {:ok, [rows, more]} = Session.call_named("frame-tabs", [])
-    assert Enum.map(rows, fn [id, _label, _current] -> id end) == Enum.take(ids, 3)
-    assert more == 2
+    assert rail() == {Enum.take(ids, 3), 2}
+  end
+
+  test "standing in a tab leaves the rail alone", %{ids: ids} do
+    [one, two, three | _] = ids
+
+    assert rail() == {[one, two, three], 2}
+
+    eval!(~s{(switch-to-group! "#{two}")})
+
+    assert rail() == {[one, two, three], 2}, "a tab keeps its place"
+  end
+
+  test "a group the cut left out takes the coldest slot, and only that one", %{ids: ids} do
+    [one, two, three | _] = ids
+    last = List.last(ids)
+
+    assert rail() == {[one, two, three], 2}
+    eval!(~s{(switch-to-group! "#{two}")})
+    eval!(~s{(switch-to-group! "#{last}")})
+
+    assert rail() == {[one, two, last], 2}, "tabs-3 was the coldest; the others held"
   end
 
   test "the rail renders the groups, and a click stands in one", %{conn: conn, ids: ids} do

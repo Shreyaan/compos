@@ -1487,22 +1487,71 @@
   "(active-groups) — every group with an open buffer, most recent first")
 
 ;;; --- the frame tab rail ---------------------------------------------------
-;;; The frame modeline carries the groups the frame last stood in, most
-;;; recent first, and counts the ones it left out. A tab is one click to
-;;; another context; the count opens the board that holds the rest.
+;;; The frame modeline carries the groups the frame last stood in, and
+;;; counts the ones it left out. The rail keeps its order: a tab moves
+;;; only when a group the cut left out takes its slot. A tab is one
+;;; click to another context; the count opens the board with the rest.
 
 (defcustom 'frame-tabs-limit 5
   "How many groups the frame modeline shows as tabs. The rest count as one more."
   'group 'groups 'type 'number)
 
+(define (frame-tab-rank id mru)
+  (let loop ((rest mru) (i 0))
+    (cond ((null? rest) 1000000)
+          ((equal? (car rest) id) i)
+          (else (loop (cdr rest) (+ i 1))))))
+
+;; the tab the MRU ranks last: the one the frame stood in longest ago
+(define (frame-tab-coldest ids mru)
+  (let loop ((rest ids) (cold #f) (rank -1))
+    (if (null? rest)
+        cold
+        (let ((r (frame-tab-rank (car rest) mru)))
+          (if (> r rank)
+              (loop (cdr rest) (car rest) r)
+              (loop (cdr rest) cold rank))))))
+
+;; The rail holds still. A tab keeps its place for as long as its group
+;; is on the rail, so standing in another group does not reshuffle the
+;; row under the pointer. The order changes only when a group the cut
+;; left out comes in, and then in one slot only: the coldest tab steps
+;; aside for it. The frame keeps the order it last showed.
+(define (frame-tab-order here mru)
+  (let* ((limit (max 1 frame-tabs-limit))
+         ;; a group that is gone leaves the rail, and a rail longer than
+         ;; a shrunken limit loses its coldest tabs first
+         (kept (filter (lambda (id) (member id mru))
+                       (or (frame-local 'tab-order) '())))
+         (kept (let trim ((row kept))
+                 (if (<= (length row) limit)
+                     row
+                     (trim (let ((cold (frame-tab-coldest row mru)))
+                             (remove (lambda (id) (equal? id cold)) row))))))
+         ;; the first call, and every later gap, fills from the MRU
+         (filled (let fill ((rest mru) (row kept))
+                   (if (or (null? rest) (>= (length row) limit))
+                       row
+                       (fill (cdr rest)
+                             (if (member (car rest) row)
+                                 row
+                                 (append row (list (car rest))))))))
+         (order (cond ((or (not here) (member here filled)) filled)
+                      ((< (length filled) limit) (append filled (list here)))
+                      (else (let ((cold (frame-tab-coldest filled mru)))
+                              (map (lambda (id) (if (equal? id cold) here id))
+                                   filled))))))
+    (set-frame-local! 'tab-order order)
+    order))
+
 ;; (((ID LABEL CURRENT?) ...) MORE)
 (define (frame-tabs)
   (let* ((here (frame-group))
-         (ids (group-ids-mru))
-         (shown (take-n ids (max 1 frame-tabs-limit))))
+         (mru (group-ids-mru))
+         (shown (frame-tab-order here mru)))
     (list (map (lambda (id) (list id (group-short-name id) (equal? id here)))
                shown)
-          (max 0 (- (length ids) (length shown))))))
+          (max 0 (- (length mru) (length shown))))))
 
 ;; A click on a tab: stand in that group. Already there, nothing moves.
 (define (frame-tab! g)
@@ -1512,8 +1561,8 @@
           (else (switch-to-group! id) id))))
 
 (public! 'frame-tabs
-  "(frame-tabs) -> (((ID LABEL CURRENT?) ...) MORE) — the groups the frame modeline shows as tabs, most recent first, and how many the limit left out")
-(catalog-meta! 'function "frame-tabs" 'domain 'buffers 'effects '(read))
+  "(frame-tabs) -> (((ID LABEL CURRENT?) ...) MORE) — the groups the frame modeline shows as tabs, in the order the rail already had them, and how many the limit left out")
+(catalog-meta! 'function "frame-tabs" 'domain 'buffers 'effects '(write))
 (public! 'frame-tab!
   "(frame-tab! GROUP) — stand in GROUP; returns its id, or #f when no group answers to it")
 (catalog-meta! 'function "frame-tab!" 'domain 'buffers 'effects '(write display))
