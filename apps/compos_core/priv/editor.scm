@@ -1378,6 +1378,58 @@
 ;; in as one change too, with the locals the caller adds: every change
 ;; is a frame refresh and a render, and a draw of twelve changes was
 ;; twelve of each.
+;;; A draw writes only what changed. Every buffer change is a frame
+;;; refresh and a render, and a whole-text rewrite is a delete and an
+;;; insert: the render between the two sees an empty table. A live list
+;;; redraws while its rows hold still -- an age column ticks over, a
+;;; token count grows -- so the lines that differ are two of thirty.
+;;; Write that run. When the line count itself moves, one whole write
+;;; still answers.
+(define (list-lines-shared a b)
+  (let loop ((x a) (y b) (n 0))
+    (if (and (pair? x) (pair? y) (equal? (car x) (car y)))
+        (loop (cdr x) (cdr y) (+ n 1))
+        n)))
+
+;; the bytes the lines [FROM, TO) hold, each with its newline
+(define (list-lines-bytes lines from to)
+  (let loop ((ls lines) (i 0) (n 0))
+    (cond ((null? ls) n)
+          ((and (>= i from) (< i to))
+           (loop (cdr ls) (+ i 1) (+ n (string-byte-length (car ls)) 1)))
+          (else (loop (cdr ls) (+ i 1) n)))))
+
+(define (list-lines-join lines from to)
+  (let loop ((ls lines) (i 0) (acc '()))
+    (cond ((null? ls) (string-join (reverse acc) "\n"))
+          ((and (>= i from) (< i to))
+           (loop (cdr ls) (+ i 1) (cons (car ls) acc)))
+          (else (loop (cdr ls) (+ i 1) acc)))))
+
+(define (list-write-text! buf text)
+  (let ((old (buffer-text buf)))
+    (unless (equal? old text)
+      (let* ((a (string-split old "\n"))
+             (b (string-split text "\n"))
+             (n (length a)))
+        (if (= n (length b))
+            (let* ((p (list-lines-shared a b))
+                   (s (min (- n p) (list-lines-shared (reverse a) (reverse b))))
+                   (start (list-lines-bytes a 0 p))
+                   (stop (- (buffer-size buf) (list-lines-bytes a (- n s) n))))
+              (buffer-replace-range! buf start (- stop start)
+                                     (list-lines-join b p (- n s))))
+            (buffer-replace-range! buf 0 (buffer-size buf) text))))))
+
+;;; A local that holds its value is not a change: writing it again is a
+;;; refresh and a render for nothing.
+(define (list-set-locals! buf plist)
+  (let loop ((p plist) (fresh '()))
+    (cond ((or (null? p) (null? (cdr p)))
+           (unless (null? fresh) (buffer-set-locals! buf fresh)))
+          ((equal? (buffer-local buf (car p)) (cadr p)) (loop (cddr p) fresh))
+          (else (loop (cddr p) (cons (car p) (cons (cadr p) fresh)))))))
+
 (define (list-write! buf lines first-row n-rows per &optional extra-locals)
   (let loop ((ls lines) (i 0) (off 0) (ovs '()) (offsets '()) (texts '()))
     (if (null? ls)
