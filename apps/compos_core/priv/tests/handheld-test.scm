@@ -164,7 +164,6 @@
                     '("Dummy" "M-x handheld-test-dummy")
                     "an unbound command's chip is M-x and its name"))))
 
-
 (deftest 'the-composer-chips-carry-no-switch-buffer-chip
   "a chat buffer's chips lead with config; no view offers a switch-buffer chip"
   (lambda ()
@@ -178,7 +177,8 @@
                     '("Chat about this" "Every command")
                     "a plain buffer's chips are chat about this and every command")
       (buffer-kill! plain)
-      (buffer-kill! chat)))
+      (buffer-kill! chat))))
+
 (deftest 'the-rail-moves-point-to-the-line-it-names
   "scrub to a line and point sits at its start; out-of-range lines clamp"
   (lambda ()
