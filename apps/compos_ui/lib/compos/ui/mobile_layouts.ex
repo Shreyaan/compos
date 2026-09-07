@@ -279,8 +279,9 @@ defmodule Compos.Ui.MobileLayouts do
             width: 62px; height: 62px; border-radius: 31px;
             background: var(--sand); color: var(--ink); border: 1px solid var(--ink);
             display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-            box-shadow: 0 8px 22px rgba(10, 10, 12, .22); touch-action: none;
+            box-shadow: 0 8px 22px rgba(10, 10, 12, .22); touch-action: none; cursor: grab;
           }
+          .hh-key.dragging { cursor: grabbing; }
           .hh-key.on { background: var(--ink); color: var(--paper); }
           .hh-key-glyph { font-size: 15px; font-weight: 600; letter-spacing: .02em; max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .hh-key-cap { font-size: 7.5px; letter-spacing: .12em; text-transform: uppercase; opacity: .72; white-space: nowrap; }
@@ -385,9 +386,10 @@ defmodule Compos.Ui.MobileLayouts do
                 this.bootCheck();
                 this.viewport();
                 this.dock();
-                this.resizeH = () => { this.viewport(); this.dock(); };
+                this.resizeH = () => { this.viewport(); this.dock(); this.bindKey(); };
                 window.addEventListener("resize", this.resizeH);
                 this.handleEvent("navigate", ({ url }) => { window.location.href = url; });
+                this.loadKeyPos();
                 this.bindKey();
                 this.bindRail();
                 this.bindComposer();
@@ -435,15 +437,33 @@ defmodule Compos.Ui.MobileLayouts do
                 if (rows !== this.rows) { this.rows = rows; this.push("viewport", { rows }); }
               },
 
-              // ── the chord key: a tap opens the keys panel, a tap closes it ──
+              // ── the chord key: tap toggles; dragging repositions it ──
               bindKey() {
                 const key = document.getElementById("chord-key");
                 if (!key || key.dataset.bound) return;
                 key.dataset.bound = "1";
+                let dragging = false, moved = false, startX = 0, startY = 0, offsetX = 0, offsetY = 0;
                 key.addEventListener("pointerdown", (e) => {
-                  e.preventDefault();
-                  this.push("fan", { open: !key.classList.contains("on") });
+                  e.preventDefault(); key.setPointerCapture(e.pointerId);
+                  const r = key.getBoundingClientRect(); startX = e.clientX; startY = e.clientY;
+                  offsetX = e.clientX - r.left; offsetY = e.clientY - r.top;
+                  dragging = true; moved = false; key.classList.add("dragging");
                 });
+                key.addEventListener("pointermove", (e) => {
+                  if (!dragging) return;
+                  if (Math.abs(e.clientX - startX) > 6 || Math.abs(e.clientY - startY) > 6) moved = true;
+                  if (!moved) return;
+                  const maxX = window.innerWidth - key.offsetWidth, maxY = window.innerHeight - key.offsetHeight;
+                  key.style.left = Math.max(0, Math.min(maxX, e.clientX - offsetX)) + "px";
+                  key.style.top = Math.max(0, Math.min(maxY, e.clientY - offsetY)) + "px";
+                  key.style.right = "auto"; key.style.bottom = "auto";
+                });
+                const stop = (e) => {
+                  if (!dragging) return; dragging = false; key.classList.remove("dragging");
+                  if (!moved) this.push("fan", { open: !key.classList.contains("on") });
+                  if (e.pointerId != null) key.releasePointerCapture(e.pointerId);
+                };
+                key.addEventListener("pointerup", stop); key.addEventListener("pointercancel", stop);
               },
 
               // ── the keys panel's filter: type, and Scheme searches every command ──
