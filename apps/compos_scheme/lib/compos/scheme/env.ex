@@ -242,6 +242,28 @@ defmodule Compos.Scheme.Env do
     end
   end
 
+  @doc "Remove one binding from a frame (the inverse of define)."
+  def unbind(%__MODULE__{tid: tid, local: local} = store, ref, name) do
+    case local do
+      %{^ref => {vars, parent}} ->
+        %{store | local: Map.put(local, ref, {Map.delete(vars, name), parent})}
+
+      _ ->
+        :ets.delete(tid, {:var, ref, name})
+        cache_delete(ref, name)
+        store
+    end
+  end
+
+  defp cache_delete(ref, name) do
+    case Process.get(:scheme_cache) do
+      nil -> :ok
+      cache -> Process.put(:scheme_cache, Map.delete(cache, {ref, name}))
+    end
+
+    :ok
+  end
+
   @doc """
   Publish every local frame to the shared table in one bulk insert and
   return the store with an empty local tier. Boot uses this: the stdlib

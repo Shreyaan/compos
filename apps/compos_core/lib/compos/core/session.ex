@@ -1162,6 +1162,8 @@ defmodule Compos.Core.Session do
       "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
       "set-symbol-value!" =>
         "(set-symbol-value! 'NAME VAL) — set the global value of the symbol.",
+      "unbind-global!" =>
+        "(unbind-global! 'NAME) — remove the global binding of the symbol.",
       "function-interpose!" =>
         "(function-interpose! 'NAME WRAPPER) — internal binding wrapper; WRAPPER receives ORIGINAL and ARGS; #f removes it.",
       "boundp" => "(boundp 'NAME) — return #t when the symbol has a global binding.",
@@ -1184,6 +1186,8 @@ defmodule Compos.Core.Session do
         "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler.",
       "debounce!" =>
         "(debounce! KEY MS CALLBACK ARG) — after MS idle, call CALLBACK with ARG; a newer call with KEY cancels the old one.",
+      "debounce-cancel!" =>
+        "(debounce-cancel! KEY) — cancel KEY's pending debounce timer; a later fire is a no-op.",
       "minibuffer-confirm!" =>
         "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value.",
       "minibuffer-confirm-input!" =>
@@ -2368,6 +2372,9 @@ defmodule Compos.Core.Session do
       end,
       "set-symbol-value!" => fn [{:sym, name}, val], store ->
         {val, Compos.Scheme.Env.define(store, global, name, val)}
+      end,
+      "unbind-global!" => fn [{:sym, name}], store ->
+        {:void, Compos.Scheme.Env.unbind(store, global, name)}
       end,
       "function-interpose!" => fn [{:sym, name}, wrapper], store ->
         {:void, Compos.Scheme.Env.interpose(store, global, name, wrapper)}
