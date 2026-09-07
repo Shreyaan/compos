@@ -212,13 +212,9 @@
 
 (ibuffer-scope! 'chats (lambda () (chat-list-bufs)))
 
-(define (chats-footer buf)
-  '(("RET" "visit") ("SPC" "mark") ("s" "steer") ("y/n" "permission")
-    ("a" "archive") ("r" "retitle") ("k/d" "flag") ("x" "execute")
-    ("TAB" "fold") ("," "sort") (";" "group by") ("+" "new")
-    ("/" "filter") ("g" "refresh") ("q" "quit")))
-
-(ibuffer-view! *agents-buffer* 'sort 'recent 'footer (lambda (buf) (chats-footer buf)))
+;; No key bar over the rows: ? shows every key with the mode's own
+;; words, the same as the buffers table.
+(ibuffer-view! *agents-buffer* 'sort 'recent)
 
 ;; the table's rows, then the saved conversations as the last section
 (define (chats-rows buf)
@@ -417,7 +413,7 @@
 ;; the sort and the folds of *chats* stay what you set them to
 (define *ichat-prompt-buffer* " *chats*")
 (add-display-rule! *ichat-prompt-buffer* 'popup '(side bottom size 0.4))
-(ibuffer-view! *ichat-prompt-buffer* 'sort 'recent 'footer (lambda (buf) (chats-footer buf)))
+(ibuffer-view! *ichat-prompt-buffer* 'sort 'recent)
 
 (define-command "ichat-prompt"
   "Switch to a chat from the table"

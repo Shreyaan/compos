@@ -1213,8 +1213,14 @@
 
 ;; one label per column says nothing about a row of two lines: the row
 ;; itself is the only place the two meet, so a two-line list shows none
+;; A list that names none of its columns shows no label row: the row
+;; itself says what it is, and a bar of blanks is one more line of chrome
+;; over the rows.
+(define (list-labelled? cols)
+  (pair? (filter (lambda (c) (not (equal? (car c) ""))) cols)))
+
 (define (list-label-lines buf cols)
-  (if (> (list-row-height buf) 1)
+  (if (or (> (list-row-height buf) 1) (not (list-labelled? cols)))
       '()
       (list (list-label-line buf cols))))
 

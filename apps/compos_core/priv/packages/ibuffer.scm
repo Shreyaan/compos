@@ -37,7 +37,11 @@
 (defgroup 'buffers "Buffer lists and buffer management.")
 
 (defcustom 'ibuffer-compact-cols 100
-  "Below this width, ibuffer combines size, mode, and last-seen details."
+  "Below this width, ibuffer drops the group column."
+  'group 'buffers 'type 'number)
+
+(defcustom 'ibuffer-narrow-cols 64
+  "Below this width, ibuffer shows the name and the age alone."
   'group 'buffers 'type 'number)
 
 (defcustom 'ibuffer-default-sorting-mode 'name
@@ -196,11 +200,6 @@
   (let ((e (assoc mode *ibuffer-mode-faces*)))
     (and e (cadr e))))
 
-(define (ibuffer-row-face b)
-  (or (ibuffer-mode-family-face (ibuffer-short-mode b))
-      (buffer-filename-face b)
-      (and (string-prefix? "*" b) "accent")))
-
 ;; the abbreviated directory and the base name of a path; a directory's
 ;; path ends in a slash and has no base: it is all name
 (define (ibuffer-split-path p)
@@ -221,8 +220,20 @@
   (let ((t (ignore-errors (lambda () (file-mtime b)))))
     (ibuffer-age-label (and (number? t) (- (current-time) t)))))
 
+;; A row's colour says its state, never its identity. Two states earn a
+;; mark: a file with edits nobody saved, and a buffer whose process runs.
+;; Every other row wears the plain face, so the two that matter stand out.
+(define (ibuffer-buffer-state b)
+  (cond ((not (buffer-known? b)) #f)
+        ((and (buffer-path b) (buffer-modified? b)) 'unsaved)
+        ((ignore-errors (lambda () (process-running? b))) 'live)
+        (else #f)))
+
 (define (ibuffer-buffer-dot b)
-  (if (and (buffer-known? b) (buffer-modified? b)) (list "●" "warn") ""))
+  (let ((state (ibuffer-buffer-state b)))
+    (cond ((equal? state 'unsaved) (list "●" "warn"))
+          ((equal? state 'live) (list "▸" "ok"))
+          (else ""))))
 
 (define (ibuffer-buffer-name b)
   (if (buffer-known? b)
@@ -242,9 +253,16 @@
                      (or (buffer-path b) ""))
       "file"))
 
-(define (ibuffer-buffer-face b) (if (buffer-known? b) (ibuffer-row-face b) "dim"))
+(define (ibuffer-buffer-face b)
+  (cond ((not (buffer-known? b)) "dim")
+        ((equal? (ibuffer-buffer-state b) 'unsaved) "warn")
+        (else #f)))
 
-(define (ibuffer-buffer-modified? b) (and (buffer-known? b) (buffer-modified? b)))
+;; what the counts mean by "modified": a file whose buffer holds edits
+;; the disk does not have. A buffer with no file reports itself modified
+;; from the moment it holds a character, and counting those said nothing.
+(define (ibuffer-buffer-modified? b)
+  (and (buffer-known? b) (buffer-path b) (buffer-modified? b) #t))
 
 ;;; --- what a row shows: the kind's answer, else the buffer's ------------------
 
@@ -509,26 +527,15 @@
   (let ((n (ibuffer-row-size b)))
     (if (number? n) (ibuffer-human n) "")))
 
-(define (ibuffer-details b)
-  (string-join
-    (filter (lambda (part) (not (equal? part "")))
-      (list (ibuffer-size-label b)
-            (ibuffer-row-label b)
-            (ibuffer-row-last b)))
-    " · "))
-
 (define (ibuffer-noun buf n)
   (let ((noun (or (list-opt buf 'noun) "buffer")))
     (string-append (number->string n) " " noun (if (= n 1) "" "s"))))
 
-(define (ibuffer-heading-details buf row width)
-  (let ((m (ibuffer-heading-modified row)))
-    (string-append
-      (if (and (> m 0) (>= width 28))
-          (string-append (number->string m) " modified · ")
-          "")
-      (ibuffer-noun buf (ibuffer-heading-count row)) " · "
-      (ibuffer-human (ibuffer-heading-bytes row)))))
+;; A heading carries one number: how many rows it stands for. The bytes
+;; and the modified count belong to the whole table, and the meta line
+;; says them once.
+(define (ibuffer-heading-details buf row)
+  (number->string (ibuffer-heading-count row)))
 
 (define (ibuffer-chevron row) (if (ibuffer-heading-folded? row) "▸" "▾"))
 
@@ -536,64 +543,128 @@
 
 ;; the details take a third of a narrow window and no more than 30
 ;; columns of a wide one; the name keeps the rest
-(define (ibuffer-details-width w) (max 16 (min 30 (quotient w 3))))
+;;; Every column is a column: one field per cell, in its own width, so a
+;;; reader's eye has a vertical anchor. The name takes what the fields
+;;; leave. The three widths are three specs, not one spec squeezed: a
+;;; narrow window drops the fields it cannot align rather than folding
+;;; them into one right-aligned sentence. No column is named, so the
+;;; table shows no label row.
 
-(define (ibuffer-compact-columns buf)
-  (list (list "" 1)
-        (list "" 1)
-        (list "buffer" #f)
-        (list "details" (ibuffer-details-width (list-view-width buf)) 'right)))
+;; The name column is as wide as the longest name it has to show, and no
+;; wider: a flexible name column pushed the fields to the window's edge
+;; and left a desert between them and the rows. It still gives ground
+;; first when the window is too narrow for every field.
+(define (ibuffer-row-line-name row)
+  (if (ibuffer-heading? row)
+      (ibuffer-heading-label row)
+      (ibuffer-row-title row)))
 
-(define (ibuffer-details-column-width buf)
-  (let ((cols (list-columns buf)))
-    (if (> (length cols) 3) (or (list-col-width (nth 3 cols)) 30) 30)))
+;; The width nine names in ten fit in. One long path must not push the
+;; fields to the window's edge and leave a desert beside every short
+;; name; the paths that pass this width trim in the middle, where the
+;; head is dim already.
+(define (ibuffer-name-fit buf)
+  (let* ((lengths (map (lambda (row)
+                         (let ((n (string-length (ibuffer-row-line-name row))))
+                           (list n n)))
+                       (list-entries buf)))
+         (sorted (map car (sort lengths)))
+         (n (length sorted)))
+    (if (= n 0) 0 (nth (min (- n 1) (quotient (* n 9) 10)) sorted))))
 
-(define (ibuffer-wide-columns buf)
-  (list (list "" 1)
-        (list "" 1)
-        (list "buffer" #f)
-        (list "size" 7 'right)
-        (list "mode" 16)
-        (list "group" 18)
-        (list "last" 4 'right)
-        (list "file" 4)))
+;; the room the fields and the fixed head leave: the mark, the dot, the
+;; icon, one gap after each column, and every field's own width
+(define (ibuffer-name-width buf fields)
+  (let* ((gap (string-length *list-gap*))
+         (room (- (list-view-width buf) 2 1 1
+                  (fold (lambda (n c) (+ n (list-col-width c))) 0 fields)
+                  (* gap (+ 2 (length fields))))))
+    (max 12 (min room (max 24 (ibuffer-name-fit buf))))))
+
+(define (ibuffer-columns buf fields)
+  (append (list (list "" 1)
+                (list "" 1)
+                (list "" (ibuffer-name-width buf fields) 'left 'middle))
+          fields))
+
+;;; A FIELD is one narrow column beside the name: (TAG WIDTH ALIGN TRIM).
+;;; A field says one thing, so it gives up its end, not its middle. A
+;;; field the sections already say is dropped: with a section per mode,
+;;; every row in it wears that mode, and the column repeats it down the
+;;; whole table.
+
+(define *ibuffer-narrow-fields*
+  '((last 4 right end)))
+
+(define *ibuffer-compact-fields*
+  '((size 6 right end) (mode 10 left end) (last 4 right end)))
+
+(define *ibuffer-wide-fields*
+  '((size 7 right end) (mode 14 left end) (group 16 left end) (last 4 right end)))
+
+(define (ibuffer-field-tag f) (car f))
+
+(define (ibuffer-field-column f)
+  (list "" (nth 1 f) (nth 2 f) (nth 3 f)))
+
+(define (ibuffer-field-live? buf tag)
+  (let ((g (ibuffer-grouping buf)))
+    (not (or (and (equal? tag 'mode) (equal? g 'mode))
+             (and (equal? tag 'group) (equal? g 'group))))))
+
+(define (ibuffer-fields buf all)
+  (filter (lambda (f) (ibuffer-field-live? buf (ibuffer-field-tag f))) all))
+
+(define (ibuffer-field-cell b tag)
+  (cond ((equal? tag 'size) (ibuffer-size-label b))
+        ((equal? tag 'mode) (ibuffer-row-label b))
+        ((equal? tag 'group) (ibuffer-row-group-label b))
+        (else (ibuffer-row-last b))))
+
+(define (ibuffer-columns-for buf all)
+  (ibuffer-columns buf (map ibuffer-field-column (ibuffer-fields buf all))))
+
+(define (ibuffer-cells-for buf b all)
+  (let ((fields (ibuffer-fields buf all)))
+    (if (ibuffer-heading? b)
+        (ibuffer-heading-cells buf b (length fields))
+        (append (ibuffer-cell-head b)
+                (map (lambda (f)
+                       (list (ibuffer-field-cell b (ibuffer-field-tag f)) "faint"))
+                     fields)))))
+
+(define (ibuffer-narrow-columns buf) (ibuffer-columns-for buf *ibuffer-narrow-fields*))
+(define (ibuffer-compact-columns buf) (ibuffer-columns-for buf *ibuffer-compact-fields*))
+(define (ibuffer-wide-columns buf) (ibuffer-columns-for buf *ibuffer-wide-fields*))
 
 (define (ibuffer-cell-head b)
   (list (ibuffer-row-dot b)
         (list (ibuffer-row-icon b) "faint")
         (list (ibuffer-row-title b) (ibuffer-row-color b))))
 
+;; A section name reads as a name, in one accent, whatever the section
+;; is. The chevron in front of it carries the section's own colour: the
+;; group keeps its identity in one glyph instead of shouting it across
+;; the row.
 (define (ibuffer-heading-head row)
   (list ""
-        (list (ibuffer-chevron row) "dim")
-        (list (ibuffer-heading-label row) (or (ibuffer-heading-face row) "accent"))))
+        (list (ibuffer-chevron row) (or (ibuffer-heading-face row) "dim"))
+        (list (ibuffer-heading-label row) "accent")))
 
-(define (ibuffer-compact-cells buf b)
-  (if (ibuffer-heading? b)
-      (append (ibuffer-heading-head b)
-              (list (list (ibuffer-heading-details buf b (ibuffer-details-column-width buf))
-                          "dim")))
-      (append (ibuffer-cell-head b)
-              (list (list (ibuffer-details b) "faint")))))
+;; a heading fills the field columns with its one number, in the first of
+;; them: the count belongs beside the name it counts, not at the window's
+;; edge
+(define (ibuffer-heading-cells buf row fields)
+  (append (ibuffer-heading-head row)
+          (map (lambda (i)
+                 (if (= i 0)
+                     (list (ibuffer-heading-details buf row) "faint")
+                     ""))
+               (iota fields))))
 
-(define (ibuffer-wide-cells buf b)
-  (if (ibuffer-heading? b)
-      (append (ibuffer-heading-head b)
-        (list (list (ibuffer-human (ibuffer-heading-bytes b)) "dim")
-              (let ((m (ibuffer-heading-modified b)))
-                (if (> m 0)
-                    (list (string-append (number->string m) " modified") "warn")
-                    ""))
-              (list (ibuffer-noun buf (ibuffer-heading-count b)) "dim")
-              "" ""))
-      (append (ibuffer-cell-head b)
-        (list (list (ibuffer-size-label b) "dim")
-              (list (ibuffer-row-label b) "faint")
-              (list (ibuffer-row-group-label b)
-                    (and (buffer-known? b) (buffer-group b)
-                         (group-color-face (buffer-group b))))
-              (list (ibuffer-row-last b) "dim")
-              (list (if (or (not (buffer-known? b)) (buffer-path b)) "✓" "") "ok")))))
+(define (ibuffer-narrow-cells buf b) (ibuffer-cells-for buf b *ibuffer-narrow-fields*))
+(define (ibuffer-compact-cells buf b) (ibuffer-cells-for buf b *ibuffer-compact-fields*))
+(define (ibuffer-wide-cells buf b) (ibuffer-cells-for buf b *ibuffer-wide-fields*))
 
 ;; the directory in front of a file name is dim: a span over the head of
 ;; the buffer cell. The cell sits after the mark and the two one-character
@@ -665,12 +736,22 @@
                     (cons (list (car is) (if (equal? (car is) current) "accent" "dim"))
                           (cons (list (if (null? out) " " " · ") "dim") out)))))))
 
+;; the counts say "modified" only when something is: with the count
+;; honest, a zero there is a word that never changes
 (define (ibuffer-counts-parts buf n dirty bytes)
   (list (list (string-append
                 (ibuffer-noun buf n)
-                " · " (number->string dirty) " modified"
-                " · " (ibuffer-human bytes))
+                (if (> dirty 0)
+                    (string-append " · " (number->string dirty) " modified")
+                    "")
+                (if (> bytes 0)
+                    (string-append " · " (ibuffer-human bytes))
+                    ""))
               "dim")))
+
+;; the keys used to stand in a bar of their own over the rows. ? shows
+;; them all, with the mode's doc, so the bar is one word here.
+(define *ibuffer-keys-hint* (list (list "   ? keys" "faint")))
 
 ;; the wide head says the choices as chips; the compact one says the
 ;; current ones in four words
@@ -682,14 +763,16 @@
                            (symbol->string (ibuffer-grouping buf)))
             (list (list "   " #f))
             (ibuffer-chips "SORT" (map symbol->string *ibuffer-sorts*)
-                           (symbol->string (ibuffer-sort buf))))))
+                           (symbol->string (ibuffer-sort buf)))
+            *ibuffer-keys-hint*)))
 
 (define (ibuffer-compact-meta-line buf n dirty bytes)
   (ibuffer-join-parts
     (append (ibuffer-counts-parts buf n dirty bytes)
             (list (list (string-append " · by " (symbol->string (ibuffer-grouping buf))
                                        " · " (symbol->string (ibuffer-sort buf)))
-                        "dim")))))
+                        "dim"))
+            *ibuffer-keys-hint*)))
 
 (define (ibuffer-meta-with buf line)
   (let loop ((rows (list-entries buf)) (n 0) (dirty 0) (bytes 0))
@@ -712,15 +795,11 @@
 (define (ibuffer-wide-meta buf) (ibuffer-meta-with buf ibuffer-wide-meta-line))
 (define (ibuffer-meta buf) (ibuffer-compact-meta buf))
 
-(define (ibuffer-compact-footer buf)
-  '(("RET" "visit") ("SPC" "mark") ("k" "kill") ("TAB" "fold")
-    ("," "sort") (";" "group by") ("/" "filter") ("q" "quit")))
-
-(define (ibuffer-wide-footer buf)
-  '(("RET" "visit") ("SPC" "mark") ("*" "all") ("k" "kill") ("TAB" "fold")
-    ("," "sort") (";" "group by") ("G" "add to group") ("K" "kill group")
-    ("d" "flag") ("x" "execute") ("/" "filter")
-    ("\\" "widen") ("g" "refresh") ("q" "quit")))
+;; No key bar. Eight hints, permanently on, were a bar of chrome as tall
+;; as four rows and louder than any of them. ? shows every key with the
+;; mode's own words, and the meta line says so.
+(define (ibuffer-compact-footer buf) '())
+(define (ibuffer-wide-footer buf) '())
 
 ;; what `/` reads: the name and what the row's kind adds — the mode and
 ;; the path of a buffer, the summary and the state of a chat
@@ -1066,9 +1145,9 @@
            "A traditional buffer management table. A section is a group, "
            "a mode, or a directory; ; cycles the grouping. Rows inside a "
            "section sort by name, recency, or size; , cycles the sort. "
-           "TAB folds the section at point. Compact rows combine size, "
-           "mode, and last-seen details. Wide rows also show the group and "
-           "the file status. / narrows the table by name, mode, or path, "
+           "TAB folds the section at point. A narrow window shows the "
+           "name and the age; a wider one adds the size and the mode, and "
+           "a wide one the group. / narrows the table by name, mode, or path, "
            "and \\ widens it. m marks one row, SPC toggles the mark, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "
@@ -1092,6 +1171,12 @@
     'stamp (lambda (buf) (length (buffer-list-mru)))
     'layouts
       (list
+        (list 'name 'narrow
+              'max-cols (lambda (buf) (- ibuffer-narrow-cols 1))
+              'columns (lambda (buf) (ibuffer-narrow-columns buf))
+              'cells (lambda (buf b) (ibuffer-narrow-cells buf b))
+              'meta (lambda (buf) (ibuffer-compact-meta buf))
+              'footer (lambda (buf) (ibuffer-footer buf ibuffer-compact-footer)))
         (list 'name 'compact
               'max-cols (lambda (buf) (- ibuffer-compact-cols 1))
               'columns (lambda (buf) (ibuffer-compact-columns buf))

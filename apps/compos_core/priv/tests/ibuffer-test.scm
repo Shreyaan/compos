@@ -75,7 +75,10 @@
     (let ((heading (car (filter ibuffer-heading? (list-entries "*ibuffer*")))))
       (check-equal! (ibuffer-heading-count heading) 1 "the first section holds b")
       (check-equal! (ibuffer-heading-members heading) '("*zz-ib-b*") "its member"))
-    (check-contains! (buffer-text "*ibuffer*") "2 buffers" "the zz-ib heading counts two")
+    (let ((second (nth 1 (filter ibuffer-heading? (list-entries "*ibuffer*")))))
+      (check-equal! (ibuffer-heading-count second) 2 "the zz-ib heading counts two")
+      (check-equal! (ibuffer-heading-details "*ibuffer*" second) "2"
+                    "and a heading says that one number, nothing else"))
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-sections-by-directory-put-no-file-last
@@ -206,14 +209,41 @@
     (check-equal! (ibuffer-test-names) '("*zz-ib-c*") "and the name still narrows")
     (ibuffer-test-reset!)))
 
-(deftest 'ibuffer-rows-show-the-modified-dot-and-the-details
-  "a modified row wears the dot; the details hold the size and the mode"
+(deftest 'ibuffer-rows-wear-a-dot-for-state-alone
+  "a buffer with no file wears no dot; every field is a column of its own"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (let ((cells (ibuffer-compact-cells "*ibuffer*" "*zz-ib-b*")))
-      (check-equal! (car cells) '("●" "warn") "the dot on a modified buffer")
+      (check-equal! (car cells) "" "a buffer with no file has no state to show")
       (check-equal! (car (nth 2 cells)) "*zz-ib-b*" "the name")
-      (check-contains! (car (nth 3 cells)) "3 · zz-ib" "size and mode"))
+      (check-equal! (car (nth 3 cells)) "3" "the size is a cell of its own"))
+    (check-false! (ibuffer-buffer-modified? "*zz-ib-b*")
+                  "a buffer with no file counts as modified nowhere")
+    (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-drops-the-field-the-sections-already-say
+  "sectioned by mode, no row repeats its mode; sectioned by group, none repeats its group"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (check-equal! (map ibuffer-field-tag (ibuffer-fields "*ibuffer*" *ibuffer-wide-fields*))
+                  '(size group last) "the mode column goes")
+    (ibuffer-set-grouping! 'group)
+    (check-equal! (map ibuffer-field-tag (ibuffer-fields "*ibuffer*" *ibuffer-wide-fields*))
+                  '(size mode last) "the group column goes")
+    (ibuffer-set-grouping! 'directory)
+    (check-equal! (map ibuffer-field-tag (ibuffer-fields "*ibuffer*" *ibuffer-wide-fields*))
+                  '(size mode group last) "by directory every field earns its place")
+    (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-shows-no-key-bar-and-no-column-names
+  "the head is one line: the title, the counts, and where the keys are"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (check-equal! (ibuffer-compact-footer "*ibuffer*") '() "no key bar")
+    (check-equal! (list-key-lines "*ibuffer*") '() "so the head carries none")
+    (check-equal! (list-label-lines "*ibuffer*" (list-columns "*ibuffer*")) '()
+                  "and no column is named, so no label row")
+    (check-contains! (car (ibuffer-meta "*ibuffer*")) "? keys" "the meta says where the keys are")
     (ibuffer-test-reset!)))
 
 ;;; --- RET goes to the buffer where it lives ------------------------------------

@@ -81,7 +81,7 @@
     (check-equal! (ibuffer-row-kind "*zz-chats-a*") 'chat "a chat row wears the chat kind")
     (check-contains! (buffer-text "*chats*") "Chats" "the title")
     (check-contains! (buffer-text "*chats*") "3 chats" "the noun is chat")
-    (check-contains! (buffer-text "*chats*") "s steer" "the key bar is the chats' own")
+    (check-equal! (list-key-lines "*chats*") '() "no key bar stands over the rows")
     (chats-test-reset!)))
 
 (deftest 'chats-sections-by-group
@@ -98,7 +98,7 @@
                       "its members, by name"))
       (check-equal! (chats-test-names) '("*zz-chats-a*" "*zz-chats-b*" "*zz-chats-c*")
                     "the rows follow their headings")
-      (check-contains! (buffer-text "*chats*") "2 chats" "the heading counts two")
+      (check-contains! (buffer-text "*chats*") "3 chats" "the meta counts the table's chats")
       (check-contains! (buffer-text "*chats*") "idle" "a chat with no runtime is idle")
       (chats-test-reset!))))
 
