@@ -99,6 +99,23 @@
 
 ;;; --- opening the game -----------------------------------------------------------
 
+(deftest 'opening-the-game-shows-the-page-in-a-window
+  "M-x doom must DISPLAY the game: a made but unshown buffer looks like nothing happened"
+  (lambda ()
+    (doom-test-reset!)
+    (doom-test-write-assets!)
+    (let ((answer 'pending))
+      (doom--install! (lambda (ok) (set! answer ok)))
+      (check-equal! answer #t "the install is done"))
+    (delete-other-windows!)
+    (doom--open!)
+    (let ((page (doom--file "doom.html")))
+      (check-true! (window-showing page) "a window shows the game")
+      (check-false! (buffer-context-only? page)
+                    "and the buffer is a real one, not a quiet agent load")
+      (check-true! (member page (buffer-list)) "so it stands in the buffer list"))
+    (doom-test-done!)))
+
 (deftest 'opening-the-game-puts-the-page-buffer-in-app-render-mode
   "the buffer that visits the page runs as an app, and a reopen reloads it"
   (lambda ()
@@ -131,5 +148,6 @@
     (let ((page (doom--file "doom.html")))
       (check-true! (wait-until (lambda () (equal? (buffer-local page 'render-mode) "app"))
                                5000 50)
-                   "and left the buffer running as an app"))
+                   "and left the buffer running as an app")
+      (check-true! (window-showing page) "and put it on the screen"))
     (doom-test-done!)))

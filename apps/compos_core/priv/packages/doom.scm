@@ -194,10 +194,15 @@
 (define (doom--open!)
   (let ((page (doom--file "doom.html")))
     (doom--sync-page!)
-    (find-file page)
+    ;; visit, never find-file: find-file is the quiet loading boundary the
+    ;; agent tools use. It makes a context-only buffer and shows nothing,
+    ;; so M-x doom looked like it did nothing at all. visit is the user
+    ;; facing open: it joins the group, takes a pane, and promotes the
+    ;; buffer out of the dormant list.
+    (visit page (and (boundp (quote group-here)) (group-here)))
     ;; the file buffer is named by its path. Never read it back from
     ;; (current-buffer): a caller off the key lane has no frame, and the
-    ;; visit would leave the locals on the wrong buffer.
+    ;; locals would land on the wrong buffer.
     (let ((buf (if (buffer-exists? page) page (current-buffer))))
       (app-reload! buf)
       (buffer-set-local! buf 'render-mode "app")
