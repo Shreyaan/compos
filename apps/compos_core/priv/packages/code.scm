@@ -582,10 +582,12 @@
 (effects! '(pure))
 
 ;; a definition's first line, trimmed — the name and doc fall back to it
-(define (code--head buf n)
-  (let* ((text (code--text buf n))
-         (nl (string-index text "\n")))
-    (string-trim (if nl (substring-bytes text 0 nl) text))))
+(define (code--head-of text n)
+  (let* ((node (substring-bytes text (code--start n) (code--end n)))
+         (nl (string-index node "\n")))
+    (string-trim (if nl (substring-bytes node 0 nl) node))))
+
+(define (code--head buf n) (code--head-of (buffer-text buf) n))
 
 ;; The words a first line spends before it says the name. A keyword list,
 ;; not a language table: strip leading punctuation, drop these, and the
@@ -632,9 +634,6 @@
 ;;; it, or the doc string just inside it. With none of those, the doc
 ;;; column repeats the first line, so a row always says something.
 
-(define (code--line-at lines count i)
-  (and (>= i 0) (< i count) (list-ref lines i)))
-
 ;; "text" from a comment line — ";; text", "# text", "// text", "-- text"
 (define (code--comment-doc line)
   (let ((g (re-groups "^[ \\t]*(;+|#+|//+|--+)[ \\t]?(.*)$" line 0)))
@@ -645,36 +644,58 @@
   (let ((g (re-groups "^[ \\t]*@(module)?doc[ \\t]+\"([^\"]*)\"[ \\t]*$" line 0)))
     (and g (code--group-text line g 2))))
 
+;; ABOVE is the lines above a definition, nearest first. The outline walks
+;; the buffer once and hands each definition its own ABOVE list, so a walk
+;; up from a definition is one cdr per line. An indexed read into a list
+;; of lines costs one interpreted step per line, per read, per definition:
+;; the outline of a 150 KB file took seven seconds that way.
+
 ;; a contiguous comment block reads top-down: its first line is the summary
-(define (code--comment-block-top lines count idx)
-  (let loop ((i idx) (top #f))
-    (let ((d (let ((l (code--line-at lines count i)))
-               (and l (code--comment-doc l)))))
-      (if d (loop (- i 1) d) top))))
+(define (code--comment-block-top above)
+  (let loop ((ls above) (top #f))
+    (let ((d (and (pair? ls) (code--comment-doc (car ls)))))
+      (if d (loop (cdr ls) d) top))))
 
 ;; the line right under an @doc \"\"\" opener, found by walking up from
 ;; the closing \"\"\" that sits directly above the definition
-(define (code--heredoc-doc lines count idx)
-  (let loop ((i idx) (below #f) (steps 0))
-    (let ((l (code--line-at lines count i)))
-      (cond ((or (not l) (> steps 20)) #f)
-            ((re-match? "^[ \\t]*@(module)?doc[ \\t]+\"\"\"" l)
-             (and below (string-trim below)))
-            (else (loop (- i 1) l (+ steps 1)))))))
+(define (code--heredoc-doc above)
+  (let loop ((ls above) (below #f) (steps 0))
+    (cond ((or (null? ls) (> steps 20)) #f)
+          ((re-match? "^[ \\t]*@(module)?doc[ \\t]+\"\"\"" (car ls))
+           (and below (string-trim below)))
+          (else (loop (cdr ls) (car ls) (+ steps 1))))))
 
-;; IDX is the 0-based line right above the definition
-(define (code--doc-above lines count idx)
-  (let ((l (code--line-at lines count idx)))
-    (and l
+(define (code--doc-above above)
+  (and (pair? above)
+       (let ((l (car above)))
          (or (and (code--comment-doc l)
-                  (code--comment-block-top lines count idx))
+                  (code--comment-block-top above))
              (code--attr-doc l)
              (and (re-match? "^[ \\t]*\"\"\"[ \\t]*$" l)
-                  (code--heredoc-doc lines count (- idx 1)))))))
+                  (code--heredoc-doc (cdr above)))))))
+
+;; One pass over LINES for the sorted byte offsets STARTS ->
+;; ((START LINE ABOVE) ...): the 1-based line START is on, and the lines
+;; above it, nearest first. A GenServer round trip per definition for the
+;; line number is not free either: this pass answers both questions at once.
+(define (code--line-context lines starts)
+  (let loop ((ls lines) (starts starts) (line 1) (off 0) (above '()) (out '()))
+    (cond ((null? starts) (reverse out))
+          ;; a start past the last line sits on the last line
+          ((null? ls)
+           (loop ls (cdr starts) line off above
+                 (cons (list (car starts) (max 1 (- line 1)) above) out)))
+          (else
+            (let* ((l (car ls))
+                   (end (+ off (string-byte-length l))))
+              (if (<= (car starts) end)
+                  (loop ls (cdr starts) line off above
+                        (cons (list (car starts) line above) out))
+                  (loop (cdr ls) starts (+ line 1) (+ end 1) (cons l above) out)))))))
 
 ;; the doc string just inside the node — python style
-(define (code--doc-inside buf n)
-  (let loop ((ls (cdr (string-split (code--text buf n) "\n"))))
+(define (code--doc-inside-of text n)
+  (let loop ((ls (cdr (string-split (substring-bytes text (code--start n) (code--end n)) "\n"))))
     (cond ((null? ls) #f)
           ((equal? (string-trim (car ls)) "") (loop (cdr ls)))
           (else
@@ -704,13 +725,16 @@
 ;;
 ;; One outline at a time. Each call replaces the map, because the lines an
 ;; agent holds come from the outline it last read.
-(define (code--remember-anchors! buf nodes)
+(define (code--remember-anchors! buf nodes rows)
   (buffer-set-local! buf 'code-anchors
-    (map (lambda (n)
-           (list (line-number-at-pos (code--start n))
-                 (buffer-anchor buf (code--start n))
-                 (code--name (code--head buf n))))
-         nodes)))
+    (let loop ((ns nodes) (rs rows) (acc '()))
+      (if (or (null? ns) (null? rs))
+          (reverse acc)
+          (loop (cdr ns) (cdr rs)
+                (cons (list (car (car rs))
+                            (buffer-anchor buf (code--start (car ns)))
+                            (caddr (car rs)))
+                      acc))))))
 
 ;; buffer-local answers #f when the outline has never run here.
 (define (code--anchor-row buf line)
@@ -718,23 +742,24 @@
     (and anchors (assoc line anchors))))
 
 (define (code--outline-rows buf)
-  (let* ((lines (string-split (buffer-text buf) "\n"))
-         (count (length lines))
+  (let* ((text (buffer-text buf))
          ;; a comment is context for a definition, not a definition: it
          ;; feeds the doc column and stays out of the outline
          (nodes (filter (lambda (n) (not (string-index (code--kind n) "comment")))
                         (code--fold-nodes buf)))
+         (ctx (code--line-context (string-split text "\n")
+                                  (sort (map code--start nodes))))
          (rows (map (lambda (n)
-                      (let ((line (line-number-at-pos (code--start n)))
-                            (head (code--head buf n)))
-                        (list line
+                      (let* ((c (assoc (code--start n) ctx))
+                             (head (code--head-of text n)))
+                        (list (cadr c)
                               (code--kind n)
                               (code--name head)
-                              (or (code--doc-above lines count (- line 2))
-                                  (code--doc-inside buf n)
+                              (or (code--doc-above (caddr c))
+                                  (code--doc-inside-of text n)
                                   head))))
                     nodes)))
-    (code--remember-anchors! buf nodes)
+    (code--remember-anchors! buf nodes rows)
     rows))
 
 ;; Every entry point runs through here. The node questions read the CURRENT

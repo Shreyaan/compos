@@ -124,6 +124,15 @@
       (check-equal! (buffer-text buf) t--code-elixir "the failed replace changed nothing")
       (buffer-kill! buf))))
 
+(deftest 'the-outline-numbers-its-lines-in-one-pass
+  "one pass gives each start its line and the lines above it, nearest first"
+  (lambda ()
+    (let ((ctx (code--line-context '("a" "bb" "ccc" "d") '(0 3 9 50))))
+      (check-equal! (assoc 0 ctx) '(0 1 ()) "the first byte is on line 1 with nothing above")
+      (check-equal! (assoc 3 ctx) '(3 2 ("a")) "byte 3 is on line 2, and line 1 is above")
+      (check-equal! (assoc 9 ctx) '(9 4 ("ccc" "bb" "a")) "the nearest line comes first")
+      (check-equal! (cadr (assoc 50 ctx)) 4 "a start past the end sits on the last line"))))
+
 (deftest 'a-buffer-with-no-grammar-still-has-an-outline
   "indentation answers where no grammar does"
   (lambda ()

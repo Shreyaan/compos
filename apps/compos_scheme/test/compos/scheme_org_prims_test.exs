@@ -55,6 +55,8 @@ defmodule Compos.SchemeOrgPrimsTest do
     assert run("(sort '(3 1 2))") == [1, 2, 3]
     assert run("(sort '((2 \"b\") (1 \"a\")))") == [[1, "a"], [2, "b"]]
     assert run("(list-ref '(a b c) 1)") == {:sym, "b"}
+    assert run("(list-ref (iota 3000) 2999)") == 2999
+    assert err("(list-ref '(a b c) 3)") =~ "list-ref"
     assert run("(iota 4)") == [0, 1, 2, 3]
     assert run("(remove (lambda (x) (> x 1)) '(0 1 2 3))") == [0, 1]
     assert run("(assq \"k\" '((\"k\" 1)))") == ["k", 1]

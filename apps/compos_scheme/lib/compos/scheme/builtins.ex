@@ -245,6 +245,14 @@ defmodule Compos.Scheme.Builtins do
         end)
       end,
       "plist-get" => fn [pl, key] when is_list(pl) -> plist_get(pl, key) end,
+      # native: an interpreted walk paid one frame per element, and a read
+      # into a list of 3000 lines per definition made an outline take seconds
+      "list-ref" => fn [l, i] when is_list(l) and is_integer(i) ->
+        case Enum.at(l, i, :none) do
+          :none -> raise Eval.Error, message: "list-ref: index #{i} out of 0..#{length(l) - 1}"
+          v -> v
+        end
+      end,
       "display" => fn [x] ->
         IO.write(Printer.display(x))
         :void
@@ -392,6 +400,7 @@ defmodule Compos.Scheme.Builtins do
         "(assoc KEY ALIST) — return the first element of ALIST whose car equals KEY, or false.",
       "plist-get" =>
         "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST, or false.",
+      "list-ref" => "(list-ref LST I) — return the element of LST at the 0-based index I; an error past the end.",
       "display" => "(display X) — write X to standard output without quotes.",
       "newline" => "(newline) — write a newline to standard output.",
       "error" => "(error X ...) — raise an error; the message joins the displayed arguments with spaces.",

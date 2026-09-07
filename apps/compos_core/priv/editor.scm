@@ -2075,9 +2075,8 @@
 
 ;; plist-get is a builtin: the flat plist read is the hottest list read.
 
-;; list-ref by its Emacs name — this dialect has no builtin for it, and it
-;; was living as a private helper inside packages/agent.scm
-(define (nth n l) (if (= n 0) (car l) (nth (- n 1) (cdr l))))
+;; list-ref by its Emacs name; list-ref is a builtin
+(define (nth n l) (list-ref l n))
 
 ;;; --- editing commands ------------------------------------------------------
 

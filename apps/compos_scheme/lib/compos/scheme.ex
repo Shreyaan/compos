@@ -24,7 +24,6 @@ defmodule Compos.Scheme do
   (define (caddr l) (car (cdr (cdr l))))
   (define (split-lines s) (string-split s "\\n"))
   (define (assq key lst) (assoc key lst))
-  (define (list-ref lst i) (if (= i 0) (car lst) (list-ref (cdr lst) (- i 1))))
   (define (iota n)
     (let loop ((i 0) (acc '()))
       (if (= i n) (reverse acc) (loop (+ i 1) (cons i acc)))))
