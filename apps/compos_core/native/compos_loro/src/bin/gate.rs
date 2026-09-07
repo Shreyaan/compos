@@ -115,7 +115,10 @@ fn bench_roundtrip(size: usize) {
     );
 }
 
-/// The load-bearing assumption: the human's undo must skip the agent's edits.
+/// Probe: exclusion keeps one actor's commits off another actor's manager. The
+/// buffer registers a single content scope ("user") for user and agent edits, and
+/// keeps this exclusion for the `process` scope; the probe below shows the Loro
+/// primitive itself supports per-actor stacks when a caller asks for them.
 fn probe_per_actor_undo() {
     let doc = LoroDoc::new();
     doc.set_peer_id(1).unwrap();

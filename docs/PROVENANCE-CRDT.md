@@ -44,15 +44,14 @@ pub struct Change<O = Op> {
 Scope is every durable and user buffer: code, writing, morg, chat, scratch, agent
 threads.
 
-## The bug this fixes
+## Undo scope
 
-`state.history` holds up to 500 rope snapshots (`buffer.ex:1409`, `@undo_limit` at
-`:56`), pushed by every edit regardless of actor. Undo pops one and swaps the rope
-wholesale (`:927`). The stack is a single linear timeline across all actors.
-
-So while an agent edits a buffer you are typing in, you cannot undo your own typing
-without first undoing the agent's work. The more an agent writes, the less usable undo
-becomes. This is not a future concern.
+`state.history` used to hold up to 500 rope snapshots, one linear timeline across
+all actors, which made undo unusable while an agent streamed into the same buffer.
+The document replaces that. Undo is one tree per buffer, the Emacs model: every
+actor that writes content - user, agent, editor command - shares the "user" undo
+scope, so C-/ walks agent-added text back too. Only `process` output (a terminal
+transcript) keeps its own scope.
 
 ## Ownership rule
 
@@ -80,9 +79,10 @@ The existing `source` becomes the Loro origin string: `user`, `agent:codex`, `ed
 
 **One `UndoManager` per actor that can undo.** The API is built for this case:
 
-- `add_exclude_origin_prefix(prefix)` keeps an origin out of a manager's stack. The
-  human's manager excludes `agent:`, so agent edits never enter human undo. That is
-  the fix for the bug above.
+- `add_exclude_origin_prefix(prefix)` keeps an origin out of a manager's stack.
+  `Buffer` registers one content manager, scope `"user"`, whose only exclusion is
+  `process` output. Agent edits share it, so a human C-/ can undo text an agent
+  added.
 - **Every manager must also exclude the `undo` origin.** An undo is itself a change,
   and it carries the `undo` origin. Without the exclusion, one actor's undo lands on the
   other actor's stack, so the other actor's next undo reverses it and restores work that
@@ -100,8 +100,8 @@ The existing `source` becomes the Loro origin string: `user`, `agent:codex`, `ed
 
 **A stack belongs to a scope, not to an actor id.** A command the user invoked edits as
 `system:editor`, and Emacs undoes it as the user's own work. So the user's scope owns
-every kind except the two that act on their own, `agent` and `process`. Agents share one
-scope with each other; no caller needs them apart yet.
+every kind that writes the buffer's content, `agent` included; only `process` output
+keeps its own scope.
 
 This retires `state.history`, `snapshot/1`, and the wholesale rope swap at `:927`.
 
@@ -549,8 +549,10 @@ work out what arrived. `checkout` reads the text at any past version, which is w
 
 ## Risks
 
-- **Undo semantics changed in Phase 3, deliberately.** Human undo skips agent edits, and
-  overlays now track through an undo. The Emacs undo and redo model survived unchanged.
+- **Undo semantics changed in Phase 3, and again since.** Phase 3 split undo by actor;
+  the later change (one tree per buffer, agent text on the user's scope) put agent edits
+  back on the human's C-/ and is what the tests now pin. Overlays track through an undo;
+  the Emacs undo and redo model survived both changes.
 - **Divergence.** Two representations can disagree. The hash check at checkpoint
   boundaries is the detector; rebuild the rope from the doc to fix it. Log rather than
   crash, matching `flush_provenance` (`buffer.ex:1714`).
@@ -576,8 +578,8 @@ work out what arrived. `checkout` reads the text at any past version, which is w
 
 - `mix test` and `bin/test-fast`, all four apps green.
 - **The undo test that matters:** an agent inserts into a buffer, the human types, the
-  human undoes. Assert the human's text is reverted and the agent's text is untouched.
-  This test fails against the current code.
+  human undoes. Assert undo reverts the most recent content change whoever wrote it - the
+  agent's insert when it came last. `buffer_history_mirror_test.exs` pins this.
 - Invariant test: after a scripted sequence of user edits, agent edits, undo, and redo,
   assert `Rope.to_binary(rope) == History.text(history)`.
 - Cursor test: place a point, have an agent insert above it, assert the point moved by

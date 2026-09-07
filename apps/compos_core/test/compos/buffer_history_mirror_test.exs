@@ -1,11 +1,10 @@
 defmodule Compos.BufferHistoryMirrorTest do
   @moduledoc """
-  Phase 2 of `docs/PROVENANCE-CRDT.md`: the buffer mirrors every text mutation
-  into its Loro document.
+  The buffer mirrors every text mutation into its Loro document.
 
   The invariant these tests defend is one line: the rope and the document hold
-  the same bytes. Behaviour must not move in this phase, so undo still works
-  exactly as it did.
+  the same bytes. Undo is one tree per buffer: every actor that writes content
+  shares the user's undo stack, so C-/ walks agent-added text back too.
   """
 
   use ExUnit.Case
@@ -136,22 +135,23 @@ defmodule Compos.BufferHistoryMirrorTest do
     end
   end
 
-  # The bug Phase 3 exists to fix. Before it, `state.history` was one linear
-  # stack across every actor, so undoing your own typing first undid whatever
-  # an agent had written into the buffer since.
-  describe "undo belongs to the actor" do
-    test "the human's undo skips the agent's edit" do
+  # One undo tree per buffer, as in Emacs. A buffer keeps a single undo
+  # stack for its content, so text an agent adds sits on the same stack the
+  # human's C-/ walks. An undo removes the most recent change, whoever wrote
+  # it.
+  describe "one undo tree across the actors" do
+    test "the human's undo removes the agent's edit too" do
       name = new_buffer("")
       Buffer.append(name, "human", source: :user)
       Buffer.append(name, " agent", source: {:agent, "codex"})
       assert Buffer.text(name) == "human agent"
 
       assert :ok = Buffer.undo(name, source: :user)
-      assert Buffer.text(name) == " agent"
+      assert Buffer.text(name) == "human"
       assert_mirrored(name)
     end
 
-    test "the agent's work survives repeated human undo" do
+    test "a run of human undo walks back through the agent's edit" do
       name = new_buffer("")
       Buffer.append(name, "one", source: :user)
       Buffer.append(name, "AGENT", source: {:agent, "codex"})
@@ -159,10 +159,12 @@ defmodule Compos.BufferHistoryMirrorTest do
 
       Buffer.undo(name, source: :user)
       Buffer.undo(name, source: :user)
-      assert Buffer.text(name) == "AGENT"
+      assert Buffer.text(name) == "one"
     end
 
-    test "an agent undoes its own work and leaves the human's alone" do
+    # An agent asking for undo pops the same shared stack, so it removes the
+    # most recent change, its own or the human's.
+    test "an agent's undo removes the most recent change" do
       name = new_buffer("")
       Buffer.append(name, "human", source: :user)
       Buffer.append(name, "AGENT", source: {:agent, "codex"})
@@ -182,9 +184,17 @@ defmodule Compos.BufferHistoryMirrorTest do
       assert Buffer.text(name) == "typed"
     end
 
-    test "an actor with nothing to undo says so" do
+    test "agent text alone is the user's to undo" do
       name = new_buffer("start")
       Buffer.append(name, " agent", source: {:agent, "codex"})
+      assert Buffer.text(name) == "start agent"
+
+      assert :ok = Buffer.undo(name, source: :user)
+      assert Buffer.text(name) == "start"
+    end
+
+    test "a buffer with no edits has nothing to undo" do
+      name = new_buffer("")
       assert {:error, :no_undo} = Buffer.undo(name, source: :user)
     end
   end
