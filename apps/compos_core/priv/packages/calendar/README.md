@@ -1,242 +1,188 @@
 # Calendar
 
-A calendar for compos. Elixir owns the model, the store and the sync. Scheme owns the views, the commands and the tools. No external program owns a calendar.
+One calendar surface over every account the operating system already knows about. The store is a text file. Scheme owns the verbs, the parse and the views. There is no Elixir module, no compiled binary, no OAuth client, no token, and on macOS no CalDAV.
 
-This file is the package source. Each heading that carries a tangle header writes its block to the named file.
+This is not a Google Calendar MCP. One MCP server per provider is a tool zoo: two accounts on two providers gives four servers, four vocabularies and no merged view. An MCP server is also a chat door only, so it cannot draw a week, hold an offline edit or merge two calendars. Instead we build one verb surface, wrap it once with define-tool!, and the compos MCP server serves it outward for free.
 
-## Why not one MCP server per provider
+## What the probes settled
 
-An MCP server per provider is a tool zoo. Two accounts on two providers give four servers and four vocabularies, and no one of them holds a merged view. An MCP server is also a chat door only. It cannot draw a week, it cannot hold an edit made offline, and it cannot merge two calendars.
+Every row below was measured on this machine on 2026-09-08, not assumed.
 
-The calendar gets one tool surface through define-tool!. The compos MCP server then serves that surface to an outside agent. One vocabulary, every provider behind it.
+| question | answer | evidence |
+| --- | --- | --- |
+| Does macOS ship a calendar CLI? | No, cal is a month grid | Calendar.app is scriptable but ships no command |
+| Can we reach EventKit without a compiler? | Yes, osascript -l JavaScript and the ObjC bridge | probe.js returns real calendar titles |
+| Does the compos daemon get calendar access? | No, and it never can | launchctl managername is Background, and TCC cannot prompt a Background process |
+| Does a LaunchAgent get access? | Yes | same script, same second: Aqua returned 10 calendars, Background returned 0 |
+| Does the grant follow the binary into the daemon? | No | TCC records kTCCServiceCalendar for /bin/zsh as allowed, and the daemon still reads 0 |
+| Can we write? | Yes, to a real Google account | created, read back and deleted an event in the Google account |
+| Do we need an RRule engine? | No | EventKit returns expanded occurrences, not rules |
+| Does Google CalDAV take an app password? | No | PROPFIND returns 401 with no WWW-Authenticate header at all, Bearer only |
+| Does iCloud CalDAV take an app password? | Yes | 401 with WWW-Authenticate: Basic realm MMCalDav |
 
-## Why not a wrapper over khal or vdirsyncer
+The consequence of rows three to six is the whole design: macOS already holds the accounts, the OAuth, the token refresh and the incremental sync for all nine of your stores, and it will hand them over in both directions, but only to a process in the Aqua session.
 
-Such a program owns the event model and the store. We would parse its output, fight its schema and inherit its recurrence faults. The store is the part we must own, because the store is where a lost edit happens.
+## The shape
 
-## Where gog fits
+| piece | where | what it does |
+| --- | --- | --- |
+| the agent | a LaunchAgent, Aqua session | the only thing that touches EventKit; reads calendars, drains the outbox |
+| the payload | agent/*.js, run by osascript -l JavaScript | EventKit calls, no compiler and no binary |
+| the spool | ~/.compos/calendar/ | request and result files; the door between the two sessions |
+| the store | one text file | the truth compos reads and renders; survives with no agent running |
+| the parse | Scheme, tree-sitter markdown | (ts-langs) already loads markdown and markdown-inline |
+| the views | morg-agenda-mode, plus a week grid | day cards, n and p, TAB fold, RET open, [ and ] by week |
 
-gog is a Google command line tool. It already holds multi-account OAuth in a keyring, and it answers JSON. It is not a calendar wrapper: it owns no model and no store, and it answers one request.
+Elixir appears nowhere. The editor already has shell exec and an async lane, so nothing in this list needs a new module, a supervisor or a database.
 
-The Apple surface below reads Google already, so gog is no longer the early phase. It stays as the direct path for a host that is not this Mac, and for anything CalDAV cannot reach.
+## Why the agent exists
 
-## Layers
+The compos daemon is started by run_erl -daemon, so its parent is pid 1 and launchctl managername says Background. TCC never prompts a Background process, and a denied EventKit call does not raise. It returns an empty array. That failure mode looks exactly like an empty calendar, which is why it cost an hour before it was measured.
 
-    Scheme    calendar.scm         verbs, tools, the sources list
-              calendar-view.scm    week grid, day view, event card
-              agenda.scm           existing; gains calendar events
+A LaunchAgent with LimitLoadToSessionType set to Aqua runs in the logged-in GUI session and can be prompted. The proof was already in ~/Library/LaunchAgents: gnu.emacs.daemon.plist, with a matching TCC row for org.gnu.Emacs.
 
-    Elixir    Calendar             facade and supervisor
-              Calendar.Sync        one worker per source; tokens and backoff
-              Calendar.Mirror      rules that copy events between calendars
-              Calendar.Store       SQLite index; the ICS text is the truth
-              Calendar.Provider    behaviour
-              Calendar.ICS         RFC 5545 read and write
-              Calendar.RRule       recurrence expansion
+So the daemon never calls EventKit. It writes a file and reads a file. That also gives the offline behaviour for free: a write made with the agent unloaded sits in the spool until the agent runs.
 
-    Providers Apple    the macOS Calendar store, read-only; every account
-                       that CalendarAgent already syncs
-              CalDAV   iCloud, Fastmail, Nextcloud; the write path
-              Google   REST v3 through gog, later a native flow
-              ICS      a read-only subscription URL
-              Local    a calendar compos owns; no remote
-              Morg     agenda.scm dated headings, read-only
+## Reading
 
-Every provider answers the same records. A view never knows which provider a record came from.
+The agent lists occurrences over a window and writes JSON to the spool. Scheme reads that JSON and rewrites the section of the text file it owns. The file is the store, in the manner of org-gcal-sync: one heading per day, one entry per event, human editable, diffable, and readable with no daemon at all.
 
-## The event model
+EventKit expands recurrence for us. enumerateEventsMatchingPredicate returns occurrences, so EXDATE, RDATE and RECURRENCE-ID overrides are already resolved. That deletes the single largest piece of the original plan, roughly 400 lines of RFC 5545 that libraries routinely get wrong.
 
-One struct, Compos.Core.Calendar.Event:
+The direct SQLite read of Calendar.sqlitedb still works, needs no grant at all, and stays as the fallback for a machine where the agent is not installed. It is a fallback and not the main path for one reason: OccurrenceCache is a bounded cache of the range Calendar.app has been asked to draw, not a full expansion. It held 2553 rows ending 2026-01 while the base tables ran to 2031. Reading it as an expansion silently loses events.
 
-    uid            the RFC 5545 UID
-    source_id      which source holds it
-    recurrence_id  set on an override of one instance, else nil
+## Writing
+
+A write is a file, not a call.
+
+| step | who | what |
+| --- | --- | --- |
+| 1 | daemon | writes ~/.compos/calendar/outbox/ID.json |
+| 2 | agent | picks it up and runs the EventKit call |
+| 3 | agent | writes ID.result, removes the request |
+| 4 | daemon | reads the result, updates the text file |
+
+One door writes to every provider, because Calendar.app owns the accounts. An event created in the Google calendar goes out through CalendarAgent's OAuth. There is no per-provider auth, ever. That is the same argument that makes the read path free, applied to writes.
+
+A failed request keeps its result file with the error, so a write is never lost in silence.
+
+## The event record
+
+    uid            the RFC 5545 UID, and the identity across every path
+    event_id       the EventKit identifier, valid on this Mac only
+    source         the account, for example Google or iCloud
+    calendar       the calendar title
     summary        the title
     description    the body
     location
-    starts_at      a naive datetime with a tzid, or a date when all day
+    starts_at      with an IANA time zone, or a date when all day
     ends_at        exclusive, as RFC 5545 says
     all_day?
-    rrule          the rule text, not expanded
-    exdates        excluded starts
-    rdates         extra starts
     status         confirmed, tentative or cancelled
     transparency   busy or free
     organizer      an address
     attendees      address, role, partstat
-    sequence       the RFC 5545 revision counter
-    etag           the remote validator
-    href           the CalDAV path; in CalDAV this is the identity
-    updated_at
-    ics            the raw component, kept whole
+    href, etag     CalDAV only; the Linux path fills these
 
-The raw component is kept. Every property we do not model survives a round trip. A round trip that loses a property is a fault.
-
-## The store
-
-SQLite through exqlite, at ~/.compos/calendar.db.
-
-    sources      id, kind, account, name, colour, config_json,
-                 sync_token, ctag, last_sync_at, status, error
-    events       source_id, uid, recurrence_id, ics, summary, etag,
-                 href, deleted
-    occurrences  source_id, uid, recurrence_id, starts_utc, ends_utc
-    links        local_uid, remote_source_id, remote_uid, rule, hash
-    outbox       id, source_id, uid, op, ics, tries, last_error
-    conflicts    source_id, uid, local_ics, remote_ics, seen_at
-
-occurrences holds the expanded recurrences for a rolling window, about one year back and two years forward. A view asks one indexed range query. It never expands a rule while it draws. A write to events expands only that event again.
-
-outbox means an edit made offline is not lost. conflicts means a clash is shown, and never resolved in silence.
-
-## Sync
-
-Pull, per provider:
-
-- Google answers an incremental list for a syncToken. A 410 answer means the token expired, and the source must do a full resync. This case happens, so handle it.
-- CalDAV uses sync-collection with a sync-token (RFC 6578). Where a server does not support it, fall back to the collection ctag, then a PROPFIND of the hrefs and their ETags, then a multiget of the changed hrefs.
-- An ICS URL uses a conditional GET with ETag or Last-Modified. On a change, parse the whole file and compare by UID.
-
-Push: the outbox drains in order. Each write carries If-Match with the stored ETag. A 412 or a 409 answer means the remote changed first. The write then goes to conflicts and the user sees a card. A user edit is never dropped.
-
-Conflict rule: a field the user did not touch takes the remote value. A field that both sides changed makes a conflict row.
-
-A source syncs on a timer, on a manual refresh, and when its buffer wakes. Sync runs off the Session lane through task-run!. Backoff is exponential on an error, and it resets on a success.
-
-## Mirroring
-
-Mirroring is not provider sync. It is a rule between two local sources.
-
-    (calendar-mirror-add! 'work 'personal 'busy)
-
-A rule states a source, a target and a mode. full copies the details. busy copies a block with no title. tagged copies only the events that carry a tag.
-
-links holds the identity map, so a second run updates the copy and does not add a second one. A mirrored event carries X-COMPOS-MIRROR-OF, and a mirrored event is never mirrored again. Two rules in opposite directions cannot loop.
-
-## Two dependency decisions
-
-Time zones. Elixir ships a UTC-only time zone database. A DTSTART with a TZID cannot be resolved without a real one. Add tz, which is small and compiles the IANA data, and set config :elixir, :time_zone_database. This is not optional. Every recurrence across a daylight saving change is wrong without it.
-
-Recurrence. No suitable library is in the tree, and cocktail does not model RFC 5545 directly. Write Calendar.RRule. It is pure, it is about 400 lines, and it is table tested against the RFC 5545 examples. Cover FREQ daily, weekly, monthly and yearly, then INTERVAL, BYDAY, BYMONTHDAY, BYMONTH, BYSETPOS, COUNT, UNTIL and WKST, then EXDATE, RDATE and the RECURRENCE-ID overrides. The overrides are the part that real calendars use, and the part that libraries get wrong.
-
-## The Apple surface
-
-macOS keeps every calendar it syncs in one SQLite file:
-
-    ~/Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb
-
-This machine was probed on 2026-09-08. The file holds nine stores: iCloud, Google, Subscribed Calendars, Todoist, Reminders, a holidays subscription and three local ones. The Google calendar svs@svsrecruiting.com holds 518 items and was written the day before the probe. A read gives the summary, the start and end, the IANA time zone, the all day flag and the attendees.
-
-This is the cheapest correct read path on a Mac. CalendarAgent already does the OAuth, the tokens, the incremental sync and the retries. For a read we need no provider sync at all. We open the file and select.
-
-The old per-calendar directory of .ics files is gone. ~/Library/Calendars holds only sync scratch on this release.
-
-### What the probe settled
-
-- Dates are CFAbsoluteTime, which counts seconds from 2001-01-01 UTC. Add 978307200 to reach the Unix epoch.
-- start_tz holds an IANA name, or _float for a floating time. An all day event is _float with all_day set.
-- OccurrenceCache looks useful and is not. It is a bounded cache of the range the user has looked at. The probe found 2553 rows that stop at 2026-01, while the base tables run to 2031. Read CalendarItem, Recurrence and ExceptionDate, and expand the rules ourselves. Calendar.RRule is still needed.
-- A comparison must cast. start_date is a real and strftime answers text, and SQLite never matches a number against text. A query that forgets the cast answers zero rows and looks like an empty calendar.
-
-### Rules for this provider
-
-- Open with immutable=1, or read-only. Never write. Calendar.app owns the file and keeps a live WAL beside it.
-- The daemon needs Full Disk Access to read it.
-- The schema carries no promise. Probe for the columns we use at connect time, and fail loudly with a clear message when a macOS release moves them. Never fail into an empty calendar in silence.
-- It is one machine only. A Linux host has none of this, which is why the CalDAV provider still gets built.
-
-### What it does not give
-
-Writes. An event written into that file would be overwritten, or would corrupt the store. A write goes to CalDAV for the account that owns the event, or through an EventKit helper. Read and write are allowed to use different paths for the same calendar, because the identity is the UID.
+uid is the identity, not event_id. That matters because the read path and the write path may differ on the same calendar, and because a Linux host reaching the same account over CalDAV must land on the same record.
 
 ## The Scheme surface :tangle calendar.scm
 
-The primitives live in session.ex. The package holds the settings, the verbs, the tools and the views. Elixir never draws, and Scheme never opens a socket.
-
 ```scheme
-;; Calendar: settings and the read verbs.
-;; Elixir owns the model, the store and the sync. This file owns policy.
+;; Calendar: settings and verbs. The agent touches EventKit; this file owns policy.
 
 (domain! 'calendar)
 (effects! '(read))
 
-(defcustom 'calendar-store-path "~/.compos/calendar.db"
-  "Where the merged calendar store lives.")
+(defcustom 'calendar-file "~/docs/calendar.md"
+  "The text store. This file is the truth compos reads and renders.")
+
+(defcustom 'calendar-spool "~/.compos/calendar"
+  "Where the daemon and the Aqua agent leave files for each other.")
+
+(defcustom 'calendar-agent-label "io.svs.compos-calendar"
+  "The LaunchAgent label. Loaded into gui/UID, never into the daemon.")
 
 (defcustom 'calendar-apple-db
   "~/Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb"
-  "The macOS calendar store. Read-only, and read only on a Mac.")
-
-(defcustom 'calendar-sync-interval 300
-  "Seconds between two syncs of a source that is not asked for.")
+  "Fallback read when no agent is installed. Recurrence is not expanded here.")
 
 (defcustom 'calendar-window-back 365
-  "Days before today that the store keeps expanded.")
+  "Days before today that the text file keeps.")
 
 (defcustom 'calendar-window-forward 730
-  "Days after today that the store keeps expanded.")
+  "Days after today that the text file keeps.")
 
 (defcustom 'calendar-week-start 1
   "The first column of the week grid. 0 is Sunday and 1 is Monday.")
 ```
 
-The verbs, once the store answers:
+The verbs:
 
-    (calendar-sources)                    every source and its state
-    (calendar-source-add! KIND CONFIG)    register a source
-    (calendar-source-remove! ID)
-    (calendar-sync! [ID])                 refresh one source, or all
-    (calendar-events FROM TO [SOURCES])   the occurrences in a window
-    (calendar-event-put! ID EVENT)        create or update; queues a push
-    (calendar-event-delete! ID UID)
-    (calendar-conflicts)
-    (calendar-mirror-add! FROM TO MODE)
+    (calendar-calendars)                  every calendar the OS knows, and its account
+    (calendar-sync! [FROM TO])            refresh the window into the text file
+    (calendar-events FROM TO [CALS])      the occurrences in a window
+    (calendar-event-put! EVENT)           create or update; queues a request
+    (calendar-event-delete! UID)
+    (calendar-agent-install!)             write the plist and bootstrap the GUI domain
+    (calendar-agent-uninstall!)           bootout and remove
+    (calendar-agent-status)               loaded, session, last drain, pending count
 
-define-tool! wraps the same verbs for chat. The compos MCP server then serves that surface outward. This is the answer to a calendar MCP: one surface, every provider behind it.
+define-tool! wraps the same verbs for chat, and the compos MCP server then serves them outward. That is the real answer to a calendar MCP: one surface, every account behind it.
 
-## Views
+## Payload choice
 
-- *Calendars* is a list mode over the sources. Colour, account, last sync, error and event count. g refreshes, s syncs, RET opens the calendar.
-- *Calendar* is the week grid, in render-mode blocks, from the ui/* components that agenda.scm and diff-mode already use. Clicks register through on-block-click! in components.scm. Never call the block primitive.
-- The event card is an overlay on the grid, and it edits in place.
-- *Agenda* gains calendar events beside its morg entries. One list, two origins, one sort.
+The payload is what the agent runs. It is a cheap and reversible choice, because everything sits behind the spool.
+
+| payload | build | risk |
+| --- | --- | --- |
+| JXA through osascript | none | the async grant callback does not fire, see landmines |
+| sichengchen/tap/apple-calendar-cli | Swift source build, no bottle, needs Xcode | third-party binary, 6 stars, last push 2026-02 |
+| @joargp/accli on npm | none, npx | unknown author, reads your calendar |
+
+JXA is in use and works. apple-calendar-cli covers list, get, create, update, delete, recurrence, alerts and --json, so it is the drop-in if JXA turns awkward, at the cost of compiling Swift once through brew.
+
+## Linux
+
+Linux has no OS calendar. Evolution Data Server over D-Bus is GNOME-only and worse than what it replaces. What Linux users actually run is vdirsyncer writing a vdir, a directory of .ics files.
+
+So Linux gets a separate importer into the same text file: CalDAV directly, or an existing vdir. The text store absorbs the difference, and no view knows which host produced a row. iCloud, Fastmail and Nextcloud take an app password. Google does not, and there CalDAV is the worse of the two Google doors, since the REST API gives sync tokens and JSON instead of XML and sync-collection.
 
 ## Phases
 
-The Apple probe moved the order. A merged read now comes before any network work at all.
+| phase | what | state |
+| --- | --- | --- |
+| P1 | the agent: plist, drain script, JXA payloads, install and uninstall verbs | probes done and verified |
+| P2 | read into the text file, tree-sitter parse, calendar-events | next |
+| P3 | views: agenda merge, then the week grid | morg-agenda-mode already does most of it |
+| P4 | the outbox: create, update, delete, results, reconcile | write path proven |
+| P5 | Linux importer over CalDAV or a vdir | |
+| P6 | mirroring between calendars, full or busy-only, with a link map | |
+| P7 | freebusy and RSVP | |
 
-P1. Model and store. ICS, RRule, Store, expansion, and the Local provider. No network. Tests only. This phase decides whether the rest is sound.
-
-P2. The Apple provider. Every calendar this Mac holds, read-only, in the merged store. No OAuth, no tokens, no sync engine. This is the phase that makes the calendar useful.
-
-P3. Views. The week grid, the day view, the event card and the agenda merge. Read-only is enough to earn its place.
-
-P4. CalDAV, read and write. iCloud and Fastmail with app passwords. This adds the write path and the first host that is not this Mac.
-
-P5. Google direct, through gog and then natively. Only needed where CalDAV does not reach, or where a non-Mac host must read Google.
-
-P6. Mirroring. Rules, links and the loop guard.
-
-P7. Freebusy and invitation replies.
+gog is dropped. It is Google-only, it is a pain to set up, the copy here is seven minor versions stale, and macOS reaches the same account for free.
 
 ## Landmines
 
-- Elixir ships a UTC-only time zone database. See the dependency decisions.
-- OccurrenceCache is a bounded cache. Do not read it.
-- A SQLite comparison of a number against text never matches, and answers an empty calendar rather than an error.
-- A Google all day event uses date, not dateTime, and its end is exclusive. A one day event ends the next morning.
-- A Google syncToken expires. A 410 answer must force a full resync.
-- In CalDAV the href is the identity, not the UID. iCloud invents hrefs.
-- RECURRENCE-ID and EXDATE must survive a round trip. Lose one and a cancelled meeting comes back.
-- Never call task-run! at load time.
-- Store work runs off the Session lane. A synchronous SQLite call inside a command freezes the editor. Open the handle once, not once per query.
-- Never test against the live daemon at ~/.compos/sock.
-- define-list-mode! caches its options. A new option key needs the definition to run again, and a hot reload alone does not reach it.
+Every one of these fails silently into an empty calendar rather than an error, which is why they are written down.
+
+| landmine | what happens |
+| --- | --- |
+| the Background session | EventKit returns an empty array with no error. Check launchctl managername before believing an empty result |
+| SQLite number against text | a comparison of a numeric column against a text literal never matches, and returns zero rows |
+| OccurrenceCache | a bounded UI cache, not an expansion. It stopped at 2026-01 while the base tables ran to 2031 |
+| CFAbsoluteTime | the SQLite path stores seconds from 2001-01-01. Add 978307200 |
+| floating time zones | a floating or all-day time has no zone, and start_tz reads _float. Do not coerce it to local |
+| the JXA grant callback | requestFullAccessToEventsWithCompletion never fired its block in the probe, and granted stayed null. Access still worked. Judge access by whether calendars come back, not by that flag |
+| stale delete readback | after removeEventSpanError, eventWithIdentifier still returned the object. Verify a delete with a fresh store or against the SQLite file |
+| the TCC row is a path | the grant is recorded against /bin/zsh as a path, client_type 1. Change the interpreter and the grant is gone |
+| the schema is not a contract | Calendar.sqlitedb carries no promise across macOS releases. Probe it, do not trust it |
+| no task-run! at load | the package registers verbs at load and starts nothing |
+| define-list-mode! caches | a new option key needs the definition re-run. A hot reload alone does not reach the mode |
 
 ## Open decisions
 
-1. Is the Apple surface enough for the first release? It reads every account already. If so, P4 and P5 wait until a write is wanted.
-2. Two-way write, or read plus a local calendar that compos owns?
-3. Mirroring: full details, or busy blocks only?
-4. Does this replace the gog cron that writes ~/docs/Work/schedule.org, or run beside it?
-5. Store path: ~/.compos/calendar.db is assumed.
+1. Where the text file lives, and whether it is one file or one per month. One file is simpler, and the window bounds its size.
+2. Whether the write path targets defaultCalendarForNewEvents or asks, when the account is ambiguous.
+3. Whether a compos edit to the text file pushes back to the calendar, or whether the file is read-only for events and writes go through the verbs. Two-way text editing is the more Emacs answer and the more dangerous one.
+4. Whether the agent runs on an interval or only on demand. On demand is cheaper and makes the file stale between uses.
