@@ -629,7 +629,7 @@ defmodule Compos.Ui.MobileLive do
     <div class="hh-modeline" phx-click="run" phx-value-cmd="modeline-expand">
       <span class="hh-ml-flags">{flags(@leaf)}</span>
       <span class="hh-ml-name">{ml_name(@leaf)}</span>
-      <span class="hh-ml-mode">({@leaf && @leaf.mode})</span>
+      <span :if={@leaf && @leaf.modeline_preset not in [nil, ""]} class="hh-ml-mode">{@leaf.modeline_preset}</span>
       <span class="hh-spacer"></span>
       <span :if={@leaf && @leaf.modeline_info not in [nil, ""]} class="hh-ml-info">{@leaf.modeline_info}</span>
       <span :if={@state.pending != []} class="hh-ml-pending">{Enum.join(@state.pending, " ")}-</span>

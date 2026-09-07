@@ -3096,6 +3096,8 @@ defmodule Compos.Core.Editor do
       modeline_project: Map.get(locals, "modeline-project"),
       # free-form per-buffer modeline segment (agent connector, etc.)
       modeline_info: Map.get(locals, "modeline-info"),
+      # the LLM tool preset alone, for a modeline too narrow for the line
+      modeline_preset: Map.get(locals, "modeline-preset"),
       # the version-control change this buffer's save would amend (jj.scm)
       modeline_vcs: Map.get(locals, "modeline-vcs"),
       selected: Map.get(locals, "buffer-selected", false),
