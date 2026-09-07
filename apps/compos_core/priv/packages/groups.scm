@@ -3454,6 +3454,8 @@
 (public! 'group-window-as "(group-window-as GROUP ROLE) -> visible window for ROLE, or #f")
 (public! 'scene-buffer "(scene-buffer ROLE) -> current scene/group buffer with ROLE, or #f")
 (public! 'scene-window "(scene-window ROLE) -> current scene/group window with ROLE, or #f")
+(public! 'group-counts "(group-counts) -> (COUNT NAME ID) for every group, most members first")
+(public! 'group-counts-report "(group-counts-report) -> group-counts as a name-and-count column with a total")
 (public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")
 (public! 'group-chat-show! "(group-chat-show! G) — open/focus G's chat pane; returns its name")
 (public! 'chat-inject-reply!
@@ -3478,6 +3480,8 @@
 (catalog-meta! 'function "buffer-color-group" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "buffer-filename-face" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-buffers" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "group-counts" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "group-counts-report" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-chat" 'domain 'buffers 'effects '(write))
 (catalog-meta! 'function "group-chat-show!" 'domain 'buffers 'effects '(write))
 (catalog-meta! 'function "chat-inject-reply!" 'domain 'chat 'effects '(write display))
