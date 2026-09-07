@@ -718,6 +718,7 @@ defmodule Compos.Ui.MobileLive do
     name = if assigns.tab in names, do: assigns.tab, else: @root
     section = Enum.find(assigns.keys, &(&1.name == name))
     rows = (section && section.rows) || []
+    recent = recent_chords(assigns.keys)
 
     assigns =
       assign(assigns,
@@ -726,8 +727,8 @@ defmodule Compos.Ui.MobileLive do
         pending: assigns.state.pending,
         caps:
           if(name == @root,
-            do: root_caps(assigns.keys),
-            else: caps(rows, assigns.path, name, names)
+            do: root_caps(assigns.keys, recent),
+            else: caps(rows, assigns.path, name, names, recent)
           )
       )
 
@@ -874,7 +875,7 @@ defmodule Compos.Ui.MobileLive do
   # is what the tap does, which is to jump to that section, where the caps
   # are what the modifier leaves to press. The root latches nothing, so it
   # reads no path.
-  defp root_caps(keys) do
+  defp root_caps(keys, recent) do
     names = Enum.map(keys, & &1.name)
     plain = Enum.find(keys, &(&1.name == "plain"))
     mods = Enum.flat_map(@mods, &section_cap(keys, &1))
@@ -888,7 +889,9 @@ defmodule Compos.Ui.MobileLive do
       |> Enum.reject(&(&1 in ["recent" | @families] or mod_led?(&1)))
       |> Enum.flat_map(&section_cap(keys, &1))
 
-    mods ++ caps((plain && plain.rows) || [], [], "plain", names) ++ bare
+    plain_caps = caps((plain && plain.rows) || [], [], "plain", names, recent)
+
+    order_caps(mods ++ plain_caps ++ bare, recent)
   end
 
   # one cap for a whole section: the tap goes there, and the caps become
@@ -905,6 +908,7 @@ defmodule Compos.Ui.MobileLive do
             kind: :jump,
             key: name,
             command: "",
+            chord: name,
             label: map_label(nil, length(section.rows))
           }
         ]
@@ -913,23 +917,49 @@ defmodule Compos.Ui.MobileLive do
 
   defp mod_led?(name), do: Enum.any?(@mods, &String.starts_with?(name, &1))
 
-  defp caps(rows, path, section, names) do
+  defp caps(rows, path, section, names, recent) do
     under = rows_under(rows, path)
 
     under
     |> Enum.map(&next_step(&1.rest))
     |> Enum.uniq()
     |> Enum.map(&cap(&1, under, path, section, names))
-    |> mods_first()
+    |> order_caps(recent)
   end
 
-  # a modifier is the first thing you reach for, so its cap leads the grid
-  # wherever the key sort would have put it. The sort is stable, so every
-  # other cap keeps the order the rows gave it.
-  defp mods_first(caps) do
+  # the order of the grid: a modifier first, because that is what you
+  # reach for; then a cap that leads to something you pressed lately;
+  # then everything else. Inside a tier the caps read alphabetically.
+  defp order_caps(caps, recent) do
     Enum.sort_by(caps, fn c ->
-      Enum.find_index(@mods, fn m -> m == c.step end) || length(@mods)
+      mod = Enum.find_index(@mods, fn m -> m == c.step end)
+
+      tier =
+        cond do
+          mod -> {0, mod}
+          MapSet.member?(recent, c.chord) -> {1, 0}
+          true -> {2, 0}
+        end
+
+      {tier, String.downcase(c.step), c.step}
     end)
+  end
+
+  # every chord the recent list names, and every prefix of one: the cap
+  # for C-x is recent when C-x k is, since that is the way there
+  defp recent_chords(keys) do
+    case Enum.find(keys, &(&1.name == "recent")) do
+      nil ->
+        MapSet.new()
+
+      section ->
+        for row <- section.rows,
+            steps = String.split(row.key, " ", trim: true),
+            steps != [],
+            n <- 1..length(steps)//1,
+            into: MapSet.new(),
+            do: steps |> Enum.take(n) |> Enum.join(" ")
+    end
   end
 
   defp cap(step, under, path, section, names) do
@@ -937,19 +967,20 @@ defmodule Compos.Ui.MobileLive do
     here = Enum.find(group, &(&1.rest == step))
     kids = Enum.reject(group, &(&1.rest == step))
     chord = chord_of(section, path ++ [step])
+    base = %{step: step, chord: chord, kind: :run, key: nil, command: "", label: ""}
 
     cond do
       here && not prefix_row?(here) ->
-        %{step: step, kind: :run, key: here.key, command: here.command, label: here.command}
+        %{base | kind: :run, key: here.key, command: here.command, label: here.command}
 
       kids != [] ->
-        %{step: step, kind: :drill, key: nil, command: "", label: map_label(here, length(kids))}
+        %{base | kind: :drill, label: map_label(here, length(kids))}
 
       chord in names ->
-        %{step: step, kind: :jump, key: chord, command: "", label: map_label(here, 0)}
+        %{base | kind: :jump, key: chord, label: map_label(here, 0)}
 
       true ->
-        %{step: step, kind: :run, key: cap_key(here, step), command: "", label: map_label(here, 0)}
+        %{base | kind: :run, key: cap_key(here, step), label: map_label(here, 0)}
     end
   end
 
