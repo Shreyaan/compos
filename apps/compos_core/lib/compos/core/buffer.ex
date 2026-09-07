@@ -1506,9 +1506,10 @@ defmodule Compos.Core.Buffer do
     {:reply, point, state |> Map.put(:point, point) |> checkpoint_later()}
   end
 
-  # Undo belongs to the actor that asks for it. The document reverts only that
-  # actor's operations and rebases them over everyone else's, so undoing your
-  # own typing no longer reverts the agent's work in the same buffer.
+  # One undo tree per buffer: every actor that writes content - the user, an
+  # agent, an editor command - lands on the same "user" scope. C-/ walks back
+  # through all of it, agent text included, the way Emacs keeps a single undo
+  # list for a buffer.
   #
   # The Emacs model survives on top of that. A run of consecutive undos keeps
   # walking back; any other command breaks the run, after which undo replays
