@@ -920,6 +920,16 @@ defmodule Compos.Ui.MobileLive do
     |> Enum.map(&next_step(&1.rest))
     |> Enum.uniq()
     |> Enum.map(&cap(&1, under, path, section, names))
+    |> mods_first()
+  end
+
+  # a modifier is the first thing you reach for, so its cap leads the grid
+  # wherever the key sort would have put it. The sort is stable, so every
+  # other cap keeps the order the rows gave it.
+  defp mods_first(caps) do
+    Enum.sort_by(caps, fn c ->
+      Enum.find_index(@mods, fn m -> m == c.step end) || length(@mods)
+    end)
   end
 
   defp cap(step, under, path, section, names) do

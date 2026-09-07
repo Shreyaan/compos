@@ -80,6 +80,30 @@ defmodule Compos.Ui.MobileLiveTest do
     refute has_element?(view, ".hh-ml-pending")
   end
 
+  test "a modifier cap leads the grid, whatever the key sort says", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/m")
+    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> a" "keyboard-quit")})
+    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> C-b" "keyboard-quit")})
+
+    on_exit(fn ->
+      Compos.Core.Session.eval(~s{(global-unset-key "<f9> a")})
+      Compos.Core.Session.eval(~s{(global-unset-key "<f9> C-b")})
+    end)
+
+    # the rows sort by key, so "a" comes before "C-b"; the cap for the
+    # modifier still leads, because a modifier is what you reach for first
+    hook(view, "fan", %{"open" => true})
+    hook(view, "fan_tab", %{"t" => "<f9>"})
+
+    caps =
+      ~r{<span class="hh-cap-key[^"]*">([^<]*)</span>}
+      |> Regex.scan(render(view))
+      |> Enum.map(fn [_, key] -> key end)
+
+    assert ["C-" | rest] = caps
+    assert "a" in rest
+  end
+
   test "typing in the panel searches every command, and a match runs by name", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
 
