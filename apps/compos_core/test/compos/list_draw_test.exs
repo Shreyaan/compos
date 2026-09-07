@@ -50,4 +50,17 @@ defmodule Compos.ListDrawTest do
     assert Buffer.text("*zz-page*") =~ "row 49"
     eval!(~s{(buffer-kill! "*zz-page*")})
   end
+
+  test "a redraw that changes nothing changes nothing" do
+    eval!(~s{(begin (load-tests!) (list-mode-show! "zz-page-mode") #t)})
+    eval!(~s{(list-redraw! "*zz-page*")})
+    ref = Buffer.ref("*zz-page*")
+    Events.subscribe(ref)
+
+    eval!(~s{(list-redraw! "*zz-page*")})
+
+    changes = count_changes(ref)
+    assert changes == 0, "a still redraw made #{changes} buffer changes"
+    eval!(~s{(buffer-kill! "*zz-page*")})
+  end
 end

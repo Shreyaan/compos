@@ -1010,17 +1010,26 @@ defmodule Compos.Core.Buffer do
     do: {:reply, :ok, state |> Map.put(:read_only, bool) |> checkpoint_later()}
 
   defp on_call({:set_locals, locals}, _from, state) do
-    state = %{state | locals: Map.merge(state.locals, locals)}
+    merged = Map.merge(state.locals, locals)
 
-    state =
-      case Map.fetch(locals, "ts-lang") do
-        {:ok, lang} -> init_ts(state, lang)
-        :error -> state
-      end
+    # A local that holds its value is not a change. The broadcast is a
+    # frame refresh and a render, and a list redraws its locals on every
+    # tick: answer the write that says nothing with nothing.
+    if merged == state.locals and not Map.has_key?(locals, "ts-lang") do
+      {:reply, :ok, state}
+    else
+      state = %{state | locals: merged}
 
-    Events.broadcast_editor(:locals)
-    broadcast(state, state.point, "", 0, :locals)
-    {:reply, :ok, checkpoint_later(state)}
+      state =
+        case Map.fetch(locals, "ts-lang") do
+          {:ok, lang} -> init_ts(state, lang)
+          :error -> state
+        end
+
+      Events.broadcast_editor(:locals)
+      broadcast(state, state.point, "", 0, :locals)
+      {:reply, :ok, checkpoint_later(state)}
+    end
   end
 
   defp on_call({:set_local, key, val}, _from, state) do
@@ -1048,15 +1057,20 @@ defmodule Compos.Core.Buffer do
   # typed character wears the old face until the next key. The phantom
   # :locals source triggers no reactor rule, so no paint loop starts.
   defp on_call({:set_overlays, tag, ranges}, _from, state) do
-    state = %{
-      state
-      | overlays: Map.put(state.overlays, tag, ranges),
-        overlay_gen: state.overlay_gen + 1
-    }
+    # the same ranges again paint the same pixels: no change, no refresh
+    if Map.get(state.overlays, tag) == ranges do
+      {:reply, :ok, state}
+    else
+      state = %{
+        state
+        | overlays: Map.put(state.overlays, tag, ranges),
+          overlay_gen: state.overlay_gen + 1
+      }
 
-    Events.broadcast_editor(:locals)
-    broadcast(state, state.point, "", 0, :locals)
-    {:reply, :ok, state}
+      Events.broadcast_editor(:locals)
+      broadcast(state, state.point, "", 0, :locals)
+      {:reply, :ok, state}
+    end
   end
 
   defp on_call({:clear_overlays, :all}, _from, state),

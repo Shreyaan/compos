@@ -1011,14 +1011,27 @@
 ;; The mode's columns fn runs once per draw: every later call in the
 ;; same draw reads the cache. The cache keys on the width, so a resize
 ;; recomputes. A draw clears the cache first.
+;;; The column layout is a cache, not state the frame shows. A buffer
+;;; local is a change, and a change is a frame refresh and a render, so
+;;; a draw that laid its columns out again refreshed every frame twice
+;;; for a table nobody could see change. The cache lives here instead,
+;;; one entry per list buffer, keyed by the width it was laid out for.
+(define *list-columns-cache* '())
+
+(define (list-columns-forget! buf)
+  (set! *list-columns-cache*
+        (filter (lambda (e) (not (equal? (car e) buf))) *list-columns-cache*)))
+
 (define (list-column-lines buf)
-  (let ((w (list-view-width buf))
-        (cache (buffer-local buf 'list-columns-cache)))
-    (if (and (pair? cache) (equal? (car cache) w))
-        (cadr cache)
+  (let* ((w (list-view-width buf))
+         (cache (assoc buf *list-columns-cache*)))
+    (if (and cache (equal? (cadr cache) w))
+        (nth 2 cache)
         (let ((cols (map (lambda (cs) (list-fit-columns cs w))
                          (list-declared-columns buf))))
-          (buffer-set-local! buf 'list-columns-cache (list w cols))
+          (list-columns-forget! buf)
+          (set! *list-columns-cache*
+                (cons (list buf w cols) *list-columns-cache*))
           cols))))
 
 ;; the first line's columns — the label row and every caller that means
@@ -1433,9 +1446,8 @@
 (define (list-write! buf lines first-row n-rows per &optional extra-locals)
   (let loop ((ls lines) (i 0) (off 0) (ovs '()) (offsets '()) (texts '()))
     (if (null? ls)
-        (begin (buffer-replace-range! buf 0 (buffer-size buf)
-                                      (string-join (reverse texts) ""))
-               (buffer-set-locals! buf
+        (begin (list-write-text! buf (string-join (reverse texts) ""))
+               (list-set-locals! buf
                  (append (list 'list-offsets (reverse offsets)
                                'list-head-count first-row
                                'list-row-height per)
@@ -1955,10 +1967,11 @@
         ;; many lines it has, and that laid the columns out while the
         ;; rows they must fit were still the last draw's. Every later
         ;; call in this draw reads the cache, so the mode's columns fn
-        ;; still runs once. One change for the three.
-        (buffer-set-locals! buf
+        ;; still runs once. One change for the two, and none when the
+        ;; rows this draw found are the rows the last one drew.
+        (list-columns-forget! buf)
+        (list-set-locals! buf
           (list 'list-entries rows
-                'list-columns-cache #f
                 'list-shown-count (length shown)))
         (let* (;; the header once: its lines and their count are one answer
                (head (list-head-lines buf))
