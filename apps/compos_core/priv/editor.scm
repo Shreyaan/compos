@@ -11178,10 +11178,21 @@
         (string-join (string-split text home) "~")
         text)))
 
+;; A chat is known by its title, not by *chat:GROUP:N*. A titled chat
+;; wears its title as its buffer name already; an untitled one keeps its
+;; derived name until its running summary writes the first label.
+(define (buffer-modeline-chat-name buf)
+  (let ((label (and (chat-buffer? buf)
+                    (boundp 'chat-prompt-label)
+                    (chat-prompt-label buf))))
+    (if (and (string? label) (not (equal? label "")))
+        label
+        (abbreviate-home-in buf))))
+
 (define (buffer-modeline-name buf)
   (let* ((path (buffer-path buf))
          (root (buffer-project-root buf))
-         (name (cond ((not (string? path)) (abbreviate-home-in buf))
+         (name (cond ((not (string? path)) (buffer-modeline-chat-name buf))
                      ((and (string? root) (not (equal? root ""))
                            (string-prefix? (string-append root "/") path))
                       (substring path (+ 1 (string-length root)) (string-length path)))
