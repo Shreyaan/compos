@@ -21,15 +21,17 @@
 
 (define *group-records* '())
 (define *group-next-id* 0)
-(define *group-colors*
-  '("#d05a47" "#3f7cac" "#4f8a5b" "#9b6ab3" "#c28a2c" "#347f7a"))
+(define *group-colors* 6)              ; how many slots the group scale has
 
-(defface! 'group-color-1 'fg "#d05a47" 'weight "700")
-(defface! 'group-color-2 'fg "#3f7cac" 'weight "700")
-(defface! 'group-color-3 'fg "#4f8a5b" 'weight "700")
-(defface! 'group-color-4 'fg "#9b6ab3" 'weight "700")
-(defface! 'group-color-5 'fg "#c28a2c" 'weight "700")
-(defface! 'group-color-6 'fg "#347f7a" 'weight "700")
+;; The theme owns the colour of a group; a package owns its weight. Each
+;; slot has an entry in every palette, so a theme switch re-tints every
+;; group at once.
+(defface! 'group-color-1 'weight "700")
+(defface! 'group-color-2 'weight "700")
+(defface! 'group-color-3 'weight "700")
+(defface! 'group-color-4 'weight "700")
+(defface! 'group-color-5 'weight "700")
+(defface! 'group-color-6 'weight "700")
 
 (define (group-record-id record) (nth 0 record))
 (define (group-record-name record) (nth 1 record))
@@ -37,6 +39,8 @@
 (define (group-record-layout record) (nth 3 record))
 (define (group-record-noise record) (nth 4 record))
 (define (group-record-primary-chat-id record) (nth 5 record))
+;; the group's slot on the colour scale, 1 to *group-colors*, the seventh
+;; field. A slot survives a theme switch where a hex could not.
 (define (group-record-color record)
   (and (> (length record) 6) (nth 6 record)))
 ;; the id of the group this one popped out of; dissolve merges back into it

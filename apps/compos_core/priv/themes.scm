@@ -344,6 +344,14 @@
     (list 'org-level-3 'fg "#9ece6a" 'weight "600")
     (list 'org-level-4 'fg "#bb9af7" 'weight "600")
     (list 'window 'bg "#23242a")
+    ;; the group scale: six colours a group is allotted by slot, told
+    ;; apart at a glance and readable against this theme's background
+    (list 'group-color-1 'fg "#f7768e")
+    (list 'group-color-2 'fg "#7aa2f7")
+    (list 'group-color-3 'fg "#9ece6a")
+    (list 'group-color-4 'fg "#bb9af7")
+    (list 'group-color-5 'fg "#e0af68")
+    (list 'group-color-6 'fg "#7dcfff")
     (list 'window-inactive 'bg "#1e1f22")
     (list 'modeline 'bg "#2f3140" 'fg "#8b8fa3")
     (list 'modeline-active 'bg "#3b4261" 'fg "#d6d8de")
@@ -406,6 +414,14 @@
     (list 'org-level-2 'fg "#fab387" 'weight "600")
     (list 'org-level-3 'fg "#a6e3a1" 'weight "600")
     (list 'org-level-4 'fg "#cba6f7" 'weight "600")
+    ;; the group scale: six colours a group is allotted by slot, told
+    ;; apart at a glance and readable against this theme's background
+    (list 'group-color-1 'fg "#f38ba8")
+    (list 'group-color-2 'fg "#89b4fa")
+    (list 'group-color-3 'fg "#a6e3a1")
+    (list 'group-color-4 'fg "#cba6f7")
+    (list 'group-color-5 'fg "#fab387")
+    (list 'group-color-6 'fg "#94e2d5")
     (list 'window 'bg "#181825")
     (list 'window-inactive 'bg "#11111b")
     (list 'modeline 'bg "#313244" 'fg "#a6adc8")
@@ -587,6 +603,8 @@
 (public! 'face-clear! "(face-clear! FACE) — forget every attribute of FACE")
 (public! 'theme-faces "(theme-faces NAME) -> the theme's face specs")
 (public! 'theme-dark? "(theme-dark?) -> #t when the current theme has a dark default background")
+(public! 'face-color "(face-color FACE ATTR) -> the value FACE wears now, theme first and the package default after; #f when neither names ATTR")
 (public! '*themes* "The theme registry: ((name . spec) ...)")
 
 (catalog-meta! 'function "theme-dark?" 'domain 'faces 'effects '(read))
+(catalog-meta! 'function "face-color" 'domain 'faces 'effects '(read))
