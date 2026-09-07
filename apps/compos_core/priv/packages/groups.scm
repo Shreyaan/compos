@@ -1198,6 +1198,44 @@
 
 (set! window-state-changed! group-current-recalculate!)
 
+;;; --- go to a buffer where it lives ----------------------------------------------
+;;; A list says "take me to this buffer". The buffer can belong to
+;;; another group, and a switch alone would show it as a foreign buffer
+;;; over the group the frame stands in. The frame enters the buffer's
+;;; group first, so the buffer takes a pane of its own group. A buffer
+;;; of the current group, and a buffer no group holds, opens where it is.
+
+;; "here" for a verb run from a list. A table of buffers belongs to no
+;; group, so showing one takes the frame out of the group the verb
+;; means: the group it last left is that group.
+(define (group-here)
+  (let loop ((ids (append (list (frame-group) (frame-local 'previous-group))
+                          (group-ids-mru))))
+    (if (null? ids)
+        #f
+        ;; the MRU keeps ids whose record is gone: a name that resolves
+        ;; now is the only one a verb can act on
+        (let ((id (and (car ids) (group-resolve-id (car ids)))))
+          (if id id (loop (cdr ids)))))))
+
+;; the group to enter for B: the one at hand when B is a member of it,
+;; else B's first membership, else #f
+(define (group-home-of b)
+  (let ((here (group-here))
+        (ids (group-context-memberships b)))
+    (and (pair? ids)
+         (if (and here (member here ids)) here (car ids)))))
+
+(define (switch-to-buffer-in-group! b)
+  (let ((id (group-home-of b)))
+    (when (and id (not (equal? id (frame-group))))
+      (switch-to-group! id))
+    (let ((w (window-showing b)))
+      (if (and w (window-exists? w))
+          (select-window! w)
+          (switch-to-buffer! b)))
+    id))
+
 ;;; --- a sealed group and the popup -----------------------------------------------
 ;;; A buffer from outside the group never takes a pane by a switch. The
 ;;; display chain shows it as category foreign, the popup by the stock
@@ -2818,8 +2856,11 @@
          (mode (buffer-local buf 'mode-name))
          (marked (cond ((equal? mode "switch-mode")
                         (list-live-marked buf *list-mark-char*))
-                       ((equal? mode "ibuffer-mode")
-                        (filter buffer-known? (list-targets buf)))
+                       ;; every table of buffers marks the same way: the
+                       ;; chats table is the buffers table over the chats
+                       ((and (list-mode-of buf)
+                             (equal? (list-opt buf 'category) 'buffer))
+                        (filter buffer-known? (filter string? (list-targets buf))))
                        (else '())))
          (selected (filter (lambda (candidate)
                              (buffer-local candidate 'buffer-selected))
@@ -2947,6 +2988,27 @@
                                   (if (= (length eligible) 1) "" "s")
                                   " to " (group-name id)))
           (length eligible))))))
+
+;; The membership half of a move, for the group the frame already stands
+;; in. `move` proper enters the destination when it is done; here there
+;; is nothing to enter, and a restore of this group's saved layout would
+;; take the windows away from under the user.
+(define (group-move-buffers-here! buffers)
+  (let ((id (group-here)))
+    (if (not id)
+        (begin (message "There is no group here") #f)
+        (let ((eligible
+                (filter (lambda (buf)
+                          (and (buffer-known? buf)
+                               (group-work-buffer? buf)
+                               (not (group-scratch-buffer? buf))))
+                        buffers)))
+          (for-each (lambda (buf) (buffer-move-to-group! buf id)) eligible)
+          (run-hooks 'group-membership-hook)
+          (message (string-append "Moved " (number->string (length eligible))
+                                  " buffer" (if (= (length eligible) 1) "" "s")
+                                  " to " (group-name id)))
+          (length eligible)))))
 
 (define (buffer-add-family-to-group! buf destination)
   (let ((family (buffer-family buf))
@@ -3262,6 +3324,12 @@
 (public! 'group-parent-set! "(group-parent-set! G PARENT) — record PARENT as the group G popped out of")
 (public! 'group-read-or-create!
   "(group-read-or-create! PROMPT RECEIVE) — read an existing group or create the typed name")
+(public! 'switch-to-buffer-in-group!
+  "(switch-to-buffer-in-group! B) — enter B's group, then focus B there; returns the group id or #f")
+(public! 'group-here "(group-here) -> the group a verb run from a list means: the frame's, else the one it last left")
+(public! 'group-home-of "(group-home-of B) -> the group to enter for B: this one when B is a member, else B's first")
+(public! 'group-add-buffers-to! "(group-add-buffers-to! BUFFERS GROUP) — join GROUP; returns how many joined")
+(public! 'group-move-buffers-here! "(group-move-buffers-here! BUFFERS) — move BUFFERS to the frame's current group, without a switch")
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
 (effects! '(read))
 (public! 'buffer-color-group

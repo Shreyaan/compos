@@ -215,3 +215,136 @@
       (check-equal! (car (nth 2 cells)) "*zz-ib-b*" "the name")
       (check-contains! (car (nth 3 cells)) "3 · zz-ib" "size and mode"))
     (ibuffer-test-reset!)))
+
+;;; --- RET goes to the buffer where it lives ------------------------------------
+
+;; two groups, one buffer each, the frame standing in the first
+(define (ibuffer-test-two-groups!)
+  (ibuffer-test-reset!)
+  (for-each (lambda (name)
+              (let ((old (group-record-by-name name)))
+                (when old (group-record-delete! old))))
+            '("zzgrp-one" "zzgrp-two"))
+  (test-buffer! "*zz-ib-a*" "")
+  (test-buffer! "*zz-ib-b*" "")
+  (let ((one (group-record-create! "zzgrp-one"))
+        (two (group-record-create! "zzgrp-two")))
+    (buffer-add-group! "*zz-ib-a*" one)
+    (buffer-add-group! "*zz-ib-b*" two)
+    (switch-to-group! one)
+    (switch-to-buffer! "*zz-ib-a*")
+    (list one two)))
+
+;; open the table on one row alone and rest the highlight on it
+(define (ibuffer-test-point-on! name)
+  (run-command "ibuffer")
+  (buffer-set-locals! "*ibuffer*"
+    (list 'ibuffer-grouping 'group 'ibuffer-sort 'name 'ibuffer-collapsed '()))
+  (list-set-filters! "*ibuffer*" (list (list "match" name)))
+  (ibuffer-refresh!)
+  (list-goto-first-entry "*ibuffer*")
+  (ibuffer-current "*ibuffer*"))
+
+(define (ibuffer-test-groups-reset! ids)
+  (ibuffer-test-reset!)
+  ;; a group with no saved layout builds one, and that makes its chat: the
+  ;; buffers a verb made must not outlive the test that made them
+  (for-each (lambda (b)
+              (when (and (buffer-known? b) (string-contains? b "zzgrp-"))
+                (buffer-kill! b)))
+            (buffer-list))
+  (for-each (lambda (id) (when (group-record-by-id id) (group-record-delete! id))) ids))
+
+(deftest 'ibuffer-visit-enters-the-group-of-the-row
+  "RET on a row of another group enters that group and focuses the buffer"
+  (lambda ()
+    (let* ((ids (ibuffer-test-two-groups!))
+           (one (car ids))
+           (two (cadr ids)))
+      (check-equal! (frame-group) one "the frame stands in the first group")
+      (check-equal! (ibuffer-test-point-on! "zz-ib-b") "*zz-ib-b*" "point is on the other group's row")
+      (run-command "ibuffer-visit")
+      (check-equal! (frame-group) two "the frame entered the row's group")
+      (check-equal! (current-buffer) "*zz-ib-b*" "and the buffer is the one in hand")
+      (ibuffer-test-groups-reset! ids))))
+
+(deftest 'ibuffer-visit-stays-put-for-a-buffer-of-this-group
+  "a row of the group at hand opens without a switch"
+  (lambda ()
+    (let* ((ids (ibuffer-test-two-groups!))
+           (one (car ids)))
+      (check-equal! (ibuffer-test-point-on! "zz-ib-a") "*zz-ib-a*" "point is on this group's row")
+      (run-command "ibuffer-visit")
+      (check-equal! (frame-group) one "the frame kept its group")
+      (check-equal! (current-buffer) "*zz-ib-a*" "and the buffer is the one in hand")
+      (ibuffer-test-groups-reset! ids))))
+
+;;; --- C-. on a row --------------------------------------------------------------
+
+(define (ibuffer-test-act! name)
+  (let ((a (assoc name (actions-for 'buffer))))
+    (check-true! (and a #t) (string-append "the menu offers " name))
+    ((cadr a) (ibuffer-current "*ibuffer*"))))
+
+(deftest 'ibuffer-row-is-a-typed-target
+  "the row at point answers as a buffer target, it follows the highlight, and a heading answers nothing"
+  (lambda ()
+    (let ((ids (ibuffer-test-two-groups!)))
+      (ibuffer-test-point-on! "zz-ib-")
+      (check-equal! (target-at "*ibuffer*") '(buffer "*zz-ib-a*" "*zz-ib-a*")
+                    "the row at point names itself")
+      (let* ((rows (list-entries "*ibuffer*"))
+             (i (list-index-of "*ibuffer*" rows "*zz-ib-b*"))
+             (heading (list-index-of "*ibuffer*" rows
+                                     (list-key "*ibuffer*"
+                                               (car (filter ibuffer-heading? rows))))))
+        (list-goto-index! "*ibuffer*" i)
+        (check-equal! (target-at "*ibuffer*") '(buffer "*zz-ib-b*" "*zz-ib-b*")
+                      "the target follows the highlight")
+        (list-goto-index! "*ibuffer*" heading)
+        (check-false! (ibuffer-target-at "*ibuffer*") "a heading is no target"))
+      (ibuffer-test-groups-reset! ids))))
+
+(deftest 'ibuffer-act-move-here-takes-the-row-into-this-group
+  "move here leaves the row's old group and joins the group at hand"
+  (lambda ()
+    (let* ((ids (ibuffer-test-two-groups!))
+           (one (car ids))
+           (two (cadr ids)))
+      (ibuffer-test-point-on! "zz-ib-b")
+      (ibuffer-test-act! "move here")
+      (check-equal! (buffer-group-ids "*zz-ib-b*") (list one) "the buffer moved to the group at hand")
+      (check-equal! (group-buffers two) '() "and left the group it was in")
+      (ibuffer-test-groups-reset! ids))))
+
+(deftest 'ibuffer-act-add-here-keeps-the-old-membership
+  "add here joins the group at hand and keeps the row's own group"
+  (lambda ()
+    (let* ((ids (ibuffer-test-two-groups!))
+           (one (car ids))
+           (two (cadr ids)))
+      (ibuffer-test-point-on! "zz-ib-b")
+      (ibuffer-test-act! "add here")
+      (check-true! (buffer-in-group? "*zz-ib-b*" one) "the buffer joined the group at hand")
+      (check-true! (buffer-in-group? "*zz-ib-b*" two) "and kept the group it was in")
+      (ibuffer-test-act! "remove here")
+      (check-false! (buffer-in-group? "*zz-ib-b*" one) "remove here undoes it")
+      (check-true! (buffer-in-group? "*zz-ib-b*" two) "and leaves the other membership")
+      (ibuffer-test-groups-reset! ids))))
+
+(deftest 'ibuffer-act-reads-the-marks
+  "a verb acts on every marked row, not on the row at point alone"
+  (lambda ()
+    (let* ((ids (ibuffer-test-two-groups!))
+           (one (car ids))
+           (two (cadr ids)))
+      (ibuffer-test-point-on! "zz-ib-")
+      (check-equal! (group-here) one "the group at hand is the one the frame came from")
+      (check-equal! (ibuffer-current "*ibuffer*") "*zz-ib-a*" "point rests on the first row")
+      (list-mark! "*ibuffer*" "*zz-ib-a*" "*")
+      (list-mark! "*ibuffer*" "*zz-ib-b*" "*")
+      (ibuffer-test-act! "add here")
+      (check-true! (buffer-in-group? "*zz-ib-b*" one)
+                   "the marked row that point does not rest on joined too")
+      (check-true! (buffer-in-group? "*zz-ib-b*" two) "and kept the group it was in")
+      (ibuffer-test-groups-reset! ids))))

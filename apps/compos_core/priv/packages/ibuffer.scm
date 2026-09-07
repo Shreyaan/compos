@@ -828,19 +828,20 @@
   (ibuffer-prompt-line! view label pick))
 
 ;; what RET does with a row, in the window form and in the minibuffer
-;; form alike: a buffer shows in the other window, the table closes
-;; (CLOSE!), and that window is selected, so the frame enters the row's
-;; group. A file no buffer holds is visited where the table came from.
+;; form alike: the table closes (CLOSE!), the frame enters the group that
+;; holds the row, and the buffer takes a pane there. A row of the group
+;; at hand, and a row no group holds, open where they are. A file no
+;; buffer holds is visited where the table came from.
 (define (ibuffer-pick! row close!)
   (cond ((not (string? row)) (message "no buffer here"))
+        ;; the table closes first: the arrangement the group it leaves
+        ;; saves must not hold the window this table was in
         ((buffer-known? row)
-         (let ((w (display-buffer-other-window! row)))
-           (close!)
-           (when (and w (window-exists? w)) (select-window! w))
-           (switch-to-buffer! row)))
+         (close!)
+         (switch-to-buffer-in-group! row))
         ((file-exists? row)
          (close!)
-         (visit-in-group row (and (boundp 'frame-group) (frame-group))))
+         (visit-in-group row (and (boundp 'group-here) (group-here))))
         (else (message "no buffer here"))))
 
 (define-command "ibuffer" "List buffers in a traditional management table"
@@ -951,9 +952,7 @@
   (list
     (list "go"
           (lambda (id)
-            (when (buffer-known? id)
-              (run-command "quit-window")
-              (switch-to-buffer-in-group! id))))
+            (ibuffer-pick! id (lambda () (run-command "quit-window")))))
     (list "add here"
           (ibuffer-act
             (lambda (targets)
