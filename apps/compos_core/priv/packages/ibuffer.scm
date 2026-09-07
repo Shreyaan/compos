@@ -554,18 +554,22 @@
 ;; wider: a flexible name column pushed the fields to the window's edge
 ;; and left a desert between them and the rows. It still gives ground
 ;; first when the window is too narrow for every field.
-(define (ibuffer-row-line-name row)
+(define (ibuffer-row-line-name buf row)
   (if (ibuffer-heading? row)
-      (ibuffer-heading-label row)
+      (ibuffer-heading-text buf row)
       (ibuffer-row-title row)))
 
-;; The width nine names in ten fit in. One long path must not push the
-;; fields to the window's edge and leave a desert beside every short
-;; name; the paths that pass this width trim in the middle, where the
-;; head is dim already.
+;; The width nine names in ten fit in, and never more than
+;; *ibuffer-name-max*. One long path must not push the fields to the
+;; window's edge and leave a desert beside every short name: ten paths
+;; in a table of fifty put the ninth-of-ten at the longest path. The
+;; names that pass this width trim in the middle, where the head of a
+;; path is dim already.
+(define *ibuffer-name-max* 40)
+
 (define (ibuffer-name-fit buf)
   (let* ((lengths (map (lambda (row)
-                         (let ((n (string-length (ibuffer-row-line-name row))))
+                         (let ((n (string-length (ibuffer-row-line-name buf row))))
                            (list n n)))
                        (list-entries buf)))
          (sorted (map car (sort lengths)))
@@ -579,7 +583,7 @@
          (room (- (list-view-width buf) 2 1 1
                   (fold (lambda (n c) (+ n (list-col-width c))) 0 fields)
                   (* gap (+ 2 (length fields))))))
-    (max 12 (min room (max 24 (ibuffer-name-fit buf))))))
+    (max 12 (min room (max 24 (min *ibuffer-name-max* (ibuffer-name-fit buf)))))))
 
 (define (ibuffer-columns buf fields)
   (append (list (list "" 1)
@@ -645,22 +649,21 @@
 ;; A section name reads as a name, in one accent, whatever the section
 ;; is. The chevron in front of it carries the section's own colour: the
 ;; group keeps its identity in one glyph instead of shouting it across
-;; the row.
-(define (ibuffer-heading-head row)
+;; the row. The count sits two spaces after the name, in the name cell:
+;; a count in the size column stood a name column away from the name it
+;; counted, and the band under the heading stopped there.
+(define (ibuffer-heading-text buf row)
+  (string-append (ibuffer-heading-label row) "  " (ibuffer-heading-details buf row)))
+
+(define (ibuffer-heading-head buf row)
   (list ""
         (list (ibuffer-chevron row) (or (ibuffer-heading-face row) "dim"))
-        (list (ibuffer-heading-label row) "accent")))
+        (list (ibuffer-heading-text buf row) "accent")))
 
-;; a heading fills the field columns with its one number, in the first of
-;; them: the count belongs beside the name it counts, not at the window's
-;; edge
+;; a heading says nothing in the field columns
 (define (ibuffer-heading-cells buf row fields)
-  (append (ibuffer-heading-head row)
-          (map (lambda (i)
-                 (if (= i 0)
-                     (list (ibuffer-heading-details buf row) "faint")
-                     ""))
-               (iota fields))))
+  (append (ibuffer-heading-head buf row)
+          (map (lambda (i) "") (iota fields))))
 
 (define (ibuffer-narrow-cells buf b) (ibuffer-cells-for buf b *ibuffer-narrow-fields*))
 (define (ibuffer-compact-cells buf b) (ibuffer-cells-for buf b *ibuffer-compact-fields*))
@@ -685,13 +688,31 @@
   (list (list off (+ off (ibuffer-row-bytes buf b) -1) face)))
 
 (define (ibuffer-row-overlays buf b off)
-  (cond ((ibuffer-heading? b) (ibuffer-band buf b off "ibuffer-heading"))
+  (cond ((ibuffer-heading? b)
+         (append (ibuffer-band buf b off "ibuffer-heading")
+                 (ibuffer-count-overlay buf b off)))
         ((not (equal? (list-mark-of buf b) " "))
          (append (ibuffer-band buf b off "ibuffer-marked")
                  (ibuffer-dir-overlay buf b off)))
         (else (ibuffer-dir-overlay buf b off))))
 
 (define (ibuffer-cell-text cell) (if (pair? cell) (car cell) cell))
+
+;; the count at the end of a heading is faint: a span over the tail of
+;; the name cell. The cell sits after the mark, the empty dot column,
+;; and the chevron, which is multibyte. A name too long for the column
+;; loses its middle, and the count with it; then there is no span.
+(define (ibuffer-count-overlay buf row off)
+  (let* ((cols (list-columns buf))
+         (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
+         (text (ibuffer-heading-text buf row))
+         (count (ibuffer-heading-details buf row)))
+    (if (and width (> (string-length text) width))
+        '()
+        (let ((start (+ off 2 1 2
+                        (string-byte-length (ibuffer-chevron row)) 2
+                        (- (string-byte-length text) (string-byte-length count)))))
+          (list (list start (+ start (string-byte-length count)) "faint"))))))
 
 (define (ibuffer-dir-overlay buf b off)
   (let* ((parts (ibuffer-row-name b))

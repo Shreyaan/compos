@@ -148,10 +148,12 @@
     (let* ((es (list-entries "*ibuffer*"))
            (heading (car es))
            (ov (ibuffer-row-overlays "*ibuffer*" heading 100)))
-      (check-equal! (length ov) 1 "one band on a heading")
+      (check-equal! (length ov) 2 "a band and the count's span on a heading")
       (check-equal! (nth 2 (car ov)) "ibuffer-heading" "the heading face")
       (check-equal! (car (car ov)) 100 "from the row's start")
-      (check-true! (> (cadr (car ov)) 100) "to its end"))
+      (check-true! (> (cadr (car ov)) 100) "to its end")
+      (check-equal! (nth 2 (cadr ov)) "faint" "the count is faint")
+      (check-equal! (cadr (cadr ov)) (cadr (car ov)) "and ends where the band ends"))
     (list-mark! "*ibuffer*" "*zz-ib-a*" "*")
     (let ((ov (ibuffer-row-overlays "*ibuffer*" "*zz-ib-a*" 200)))
       (check-equal! (nth 2 (car ov)) "ibuffer-marked" "a marked row wears the tint"))
@@ -219,6 +221,35 @@
       (check-equal! (car (nth 3 cells)) "3" "the size is a cell of its own"))
     (check-false! (ibuffer-buffer-modified? "*zz-ib-b*")
                   "a buffer with no file counts as modified nowhere")
+    (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-heading-carries-its-count-beside-the-name
+  "a heading's name cell ends with the count; its field cells say nothing"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (let* ((heading (car (filter ibuffer-heading? (list-entries "*ibuffer*"))))
+           (cells (ibuffer-wide-cells "*ibuffer*" heading))
+           (name (car (nth 2 cells))))
+      (check-true! (string-suffix? "  3" name) "the count follows the name in its cell")
+      (check-equal! (nth 3 cells) "" "the first field cell is empty")
+      (check-equal! (nth 4 cells) "" "and so is the second")
+      (let* ((text (buffer-text "*ibuffer*"))
+             (line (car (filter (lambda (l) (string-contains? l "zz-ib  3"))
+                                (string-split text "\n")))))
+        (check-true! (string? line) "the drawn line reads name, two spaces, count")))
+    (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-name-column-stops-at-its-cap
+  "one long name widens the name column to the cap and no further"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (let ((long (string-append "*zz-ib-" (string-repeat "x" 70) "*")))
+      (ibuffer-test-buffer! long "1" *ibuffer-test-mode*)
+      (ibuffer-refresh!)
+      (let ((cols (list-columns "*ibuffer*")))
+        (check-true! (<= (list-col-width (nth 2 cols)) *ibuffer-name-max*)
+                     "the name column is no wider than the cap"))
+      (buffer-kill! long))
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-drops-the-field-the-sections-already-say

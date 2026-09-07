@@ -72,17 +72,16 @@ defmodule Compos.IbufferTest do
     assert eval!(~s{(plist-get (list-active-layout "*ibuffer*") 'name)}) == "wide"
 
     text = Buffer.text("*ibuffer*")
-    assert text =~ "Buffers"
-    assert text =~ "buffer"
-    assert text =~ "SIZE"
-    assert text =~ "MODE"
-    assert text =~ "GROUP"
-    assert text =~ "LAST"
-    assert text =~ "FILE"
-    assert text =~ "GROUP group · mode · directory   SORT name · recent · size"
-    assert text =~ "d flag"
-    assert text =~ "x execute"
-    assert text =~ "*zz-ibuffer-a*"
+    [headline, heading | _rows] = String.split(text, "\n")
+    # the head is one line: the counts and the chips; no key bar, no label row
+    assert headline =~ ~r/^Buffers  \d+ buffers/
+    assert headline =~ "GROUP group · mode · directory   SORT name · recent · size   ? keys"
+    refute text =~ "SIZE"
+    refute text =~ "d flag"
+    # a heading carries its count beside its name
+    assert heading =~ ~r/^\s+▾  \S.*  \d+$/
+    # every field is a column: the size, then the mode
+    assert text =~ ~r/\*zz-ibuffer-a\*\s+0  Fundamental/
   end
 
   test "ibuffer uses a dense name and details table in its popup width" do
@@ -98,20 +97,19 @@ defmodule Compos.IbufferTest do
     assert eval!(~s{(plist-get (list-active-layout "*ibuffer*") 'name)}) == "compact"
 
     text = Buffer.text("*ibuffer*")
-    # the key bar sits under the headline, above the column labels
-    [headline, keys, labels | _rows] = String.split(text, "\n")
-    assert keys =~ "RET visit"
+    # the head is one line, and the rows start under it
+    [headline, heading | _rows] = String.split(text, "\n")
+    refute text =~ "RET visit"
 
     assert headline =~
-             ~r/^Buffers  \d+ buffers · \d+ modified · \S+ · by group · name$/
+             ~r/^Buffers  \d+ buffers( · \d+ modified)?( · \S+)? · by group · name   \? keys$/
 
-    assert labels =~ "BUFFER"
-    assert labels =~ "DETAILS"
+    assert heading =~ ~r/^\s+▾  \S/
     # compact omits the rule lines; a group section's "── name" is not one
     refute text =~ ~r/^\s*─+\s*$/m
-    refute labels =~ "SIZE"
-    refute labels =~ "GROUP"
-    assert text =~ ~r/\*zz-ibuffer-a\*\s+0 · example/
+    refute text =~ "SIZE"
+    # the size and the mode are columns of their own
+    assert text =~ ~r/\*zz-ibuffer-a\*\s+0  example/
   end
 
   test "ibuffer groups rows under switcher-style headings" do
@@ -143,7 +141,7 @@ defmodule Compos.IbufferTest do
     assert text =~ "▾  in this group"
     assert text =~ "▾  #{foreign}"
     assert text =~ "▾  ungrouped"
-    assert text =~ ~r/^3 buffers · 0 modified · \S+ · by group · name/m
+    assert text =~ ~r/^3 buffers · by group · name/m
     assert :binary.match(text, "in this group") < :binary.match(text, "*zz-ibuffer-a*")
     assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, foreign)
     assert :binary.match(text, foreign) < :binary.match(text, "*zz-ibuffer-b*")
