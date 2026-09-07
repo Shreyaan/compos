@@ -3501,3 +3501,9 @@
 
 ;; the groups a running daemon holds from before origins
 (group-migrate-path-names!)
+
+;; the groups a running daemon holds from before colours were slots. A
+;; fresh boot has no records yet and the desktop restore does this instead.
+(set! *group-records* (group-record-colors-restore *group-records*))
+(group-frame-styles-refresh!)
+(modeline-groups-refresh!)
