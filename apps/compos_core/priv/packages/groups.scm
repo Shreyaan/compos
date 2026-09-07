@@ -2405,6 +2405,30 @@
   (remove (lambda (b) (or (chat-buffer? b) (equal? b (group-chat-name g))))
           (group-user-buffers-mru g)))
 
+;; Every group by size, as (COUNT NAME ID). sort takes no comparator here and
+;; orders terms ascending, so the count goes in negated and comes back out
+;; positive: most members first, ties by name. The empty groups land in the
+;; tail, which is what a candidate scan reads.
+(define (group-counts)
+  (map (lambda (r) (list (- (car r)) (cadr r) (caddr r)))
+       (sort (map (lambda (id)
+                    (list (- (length (group-buffers id))) (group-name id) id))
+                  (group-ids)))))
+
+;; group-counts as one name-and-count column with a total line under it.
+(define (group-counts-report)
+  (let ((rows (group-counts)))
+    (string-join
+      (append
+        (map (lambda (r)
+               (string-append (string-pad-right (cadr r) 20)
+                              (string-pad-left (number->string (car r)) 3)))
+             rows)
+        (list (string-append "-- " (number->string (length rows)) " groups, "
+                             (number->string (apply + (map car rows)))
+                             " memberships")))
+      "\n")))
+
 ;; a buffer with no group founds one named after itself
 (define (group-ensure! b)
   (or (buffer-group b)
