@@ -116,6 +116,33 @@
       (set! *jj-dir-roots* roots)
       (buffer-kill! buf))))
 
+(deftest 'a-chats-title-is-the-first-summary-and-does-not-move
+  "the first label the running summary writes becomes the title; later paragraphs move the summary only, and the bar and the list rows show the title"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-title*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (buffer-set-local! buf 'chat-turn-active #t)   ; no archive write here
+      (buffer-set-local! buf 'agent-saved-mark 0)
+      (buffer-set-local! buf 'agent-blocks '())
+      (chat-summary-land! buf "Adding titles to chats.")
+      (chat-summary-land! buf "Rewriting the dashboard segment.")
+      (check-equal! (buffer-local buf 'chat-title) "Adding titles to chats."
+                    "the title is the label the chat wrote first")
+      (check-equal! (chat-title-of buf) "Adding titles to chats."
+                    "and a second paragraph does not move it")
+      (check-equal! (buffer-local buf 'chat-summary) "Rewriting the dashboard segment."
+                    "the running summary is still the latest")
+      (let* ((blocks (dashboard-line-blocks buf))
+             (wide (car (reverse blocks)))
+             (kids (plist-get wide 'children)))
+        (check-equal! (cadr (car (plist-get (car kids) 'segs)))
+                      "Adding titles to chats."
+                      "the bar names the chat, not what it is doing now"))
+      (check-equal! (chat-prompt-label buf) "Adding titles to chats."
+                    "and every list row leads with the same name")
+      (buffer-kill! buf))))
+
 (deftest 'the-summary-log-interleaves-summaries-and-jj-lines-by-time
   "every paragraph lands in chat-summary-log; the entries merge with the repo's line history in time order"
   (lambda ()

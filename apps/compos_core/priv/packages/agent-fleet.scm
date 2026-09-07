@@ -97,7 +97,10 @@
          (let* ((nl (string-index text "\n"))
                 (head (chat-parse-header
                         (if nl (substring-bytes text 0 nl) text)))
-                (s (and head (plist-get head 'summary))))
+                ;; the title if the file carries one; a file written
+                ;; before titles existed answers with its last summary
+                (s (and head (or (plist-get head 'title)
+                                 (plist-get head 'summary)))))
            (and (string? s) (not (equal? s "")) s)))))
 
 (define (chats-archived-summary path)
@@ -172,8 +175,9 @@
   (let ((s (buffer-local b 'chat-summary)))
     (and (string? s) (not (equal? s "")) s)))
 
-;; the row names the chat the way the C-x c prompt does: its title, else
-;; the sentence its summary wrote, else its buffer name
+;; the row names the chat the way the C-x c prompt does: its title --
+;; the name somebody gave it, or the first label its summary wrote --
+;; else its buffer name
 (define (chats-title b) (chat-prompt-label b))
 
 (define (chats-match-text b)
@@ -445,12 +449,12 @@
       s))
 
 ;; a titled chat wears its title as its buffer name (chat-title renames
-;; it). A derived *chat:group* name is not a title, so the running
-;; summary -- the sentence saying what the chat is about -- stands in.
+;; it). A derived *chat:group* name is not a title, so the chat's own
+;; title -- the first label its running summary wrote -- stands in.
 (define (chat-prompt-label b)
   (if (not (string-prefix? "*" b))
       b
-      (let ((s (buffer-local b 'chat-summary)))
+      (let ((s (chat-title-of b)))
         (if (and (string? s) (not (equal? s ""))) (chat-prompt-clip s) b))))
 
 ;; a row is (LABEL ANNOTATION KIND TARGET); the prompt gets the first

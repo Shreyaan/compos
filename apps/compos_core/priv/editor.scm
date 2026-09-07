@@ -9580,6 +9580,10 @@
       (if (pair? ps) (string-append " presets " (value->string ps)) ""))
     (let ((d (buffer-local buf 'chat-directory)))
       (if (string? d) (string-append " directory " (value->string d)) ""))
+    (let ((s (and (boundp (quote chat-title-of)) (chat-title-of buf))))
+      (if (and (string? s) (not (equal? s "")))
+          (string-append " title " (value->string s))
+          ""))
     (let ((s (buffer-local buf 'chat-summary)))
       (if (and (string? s) (not (equal? s "")))
           (string-append " summary " (value->string s))
@@ -9672,7 +9676,8 @@
             (when v (buffer-set-local! buf (cadr pair) v))))
         '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)
-          (summary chat-summary) (directory chat-directory)))
+          (title chat-title) (summary chat-summary)
+          (directory chat-directory)))
       (let* ((end (or (chat-file-record-at text) (string-byte-length text)))
              (recorded (chat-file-record text))
              (turns (chat-parse-transcript (substring-bytes text (or nl 0) end))))
@@ -9771,6 +9776,9 @@
     ;; a one-shot note for the next send (a skill body a mode pushed):
     ;; undelivered it must survive a restart, and a reset drops it
     chat-note-once
+    ;; images the user pasted and did not send yet: same rule as the note,
+    ;; they survive a restart and a reset drops them
+    chat-pending-images
     ;; the file this conversation logs itself to under <compos-home>/chats:
     ;; a reset starts a new conversation, which gets a new file, and the
     ;; old file stays as the archive
@@ -9778,6 +9786,9 @@
     ;; the running summary and every paragraph before it: a reset starts
     ;; a new conversation with nothing to say yet
     chat-summary chat-summary-log
+    ;; and the title the first one wrote, fixed for the life of the
+    ;; conversation: a reset earns a new one
+    chat-title
     agent-saved-mark agent-marker-bytes))
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
@@ -11041,10 +11052,14 @@
 (define (dash--vcs buf)
   (and (boundp 'jj-modeline-line) (jj-modeline-line buf)))
 
-;; the chat's running summary, once the cheap model wrote one
+;; the chat's title: the first label its running summary wrote. The bar
+;; names the chat, and a name that changes under you names nothing --
+;; the paragraph the summary says now is a click away, in the log.
 (define (dash--summary buf)
   (and (chat-buffer? buf)
-       (let ((s (buffer-local buf 'chat-summary)))
+       (let ((s (if (boundp (quote chat-title-of))
+                    (chat-title-of buf)
+                    (buffer-local buf 'chat-title))))
          (and (string? s) (not (equal? s "")) s))))
 
 (define (dash--preset buf)

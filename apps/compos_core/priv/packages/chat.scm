@@ -797,6 +797,18 @@
         (cadr (car (reverse log)))
         (buffer-local buf 'chat-summary))))
 
+;; A chat's title is the first label its running summary wrote, and a
+;; title does not move: the summary keeps saying what the work is doing
+;; now, the title keeps saying what the chat is. The lists and the bar
+;; show this. chat-title, typed, renames the buffer and wins over it.
+(public! 'chat-title-of
+  "(chat-title-of BUF) — the chat's fixed title: the first label its running summary wrote")
+(define (chat-title-of buf)
+  (let ((t (buffer-local buf 'chat-title)))
+    (if (and (string? t) (not (equal? t "")))
+        t
+        (chat-title--first-summary buf))))
+
 (define-command "chat-title" "Set the current chat's title"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -1145,6 +1157,11 @@
 ;; takes it
 (define (chat-summary-land! buf text)
   (buffer-set-local! buf 'chat-summary text)
+  ;; the first label a chat writes is its title, and it is fixed from
+  ;; here on. A chat whose log predates the title takes the oldest entry
+  ;; the log holds, so the title is still the label it wore first.
+  (unless (string? (buffer-local buf 'chat-title))
+    (buffer-set-local! buf 'chat-title (or (chat-title--first-summary buf) text)))
   (let ((log (or (buffer-local buf 'chat-summary-log) '())))
     (buffer-set-local! buf 'chat-summary-log
       (chat-summary--take (cons (list (current-time) text) log) *chat-summary-log-max*)))

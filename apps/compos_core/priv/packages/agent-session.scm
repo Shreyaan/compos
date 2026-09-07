@@ -72,17 +72,37 @@
   (or (and (boundp 'chat-model-flatten) (chat-model-flatten buf))
       (agent-conversation-text buf)))
 
+(define (chat-image-paste! kind data mime)
+  ;; The hook only runs in chat-mode, so the mode needs no second test here.
+  (if (and (equal? kind "image") (string-prefix? "image/" mime))
+      (begin
+        (buffer-set-local! (current-buffer) 'chat-pending-images
+          (append (or (buffer-local (current-buffer) 'chat-pending-images) '())
+                  (list (list mime data))))
+        (message "image attached, send it with RET")
+        #t)
+      #f))
+
+(add-paste-hook! "chat-mode" 'chat-image chat-image-paste!)
+
 (define (agent-send-msg! slug raw)
   (let* ((buf (agent-buf slug))
-         ;; a one-shot note — a skill body a mode pushed — rides the next
+         ;; a one-shot note - a skill body a mode pushed - rides the next
          ;; message exactly once, then clears
          (once (or (buffer-local buf 'chat-note-once) ""))
+         ;; images the user pasted since the last send ride once, then clear
+         (images (or (buffer-local buf 'chat-pending-images) '()))
+         (image-wire (apply string-append
+                       (map (lambda (im)
+                              (string-append "\n[compos-image " (car im) " " (cadr im) "]"))
+                            images)))
          ;; What the user sees rides as a small navigation hint. Document text
          ;; never rides in the message. The agent reads current context itself.
          (msg (string-append
                 (if (equal? once "") "" (string-append once "\n\n"))
-                (editor-context-preamble buf) raw)))
+                (editor-context-preamble buf) raw image-wire)))
     (buffer-set-local! buf 'chat-note-once #f)
+    (buffer-set-local! buf 'chat-pending-images '())
     (if (buffer-local buf 'agent-seed-context)
         (begin
           (buffer-set-local! buf 'agent-seed-context #f)
