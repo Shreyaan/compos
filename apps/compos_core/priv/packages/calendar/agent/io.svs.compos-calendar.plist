@@ -2,13 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>io.svs.compos-calendar-write</string>
+  <key>Label</key><string>io.svs.compos-calendar</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>/Users/svs/src/compos/apps/compos_core/priv/packages/calendar/agent/write-probe.sh</string>
+    <string>/Users/svs/src/compos/apps/compos_core/priv/packages/calendar/agent/drain.sh</string>
+  </array>
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/svs/.compos/calendar/outbox</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>StandardErrorPath</key><string>/Users/svs/.compos/calendar/agent.err</string>
 </dict>
 </plist>

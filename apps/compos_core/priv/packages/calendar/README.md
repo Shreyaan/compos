@@ -26,6 +26,8 @@ The consequence of rows three to six is the whole design: macOS already holds th
 
 | piece | where | what it does |
 | --- | --- | --- |
+| the config | ~/.compos/calendar.scm | which sources exist, and which provider each one uses |
+| the provider seam | calendar.scm | one contract; macos is one implementation and CalDAV is another |
 | the agent | a LaunchAgent, Aqua session | the only thing that touches EventKit; reads calendars, drains the outbox |
 | the payload | agent/*.js, run by osascript -l JavaScript | EventKit calls, no compiler and no binary |
 | the spool | ~/.compos/calendar/ | request and result files; the door between the two sessions |
@@ -34,6 +36,60 @@ The consequence of rows three to six is the whole design: macOS already holds th
 | the views | morg-agenda-mode, plus a week grid | day cards, n and p, TAB fold, RET open, [ and ] by week |
 
 Elixir appears nowhere. The editor already has shell exec and an async lane, so nothing in this list needs a new module, a supervisor or a database.
+
+## Providers
+
+A provider is one way to reach calendars. macos is one provider, not the design. Above the seam nothing knows which provider answered.
+
+| provider | reaches | reads | writes | occurrences |
+| --- | --- | --- | --- | --- |
+| macos | every account Calendar.app holds: iCloud, Google, Exchange, subscribed, Todoist | yes, through the Aqua agent | yes | expanded by EventKit |
+| macos-db | the same accounts, with no grant at all | yes | no | rules only |
+| caldav | iCloud, Fastmail, Nextcloud, and Google with a bearer token | yes | yes | rules only |
+| ics | any subscription URL | yes | no | rules only |
+| vdir | a vdirsyncer directory, which is what Linux actually runs | yes | yes | rules only |
+| local | a calendar compos owns, kept in the text file | yes | yes | none |
+
+The contract:
+
+    (calendar-provider-define! 'NAME
+      'calendars    (lambda (src) ...)          every calendar the source reaches
+      'events       (lambda (src from to) ...)  occurrences in a window
+      'put!         (lambda (src event) ...)    create or update, returns a uid
+      'delete!      (lambda (src uid) ...)
+      'capabilities '(read write expanded))
+
+The capability that matters most is `expanded`. macos returns occurrences, so nothing expands recurrence. Every other provider returns rules, so the RRule work comes back with the first non-macOS provider and not one day before. It is bought when it is needed.
+
+A provider that cannot write omits `put!` and `delete!` and leaves `write` out of its capabilities. A verb asks the capability rather than calling and catching.
+
+`macos` and `macos-db` are registered today with the capabilities the probes settled. Their functions arrive with P2, so a verb that asks `(calendar-provider-can? 'macos-db 'write)` already gets the right answer, which is no.
+
+## Configuration
+
+Sources live in a file, not in customize. `~/.compos/calendar.scm` follows the convention already used by `custom.scm`, `secrets.scm` and a project's `compos.scm`: plain Scheme, read and evaluated with `eval-string-safe`, and a mistake in it reaches `*Messages*` instead of raising.
+
+```scheme
+;; ~/.compos/calendar.scm
+
+(calendar-source! 'mac
+  'provider 'macos
+  'exclude  '("Birthdays" "Holidays in India")
+  'writes   #t)
+
+(calendar-source! 'fastmail
+  'provider 'caldav
+  'url      "https://caldav.fastmail.com/dav/calendars/user/me/personal"
+  'user     "me@fastmail.com"
+  'password "@FASTMAIL_APP_PASSWORD"
+  'writes   #t)
+```
+
+`@NAME` is a key reference and not a key, the convention `graphql-register!` already uses. It resolves through the key chain, so the config file holds no secret and can be read by anyone.
+
+`calendar-source!` is valid only while the config file is loading, and is an error anywhere else. So the source list has exactly one origin, and a reload replaces it rather than adding to it.
+
+A source is one configured use of a provider. One provider can carry several sources, and one source can filter the calendars it exposes with `include` or `exclude`.
 
 ## Why the agent exists
 
@@ -65,6 +121,16 @@ A write is a file, not a call.
 One door writes to every provider, because Calendar.app owns the accounts. An event created in the Google calendar goes out through CalendarAgent's OAuth. There is no per-provider auth, ever. That is the same argument that makes the read path free, applied to writes.
 
 A failed request keeps its result file with the error, so a write is never lost in silence.
+
+Two verbs, and no others:
+
+    (calendar-add! 'title "..." 'start "YYYY-MM-DD HH:MM" 'end "..."
+                   'calendar "Home" 'notes "..." 'location "..." 'all-day #t)
+    (calendar-remove! EVENT-ID EXPECTED-TITLE)
+
+Four rules hold them in place. A write is only ever one event, named explicitly by the caller. No sync path writes, so a refresh can never push. `calendar-add!` needs a source whose config says `'writes #t`, and refuses when two sources both claim it rather than guessing. And `calendar-remove!` names the event and states the title it expects to find there: if the identifier has moved to another event the removal is refused, so a stale id cannot delete the wrong thing.
+
+There is no update verb and no bulk verb. Changing an event means removing it and adding it, which keeps every destructive call down to one named event.
 
 ## The event record
 
@@ -103,6 +169,9 @@ uid is the identity, not event_id. That matters because the read path and the wr
 (defcustom 'calendar-agent-label "io.svs.compos-calendar"
   "The LaunchAgent label. Loaded into gui/UID, never into the daemon.")
 
+(defcustom 'calendar-config-file "~/.compos/calendar.scm"
+  "The file that declares the sources. Plain Scheme, loaded on demand.")
+
 (defcustom 'calendar-apple-db
   "~/Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb"
   "Fallback read when no agent is installed. Recurrence is not expanded here.")
@@ -119,16 +188,70 @@ uid is the identity, not event_id. That matters because the read path and the wr
 
 The verbs:
 
-    (calendar-calendars)                  every calendar the OS knows, and its account
+    (calendar-calendars)                  every calendar the sources reach, and its account
     (calendar-sync! [FROM TO])            refresh the window into the text file
     (calendar-events FROM TO [CALS])      the occurrences in a window
     (calendar-event-put! EVENT)           create or update; queues a request
     (calendar-event-delete! UID)
+    (calendar-add! 'title ... 'start ... 'end ...)   create one event
+    (calendar-remove! EVENT-ID EXPECTED-TITLE)      remove one, if it is still that one
     (calendar-agent-install!)             write the plist and bootstrap the GUI domain
     (calendar-agent-uninstall!)           bootout and remove
     (calendar-agent-status)               loaded, session, last drain, pending count
+    (calendar-config-load!)               read the config file, replace the source list
+    (calendar-config-path)                where that file is
+    (calendar-sources)                    the configured sources, in order
+    (calendar-providers)                  the registered providers
 
 define-tool! wraps the same verbs for chat, and the compos MCP server then serves them outward. That is the real answer to a calendar MCP: one surface, every account behind it.
+
+## The spool protocol
+
+The daemon writes one request file and reads one result file. It never calls EventKit, because a Background process is never granted.
+
+| path | holds |
+| --- | --- |
+| `~/.compos/calendar/outbox/ID.json` | the request; launchd watches this directory and wakes the agent |
+| `~/.compos/calendar/results/ID.json` | the reply, written whole by a rename so a reader never sees half of one |
+| `~/.compos/calendar/results/ID.err` | anything the payload wrote to stderr |
+| `~/.compos/calendar/last-drain` | when the agent last ran, and which session it ran in |
+
+A request is `{"op":"calendars"}` or `{"op":"events","from":"YYYY-MM-DD","to":"YYYY-MM-DD","calendars":[ID,...]}`. A reply always carries `ok`, and carries `error` when `ok` is false. The daemon waits `calendar-agent-timeout` seconds for the file and gives up with a message rather than hanging.
+
+Calendars are named by identifier, never by title, so no title has to survive being escaped into JSON.
+
+`WatchPaths` is what makes this cheap: the agent runs only when a request lands, and holds no process in between.
+
+## The text file
+
+`(calendar-sync!)` writes `~/docs/calendar.md`, and it will not write over a file it did not write. The first line is the mark of ownership:
+
+    <!-- compos calendar: generated by (calendar-sync!). Edits here are replaced. -->
+
+If that line is missing the sync refuses, says so, and changes nothing. That is checked before the events are even fetched.
+
+The body is Markdown, one heading per day and one list item per event, which `morg-agenda-mode` and the markdown grammar already read:
+
+    ## 2026-09-08 Tuesday
+
+    - 11:00-11:45  Arun Devarajan - Client Meeting  `svs@svsrecruiting.com`
+      https://meet.google.com/cqo-xzei-adb
+    - 16:30-17:30  Out of office  `svs@svsrecruiting.com`
+
+## Commands
+
+| command | what it does |
+| --- | --- |
+| `calendar` | refresh the file and show it in the other window |
+| `calendar-sync` | refresh the file, and say how many events landed |
+| `calendar-add-event` | title, start, minutes, then the calendar; creates it and refreshes |
+| `calendar-agent-status` | loaded or absent, the last drain, and how many requests are waiting |
+| `calendar-agent-install` | install the LaunchAgent into the GUI session |
+| `calendar-reload-config` | read `~/.compos/calendar.scm` again |
+
+`calendar-add-event` offers only calendars that EventKit reports as writable, so a subscribed or holiday calendar is never on the list. Minutes defaults to 60 and the start defaults to today, so the usual event is four keystrokes and two RETs.
+
+No keys are bound. A binding is the user's to choose, and `(global-set-key "C-c c" "calendar")` in `~/.compos/init.scm` is the whole of it.
 
 ## Payload choice
 
@@ -152,10 +275,10 @@ So Linux gets a separate importer into the same text file: CalDAV directly, or a
 
 | phase | what | state |
 | --- | --- | --- |
-| P1 | the agent: plist, drain script, JXA payloads, install and uninstall verbs | probes done and verified |
-| P2 | read into the text file, tree-sitter parse, calendar-events | next |
-| P3 | views: agenda merge, then the week grid | morg-agenda-mode already does most of it |
-| P4 | the outbox: create, update, delete, results, reconcile | write path proven |
+| P1 | the provider seam, the config file, the agent probes | seam and config load in the live session; the install and drain verbs are still to write |
+| P2 | read into the text file through the spool | done: 10 calendars, 6 configured, 39 events written |
+| P3 | views: agenda merge, then the week grid | next; morg-agenda-mode already does most of it |
+| P4 | writing: create and remove, through the same spool | done: an event was created in Home, read back, removed, and confirmed gone from the SQLite file |
 | P5 | Linux importer over CalDAV or a vdir | |
 | P6 | mirroring between calendars, full or busy-only, with a link map | |
 | P7 | freebusy and RSVP | |
@@ -177,6 +300,12 @@ Every one of these fails silently into an empty calendar rather than an error, w
 | stale delete readback | after removeEventSpanError, eventWithIdentifier still returned the object. Verify a delete with a fresh store or against the SQLite file |
 | the TCC row is a path | the grant is recorded against /bin/zsh as a path, client_type 1. Change the interpreter and the grant is gone |
 | the schema is not a contract | Calendar.sqlitedb carries no promise across macOS releases. Probe it, do not trust it |
+| the SQLite calendar list | Calendar.sqlitedb lists 20 calendars where EventKit shows 10. Default, Found in Mail, Found in Natural Language and Facebook Birthdays are internal. Filter by store, and drop the Default store |
+| dotted rest arguments | this Scheme takes `&rest`, and a dotted formal binds the last argument instead of the tail. It fails quietly, with no error |
+| sort takes one argument | `(sort LIST)` only. There is no comparator argument and no `string<?`. `<` compares strings, so a keyed sort has to be written by hand |
+| NSArray from a JS array | `$.NSArray.arrayWithArray` on a JS array of ObjC wrappers throws `unrecognized selector ... backingObject`. Build an `NSMutableArray` and `addObject` instead |
+| reading the result too soon | launchd fires the watch quickly but not instantly. A read straight after writing the request finds nothing. Poll for the result file |
+| json-parse turns null into #f | an absent location and a location of `false` are the same value afterwards |
 | no task-run! at load | the package registers verbs at load and starts nothing |
 | define-list-mode! caches | a new option key needs the definition re-run. A hot reload alone does not reach the mode |
 
