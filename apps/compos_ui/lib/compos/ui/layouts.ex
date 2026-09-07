@@ -729,11 +729,15 @@ defmodule Compos.Ui.Layouts do
             white-space: pre-wrap;
           }
           .ag-perm {
-            display: flex; align-items: center; gap: 10px; margin: 10px 0;
+            display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0;
             border: 1px solid var(--agent-permission-fg, #e0af68); border-radius: 8px;
             padding: 8px 12px; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85);
           }
-          .ag-perm-title { flex: 1; color: var(--agent-permission-fg, #a8741a); }
+          .ag-perm-title {
+            flex: 1 1 24ch; min-width: 0; overflow-wrap: anywhere;
+            color: var(--agent-permission-fg, #a8741a);
+          }
+          .ag-perm-actions { display: flex; flex: 0 1 auto; flex-wrap: wrap; gap: 10px; max-width: 100%; }
           .ag-question {
             margin: 10px 0; padding: 11px 12px;
             border: 1px solid var(--agent-tool-fg, #26356b); border-radius: 8px;
@@ -773,6 +777,13 @@ defmodule Compos.Ui.Layouts do
           /* the turn pulse under the transcript: outside .ag-scroll, so it
              aligns with the input row, not the padded scroll area */
           .ag-activity { margin: 2px 18px 4px; flex-shrink: 0; }
+          /* The preview sentence changes every few tokens. Pin the row to
+             one line and clip, so a word that wraps can't push the input
+             row up and down and flash the transcript. */
+          .ag-activity-text {
+            display: block; height: 1.5em; line-height: 1.5em;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          }
           @keyframes ag-shimmer {
             0%, 18% { transform: translateX(-120%); }
             82%, 100% { transform: translateX(120%); }

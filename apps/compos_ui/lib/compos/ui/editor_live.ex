@@ -1807,8 +1807,9 @@ defmodule Compos.Ui.EditorLive do
                dead chat, not motion — the [agent exited] line says it. --%>
           <div
             :if={@node.ag_activity && @node.ag_activity != "disconnected"}
+            id={"ag-activity-\#{@node.id}"}
             class="ag-wait ag-activity"
-          >⋯ {@node.ag_activity}</div>
+          ><span class="ag-activity-text">⋯ {@node.ag_activity}</span></div>
           <div class="ag-inputrow">
             <span class="ag-label">YOU</span>
             <span class="ag-input">{@node.ag_input.pre}<span

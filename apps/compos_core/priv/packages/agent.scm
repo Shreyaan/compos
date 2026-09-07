@@ -70,6 +70,7 @@
                         (string-append "\n>>> you: " txt "\n\n")
                         "agent-you")))
            (agent-block-push! buf start (agent-mark slug) "user" (list txt))))
+       (agent-thought-forget! slug)
        (agent-show-waiting! slug)
        (chat-activity! buf "waiting…"))
 
@@ -89,7 +90,9 @@
       ((equal? type 'thought)
        (let ((start (agent-render! slug (plist-get e 'text) "agent-thought")))
          (agent-block-extend-or-push! buf start (agent-mark slug) "thought"))
-       (chat-activity! buf (agent-activity-preview e)))
+       (let ((tail (agent-thought-note! slug (or (plist-get e 'text) ""))))
+         (when tail
+           (chat-activity! buf (agent-activity-preview tail)))))
 
       ((equal? type 'tool-call)
        (chat-activity! buf (string-append "tool · " (agent-tool-title e)))
@@ -259,6 +262,7 @@
                         "agent-meta")))
            (agent-block-push! buf start (agent-mark slug) "meta" '())))
        (buffer-set-local! buf 'agent-turn-text #f)
+       (agent-thought-forget! slug)
        (buffer-set-local! buf 'agent-turn-any #f)
        (agent-block-drop-kind! buf "permission")
        (agent-block-drop-kind! buf "question")

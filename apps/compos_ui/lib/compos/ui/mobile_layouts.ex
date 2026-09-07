@@ -174,6 +174,7 @@ defmodule Compos.Ui.MobileLayouts do
           .ag-perm, .ag-question { margin: 10px 0; padding: 10px; background: var(--sand); color: var(--amber); font-size: 12px; }
           .ag-perm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
           .ag-perm-title { flex: 1 1 100%; }
+          .ag-perm-actions { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
           .ag-question-title { color: var(--ink); font-weight: 600; }
           .ag-question-answers { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
           .ag-question-hint { color: var(--faint); font-size: 10px; margin-top: 6px; }
@@ -185,6 +186,7 @@ defmodule Compos.Ui.MobileLayouts do
           .ag-meta, .ag-status { color: var(--faint); font-size: 10.5px; margin: 6px 0; }
           .ag-queued-row { margin: 4px 14px; }
           .ag-activity { display: flex; align-items: center; gap: 8px; padding: 6px 14px 8px; font-size: 10.5px; color: var(--faint); }
+          .ag-activity-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .hh-blink { display: inline-block; width: 7px; height: 14px; background: var(--indigo); animation: hh-blink .9s step-end infinite; }
 
           /* ── the composer ───────────────────────────────────────── */

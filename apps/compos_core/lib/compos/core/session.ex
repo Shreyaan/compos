@@ -2576,6 +2576,20 @@ defmodule Compos.Core.Session do
         :ets.insert(@escaped, {key, {generation, timer, callback, arg, Frame.current()}})
         :void
       end,
+      "debounce-cancel!" => fn [key] ->
+        key = {:debounce, s(key)}
+
+        case :ets.lookup(@escaped, key) do
+          [{^key, {_generation, timer, _callback, _arg, _fid}}] ->
+            Process.cancel_timer(timer)
+            :ets.delete(@escaped, key)
+
+          _ ->
+            :ok
+        end
+
+        :void
+      end,
       "minibuffer-confirm!" => fn [], store ->
         case Editor.minibuffer_close() do
           %{on_confirm: oc} = mb when oc not in [nil, false] ->

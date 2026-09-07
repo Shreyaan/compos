@@ -623,7 +623,7 @@ defmodule Compos.Ui.MobileLive do
       <div
         :if={Map.get(@leaf, :ag_activity) && @leaf.ag_activity != "disconnected"}
         class="ag-wait ag-activity"
-      ><span class="hh-blink"></span> {@leaf.ag_activity} · C-g interrupts</div>
+      ><span class="hh-blink"></span> <span class="ag-activity-text">{@leaf.ag_activity}</span> · C-g interrupts</div>
     </div>
     """
   end

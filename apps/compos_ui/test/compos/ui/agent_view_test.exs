@@ -316,6 +316,9 @@ defmodule Compos.Ui.AgentViewTest do
 
     assert html =~ "needs permission — Write foo.ex"
     assert html =~ "Allow"
+    assert has_element?(view, ".ag-perm-actions button.ag-btn.allow", "Allow")
+    assert has_element?(view, ".ag-perm-actions button.ag-btn.session", "Always")
+    assert has_element?(view, ".ag-perm-actions button.ag-btn.deny", "Deny")
 
     # clicking runs the scheme command path (no pending permission -> message)
     view |> element("button.ag-btn.allow", "Allow") |> render_click()

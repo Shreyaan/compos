@@ -70,24 +70,26 @@ defmodule Compos.Ui.AgentTranscript do
           <% :permission -> %>
             <div data-ag-index={block_index} class="ag-perm">
               <span class="ag-perm-title">needs permission — {b.title}</span>
-              <button
-                class="ag-btn allow"
-                phx-click="ui_cmd"
-                phx-value-win={@win}
-                phx-value-cmd="agent-permission-allow"
-              >Allow</button>
-              <button
-                class="ag-btn session"
-                phx-click="ui_cmd"
-                phx-value-win={@win}
-                phx-value-cmd="agent-permission-always"
-              >Always</button>
-              <button
-                class="ag-btn deny"
-                phx-click="ui_cmd"
-                phx-value-win={@win}
-                phx-value-cmd="agent-permission-deny"
-              >Deny</button>
+              <div class="ag-perm-actions">
+                <button
+                  class="ag-btn allow"
+                  phx-click="ui_cmd"
+                  phx-value-win={@win}
+                  phx-value-cmd="agent-permission-allow"
+                >Allow</button>
+                <button
+                  class="ag-btn session"
+                  phx-click="ui_cmd"
+                  phx-value-win={@win}
+                  phx-value-cmd="agent-permission-always"
+                >Always</button>
+                <button
+                  class="ag-btn deny"
+                  phx-click="ui_cmd"
+                  phx-value-win={@win}
+                  phx-value-cmd="agent-permission-deny"
+                >Deny</button>
+              </div>
             </div>
           <% :question -> %>
             <div data-ag-index={block_index} class="ag-question">

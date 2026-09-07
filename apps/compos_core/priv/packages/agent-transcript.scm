@@ -457,18 +457,54 @@
 ;; glimpse into the reasoning worth flashing past, so the row shows its
 ;; latest line as it scrolls by. Only the last line fits, and only the
 ;; first word survives the clip.
-(define (agent-activity-preview e)
-  (let ((text (or (plist-get e 'text) "")))
+(define *agent-thought-tails* '())
+
+;; Push a new label only every N deltas: the tail still accumulates on
+;; every token, but the chat-activity buffer-local — and the repaint it
+;; broadcasts — is spared most of them.
+(define *agent-thought-label-every* 4)
+
+(define (agent-thought-note! slug delta)
+  (let* ((entry (assoc slug *agent-thought-tails*))
+         (prev (if entry (cadr entry) ""))
+         (count (if entry (caddr entry) 0))
+         (grown (string-append prev delta))
+         (n (string-byte-length grown))
+         (tail (if (> n 240)
+                   (substring-bytes grown (- n 240) n)
+                   grown)))
+    (set! *agent-thought-tails*
+      (cons (list slug tail (+ count 1))
+            (remove (lambda (x) (equal? (car x) slug)) *agent-thought-tails*)))
+    (and (= 0 (modulo count *agent-thought-label-every*)) tail)))
+
+(define (agent-thought-forget! slug)
+  (set! *agent-thought-tails*
+    (remove (lambda (x) (equal? (car x) slug)) *agent-thought-tails*)))
+
+;; the byte where the current (in-progress) sentence begins in S. A
+;; sentence terminator that is the final character means that sentence
+;; just completed, so it stays visible whole until the next word begins.
+(define (agent--tail-sentence s)
+  (let ((n (string-byte-length s)))
+    (let loop ((marks '("." "!" "?" "\n")) (best 0))
+      (if (null? marks)
+          best
+          (let ((i (string-rindex s (car marks))))
+            (loop (cdr marks)
+                  (if (and i (< i (- n 1)))
+                      (max best (+ i 1))
+                      best)))))))
+
+(define (agent-activity-preview tail)
+  (let* ((text (string-trim (or tail "")))
+         (n (string-byte-length text)))
     (if (equal? text "")
         "thinking…"
-        (let* ((nl (string-rindex text "\n"))
-               (line (if nl
-                         (substring-bytes text (+ nl 1) (string-byte-length text))
-                         text))
-               (trimmed (string-trim line))
-               (shown (if (equal? trimmed "")
-                          "thinking…"
-                          (string-append "thinking · " trimmed))))
+        (let* ((start (agent--tail-sentence text))
+               (line (string-trim (substring-bytes text start n)))
+               (shown (if (equal? line "") "thinking…"
+                          (string-append "thinking · " line))))
           (if (> (string-byte-length shown) 160)
               (string-append (substring-bytes shown 0 159) "…")
               shown)))))
