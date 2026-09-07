@@ -3453,6 +3453,12 @@
 (public! 'buffer-color-group
   "(buffer-color-group NAME) -> the buffer-owned group that supplies its color, or #f"
   'buffers)
+(public! 'group-color-face
+  "(group-color-face G) -> the face name for G's colour slot, or \"accent\""
+  'buffers)
+(public! 'group-color-hex
+  "(group-color-hex SLOT) -> the hex SLOT wears under the current theme, or #f"
+  'buffers)
 (public! 'buffer-filename-face
   "(buffer-filename-face NAME) -> the group color face for a buffer filename, or #f"
   'buffers)
@@ -3487,6 +3493,8 @@
   '("group-switch" "group-switch-last"))
 (catalog-meta! 'function "buffer-group" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "buffer-color-group" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "group-color-face" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "group-color-hex" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "buffer-filename-face" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-buffers" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-counts" 'domain 'buffers 'effects '(read))

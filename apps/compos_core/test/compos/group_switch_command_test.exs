@@ -288,8 +288,8 @@ defmodule Compos.GroupSwitchCommandTest do
 
     rendered = Editor.render_state()
     leaf = rendered.tree |> leaves() |> Enum.find(&(&1.buffer == second))
-    docs_color = eval!(~s[(group-record-color (group-record-by-id "#{docs}"))]) |> Jason.decode!()
-    mail_color = eval!(~s[(group-record-color (group-record-by-id "#{mail}"))]) |> Jason.decode!()
+    docs_color = eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{docs}")))]) |> Jason.decode!()
+    mail_color = eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{mail}")))]) |> Jason.decode!()
     docs_face = eval!(~s[(group-color-face "#{docs}")]) |> Jason.decode!()
 
     assert rendered.frame_group == "color-docs"

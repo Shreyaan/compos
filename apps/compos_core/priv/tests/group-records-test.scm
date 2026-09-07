@@ -35,7 +35,7 @@
            (right (group-record-create! "zzgs-color-right"))
            (color (group-record-color (group-record-by-id left)))
            (buf (t--gs-buf)))
-      (check-true! (string-prefix? "#" color) "the color is a CSS hex value")
+      (check-true! (group-color-slot? color) "the color is a slot on the group scale")
       (check-false!
         (equal? color (group-record-color (group-record-by-id right)))
         "adjacent groups get distinct accents")
