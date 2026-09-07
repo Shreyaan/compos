@@ -143,7 +143,8 @@ defmodule Compos.ChatLogTest do
     assert eventually(fn -> not Buffer.exists?(buf) end)
 
     eval!(~s[(run-command "chat-list")])
-    rows = Buffer.get_local("*chats*", "list-entries")
+    # a heading row is a list; the chat rows are the strings
+    rows = Buffer.get_local("*chats*", "list-entries") |> Enum.filter(&is_binary/1)
     assert path in rows
 
     # the archive rows sit under every live chat

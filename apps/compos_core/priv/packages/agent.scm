@@ -332,7 +332,7 @@
         events)
       ;; fleet surfaces track every batch: the modeline says at once who
       ;; needs you, and the list settles once the burst stops
-      (agents-note-event!))))
+      (agents-note-event! slug))))
 
 ;; Branching questions are not permission requests. Their answer goes back
 ;; to the model as the result of its `ask` tool call.

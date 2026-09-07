@@ -1953,7 +1953,7 @@ defmodule Compos.AgentTest do
     {:ok, _} = Session.eval(~s[(run-command "chat-list")])
     text = Buffer.text("*chats*")
     assert text =~ "a2"
-    assert text =~ "needs_attention"
+    assert text =~ "your turn"
 
     # point lands on the first table entry; answer through the real key path
     focus("*chats*")
@@ -2040,8 +2040,9 @@ defmodule Compos.AgentTest do
   end
 
   # put point on BUF's row in the *chats* list
+  # a heading row is a list, and the mover skips it: count the chat rows only
   defp goto_chat_row(buf) do
-    rows = Buffer.get_local("*chats*", "list-entries")
+    rows = Buffer.get_local("*chats*", "list-entries") |> Enum.filter(&is_binary/1)
     row = Enum.find_index(rows, &(&1 == buf))
     assert row, "chat #{buf} not listed in #{inspect(rows)}"
     {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chats*")])
