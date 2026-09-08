@@ -1,8 +1,8 @@
 ;;; web-browse-test.scm --- packages/web.scm, pages read as text, offline.
 ;;;
 ;;; The fetch seam is replaced, so no test reaches the network. Links
-;;; render as labels, a page is its own tab in the browse group, and the
-;;; wake serves the copy it holds.
+;;; render as labels, a fresh page joins the group the frame stands in,
+;;; and the wake serves the copy it holds.
 ;;;
 ;;; Five tests stay in ExUnit. Three press TAB, RET and the M-arrows,
 ;;; which is the path the GUI uses. One reads the minibuffer the prompt
@@ -45,8 +45,22 @@
                 (buffer-kill! b)))
             (buffer-list)))
 
-(deftest 'browse-starts-in-the-browse-group-and-cycles-views
-  "browse starts in its named group and cycles both rendered types before source"
+;; A fresh tab's group is decided when it opens, by the frame's current
+;; group. Pin that for the thunk and give the frame its own group back
+;; after; a throwaway group created here is removed when the test ends.
+;; GROUP is a name, or #f for a groupless frame.
+(define (t--web-pin-group! group thunk)
+  (let* ((saved (frame-local 'current-group))
+         (existing (and group (group-resolve-id group)))
+         (id (or existing (and group (group-record-create! group)))))
+    (set-frame-local! 'current-group id)
+    (let ((out (thunk)))
+      (set-frame-local! 'current-group saved)
+      (when (and id (not existing)) (group-record-delete! id))
+      out)))
+
+(deftest 'a-page-opens-in-the-group-the-frame-stands-in-and-cycles-views
+  "a page opens in the current group and cycles both rendered types before source"
   (lambda ()
     ;; the type of a rendered page is a setting, so give it back
     (let ((before (preview-typography)))
@@ -54,11 +68,15 @@
       (t--web-with-fetch
         (lambda (url want k) (k (list want (t--web-pages url) #f)))
         (lambda ()
-          (let ((buf (browse "https://site.test/index.html")))
-            (check-equal! (group-name (buffer-group buf)) "browse"
-                          "the page belongs to the browse group")
-            (check-equal! (buffer-local buf 'browse-view) "mono"
-                          "browse opens in the type rendered pages use")
+          (t--web-pin-group! "zzweb-home"
+            (lambda ()
+              (let ((buf (browse "https://site.test/index.html")))
+                (check-equal! (group-name (buffer-group buf)) "zzweb-home"
+                              "the page belongs to the current group")
+                (check-equal! (group-name (frame-group)) "zzweb-home"
+                              "the frame stays in the current group")
+                (check-equal! (buffer-local buf 'browse-view) "mono"
+                              "browse opens in the type rendered pages use")
             (check-true! (minor-mode-on? buf "preview-mode")
                          "the default renders the Markdown")
             (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
@@ -78,8 +96,8 @@
             (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
             (check-equal! (buffer-local buf 'browse-view) "mono"
                           "the third cycle returns to monospace")
-            (check-true! (minor-mode-on? buf "preview-mode")
-                         "rendering returns without changing the Markdown"))))
+                (check-true! (minor-mode-on? buf "preview-mode")
+                             "rendering returns without changing the Markdown"))))))
       (t--web-kill-tabs!)
       (preview-typography! before))))
 
@@ -119,21 +137,23 @@
                              "and the one that leaves")))))
     (t--web-kill-tabs!)))
 
-(deftest 'every-page-is-its-own-tab-in-the-browse-group
+(deftest 'every-page-is-its-own-tab-in-the-current-group
   "outside returns to a tab; preview links navigate that tab in place"
   (lambda ()
     (t--web-with-fetch
       (lambda (url want k) (k (list want (t--web-pages url) #f)))
       (lambda ()
-        (let ((a (browse "https://site.test/index.html")))
-          (check-contains! (buffer-local a 'modeline-name) "site.test/index.html"
-                           "the visible title names the first page")
-          (switch-to-buffer! "*scratch*")
-          (let ((b (browse "https://site.test/second.html")))
-            (check-false! (equal? a b) "two pages, two tabs")
-            (check-contains! a "*browse:" "the tab is named for the page")
-            (check-equal! (group-name (buffer-group b)) "browse"
-                          "both sit in the browse group")
+        (t--web-pin-group! "zzweb-home"
+          (lambda ()
+            (let ((a (browse "https://site.test/index.html")))
+              (check-contains! (buffer-local a 'modeline-name) "site.test/index.html"
+                               "the visible title names the first page")
+              (switch-to-buffer! "*scratch*")
+              (let ((b (browse "https://site.test/second.html")))
+                (check-false! (equal? a b) "two pages, two tabs")
+                (check-contains! a "*browse:" "the tab is named for the page")
+                (check-equal! (group-name (buffer-group b)) "zzweb-home"
+                              "both tabs sit in the current group")
 
             (switch-to-buffer! "*scratch*")
             (check-equal! (browse "https://site.test/second.html") b

@@ -30,8 +30,9 @@
 (defface! 'web-date 'fg "var(--dim-fg)" 'size "0.82em")
 (defface! 'web-separator 'fg "transparent")
 
-;; browser TABS: one buffer per page, every one in the "browse" group.
-;; The switcher finds them by mode — typing "browse" narrows to them.
+;; browser TABS: one buffer per page. A fresh tab joins the group the
+;; frame stands in, so the page opens where the reader is. The switcher
+;; finds the tabs by mode — typing "browse" narrows to them.
 (define (web--buffer? b)
   (equal? (buffer-local b 'mode-name) "browse-mode"))
 
@@ -1049,7 +1050,7 @@
             (else
               (let ((name (string-append "*browse-source:" (web--slug url) "*")))
                 (buffer-create name)
-                (buffer-add-group! name (web--browse-group!))
+                (buffer-add-group! name (or (buffer-group buf) (web--tab-group!)))
                 (buffer-set-read-only! name #f)
                 (buffer-delete-range! name 0 (buffer-size name))
                 (buffer-insert! name 0 html)
@@ -1116,8 +1117,9 @@
     (let ((prev (web--tab-step (current-buffer) -1)))
       (if prev (switch-to-buffer! prev) (message "no other tab")))))
 
-;; the switcher, locked to the browse group: every tab, and nothing else
-(define-command "browse-list-tabs" "List the browse tabs in the switcher"
+;; the switcher on the page's group: the tabs that opened here, and the
+;; work around them. The tabs themselves are found by mode.
+(define-command "browse-list-tabs" "List the buffers of the page's group in the switcher"
   (lambda ()
     (let ((g (buffer-group (current-buffer))))
       (if (and g (boundp 'switch-open!))
@@ -1128,6 +1130,14 @@
   (if (boundp 'group-ensure-record!)
       (group-ensure-record! "browse")
       "browse"))
+
+;; A fresh tab joins the group the frame stands in, the way find-file
+;; places a new file: the page opens where the reader is and belongs to
+;; that group. With no group current — a bare scratch frame — the
+;; dedicated browse group still gathers the tabs.
+(define (web--tab-group!)
+  (or (and (boundp 'frame-group) (frame-group))
+      (web--browse-group!)))
 
 (define (web--view-label view)
   (cond ((equal? view "mono") "rendered monospace")
@@ -1276,8 +1286,8 @@ where to go: RET refetches this page, a visited site or a fresh URL
 goes there. o opens the page in the real browser. w copies the link
 at point, else the page URL. v shows the html. d saves the link at
 point, else the page. H lists every page you read, b bookmarks this
-one, B lists the bookmarks. s lists the tabs, M-n and M-p walk them.
-C-s searches to any link.")
+one, B lists the bookmarks. s lists the page's group, M-n and M-p walk
+the tabs. C-s searches to any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 ;; a tab's name: the host, and the page's last path segment
@@ -1306,7 +1316,7 @@ C-s searches to any link.")
 
 ;; browser-tab semantics: inside a browse buffer the URL navigates IN
 ;; PLACE; outside, the page's own tab comes up — the one that already
-;; shows it, or a fresh one, joined to the "browse" group
+;; shows it, or a fresh one joined to the frame's current group
 ;; the page's own tab: the one that already shows it, or a fresh one.
 ;; The tab is made and its fetch starts without a window move, so the
 ;; caller decides where it shows.
@@ -1314,14 +1324,14 @@ C-s searches to any link.")
   (or (web--buffer-for url)
       (let ((name (string-append "*browse:" (web--slug url) "*")))
         (buffer-create name)
-        (buffer-add-group! name (web--browse-group!))
+        (buffer-add-group! name (web--tab-group!))
         (with-current-buffer name (lambda () (set-mode! "browse-mode")))
         (web--goto-url! name url #t)
         name)))
 
 (define (web--open-tab! url)
-  (let ((group (web--browse-group!)))
-    (when (boundp 'switch-to-group!) (switch-to-group! group)))
+  ;; The frame stays in its group; a fresh tab belongs to it. The frame
+  ;; never leaves for a dedicated browse group.
   (let ((tab (web--tab-for! url)))
     (switch-to-buffer! tab)
     tab))
