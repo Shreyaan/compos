@@ -1148,7 +1148,7 @@
         " and a coding agent. The label names the task the chat is on, the"
         " way a title does: what kind of work, on what. Do not report steps"
         " taken, findings, or status. Rewrite the label only when the task"
-        " changed. One sentence, plain text, no markdown, under 12 words."
+        " changed. One sentence, plain text, no markdown, five or six words."
         " Answer with the sentence only.\n\nCurrent label:\n"
         (or (buffer-local buf 'chat-summary) "(none yet)")
         "\n\nLatest transcript:\n"
