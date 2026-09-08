@@ -51,8 +51,13 @@
 ;;; The gate: the selections answer in a buffer you are editing, and a
 ;;; buffer you have just landed on keeps the plain meaning of the chords.
 
-(define (t--cua-key keys)
-  (with-current-buffer t--cua-buf (lambda () (key-binding keys))))
+;; key-binding answers for the frame's buffer, so the ladder is read as
+;; data: the maps in force in this buffer, and the key that selects there.
+(define (t--cua-in-force? map)
+  (if (member map (buffer-keymaps t--cua-buf)) #t #f))
+
+(define (t--cua-select-key)
+  (key-for-command "cua-select-backward" t--cua-buf))
 
 (define (t--cua-after! cmd)
   (with-current-buffer t--cua-buf (lambda () (editing--after-command! cmd))))
@@ -62,11 +67,13 @@
   (lambda ()
     (t--cua! "alpha bravo charlie\n" 0)
     (editing-state-off! t--cua-buf)
-    (check-equal! (t--cua-key "S-<left>") "previous-buffer" "the buffer walk holds")
-    (check-equal! (t--cua-key "M-S-<left>") "group-tab-left" "and the group move")
+    (check-false! (t--cua-in-force? "cua-mode-map") "the selections are not in force on a landing")
+    (check-equal! (t--cua-select-key) "" "so no key selects there")
     (editing-state-on! t--cua-buf)
-    (check-equal! (t--cua-key "S-<left>") "cua-select-backward" "armed, Shift selects")
-    (check-equal! (t--cua-key "M-S-<left>") "group-tab-left" "the group move holds armed too")
+    (check-true! (t--cua-in-force? "cua-mode-map") "a buffer you are editing has them")
+    (check-equal! (t--cua-select-key) "S-<left>" "and Shift-Left extends the region")
+    (check-equal! (keymap-lookup "cua-mode-map" "M-S-<left>") "group-tab-left"
+                  "the group move holds in the map itself, armed or not")
     (buffer-kill! t--cua-buf)))
 
 (deftest 'any-key-but-a-cua-chord-arms-the-buffer
