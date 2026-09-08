@@ -3616,23 +3616,26 @@
 ;; the same glyph is what :group: reaches in a name format
 (name-icon! "group" (mode-icon "groups-mode"))
 
-;; The verbs of docs/groups.md under one prefix. C-x G is the switcher's
-;; groups view (switch.scm); the board is C-x C-g l.
+;; Two prefixes: C-x g holds the group-subject verbs, C-x C-g the
+;; buffer-subject verbs. C-x G is the switcher's groups view (switch.scm).
 (define (group-keymap-install!)
   (define-key "mode-specific-map" "g" "group-add")
   (define-key "mode-specific-map" "d" "group-describe")
-  (define-key "ctl-x-map" "g" "group-switch")
 
+  ;; C-x g — the group is the subject: switch, see its members,
+  ;; the board, tiling, and the pin.
   (define-key "group-map" "g" "group-switch")
   (define-key "group-map" "C-g" "group-switch-last")
-  (define-key "group-map" "a" "group-add")
-  (define-key "group-map" "m" "group-move")
-  (define-key "group-map" "r" "remove-group-from-buffer")
-  (define-key "group-map" "n" "group-new")
   (define-key "group-map" "b" "group-members")
   (define-key "group-map" "l" "groups")
   (define-key "group-map" "s" "tile-all")
-  (define-key "group-map" "p" "group-pin"))
+  (define-key "group-map" "p" "group-pin")
+
+  ;; C-x C-g — the buffer is the subject; its groups are the object.
+  (define-key "buffer-group-map" "a" "group-add")
+  (define-key "buffer-group-map" "m" "group-move")
+  (define-key "buffer-group-map" "r" "remove-group-from-buffer")
+  (define-key "buffer-group-map" "v" "group-new-from-visible"))
 
 (group-keymap-install!)
 
@@ -3649,7 +3652,7 @@
     "group-list" "group-show-all" "group-chat-new"
     "switch-group" "ibuffer-group" "find-file-in-group"
     "opencode-in-group"))
-(define-key "group-map" "v" "group-new-from-visible")
+
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")

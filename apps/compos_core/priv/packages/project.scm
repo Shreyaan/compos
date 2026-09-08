@@ -727,7 +727,7 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 (define-key "project-prefix-map" "d" "project-dired")
 (define-key "project-prefix-map" "g" "project-ripgrep")
 (define-key "project-prefix-map" "k" "project-kill-all")
-(define-key "group-map" "f" "find-file-in-new-group")
+
 
 (category! 'project)
 (catalog-meta! 'command "project-kill-all" 'domain 'project 'effects '(destroy))
