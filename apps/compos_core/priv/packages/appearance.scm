@@ -50,15 +50,12 @@
 (define-command "text-scale-reset" "Give this buffer the normal text size"
   (lambda () (text-scale-apply! (current-buffer) 0)))
 
-;; How a buffer and a group write their names. editor.scm owns the grammar
-;; and the defaults; these declare them, so a name reads the same way after
-;; a restart. *strong* ~dim~ `mono` :icon:, and :mode: is the buffer's own.
+;; How a buffer writes its name. editor.scm owns the grammar and the
+;; default; this declares it, so a name reads the same way after a restart.
+;; *strong* ~dim~ `mono` :icon:, and :mode: is the buffer's own icon.
+;; groups.scm declares group-name-format, the same grammar for a group.
 (defcustom 'buffer-name-format ":mode: %n"
   "How a buffer names itself: %n the compact name, %N the buffer name, %m the mode, %p the project. *strong*, ~dim~, `mono`, :icon:."
-  'group 'appearance)
-
-(defcustom 'group-name-format "%n"
-  "How a group names itself on the tab rail: %n the short name, %N the full one. Add :group: for the icon."
   'group 'appearance)
 
 (defcustom 'ui-scale 0

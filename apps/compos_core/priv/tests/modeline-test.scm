@@ -274,3 +274,91 @@
                      "a sync asked for by name rebuilds it"))
       (buffer-kill! here)
       (buffer-kill! other))))
+
+;;; --- the buffer-name grammar -------------------------------------------------
+;;; A name renders: *strong* ~dim~ `mono` :icon:, and \\x for a literal x.
+
+(deftest 'the-name-grammar-draws-emphasis-icons-and-plain-text
+  "each delimiter makes one segment, and the text between them is its own"
+  (lambda ()
+    (check-equal! (name-segments "*Messages*")
+                  '(("bn-strong" "Messages"))
+                  "a special buffer is bold and shows no asterisk")
+    (check-equal! (name-segments "~lib/~example.scm")
+                  '(("bn-dim" "lib/") ("bn-text" "example.scm"))
+                  "a dim head stands beside plain text")
+    (check-equal! (name-segments "`M-x`")
+                  '(("bn-code" "M-x"))
+                  "backticks make one mono segment")
+    (check-equal! (name-segments ":zz: notes" '(("zz" "@")))
+                  '(("bn-icon" "@") ("bn-text" " notes"))
+                  "the caller's icon leads the name")
+    (check-equal! (name-segments "\\*not bold\\*")
+                  '(("bn-text" "*not bold*"))
+                  "a backslash makes the next character literal")))
+
+(deftest 'a-delimiter-a-name-carries-by-accident-stays-text
+  "only a delimiter that closes marks anything, and an unregistered icon marks nothing"
+  (lambda ()
+    (check-equal! (name-segments "editor_live.ex")
+                  '(("bn-text" "editor_live.ex"))
+                  "underscore is not a delimiter: a file name keeps its word")
+    (check-equal! (name-segments "notmuch:thread:0005")
+                  '(("bn-text" "notmuch:thread:0005"))
+                  "an icon nobody registered leaves the name whole")
+    (check-equal! (name-segments "a*b")
+                  '(("bn-text" "a*b"))
+                  "a delimiter with no partner is text")
+    (check-equal! (name-segments "**")
+                  '(("bn-text" "**"))
+                  "an empty body marks nothing")
+    (check-equal! (name-segments "") '() "an empty name draws nothing")))
+
+(deftest 'an-icon-a-mode-never-declared-leaves-no-gap
+  "the space beside a missing icon goes with it"
+  (lambda ()
+    (check-equal! (name-segments ":mode: *X*" '(("mode" "")))
+                  '(("bn-strong" "X"))
+                  "no glyph, no leading space")
+    (check-equal! (name-segments ":mode: x " '(("mode" "@")))
+                  '(("bn-icon" "@") ("bn-text" " x"))
+                  "a name never ends on a space")))
+
+(deftest 'a-name-format-fills-its-own-directives
+  "the format is what a mode changes, and an unknown directive survives it"
+  (lambda ()
+    (check-equal! (name-format-expand "%m: %n %%"
+                    '(("n" "example.scm") ("m" "scheme-mode")))
+                  "scheme-mode: example.scm %"
+                  "every directive the caller named is filled")
+    (check-equal! (name-format-expand "%z %n" '(("n" "x")))
+                  "%z x"
+                  "a directive nobody named stays as it was written")
+    (check-equal! (name-text (name-segments "*Messages*")) "Messages"
+                  "the rendered name reads back as one plain string")))
+
+(deftest 'a-buffer-draws-its-name-through-the-grammar
+  "the mode icon leads, the buffer's own asterisks make it bold, and the sync stores the spans"
+  (lambda ()
+    (let ((buf "*zz-name-render*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "scheme-mode")
+      (check-equal! (buffer-name-segments buf)
+                    (list (list "bn-icon" (mode-icon "scheme-mode"))
+                          (list "bn-text" " ")
+                          (list "bn-strong" "zz-name-render"))
+                    "the default format is the mode icon and the compact name")
+      ;; a mode with something else to say owns its own format
+      (buffer-set-local! buf 'name-format "%m")
+      (check-equal! (buffer-name-segments buf)
+                    '(("bn-text" "scheme-mode"))
+                    "the buffer-local format wins over buffer-name-format")
+      (buffer-set-local! buf 'name-format #f)
+      (dashboard--sync! buf)
+      (check-equal! (buffer-local buf 'modeline-name-segments)
+                    (buffer-name-segments buf)
+                    "the sync stores the spans beside the plain name")
+      (check-equal! (name-text (buffer-local buf 'modeline-name-segments))
+                    (string-append (mode-icon "scheme-mode") " zz-name-render")
+                    "and the plain reading of them keeps no asterisk")
+      (buffer-kill! buf))))

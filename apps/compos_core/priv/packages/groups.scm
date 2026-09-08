@@ -1617,10 +1617,9 @@
 
 ;; A group name renders like a buffer name: the same grammar, so *chat:mail*
 ;; reads as a bold "chat:mail" on the rail and nowhere shows its asterisks.
-;; :group: is the icon a format can call for.
-(name-icon! "group" (mode-icon "groups-mode"))
-
-(define group-name-format "%n")
+(defcustom 'group-name-format "%n"
+  "How a group names itself on the tab rail: %n the short name, %N the full one. Add :group: for the icon."
+  'group 'appearance)
 
 (define (group-name-segments g)
   (name-segments
@@ -3431,6 +3430,8 @@
 
 
 (mode-icon! "groups-mode" "")
+;; the same glyph is what :group: reaches in a name format
+(name-icon! "group" (mode-icon "groups-mode"))
 
 ;; The verbs of docs/groups.md under one prefix. C-x G is the switcher's
 ;; groups view (switch.scm); the board is C-x C-g l.
