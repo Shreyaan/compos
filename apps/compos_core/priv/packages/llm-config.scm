@@ -298,8 +298,6 @@
         (string-append "RET sets how hard " (if (equal? model "default") connector model)
                        " reasons. More effort costs more time and tokens.")))))
 
-
-
 ;;; --- what stops to ask ----------------------------------------------------
 ;;; Permissions are part of the setup, not a separate subject: the same
 ;;; menu that chooses the model chooses what that model may do without
@@ -472,6 +470,8 @@
 (define-command "llm-config-save-bundle" "Save this whole setup as a named bundle"
   (lambda ()
     (let ((buf (transient-scope)))
+      ;; the setup saved is the one on screen, so a pending choice lands first
+      (llm-config--commit-pending!)
       ;; a free-text prompt, not a palette: the point is to type a NEW name,
       ;; and the saved ones complete so that saving over one is easy
       (minibuffer-read "Bundle name: " (llm-config--bundle-candidates)
@@ -483,7 +483,7 @@
               (message (string-append "bundle " n ": "
                          (llm-bundle-label (llm-bundle-named n)))))))))))
 
-(define-command "llm-config-use-bundle" "Apply a saved bundle"
+(define-command "llm-config-use-bundle" "Select a saved bundle by name"
   (lambda ()
     (let ((buf (transient-scope)))
       (if (null? *llm-bundles*)
@@ -550,9 +550,10 @@
 ;;; --- two levels ------------------------------------------------------------
 ;;; Picking a bundle and tuning one field are two different acts, so they
 ;;; are two levels of one menu. Level one (C-c b) is the saved bundles on
-;;; letters and the recent setups on digits: one key applies the whole
-;;; setup and closes the menu. The rail on the right says what the
-;;; highlighted row resolves to, and marks in amber what would change.
+;;; letters and the recent setups on digits: one key selects the whole
+;;; setup, the menu stays open, and closing it applies the last selection.
+;;; The rail on the right says what the highlighted row resolves to, and
+;;; marks in amber what would change.
 ;;; Level two (.) is the fields. Its rail compares the live setup with the
 ;;; base bundle, and u goes back to it.
 
@@ -681,10 +682,13 @@
                    (llm-config--target buf))))
 
 (define (llm-config--subtitle buf)
-  (let ((m (llm-config--matching-bundle buf)))
-    (if m
-        (string-append "on bundle " (or (llm-bundle-name m) "?"))
-        (string-append "off-bundle · " (llm-bundle-label (llm-config--current buf))))))
+  (let ((p (llm-config--pending-bundle))
+        (m (llm-config--matching-bundle buf)))
+    (cond
+      (p (string-append "selected " (or (llm-bundle-name p) "recent setup")
+                        " · applies on close"))
+      (m (string-append "on bundle " (or (llm-bundle-name m) "?")))
+      (else (string-append "off-bundle · " (llm-bundle-label (llm-config--current buf)))))))
 
 ;; the rail of level one follows the highlighted row
 (define (llm-config--detail buf item)
@@ -696,7 +700,12 @@
                (n (llm-config--drift-count nb current)))
           (list (or name "recent setup")
                 (llm-config--rows nb current)
-                (string-append "RET applies " (or name "it") " to " (llm-config--target buf)
+                (string-append
+                  (if (equal? (llm-config--pending-bundle) b)
+                      (string-append "selected · applies to " (llm-config--target buf)
+                                     " when the menu closes")
+                      (string-append "RET selects " (or name "it") " for "
+                                     (llm-config--target buf)))
                   (cond ((= n 0) "\nnothing changes: this is the live setup")
                         ((= n 1) "\n1 field changes")
                         (else (string-append "\n" (number->string n) " fields change"))))))
@@ -719,8 +728,11 @@
     (append
       (if bundles (list (list bundles "bundle")) '())
       (if recent (list (list recent "recent")) '())
-      (list (list "." "fine-tune") (list "s" "save") (list "RET" "apply")
-            (list "↑↓ ←→" "move") (list "ESC" "dismiss")))))
+      (list (list "." "fine-tune") (list "s" "save") (list "RET" "select")
+            (list "↑↓ ←→" "move")
+            (if (llm-config--pending-bundle)
+                (list "ESC" "apply and close")
+                (list "ESC" "dismiss"))))))
 
 ;; Bundles, then the setup actions, then the recents: the groups pack
 ;; column-wise on screen, so the short groups share the first column and
@@ -752,7 +764,7 @@
   (lambda (buf) (llm-config--groups buf))
   'columns '(("Bundles" "Setup") ("Recent"))
   'on-setup llm-config--setup!
-  'on-quit llm-config--quit!
+  'on-quit llm-config--quit-top!
   'subtitle-fn llm-config--subtitle
   'context-fn llm-config--context
   'detail-fn llm-config--detail
@@ -761,6 +773,8 @@
 ;;; level two: the fields
 
 (define (llm-fine-tune--setup! buf)
+  ;; a choice at level one is the base this level tunes from, so it lands first
+  (llm-config--commit-pending!)
   (let ((base (llm-config--base buf)))
     (set-frame-local! 'llm-config-base (and base (llm-bundle-name base)))))
 
