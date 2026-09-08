@@ -3092,6 +3092,9 @@ defmodule Compos.Core.Editor do
       # what the modeline calls this buffer: project coordinates inside a
       # project, "~" for the home directory outside one. Scheme decides.
       modeline_name: Map.get(locals, "modeline-name"),
+      # the same name as the spans that draw it: the buffer-name grammar
+      # (editor.scm) names the classes, the client draws one span each
+      modeline_name_segments: Map.get(locals, "modeline-name-segments"),
       modeline_file: Map.get(locals, "modeline-file"),
       modeline_project: Map.get(locals, "modeline-project"),
       # free-form per-buffer modeline segment (agent connector, etc.)

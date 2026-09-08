@@ -1403,7 +1403,7 @@ defmodule Compos.Ui.EditorLive do
           title={"switch to #{t.label}"}
           phx-click="frame_tab"
           phx-value-id={t.id}
-        >{t.label}</span>
+        ><%= if t.segs != [] do %><span :for={{c, x} <- t.segs} class={c}>{x}</span><% else %>{t.label}<% end %></span>
         <span
           :if={@tabs.more > 0}
           class="ml-tab ml-tab-more"
@@ -1440,8 +1440,14 @@ defmodule Compos.Ui.EditorLive do
       {:ok, [rows, more]} when is_list(rows) ->
         %{
           tabs:
-            for [id, label, current] <- rows do
-              %{id: to_string(id), label: to_string(label), current: current == true}
+            for [id, label, current | rest] <- rows do
+              %{
+                id: to_string(id),
+                label: to_string(label),
+                current: current == true,
+                # the rendered name, from the same grammar the modeline uses
+                segs: ml_segs(%{modeline_name_segments: List.first(rest)})
+              }
             end,
           more: if(is_number(more), do: trunc(more), else: 0)
         }
@@ -1938,7 +1944,7 @@ defmodule Compos.Ui.EditorLive do
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
-        >{ml_name(@node)}</span>
+        ><%= if ml_segs(@node) != [] do %><span :for={{c, t} <- ml_segs(@node)} class={c}>{t}</span><% else %>{ml_name(@node)}<% end %></span>
         <span :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
           · {@node.modeline_project}
         </span>
@@ -3775,6 +3781,15 @@ defmodule Compos.Ui.EditorLive do
 
   # the modeline names the buffer the short way; the tooltip keeps the
   # absolute path. Scheme decides what short means (project.scm).
+  # The buffer-name grammar (editor.scm) draws the name: Scheme names the
+  # classes and the client draws one span each. A buffer whose dashboard
+  # has not synced yet carries no segments, and shows the plain name.
+  defp ml_segs(%{modeline_name_segments: segs}) when is_list(segs) do
+    for [c, t] <- segs, is_binary(c), is_binary(t), do: {c, t}
+  end
+
+  defp ml_segs(_), do: []
+
   defp ml_name(%{modeline_name: name}) when is_binary(name) and name != "", do: name
   defp ml_name(%{buffer: buffer}), do: buffer
 
