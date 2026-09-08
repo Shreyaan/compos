@@ -8,7 +8,7 @@
 (domain! 'editing)
 (effects! '(write))
 
-(define *registers* '())    ; ((NAME KIND VALUE ...) ...)
+(defvar '*registers* '())   ; ((NAME KIND VALUE ...) ...)
 
 (persist-global! 'registers
   (lambda () *registers*)

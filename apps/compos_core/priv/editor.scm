@@ -3464,6 +3464,14 @@
 ;;;
 ;;;   (persist-global! 'my-thing (lambda () *my-thing*)
 ;;;                              (lambda (v) (set! *my-thing* v)))
+;;;
+;;; RULE: the variable behind a persisted global uses defvar, never define.
+;;; A reload re-evaluates a top-level define and puts the literal back, so
+;;; the live value becomes '() while the daemon runs. The next desktop save
+;;; then writes that '() over the good file, and the state is gone for real.
+;;; defvar binds only when the name is free, so a reload keeps the value.
+;;; A state fn that derives its value from live frames or buffers, as
+;;; layout-targets-state does, holds no such variable and needs nothing.
 
 (define *desktop-globals* '())   ; ((KEY GET PUT CLEAR) ...)
 
@@ -4167,8 +4175,13 @@
          buf)
         ((and (not *layout-busy*) (layout-target)
               (not (popup--class? (window-buffer (active-window))))
-              (layout-target-open! buf #t #f)) buf)
-        (else (switch-to-buffer-here! buf))))
+              (window-display! (lambda () (layout-target-open! buf #t #f)))) buf)
+        (else
+          (window-display!
+            (lambda ()
+              (switch-to-buffer-here! buf)
+              (active-window)))
+          buf)))
 
 ;; the switch itself: the selected window shows BUF, whatever its group
 (define (switch-to-buffer-here! buf)
@@ -6775,19 +6788,13 @@
                ((and (not (member name panes))
                      (or (not capacity) (< (length panes) capacity)))
                 (layout-target-arrange! (append panes (list name)) (if select? name focus))
-                (let ((win (window-showing name)))
-                  (when win (window-quit-restore-note! win 'window #f))
-                  win))
+                (window-showing name))
                (else
                  (let ((win (if select? selected (layout-replacement-window selected))))
                    (when win
-                     (let ((previous (window-buffer win)))
-                       (display-buffer-in-window! win name)
-                       (if select?
-                           (window-quit-restore-forget! win)
-                           (window-quit-restore-note! win 'other previous))
-                       (when select? (select-window! win))
-                       win))))))))
+                     (display-buffer-in-window! win name)
+                     (when select? (select-window! win))
+                     win)))))))
 
 ;; Window changes reflow occupied slots. Closing a pane does not reopen hidden work.
 (define (layout-target-on-change!)
@@ -6828,6 +6835,17 @@
           (filter (lambda (e) (and (not (equal? (car e) win))
                                    (window-exists? (car e))))
                   *window-quit-restore*))))
+
+(define (window-display! thunk)
+  (let* ((before (map (lambda (row) (list (car row) (cadr row))) (window-list)))
+         (win (thunk))
+         (previous (and win (assoc win before))))
+    (when (and win (window-exists? win))
+      (cond ((not previous)
+             (window-quit-restore-note! win 'window #f))
+            ((not (equal? (cadr previous) (window-buffer win)))
+             (window-quit-restore-note! win 'other (cadr previous)))))
+    win))
 
 (define (window-quit-restore win) (assoc win *window-quit-restore*))
 
@@ -6954,22 +6972,21 @@
            (largest (display--largest-work-window))
            (win (or (split-window-sensibly largest)
                     (and (not (equal? largest me)) (split-window-sensibly me)))))
-      (and win
-           (begin
-             (display-buffer-in-window! win name)
-             (window-quit-restore-note! win 'window #f)
-             win)))))
+      (and win (display-buffer-in-window! win name)))))
 
 (define-display-action! 'use-some-window
   (lambda (name alist)
     (let ((win (layout-replacement-window (active-window))))
-      (and win
-           (let ((prev (window-buffer win)))
-             (display-buffer-in-window! win name)
-             (window-quit-restore-note! win 'other prev)
-             win)))))
+      (and win (display-buffer-in-window! win name)))))
 
 ;; show NAME where the chain says, selecting nothing; the window, or #f
+(define (display-buffer-run-actions name alist actions)
+  (if (null? actions)
+      #f
+      (let* ((fn (display-action-fn (car actions)))
+             (win (and fn (fn name alist))))
+        (or win (display-buffer-run-actions name alist (cdr actions))))))
+
 (define (display-buffer name &optional alist)
   (let ((a (or alist '())))
     ;; a board, a listing, any surface from outside the group takes its
@@ -6979,15 +6996,12 @@
     ;; is not one.
     (group-layout-save-before-cover! name)
     (let ((actions (display-buffer-actions-for name a)))
-      (or (and (layout-target) (not *layout-busy*) (pair? actions)
-               (not (member (car actions) '(popup same same-window)))
-               (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
-          (let loop ((actions actions))
-            (if (null? actions)
-                #f
-                (let* ((fn (display-action-fn (car actions)))
-                       (win (and fn (fn name a))))
-                  (or win (loop (cdr actions))))))))))
+      (window-display!
+        (lambda ()
+          (or (and (layout-target) (not *layout-busy*) (pair? actions)
+                   (not (member (car actions) '(popup same same-window)))
+                   (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
+              (display-buffer-run-actions name a actions)))))))
 
 ;; show NAME and select its window (Emacs pop-to-buffer)
 (define (pop-to-buffer name &optional alist)
@@ -7054,7 +7068,7 @@
 ;;; recent: what a peek showed and let go. An entry is
 ;;; (LABEL KIND KEY TIME): KIND names the reviver, KEY is what it needs.
 
-(define *peek-recent* '())
+(defvar '*peek-recent* '())
 (define *peek-recent-max* 50)
 
 (persist-global! 'peek-recent
@@ -8734,7 +8748,7 @@
 ;; Runtime ids are buffer identities, not turn identities. The local survives
 ;; desktop restore and buffer rename; the persisted counter prevents a new
 ;; buffer from colliding with an old renamed one.
-(define *llm-inline-next* 0)
+(defvar '*llm-inline-next* 0)
 
 (persist-global! 'llm-inline-next
   (lambda () *llm-inline-next*)
@@ -10159,12 +10173,12 @@
 
 ;; The configuration menu keeps recent complete choices, not three unrelated
 ;; input histories. The transient records one final choice when it closes.
-(define *llm-config-history* '())
+(defvar '*llm-config-history* '())
 (define llm-config-history-limit 10)
 
 ;; Named bundles, newest first. These outlive the history: the history
 ;; forgets at ten, a named bundle is kept until it is forgotten by name.
-(define *llm-bundles* '())
+(defvar '*llm-bundles* '())
 
 ;; A named bundle keeps its first menu key. List order may change; identity does not.
 (define *llm-config-bundle-keys*
@@ -10358,7 +10372,7 @@
 ;; next chat on that connector — and the picker aimed at a connector nothing
 ;; is attached to — offers the same list, instead of a hand-written seed
 ;; that ages the day the provider ships a model.
-(define *llm-connector-models* '())
+(defvar '*llm-connector-models* '())
 
 (persist-global! 'llm-connector-models
   (lambda () *llm-connector-models*)
@@ -11455,7 +11469,7 @@
 ;;; candidates history-first keeps them first among equal matches — the
 ;;; empty prompt shows pure recency, typing re-ranks fuzzily within it.
 
-(define *minibuffer-history* '())   ; ((key (item ...)) ...), most recent first
+(defvar '*minibuffer-history* '())  ; ((key (item ...)) ...), most recent first
 (define *minibuffer-history-max* 50)
 
 ;; savehist: which commands, themes and searches you use is worth more

@@ -19,8 +19,8 @@
 
 
 
-(define *group-records* '())
-(define *group-next-id* 0)
+(defvar '*group-records* '())
+(defvar '*group-next-id* 0)
 (define *group-colors* 6)              ; how many slots the group scale has
 
 ;; The theme owns the colour of a group; a package owns its weight. Each
@@ -2051,7 +2051,7 @@
 ;;; the revival says how many. The graveyard keeps the last twenty and
 ;;; persists with the desktop.
 
-(define *group-graveyard* '())
+(defvar '*group-graveyard* '())
 (define *group-graveyard-depth* 20)
 
 ;; (NAME META LAYOUT NOISE CHAT-ID COLOR KILLED-AT ((BUFFER PATH) ...) SETTINGS)

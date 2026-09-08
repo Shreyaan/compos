@@ -61,6 +61,9 @@ defmodule Compos.Core.Session do
   @wait_cap 10_000
 
   @bootstrap_files ~w(editor.scm transient.scm dired.scm themes.scm chrome.scm init.scm)
+
+  # user config, in load order: saved customizations load last so they win
+  @user_config_files ~w(ai-config.scm init.scm custom.scm)
   @reload_context ~w(origin! package! namespace! category! domain! effects!)
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -850,10 +853,22 @@ defmodule Compos.Core.Session do
     end)
   end
 
+  # Every file the session evaluates, not only the bundled ones. A file the
+  # manifest does not name re-evaluates ALL of its forms on the first save,
+  # because reload_changes cannot tell an edited form from an untouched one
+  # without a baseline. The config home loads at boot like priv does, so it
+  # needs the same baseline.
   defp reload_source_paths do
     priv = canonical(Application.app_dir(:compos_core, "priv"))
     packages = Path.wildcard(Path.join([priv, "packages", "**/*.scm"]))
-    Enum.map(@bootstrap_files, &Path.join(priv, &1)) ++ packages
+    Enum.map(@bootstrap_files, &Path.join(priv, &1)) ++ packages ++ config_source_paths()
+  end
+
+  defp config_source_paths do
+    home = canonical(Compos.Core.config_dir())
+
+    Enum.map(@user_config_files, &Path.join(home, &1)) ++
+      Path.wildcard(Path.join([home, "packages", "**/*.scm"]))
   end
 
   @doc """
@@ -896,7 +911,7 @@ defmodule Compos.Core.Session do
   # but never brick boot. (load "...") works from inside either. Tests set
   # :home to a tmp dir so the user's real init.scm stays out of them.
   defp load_user_init(interp) do
-    Enum.reduce(["ai-config.scm", "init.scm", "custom.scm"], interp, fn file, interp ->
+    Enum.reduce(@user_config_files, interp, fn file, interp ->
       path = Path.join(Compos.Core.config_dir(), file)
 
       with true <- File.exists?(path),

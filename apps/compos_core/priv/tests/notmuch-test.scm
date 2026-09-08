@@ -82,7 +82,7 @@
     (check-equal! (current-buffer) "*notmuch*" "the listing is current")
     (let ((text (buffer-text "*notmuch*")))
       (check-contains! text "Mail" "the title")
-      (check-contains! text "2 threads · tag:inbox" "the count and the query")
+      (check-contains! text "5 threads · tag:inbox" "the count and the query")
       (check-contains! text "Hello world" "the first subject")
       (check-contains! text "Quarterly report" "the second")
       (check-contains! text "Alice" "and an author"))
@@ -446,6 +446,22 @@
     (run-command "notmuch-unfilter-last")
     (check-equal! (nm--query-of "*notmuch*") "tag:inbox and from:alice"
                   "and popping leaves the search alone")
+    (t--nm-done!)))
+
+(deftest 'unfilter-restores-the-originating-list-position
+  "backslash returns to the row where the filter was entered"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (list-goto-index! "*notmuch*" 1)
+
+    (run-command "notmuch-filter")
+    (t--nm-answer! "from:alice")
+    (check-equal! (list-index "*notmuch*") 0 "the filter starts at its first row")
+
+    (run-command "notmuch-unfilter-last")
+    (check-equal! (nm--query-of "*notmuch*") "tag:inbox" "backslash removes the filter")
+    (check-equal! (list-index "*notmuch*") 1 "the inbox returns to the originating row")
     (t--nm-done!)))
 
 (deftest 'replacement-filters-are-removed-in-order

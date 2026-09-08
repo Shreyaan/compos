@@ -48,6 +48,7 @@
 (load-bundled-package "feeds.scm")
 (load-bundled-package "git.scm")
 (load-bundled-package "graphql.scm")
+(load-bundled-package "google.scm")
 (load-bundled-package "groups.scm")
 (load-bundled-package "help.scm")
 (load-bundled-package "ibuffer.scm")

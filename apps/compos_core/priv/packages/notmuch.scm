@@ -110,16 +110,23 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--query-reset! buf query)
   (buffer-set-local! buf 'notmuch-query-base query)
   (buffer-set-local! buf 'notmuch-query-filters '())
+  (buffer-set-local! buf 'notmuch-query-positions '())
   ;; Keep a restored legacy local inert. The stack now owns the query.
   (buffer-set-local! buf 'notmuch-query #f))
 
 (define (nm--query-push! buf term)
   (nm--query-base-of buf)
+  (buffer-set-local! buf 'notmuch-query-positions
+    (cons (list-index buf)
+          (or (buffer-local buf 'notmuch-query-positions) '())))
   (buffer-set-local! buf 'notmuch-query-filters
     (cons term (nm--query-filters-of buf))))
 
 (define (nm--query-push-only! buf term)
   (nm--query-base-of buf)
+  (buffer-set-local! buf 'notmuch-query-positions
+    (cons (list-index buf)
+          (or (buffer-local buf 'notmuch-query-positions) '())))
   (buffer-set-local! buf 'notmuch-query-filters
     (cons (list "only" term) (nm--query-filters-of buf))))
 
@@ -129,6 +136,9 @@ when a message has no text/plain part." 'group 'notmuch)
         #f
         (begin
           (buffer-set-local! buf 'notmuch-query-filters (cdr filters))
+          (let ((positions (or (buffer-local buf 'notmuch-query-positions) '())))
+            (unless (null? positions)
+              (buffer-set-local! buf 'notmuch-query-positions (cdr positions))))
           #t))))
 
 ;;; --- CLI plumbing -------------------------------------------------------------
@@ -213,12 +223,13 @@ when a message has no text/plain part." 'group 'notmuch)
 (define nm-mark-rem (string-append "-" nm-mark-tag))
 
 (define (nm--search-rows buf)
-  (let ((rows (map (lambda (th) (list (nm--get th 'thread)
+  (let* ((query (nm--query-of buf))
+         (rows (map (lambda (th) (list (nm--get th 'thread)
                                       (or (nm--get th 'subject) "")
                                       (or (nm--get th 'authors) "")
                                       (or (nm--get th 'tags) '())
                                       (or (nm--get th 'date_relative) "")))
-                   (nm--search-json (nm--query-of buf) notmuch-search-limit))))
+                    (nm--search-json query notmuch-search-limit))))
     ;; a marked thread carries the m tag, and the list draws its mark
     ;; column from the marks local: derive the marks from the tags on
     ;; every fetch, so a marked row shows the mark like any other list
@@ -296,8 +307,11 @@ when a message has no text/plain part." 'group 'notmuch)
                 (list (nm--tags-text th) "nm-tags")))))
 
 (define (nm--search-meta buf)
-  (string-append (number->string (length (list-entries buf)))
-                 " threads · " (nm--query-of buf)))
+  (let* ((query (nm--query-of buf))
+         (total (string-trim
+                  (nm--run
+                    (string-append "count --output=threads -- " (nm--quote query))))))
+    (string-append total " threads · " query)))
 
 ;; the list machinery owns the refresh, the row lookup and the header
 ;; offset (R8); these names stay for the commands and tests that call them
@@ -815,11 +829,16 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define-command "notmuch-unfilter-last" "Remove the most recently added notmuch filter"
   (lambda ()
-    (let ((buf (current-buffer)))
+    (let* ((buf (current-buffer))
+           (positions (or (buffer-local buf 'notmuch-query-positions) '()))
+           (i (if (null? positions) #f (car positions))))
       (if (not (nm--query-pop! buf))
           (message "No structured notmuch filters to remove")
           (begin
             (nm--refresh! buf)
+            (let ((n (length (list-entries buf))))
+              (when (and i (> n 0))
+                (nm--goto-index! buf (min i (- n 1)))))
             (message "Removed last notmuch filter"))))))
 
 (define-command "notmuch-filter-by-sender" "Narrow the search to this thread's sender"

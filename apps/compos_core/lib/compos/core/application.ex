@@ -59,6 +59,7 @@ defmodule Compos.Core.Application do
       # stdlib loads, and a cast to a process that isn't up yet is silently
       # dropped — the browser would then be told this daemon serves nothing
       Compos.Core.Browser,
+      Compos.Core.Google,
       Compos.Core.Session,
       Compos.Core.Desktop,
       # dev: a saved source file reaches this daemon without a restart

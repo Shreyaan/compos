@@ -232,6 +232,23 @@
       (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c") "quitting restores the borrowed pane")
       (lp-rect! "zz-lp-c" (/ 2 3) 0 (/ 1 3) 1))))
 
+(deftest 'selected-result-quit-restores-the-buffer-under-it
+  "a user-opened result remembers the selected pane it replaced"
+  (lambda ()
+    (lp-start!)
+    (lp-buffer! "b") (lp-buffer! "c") (lp-buffer! "result")
+    (tile-windows! 'columns '("zz-lp-a" "zz-lp-b" "zz-lp-c"))
+    (layout-target-set! 'columns)
+    (select-window! (window-showing "zz-lp-a"))
+    (switch-to-buffer! "zz-lp-result")
+    (let ((win (active-window)))
+      (check-equal! (current-buffer) "zz-lp-result" "the result is selected")
+      (check-equal! (cadr (window-quit-restore win)) 'other "the editor records the pane replacement")
+      (check-equal! (caddr (window-quit-restore win)) "zz-lp-a" "the editor remembers the underlying buffer")
+      (run-command "quit-window")
+      (check-equal! (current-buffer) "zz-lp-a" "q restores the buffer under the result")
+      (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c") "no unrelated buffer is duplicated"))))
+
 (deftest 'target-reflows-after-pane-close-without-reopening-hidden-work
   "closing a pane reduces occupancy but keeps the target for the next open"
   (lambda ()

@@ -27,6 +27,7 @@ defmodule Compos.NotmuchSceneTest do
              "unread\ninbox\n")
             ((string-prefix? "search" args)
              "[{\"thread\":\"zz-thread\",\"timestamp\":1786065644,\"date_relative\":\"Today\",\"matched\":1,\"total\":1,\"authors\":\"Alice\",\"subject\":\"Role routed mail\",\"query\":[\"id:zz-message\"],\"tags\":[\"inbox\"]},{\"thread\":\"zz-thread-2\",\"timestamp\":1785979244,\"date_relative\":\"Yesterday\",\"matched\":1,\"total\":1,\"authors\":\"Bob\",\"subject\":\"Reloaded selection\",\"query\":[\"id:zz-message-2\"],\"tags\":[\"inbox\"]}]")
+            ((string-prefix? "count --output=threads" args) "5\n")
             ((string-prefix? "show" args)
              "[[[{\"id\":\"zz-message\",\"match\":true,\"excluded\":false,\"filename\":[\"/tmp/zz-message\"],\"timestamp\":1786065644,\"date_relative\":\"Today\",\"tags\":[\"inbox\"],\"duplicate\":1,\"body\":[{\"id\":1,\"content-type\":\"text/plain\",\"content\":\"The routed body.\\n\"}],\"headers\":{\"Subject\":\"Role routed mail\",\"From\":\"Alice <alice@example.com>\",\"To\":\"reader@example.com\",\"Date\":\"Thu, 07 Aug 2026 06:50:44 +0530\"}},[]]]]")
             (else ""))))
@@ -70,6 +71,7 @@ defmodule Compos.NotmuchSceneTest do
     KeyDispatch.handle_key("C-9")
 
     assert eval!(~S|(current-buffer)|) == ~s{"*notmuch*"}
+    assert eval!(~S|(buffer-text "*notmuch*")|) =~ "5 threads · tag:inbox"
     assert eval!(~S|(active-window)|) == eval!(~S|(scene-window 'index)|)
     assert eval!(~S|(window-buffer (scene-window 'index))|) == ~s{"*notmuch*"}
     assert eval!(~S|(buffer-text (scene-buffer 'show))|) =~ "The routed body."
@@ -111,6 +113,22 @@ defmodule Compos.NotmuchSceneTest do
     assert eval!(~S|(nm--th-id (nm--thread-at "*notmuch*"))|) == ~s{"zz-thread-2"}
     assert eval!(selected_row_overlay?()) == "#t"
     assert eval!(selected_row_covers_both_lines?()) == "#t"
+  end
+
+  test "backslash restores the row where a filter was entered" do
+    eval!(~S"""
+    (begin
+      (run-command "notmuch-inbox")
+      (list-goto-index! "*notmuch*" 1)
+      (run-command "notmuch-filter-marked"))
+    """)
+
+    assert eval!(~S|(list-index "*notmuch*")|) == "0"
+
+    KeyDispatch.handle_key("\\")
+
+    assert eval!(~S|(nm--query-of "*notmuch*")|) == ~s{"tag:inbox"}
+    assert eval!(~S|(list-index "*notmuch*")|) == "1"
   end
 
   defp selected_row_overlay? do

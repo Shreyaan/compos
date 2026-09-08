@@ -28,12 +28,58 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(sysmon_primitives())
     |> Map.merge(discovery_primitives())
     |> Map.merge(irc_primitives())
+    |> Map.merge(google_primitives())
+  end
+
+  defp google_primitives do
+    convert = &Compos.Core.LLM.json_to_scheme/1
+
+    %{
+      "google-oauth-start!" => fn [path, scopes] ->
+        convert.(Compos.Core.Google.connect(Compos.Core.Session.scheme_to_json(path), scopes))
+      end,
+      "google-oauth-status" => fn [] -> convert.(Compos.Core.Google.status()) end,
+      "google-accounts" => fn [] -> convert.(Compos.Core.Google.accounts()) end,
+      "google-http!" => fn
+        [account, url, request_json, callback] ->
+          async_dispatch(callback, fn ->
+            convert.(Compos.Core.Google.request_json(account, url, request_json))
+          end)
+
+        [account, method, url, params, body | rest] ->
+          params = Compos.Core.Session.scheme_to_json(params)
+          body = Compos.Core.Session.scheme_to_json(body)
+
+          work = fn ->
+            convert.(Compos.Core.Google.request(account, method, url, params, body))
+          end
+
+          case rest do
+            [] -> work.()
+            [callback] -> async_dispatch(callback, work)
+          end
+      end,
+      "google-revoke!" => fn [account, callback] ->
+        async_dispatch(callback, fn -> convert.(Compos.Core.Google.disconnect(account)) end)
+      end
+    }
   end
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
   def docs do
     %{
-      "buffer-create" => "(buffer-create NAME) — create an empty buffer NAME and return NAME. A NAME that is a file on disk loads that file instead.",
+      "google-accounts" =>
+        "(google-accounts) — connected account subjects, emails, and scopes; never tokens.",
+      "google-oauth-start!" =>
+        "(google-oauth-start! CLIENT SCOPES) — start native desktop OAuth using a client JSON file or installed-client record.",
+      "google-oauth-status" =>
+        "(google-oauth-status) — current OAuth progress without credentials.",
+      "google-http!" =>
+        "(google-http! ACCOUNT METHOD URL PARAMS BODY [CALLBACK]) — authenticated Google HTTP request with an explicit account.",
+      "google-revoke!" =>
+        "(google-revoke! ACCOUNT CALLBACK) — revoke and remove one Google account connection.",
+      "buffer-create" =>
+        "(buffer-create NAME) — create an empty buffer NAME and return NAME. A NAME that is a file on disk loads that file instead.",
       "buffer-list" => "(buffer-list) — return the names of all buffers.",
       "buffer-list-mru" =>
         "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers.",

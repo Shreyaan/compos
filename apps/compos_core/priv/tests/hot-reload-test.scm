@@ -165,3 +165,56 @@
     (define-command--raw "zz-reload-scheme-b" (lambda () 1))
     (check-equal! (command-doc "zz-reload-scheme-b") ""
       "the alias did not register the command")))
+
+;;; --- a reload must not empty the state the desktop saves -----------------
+;;;
+;;; A top-level (define *x* '()) puts the literal back every time a reload
+;;; re-evaluates it. The live value became '() while the daemon ran, and
+;;; the next desktop save wrote that '() over the good file: groups, LLM
+;;; bundles, connector models, registers and minibuffer history all went
+;;; at once. defvar binds only a free name, so a reload keeps the value.
+
+(deftest 'defvar-keeps-the-value-a-session-set
+  "re-evaluating the definition of a defvar variable leaves the value alone"
+  (lambda ()
+    (defvar 'zz-reload-state '())
+    (set-symbol-value! 'zz-reload-state '(one two))
+    ;; this is what the reload does to the top-level form
+    (defvar 'zz-reload-state '())
+    (check-equal! (symbol-value 'zz-reload-state) '(one two)
+      "the reload kept the live value")
+    (unbind-global! 'zz-reload-state)
+    (defvar 'zz-reload-state 'fresh)
+    (check-equal! (symbol-value 'zz-reload-state) 'fresh
+      "a free name still takes the default")
+    (unbind-global! 'zz-reload-state)))
+
+;; ((FILE VAR) ...) — every variable a persist-global! entry reads.
+;; layout-targets is absent on purpose: its state fn derives the value
+;; from the live frames and holds no variable a reload can reset.
+(define t--reload-persisted
+  '(("editor.scm" "*peek-recent*")
+    ("editor.scm" "*llm-inline-next*")
+    ("editor.scm" "*llm-config-history*")
+    ("editor.scm" "*llm-bundles*")
+    ("editor.scm" "*llm-connector-models*")
+    ("editor.scm" "*minibuffer-history*")
+    ("packages/groups.scm" "*group-records*")
+    ("packages/groups.scm" "*group-next-id*")
+    ("packages/groups.scm" "*group-graveyard*")
+    ("packages/register.scm" "*registers*")))
+
+(deftest 'every-persisted-global-uses-defvar
+  "no persisted variable is initialized with define, which a reload resets"
+  (lambda ()
+    (for-each
+      (lambda (entry)
+        (let* ((file (car entry))
+               (var (cadr entry))
+               (src (read-file (string-append (compos-priv-dir) "/" file))))
+          (check-equal! (string? src) #t (string-append "read " file))
+          (check-equal! (string-contains? src (string-append "(defvar '" var " ")) #t
+            (string-append var " uses defvar"))
+          (check-equal! (string-contains? src (string-append "(define " var " ")) #f
+            (string-append var " is not a bare define"))))
+      t--reload-persisted)))
