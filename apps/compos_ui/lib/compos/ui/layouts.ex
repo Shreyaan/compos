@@ -1099,6 +1099,10 @@ defmodule Compos.Ui.Layouts do
             flex: 0 0 auto; width: 460px; max-width: 100%;
             display: flex; flex-direction: column; gap: 26px;
           }
+          /* Group cards keep their intrinsic height; without an explicit
+             no-shrink rule, the column flex layout can compress the sections
+             when the modal is shorter than the combined group content. */
+          .transient-group { flex: 0 0 auto; min-height: max-content; }
           .transient-group-title {
             margin-bottom: 10px; font-size: 13px; letter-spacing: .14em;
             text-transform: uppercase; color: var(--dim-fg, #8a857a);
