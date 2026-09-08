@@ -343,16 +343,16 @@ One command per verb. The name says which way the verb runs, so `remove-buffers-
 | `move` | `group-move` | `C-x C-g m` |
 | `remove-buffers` | `remove-buffers-from-group` | `M-x` |
 | `remove-group` | `remove-group-from-buffer` | `C-x C-g r` |
-| `switch` | `group-switch` | `C-x g`, `C-x C-g g`; `RET` in the board |
-| `switch-last` | `group-switch-last` | `C-x C-g C-g` |
+| `switch` | `group-switch` | `C-x g g`; `RET` in the board |
+| `switch-last` | `group-switch-last` | `C-x g C-g` |
 | `switch-to-buffer-group` | `C-RET` in the switcher (`buffer-context-switch!`) | |
-| `new` | `group-new` | `C-x C-g n` |
+| `new` | `group-new` | `M-x`; the switcher's last row |
 | `dissolve` | `group-dissolve` | `x` in the board |
 | `kill` | `group-kill` | `K` in the board |
 | `rename` | `group-rename` | `r` in the board |
 | `revive` | `group-revive` | `M-x` |
-| `groups` | `groups` | `C-x C-g l` |
-| `members` | `group-members` | `C-x C-g b`; `b` in the board |
+| `groups` | `groups` | `C-x g l` |
+| `members` | `group-members` | `C-x g b`; `b` in the board |
 | `buffer-select` | `buffer-select`; `C-SPC` marks in the switcher, `SPC` in a list | |
 
 The `group-add` prompt names a default: the group the frame stands in, else the group it last stood in. A bare `RET` joins it; a typed name joins that group or founds it; the `New group` row founds one without entering it.

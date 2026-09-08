@@ -79,7 +79,8 @@ defmodule Compos.Core.Reactor do
       eager: Keyword.get(opts, :eager, false),
       pending: [],
       timer: nil,
-      in_flight: false
+      in_flight: false,
+      failures: 0
     }
 
     state = %{
@@ -103,6 +104,39 @@ defmodule Compos.Core.Reactor do
   end
 
   def handle_call(:rules, _from, state), do: {:reply, Map.values(state.rules), state}
+
+  # A failed batch goes back on the queue, because the usual failure is
+  # transient: a hot reload purges the module a handler came from, the retry
+  # runs the new one. The retry itself is what needed a bound. A handler that
+  # cannot finish this text will not finish it on the tenth attempt either,
+  # and it retries with the batch still growing. On 2026-09-09 a rule over a
+  # 3.8 MB chat buffer passed the 1024 MB Scheme heap limit every twelve
+  # seconds. It held the :ui lane, so every desktop save timed out, and no
+  # Scheme registry still held its id, so nothing in the editor could remove
+  # it.
+  #
+  # Three failures in a row and the rule goes. The log names the buffer,
+  # because that is the only thread left to pull.
+  @max_failures 3
+
+  defp note_failure(state, id, rule, changes, error) do
+    failures = rule.failures + 1
+    name = buffer_name(rule.buffer_ref) || inspect(rule.buffer_ref)
+    rule = %{rule | pending: rule.pending ++ Enum.reverse(changes), timer: nil, failures: failures}
+
+    if failures >= @max_failures do
+      Logger.error(
+        "reactor rule #{id} on #{name} removed after #{failures} failures: #{error}. " <>
+          "Its mode must register a new rule to run again."
+      )
+
+      drop_rule(state, id, rule)
+    else
+      Logger.error("reactor rule #{id} on #{name} failed (#{failures}/#{@max_failures}): #{error}")
+
+      put_in(state.rules[id], rule)
+    end
+  end
 
   defp drop_rule(state, id, rule) do
     if rule.timer, do: Process.cancel_timer(rule.timer)
@@ -193,15 +227,11 @@ defmodule Compos.Core.Reactor do
         Process.demonitor(rule.in_flight.monitor, [:flush])
         rule = %{rule | in_flight: false}
 
-        rule =
-          if handler_ok?(result) do
-            arm_pending(rule)
-          else
-            Logger.error("reactor rule #{id} failed: #{handler_error(result)}")
-            %{rule | pending: rule.pending ++ Enum.reverse(changes), timer: nil}
-          end
-
-        {:noreply, put_in(state.rules[id], rule)}
+        if handler_ok?(result) do
+          {:noreply, put_in(state.rules[id], arm_pending(%{rule | failures: 0}))}
+        else
+          {:noreply, note_failure(state, id, rule, changes, handler_error(result))}
+        end
     end
   end
 
@@ -213,10 +243,9 @@ defmodule Compos.Core.Reactor do
         {:noreply, state}
 
       {id, rule} ->
-        Logger.error("reactor rule #{id} task exited: #{inspect(reason)}")
         attempted = Enum.reverse(rule.in_flight.changes)
-        rule = %{rule | in_flight: false, pending: rule.pending ++ attempted, timer: nil}
-        {:noreply, put_in(state.rules[id], rule)}
+        rule = %{rule | in_flight: false}
+        {:noreply, note_failure(state, id, rule, attempted, "task exited: #{inspect(reason)}")}
     end
   end
 

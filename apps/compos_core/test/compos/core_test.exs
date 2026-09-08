@@ -6,6 +6,16 @@ defmodule Compos.CoreTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # poll instead of sleeping: the reactor debounces, runs the handler in a
+  # Task, and only then updates its own state
+  defp wait_for(fun, tries \\ 60) do
+    cond do
+      fun.() -> :ok
+      tries == 0 -> :timeout
+      true -> Process.sleep(25) && wait_for(fun, tries - 1)
+    end
+  end
+
   def mfa_handler(me, tag, changes), do: send(me, {:mfa, tag, changes})
 
   describe "Rope" do
@@ -83,6 +93,31 @@ defmodule Compos.CoreTest do
   end
 
   describe "Reactor" do
+    # A handler that cannot finish this text cannot finish more of it. Giving
+    # its changes back made every retry at least as expensive as the failure,
+    # and the rule ran forever: on 2026-09-09 one such rule passed the Scheme
+    # heap limit every twelve seconds, held the :ui lane, and no Scheme
+    # registry still held its id to remove it.
+    test "a rule that keeps failing removes itself and names its buffer" do
+      name = uniq("always-fails")
+      {:ok, _} = Core.create_buffer(name)
+
+      {:ok, id} =
+        Reactor.on_change(name, :any, fn _changes -> raise "handler is broken" end, eager: true)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for n <- 1..3 do
+            Buffer.append(name, "line #{n}\n")
+            wait_for(fn -> not Enum.any?(Reactor.rules(), &(&1.id == id)) end)
+          end
+        end)
+
+      refute Enum.any?(Reactor.rules(), &(&1.id == id)), "the rule is gone"
+      assert log =~ "removed after 3 failures"
+      assert log =~ name
+    end
+
     test "an MFA handler fires with the changes appended to its args" do
       name = uniq("mfa")
       {:ok, _} = Core.create_buffer(name)
