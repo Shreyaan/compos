@@ -11254,18 +11254,176 @@
       (abbreviate-file-name (buffer-directory buf))
       (buffer-project-label buf)))
 
+;;; --- the buffer-name grammar --------------------------------------------------
+;;; A name renders. Every chrome that shows a buffer or a group draws the
+;;; same small markup and never the raw characters: *Messages* was always
+;;; meant to read as a bold "Messages", and the naming convention the
+;;; editor already had IS the grammar.
+;;;
+;;;   *text*   strong        :key:  one icon; :mode: is the buffer's own
+;;;   ~text~   dim           \\x     a literal x
+;;;   `text`   mono
+;;;
+;;; The delimiters are the ones a name does not carry by accident.
+;;; Markdown's _ is absent on purpose: editor_live.ex and __init__.py would
+;;; each lose a word to it. A delimiter that never closes is text, and so is
+;;; :key: for an icon nobody registered, which keeps a name like
+;;; notmuch:thread:0005 whole.
+;;;
+;;; A format string says what a name is made of, so a mode changes its own
+;;; without touching a renderer: set the buffer-local name-format, or
+;;; buffer-name-format for the rest. name-format-expand fills the
+;;; %-directives and name-segments parses the result; both are pure. The
+;;; value is the ((CLASS TEXT) ...) list the modeline extra already speaks,
+;;; so Scheme names the classes and the client draws one span each.
+
+(define *name-icons* '())            ; ((KEY GLYPH) ...) what :key: reaches
+
+(define (name-icon! key glyph)
+  (set! *name-icons*
+    (cons (list key glyph)
+          (remove (lambda (e) (equal? (car e) key)) *name-icons*))))
+
+;; a caller's own icons come first: :mode: belongs to the buffer, not here
+(define (name--icon key icons)
+  (let ((e (or (assoc key icons) (assoc key *name-icons*))))
+    (and e (cadr e))))
+
+;; the character position of CH in TEXT at or after FROM, or #f. string-index
+;; counts bytes where substring counts characters, and a name carries icons:
+;; the scan must count characters or the two disagree.
+(define (name--index text ch from)
+  (let ((n (string-length text)))
+    (let loop ((i from))
+      (cond ((>= i n) #f)
+            ((equal? (substring text i (+ i 1)) ch) i)
+            (else (loop (+ i 1)))))))
+
+(define (name--class ch)
+  (cond ((equal? ch "*") "bn-strong")
+        ((equal? ch "~") "bn-dim")
+        ((equal? ch "`") "bn-code")
+        ((equal? ch ":") "bn-icon")
+        (else #f)))
+
+(define (name--flush plain out)
+  (if (equal? plain "") out (cons (list "bn-text" plain) out)))
+
+(define (name--trim-left s)
+  (let ((n (string-length s)))
+    (let loop ((i 0))
+      (cond ((>= i n) "")
+            ((equal? (substring s i (+ i 1)) " ") (loop (+ i 1)))
+            (else (substring s i n))))))
+
+(define (name--trim-right s)
+  (let loop ((n (string-length s)))
+    (cond ((= n 0) "")
+          ((equal? (substring s (- n 1) n) " ") (loop (- n 1)))
+          (else (substring s 0 n)))))
+
+(define (name--drop-empty segs)
+  (filter (lambda (s) (not (equal? (cadr s) ""))) segs))
+
+(define (name--edge segs trim)
+  (if (null? segs)
+      '()
+      (cons (list (car (car segs)) (trim (cadr (car segs)))) (cdr segs))))
+
+;; A mode that declares no icon leaves the space that stood beside it, and a
+;; name never begins or ends on one. Drop the empty segments first, so that
+;; space is an edge by the time the edges are trimmed.
+(define (name--tidy segs)
+  (let* ((a (name--drop-empty segs))
+         (b (name--edge a name--trim-left))
+         (c (reverse (name--edge (reverse b) name--trim-right))))
+    (name--drop-empty c)))
+
+(define (name-segments spec &optional icons)
+  (let* ((text (if (string? spec) spec ""))
+         (icons (or icons '()))
+         (n (string-length text)))
+    (name--tidy
+      (let loop ((i 0) (plain "") (out '()))
+        (if (>= i n)
+            (reverse (name--flush plain out))
+            (let ((ch (substring text i (+ i 1))))
+              (cond
+                ((and (equal? ch "\\") (< (+ i 1) n))
+                 (loop (+ i 2)
+                       (string-append plain (substring text (+ i 1) (+ i 2)))
+                       out))
+                ((name--class ch)
+                 (let ((close (name--index text ch (+ i 1))))
+                   ;; no partner, or an empty body: the delimiter is text
+                   (if (or (not close) (= close (+ i 1)))
+                       (loop (+ i 1) (string-append plain ch) out)
+                       (let ((body (substring text (+ i 1) close)))
+                         (if (equal? ch ":")
+                             (let ((glyph (name--icon body icons)))
+                               (if glyph
+                                   (loop (+ close 1) ""
+                                         (cons (list "bn-icon" glyph)
+                                               (name--flush plain out)))
+                                   (loop (+ i 1) (string-append plain ch) out)))
+                             (loop (+ close 1) ""
+                                   (cons (list (name--class ch) body)
+                                         (name--flush plain out))))))))
+                (else (loop (+ i 1) (string-append plain ch) out)))))))))
+
+;; VALS is ((KEY VALUE) ...) over one-character keys. An unknown directive
+;; stays as it was written, so a name that carries a per cent sign survives.
+(define (name-format-expand format vals)
+  (let* ((text (if (string? format) format ""))
+         (n (string-length text)))
+    (let loop ((i 0) (out ""))
+      (if (>= i n)
+          out
+          (let ((ch (substring text i (+ i 1))))
+            (if (and (equal? ch "%") (< (+ i 1) n))
+                (let* ((key (substring text (+ i 1) (+ i 2)))
+                       (e (assoc key vals)))
+                  (cond ((equal? key "%") (loop (+ i 2) (string-append out "%")))
+                        (e (loop (+ i 2) (string-append out (or (cadr e) ""))))
+                        (else (loop (+ i 2) (string-append out ch key)))))
+                (loop (+ i 1) (string-append out ch))))))))
+
+;; the same name as one string, for a tooltip and for a caller with no spans
+(define (name-text segments)
+  (string-join (map cadr segments) ""))
+
+;; How a buffer names itself: the mode's icon, then the compact name, whose
+;; own asterisks make a special buffer bold. A mode with something else to
+;; say sets the buffer-local name-format instead. %n is that compact name,
+;; %N the buffer name, %m the mode, %p the project or the working directory.
+(define buffer-name-format ":mode: %n")
+
+(define (buffer-name-segments buf)
+  (name-segments
+    (name-format-expand
+      (or (buffer-local buf 'name-format) buffer-name-format)
+      (list (list "n" (buffer-modeline-name buf))
+            (list "N" buf)
+            (list "m" (or (buffer-local buf 'mode-name) "Fundamental"))
+            (list "p" (buffer-modeline-context buf))))
+    (list (list "mode" (buffer-icon buf)))))
+
 (define (dashboard--sync! buf)
   (desktop-skip! buf 'dashboard-line)
   (desktop-skip! buf 'dashboard-line-blocks)
   (desktop-skip! buf 'modeline-name)
+  (desktop-skip! buf 'modeline-name-segments)
   (desktop-skip! buf 'modeline-project)
-  ;; one preset read for the line and the blocks; one change for the four
+  ;; one preset read for the line and the blocks; one change for the five
   ;; locals, so the frame refreshes once for the sync
   (let ((preset-cell (list (dash--preset buf))))
     (buffer-set-locals! buf
       (list 'dashboard-line (dashboard-one-line buf preset-cell)
             'dashboard-line-blocks (dashboard-line-blocks buf preset-cell)
             'modeline-name (buffer-modeline-name buf)
+            ;; the same name as the spans that draw it: the client shows
+            ;; these and falls back to the plain string only without them
+            'modeline-name-segments (buffer-name-segments buf)
             ;; The project stands beside a file name. A chat shows its
             ;; working directory in the same context slot.
             'modeline-project (buffer-modeline-context buf)))))
@@ -12909,6 +13067,17 @@
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
 (public! 'buffer-modeline-name "(buffer-modeline-name BUF) — BUF's name for the modeline: project-relative, or ~ for home")
+;; the buffer-name grammar: *strong* ~dim~ `mono` :icon:, and \x for a literal x
+(public! 'name-segments "(name-segments SPEC [ICONS]) — the ((CLASS TEXT) ...) spans SPEC draws: *strong* ~dim~ `mono` :icon:; ICONS is ((KEY GLYPH) ...) the caller adds")
+(public! 'name-format-expand "(name-format-expand FORMAT VALS) — fill a name format's %-directives from ((KEY VALUE) ...)")
+(public! 'name-text "(name-text SEGMENTS) — the rendered name as one plain string")
+(public! 'name-icon! "(name-icon! KEY GLYPH) — register the icon :KEY: reaches in a name")
+(public! 'buffer-name-segments "(buffer-name-segments BUF) — the spans that draw BUF's name, from the buffer-local name-format or buffer-name-format")
+(catalog-meta! 'function "name-segments" 'domain 'interaction 'effects '(pure))
+(catalog-meta! 'function "name-format-expand" 'domain 'interaction 'effects '(pure))
+(catalog-meta! 'function "name-text" 'domain 'interaction 'effects '(pure))
+(catalog-meta! 'function "name-icon!" 'domain 'interaction 'effects '(write))
+(catalog-meta! 'function "buffer-name-segments" 'domain 'interaction 'effects '(read))
 (public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT STYLE COMPLETE COLLECT) — preview candidates and optionally route collected rows")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 (catalog-meta! 'function "window-preview-buffer!"

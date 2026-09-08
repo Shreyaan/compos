@@ -1614,11 +1614,26 @@
 (define-key "cua-mode-map" "M-S-<right>" "group-tab-right")
 (editing-neutral-commands! '("group-tab-left" "group-tab-right"))
 
+;; A group name renders like a buffer name: the same grammar, so *chat:mail*
+;; reads as a bold "chat:mail" on the rail and nowhere shows its asterisks.
+;; :group: is the icon a format can call for.
+(name-icon! "group" (mode-icon "groups-mode"))
+
+(define group-name-format "%n")
+
+(define (group-name-segments g)
+  (name-segments
+    (name-format-expand group-name-format
+      (list (list "n" (group-short-name g))
+            (list "N" (group-display-name g))))))
+
 (define (frame-tabs)
   (let* ((here (frame-group))
          (mru (group-ids-mru))
          (shown (frame-tab-order here mru)))
-    (list (map (lambda (id) (list id (group-short-name id) (equal? id here)))
+    (list (map (lambda (id)
+                 (list id (group-short-name id) (equal? id here)
+                       (group-name-segments id)))
                shown)
           (max 0 (- (length mru) (length shown))))))
 
@@ -1630,7 +1645,10 @@
           (else (switch-to-group! id) id))))
 
 (public! 'frame-tabs
-  "(frame-tabs) -> (((ID LABEL CURRENT?) ...) MORE) — the groups the frame modeline shows as tabs, in the order the rail already had them, and how many the limit left out")
+  "(frame-tabs) -> (((ID LABEL CURRENT? SEGMENTS) ...) MORE) — the groups the frame modeline shows as tabs, in the order the rail already had them, and how many the limit left out; SEGMENTS is the rendered name")
+(public! 'group-name-segments
+  "(group-name-segments GROUP) — the spans that draw GROUP's name, from group-name-format")
+(catalog-meta! 'function "group-name-segments" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "frame-tabs" 'domain 'buffers 'effects '(write))
 (public! 'frame-tab!
   "(frame-tab! GROUP) — stand in GROUP; returns its id, or #f when no group answers to it")
