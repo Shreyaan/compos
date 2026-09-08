@@ -415,47 +415,10 @@
               (else (loop (cdr es)))))))
 
 (define (agent-update-modeline! buf)
-  (let* ((c (or (buffer-local buf 'agent-connector) *default-connector*))
-         ;; never name a model this connector can't run: a pinned id left
-         ;; over from another backend (an ACP "default" sentinel, say) is
-         ;; about to be dropped at send time anyway
-         (pinned (let ((m (buffer-local buf 'agent-model)))
-                   (and m (not (agent-model-foreign? buf c m)) m)))
-         (m (or pinned (and (connector-can? c 'stateless) (llm-model))))
-         (cost (and (connector-can? c 'metered) (buffer-local buf 'chat-cost)))
-         ;; the tool surface: the presets beyond the ever-present editor
-         ;; bridge, so two setups that differ only in tools read apart
-         (presets (let ((ps (and (boundp 'chat-presets-of)
-                                 (remove (lambda (p) (equal? p 'compos))
-                                         (chat-presets-of buf)))))
-                    (and (pair? ps) (string-join (map symbol->string ps) "+")))))
-    ;; its own segment as well: a narrow modeline shows the preset where a
-    ;; wider one shows the whole line
-    (buffer-set-local! buf 'modeline-preset presets)
-    (buffer-set-local! buf 'modeline-info
-      (string-append
-        c
-        (if (and m (not (equal? m ""))) (string-append " · " m) "")
-        (let ((effort (buffer-local buf 'agent-effort)))
-          (if effort (string-append " · " effort) ""))
-        (if presets (string-append " · " presets) "")
-        (if cost (string-append " · " (format-usd cost)) "")
-        ;; how full the conversation is, when the backend counts it for us
-        (let ((ctx (and (boundp 'chat-context-label) (chat-context-label buf))))
-          (if ctx (string-append " · " ctx) ""))
-        ;; what will and won't stop to ask — never leave this ambiguous
-        " · " (symbol->string (chat-permission-mode buf))
-        ;; the agent's own mode, when it is running something other than
-        ;; its default (plan mode especially changes what a turn DOES)
-        (let ((am (buffer-local buf 'agent-mode)))
-          (if (and am (not (equal? am "default"))) (string-append " · " am) ""))
-        ;; the editor has tools this chat froze out. Say so: adopting them
-        ;; (C-c t) costs a cache miss, so it is the user's call, not ours.
-        (if (and (boundp 'chat-tools-stale?) (chat-tools-stale? buf))
-            " · tools stale"
-            "")))
-    ;; the segment is clickable: ui-command! runs this on a click
-    (buffer-set-local! buf 'modeline-info-command "agent-switch")))
+  ;; Chat buffers keep the bottom modeline free of LLM configuration.
+  (buffer-set-local! buf 'modeline-preset #f)
+  (buffer-set-local! buf 'modeline-info #f)
+  (buffer-set-local! buf 'modeline-info-command #f))
 
 ;; the catalog the providers last reported, so a fresh session offers the
 ;; long list before anything is fetched

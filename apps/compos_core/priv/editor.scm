@@ -9512,8 +9512,10 @@
         (if (and (buffer-local buf 'agent-connector)
                  (boundp (quote agent-update-modeline!)))
             (agent-update-modeline! buf)
-            (buffer-set-local! buf 'modeline-info
-              (string-append "api · " (llm-model))))
+            (begin
+              (buffer-set-local! buf 'modeline-info #f)
+              (buffer-set-local! buf 'modeline-info-command #f)
+              (buffer-set-local! buf 'modeline-preset #f)))
         (chat-clear-waiting! buf)
         ;; ONE key set for every chat: RET is agent-send everywhere — a
         ;; chat without a runtime attaches the api backend on first send
