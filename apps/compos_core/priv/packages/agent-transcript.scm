@@ -103,6 +103,18 @@
 (define (agent-card-toggle! buf id)
   (agent-card-set-open! buf id (not (agent-card-open? buf id))))
 
+(define (agent-set-verbosity! level)
+  (buffer-set-local! (current-buffer) 'agent-verbosity level))
+
+(define-command "agent-verbosity-info" "Show summaries and only the latest tool title in each burst"
+  (lambda () (agent-set-verbosity! "info")))
+
+(define-command "agent-verbosity-log" "Show summaries and every compact tool call"
+  (lambda () (agent-set-verbosity! "log")))
+
+(define-command "agent-verbosity-debug" "Show summaries and full tool-call details"
+  (lambda () (agent-set-verbosity! "debug")))
+
 (define (agent-card-at-fold buf s)
   (let loop ((es (or (buffer-local buf 'agent-tool-bodies) '())))
     (cond ((null? es) #f)

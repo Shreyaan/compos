@@ -496,11 +496,21 @@ defmodule Compos.Scheme.Builtins do
 
   defp divide([x | rest]), do: Enum.reduce(rest, x, fn b, a -> a / b end)
 
+  # Walk the arguments in place. chunk_every built the whole list of
+  # overlapping pairs first, so a comparison over a long list allocated a
+  # second copy of it before Enum.all? could reject the first pair. On
+  # 2026-09-09 one such call reached 368 MB of heap and passed the 1024 MB
+  # limit, which killed the reactor rule that made it. This allocates
+  # nothing and stops at the first pair that fails.
   defp cmp(op) do
-    fn args ->
-      args |> Enum.chunk_every(2, 1, :discard) |> Enum.all?(fn [a, b] -> op.(a, b) end)
-    end
+    fn args -> cmp_pairs(args, op) end
   end
+
+  defp cmp_pairs([a, b | rest], op) do
+    if op.(a, b), do: cmp_pairs([b | rest], op), else: false
+  end
+
+  defp cmp_pairs(_args, _op), do: true
 
   # keep the elements whose PRED answer is truthy (KEEP true) or false
   defp select(pred, l, store, keep) do

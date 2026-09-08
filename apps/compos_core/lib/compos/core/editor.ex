@@ -3248,6 +3248,7 @@ defmodule Compos.Core.Editor do
       slug: Map.get(locals, "agent-slug"),
       # controlled card state (S6): the ids whose tool cards show open
       open_cards: Map.get(locals, "agent-open-cards") || [],
+      verbosity: Map.get(locals, "agent-verbosity") || "info",
       # transcript follow flag + reader position (S7) — runtime locals,
       # so a page refresh keeps the reader's place and a restart resets
       # to following. Stored INVERTED (agent-unstick): a cleared local is

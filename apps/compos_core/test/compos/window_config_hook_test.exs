@@ -61,7 +61,7 @@ defmodule Compos.WindowConfigHookTest do
 
   test "the Scheme half: popups and ibuffer order" do
     for name <- ["a-popup-does-not-change-the-frame-group", "ibuffer-puts-the-frames-group-first"] do
-      assert eval!("(begin (load-tests!) (run-test '#{name}))") == "()", name
+      assert eval!("(begin (load-tests-once!) (run-test '#{name}))") == "()", name
     end
   end
 end

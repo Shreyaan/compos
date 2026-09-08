@@ -769,7 +769,7 @@ defmodule Compos.ProjectScopeTest do
           "a-search-row-clips-a-generated-line",
           "a-project-search-reads-only-what-git-names"
         ] do
-      assert eval!("(begin (load-tests!) (run-test '#{name}))") == "()", name
+      assert eval!("(begin (load-tests-once!) (run-test '#{name}))") == "()", name
     end
   end
 

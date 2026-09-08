@@ -119,10 +119,18 @@ defmodule Compos.Core.Reactor do
   # because that is the only thread left to pull.
   @max_failures 3
 
+  # Map.get, not rule.failures: a hot reload swaps this module while the
+  # running Reactor still holds rules that were built before the key existed,
+  # and a KeyError here would take every rule in the editor down with it.
   defp note_failure(state, id, rule, changes, error) do
-    failures = rule.failures + 1
+    failures = Map.get(rule, :failures, 0) + 1
     name = buffer_name(rule.buffer_ref) || inspect(rule.buffer_ref)
-    rule = %{rule | pending: rule.pending ++ Enum.reverse(changes), timer: nil, failures: failures}
+
+    rule =
+      rule
+      |> Map.put(:pending, rule.pending ++ Enum.reverse(changes))
+      |> Map.put(:timer, nil)
+      |> Map.put(:failures, failures)
 
     if failures >= @max_failures do
       Logger.error(
@@ -228,7 +236,7 @@ defmodule Compos.Core.Reactor do
         rule = %{rule | in_flight: false}
 
         if handler_ok?(result) do
-          {:noreply, put_in(state.rules[id], arm_pending(%{rule | failures: 0}))}
+          {:noreply, put_in(state.rules[id], arm_pending(Map.put(rule, :failures, 0)))}
         else
           {:noreply, note_failure(state, id, rule, changes, handler_error(result))}
         end
@@ -243,7 +251,7 @@ defmodule Compos.Core.Reactor do
         {:noreply, state}
 
       {id, rule} ->
-        attempted = Enum.reverse(rule.in_flight.changes)
+        attempted = rule.in_flight.changes
         rule = %{rule | in_flight: false}
         {:noreply, note_failure(state, id, rule, attempted, "task exited: #{inspect(reason)}")}
     end

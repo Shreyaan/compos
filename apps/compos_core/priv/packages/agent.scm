@@ -51,13 +51,16 @@
       ;; one it is actually in (it switches itself when it enters plan mode)
       ((equal? type 'mode-state)
        (let ((avail (plist-get e 'available))
-             (cur (plist-get e 'current)))
+             (cur (plist-get e 'current))
+             (known (buffer-local buf 'agent-modes)))
          (when avail (buffer-set-local! buf 'agent-modes avail))
          (when (and cur (not (equal? cur "")))
-           (buffer-set-local! buf 'agent-mode cur)))
-       ;; a chat already in auto mode pushes that down to the agent as
-       ;; soon as it learns the session can take it
-       (agent-sync-permission-mode! slug)
+           (buffer-set-local! buf 'agent-mode cur))
+         ;; Apply the compos stance when modes are first discovered. Later
+         ;; updates acknowledge explicit choices (or entering plan mode);
+         ;; synchronizing again would immediately undo those choices.
+         (when (and avail (not (pair? known)))
+           (agent-sync-permission-mode! slug)))
        (agent-update-modeline! buf))
 
       ((equal? type 'user-msg)

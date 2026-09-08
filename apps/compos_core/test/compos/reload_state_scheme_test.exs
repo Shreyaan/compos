@@ -22,7 +22,7 @@ defmodule Compos.ReloadStateSchemeTest do
 
   @tag timeout: 180_000
   test "a reload cannot empty the state the desktop saves" do
-    registered = eval!("(begin (load-tests!) (test-names))")
+    registered = eval!("(begin (load-tests-once!) (test-names))")
 
     for name <- @names do
       assert registered =~ name, "#{name} did not register"

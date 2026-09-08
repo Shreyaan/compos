@@ -39,7 +39,7 @@ defmodule Compos.ListDrawTest do
   end
 
   test "a list redraw is at most eight buffer changes" do
-    eval!(~s{(begin (load-tests!) (list-mode-show! "zz-page-mode") #t)})
+    eval!(~s{(begin (load-tests-once!) (list-mode-show! "zz-page-mode") #t)})
     ref = Buffer.ref("*zz-page*")
     Events.subscribe(ref)
 
@@ -52,7 +52,7 @@ defmodule Compos.ListDrawTest do
   end
 
   test "a redraw that changes nothing changes nothing" do
-    eval!(~s{(begin (load-tests!) (list-mode-show! "zz-page-mode") #t)})
+    eval!(~s{(begin (load-tests-once!) (list-mode-show! "zz-page-mode") #t)})
     eval!(~s{(list-redraw! "*zz-page*")})
     ref = Buffer.ref("*zz-page*")
     Events.subscribe(ref)

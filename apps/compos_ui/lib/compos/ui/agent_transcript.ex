@@ -21,7 +21,7 @@ defmodule Compos.Ui.AgentTranscript do
     ~H"""
     <div
       id={"ag-scroll-#{@win}"}
-      class="ag-scroll"
+      class={"ag-scroll ag-verbosity-#{@verbosity}"}
       phx-hook="AgentScroll"
       data-buf={@buf}
       data-win={@win}
@@ -30,12 +30,11 @@ defmodule Compos.Ui.AgentTranscript do
       data-scroll-anchor={@scroll_anchor}
       data-scroll-offset={@scroll_offset}
     >
-      <fieldset class="ag-verbosity" aria-label="Transcript verbosity">
-        <legend>Transcript verbosity</legend>
-        <label><input type="radio" name={"ag-verbosity-#{@win}"} value="info" checked />info</label>
-        <label><input type="radio" name={"ag-verbosity-#{@win}"} value="log" />log</label>
-        <label><input type="radio" name={"ag-verbosity-#{@win}"} value="debug" />debug</label>
-      </fieldset>
+      <div class="ag-verbosity" role="group" aria-label="Transcript verbosity">
+        <button type="button" class={if @verbosity == "info", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-info">info</button>
+        <button type="button" class={if @verbosity == "log", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-log">log</button>
+        <button type="button" class={if @verbosity == "debug", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-debug">debug</button>
+      </div>
       <%= for {b, block_index} <- Enum.with_index(@blocks) do %>
         <%= case b.kind do %>
           <% :user -> %>

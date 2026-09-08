@@ -16,7 +16,7 @@ defmodule Compos.FrameWindowsTest do
           "switch-under-context-changes-no-window",
           "with-frame-windows-reaches-the-real-windows"
         ] do
-      {:ok, out} = Session.eval("(begin (load-tests!) (run-test '#{name}))")
+      {:ok, out} = Session.eval("(begin (load-tests-once!) (run-test '#{name}))")
       assert out == "()", "#{name}: #{out}"
     end
   end

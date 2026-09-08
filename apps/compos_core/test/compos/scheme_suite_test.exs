@@ -32,7 +32,7 @@ defmodule Compos.SchemeSuiteTest do
 
   # symbols print as a bare list: (a b c)
   defp names do
-    eval!("(begin (load-tests!) (test-names))")
+    eval!("(begin (load-tests-once!) (test-names))")
     |> String.trim_leading("(")
     |> String.trim_trailing(")")
     |> String.split(" ", trim: true)
@@ -94,7 +94,7 @@ defmodule Compos.SchemeSuiteTest do
   # in a live editor. Here the home is a throwaway one, so they MUST run:
   # a gate that quietly hid them would be worse than no gate.
   test "the gated tests are not gated here" do
-    assert eval!("(begin (load-tests!) (editor-is-disposable?))") == "#t",
+    assert eval!("(begin (load-tests-once!) (editor-is-disposable?))") == "#t",
            "the test home is not disposable, so the suite would skip the gated files"
 
     gated = eval!("(length *disposable-only-tests*)") |> String.to_integer()

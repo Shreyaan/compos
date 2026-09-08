@@ -2456,7 +2456,8 @@ defmodule Compos.AgentTest do
           "currentModeId" => "default",
           "availableModes" => [
             %{"id" => "default", "name" => "Default"},
-            %{"id" => "dontAsk", "name" => "Don't Ask"}
+            %{"id" => "dontAsk", "name" => "Don't Ask"},
+            %{"id" => "auto", "name" => "Auto"}
           ]
         }
       }
@@ -2466,6 +2467,33 @@ defmodule Compos.AgentTest do
     assert_receive {:frame, %{"method" => "session/set_mode", "params" => sp}}, 1_000
     assert sp["modeId"] == "dontAsk"
     assert eventually(fn -> Buffer.get_local("*chat:a1*", "agent-mode") == "dontAsk" end)
+
+    # An explicit mode selected through the UI must survive its backend
+    # acknowledgement, even though compos's permission stance is auto.
+    buf = "*chat:a1*"
+    {:ok, _} = Session.eval(~s[(switch-to-buffer! "#{buf}")])
+    {:ok, _} = Session.eval(~s[(run-command "agent-set-mode")])
+    type("auto")
+    press("RET")
+    assert_receive {:frame, %{"method" => "session/set_mode", "params" => %{"modeId" => "auto"}}}, 1_000
+    update(agent, "sess-auto", %{
+      "sessionUpdate" => "current_mode_update",
+      "currentModeId" => "auto"
+    })
+    assert eventually(fn -> Buffer.get_local(buf, "agent-mode") == "auto" end)
+    refute_receive {:frame, %{"method" => "session/set_mode"}}, 100
+
+    # Some adapters repeat the available modes with configuration updates.
+    update(agent, "sess-auto", %{
+      "sessionUpdate" => "config_option_update",
+      "configOptions" => [%{
+        "id" => "mode", "type" => "select", "currentValue" => "auto",
+        "options" => [%{"value" => "auto", "name" => "Auto"},
+                      %{"value" => "dontAsk", "name" => "Don't Ask"}]
+      }]
+    })
+    assert Buffer.get_local(buf, "agent-mode") == "auto"
+    refute_receive {:frame, %{"method" => "session/set_mode"}}, 100
   end
 
   defp block_kinds(buf),

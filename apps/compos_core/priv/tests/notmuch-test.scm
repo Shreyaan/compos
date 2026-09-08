@@ -31,7 +31,7 @@
     (list "show-html.json" "  [[[{\"id\": \"m2\", \"match\": true, \"excluded\": false, \"filename\": [\"/Users/svs/Mail/svsrecruiting/mail/cur/def:2,S\"], \"timestamp\": 1786037671, \"date_relative\": \"Yest. 23:04\", \"tags\": [\"inbox\"], \"duplicate\": 1, \"body\": [{\"id\": 1, \"content-type\": \"text/html\", \"content\": \"<p>Hello <b>HTML</b> world</p>\"}], \"headers\": {\"Subject\": \"Quarterly report\", \"From\": \"Bob <bob@example.com>\", \"To\": \"svs@svsrecruiting.com\", \"Date\": \"Wed, 06 Aug 2026 23:04:31 +0530\"}}, []]]]")
     (list "reply.json" "  {\"reply-headers\": {\"Subject\": \"Re: Hello world\", \"From\": \"SVS <svs@svsrecruiting.com>\", \"To\": \"Alice <alice@example.com>\", \"In-reply-to\": \"<m1>\", \"References\": \"<m1>\"}, \"original\": {\"id\": \"m1\", \"match\": false, \"excluded\": false, \"filename\": [\"/Users/svs/Mail/svsrecruiting/mail/cur/abc:2,S\"], \"timestamp\": 1786065644, \"date_relative\": \"Today 06:50\", \"tags\": [\"inbox\"], \"body\": [{\"id\": 1, \"content-type\": \"multipart/alternative\", \"content\": [{\"id\": 2, \"content-type\": \"text/plain\", \"content\": \"Hi there, this is the body.\\n\"}, {\"id\": 3, \"content-type\": \"text/html\", \"content-length\": 100}]}], \"headers\": {\"Subject\": \"Hello world\", \"From\": \"Alice <alice@example.com>\", \"To\": \"svs@svsrecruiting.com\", \"Date\": \"Thu, 07 Aug 2026 06:50:44 +0530\"}}}")))
 
-(define t--nm-script "#!/bin/sh\ndir=\"$(dirname \"$0\")\"\necho \"$@\" >> \"$dir/calls.log\"\ncase \"$1\" in\n  search)\n    case \"$*\" in\n      *thread:{from:alice@example.com}*) printf '[]\\n';;\n      *from:alice@example.com*) cat \"$dir/sender-search.json\";;\n      *--output=messages*) echo \"id:m1\";;\n      *--output=tags*) printf 'important\\ninbox\\nunread\\n';;\n      *) cat \"$dir/search.json\";;\n    esac;;\n  show)\n    case \"$*\" in\n      *thread:0002*) cat \"$dir/show-html.json\";;\n      *) cat \"$dir/show.json\";;\n    esac;;\n  reply) cat \"$dir/reply.json\";;\n  config) printf 'query.inbox.query=tag:inbox\\nquery.unread.query=tag:unread\\n';;\n  # two different shapes: `count --batch` reads queries on stdin and\n  # answers one line each (the mailbox list), while a plain `count`\n  # must NOT touch stdin — draining a pipe nobody writes to blocks\n  # forever and wedges the Session for every later eval.\n  count)\n    case \"$*\" in\n      *--batch*)\n        while read -r q; do\n          case \"$q\" in *unread*) printf '2\\n';; *) printf '5\\n';; esac\n        done;;\n      *no-such*) printf '0\\n';;\n      *) printf '5\\n';;\n    esac;;\nesac")
+(define t--nm-script "#!/bin/sh\ndir=\"$(dirname \"$0\")\"\necho \"$@\" >> \"$dir/calls.log\"\ncase \"$1\" in\n  search)\n    case \"$*\" in\n      *thread:{from:alice@example.com}*) printf '[]\\n';;\n      *from:alice@example.com*) cat \"$dir/sender-search.json\";;\n      *--output=messages*) echo \"id:m1\";;\n      *--output=tags*) printf 'important\\ninbox\\nunread\\n';;\n      *) cat \"$dir/search.json\";;\n    esac;;\n  show)\n    case \"$*\" in\n      *thread:0002*) cat \"$dir/show-html.json\";;\n      *) cat \"$dir/show.json\";;\n    esac;;\n  reply) cat \"$dir/reply.json\";;\n  config)\n    case \"$*\" in\n      *database.path*) printf '/test/mail\\n';;\n      *) printf 'query.inbox.query=tag:inbox\\nquery.unread.query=tag:unread\\n';;\n    esac;;\n  # two different shapes: `count --batch` reads queries on stdin and\n  # answers one line each (the mailbox list), while a plain `count`\n  # must NOT touch stdin — draining a pipe nobody writes to blocks\n  # forever and wedges the Session for every later eval.\n  count)\n    case \"$*\" in\n      *--batch*)\n        while read -r q; do\n          case \"$q\" in *unread*) printf '2\\n';; *) printf '5\\n';; esac\n        done;;\n      *no-such*) printf '0\\n';;\n      *) printf '5\\n';;\n    esac;;\nesac")
 
 ;; Every test starts from a clean stub and a clean editor: the call log is
 ;; what most of them read, and a stale one answers for the wrong test.
@@ -82,7 +82,8 @@
     (check-equal! (current-buffer) "*notmuch*" "the listing is current")
     (let ((text (buffer-text "*notmuch*")))
       (check-contains! text "Mail" "the title")
-      (check-contains! text "5 threads · tag:inbox" "the count and the query")
+      (check-contains! text "5 messages" "the message count")
+      (check-contains! text "tag:inbox" "the query")
       (check-contains! text "Hello world" "the first subject")
       (check-contains! text "Quarterly report" "the second")
       (check-contains! text "Alice" "and an author"))
@@ -237,13 +238,16 @@
     (check-contains! (t--nm-calls) "tag -inbox -- thread:0001" "the untag call")
     (t--nm-done!)))
 
-(deftest 'mark-toggles-the-mark-tag
-  "the mark is a tag, so it survives a refresh"
+(deftest 'mark-toggles-local-selection
+  "selection survives refresh without writing a mail tag"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (t--nm-run! "notmuch-mark-toggle")
-    (check-contains! (t--nm-calls) "tag +compos-mark -- thread:0001" "the mark call")
+    (check-equal! (list-marks "*notmuch*") '(("0001" "*")) "selected locally")
+    (nm--refresh! "*notmuch*")
+    (check-equal! (list-marks "*notmuch*") '(("0001" "*")) "still selected")
+    (check-equal! (string-contains? (t--nm-calls) "tag +compos-mark") #f "no mark write")
     (t--nm-done!)))
 
 (deftest 'reply-composes-from-the-threads-newest-message
@@ -277,6 +281,12 @@
     (t--nm-setup!)
     (run-command "notmuch")
     (check-equal! (current-buffer) "*mailboxes*" "the mailbox list")
+    (check-true!
+      (wait-until (lambda ()
+                    (and (equal? (buffer-local "*mailboxes*" 'nm-hello-status) "")
+                         (not (string-contains? (buffer-text "*mailboxes*") "loading counts"))))
+                  3000 10)
+      "the asynchronous counts arrive")
     (let ((text (buffer-text "*mailboxes*")))
       (check-contains! text "Mailboxes" "the title")
       (check-contains! text "inbox" "a mailbox")
@@ -475,8 +485,9 @@
     (check-equal! (length (list-entries "*notmuch*")) 1 "one row matches")
     (check-equal! (nm--query-of "*notmuch*") "from:alice@example.com" "the sender filter")
 
+    (run-command "notmuch-mark-toggle")
     (run-command "notmuch-filter-marked")
-    (check-equal! (nm--query-of "*notmuch*") "tag:compos-mark" "the marked filter replaced it")
+    (check-equal! (nm--query-of "*notmuch*") "( from:alice@example.com ) and ( thread:0001 )" "the selected search replaced it")
 
     (run-command "notmuch-unfilter-last")
     (check-equal! (nm--query-of "*notmuch*") "from:alice@example.com" "and back to the sender")
@@ -507,65 +518,57 @@
     (t--nm-replace (cadr (assoc "search.json" t--nm-files)) from to)))
 
 (deftest 'a-marked-thread-shows-the-list-mark-on-its-row
-  "the mark tag becomes a list mark, so the row wears the mark column"
+  "local selection draws a mark and ignores legacy server marks"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
-    (check-equal! (list-marks "*notmuch*") '() "no thread is marked at first")
     (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
                              "\"tags\": [\"inbox\", \"compos-mark\", \"unread\"]")
-    (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
-    (check-equal! (list-marks "*notmuch*") (list (list "0001" "*"))
-                  "the marked thread carries the list mark")
+    (nm--refresh! "*notmuch*")
+    (check-equal! (list-marks "*notmuch*") '() "old tags are not selection")
+    (run-command "notmuch-mark-toggle")
+    (check-equal! (list-marks "*notmuch*") '(("0001" "*")) "selected row")
     (let ((row (car (list-row-lines "*notmuch*" (car (list-entries "*notmuch*"))))))
-      (check-equal! (string-prefix? "* " (car row)) #t "the row starts with the mark"))
-    (let ((row (car (list-row-lines "*notmuch*" (cadr (list-entries "*notmuch*"))))))
-      (check-equal! (string-prefix? "  " (car row)) #t "an unmarked row starts blank"))
+      (check-equal! (string-prefix? "* " (car row)) #t "visible mark"))
     (t--nm-done!)))
 
 (deftest 'mark-all-again-unmarks-the-search
-  "one shown thread marked is enough: the next mark-all removes the mark tag"
+  "one selected thread is enough for star to clear selection"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
-    (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
-                             "\"tags\": [\"inbox\", \"compos-mark\", \"unread\"]")
-    (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
-    (check-equal! (nm--any-marked? "*notmuch*") #t "one row is marked, another is not")
+    (run-command "notmuch-mark-toggle")
+    (check-equal! (nm--any-marked? "*notmuch*") #t "one selected")
     (run-command "notmuch-mark-all")
-    (check-contains! (t--nm-calls) "tag -compos-mark -- ( tag:inbox )" "the second press unmarks the query")
+    (check-equal! (nm--any-marked? "*notmuch*") #f "cleared")
     (t--nm-done!)))
 
-(deftest 'mark-all-under-a-filter-tags-only-the-narrowed-query
-  "the tag call names the base plus the filters, both ways"
+(deftest 'mark-all-under-a-filter-selects-only-the-narrowed-query
+  "the selection names the base plus filters without a tag write"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (run-command "notmuch-filter")
     (t--nm-answer! "from:alice")
     (run-command "notmuch-mark-all")
-    (check-contains! (t--nm-calls) "tag +compos-mark -- ( ( tag:inbox ) and from:alice )"
-                     "the mark covers the filtered search, not the mailbox")
-    (t--nm-search-json-with! "\"tags\": [\"inbox\", \"unread\"]"
-                             "\"tags\": [\"inbox\", \"compos-mark\", \"unread\"]")
-    (with-current-buffer "*notmuch*" (lambda () (list-refresh! "*notmuch*")))
+    (check-equal! (nm--marked-query "*notmuch*") "( ( tag:inbox ) and from:alice )" "full query")
     (run-command "notmuch-mark-all")
-    (check-contains! (t--nm-calls) "tag -compos-mark -- ( ( tag:inbox ) and from:alice )"
-                     "and so does the unmark")
+    (check-equal! (nm--any-marked? "*notmuch*") #f "cleared")
+    (check-equal! (string-contains? (t--nm-calls) "compos-mark") #f "no mark writes")
     (t--nm-done!)))
 
 (deftest 'mark-all-then-archive-marked-asks-before-it-acts
-  "a bulk change over a whole query takes a confirmation"
+  "archive applies to the full filtered query and clears selection"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
+    (nm--query-push! "*notmuch*" "from:alice")
+    (nm--refresh! "*notmuch*")
     (run-command "notmuch-mark-all")
-    (check-contains! (t--nm-calls) "tag +compos-mark -- ( tag:inbox )" "every thread in the query is marked")
-
     (run-command "notmuch-archive-marked")
     (t--nm-answer! "yes")
-    (check-contains! (t--nm-calls) "tag -inbox -compos-mark -- ( tag:inbox ) and tag:compos-mark"
-                     "and the archive names the marked set")
+    (check-contains! (t--nm-calls) "tag -inbox -- ( ( tag:inbox ) and from:alice )" "archive query")
+    (check-equal! (nm--any-marked? "*notmuch*") #f "selection cleared")
     (t--nm-done!)))
 
 (deftest 'embark-acts-on-the-email-at-point

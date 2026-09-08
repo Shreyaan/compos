@@ -17,7 +17,7 @@ defmodule Compos.FileViewTest do
           "browser-file-mode-draws-common-images-with-the-browser-viewer",
           "file-view-modes-and-commands-are-discoverable-with-declared-effects"
         ] do
-      assert eval!("(begin (load-tests!) (run-test '#{name}))") == "()", name
+      assert eval!("(begin (load-tests-once!) (run-test '#{name}))") == "()", name
     end
   end
 

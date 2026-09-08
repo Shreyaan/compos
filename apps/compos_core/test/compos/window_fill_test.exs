@@ -23,7 +23,7 @@ defmodule Compos.WindowFillTest do
           "a-listing-seeds-no-new-group",
           "the-visible-verbs-take-the-windows-as-they-stand"
         ] do
-      {:ok, out} = Session.eval("(begin (load-tests!) (run-test '#{name}))", frame)
+      {:ok, out} = Session.eval("(begin (load-tests-once!) (run-test '#{name}))", frame)
       assert out == "()", "#{name}: #{out}"
     end
   end

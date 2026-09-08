@@ -1812,6 +1812,7 @@ defmodule Compos.Ui.EditorLive do
             blocks={@node.ag_blocks}
             win={@node.id}
             buf={@node.buffer}
+            verbosity={@node.agent.verbosity}
             stick={@node.agent.stick}
             scroll_top={@node.agent.scroll_top}
             scroll_anchor={@node.agent.scroll_anchor}

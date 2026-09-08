@@ -69,10 +69,39 @@ defmodule Compos.Ui.AgentViewTest do
     # The scroll lifecycle belongs to the async transcript component, so its
     # mounted/updated callbacks see the child's final scroll height.
     assert has_element?(view, ~s(.ag-scroll[phx-hook="AgentScroll"][data-stick="true"]))
+    assert has_element?(view, ~s(.ag-scroll.ag-verbosity-info))
     assert has_element?(view, ~s(.ag-verbosity[aria-label="Transcript verbosity"]))
-    assert has_element?(view, ~s(.ag-verbosity input[value="info"][checked]))
-    assert has_element?(view, ~s(.ag-verbosity input[value="log"]))
-    assert has_element?(view, ~s(.ag-verbosity input[value="debug"]))
+
+    assert has_element?(
+             view,
+             ~s(.ag-verbosity button.active[phx-value-cmd="agent-verbosity-info"]),
+             "info"
+           )
+
+    assert has_element?(
+             view,
+             ~s(.ag-verbosity button[phx-value-cmd="agent-verbosity-log"]),
+             "log"
+           )
+
+    assert has_element?(
+             view,
+             ~s(.ag-verbosity button[phx-value-cmd="agent-verbosity-debug"]),
+             "debug"
+           )
+
+    view
+    |> element(~s(.ag-verbosity button[phx-value-cmd="agent-verbosity-log"]))
+    |> render_click()
+
+    assert Buffer.get_local(buf, "agent-verbosity") == "log"
+    assert has_element?(view, ~s(.ag-scroll.ag-verbosity-log))
+
+    assert has_element?(
+             view,
+             ~s(.ag-verbosity button.active[phx-value-cmd="agent-verbosity-log"])
+           )
+
     refute has_element?(view, ~s(.agent-view[phx-hook="AgentScroll"]))
     assert html =~ "ag-user"
     assert html =~ "profile redisplay"

@@ -205,10 +205,28 @@
     (set! *test-file-needs-disposable* #f)
     (length *tests*)))
 
+
+;; The suite is 124 files. Loading it costs most of an eval's heap budget, so
+;; an eval that loads AND runs a test passed the 1024 MB limit and died. This
+;; loads once per daemon: the first caller pays, every caller after it pays
+;; nothing, and the run has the whole budget to itself.
+(defvar '*tests-loaded* #f)
+
+(define (load-tests-once!)
+  (unless *tests-loaded*
+    (load-tests!)
+    (set! *tests-loaded* #t))
+  (length *tests*))
+
+;; A reload of a test file must be visible to the next run.
+(define (reload-tests!)
+  (set! *tests-loaded* #f)
+  (load-tests-once!))
+
 (define-command "run-scheme-tests"
   "Run the Scheme test suite and report it in *test-results*"
   (lambda ()
-    (load-tests!)
+    (load-tests-once!)
     (let* ((buf "*test-results*")
            (failed 0)
            (lines '())
@@ -265,6 +283,8 @@
   "(test-self-check) — prove the checks can fail; answers the failures three bad assertions record")
 (public! 'test-forget-catalog!
   "(test-forget-catalog! KIND NAME) — drop a test's catalog entry; the M-x name stays until a restart")
+(public! 'load-tests-once! "(load-tests-once!) — load every test file the first time only; answers the test count")
+(public! 'reload-tests! "(reload-tests!) — forget the loaded suite and read priv/tests again")
 (public! 'load-tests! "(load-tests!) — load every .scm under priv/tests; answers the test count")
 
 (message "test.scm loaded")

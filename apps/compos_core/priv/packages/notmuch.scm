@@ -108,6 +108,7 @@ when a message has no text/plain part." 'group 'notmuch)
                           (nm--query-filters-of buf)))
 
 (define (nm--query-reset! buf query)
+  (buffer-set-local! buf 'notmuch-selection #f)
   (buffer-set-local! buf 'notmuch-query-base query)
   (buffer-set-local! buf 'notmuch-query-filters '())
   (buffer-set-local! buf 'notmuch-query-positions '())
@@ -115,6 +116,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (buffer-set-local! buf 'notmuch-query #f))
 
 (define (nm--query-push! buf term)
+  (buffer-set-local! buf 'notmuch-selection #f)
   (nm--query-base-of buf)
   (buffer-set-local! buf 'notmuch-query-positions
     (cons (list-index buf)
@@ -123,6 +125,7 @@ when a message has no text/plain part." 'group 'notmuch)
     (cons term (nm--query-filters-of buf))))
 
 (define (nm--query-push-only! buf term)
+  (buffer-set-local! buf 'notmuch-selection #f)
   (nm--query-base-of buf)
   (buffer-set-local! buf 'notmuch-query-positions
     (cons (list-index buf)
@@ -135,6 +138,7 @@ when a message has no text/plain part." 'group 'notmuch)
     (if (null? filters)
         #f
         (begin
+          (buffer-set-local! buf 'notmuch-selection #f)
           (buffer-set-local! buf 'notmuch-query-filters (cdr filters))
           (let ((positions (or (buffer-local buf 'notmuch-query-positions) '())))
             (unless (null? positions)
@@ -239,16 +243,6 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--th-tags th) (list-ref th 3))
 (define (nm--th-date th) (list-ref th 4))
 
-;; The mark is a notmuch tag, so it has to be a name the mail server
-;; will never hand back as a label of its own. "m" was not such a name:
-;; this mailbox carries an "m" label on 12828 messages, so every thread
-;; read as marked and a bulk verb would have acted on the whole inbox
-;; instead of the handful the reader picked.
-(define nm-mark-tag "compos-mark")
-(define nm-mark-query (string-append "tag:" nm-mark-tag))
-(define nm-mark-add (string-append "+" nm-mark-tag))
-(define nm-mark-rem (string-append "-" nm-mark-tag))
-
 (define (nm--search-rows buf)
   (let* ((query (nm--query-of buf))
          (rows (map (lambda (th) (list (nm--get th 'thread)
@@ -257,12 +251,7 @@ when a message has no text/plain part." 'group 'notmuch)
                                       (or (nm--get th 'tags) '())
                                       (or (nm--get th 'date_relative) "")))
                     (nm--search-json query notmuch-search-limit))))
-    ;; a marked thread carries the m tag, and the list draws its mark
-    ;; column from the marks local: derive the marks from the tags on
-    ;; every fetch, so a marked row shows the mark like any other list
-    (buffer-set-local! buf 'list-marks
-      (map (lambda (th) (list (nm--th-id th) *list-mark-char*))
-           (filter (lambda (th) (member nm-mark-tag (nm--th-tags th))) rows)))
+    (nm--draw-marks! buf rows)
     ;; the tag column measures itself against the threads this search
     ;; found. It reads the number here, and not from the entries: a draw
     ;; lays the columns out while the entries it replaces are still the
@@ -319,15 +308,14 @@ when a message has no text/plain part." 'group 'notmuch)
               (list "tags" (nm--tags-width buf) 'right nm--fit-tags))))
 
 (define (nm--subject-face tags)
-  (cond ((member nm-mark-tag tags) "nm-marked")
-        ((member "unread" tags) "nm-unread")
+  (cond ((member "unread" tags) "nm-unread")
         (else "nm-subject")))
 
 (define (nm--search-cells buf th)
   (let* ((tags (nm--th-tags th))
          (bar (if (member "unread" tags) "▌" " ")))
     (list (list (list bar "nm-bar")
-                (list (nm--th-subject th) (nm--subject-face tags))
+                (list (nm--th-subject th) (if (nm--row-marked? buf th) "nm-marked" (nm--subject-face tags)))
                 (list (nm--th-date th) "nm-date"))
           (list " "
                 (list (nm--th-authors th) "nm-author")
@@ -368,10 +356,10 @@ when a message has no text/plain part." 'group 'notmuch)
     'doc (string-append
            "One notmuch search as a list of threads. `RET` opens, `SPC` "
            "previews, `a`/`d`/`t` tag, `m` marks and the capital keys act "
-           "on every marked thread. `/` adds a custom query filter. "
+           "on every marked thread. Selection is local and clears after bulk actions or filter changes. `/` adds a custom query filter. "
            "`l` adds a tag filter; `\\` removes it. "
-           "`s` starts a new search; `q` goes back "
-           "to the mailboxes.")
+           "`s` starts a new search; `q` removes the last filter, "
+           "or goes back to mailboxes when no filters remain.")
     'rows (lambda (buf) (nm--search-rows buf))
     'key (lambda (buf th) (nm--th-id th))
     'selection-face "select"
@@ -388,13 +376,13 @@ when a message has no text/plain part." 'group 'notmuch)
                   '(("a" "archive marked") ("d" "trash marked")
                     ("t" "tag marked") ("F" "show marked")
                     ("U" "unmark all") ("m" "unmark this")
-                    ("RET" "open") ("g" "refresh") ("q" "mailboxes"))
+                    ("RET" "open") ("g" "refresh") ("q" "back"))
                   '(("RET" "open") ("SPC" "preview") ("m" "mark")
                     ("a" "archive") ("d" "trash") ("T" "tag")
                     ("s" "search") ("/" "custom filter") ("l" "tag filter")
                     ("\\" "unfilter")
                     ("g" "refresh")
-                    ("q" "mailboxes"))))
+                    ("q" "back"))))
     'keys '(("n" "notmuch-next") ("p" "notmuch-prev")
             ("RET" "notmuch-open-thread") ("SPC" "notmuch-preview")
             ("M-<" "notmuch-first-thread") ("M->" "notmuch-last-thread")
@@ -410,8 +398,8 @@ when a message has no text/plain part." 'group 'notmuch)
             ("/" "notmuch-filter")
             ("\\" "notmuch-unfilter-last") ("l" "notmuch-filter-by-tag")
             ("s" "notmuch-search") ("g" "notmuch-refresh")
-            ;; like notmuch-emacs: q in the index goes back to the mailboxes
-            ("q" "notmuch"))
+            ("C-c a" "notmuch-open-attachment")
+            ("q" "notmuch-back"))
     'remap '(("next-line" "notmuch-next") ("previous-line" "notmuch-prev"))))
 
 (define (nm--open-index! query)
@@ -425,7 +413,10 @@ when a message has no text/plain part." 'group 'notmuch)
     ;; The mode setup can reuse cached rows. A mailbox selection requests
     ;; current rows for its new base query.
     (when cached? (nm--refresh! buf))
-    (list-goto-first-entry buf)))
+    (list-goto-first-entry buf)
+    ;; Opening selects a row just as n/p do. Populate its detail now.
+    ;; During scene construction, the declared show pane does this itself.
+    (unless (layout-arranging?) (nm--maybe-preview! buf))))
 
 (define-command "notmuch-inbox" "Open the mail index on the default query"
   (lambda () (nm--open-index! notmuch-default-query)))
@@ -448,39 +439,96 @@ when a message has no text/plain part." 'group 'notmuch)
                 (loop (cdr ls) (cons (list name q) acc)))
               (loop (cdr ls) acc))))))
 
-;; one notmuch invocation for all counts
-(define (nm--batch-count queries)
-  (if (null? queries)
-      '()
-      (map (lambda (s) (or (string->number s) 0))
-           (string-split
-             (string-trim
-               (shell-command->string
-                 (string-append "printf '%s\\n' "
-                                (string-join (map nm--quote queries) " ")
-                                " | " (nm--cmd "count --batch"))))
-             "\n"))))
+(define (nm--tag-query tag)
+  (string-append "tag:\"" (string-join (string-split tag "\"") "\"\"") "\""))
 
-;; one row: (name query total unread)
+(define (nm--tag-search? query tag)
+  (or (equal? query (nm--tag-query tag))
+      (and (re-match? "^[A-Za-z0-9_.@+-]+$" tag)
+           (equal? query (string-append "tag:" tag)))))
+
+;; Tags belong to the selected database. A mailbox does not need a
+;; separately configured saved search just to make its tag visible.
+(define (nm--mailboxes)
+  (let ((saved (nm--saved-searches)))
+    (append saved
+      (map (lambda (tag) (list tag (nm--tag-query tag)))
+           (filter
+             (lambda (tag)
+               (null? (filter (lambda (s) (nm--tag-search? (cadr s) tag)) saved)))
+             (nm--all-tags))))))
+
+(define (nm--batch-count-command queries)
+  (string-append "printf '%s\\n' "
+                 (string-join (map nm--quote queries) " ")
+                 " | " (nm--cmd "count --batch")))
+
+(define (nm--parse-counts output)
+  (map string->number (string-split (string-trim output) "\n")))
+
+;; Kept for callers that need a synchronous count outside the UI.
+(define (nm--batch-count queries)
+  (if (null? queries) '()
+      (nm--parse-counts
+        (shell-command->string (nm--batch-count-command queries)))))
+
+;; Count pairs share one database open and SSH call. A thread expansion
+;; in a saved search can take seconds even over a warm SSH connection.
+;; Show selectable mailbox names first; counts must never hold navigation.
+(define *nm-hello-request* 0)
+
+(define (nm--hello-count-queries searches)
+  (fold (lambda (acc s)
+          (append acc (list (cadr s)
+                            (string-append "( " (cadr s) " ) and tag:unread"))))
+        '() searches))
+
+(define (nm--hello-count-rows searches counts)
+  (if (null? searches) '()
+      (cons (list (car (car searches)) (cadr (car searches)) (car counts) (cadr counts))
+            (nm--hello-count-rows (cdr searches) (cddr counts)))))
+
 (define (nm--hello-rows buf)
-  (let* ((searches (nm--saved-searches))
-         (queries (map cadr searches))
-         (totals (nm--batch-count queries))
-         (unreads (nm--batch-count
-                    (map (lambda (q) (string-append "( " q " ) and tag:unread"))
-                         queries))))
-    (let loop ((ss searches) (ts totals) (us unreads) (acc '()))
-      (if (or (null? ss) (null? ts) (null? us))
-          (reverse acc)
-          (loop (cdr ss) (cdr ts) (cdr us)
-                (cons (list (car (car ss)) (cadr (car ss)) (car ts) (car us))
-                      acc))))))
+  (let* ((searches (nm--mailboxes))
+         (identity (nm--db-key))
+         (request (+ *nm-hello-request* 1)))
+    (set! *nm-hello-request* request)
+    (desktop-skip! buf 'nm-hello-request)
+    (desktop-skip! buf 'nm-hello-status)
+    (buffer-set-local! buf 'nm-hello-request request)
+    (buffer-set-local! buf 'nm-hello-status
+      (if (null? searches) "" " · loading counts…"))
+    (unless (null? searches)
+      (shell-command->string
+        (nm--batch-count-command (nm--hello-count-queries searches))
+        (lambda (output)
+          ;; An older refresh, another account, or a recreated buffer must
+          ;; never receive these results. The callback never selects a window.
+          (when (and (buffer-exists? buf)
+                     (equal? identity (nm--db-key))
+                     (equal? request (buffer-local buf 'nm-hello-request)))
+            (let ((counts (nm--parse-counts output)))
+              (if (and (= (length counts) (* 2 (length searches)))
+                       (null? (filter (lambda (n) (not (and (number? n) (>= n 0)))) counts)))
+                  (begin
+                    (buffer-set-local! buf 'list-source-entries
+                      (nm--hello-count-rows searches counts))
+                    (buffer-set-local! buf 'nm-hello-status ""))
+                  (buffer-set-local! buf 'nm-hello-status " · counts unavailable; g retries"))
+              (list-redraw! buf))))))
+    (map (lambda (s) (list (car s) (cadr s) #f #f)) searches)))
+
+(define (nm--hello-count-label n)
+  (if (number? n) (number->string n) "…"))
+
+(define (nm--hello-unread? row)
+  (let ((n (list-ref row 3))) (and (number? n) (> n 0))))
 
 (define (nm--hello-cols row)
   (list (nm--fit (car row) 16)
         (string-append
-          (string-pad-left (number->string (list-ref row 3)) 6) " / "
-          (string-pad-left (number->string (list-ref row 2)) 6))))
+          (string-pad-left (nm--hello-count-label (list-ref row 3)) 6) " / "
+          (string-pad-left (nm--hello-count-label (list-ref row 2)) 6))))
 
 (define (nm--hello-line row)
   (let ((c (nm--hello-cols row)))
@@ -493,14 +541,14 @@ when a message has no text/plain part." 'group 'notmuch)
          (c-end (+ n-end (string-byte-length (cadr c))))
          (l-end (+ off (string-byte-length (nm--hello-line row)))))
     (list (list n-start n-end
-                (if (> (list-ref row 3) 0) "nm-unread" "nm-author"))
+                (if (nm--hello-unread? row) "nm-unread" "nm-author"))
           (list n-end c-end "nm-date")
           (list c-end l-end "nm-tags"))))
 
 (define (nm--hello-cells buf row)
-  (list (list (car row) (if (> (list-ref row 3) 0) "nm-unread" "nm-author"))
-        (list (number->string (list-ref row 3)) "nm-date")
-        (list (number->string (list-ref row 2)) "nm-date")
+  (list (list (car row) (if (nm--hello-unread? row) "nm-unread" "nm-author"))
+        (list (nm--hello-count-label (list-ref row 3)) "nm-date")
+        (list (nm--hello-count-label (list-ref row 2)) "nm-date")
         (list (cadr row) "nm-tags")))
 
 (define (nm--hello-at buf) (list-current buf))
@@ -510,11 +558,12 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-list-mode! "notmuch-hello-mode"
   (list
     'doc (string-append
-           "The mailboxes: every saved search with its unread and total "
+           "The account’s tags and saved searches with their unread and total "
            "counts. `RET` opens one as a thread list; `s` runs a free-form "
-           "search.")
+           "search. Counts load in the background; mailboxes open immediately.")
     'buffer *notmuch-hello-buffer*
     'rows (lambda (buf) (nm--hello-rows buf))
+    'key (lambda (buf row) (cadr row))
     'columns (lambda (buf)
                (list (list "mailbox" 16) (list "unread" 7 'right)
                      (list "total" 7 'right) (list "query" #f)))
@@ -525,7 +574,8 @@ when a message has no text/plain part." 'group 'notmuch)
                    (string-append "Mailboxes on " notmuch-host)))
     'meta (lambda (buf)
             (string-append (number->string (length (list-entries buf)))
-                           " saved searches · " (nm--source-label)))
+                           " mailboxes · " (nm--source-label)
+                           (or (buffer-local buf 'nm-hello-status) "")))
     'total (lambda (buf) (length (list-source-entries buf)))
     'local-filter #t
     'footer (lambda (buf)
@@ -536,6 +586,15 @@ when a message has no text/plain part." 'group 'notmuch)
             ("j" "notmuch-jump") ("s" "notmuch-search")
             ("h" "notmuch-switch-host")
             ("q" "quit-window"))))
+
+(define (nm--hello-wake!)
+  ;; Pending callbacks and their status do not survive desktop restore.
+  ;; Cached mailbox rows still need fresh counts after the mode wakes.
+  (let ((buf (current-buffer)))
+    (unless (buffer-local buf 'nm-hello-status)
+      (list-refresh! buf))))
+
+(add-hook! 'notmuch-hello-mode-hook 'nm--hello-wake!)
 
 (define-command "notmuch" "Open the mailboxes (saved searches)"
   (lambda ()
@@ -725,7 +784,7 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; tag, refresh, stay at the same list INDEX — when the change removes the
 ;; row (archive/trash on an inbox view) that index IS the next thread —
 ;; then the shown mail follows
-(define (nm--tag! buf changes)
+(define (nm--tag! buf changes &optional skip-preview)
   (let ((th (nm--thread-at buf)) (i (nm--index-at buf)))
     (if th
         (begin
@@ -733,7 +792,7 @@ when a message has no text/plain part." 'group 'notmuch)
           (nm--refresh! buf)
           (let ((n (length (list-entries buf))))
             (when (and i (> n 0)) (nm--goto-index! buf (min i (- n 1)))))
-          (nm--maybe-preview! buf)
+          (unless skip-preview (nm--maybe-preview! buf))
           (message changes))
         (message "No thread on this line"))))
 
@@ -744,13 +803,13 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let ((buf (current-buffer)))
       (if (nm--any-marked? buf)
-          (nm--confirm-marked buf "Archive" (string-append "-inbox " nm-mark-rem))
+          (nm--confirm-marked buf "Archive" "-inbox")
           (nm--tag! buf "-inbox")))))
 (define-command "notmuch-trash" "Trash the marked threads, or the thread at point (+trash -inbox -unread)"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (nm--any-marked? buf)
-          (nm--confirm-marked buf "Trash" (string-append "+trash -inbox -unread " nm-mark-rem))
+          (nm--confirm-marked buf "Trash" "+trash -inbox -unread")
           (nm--tag! buf "+trash -inbox -unread")))))
 (catalog-meta! 'command "notmuch-trash" 'domain 'mail 'effects '(destroy))
 
@@ -758,7 +817,9 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
       (if th
-          (nm--tag! buf (if (member "unread" (nm--th-tags th)) "-unread" "+unread"))
+          ;; Reading a preview clears unread. An explicit toggle must
+          ;; keep its new state instead of immediately reading it again.
+          (nm--tag! buf (if (member "unread" (nm--th-tags th)) "-unread" "+unread") #t)
           (message "No thread on this line")))))
 
 ;; on a plain tag:X search, u strips that tag from the thread — inbox zero
@@ -785,7 +846,7 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; every tag in the database — the completion source for +
 (define (nm--all-tags)
   (filter (lambda (t) (not (equal? t "")))
-          (string-split (string-trim (nm--run "search --output=tags '*'")) "\n")))
+          (string-split (string-trim (nm--run "search --output=tags --exclude=false -- '*'")) "\n")))
 
 ;; Only offer tags that occur in the current result. The menu cannot lead
 ;; from a useful inbox view to an empty result through an unrelated tag.
@@ -797,25 +858,34 @@ when a message has no text/plain part." 'group 'notmuch)
                                       (nm--quote (nm--query-of buf)))))
             "\n")))
 
-(define-command "notmuch-add-tag" "Add a tag to the thread at point (completes)"
+(define-command "notmuch-add-tag" "Add a tag to marked threads, or the thread at point (completes)"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (nm--thread-at buf)
+      (if (or (nm--any-marked? buf) (nm--thread-at buf))
           (minibuffer-read "Add tag: " (nm--all-tags)
             (lambda (tag)
               (unless (equal? (string-trim tag) "")
-                (nm--tag! buf (string-append "+" (string-trim tag))))))
+                (if (nm--any-marked? buf)
+                    (nm--tag-marked! buf (nm--quote (string-append "+" (string-trim tag))))
+                    (nm--tag! buf (nm--quote (string-append "+" (string-trim tag))))))))
           (message "No thread on this line")))))
 
-(define-command "notmuch-remove-tag" "Remove a tag from the thread at point (completes)"
+(catalog-meta! 'command "notmuch-add-tag" 'domain 'mail 'effects '(write external execute))
+
+(define-command "notmuch-remove-tag" "Remove a tag from marked threads, or the thread at point (completes)"
   (lambda ()
-    (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
-      (if th
-          (minibuffer-read "Remove tag: " (nm--th-tags th)
+    (let* ((buf (current-buffer)) (th (nm--thread-at buf))
+           (marked? (nm--any-marked? buf)))
+      (if (or marked? th)
+          (minibuffer-read "Remove tag: "
+            (if marked? (nm--marked-tags buf) (nm--th-tags th))
             (lambda (tag)
               (unless (equal? (string-trim tag) "")
-                (nm--tag! buf (string-append "-" (string-trim tag))))))
+                (if (nm--any-marked? buf)
+                    (nm--tag-marked! buf (nm--quote (string-append "-" (string-trim tag))))
+                    (nm--tag! buf (nm--quote (string-append "-" (string-trim tag))))))))
           (message "No thread on this line")))))
+(catalog-meta! 'command "notmuch-remove-tag" 'domain 'mail 'effects '(write external execute))
 
 ;;; --- jump & filter ---------------------------------------------------------------
 
@@ -885,6 +955,13 @@ when a message has no text/plain part." 'group 'notmuch)
                 (nm--goto-index! buf (min i (- n 1)))))
             (message "Removed last notmuch filter"))))))
 
+(define-command "notmuch-back" "Remove the last mail filter, or return to mailboxes"
+  (lambda ()
+    (if (pair? (nm--query-filters-of (current-buffer)))
+        (run-command "notmuch-unfilter-last")
+        (run-command "notmuch"))))
+(catalog-meta! 'command "notmuch-back" 'domain 'mail 'effects '(write external execute))
+
 (define-command "notmuch-filter-by-sender" "Narrow the search to this thread's sender"
   (lambda ()
     (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
@@ -909,59 +986,122 @@ when a message has no text/plain part." 'group 'notmuch)
                   (list-goto-first-entry buf)
                   (message (string-append "from:" email)))))))))
 
-;;; --- marks: dired-style bulk operations via the m tag ---------------------------
+ ;;; --- local selection ---------------------------------------------------------
 
-;; bulk queries carry parens — shell syntax unless quoted as one argument
+;; Selection is an editor operation, never a mail tag. ALL selects the query;
+;; IDS then excludes individual threads. Otherwise IDS names selected threads.
+;; The query is evaluated when the mail action runs, including unseen results.
+(define (nm--selection buf)
+  (let ((s (buffer-local buf 'notmuch-selection)))
+    (if (and s (equal? (car s) (nm--db-key))
+               (equal? (cadr s) (nm--query-of buf)))
+        s
+        (begin (buffer-set-local! buf 'notmuch-selection #f) #f))))
+
+(define (nm--set-selection! buf all? ids)
+  (desktop-skip! buf 'notmuch-selection)
+  (buffer-set-local! buf 'notmuch-selection
+    (list (nm--db-key) (nm--query-of buf) all? ids)))
+
+(define (nm--row-marked? buf th)
+  (let ((s (nm--selection buf)))
+    (and s (if (caddr s)
+               (not (member (nm--th-id th) (list-ref s 3)))
+               (if (member (nm--th-id th) (list-ref s 3)) #t #f)))))
+
+(define (nm--any-marked? buf)
+  (let ((s (nm--selection buf)))
+    (and s (or (caddr s) (pair? (list-ref s 3))))))
+
+(define (nm--draw-marks! buf rows)
+  (buffer-set-local! buf 'list-marks
+    (map (lambda (th) (list (nm--th-id th) *list-mark-char*))
+         (filter (lambda (th) (nm--row-marked? buf th)) rows))))
+
+(define (nm--redraw-marks! buf)
+  (nm--draw-marks! buf (list-entries buf))
+  ;; Plain list redraws fetch their source. Cached rendering keeps the rows,
+  ;; exact count, point, and preview, with no external command.
+  (when (pair? (list-entries buf)) (list-render! buf 'cached)))
+
+(define (nm--marked-query buf)
+  (let* ((s (nm--selection buf))
+         (ids (if s (list-ref s 3) '()))
+         (threads (string-join (map (lambda (id) (string-append "thread:" id)) ids) " or ")))
+    (if (not (nm--any-marked? buf))
+        "tag:inbox and not tag:inbox"
+        (string-append "( " (cadr s) " )"
+          (if (null? ids) ""
+              (string-append (if (caddr s) " and not ( " " and ( ") threads " )"))))))
+
+(define (nm--marked-tags buf)
+  (filter (lambda (tag) (not (equal? tag "")))
+    (string-split (string-trim
+      (nm--run (string-append "search --output=tags -- " (nm--quote (nm--marked-query buf)))))
+      "\n")))
+
 (define (nm--tag-marked! buf changes)
-  (nm--run (string-append "tag " changes " -- "
-                          (nm--quote (string-append "( " (nm--query-of buf)
-                                                    " ) and " nm-mark-query))))
-  (nm--refresh! buf))
+  (if (not (nm--any-marked? buf))
+      (message "No selected messages")
+      (begin
+        (nm--run (string-append "tag " changes " -- " (nm--quote (nm--marked-query buf))))
+        (buffer-set-local! buf 'notmuch-selection #f)
+        (nm--refresh! buf))))
 
-(define-command "notmuch-mark-toggle" "Toggle the m tag on this thread, move down"
+(define (nm--toggle-selection! buf id)
+  (let* ((s (nm--selection buf))
+         (ids (if s (list-ref s 3) '())))
+    (nm--set-selection! buf (and s (caddr s))
+      (if (member id ids)
+          (filter (lambda (other) (not (equal? other id))) ids)
+          (cons id ids)))
+    (nm--redraw-marks! buf)))
+
+(define-command "notmuch-mark-toggle" "Toggle local selection of this thread, move down"
   (lambda ()
     (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
       (if th
-          (begin
-            (nm--tag! buf (if (member nm-mark-tag (nm--th-tags th))
-                              nm-mark-rem nm-mark-add))
-            ;; marking keeps the row — advance past it, dired-style
-            (list-move-in! buf 1))
+          (begin (nm--toggle-selection! buf (nm--th-id th)) (list-move-in! buf 1))
           (message "No thread on this line")))))
 
-(define (nm--any-marked? buf)
-  (let loop ((es (list-entries buf)))
-    (cond ((null? es) #f)
-          ((member nm-mark-tag (nm--th-tags (car es))) #t)
-          (else (loop (cdr es))))))
-
-;; a second press reads as "never mind" and unmarks the search. The
-;; test is "any shown thread marked", not "every one": a mail that
-;; arrives after the first press is unmarked, and a rule that then
-;; marked again would never let the reader out.
-(define-command "notmuch-mark-all" "Mark every thread in this search; again unmarks them"
+(define-command "notmuch-mark-all" "Select the entire filtered inbox or search locally; again clears selection"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (unmark? (nm--any-marked? buf)))
-      (nm--run (string-append "tag " (if unmark? nm-mark-rem nm-mark-add) " -- "
-                              (nm--quote (string-append "( " (nm--query-of buf) " )"))))
-      (nm--refresh! buf)
-      (message (if unmark? "Unmarked all" "Marked all")))))
+    (let* ((buf (current-buffer)) (unmark? (nm--any-marked? buf)))
+      (cond
+        (unmark?
+          (buffer-set-local! buf 'notmuch-selection #f)
+          (nm--redraw-marks! buf)
+          (message "Unmarked all"))
+        ((and (or (equal? (nm--query-base-of buf) "tag:inbox")
+                  (equal? (nm--query-base-of buf) notmuch-default-query))
+              (null? (nm--query-filters-of buf)))
+          (message "Add a filter before selecting all inbox messages"))
+        ((null? (list-entries buf)) (message "No messages to select"))
+        (else
+          (nm--set-selection! buf #t '())
+          (nm--redraw-marks! buf)
+          (message "Selected entire search"))))))
 
-(define-command "notmuch-unmark-all" "Unmark every thread in this search"
+(define-command "notmuch-unmark-all" "Clear local mail selection"
   (lambda ()
     (let ((buf (current-buffer)))
-      (nm--run (string-append "tag " nm-mark-rem " -- "
-                              (nm--quote (string-append "( " (nm--query-of buf) " )"))))
-      (nm--refresh! buf)
+      (buffer-set-local! buf 'notmuch-selection #f)
+      (nm--redraw-marks! buf)
       (message "Unmarked all"))))
 
-(define-command "notmuch-filter-marked" "Show only the marked threads"
+(define-command "notmuch-filter-marked" "Open the selected messages as a search"
   (lambda ()
     (let ((buf (current-buffer)))
-      (nm--query-push-only! buf nm-mark-query)
-      (nm--refresh! buf)
-      (list-goto-first-entry buf))))
+      (if (not (nm--any-marked? buf))
+          (message "No selected messages")
+          (begin
+            (nm--query-push-only! buf (nm--marked-query buf))
+            (nm--refresh! buf)
+            (list-goto-first-entry buf))))))
+
+(for-each (lambda (name)
+            (catalog-meta! 'command name 'domain 'mail 'effects '(read write display)))
+  '("notmuch-mark-toggle" "notmuch-mark-all" "notmuch-unmark-all"))
 
 (define (nm--confirm-marked buf verb changes)
   (minibuffer-read (string-append verb " all marked threads? ")
@@ -973,10 +1113,10 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define-command "notmuch-archive-marked" "Archive all marked threads"
   (lambda () (nm--confirm-marked (current-buffer) "Archive"
-                        (string-append "-inbox " nm-mark-rem))))
+                        "-inbox")))
 (define-command "notmuch-trash-marked" "Trash all marked threads"
   (lambda () (nm--confirm-marked (current-buffer) "Trash"
-                        (string-append "+trash -inbox -unread " nm-mark-rem))))
+                        "+trash -inbox -unread")))
 
 (define-command "notmuch-tag-marked" "Apply tag changes to all marked threads"
   (lambda ()
@@ -986,12 +1126,103 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- thread (show) buffer -------------------------------------------------------
 
-;; body part -> displayable text: text/plain passes, multipart/alternative
-;; prefers its text/plain child, attachments become a marker line
+(define (nm--attachment-parts parts)
+  (fold (lambda (acc part)
+          (append acc
+            (cond ((and (nm--get part 'filename) (number? (nm--get part 'id))) (list part))
+                  ((pair? (nm--get part 'content))
+                   (nm--attachment-parts (nm--get part 'content)))
+                  (else '()))))
+        '() parts))
+
+(define (nm--attachment-text msg)
+  (let ((parts (nm--attachment-parts (nm--get msg 'body))))
+    (if (null? parts) ""
+        (string-append "Attachments (C-c a to open):\n"
+          (string-join (map (lambda (p) (string-append "  " (nm--get p 'filename))) parts) "\n")
+          "\n\n"))))
+
+(define (nm--attachment-html msg)
+  (let ((parts (nm--attachment-parts (nm--get msg 'body))))
+    (if (null? parts) ""
+        (string-append "<section><strong>Attachments</strong><ul>"
+          (string-join (map (lambda (p)
+                             (string-append "<li>" (nm--html-escape (nm--get p 'filename)) "</li>"))
+                           parts) "")
+          "</ul><small>C-c a to open an attachment</small></section>"))))
+
+;; Capture the full fetch command while this message's account is active.
+;; The user can switch accounts while the attachment picker is open.
+(define (nm--attachment-options msgs)
+  (fold (lambda (acc msg)
+          (append acc
+            (map (lambda (part)
+                   (list (nm--get part 'filename)
+                         (nm--cmd (string-append "show --format=raw --part="
+                           (number->string (nm--get part 'id)) " -- "
+                           (nm--quote (string-append "id:" (nm--get msg 'id)))))))
+                 (nm--attachment-parts (nm--get msg 'body)))))
+        '() msgs))
+
+(define (nm--attachment-filename name)
+  (let ((base (car (reverse (string-split
+                             (string-join (string-split name "\\") "/") "/")))))
+    (if (member base '("" "." "..")) "attachment" base)))
+
+(define (nm--open-attachment! attachment)
+  (let* ((root (string-append (compos-home) "/attachments")))
+    (make-directory! root)
+    (let ((dir (string-trim (shell-command->string
+                 (string-append "mktemp -d " (nm--quote (string-append root "/part-XXXXXX")))))))
+      (if (not (string-prefix? (string-append root "/part-") dir))
+          (message "Could not create an attachment directory")
+          (let ((path (string-append dir "/" (nm--attachment-filename (car attachment)))))
+            (message (string-append "Downloading " (car attachment) "…"))
+            ;; Redirect bytes locally: binary attachments must never pass
+            ;; through Scheme strings or text-buffer decoding.
+            (shell-command->string
+              (string-append (cadr attachment) " > " (nm--quote path) " && printf attachment-ok")
+              (lambda (result)
+                (if (equal? result "attachment-ok")
+                    (visit path)
+                    (begin
+                      (when (file-exists? path) (delete-file! path))
+                      (message "Attachment download failed"))))))))))
+
+(define-command "notmuch-open-attachment" "Choose and open an attachment from the selected mail thread"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (th (if (equal? buf *notmuch-search-buffer*)
+                   (let ((row (nm--thread-at buf))) (and row (nm--th-id row)))
+                   (buffer-local buf 'notmuch-thread)))
+           (cached? (and (buffer-exists? *notmuch-show-buffer*)
+                         (equal? th (buffer-local *notmuch-show-buffer* 'notmuch-thread))
+                         (buffer-local *notmuch-show-buffer* 'nm-attachment-source)
+                         (or (equal? buf *notmuch-show-buffer*)
+                             (equal? (nm--db-key) (buffer-local *notmuch-show-buffer* 'nm-attachment-source)))))
+           (attachments (if cached?
+                            (or (buffer-local *notmuch-show-buffer* 'notmuch-attachments) '())
+                            (if th (nm--attachment-options (nm--show-msgs th)) '())))
+           (choices (let loop ((rest attachments) (i 1) (acc '()))
+                      (if (null? rest) (reverse acc)
+                          (loop (cdr rest) (+ i 1)
+                            (cons (list (string-append (number->string i) ". " (car (car rest)))
+                                        (car rest)) acc))))))
+      (if (null? choices)
+          (message "No attachments in this thread")
+          (minibuffer-read "Open attachment: " (map car choices)
+            (lambda (choice)
+              (let ((hit (assoc choice choices)))
+                (when hit (nm--open-attachment! (cadr hit))))))))))
+(catalog-meta! 'command "notmuch-open-attachment" 'domain 'mail 'effects '(write external execute display))
+
+;; Body text excludes attachments, which have their own visible list.
+;; multipart/alternative prefers its text/plain child.
 (define (nm--part-text part)
   (let ((ct (or (nm--get part 'content-type) ""))
         (content (nm--get part 'content)))
-    (cond ((and (string-prefix? "multipart/alternative" ct) (pair? content))
+    (cond ((nm--get part 'filename) "")
+          ((and (string-prefix? "multipart/alternative" ct) (pair? content))
            (let ((plains (filter (lambda (p)
                                    (string-prefix? "text/plain"
                                      (or (nm--get p 'content-type) "")))
@@ -1002,8 +1233,6 @@ when a message has no text/plain part." 'group 'notmuch)
           ((pair? content) (nm--parts-text content))
           ((and (string-prefix? "text/plain" ct) (string? content)) content)
           ((and (string-prefix? "text/html" ct)) "")
-          ((nm--get part 'filename)
-           (string-append "[attachment: " (nm--get part 'filename) "]\n"))
           (else ""))))
 
 (define (nm--parts-text parts)
@@ -1013,7 +1242,8 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--part-html part)
   (let ((ct (or (nm--get part 'content-type) ""))
         (content (nm--get part 'content)))
-    (cond ((and (string-prefix? "text/html" ct) (string? content)) content)
+    (cond ((nm--get part 'filename) #f)
+          ((and (string-prefix? "text/html" ct) (string? content)) content)
           ((pair? content) (nm--parts-html content))
           (else #f))))
 
@@ -1059,6 +1289,7 @@ when a message has no text/plain part." 'group 'notmuch)
       (let ((to (nm--get h 'To)))
         (if to (string-append "To: " to "\n") ""))
       "\n"
+      (nm--attachment-text msg)
       (nm--msg-body-text msg)
       "\n")))
 
@@ -1097,7 +1328,7 @@ when a message has no text/plain part." 'group 'notmuch)
       (nm--html-escape (or (nm--get h 'Date) ""))
       (let ((to (nm--get h 'To)))
         (if to (string-append " · to " (nm--html-escape to)) ""))
-      "</div>" body)))
+      "</div>" (nm--attachment-html msg) body)))
 
 (define (nm--thread-html subject msgs)
   (string-append
@@ -1115,7 +1346,7 @@ when a message has no text/plain part." 'group 'notmuch)
           (else (loop (cdr ms))))))
 
 (mode-doc! "notmuch-show-mode"
-  "One mail thread, read. `a` archives it and `r` starts a reply. `v` changes between the HTML and the plain text. `q` goes back to the search.")
+  "One mail thread, read. `a` archives it and `r` starts a reply. `C-c a` opens an attachment. `v` changes between HTML and plain text. `q` goes back to the search.")
 
 (mode-icon! "notmuch-show-mode" "")
 
@@ -1131,6 +1362,10 @@ when a message has no text/plain part." 'group 'notmuch)
                  (html? (and notmuch-prefer-html
                              (not (equal? (buffer-local buf 'notmuch-view) "text"))
                              (nm--any-html? msgs))))
+            (desktop-skip! buf 'notmuch-attachments)
+            (desktop-skip! buf 'nm-attachment-source)
+            (buffer-set-local! buf 'notmuch-attachments (nm--attachment-options msgs))
+            (buffer-set-local! buf 'nm-attachment-source (nm--db-key))
             (buffer-delete-range! buf 0 (buffer-size buf))
             (if html?
                 (begin
@@ -1164,6 +1399,8 @@ when a message has no text/plain part." 'group 'notmuch)
     ("r" "notmuch-show-reply")
     ("v" "notmuch-show-toggle-view")
     ("j" "notmuch-jump")
+    ("C-c a" "notmuch-open-attachment")
+    ("A" "notmuch-open-attachment")
     ("q" "quit-window")))
 
 ;; ONE show buffer, reused — it is a view, not a document. The subject
@@ -1396,7 +1633,8 @@ when a message has no text/plain part." 'group 'notmuch)
   (list (list "archive"  (nm--email-tag-act "-inbox"))
         (list "trash"    (nm--email-tag-act "+trash -inbox -unread"))
         (list "unread"   (nm--email-tag-act "+unread"))
-        (list "mark"     (nm--email-tag-act nm-mark-add))
+        (list "mark"     (lambda (id)
+                           (nm--toggle-selection! *notmuch-search-buffer* id)))
         (list "read"     (lambda (id)
                            (nm--open-thread! id
                              (let ((th (nm--thread-at (current-buffer))))

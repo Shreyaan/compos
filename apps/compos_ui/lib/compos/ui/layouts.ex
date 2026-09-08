@@ -650,33 +650,35 @@ defmodule Compos.Ui.Layouts do
           .ag-verbosity {
             position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end;
             gap: 2px; width: max-content; margin: 0 0 8px auto; padding: 2px;
-            border: 1px solid var(--agent-card-border, rgba(0,0,0,0.12)); border-radius: 999px;
+            border: 1px solid var(--agent-card-border, rgba(0,0,0,0.12)); border-radius: 0;
             background: color-mix(in srgb, var(--window-bg, #fdfcf8) 92%, transparent);
             font: 600 calc(var(--ag-base) * 0.62)/1 var(--font-sans); text-transform: uppercase;
             letter-spacing: .045em;
           }
-          .ag-verbosity legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-          .ag-verbosity label { padding: 5px 8px; border-radius: 999px; color: var(--agent-meta-fg, #8a8577); cursor: pointer; }
-          .ag-verbosity label:has(input:checked) {
+          .ag-verbosity button {
+            padding: 5px 8px; border: 0; border-radius: 0; background: transparent;
+            color: var(--agent-meta-fg, #8a8577); font: inherit; text-transform: inherit;
+            letter-spacing: inherit; cursor: pointer;
+          }
+          .ag-verbosity button.active {
             background: var(--agent-tool-fg, #26356b); color: var(--window-bg, #fdfcf8);
           }
-          .ag-verbosity input { position: absolute; opacity: 0; pointer-events: none; }
           .ag-thought { display: none; }
-          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool:has(+ .ag-tool) { display: none; }
-          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool {
+          .ag-scroll.ag-verbosity-info > .ag-tool:has(+ .ag-tool) { display: none; }
+          .ag-scroll.ag-verbosity-info > .ag-tool {
             margin: 2px 0; border-color: transparent; background: transparent; opacity: .76;
           }
-          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool summary {
+          .ag-scroll.ag-verbosity-info > .ag-tool summary {
             min-height: 25px; padding-block: 1px;
           }
-          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool .ag-preview,
-          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool .ag-duration,
-          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool .ag-tokens { display: none; }
-          .ag-scroll:has(.ag-verbosity input[value="debug"]:checked) > .ag-tool > .ag-body { display: block; }
-          .ag-scroll:has(.ag-verbosity input[value="debug"]:checked) > .ag-tool .ag-preview { display: none; }
+          .ag-scroll.ag-verbosity-info > .ag-tool .ag-preview,
+          .ag-scroll.ag-verbosity-info > .ag-tool .ag-duration,
+          .ag-scroll.ag-verbosity-info > .ag-tool .ag-tokens { display: none; }
+          .ag-scroll.ag-verbosity-debug > .ag-tool > .ag-body { display: block; }
+          .ag-scroll.ag-verbosity-debug > .ag-tool .ag-preview { display: none; }
           .ag-tool, .ag-thought {
             margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
-            border-radius: 7px; font-family: var(--font-mono); font-size: var(--ag-base);
+            border-radius: 0; font-family: var(--font-mono); font-size: var(--ag-base);
             background: color-mix(in srgb, var(--window-bg, #fdfcf8) 96%, var(--agent-tool-fg, #26356b));
           }
           .ag-tool summary, .ag-thought summary {
@@ -748,6 +750,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-body {
             border-top: 1px solid var(--agent-card-border, rgba(0,0,0,0.08));
+            font-size: calc(var(--ag-base) * 0.8);
             margin: 0; padding: 10px 12px; overflow-x: auto; max-height: 320px; overflow-y: auto;
             white-space: pre-wrap; overflow-wrap: anywhere; color: var(--agent-thought-fg, #6a675e);
             background: color-mix(in srgb, var(--agent-code-bg, rgba(0,0,0,0.06)) 60%, transparent);
@@ -822,7 +825,7 @@ defmodule Compos.Ui.Layouts do
           .ag-status {
             display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline;
             margin: 16px 0; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 28%, transparent);
-            border-left: 4px solid var(--accent-fg, #26356b); border-radius: 8px;
+            border-left: 4px solid var(--accent-fg, #26356b); border-radius: 0;
             color: var(--window-fg, inherit);
             background: color-mix(in srgb, var(--accent-fg, #26356b) 9%, var(--window-bg, #fdfcf8));
             box-shadow: 0 2px 10px rgba(0,0,0,.05);

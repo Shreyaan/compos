@@ -16,7 +16,7 @@ defmodule Compos.PopupMoveTest do
           "a-move-outside-the-popup-does-nothing",
           "dismissing-a-popup-brings-back-the-one-under-it"
         ] do
-      assert {:ok, "()"} = Session.eval("(begin (load-tests!) (run-test '#{name}))"), name
+      assert {:ok, "()"} = Session.eval("(begin (load-tests-once!) (run-test '#{name}))"), name
     end
   end
 end
