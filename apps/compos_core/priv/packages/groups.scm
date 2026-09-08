@@ -1731,7 +1731,7 @@
               (cons (list "buffers" (car names))
                     (map (lambda (name) (list "" name)) (cdr names))))))
 
-(define (group-switch-candidate-in index g)
+(define (group-switch-candidate-in index g &optional label)
   (let* ((members (group-members-in index g))
          (names (map buffer-modeline-name members))
          (n (length names))
@@ -1740,7 +1740,7 @@
                    (string-append (number->string n) " buffer" (if (= n 1) "" "s")))))
     ;; the card names the group and counts it; the members are the rail's
     ;; list now, so the card does not repeat them as chips
-    (list (group-name g)
+    (list (or label (group-name g))
           hint
           "container"
           '()
@@ -1757,7 +1757,14 @@
 (define (group-switch-candidate g)
   (group-switch-candidate-in (group-members-index) g))
 
-(define (switch-to-group-candidates)
+(define (group-switch-prompt-rows)
+  ;; ((CANDIDATE ...) . ((LABEL ID RAIL-ROWS) ...)): the rows the prompt draws,
+  ;; and the group each label means. The prompt hands a selection back as its
+  ;; label and nothing else, and two groups may wear one name, so a repeated
+  ;; name takes a counter and every verb here resolves through these pairs
+  ;; instead of the name index, which answers with the first group of that
+  ;; name and so showed another group's buffers. The rail rows are built with
+  ;; them: moving the highlight is then a lookup and no scan.
   (let* ((current (frame-group))
          (all (group-ids-mru))
          ;; every group, the one you stand in included: you came to see
@@ -1771,12 +1778,28 @@
          (action (group-switch-new-action))
          (action-row (list (car action) "new context"))
          (index (group-members-index))
-         (candidate (lambda (g) (group-switch-candidate-in index g))))
-    (if (group-visible-homogeneous? current)
-        (append (map candidate recent) (list action-row))
-        (append (map candidate mine-recent)
-                (list action-row)
-                (map candidate others)))))
+         (seen '())
+         (rows '())
+         (candidate
+           (lambda (g)
+             (let* ((name (group-name g))
+                    (taken (length (filter (lambda (s) (equal? s name)) seen)))
+                    (label (if (= taken 0)
+                               name
+                               (string-append name " #" (number->string (+ taken 1))))))
+               (set! seen (cons name seen))
+               (set! rows (cons (list label g (group-switch-rail-rows index g)) rows))
+               (group-switch-candidate-in index g label))))
+         (candidates
+           (if (group-visible-homogeneous? current)
+               (append (map candidate recent) (list action-row))
+               (let* ((first (map candidate mine-recent))
+                      (rest (map candidate others)))
+                 (append first (list action-row) rest)))))
+    (cons candidates (reverse rows))))
+
+(define (switch-to-group-candidates)
+  (car (group-switch-prompt-rows)))
 
 (define (group-switch-run-new-action! action)
   (let ((label (car action))
