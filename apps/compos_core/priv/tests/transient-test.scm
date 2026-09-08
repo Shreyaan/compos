@@ -197,6 +197,37 @@
       (set! *llm-bundles* saved)
       (buffer-kill! buf))))
 
+(deftest 'llm-config-bundle-row-selects-and-close-applies
+  "A bundle row parks a choice; the setup lands when level one closes"
+  (lambda ()
+    (let ((saved *llm-bundles*)
+          (history *llm-config-history*)
+          (buf (test-buffer! "zz-llm-config-pending" "")))
+      (set! *llm-bundles* '())
+      (set-frame-local! 'llm-config-pending #f)
+      (buffer-set-local! buf 'llm-connector "api")
+      (buffer-set-local! buf 'llm-model "m1")
+      (llm-bundle-save! "zz-pick" '(connector "api" model "m2" effort "default"))
+      (let ((row (car (llm-config--bundle-items buf))))
+        ((plist-get row 'command))
+        (check-equal! (llm-config--model buf) "m1"
+                      "choosing a bundle changes nothing yet")
+        (check-equal! (llm-bundle-name (llm-config--pending-bundle)) "zz-pick"
+                      "the choice waits as the pending one")
+        (check-equal! ((plist-get row 'value-fn) buf) "selected"
+                      "and the row says so")
+        (check-contains! (llm-config--subtitle buf) "applies on close"
+                         "the subtitle says when it lands")
+        (llm-config--quit-top! buf)
+        (check-equal! (llm-config--model buf) "m2"
+                      "closing level one applies the choice")
+        (check-equal! (llm-config--pending) #f
+                      "and nothing stays pending"))
+      (set! *llm-bundles* saved)
+      (set! *llm-config-history* history)
+      (set-frame-local! 'llm-config-base #f)
+      (buffer-kill! buf))))
+
 (deftest 'llm-fine-tune-measures-drift-against-the-base
   "Level two compares the live setup with the base bundle; u puts it back"
   (lambda ()
