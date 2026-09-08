@@ -643,6 +643,37 @@ defmodule Compos.Ui.Layouts do
           }
           /* a header names the column: it never reads better wrapped */
           .ag-prose th { font-weight: 600; white-space: nowrap; }
+          /* Transcript verbosity is deliberately local and CSS-driven: info
+             keeps only the last title row in each live tool burst, log keeps
+             every compact card, and debug opens the call contents visually.
+             Thought is supporting machinery, not a fourth reader mode. */
+          .ag-verbosity {
+            position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end;
+            gap: 2px; width: max-content; margin: 0 0 8px auto; padding: 2px;
+            border: 1px solid var(--agent-card-border, rgba(0,0,0,0.12)); border-radius: 999px;
+            background: color-mix(in srgb, var(--window-bg, #fdfcf8) 92%, transparent);
+            font: 600 calc(var(--ag-base) * 0.62)/1 var(--font-sans); text-transform: uppercase;
+            letter-spacing: .045em;
+          }
+          .ag-verbosity legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+          .ag-verbosity label { padding: 5px 8px; border-radius: 999px; color: var(--agent-meta-fg, #8a8577); cursor: pointer; }
+          .ag-verbosity label:has(input:checked) {
+            background: var(--agent-tool-fg, #26356b); color: var(--window-bg, #fdfcf8);
+          }
+          .ag-verbosity input { position: absolute; opacity: 0; pointer-events: none; }
+          .ag-thought { display: none; }
+          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool:has(+ .ag-tool) { display: none; }
+          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool {
+            margin: 2px 0; border-color: transparent; background: transparent; opacity: .76;
+          }
+          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool summary {
+            min-height: 25px; padding-block: 1px;
+          }
+          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool .ag-preview,
+          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool .ag-duration,
+          .ag-scroll:has(.ag-verbosity input[value="info"]:checked) > .ag-tool .ag-tokens { display: none; }
+          .ag-scroll:has(.ag-verbosity input[value="debug"]:checked) > .ag-tool > .ag-body { display: block; }
+          .ag-scroll:has(.ag-verbosity input[value="debug"]:checked) > .ag-tool .ag-preview { display: none; }
           .ag-tool, .ag-thought {
             margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
             border-radius: 7px; font-family: var(--font-mono); font-size: var(--ag-base);
@@ -788,9 +819,16 @@ defmodule Compos.Ui.Layouts do
             0%, 18% { transform: translateX(-120%); }
             82%, 100% { transform: translateX(120%); }
           }
-          .ag-status { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: baseline; margin: 10px 0; padding: 8px 12px; border-left: 2px solid var(--agent-meta-fg, #8a8577); color: var(--agent-meta-fg, #8a8577); background: color-mix(in srgb, var(--agent-meta-fg, #8a8577) 7%, transparent); }
-          .ag-status .ag-label { margin: 0; }
-          .ag-status-text { min-width: 0; }
+          .ag-status {
+            display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline;
+            margin: 16px 0; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 28%, transparent);
+            border-left: 4px solid var(--accent-fg, #26356b); border-radius: 8px;
+            color: var(--window-fg, inherit);
+            background: color-mix(in srgb, var(--accent-fg, #26356b) 9%, var(--window-bg, #fdfcf8));
+            box-shadow: 0 2px 10px rgba(0,0,0,.05);
+          }
+          .ag-status .ag-label { margin: 0; color: var(--accent-fg, #26356b); font-weight: 750; letter-spacing: .08em; }
+          .ag-status-text { min-width: 0; font-size: calc(var(--ag-base) * .94); line-height: 1.55; font-weight: 500; }
           .ag-meta { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.8); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
           @keyframes ag-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
           .ag-inputrow {

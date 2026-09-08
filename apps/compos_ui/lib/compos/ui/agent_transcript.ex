@@ -30,6 +30,12 @@ defmodule Compos.Ui.AgentTranscript do
       data-scroll-anchor={@scroll_anchor}
       data-scroll-offset={@scroll_offset}
     >
+      <fieldset class="ag-verbosity" aria-label="Transcript verbosity">
+        <legend>Transcript verbosity</legend>
+        <label><input type="radio" name={"ag-verbosity-#{@win}"} value="info" checked />info</label>
+        <label><input type="radio" name={"ag-verbosity-#{@win}"} value="log" />log</label>
+        <label><input type="radio" name={"ag-verbosity-#{@win}"} value="debug" />debug</label>
+      </fieldset>
       <%= for {b, block_index} <- Enum.with_index(@blocks) do %>
         <%= case b.kind do %>
           <% :user -> %>
