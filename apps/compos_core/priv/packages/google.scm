@@ -428,7 +428,7 @@
     (buffer-set-local! buf 'google-parent (or parent #f))
     (when (google--file-service? service) (buffer-set-local! buf 'dired-provider "google"))
     (with-current-buffer buf (lambda () (set-mode! (if (google--file-service? service) "Dired" "google-service-mode"))))
-    (pop-to-buffer buf)
+    (if (google--file-service? service) (switch-to-buffer-here! buf) (pop-to-buffer buf))
     (when (google--file-service? service) (list-goto-index! buf (if (> (length (list-entries buf)) 1) 1 0))) buf))
 (define (google--refresh buf)
   ;; A new user query supersedes an older request. Its callback is discarded.

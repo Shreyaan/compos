@@ -638,7 +638,7 @@
     (dired-skip-derived! buf)
     ;; re-opening a directory re-reads what git and the sizes say
     (dired-rescan! buf)
-    (switch-to-buffer! buf)
+    (switch-to-buffer-here! buf)
     (set-mode! "Dired")
     (dired-arm-watch! buf)
     (when fresh (dired-goto-first-entry))
@@ -753,10 +753,19 @@
     ;; fallback. An explicit visit also replaces inherited placement.
     (dired-visit-with-group (buffer-group (current-buffer)))))
 
-(define-command "dired-quit" "Dismiss the peek; with none showing, leave dired"
+(define-command "dired-quit" "Dismiss the peek, otherwise return through this window's directory history"
   (lambda ()
     (unless (peek-dismiss!)
-      (run-command "quit-window"))))
+      (let* ((win (active-window)) (cur (current-buffer))
+             (history (filter (lambda (buf) (and (buffer-exists? buf) (not (equal? buf cur))))
+                             (window-buffer-history win))))
+        (if (pair? history)
+            (begin
+              (switch-to-buffer-here! (car history))
+              ;; Switching normally pushes CUR; popping must consume that entry
+              ;; so q q walks back instead of toggling between two directories.
+              (window-history-set! win (cdr history)))
+            (run-command "quit-window"))))))
 
 (define-command "dired-open" "Open the file on this line as your own, here: a peek is kept"
   (lambda ()

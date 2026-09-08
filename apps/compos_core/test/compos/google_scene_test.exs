@@ -274,6 +274,27 @@ defmodule Compos.GoogleSceneTest do
     assert Buffer.get_local(Editor.current_buffer(), "mode-name") == "Dired"
   end
 
+  test "Google directories stay in one window and q q pops history without killing them" do
+    eval!(~S[(buffer-create "*Google origin*")])
+    eval!(~S[(switch-to-buffer-here! "*Google origin*")])
+    eval!(~S[(window-history-set! (active-window) '())])
+    window = eval!("(active-window)")
+    windows = eval!("(length (window-list))")
+    eval!(~S[(google-open "alpha" "drive")])
+    root = Editor.current_buffer()
+    eval!(~S[(google-open "alpha" "drive" "child")])
+    child = Editor.current_buffer()
+    assert eval!("(active-window)") == window
+    assert eval!("(length (window-list))") == windows
+    KeyDispatch.handle_key("q")
+    assert Editor.current_buffer() == root
+    KeyDispatch.handle_key("q")
+    assert Editor.current_buffer() == "*Google origin*"
+    assert eval!("(active-window)") == window
+    assert eval!("(buffer-exists? #{Jason.encode!(root)})") == "#t"
+    assert eval!("(buffer-exists? #{Jason.encode!(child)})") == "#t"
+  end
+
   test "filesystem Dired still navigates without a provider" do
     dir = Path.join(System.tmp_dir!(), "google-dired-local-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(dir, "child"))
