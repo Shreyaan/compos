@@ -572,6 +572,14 @@
 ;; path is dim already.
 (define *ibuffer-name-max* 40)
 
+;; A table of paths takes the width nine names in ten fit in: one long
+;; path must not push the fields to the window's edge. A table whose row
+;; IS its name -- a chat title, which nothing else on the row repeats --
+;; asks for 'full instead: the longest name, bounded only by the room the
+;; fields leave.
+(define (ibuffer-name-full? buf)
+  (equal? (plist-get (list-mode-opts (list-mode-of buf)) 'name-fit) 'full))
+
 (define (ibuffer-name-fit buf)
   (let* ((lengths (map (lambda (row)
                          (let ((n (string-length (ibuffer-row-line-name buf row))))
@@ -579,7 +587,9 @@
                        (list-entries buf)))
          (sorted (map car (sort lengths)))
          (n (length sorted)))
-    (if (= n 0) 0 (nth (min (- n 1) (quotient (* n 9) 10)) sorted))))
+    (cond ((= n 0) 0)
+          ((ibuffer-name-full? buf) (nth (- n 1) sorted))
+          (else (nth (min (- n 1) (quotient (* n 9) 10)) sorted)))))
 
 ;; the room the fields and the fixed head leave: the mark, the dot, the
 ;; icon, one gap after each column, and every field's own width
@@ -587,8 +597,9 @@
   (let* ((gap (string-length *list-gap*))
          (room (- (list-view-width buf) 2 1 1
                   (fold (lambda (n c) (+ n (list-col-width c))) 0 fields)
-                  (* gap (+ 2 (length fields))))))
-    (max 12 (min room (max 24 (min *ibuffer-name-max* (ibuffer-name-fit buf)))))))
+                  (* gap (+ 2 (length fields)))))
+         (cap (if (ibuffer-name-full? buf) room *ibuffer-name-max*)))
+    (max 12 (min room (max 24 (min cap (ibuffer-name-fit buf)))))))
 
 (define (ibuffer-columns buf fields)
   (append (list (list "" 1)

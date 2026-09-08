@@ -175,10 +175,11 @@
   (let ((s (buffer-local b 'chat-summary)))
     (and (string? s) (not (equal? s "")) s)))
 
-;; the row names the chat the way the C-x c prompt does: its title --
-;; the name somebody gave it, or the first label its summary wrote --
-;; else its buffer name
-(define (chats-title b) (chat-prompt-label b))
+;; the row names the chat by its title -- the name somebody gave it, or
+;; the first label its summary wrote -- else its buffer name. The table
+;; is the broad form, in a window or in the wide C-x c popup, so the
+;; whole title stands; only the narrow candidate line clips.
+(define (chats-title b) (chat-prompt-full-label b))
 
 (define (chats-match-text b)
   (string-append (chats-title b) " "
@@ -391,6 +392,9 @@
              "one reads its file back and revives the chat.")
       'buffer *agents-buffer*
       'category 'chat
+      ;; a chat's title is the whole row: nothing else on the line repeats
+      ;; it, so the name column takes every column the fields leave
+      'name-fit 'full
       'title (lambda (buf) "Chats")
       'noun "chat"
       'rows (lambda (buf) (chats-rows buf))
@@ -451,11 +455,15 @@
 ;; a titled chat wears its title as its buffer name (chat-title renames
 ;; it). A derived *chat:group* name is not a title, so the chat's own
 ;; title -- the first label its running summary wrote -- stands in.
-(define (chat-prompt-label b)
+;; The whole title: a broad list shows it in full.
+(define (chat-prompt-full-label b)
   (if (not (string-prefix? "*" b))
       b
       (let ((s (chat-title-of b)))
-        (if (and (string? s) (not (equal? s ""))) (chat-prompt-clip s) b))))
+        (if (and (string? s) (not (equal? s ""))) s b))))
+
+;; the narrow form: one candidate line beside an annotation, so it clips
+(define (chat-prompt-label b) (chat-prompt-clip (chat-prompt-full-label b)))
 
 ;; a row is (LABEL ANNOTATION KIND TARGET); the prompt gets the first
 ;; three, and the annotation's first two fields are typeable kinds, so
