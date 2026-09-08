@@ -1563,6 +1563,89 @@
       (set! group-switch-style style))
     (t--sw-done!)))
 
+(deftest 'a-zero-peek-keeps-the-frame-still
+  "group-switch-peek-ms 0 highlights groups without drawing a frame"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((style group-switch-style)
+          (ms group-switch-peek-ms)
+          (here (group-record-create! "zzsw-still-here"))
+          (there (group-record-create! "zzsw-still-there")))
+      (set! group-switch-style "popup")
+      (set! group-switch-peek-ms 0)
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second there)
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-second)
+      (group-layout-save! there)
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-first)
+      (set-frame-local! 'current-group here)
+
+      (run-command "group-switch")
+      (t--sw-type! "zzsw-still-there")
+      ;; waiting for a change that must not come: longer than any look
+      ;; would have taken to draw
+      (check-true!
+        (not (wait-until (lambda () (not (equal? (map cadr (window-list))
+                                                 (list t--sw-first))))
+                         300 20))
+        "the frame you came from is still the frame you see")
+
+      (t--sw-key! "cancel")
+      (check-equal! (map cadr (window-list)) (list t--sw-first)
+                    "and closing it moves nothing either")
+      (set! group-switch-peek-ms ms)
+      (set! group-switch-style style))
+    (t--sw-done!)))
+
+(deftest 'a-look-writes-no-layout
+  "walking the switcher leaves every group's saved layout exactly as it was"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((style group-switch-style)
+          (here (group-record-create! "zzsw-nowrite-here"))
+          (there (group-record-create! "zzsw-nowrite-there")))
+      (set! group-switch-style "popup")
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second there)
+      (buffer-add-group! t--sw-third there)
+      ;; `there` holds a two-pane arrangement of its own members
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-second)
+      (split-window! 'v 0.5)
+      (other-window!)
+      (t--sw-show-here! t--sw-third)
+      (group-layout-save! there)
+      ;; and `here` holds one pane, its own member
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-first)
+      (set-frame-local! 'current-group here)
+      (group-layout-save! here)
+
+      (let ((here-was (window-tree-buffers (group-layout here)))
+            (there-was (window-tree-buffers (group-layout there))))
+        (run-command "group-switch")
+        (t--sw-type! "zzsw-nowrite-there")
+        (check-true!
+          (wait-until (lambda () (equal? (map cadr (window-list))
+                                        (list t--sw-second t--sw-third)))
+                      1000 10)
+          "the look drew the other group")
+        ;; whatever the editor notices about its windows while a look is on
+        ;; screen, it is looking at a look and must write nothing
+        (group-current-recalculate!)
+        (check-equal! (frame-group) here
+                      "a look does not move the group you stand in")
+        (t--sw-key! "cancel")
+
+        (check-equal! (window-tree-buffers (group-layout here)) here-was
+                      "the group you stand in kept its layout")
+        (check-equal! (window-tree-buffers (group-layout there)) there-was
+                      "and the group you looked at kept its own"))
+      (set! group-switch-style style))
+    (t--sw-done!)))
+
 (deftest 'a-group-card-previews-the-whole-group-in-its-facts
   "the card wears four chips; the rail it previews with names every member"
   (lambda ()

@@ -1127,6 +1127,13 @@
 
 (define *group-current-inhibit* #f)
 
+;; #t while a look is on screen. The inhibit above covers the draw; this
+;; covers the whole time the look stays up, which is when the damage was
+;; done: the frame's windows then say nothing about the group you stand in,
+;; and every notification that reads them would move you into the group you
+;; are merely looking at -- and save layouts under that answer.
+(define *group-look-active* #f)
+
 (define (switch-to-group! g)
   (let ((id (begin (group-migrate-live!) (group-resolve-id g))))
     (if (not id)
@@ -1213,26 +1220,31 @@
             (if (pair? recent) (car recent) (car common))))))
 
 (define (group-current-recalculate!)
-  ;; A buffer shown by any path is no longer context-only.
-  (for-each (lambda (row) (buffer-promote! (cadr row))) (window-list))
-  (unless *group-current-inhibit*
-    (let* ((pinned (group-pinned))
-           (rows (group-visible-membership-rows))
-           (current (frame-group))
-           (next (if pinned
-                     pinned
-                     (group-current-choice (group-common-memberships rows) current))))
-      (unless (equal? next current)
-        ;; Leaving a group because a pane shows a foreign buffer saves the
-        ;; layout as it is, foreign pane and all (docs/groups.md, Save),
-        ;; and remembers the group: a switch from a frame in no group has
-        ;; nothing to save, and coming back must find what you had.
-        (when (and current (not next) (group-uncovered? current))
-          (group-layout-save! current)
-          (set-frame-local! 'previous-group current))
-        (set-frame-local! 'current-group next)
-        (frame-group-label-refresh!))
-      next)))
+  ;; A look is not your work. While one is on screen nothing it shows is
+  ;; promoted, entered, or saved: you are standing where you were standing.
+  (if *group-look-active*
+      (frame-group)
+      (begin
+        ;; A buffer shown by any path is no longer context-only.
+        (for-each (lambda (row) (buffer-promote! (cadr row))) (window-list))
+        (unless *group-current-inhibit*
+          (let* ((pinned (group-pinned))
+                 (rows (group-visible-membership-rows))
+                 (current (frame-group))
+                 (next (if pinned
+                           pinned
+                           (group-current-choice (group-common-memberships rows) current))))
+            (unless (equal? next current)
+              ;; Leaving a group because a pane shows a foreign buffer saves the
+              ;; layout as it is, foreign pane and all (docs/groups.md, Save),
+              ;; and remembers the group: a switch from a frame in no group has
+              ;; nothing to save, and coming back must find what you had.
+              (when (and current (not next) (group-uncovered? current))
+                (group-layout-save! current)
+                (set-frame-local! 'previous-group current))
+              (set-frame-local! 'current-group next)
+              (frame-group-label-refresh!))
+            next)))))
 
 (set! window-state-changed! group-current-recalculate!)
 
@@ -1870,7 +1882,9 @@
        (equal? (car *group-preview-last*) g)
        (equal? (cadr *group-preview-last*) (map cadr (window-list)))))
 
-(define (group-preview-forget!) (set! *group-preview-last* #f))
+(define (group-preview-forget!)
+  (set! *group-preview-last* #f)
+  (set! *group-look-active* #f))
 
 (define (group-preview-draw! index g)
   (if (group-preview-shown? g)
@@ -1884,6 +1898,9 @@
              (standing *group-current-inhibit*))
         (set! *winner-inhibit* #t)
         (set! *group-current-inhibit* #t)
+        ;; and it stays set until the frame is yours again: the look outlives
+        ;; the draw, and so must the silence around it
+        (set! *group-look-active* #t)
         (if saved
             (begin (group-revive-layout-files! saved)
                    ;; a look: the layout is drawn, the history is not written
@@ -1995,8 +2012,16 @@
                ;; waiting must not draw after it
                (open #t)
                (woken '())
+               ;; #t only once a look has replaced the frame. Putting the
+               ;; windows back is itself a whole-frame draw, so a prompt that
+               ;; never looked closes without repainting anything
+               (drew #f)
                (show-here!
-                 (lambda () (window-tree-preview! here-windows)))
+                 (lambda ()
+                   (when drew
+                     (set! drew #f)
+                     (group-preview-forget!)
+                     (window-tree-preview! here-windows))))
                (sleep-woken!
                  (lambda ()
                    (for-each (lambda (buf) (buffer-sleep! buf)) woken)
@@ -2007,13 +2032,16 @@
                  (lambda ()
                    (set! open #f)
                    (set! *group-switch-rows* '())
-                   (set! *group-switch-restore* #f)))
+                   (set! *group-switch-restore* #f)
+                   (group-preview-forget!)))
                (peek-now!
                  (lambda (name)
                    (when open
                      (let ((id (group-switch-id name)))
                        (if id
-                           (set! woken (append (group-preview-draw! index id) woken))
+                           (begin
+                             (set! drew #t)
+                             (set! woken (append (group-preview-draw! index id) woken)))
                            ;; the new-context row previews nothing: it names
                            ;; no group yet, so the windows stay as they were
                            (show-here!))))))
@@ -2039,7 +2067,13 @@
                (peek!
                  (lambda (name)
                    (rail! name)
-                   (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name))))
+                   ;; 0 keeps the frame still: the rail already names what a
+                   ;; group holds, and a look is a whole-frame draw per
+                   ;; highlight, panes and all
+                   (when (and (number? group-switch-peek-ms)
+                              (> group-switch-peek-ms 0))
+                     (debounce! "group-switch-peek" group-switch-peek-ms
+                                peek-now! name)))))
           (set! *group-switch-rows* (cdr prompt-rows))
           (set! *group-switch-restore* restore!)
           (if (null? candidates)
@@ -2066,7 +2100,7 @@
                 group-switch-style))))))
 
 (defcustom 'group-switch-peek-ms 120
-  "How long the highlight rests on a group before the switcher previews it, in milliseconds."
+  "How long the highlight rests on a group before the switcher previews it, in milliseconds. 0 turns the look off and leaves the frame still; the rail still names every buffer."
   'group 'groups 'type 'number)
 
 (defcustom 'group-switch-style "modal"
