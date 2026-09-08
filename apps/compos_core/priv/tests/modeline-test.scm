@@ -116,6 +116,31 @@
       (set! *jj-dir-roots* roots)
       (buffer-kill! buf))))
 
+(deftest 'a-narrow-window-keeps-the-headline-segments-its-mode-declared
+  "narrow-cols is where narrow starts for the headline as for every list"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-narrow*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (check-equal! (dash--headline-keep buf (+ narrow-cols 1)) #f
+                    "a wide window keeps every segment")
+      (check-equal! (dash--headline-keep buf (- narrow-cols 1)) '(mode llm)
+                    "a narrow chat keeps what it is and what is behind it")
+      (buffer-set-local! buf 'mode-name "text-mode")
+      (check-equal! (dash--headline-keep buf (- narrow-cols 1)) #f
+                    "a mode that declares nothing keeps every segment")
+      (buffer-kill! buf))))
+
+(deftest 'a-dropped-headline-segment-takes-no-rule-with-it
+  "the rules separate whatever survives, so none is ever left dangling"
+  (lambda ()
+    (check-equal! (dash--ruled '()) '() "nothing to separate")
+    (check-equal! (length (dash--ruled '(a))) 1 "one segment, no rule")
+    (let ((two (dash--ruled '(a b))))
+      (check-equal! (length two) 3 "two segments, one rule")
+      (check-equal! (plist-get (cadr two) 'class) "dseg-rule"
+                    "and the rule stands between them"))))
+
 (deftest 'a-chats-title-is-the-first-summary-and-does-not-move
   "the first label the running summary writes becomes the title; later paragraphs move the summary only, and the bar and the list rows show the title"
   (lambda ()

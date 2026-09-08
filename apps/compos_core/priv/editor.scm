@@ -438,14 +438,15 @@
 ;; Where narrow starts is the system's answer, not each view's: every
 ;; list turns at the same width, so a profile that calls itself narrow or
 ;; compact declares only WHICH columns survive. An explicit min-cols or
-;; max-cols still wins.
-(define list-narrow-cols 64)
-(define list-compact-cols 100)
+;; max-cols still wins. The headline at the top of a window turns at the
+;; same two widths, and a mode there declares only WHICH segments survive.
+(define narrow-cols 64)
+(define compact-cols 100)
 
 (define (list-layout-named-max profile)
   (let ((name (plist-get profile 'name)))
-    (cond ((equal? name 'narrow) (- list-narrow-cols 1))
-          ((equal? name 'compact) (- list-compact-cols 1))
+    (cond ((equal? name 'narrow) (- narrow-cols 1))
+          ((equal? name 'compact) (- compact-cols 1))
           (else #f))))
 
 (define (list-layout-match? buf profile width)
@@ -11192,36 +11193,88 @@
   (and (boundp (quote llm-config-preset-name))
        (llm-config-preset-name buf)))
 
+;;; What a mode's headline keeps when its window is narrow. Where narrow
+;;; starts is narrow-cols, the system's answer; a mode declares only WHICH
+;;; of the segments survive it. The names are mode, group, llm and wide. A
+;;; mode that declares nothing keeps every segment and lets the row clip.
+(define *mode-headlines* '())
+
+(define (define-mode-headline! mode narrow)
+  (set! *mode-headlines*
+    (cons (list mode narrow)
+          (remove (lambda (e) (equal? (car e) mode)) *mode-headlines*)))
+  mode)
+
+(define (mode-headline mode)
+  (let ((e (assoc mode *mode-headlines*))) (and e (cadr e))))
+
+;; A chat in a narrow pane keeps what it is and what is behind it. Its
+;; group is already the colour of the headline's own border and its title
+;; is already the modeline name, so neither needs the room; the model and
+;; the lane have nowhere else to appear, because the chat modeline gave
+;; them up.
+(define-mode-headline! "chat-mode" '(mode llm))
+
+;; The minor modes first, then the major mode: the same walk buffer-layout
+;; makes, so one buffer answers with one declaration. WIDTH is the columns
+;; of the window showing BUF; a wide window keeps everything and answers #f.
+(define (dash--headline-keep buf width)
+  (and (< width narrow-cols)
+       (let loop ((names (append (or (buffer-local buf 'minor-modes) '())
+                                 (let ((m (buffer-local buf 'mode-name)))
+                                   (if m (list m) '())))))
+         (if (null? names)
+             #f
+             (let ((keep (mode-headline (car names))))
+               (or keep (loop (cdr names))))))))
+
+;; The rules separate whatever survives. They are not segments: dropping a
+;; segment must never leave the rule that stood beside it dangling.
+(define (dash--ruled blocks)
+  (if (null? blocks)
+      '()
+      (cons (car blocks)
+            (let loop ((rest (cdr blocks)))
+              (if (null? rest)
+                  '()
+                  (cons (dash--seg-rule)
+                        (cons (car rest) (loop (cdr rest)))))))))
+
 (define (dashboard-line-blocks buf &optional preset-cell)
-  (let ((vcs (dash--vcs buf))
-        (summary (dash--summary buf))
-        (preset (if preset-cell (car preset-cell) (dash--preset buf))))
-    (append
-      (list (dash--seg "mode" (dash--mode-segs buf) 'left)
-            (dash--seg-rule)
-            (dash--seg "group" (dash--group-segs buf) 'left)
-            (dash--seg-rule)
-            ;; the preset names the whole setup, so it stands alone: the model
-            ;; and the lane are what it chose, and repeating them says nothing
-            (if preset
-                (dash--seg "preset" (list (list "dseg-strong" preset)) 'right)
-                (list 'tag "div" 'class "dseg-stack"
-                      'children
-                      (list (dash--seg "llm" (dash--model-segs buf) 'right "dseg-inline")
-                            (dash--seg "lane"
-                              (list (list "f-ok dseg-strong" (dash--lane buf)))
-                              'right "dseg-inline")))))
-      ;; one wide segment at the end, wrapping to two lines with the key
-      ;; inline: a chat says what it is doing, and every other buffer of
-      ;; the repo names the open jj change, kept fresh by jj.scm
-      ;; A click on it opens the log of every line it showed.
-      (cond (summary
-             (list (dash--seg-rule)
-                   (dash--wide-seg #f summary)))
-            (vcs
-             (list (dash--seg-rule)
-                   (dash--wide-seg "jj" vcs)))
-            (else '())))))
+  (let* ((vcs (dash--vcs buf))
+         (summary (dash--summary buf))
+         (preset (if preset-cell (car preset-cell) (dash--preset buf)))
+         ;; every segment carries its name, so a narrow window keeps the
+         ;; ones its mode declared and drops the rest
+         (cells
+           (append
+             (list
+               (list 'mode (dash--seg "mode" (dash--mode-segs buf) 'left))
+               (list 'group (dash--seg "group" (dash--group-segs buf) 'left))
+               ;; the preset names the whole setup, so it stands alone: the model
+               ;; and the lane are what it chose, and repeating them says nothing
+               (list 'llm
+                 (if preset
+                     (dash--seg "preset" (list (list "dseg-strong" preset)) 'right)
+                     (list 'tag "div" 'class "dseg-stack"
+                           'children
+                           (list (dash--seg "llm" (dash--model-segs buf) 'right "dseg-inline")
+                                 (dash--seg "lane"
+                                   (list (list "f-ok dseg-strong" (dash--lane buf)))
+                                   'right "dseg-inline"))))))
+             ;; one wide segment at the end, wrapping to two lines with the key
+             ;; inline: a chat says what it is doing, and every other buffer of
+             ;; the repo names the open jj change, kept fresh by jj.scm
+             ;; A click on it opens the log of every line it showed.
+             (cond (summary (list (list 'wide (dash--wide-seg #f summary))))
+                   (vcs (list (list 'wide (dash--wide-seg "jj" vcs))))
+                   (else '()))))
+         (keep (dash--headline-keep buf (buffer-cols buf))))
+    (dash--ruled
+      (map cadr
+           (if keep
+               (filter (lambda (cell) (member (car cell) keep)) cells)
+               cells)))))
 
 (define (dash--wide-seg key text)
   (append (dash--seg key (list (list "f-dim" text)) 'left "dseg-inline dseg-wide")
@@ -13064,6 +13117,8 @@
   "(add-display-rule! PATTERN ACTION [PARAMS]) — set display policy without showing a buffer. PATTERN is a name substring or (category KIND); ACTION is one action name or a list: popup, pop-up-window, reuse-window, use-some-window, same-window")
 (public! 'define-mode-layout!
   "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — set a mode layout without applying it")
+(public! 'define-mode-headline!
+  "(define-mode-headline! MODE '(mode group llm wide)) — which headline segments MODE keeps in a narrow window")
 (effects! '(read))
 (public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
 (effects! '(write))
@@ -13080,6 +13135,7 @@
 (catalog-meta! 'function "y-or-n" 'domain 'interaction 'effects '(read))
 (catalog-meta! 'command "reset-layout" 'domain 'windows 'effects '(write display))
 (catalog-meta! 'function "define-mode-layout!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "define-mode-headline!" 'domain 'windows 'effects '(write))
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
 (public! 'buffer-modeline-name "(buffer-modeline-name BUF) — BUF's name for the modeline: project-relative, or ~ for home")
