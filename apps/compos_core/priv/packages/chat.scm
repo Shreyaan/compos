@@ -920,7 +920,14 @@
                 (lambda (leaf)
                   (let ((path (chat-log-path-by-leaf leaf paths)))
                     (if path
-                        (visit-in-group path g)
+                        (let* ((buf (visit-in-group path g))
+                               (title (and buf (buffer-local buf 'chat-title))))
+                          ;; chat-file-init! restores the title local from the
+                          ;; archive header. Give the revived chat that name
+                          ;; again instead of leaving it named after its file.
+                          (when (and (string? title) (not (equal? title "")))
+                            (chat-title buf title))
+                          buf)
                         (message "No such archived chat")))))))))))
 
 ;; a group title becomes a file name: keep word characters, dot and dash

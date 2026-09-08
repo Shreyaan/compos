@@ -954,7 +954,8 @@
 (define (ibuffer-prompt-line! view label pick)
   (let* ((narrow (lambda (q)
                    (list-set-query! view q)
-                   (list-goto-first-entry view)))
+                   (list-goto-first-entry view)
+                   (ibuffer-preview! view)))
          (done (lambda ()
                  (set! *mb-list-buffer* #f)
                  (set! *mb-list-prompt* #f))))
@@ -984,10 +985,14 @@
 ;; classes and the line numbers go on before the display rule floats the
 ;; buffer: popup-float! reads them when it writes the window class.
 (define (ibuffer-prompt! scope view mode label pick)
-  (buffer-create view)
-  (buffer-set-locals! view (list 'line-numbers "off" 'window-classes "bare"))
-  (ibuffer-open! scope view mode)
-  (ibuffer-prompt-line! view label pick))
+  (let ((home (active-window)))
+    (buffer-create view)
+    (buffer-set-locals! view (list 'line-numbers "off" 'window-classes "bare"))
+    (ibuffer-open! scope view mode)
+    ;; Mode setup clears ordinary locals, so remember the invoking window
+    ;; after the prompt view has been opened and initialized.
+    (buffer-set-local! view 'ibuffer-prompt-home-window home)
+    (ibuffer-prompt-line! view label pick)))
 
 ;; what RET does with a row, in the window form and in the minibuffer
 ;; form alike: the table closes (CLOSE!), the frame enters the group that
@@ -1070,7 +1075,9 @@
         (b (or b (ibuffer-current buf))))
     (when (and (string? b) (buffer-known? b) (not (equal? b buf)))
       (if (and (popup-open?) (equal? (window-buffer (popup-window)) buf))
-          (let ((w (other-window-id (active-window))))
+          ;; The prompt popup is selected while its keys run. Preview in
+          ;; the window that invoked it: the same window RET will replace.
+          (let ((w (buffer-local buf 'ibuffer-prompt-home-window)))
             (when w (window-preview-buffer! b w)))
           ;; the window form: preview only from the table's own window,
           ;; so a move in a table nobody looks at moves no other window

@@ -1930,7 +1930,12 @@
           (when (and i (>= last 0))
             (let ((at (min i last)))
               (when (< at (length offs))
-                (window-set-point! (car place) (nth at offs)))))))
+                (let ((p (nth at offs)))
+                  ;; A refresh that left this row at the same byte left the
+                  ;; window alone too. Re-setting it still makes the client
+                  ;; follow point and repaint the window.
+                  (unless (equal? (window-point (car place)) p)
+                    (window-set-point! (car place) p))))))))
       places)))
 
 (define (list-render! buf fetch)
@@ -1992,14 +1997,18 @@
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))))
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
             (last (- (list-shown-count buf) 1)))
-        (cond ((and i (pair? rows)) (list-goto-index! buf (min i last)))
-              ;; the rows may have shrunk under point — the key bar is
-              ;; not a row
-              ((and was (pair? rows))
-               (list-goto-index! buf (min was last)))
-              (else
-               (let ((q (min p (buffer-size buf))))
-                 (if cur? (goto-char! q) (buffer-goto! buf q))))))
+        ;; Restore the buffer's point without moving every window that
+        ;; shows it. list-goto-index! deliberately propagates interactive
+        ;; motion to those windows; a background refresh must preserve each
+        ;; window's independent place instead.
+        (let* ((at (cond ((and i (pair? rows)) (min i last))
+                         ((and was (pair? rows)) (min was last))
+                         (else #f)))
+               (q (if at
+                      (nth at (list-offsets buf))
+                      (min p (buffer-size buf)))))
+          (unless (equal? (buffer-point buf) q)
+            (if cur? (goto-char! q) (buffer-goto! buf q)))))
       (list-snap-point! buf)
       (list-update-selection! buf)
       ;; the windows that show this list, each on its own row again

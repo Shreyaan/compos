@@ -113,15 +113,26 @@ defmodule Compos.ChatLogTest do
     path = eval_str!(~s[(chat-log-path "#{buf}")])
     assert eventually(fn -> File.exists?(path) end)
 
-    eval!(~s[(begin (switch-to-buffer! "#{buf}") (run-command "chat-reset") #t)])
+    # The archived header carries the conversation title. Restoring it
+    # should give the revived chat that name, not its archive path.
+    title = "Recovered conversation"
+
+    eval!(~s[(begin
+      (buffer-set-local! "#{buf}" 'chat-title "#{title}")
+      (chat-log-save! "#{buf}")
+      (switch-to-buffer! "#{buf}")
+      (run-command "chat-reset")
+      #t)])
+
     eval!(~s[(run-command "chat-restore")])
     Editor.minibuffer_set_input(Path.basename(path))
     eval!("(minibuffer-confirm!)")
 
-    assert eval_str!("(current-buffer)") == path
-    assert Buffer.get_local(path, "mode-name") == "chat-mode"
-    assert Buffer.text(path) =~ "recover this"
-    assert Buffer.text(path) =~ "Recovered answer."
+    assert eval_str!("(current-buffer)") == title
+    assert Buffer.get_local(title, "mode-name") == "chat-mode"
+    assert Buffer.get_local(title, "chat-title") == title
+    assert Buffer.text(title) =~ "recover this"
+    assert Buffer.text(title) =~ "Recovered answer."
   end
 
   test "the chats list ends with the saved chats and RET revives one" do

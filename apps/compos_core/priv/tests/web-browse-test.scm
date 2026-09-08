@@ -46,16 +46,22 @@
             (buffer-list)))
 
 ;; A fresh tab's group is decided when it opens, by the frame's current
-;; group. Pin that for the thunk and give the frame its own group back
-;; after; a throwaway group created here is removed when the test ends.
+;; group. Stand the frame in GROUP for the thunk and give the frame its
+;; own group back after; a throwaway group created here is removed when
+;; the test ends. The frame is PINNED to GROUP too: a window change
+;; recalculates the frame's group from what it shows, and only a pin
+;; survives a visit to a buffer outside the group.
 ;; GROUP is a name, or #f for a groupless frame.
 (define (t--web-pin-group! group thunk)
-  (let* ((saved (frame-local 'current-group))
+  (let* ((saved-current (frame-local 'current-group))
+         (saved-pinned (frame-local 'pinned-group))
          (existing (and group (group-resolve-id group)))
          (id (or existing (and group (group-record-create! group)))))
     (set-frame-local! 'current-group id)
+    (set-frame-local! 'pinned-group id)
     (let ((out (thunk)))
-      (set-frame-local! 'current-group saved)
+      (set-frame-local! 'current-group saved-current)
+      (set-frame-local! 'pinned-group saved-pinned)
       (when (and id (not existing)) (group-record-delete! id))
       out)))
 
@@ -77,25 +83,25 @@
                               "the frame stays in the current group")
                 (check-equal! (buffer-local buf 'browse-view) "mono"
                               "browse opens in the type rendered pages use")
-            (check-true! (minor-mode-on? buf "preview-mode")
-                         "the default renders the Markdown")
-            (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
-            (check-equal! (buffer-local buf 'browse-view) "serif"
-                          "the first cycle selects serif")
-            (check-equal! (preview-typography) "serif"
-                          "the cycle changes the type of every rendered page")
-            (check-true! (minor-mode-on? buf "preview-mode")
-                         "serif still renders the Markdown")
-            (check-equal! (buffer-local buf 'render-mode) "markdown"
-                          "a type change never leaves the rendered page")
-            (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
-            (check-equal! (buffer-local buf 'browse-view) "source"
-                          "the second cycle selects source")
-            (check-false! (minor-mode-on? buf "preview-mode")
-                          "source is the only step that leaves the rendered page")
-            (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
-            (check-equal! (buffer-local buf 'browse-view) "mono"
-                          "the third cycle returns to monospace")
+                (check-true! (minor-mode-on? buf "preview-mode")
+                             "the default renders the Markdown")
+                (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
+                (check-equal! (buffer-local buf 'browse-view) "serif"
+                              "the first cycle selects serif")
+                (check-equal! (preview-typography) "serif"
+                              "the cycle changes the type of every rendered page")
+                (check-true! (minor-mode-on? buf "preview-mode")
+                             "serif still renders the Markdown")
+                (check-equal! (buffer-local buf 'render-mode) "markdown"
+                              "a type change never leaves the rendered page")
+                (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
+                (check-equal! (buffer-local buf 'browse-view) "source"
+                              "the second cycle selects source")
+                (check-false! (minor-mode-on? buf "preview-mode")
+                              "source is the only step that leaves the rendered page")
+                (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
+                (check-equal! (buffer-local buf 'browse-view) "mono"
+                              "the third cycle returns to monospace")
                 (check-true! (minor-mode-on? buf "preview-mode")
                              "rendering returns without changing the Markdown"))))))
       (t--web-kill-tabs!)
@@ -154,24 +160,23 @@
                 (check-contains! a "*browse:" "the tab is named for the page")
                 (check-equal! (group-name (buffer-group b)) "zzweb-home"
                               "both tabs sit in the current group")
+                (switch-to-buffer! "*scratch*")
+                (check-equal! (browse "https://site.test/second.html") b
+                              "the same url returns"))
 
-            (switch-to-buffer! "*scratch*")
-            (check-equal! (browse "https://site.test/second.html") b
-                          "the same url returns")
-
-            ;; The rendered preview sends relative links back through browse.
-            (switch-to-buffer! a)
-            (buffer-goto! a 12)
-            (preview-follow-link! (active-window) "second.html")
-            (check-equal! (current-buffer) a "preview navigation stays in tab")
-            (check-equal! (buffer-local a 'browse-url)
-                          "https://site.test/second.html"
-                          "the relative target resolves against the page")
-            (check-equal! (buffer-point a) 0
-                          "new navigation starts at the top")
-            (check-contains! (buffer-local a 'modeline-name)
-                             "site.test/second.html"
-                             "the visible title follows navigation")))))
+              ;; The rendered preview sends relative links back through browse.
+              (switch-to-buffer! a)
+              (buffer-goto! a 12)
+              (preview-follow-link! (active-window) "second.html")
+              (check-equal! (current-buffer) a "preview navigation stays in tab")
+              (check-equal! (buffer-local a 'browse-url)
+                            "https://site.test/second.html"
+                            "the relative target resolves against the page")
+              (check-equal! (buffer-point a) 0
+                            "new navigation starts at the top")
+              (check-contains! (buffer-local a 'modeline-name)
+                               "site.test/second.html"
+                               "the visible title follows navigation"))))))
     (t--web-kill-tabs!)))
 
 ;;; --- the cache ----------------------------------------------------------------

@@ -80,6 +80,8 @@
     (run-command "ibuffer-prompt")
     (minibuffer-change! "zz-ibp-")
     (check-equal! (ibp-mine " *buffers*") '("*zz-ibp-b*" "*zz-ibp-a*" "*zz-ibp-c*") "three rows match")
+    (check-equal! (window-buffer (buffer-local " *buffers*" 'ibuffer-prompt-home-window)) "*zz-ibp-b*"
+                  "C-x b previews the highlighted buffer in the invoking window")
     (check-equal! (list-current " *buffers*") "*zz-ibp-b*" "the highlight starts on the first row")
     (run-command "minibuffer-next-candidate")
     (check-equal! (list-current " *buffers*") "*zz-ibp-a*" "and moves down a row")
@@ -131,6 +133,8 @@
     (check-equal! (plist-get (minibuffer-state) 'prompt) "Chat: " "the prompt line")
     (minibuffer-change! "zz-ibp-chat")
     (check-equal! (ibp-names " *chats*") '("*zz-ibp-chat*") "the chat matches")
+    (check-equal! (window-buffer (buffer-local " *chats*" 'ibuffer-prompt-home-window)) "*zz-ibp-chat*"
+                  "C-x c previews the highlighted chat in the invoking window")
     (run-command "minibuffer-confirm")
     (check-false! (and (popup-open?) (equal? (window-buffer (popup-window)) " *chats*"))
                   "the table is closed")
