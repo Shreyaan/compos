@@ -4,8 +4,7 @@
 ;;; motion with Shift held starts a region at point when there is none and
 ;;; extends it. The commands here move by the same primitives as the plain
 ;;; motions, so a mode that changes what a line or a word is changes them
-;;; too. writing-mode binds them in its own buffers; cua-mode binds them
-;;; everywhere.
+;;; too. cua-mode owns the keys, in every buffer you are editing.
 
 (domain! 'editing)
 (effects! '(write))
@@ -52,8 +51,7 @@
 (define-command "cua-select-page-down" "Extend the region one screen down"
   (lambda () (cua--select-page! 1)))
 
-;; the bindings cua-mode puts in force everywhere; a buffer's own minor
-;; modes still win, as in Emacs
+;; the bindings cua-mode puts in force in a buffer you are editing
 (define cua--keys
   '(("S-<left>" "cua-select-backward")
     ("S-<right>" "cua-select-forward")
@@ -75,9 +73,15 @@
 
 (define (cua-mode-on?) *cua-mode*)
 
-;; the mode owns one keymap and puts it in force in every buffer, as a
-;; global minor mode does in Emacs. Turning it off takes the map away and
-;; leaves every other binding of those keys as it was.
+;; the mode owns one keymap, and the map answers only in a buffer that
+;; stands in the editing state. A buffer you have just landed on keeps
+;; the plain meaning of the Shift chords: S-<left> walks buffer history,
+;; M-S-<left> moves to the group on the left. The first key that says you
+;; are editing here -- a letter, RET, an arrow, anything but the Shift
+;; chords themselves -- arms the editing state, and from then on Shift
+;; selects. editing-state-map is the buffer-local map that state installs;
+;; cua-mode-map is its parent, so the selections come and go with it and
+;; no other binding moves.
 (define-keymap! "cua-mode-map")
 ;; Cmd-Shift-arrows move views between panes. Remove old selection bindings
 ;; on reload too; Shift-Home/End retain line selection.
@@ -90,12 +94,22 @@
   (remove (lambda (m) (equal? m "cua-mode-map")) (global-minor-maps)))
 
 (define (cua--enable!)
-  (global-minor-maps! (cons "cua-mode-map" (cua--others)))
+  ;; the map was a global minor map once; a reload takes it back out
+  (global-minor-maps! (cua--others))
+  (keymap-parent! "editing-state-map" "cua-mode-map")
   (set! *cua-mode* #t))
 
 (define (cua--disable!)
   (global-minor-maps! (cua--others))
+  (keymap-parent! "editing-state-map" #f)
   (set! *cua-mode* #f))
+
+;; the chords cua owns say nothing about whether you are editing: pressing
+;; one neither arms the editing state nor leaves it. The list is the
+;; commands the chords run, armed (the selections) and unarmed (the
+;; buffer walk under S-<left>/S-<right>).
+(editing-neutral-commands!
+  (append (map cadr cua--keys) '("previous-buffer" "next-buffer")))
 
 (define-command "cua-mode" "Toggle Shift-selection in every buffer"
   (lambda ()
@@ -104,9 +118,10 @@
         (begin (cua--enable!) (message "CUA mode enabled")))))
 
 (mode-doc! "cua-mode"
-  "Shift with a motion key extends the region, in every buffer. On by default; M-x cua-mode toggles it. The commands are cua-select-*; writing-mode binds the same commands in its own buffers.")
+  "Shift with a motion key extends the region, in a buffer you are editing. A buffer you have just landed on answers the Shift chords with their plain meaning until any other key arms it, so S-<left> still walks buffer history and M-S-<left> still moves to the group on the left. On by default; M-x cua-mode toggles it. The commands are cua-select-*.")
 
-;; Shift-selection is on from the start. On an editable surface the
+;; Shift-selection is on from the start, and waits in each buffer for the
+;; first key that says you are editing there. On an editable surface the
 ;; browser answers the plain Shift motions natively; these bindings answer
 ;; where the server owns the caret, and for the chords the client sends as
 ;; keys (the Cmd arrows).

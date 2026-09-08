@@ -358,27 +358,14 @@
 
 (register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
 
+;; The Shift selections are cua-mode's, in every buffer and gated on the
+;; editing state, so writing-mode does not bind them: a writing buffer you
+;; have just landed on answers M-S-<left> with the group move, as any
+;; other buffer does, and selects a word once the buffer is armed.
 (minor-mode-keys! "writing-mode"
   '(
-    ("S-<left>" "cua-select-backward")
-    ("S-<right>" "cua-select-forward")
-    ("S-<up>" "cua-select-up")
-    ("S-<down>" "cua-select-down")
     ("M-<left>" "backward-word")
-    ("M-<right>" "forward-word")
-    ("M-S-<left>" "cua-select-backward-word")
-    ("M-S-<right>" "cua-select-forward-word")
-    ("s-S-<left>" "cua-select-line-start")
-    ("s-S-<right>" "cua-select-line-end")
-    ("s-S-<up>" "cua-select-buffer-start")
-    ("s-S-<down>" "cua-select-buffer-end")
-    ("S-<home>" "cua-select-line-start")
-    ("S-<end>" "cua-select-line-end")
-    ("C-S-<left>" "cua-select-backward-word")
-    ("C-S-<right>" "cua-select-forward-word")
-    ("C-S-<home>" "cua-select-buffer-start")
-    ("C-S-<end>" "cua-select-buffer-end")
-    ("s-a" "cua-select-all")))
+    ("M-<right>" "forward-word")))
 
 ;;; --- writing-layout ---------------------------------------------------------
 ;;; `write` presents the document, its writing scratch, and the group chat

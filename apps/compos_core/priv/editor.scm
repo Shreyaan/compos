@@ -12236,6 +12236,21 @@
                      (set! *editing--domain-cache* (cons (list cmd yes) *editing--domain-cache*))
                      yes)))))))
 
+;; A Shift chord is the selection keys' own chord. Pressing one says
+;; nothing about whether you are editing this buffer, so it leaves the
+;; state as it found it: cua.scm and groups.scm name the commands those
+;; chords run, and every other key still arms the editing state.
+(define *editing-neutral-commands* '())
+
+(define (editing-neutral-commands! names)
+  (for-each (lambda (n)
+              (unless (member n *editing-neutral-commands*)
+                (set! *editing-neutral-commands* (cons n *editing-neutral-commands*))))
+            names))
+
+(define (editing-neutral-command? cmd)
+  (if (and (string? cmd) (member cmd *editing-neutral-commands*)) #t #f))
+
 (define (editing--after-command! &optional cmd)
   (let ((buf (current-buffer))
         (cmd (or cmd (editing--command-name)))
@@ -12244,6 +12259,7 @@
     (cond ((not (and buf (buffer-exists? buf))) #t)
           ((buffer-read-only? buf) (editing-state-off! buf))
           ((or quit (equal? cmd "keyboard-quit")) (editing-state-off! buf))
+          ((editing-neutral-command? cmd) #t)
           ((equal? cmd "self-insert-command") (editing-state-on! buf))
           ((editing--window-command? cmd) (editing-state-off! buf))
           (else (editing-state-on! buf)))))
@@ -12256,6 +12272,8 @@
 (catalog-meta! 'function "editing-state-on!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-state-off!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-quit!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "editing-neutral-commands!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "editing-neutral-command?" 'domain 'windows 'effects '(read))
 
 ;; S-<left>/<right>: walk buffer history — S-<left> goes to the buffer you
 ;; just left (MRU), pressing again goes deeper; S-<right> walks back. The
