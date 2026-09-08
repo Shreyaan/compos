@@ -901,9 +901,19 @@ defmodule Compos.Ui.Layouts do
             border-bottom: 1px solid var(--border-bg, #cbc4b1);
             font-family: var(--font-mono); font-size: 14px;
           }
+          /* A message passes and the bar around it stays, so a message
+             says which of the two it is: an accent-tinted chip lifts it
+             off the bar the tabs and the path share. An empty echo draws
+             nothing. */
           .echo {
             color: var(--default-fg, #1b1a17); white-space: pre;
             min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
+            font-weight: 600; align-self: center;
+          }
+          .echo:not(:empty) {
+            padding: 2px 10px 3px; border-radius: 7px;
+            background: color-mix(in srgb, var(--accent-fg, #26356b) 22%, var(--window-bg, #fdfcf8));
+            border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 48%, transparent);
           }
           .ml-frame-path {
             min-width: 0; max-width: 62vw; flex: 0 1 auto;
