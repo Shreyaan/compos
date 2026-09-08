@@ -435,9 +435,23 @@
   (let ((value (plist-get profile key)))
     (if (procedure? value) (value buf) value)))
 
+;; Where narrow starts is the system's answer, not each view's: every
+;; list turns at the same width, so a profile that calls itself narrow or
+;; compact declares only WHICH columns survive. An explicit min-cols or
+;; max-cols still wins.
+(define list-narrow-cols 64)
+(define list-compact-cols 100)
+
+(define (list-layout-named-max profile)
+  (let ((name (plist-get profile 'name)))
+    (cond ((equal? name 'narrow) (- list-narrow-cols 1))
+          ((equal? name 'compact) (- list-compact-cols 1))
+          (else #f))))
+
 (define (list-layout-match? buf profile width)
   (let ((minimum (list-layout-bound buf profile 'min-cols))
-        (maximum (list-layout-bound buf profile 'max-cols)))
+        (maximum (or (list-layout-bound buf profile 'max-cols)
+                     (list-layout-named-max profile))))
     (or (plist-get profile 'default)
         (and (or minimum maximum)
              (or (not minimum) (>= width minimum))

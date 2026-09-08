@@ -231,6 +231,31 @@
               (list (car st) "faint")
               (list vc (dired-vc-face vc))))))
 
+;;; --- narrow windows -----------------------------------------------------------
+;;; The same row with fewer columns. Dired's furniture (bar, size, date,
+;;; perms, vc) costs about 58 characters before the name gets one, so a
+;;; narrow window keeps what names the file and what git says about it.
+;;; The widths where these turn belong to list-mode, not to dired.
+
+(define (dired-cells-pick buf e keep)
+  (let ((all (dired-cells buf e)))
+    (map (lambda (i) (list-ref all i)) keep)))
+
+(define (dired-narrow-columns buf)
+  (list (list "" 1) (list "name" #f) (list "vc" 9)))
+
+(define (dired-narrow-cells buf e) (dired-cells-pick buf e '(0 1 6)))
+
+(define (dired-compact-columns buf)
+  (list (list "" 1) (list "name" #f) (list "size" 7 'right)
+        (list "modified" 12) (list "vc" 9)))
+
+(define (dired-compact-cells buf e) (dired-cells-pick buf e '(0 1 3 4 6)))
+
+(define (dired-narrow-footer buf)
+  '(("RET" "peek") ("SPC" "select") ("x" "trash")
+    ("/" "filter") ("^" "up") ("q" "quit")))
+
 ;;; --- filters ------------------------------------------------------------------
 ;;; `/` narrows and `\` widens, and both are list-mode's: the stack, the
 ;;; label and the matching all live there, and `/` already reads the
@@ -466,8 +491,8 @@
     ;; C-x C-f shows beside one
     'category 'file
     'local-filter #t
-    'filter dired-filter-match?
-    'match dired-match?
+    'filter (lambda (buf e q) (dired-filter-match? buf e q))
+    'match (lambda (buf e q) (dired-match? buf e q))
     'rows (lambda (buf)
             (let ((dir (dired-dir buf)))
               (if (not dir)
@@ -486,9 +511,21 @@
                      (list "modified" 12)
                      (list "perms" 10)
                      (list "vc" 9)))
-    'cells dired-cells
-    'title dired-title
-    'meta dired-meta
+    'cells (lambda (buf e) (dired-cells buf e))
+    'layouts
+      (list
+        (list 'name 'narrow
+              'columns (lambda (buf) (dired-narrow-columns buf))
+              'cells (lambda (buf e) (dired-narrow-cells buf e))
+              'footer (lambda (buf) (dired-narrow-footer buf))
+              'compact #t)
+        (list 'name 'compact
+              'columns (lambda (buf) (dired-compact-columns buf))
+              'cells (lambda (buf e) (dired-compact-cells buf e))
+              'footer (lambda (buf) (dired-narrow-footer buf)))
+        (list 'name 'wide 'default #t))
+    'title (lambda (buf) (dired-title buf))
+    'meta (lambda (buf) (dired-meta buf))
     'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
     'footer (lambda (buf)
               '(("RET" "peek, again opens") ("M-RET" "open") ("SPC" "select") ("*" "all") ("d" "flag")
