@@ -28,7 +28,7 @@ defmodule Compos.Ui.FrameTabsTest do
 
   defp rail do
     assert {:ok, [rows, more]} = Session.call_named("frame-tabs", [])
-    {Enum.map(rows, fn [id, _label, _current] -> id end), more}
+    {Enum.map(rows, fn [id, _label, _current | _segs] -> id end), more}
   end
 
   defp reset!(limit) do

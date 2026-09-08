@@ -866,7 +866,18 @@ defmodule Compos.Ui.Layouts do
             background: var(--linenum-fg, #c3bcac); flex: 0 0 auto;
           }
           .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
-          .modeline .name { font-weight: 700; color: var(--buffer-group-color, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .modeline .name { font-weight: 600; color: var(--buffer-group-color, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          /* The buffer-name grammar (editor.scm): every chrome that shows a
+             buffer or a group draws these classes and never the raw name.
+             *Messages* is bold and keeps no asterisks; :mode: is the icon. */
+          .bn-strong { font-weight: 800; }
+          .bn-dim { opacity: 0.6; font-weight: 500; }
+          .bn-code { font-family: var(--font-mono); font-size: 0.95em; }
+          .bn-icon {
+            display: inline-block; min-width: 1.1em; text-align: center;
+            color: var(--accent-fg, #26356b); font-weight: 500;
+          }
+          .ml-tab .bn-icon, .ml-tab-on .bn-icon { color: inherit; }
           .ml-icon { display: inline-block; min-width: 1.1em; color: var(--accent-fg, #26356b); font-weight: 700; text-align: center; }
           .ml-pos { font-family: var(--font-mono); font-size: 12.5px; opacity: 1; white-space: nowrap; }
           .ml-mode { font-family: var(--font-mono); font-size: 12.5px; opacity: 1; white-space: nowrap; }
