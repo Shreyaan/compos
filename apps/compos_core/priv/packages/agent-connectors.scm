@@ -63,6 +63,9 @@
   ;; cache serves the prefix and only the new turn is full price.
   ;; Install: `npm install @deepseek-ai/dsh` in ~/src/dsh-acp. The provider
   ;; key lives in ~/.dsh/.credentials.yaml, which the harness writes.
+  ;; The shipped adapter cannot steer a running turn: reapply
+  ;; docs/dsh-acp-steering.patch after every install, or blank RET only ever
+  ;; queues on this lane.
   '(cmd "/Users/svs/.asdf/installs/nodejs/24.0.2/bin/node /Users/svs/src/dsh-acp/node_modules/@deepseek-ai/dsh/lib/bin.js --profile acp"
     ;; the session reports model and reasoning effort as ACP config
     ;; options, so the model rides in protocol config, not the command line
