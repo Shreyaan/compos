@@ -1861,29 +1861,49 @@
 ;; back when it closes. A dormant member wakes for the look and sleeps
 ;; again after; buffer-sleep! refuses a buffer that is on screen, so the
 ;; group you actually enter stays awake.
+;; what the last look drew: (GROUP BUFFERS). A look is a whole frame, so a
+;; look that would draw what is already on screen draws nothing at all
+(define *group-preview-last* #f)
+
+(define (group-preview-shown? g)
+  (and *group-preview-last*
+       (equal? (car *group-preview-last*) g)
+       (equal? (cadr *group-preview-last*) (map cadr (window-list)))))
+
+(define (group-preview-forget!) (set! *group-preview-last* #f))
+
 (define (group-preview-draw! index g)
-  (let* ((saved (group-layout g))
-         (members (group-preview-members-in index g))
-         (names (if saved (window-tree-buffers saved) members))
-         (asleep (filter (lambda (b) (and (buffer-known? b) (not (buffer-exists? b))))
-                         names))
-         (winner *winner-inhibit*)
-         (standing *group-current-inhibit*))
-    (set! *winner-inhibit* #t)
-    (set! *group-current-inhibit* #t)
-    (if saved
-        (begin (group-revive-layout-files! saved)
-               ;; a look: the layout is drawn, the history is not written
-               (window-tree-preview! saved))
-        (group-preview-default! members))
-    (set! *group-current-inhibit* standing)
-    (set! *winner-inhibit* winner)
-    (let loop ((rest asleep) (woken '()))
-      (cond ((null? rest) woken)
-            ((buffer-exists? (car rest))
-             (restore-buffer-runtime! (car rest))
-             (loop (cdr rest) (cons (car rest) woken)))
-            (else (loop (cdr rest) woken))))))
+  (if (group-preview-shown? g)
+      '()
+      (let* ((saved (group-layout g))
+             (members (group-preview-members-in index g))
+             (names (if saved (window-tree-buffers saved) members))
+             (asleep (filter (lambda (b) (and (buffer-known? b) (not (buffer-exists? b))))
+                             names))
+             (winner *winner-inhibit*)
+             (standing *group-current-inhibit*))
+        (set! *winner-inhibit* #t)
+        (set! *group-current-inhibit* #t)
+        (if saved
+            (begin (group-revive-layout-files! saved)
+                   ;; a look: the layout is drawn, the history is not written
+                   (window-tree-preview! saved)
+                   ;; and it is the look the switch would give. A saved
+                   ;; arrangement can name buffers that have since left the
+                   ;; group, or never held it; switch-to-group! sanitizes those
+                   ;; panes away, so a look that skips this step shows buffers
+                   ;; the group does not hold and the switch would not show
+                   (group-restore-sanitize! g))
+            (group-preview-default! members))
+        (set! *group-current-inhibit* standing)
+        (set! *winner-inhibit* winner)
+        (set! *group-preview-last* (list g (map cadr (window-list))))
+        (let loop ((rest asleep) (woken '()))
+          (cond ((null? rest) woken)
+                ((buffer-exists? (car rest))
+                 (restore-buffer-runtime! (car rest))
+                 (loop (cdr rest) (cons (car rest) woken)))
+                (else (loop (cdr rest) woken)))))))
 
 ;; In the groups board a verb acts on the row; anywhere else it prompts.
 (define (in-groups-board?)

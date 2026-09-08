@@ -1521,6 +1521,48 @@
       (set! group-switch-style style))
     (t--sw-done!)))
 
+(deftest 'a-previewed-group-drops-panes-it-no-longer-holds
+  "a saved layout naming a foreign buffer previews the group, not the stale pane"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((style group-switch-style)
+          (here (group-record-create! "zzsw-stale-here"))
+          (there (group-record-create! "zzsw-stale-there")))
+      (set! group-switch-style "popup")
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second there)
+      ;; the layout `there` saved: one pane its own, one pane a buffer that
+      ;; was never a member. A switch sanitizes that pane away, so the look
+      ;; must too, or it shows buffers the group does not hold
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-second)
+      (split-window! 'v 0.5)
+      (other-window!)
+      (t--sw-show-here! t--sw-third)
+      (group-layout-save! there)
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-first)
+      (set-frame-local! 'current-group here)
+
+      (run-command "group-switch")
+      (t--sw-type! "zzsw-stale-there")
+      ;; the look draws the saved tree and sanitizes it, in that order, so
+      ;; both halves are one state to wait for: waiting on either alone
+      ;; passes on a frame that has not finished drawing
+      (check-true!
+        (wait-until (lambda ()
+                      (let ((shown (map cadr (window-list))))
+                        (and (member t--sw-second shown)
+                             (not (member t--sw-third shown)))))
+                    1000 10)
+        "the look shows the group's member, not the pane it no longer holds")
+
+      (t--sw-key! "cancel")
+      (check-equal! (map cadr (window-list)) (list t--sw-first)
+                    "cancelling puts back the frame you came from")
+      (set! group-switch-style style))
+    (t--sw-done!)))
+
 (deftest 'a-group-card-previews-the-whole-group-in-its-facts
   "the card wears four chips; the rail it previews with names every member"
   (lambda ()

@@ -156,17 +156,18 @@ defmodule Compos.GroupSwitchCommandTest do
 
     group = group_id("switch-marginalia")
 
-    # the switcher's row is a container card: the group's name, what it
-    # holds, and its members as chips
+    # the switcher's row names the group and counts it; the members are the
+    # rail's list beside it, in the same abbreviations
     [hint, kind, members] =
       eval!("""
       (begin
         (visit #{Jason.encode!(project_file)})
         (buffer-add-group! #{Jason.encode!(project_file)} "#{group}")
         (buffer-add-group! #{Jason.encode!(home_buffer)} "#{group}")
-        (let ((row (group-switch-candidate "#{group}")))
+        (let ((row (group-switch-candidate "#{group}"))
+              (rail (group-switch-rail-rows (group-members-index) "#{group}")))
           (string-join
-            (list (cadr row) (nth 2 row) (string-join (nth 3 row) " · "))
+            (list (cadr row) (nth 2 row) (string-join (map car rail) " · "))
             " | ")))
       """)
       |> Jason.decode!()

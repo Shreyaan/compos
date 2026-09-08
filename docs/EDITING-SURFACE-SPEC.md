@@ -115,7 +115,15 @@ state as it found it. The state installs the maps on `*editing-state-maps*`,
 and `cua.scm` adds `cua-mode-map` to that list, so the Shift selections answer
 in a buffer you are editing and a buffer you have just landed on keeps the
 plain meaning of those chords: S-<left> walks buffer history, M-S-<left> moves
-to the group on the left. A buffer the
+to the group on the left.
+
+`editing-state-map` is the marker of the state and holds no binding.
+The Cmd-arrows the state gives to the caret are on `editing-caret-map`,
+and a mode can refuse a map of the state by name
+(`editing-state-maps-off! MODE MAPS`). `chat-mode` refuses the caret map:
+a chat is a conversation you type in without pause, so a chat that held the
+Cmd-arrows while armed would never answer the window motion again. A chat
+still arms `cua-mode-map`, so Shift there extends a region. A buffer the
 server draws (the chat) is handled here alone. The client mirrors the state
 for a contenteditable surface (`editingAfterKey` in `layouts.ex`), because
 the native-or-key decision for a Cmd-arrow must run inside `keydown`; a
