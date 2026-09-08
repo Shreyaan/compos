@@ -12910,6 +12910,7 @@
 (catalog-meta! 'function "editing-quit!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-state-maps!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-state-maps-drop!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "editing-state-maps-off!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-neutral-commands!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-neutral-command?" 'domain 'windows 'effects '(read))
 
@@ -13545,6 +13546,7 @@
 (public! 'editing-state? "(editing-state? BUF) — #t when BUF is in the editing state: editing-state-map is in force and the Cmd-arrows move point, not the focus")
 (public! 'editing-state-on! "(editing-state-on! BUF) — enter the editing state in BUF; the first command after a landing does this")
 (public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows move the focus; keyboard-quit, a window command, and a new landing do this")
+(public! 'editing-state-maps-off! "(editing-state-maps-off! MODE MAPS) — MODE's buffers refuse those maps in the editing state; chat-mode refuses editing-caret-map, so the Cmd-arrows stay the window motion in a chat")
 (public! 'editing-quit! "(editing-quit!) — mark the running command as a quit: after it the buffer is in the movement state; keyboard-quit calls this, and a command that aborts something calls it too")
 (public! 'window-default-keybindings "(window-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to window-left/right/up/down; the two panes' buffers swap and the focus follows")
 (public! 'buffer-default-keybindings "(buffer-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to buffer-left/right/up/down; the buffer moves to the neighbor and its previous buffer shows here")
