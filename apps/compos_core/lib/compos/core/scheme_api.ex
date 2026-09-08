@@ -230,6 +230,8 @@ defmodule Compos.Core.SchemeAPI do
       "directory-entries" =>
         "(directory-entries DIR) — return sorted entry plists with name, type, exact bytes, mtime, size, date, and perms; return (error MSG) when DIR cannot be read.",
       "expand-path" => "(expand-path PATH) — expand PATH to an absolute path.",
+      "file-realpath" =>
+        "(file-realpath PATH) — expand PATH and resolve any symlink in it, so two names for one directory compare equal.",
       "file-stat" => "(file-stat PATH) — return (PERMS SIZE DATE) strings in dired style.",
       "url-encode" => "(url-encode S) — percent-encode S as one URL path segment.",
       "url-decode" => "(url-decode S) — decode a percent-encoded URL segment.",
@@ -987,6 +989,11 @@ defmodule Compos.Core.SchemeAPI do
         end
       end,
       "expand-path" => fn [p] -> Path.expand(p) end,
+      # A write rule compares a path against a root directory. In development
+      # _build/dev/lib/compos_core/priv is a symlink to apps/compos_core/priv,
+      # so the same directory has two names and a text prefix test fails on one
+      # of them. Scheme has no way to read a link, so this resolves them.
+      "file-realpath" => fn [p] -> realpath(Path.expand(p)) end,
       # (file-stat path) -> (perms size date) strings, dired-style
       "file-stat" => fn [p] ->
         case File.stat(Path.expand(p), time: :posix) do
@@ -2905,6 +2912,26 @@ defmodule Compos.Core.SchemeAPI do
   defp unused_path(path, suffix \\ 0) do
     candidate = if suffix == 0, do: path, else: path <> ".#{suffix}"
     if path_present?(candidate), do: unused_path(path, suffix + 1), else: candidate
+  end
+
+  # Resolve every symlink on the path, one component at a time. A link that
+  # points at another link resolves through @realpath_hops rounds and then
+  # stops, so a link that points at itself cannot spin here.
+  @realpath_hops 8
+  defp realpath(path) do
+    path
+    |> Path.split()
+    |> Enum.reduce("/", fn seg, acc -> resolve_link(Path.join(acc, seg), @realpath_hops) end)
+  end
+
+  defp resolve_link(path, 0), do: path
+
+  defp resolve_link(path, hops) do
+    case File.read_link(path) do
+      {:ok, "/" <> _ = target} -> resolve_link(Path.expand(target), hops - 1)
+      {:ok, target} -> resolve_link(Path.expand(target, Path.dirname(path)), hops - 1)
+      _ -> path
+    end
   end
 
   defp format_mode(stat) do

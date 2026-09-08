@@ -914,3 +914,40 @@
 (public! 'dired-visible "(dired-visible BUF DIR) — the entries a Dired buffer is showing, after its filters")
 (public! 'dired-marks "(dired-marks BUF) — the marked entries, as (name mark-char) pairs")
 (catalog-meta! 'function "dired-open" 'effects '(write))
+
+(domain! 'files)
+(effects! '(write))
+;;; Directory providers reuse the real Dired mode and commands. The provider name
+;;; is durable; its functions/specification are registered by the owning package.
+(define *dired-providers* (if (boundp '*dired-providers*) *dired-providers* '()))
+(define (dired-register-provider! name list-mode commands)
+  (set! *dired-providers*
+    (cons (list name list-mode commands)
+      (filter (lambda (entry) (not (equal? (car entry) name))) *dired-providers*))))
+(define (dired-provider buf)
+  (assoc (buffer-local buf 'dired-provider) *dired-providers*))
+(define-mode "Dired"
+  (lambda ()
+    (let* ((buf (current-buffer)) (provider (dired-provider buf)))
+      (if provider
+          (begin
+            (list-mode-init! buf (cadr provider))
+            ;; Provider-specific actions such as remote pagination augment Dired.
+            (for-each (lambda (binding) (local-set-key (car binding) (cadr binding)))
+              (or (plist-get (list-mode-opts (cadr provider)) 'keys) '())))
+          (list-mode-init! buf "Dired")))))
+(define (dired--provider-command! command)
+  (let ((local (command-function command)) (doc (plist-get (catalog-entry 'command command) 'doc)))
+    (define-command command (or doc command)
+      (lambda ()
+        (let ((provider (dired-provider (current-buffer))))
+          (if provider
+              (let ((target (assoc command (caddr provider))))
+                (if target (run-command (cadr target))
+                    (message "This operation is not supported by this directory provider.")))
+              (local)))))))
+(for-each dired--provider-command!
+  '("dired-visit" "dired-open" "dired-visit-in-group" "dired-up" "dired-revert"
+    "dired-rename" "dired-copy" "dired-mkdir" "dired-chmod" "dired-touch"
+    "dired-symlink" "dired-sort-cycle" "dired-sort-reverse" "dired-dirs-first" "dired-filter-dotfiles"))
+(public! 'dired-register-provider! "(dired-register-provider! NAME LIST-MODE COMMANDS) — register a directory listing and Dired-command dispatch map; set buffer-local dired-provider before applying Dired.")

@@ -1177,8 +1177,7 @@ defmodule Compos.Core.Session do
       "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
       "set-symbol-value!" =>
         "(set-symbol-value! 'NAME VAL) — set the global value of the symbol.",
-      "unbind-global!" =>
-        "(unbind-global! 'NAME) — remove the global binding of the symbol.",
+      "unbind-global!" => "(unbind-global! 'NAME) — remove the global binding of the symbol.",
       "function-interpose!" =>
         "(function-interpose! 'NAME WRAPPER) — internal binding wrapper; WRAPPER receives ORIGINAL and ARGS; #f removes it.",
       "boundp" => "(boundp 'NAME) — return #t when the symbol has a global binding.",
@@ -1195,8 +1194,11 @@ defmodule Compos.Core.Session do
       "delete-frame!" =>
         "(delete-frame! [ID]) — delete the frame and run its prompt's cancel handler.",
       "minibuffer-buffer" => "(minibuffer-buffer) — return the minibuffer's buffer name.",
-      "minibuffer-state" => "(minibuffer-state) — return the active prompt as a plist (prompt, input, sel, total, legend, candidates), or #f.",
+      "minibuffer-state" =>
+        "(minibuffer-state) — return the active prompt as a plist (prompt, input, sel, total, legend, candidates), or #f.",
       "minibuffer-input!" => "(minibuffer-input! INPUT) — set the minibuffer input text.",
+      "minibuffer-style!" =>
+        "(minibuffer-style! STYLE) — change the open prompt's style, and so its shape, without closing it: \"modal\", \"popup\", \"minibuffer\", or #f.",
       "minibuffer-change!" =>
         "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler.",
       "debounce!" =>
@@ -1215,6 +1217,8 @@ defmodule Compos.Core.Session do
         "(minibuffer-complete!) — run the prompt's completion, or copy the selection to the input.",
       "minibuffer-next!" => "(minibuffer-next!) — move the candidate selection down one.",
       "minibuffer-prev!" => "(minibuffer-prev!) — move the candidate selection up one.",
+      "minibuffer-rail!" =>
+        "(minibuffer-rail! ROWS INDEX FOCUSED) — set the palette's right-hand list. ROWS is ((LABEL HINT ...) ...), INDEX the row on, FOCUSED whether the arrows are in it; '() clears it.",
       "minibuffer-del!" =>
         "(minibuffer-del!) — delete one char back; at a directory boundary, delete the component."
     }
@@ -1350,8 +1354,11 @@ defmodule Compos.Core.Session do
       end,
       "run-command" => fn [name], store ->
         case :ets.lookup(Compos.Core.SchemeAPI.commands_table(), command_name(name)) do
-          [] -> raise Compos.Scheme.Eval.Error, message: "undefined command: #{command_name(name)}"
-          [{_, closure, _}] -> Compos.Scheme.Eval.apply_fn(closure, [], store)
+          [] ->
+            raise Compos.Scheme.Eval.Error, message: "undefined command: #{command_name(name)}"
+
+          [{_, closure, _}] ->
+            Compos.Scheme.Eval.apply_fn(closure, [], store)
         end
       end,
       "llm" => fn [prompt, callback] ->
@@ -1694,7 +1701,14 @@ defmodule Compos.Core.Session do
       end,
       "lsp-request" => fn [id, method, params, callback] ->
         {pid, key} = lsp_conn!(id)
-        Compos.Core.LSP.Conn.request(pid, s(method), scheme_to_json(params), lsp_cb(callback, key))
+
+        Compos.Core.LSP.Conn.request(
+          pid,
+          s(method),
+          scheme_to_json(params),
+          lsp_cb(callback, key)
+        )
+
         :void
       end,
       "lsp-buffer-request" => fn
@@ -2537,6 +2551,11 @@ defmodule Compos.Core.Session do
               mb.list.sel,
               {:sym, "total"},
               Compos.Core.Candidates.total(mb.list),
+              # the prompt's flavour word, which decides its shape. A
+              # surface that draws its own prompt reads this to know
+              # whether it was asked for the bar, the popup or the modal.
+              {:sym, "style"},
+              Map.get(mb, :style) || false,
               # the prompt's own key legend, as Scheme wrote it
               {:sym, "legend"},
               Map.get(mb, :legend) || [],
@@ -2546,6 +2565,10 @@ defmodule Compos.Core.Session do
               end)
             ]
         end
+      end,
+      "minibuffer-style!" => fn [style] ->
+        Editor.minibuffer_set_style(if(style in [false, nil], do: nil, else: s(style)))
+        :void
       end,
       "minibuffer-input!" => fn [input] ->
         Editor.minibuffer_set_input(s(input))
@@ -2709,6 +2732,40 @@ defmodule Compos.Core.Session do
       end,
       "minibuffer-prev!" => fn [] ->
         Editor.minibuffer_move_sel(-1)
+        :void
+      end,
+      # The palette's second list. The prompt keeps the state and sends the
+      # whole rail each time, so this holds no cursor of its own: rows in,
+      # rows out, and INDEX says which one wears the highlight. A row is
+      # (LABEL HINT . REST); REST is the prompt's own and never travels.
+      "minibuffer-rail!" => fn [rows, index, focused] ->
+        rail =
+          case rows do
+            [_ | _] ->
+              i = index |> trunc() |> max(0) |> min(length(rows) - 1)
+
+              %{
+                focused: focused not in [false, nil],
+                rows:
+                  rows
+                  |> Enum.with_index()
+                  |> Enum.map(fn {row, k} ->
+                    {label, hint} =
+                      case row do
+                        [l, h | _] -> {l, h}
+                        [l] -> {l, ""}
+                        l -> {l, ""}
+                      end
+
+                    %{label: s(label), hint: s(hint), selected: k == i}
+                  end)
+              }
+
+            _ ->
+              nil
+          end
+
+        Editor.minibuffer_set_rail(rail)
         :void
       end,
       # DEL: in a path prompt at a directory boundary, kill the whole

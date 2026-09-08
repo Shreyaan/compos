@@ -146,7 +146,7 @@ defmodule Compos.GoogleSceneTest do
 
     eval!(~S[(google-open "alpha" "drive")])
     root = Editor.current_buffer()
-    assert Buffer.get_local(root, "mode-name") == "google-drive-mode"
+    assert Buffer.get_local(root, "mode-name") == "Dired"
     assert Buffer.text(root) =~ "Projects/"
     assert eval!("(plist-get (nth 3 (car *google-test-calls*)) 'q)") =~ "'root' in parents"
     KeyDispatch.handle_key("RET")
@@ -175,7 +175,7 @@ defmodule Compos.GoogleSceneTest do
   test "all Google file indexes share dired keys and copy via a named folder picker" do
     for service <- ["drive", "docs", "sheets", "slides", "forms", "script"] do
       eval!("(google-open \"alpha\" #{Jason.encode!(service)})")
-      assert Buffer.get_local(Editor.current_buffer(), "mode-name") == "google-drive-mode"
+      assert Buffer.get_local(Editor.current_buffer(), "mode-name") == "Dired"
     end
 
     eval!(~S[(google-open "alpha" "docs")])
@@ -256,6 +256,42 @@ defmodule Compos.GoogleSceneTest do
     KeyDispatch.handle_key("y")
     assert eval!(~S[(list-marked (current-buffer) "D")]) == ~s[("file1")]
     assert Buffer.get_local(source, "google-file-busy") == false
+  end
+
+  test "Google Dired has an unmarkable parent row and reapplies the real mode" do
+    eval!(~S[(google-open "alpha" "docs")])
+    buf = Editor.current_buffer()
+    assert Buffer.get_local(buf, "mode-name") == "Dired"
+    assert Buffer.text(buf) =~ ".."
+    eval!(~S[(set-mode! "Dired")])
+    eval!(~S[(list-goto-index! (current-buffer) 0)])
+    assert eval!(~S[(google--get (list-current (current-buffer)) 'google-up)]) == "#t"
+    KeyDispatch.handle_key("m")
+    assert eval!(~S[(list-marks (current-buffer))]) == "()"
+    eval!(~S[(list-goto-index! (current-buffer) 0)])
+    KeyDispatch.handle_key("RET")
+    assert Buffer.get_local(Editor.current_buffer(), "google-service") == "drive"
+    assert Buffer.get_local(Editor.current_buffer(), "mode-name") == "Dired"
+  end
+
+  test "filesystem Dired still navigates without a provider" do
+    dir = Path.join(System.tmp_dir!(), "google-dired-local-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(dir, "child"))
+
+    on_exit(fn ->
+      for name <- Compos.Core.list_buffers(), is_binary(name), String.starts_with?(name, dir) do
+        Compos.Core.kill_buffer(name)
+      end
+
+      File.rm_rf!(dir)
+    end)
+
+    eval!("(dired-open #{Jason.encode!(dir)})")
+    assert Buffer.get_local(Editor.current_buffer(), "mode-name") == "Dired"
+    assert Buffer.get_local(Editor.current_buffer(), "dired-provider") in [nil, false]
+    eval!(~S[(list-goto-index! (current-buffer) 0)])
+    KeyDispatch.handle_key("^")
+    assert Buffer.get_local(Editor.current_buffer(), "dired-dir") != dir
   end
 
   test "search escapes Drive literals and pagination reaches the API" do

@@ -232,7 +232,8 @@
                              (when (and (buffer-exists? buf) (= generation (buffer-local buf 'google-generation)))
                                (buffer-set-local! buf 'google-next-page (google--get data 'nextPageToken))
                                (buffer-set-local! buf 'google-status (if (null? rows) "No results" ""))
-                               (k rows)))))
+                               (k (if (google--file-service? (buffer-local buf 'google-service))
+                                      (cons google--up-row rows) rows))))))
                       (if (equal? (buffer-local buf 'google-service) "gmail")
                           (google--mail-rows account rows finish) (finish rows)))))))))))
 
@@ -253,10 +254,14 @@
 (define (google--file-service? service)
   (or (equal? service "drive") (and (google--service service) (plist-get (google--service service) 'mime))))
 
+(define google--up-row '(id ".." name ".." google-up #t))
+(define (google--file-targets buf)
+  (filter (lambda (row) (not (google--get row 'google-up))) (list-targets buf)))
 (define-list-mode! "google-drive-mode"
   (list 'transient #f
     'doc "Google file index. RET opens, ^ goes up, C copies, R renames or moves, + creates a folder. m marks, u unmarks, d flags, x trashes. s sorts and / filters."
-    'rows (lambda (buf) (list-entries buf)) 'cache-fetch google--fetch 'cache-ttl 120
+    'rows (lambda (buf) (cons google--up-row (filter (lambda (row) (not (google--get row 'google-up))) (list-entries buf))))
+    'markable? (lambda (buf row) (not (google--get row 'google-up))) 'cache-fetch google--fetch 'cache-ttl 120
     'columns (lambda (buf) '(("Name" #f) ("Size" 12 right) ("Modified" 20) ("Type" 24)))
     'cells (lambda (buf row)
       (list (string-append (google--line (google--row-title row))
@@ -267,10 +272,10 @@
     'title (lambda (buf) (string-append (plist-get (google--service (buffer-local buf 'google-service)) 'title) " / " (or (buffer-local buf 'google-drive-path) (if (equal? (buffer-local buf 'google-service) "drive") "My Drive" "All files"))))
     'meta (lambda (buf) (string-append (google--email (buffer-local buf 'google-account)) "  "
                          (or (buffer-local buf 'google-status) "")))
-    'keys '(("RET" "google-read") ("^" "google-drive-up") ("R" "google-drive-rename")
-            ("C" "google-drive-copy") ("d" "google-drive-flag") ("+" "google-drive-mkdir") ("SPC" "list-mark") ("x" "google-drive-trash")
-            ("g" "google-refresh") ("]" "google-next-page") ("[" "google-first-page")
-            ("s" "google-drive-sort") ("f" "google-search") ("o" "google-operation"))
+    'keys '(("RET" "dired-visit") ("^" "dired-up") ("R" "dired-rename")
+            ("C" "dired-copy") ("d" "google-drive-flag") ("+" "dired-mkdir") ("SPC" "list-mark") ("x" "google-drive-trash")
+            ("g" "dired-revert") ("]" "google-next-page") ("[" "google-first-page")
+            ("s" "dired-sort-cycle") ("f" "google-search") ("o" "google-operation"))
     'footer (lambda (buf) '(("RET" "open") ("^" "up") ("m" "mark") ("u" "unmark")
        ("d" "flag") ("x" "trash") ("C" "copy") ("R" "rename/move") ("+" "new folder") ("/" "filter") ("s" "sort") ("g" "refresh") ("]" "next page")))))
 
@@ -381,10 +386,10 @@
                       (list 'name (google--row-title row))))) rows)))))))
 
 (define-command "google-drive-copy" "Copy marked files, or the current file, to a Drive folder"
-  (lambda () (let ((buf (current-buffer))) (google--file-transfer buf (list-targets buf) #t))))
+  (lambda () (let ((buf (current-buffer))) (google--file-transfer buf (google--file-targets buf) #t))))
 (define-command "google-drive-rename" "Rename the current file or move selected files to a folder"
   (lambda ()
-    (let* ((buf (current-buffer)) (rows (list-targets buf)))
+    (let* ((buf (current-buffer)) (rows (google--file-targets buf)))
       (when (pair? rows)
         (if (> (length rows) 1) (google--file-transfer buf rows #f)
           (completing-read "Rename or move: " '("Rename" "Move to folder")
@@ -411,7 +416,7 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (flagged (filter (lambda (row) (equal? (list-mark-of buf row) "D")) (list-entries buf)))
-           (rows (if (pair? flagged) flagged (list-targets buf))))
+           (rows (if (pair? flagged) flagged (google--file-targets buf))))
       (google--file-apply buf "Trash" (map (lambda (row) (google--file-op row "PATCH" "" '() '(trashed #t))) rows)))))
 
 (define (google-open account service &optional parent)
@@ -421,8 +426,10 @@
     (buffer-set-local! buf 'google-account account)
     (buffer-set-local! buf 'google-service service)
     (buffer-set-local! buf 'google-parent (or parent #f))
-    (with-current-buffer buf (lambda () (set-mode! (if (google--file-service? service) "google-drive-mode" "google-service-mode"))))
-    (pop-to-buffer buf) buf))
+    (when (google--file-service? service) (buffer-set-local! buf 'dired-provider "google"))
+    (with-current-buffer buf (lambda () (set-mode! (if (google--file-service? service) "Dired" "google-service-mode"))))
+    (pop-to-buffer buf)
+    (when (google--file-service? service) (list-goto-index! buf (if (> (length (list-entries buf)) 1) 1 0))) buf))
 (define (google--refresh buf)
   ;; A new user query supersedes an older request. Its callback is discarded.
   (buffer-set-local! buf 'cache-inflight #f)
@@ -503,6 +510,7 @@
            (account (buffer-local buf 'google-account)) (service (buffer-local buf 'google-service))
            (parent (buffer-local buf 'google-parent)))
       (when row
+        (if (google--get row 'google-up) (run-command "google-drive-up")
         (let* ((id (google--row-id row))
                (matches (filter (lambda (s) (and (plist-get s 'mime)
                           (equal? (plist-get s 'mime) (google--get row 'mimeType)))) google--services))
@@ -520,7 +528,7 @@
                 (lambda (r)
                   (if (plist-get r 'ok)
                       (google--show-result account target (google--row-title row) (plist-get r 'data))
-                      (message (plist-get r 'error)))))))))))
+                      (message (plist-get r 'error))))))))))))
 
 ;;; Reviewable API drafts cover the full REST surface of each service.
 ;;; Templates are data. Nothing runs when a draft opens or is restored.
@@ -557,7 +565,7 @@
     (name "Meet: create space" service "meet" method "POST" path "/spaces")
     (name "Apps Script: create" service "script" method "POST" path "/projects" body (title "New project"))))
 (define (google--context-operation op buf)
-  (let* ((row (if (member (buffer-local buf 'mode-name) '("google-service-mode" "google-drive-mode")) (list-current buf)
+  (let* ((row (if (member (buffer-local buf 'mode-name) '("google-service-mode" "google-drive-mode" "Dired")) (list-current buf)
                  (buffer-local buf 'google-data)))
          (id (or (google--get row 'documentId) (google--get row 'spreadsheetId)
                  (google--get row 'presentationId) (and row (google--row-id row))))
@@ -824,3 +832,12 @@
 (define-tool! 'google-file-trash "Move a Google file or folder to trash immediately. Use only when the user's task authorizes trashing it."
   '((account "string" "Google account subject") (id "string" "File ID"))
   (lambda (a) (google-file-trash! (plist-get a 'account) (plist-get a 'id))) '(destroy external))
+
+(dired-register-provider! "google" "google-drive-mode"
+  '(("dired-visit" "google-read") ("dired-open" "google-read") ("dired-visit-in-group" "google-read")
+    ("dired-up" "google-drive-up") ("dired-revert" "google-refresh")
+    ("dired-copy" "google-drive-copy") ("dired-rename" "google-drive-rename")
+    ("dired-mkdir" "google-drive-mkdir") ("dired-sort-cycle" "google-drive-sort")))
+;; Restore older Google directory desktops through the same provider entry point.
+(define-mode "google-drive-mode"
+  (lambda () (buffer-set-local! (current-buffer) 'dired-provider "google") (set-mode! "Dired")))

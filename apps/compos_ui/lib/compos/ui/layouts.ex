@@ -1196,48 +1196,54 @@ defmodule Compos.Ui.Layouts do
             margin-top: auto; padding-top: 8px;
             color: var(--dim-fg, #8a857a); font-size: 10.5px; line-height: 1.5;
           }
-          /* a container: one group as one row, its members as chips */
-          .mb-container {
-            grid-column: 1 / -1;
-            margin: 2px 8px 3px;
-            border: 1px solid var(--border-bg, #e2dbc9); border-radius: 10px;
-            background: var(--default-bg, #efeadf);
-            overflow: hidden;
+          /* the rail as a second list: the group's buffers, ibuffer's own
+             columns at a smaller size. Only one of the two lists holds the
+             arrows, so the focused one wears the paper and the accent edge
+             and the other keeps a flat highlight — the pane you are in is
+             never a guess. */
+          .mb-preview.mb-rail { padding: 0; gap: 0; }
+          /* buffer names run long — a chat title, a browse URL — and the
+             candidates beside them are short group names. So the rail takes
+             half the panel, while the facts panel it stands in for keeps
+             the narrower share that suits key/value rows. */
+          .mb-panel.palette .mb-preview.mb-rail { padding: 22px 0 26px; flex-basis: 50%; }
+          .mb-panel.palette .mb-preview.mb-rail .mb-preview-title {
+            margin: 0 28px 10px; padding-bottom: 12px;
           }
-          .mb-container.selected {
-            border-color: var(--accent-fg, #26356b);
-            background: var(--select-bg, #e7e9f1);
-          }
-          .mb-container-head {
+          .mb-rail-row {
             display: flex; align-items: baseline; gap: 10px;
-            padding: 7px 12px; font-family: var(--font-mono);
+            padding: 3px 12px; min-height: 21px;
+            border-left: 2px solid transparent;
+            font-size: 11px; line-height: 1.35;
           }
-          .mb-container-dot {
-            width: 7px; height: 7px; border-radius: 2px; align-self: center;
-            background: var(--accent-fg, #26356b); flex: 0 0 auto;
+          /* the palette reads at a distance, so the rail's rows do too:
+             smaller than a group card, larger than the facts they replace */
+          .mb-panel.palette .mb-rail-row {
+            padding: 4px 16px 4px 28px; min-height: 28px;
+            border-left-width: 3px; font-size: 15px;
           }
-          .mb-container-name { font-size: 13.5px; font-weight: 600; flex: 0 0 auto; }
-          .mb-container.selected .mb-container-name { color: var(--accent-fg, #26356b); }
-          .mb-container-action {
-            font-size: 10.5px; color: var(--accent-fg, #26356b); flex: 0 0 auto;
-          }
-          .mb-container-meta {
-            flex: 1; min-width: 0; font-size: 10.5px; color: var(--dim-fg, #8a857a);
+          .mb-panel.palette .mb-rail-hint { font-size: 13px; }
+          .mb-rail-name {
+            flex: 1; min-width: 0;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           }
-          .mb-chips {
-            display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-            padding: 0 12px 8px 29px; font-family: var(--font-mono);
+          .mb-rail-hint { flex: 0 0 auto; font-size: 10px; color: var(--dim-fg, #8a857a); }
+          .mb-preview.mb-rail.focused { background: var(--window-bg, #fdfcf8); }
+          .mb-rail-row.selected { background: var(--default-bg, #efeadf); }
+          .mb-preview.mb-rail.focused .mb-rail-row.selected {
+            background: var(--select-bg, #e7e9f1);
+            border-left-color: var(--accent-fg, #26356b);
           }
-          .mb-chips-key {
-            font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
-            color: var(--dim-fg, #8a857a);
+          /* the arrows are in the rail: the candidate list keeps its place
+             but stops claiming them */
+          .mb-body.rail-focus .mb-cand.selected {
+            background: var(--default-bg, #efeadf);
+            border-left-color: var(--border-bg, #e2dbc9);
           }
-          .mb-chip {
-            font-size: 10.5px; padding: 1px 8px; border-radius: 20px;
-            border: 1px solid var(--border-bg, #e2dbc9);
-            background: var(--window-bg, #fdfcf8);
-          }
+          /* A group is a row, like everything else in the list. It used to
+             be a card with its own box, dot, verb and chips, and that card
+             was its own layout problem every time the list changed. One row
+             shape for every candidate: the name, and its count beside it. */
 
           .mb-label-row {
             padding: 6px 14px 5px;
@@ -1267,8 +1273,13 @@ defmodule Compos.Ui.Layouts do
                max-content sizes the column to the labels themselves,
                padding included, and the floor below keeps the column from
                reflowing as narrowing shortens the longest visible name. */
-            grid-template-columns: max-content minmax(0, auto);
-            justify-content: start;
+            /* the second track takes the slack. It used to be `auto`,
+               which sizes to content and leaves the rest of the pane
+               empty: a group card spans both tracks, so it stopped where
+               the longest hint stopped and left a hole between the cards
+               and the rail. A name column that never reflows is still the
+               point; 1fr only decides where the row ENDS. */
+            grid-template-columns: max-content minmax(0, 1fr);
           }
           /* a section heading inside the candidate list: it labels the rows
              under it and never takes the selection */
@@ -2611,13 +2622,16 @@ defmodule Compos.Ui.Layouts do
                 cur.scrollIntoView({ block: "nearest" });
               }
             },
-            // the transient's selected row stays in view as the arrows move
-            // it; the area scrolls, the selection must not leave the screen
-            TransientScroll: {
+            // one rule for every list the arrows move through: the area
+            // scrolls, so the selected row must not leave the screen. The
+            // transient and the minibuffer candidates both wear this; a
+            // list that scrolls and has no hook loses its selection off
+            // the bottom, which is the bug this exists to prevent.
+            SelectionScroll: {
               mounted() { this.follow(); },
               updated() { this.follow(); },
               follow() {
-                const cur = this.el.querySelector(".transient-item.selected");
+                const cur = this.el.querySelector(".selected");
                 if (cur) cur.scrollIntoView({ block: "nearest" });
               }
             },

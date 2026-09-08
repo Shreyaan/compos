@@ -294,6 +294,25 @@ defmodule Compos.Core.Editor do
   def minibuffer_move_sel(delta, fid \\ nil),
     do: GenServer.call(__MODULE__, {:mb_move_sel, delta, fid(fid)})
 
+  @doc """
+  Set the palette's right-hand list, or nil to clear it.
+
+  The prompt owns the rail: it writes the rows, which row is on, and
+  whether the rail holds the arrows. Nothing is inferred here.
+  """
+  def minibuffer_set_rail(rail, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_rail, rail, fid(fid)})
+
+  @doc """
+  Change the open prompt's style, and so its shape, without closing it.
+
+  The shape is a property of the prompt, not a different prompt: the same
+  input, candidates and selection carry over, and the view re-reads its
+  geometry from the new style.
+  """
+  def minibuffer_set_style(style, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_style, style, fid(fid)})
+
   @doc "Currently selected candidate label (after fuzzy filter), or nil."
   def minibuffer_selected(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_selected, fid(fid)})
 
@@ -388,6 +407,7 @@ defmodule Compos.Core.Editor do
   def set_face(name, attrs), do: GenServer.call(__MODULE__, {:set_face, name, attrs})
   @doc "Forget every attribute of a face. load-theme clears before it applies."
   def clear_face(name), do: GenServer.call(__MODULE__, {:clear_face, name})
+
   @doc """
   Apply OPS to the face table in one change: `{:clear, name}` forgets a
   face, `{:set, name, attrs}` merges attrs. A theme is hundreds of face
@@ -1594,6 +1614,26 @@ defmodule Compos.Core.Editor do
     end
   end
 
+  def handle_call({:mb_style, style, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} = f ->
+        changed(:ok, put_frame(state, %{f | minibuffer: Map.put(mb, :style, style)}), f.id)
+
+      _ ->
+        {:reply, {:error, :inactive}, state}
+    end
+  end
+
+  def handle_call({:mb_rail, rail, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} = f ->
+        changed(:ok, put_frame(state, %{f | minibuffer: Map.put(mb, :rail, rail)}), f.id)
+
+      _ ->
+        {:reply, {:error, :inactive}, state}
+    end
+  end
+
   def handle_call({:mb_move_sel, delta, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} = f ->
@@ -2570,6 +2610,14 @@ defmodule Compos.Core.Editor do
       # the prompt's own words for the palette: the rail's footer note and
       # the head row's key legend. Scheme writes both; nothing is inferred.
       note: (is_binary(Map.get(mb, :note)) && mb.note) || "",
+      # the palette's right pane when the prompt gave it one: rows the
+      # arrows can step into. The prompt already shaped them; they travel
+      # to the view as they are.
+      rail:
+        case Map.get(mb, :rail) do
+          %{rows: [_ | _]} = rail -> rail
+          _ -> nil
+        end,
       legend:
         case Map.get(mb, :legend) do
           rows when is_list(rows) ->
@@ -2749,8 +2797,7 @@ defmodule Compos.Core.Editor do
   defp release_buffer_from_tree(%{type: :split} = split, buffer, fallback, shown),
     do: %{
       split
-      | children:
-          Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback, shown))
+      | children: Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback, shown))
     }
 
   defp replace_leaf(%{type: :leaf} = leaf, id, new),

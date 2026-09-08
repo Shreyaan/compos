@@ -2476,8 +2476,72 @@
 ;;; undo and M-DEL all work in prompts for free via the global keymap. Only
 ;;; prompt-specific behavior is bound here, in its local keymap.
 
+;;; --- the rail: the palette's second list -------------------------------------
+;;; A modal prompt can carry a list on the right as well as the left. Only
+;;; one of the two holds the keys: <right> steps into the rail, <left>
+;;; steps back out, and up/down/RET always mean the list you are standing
+;;; in. The prompt owns the rows and what RET does with one; this keeps
+;;; the cursor and tells the frame, so the view infers nothing.
+
+(define *mb-rail-rows* '())
+(define *mb-rail-index* 0)
+(define *mb-rail-focus* #f)
+(define *mb-rail-pick* #f)
+
+(define (mb-rail-reset!)
+  (set! *mb-rail-rows* '())
+  (set! *mb-rail-index* 0)
+  (set! *mb-rail-focus* #f)
+  (set! *mb-rail-pick* #f))
+
+(define (mb-rail-push!)
+  (minibuffer-rail! *mb-rail-rows* *mb-rail-index* *mb-rail-focus*))
+
+;; ROWS is ((LABEL HINT . REST) ...) — the frame reads the first two and
+;; carries the rest untouched, so PICK gets back the whole row and the
+;; prompt can act on what it put there
+(define (mb-rail! rows pick)
+  (set! *mb-rail-rows* rows)
+  (set! *mb-rail-pick* pick)
+  (when (null? rows) (set! *mb-rail-focus* #f))
+  (when (>= *mb-rail-index* (length rows)) (set! *mb-rail-index* 0))
+  (mb-rail-push!))
+
+(define (mb-rail-focused?) (and *mb-rail-focus* (pair? *mb-rail-rows*)))
+
+(define (mb-rail-enter!)
+  (cond ((mb-rail-focused?) #t)
+        ((null? *mb-rail-rows*) #f)
+        (else (set! *mb-rail-focus* #t) (set! *mb-rail-index* 0) (mb-rail-push!) #t)))
+
+(define (mb-rail-exit!)
+  (if (mb-rail-focused?)
+      (begin (set! *mb-rail-focus* #f) (mb-rail-push!) #t)
+      #f))
+
+(define (mb-rail-move! delta)
+  (if (mb-rail-focused?)
+      (begin
+        (set! *mb-rail-index*
+              (max 0 (min (- (length *mb-rail-rows*) 1) (+ *mb-rail-index* delta))))
+        (mb-rail-push!)
+        #t)
+      #f))
+
+(define (mb-rail-confirm!)
+  (if (and (mb-rail-focused?) *mb-rail-pick*)
+      (begin (*mb-rail-pick* (list-ref *mb-rail-rows* *mb-rail-index*)) #t)
+      #f))
+
+(define-command "minibuffer-rail-enter"
+  "Move the arrows into the list on the right of the palette"
+  (lambda () (if (mb-rail-enter!) #t (run-command "forward-char"))))
+(define-command "minibuffer-rail-exit"
+  "Leave the list on the right and go back to the candidates"
+  (lambda () (if (mb-rail-exit!) #t (run-command "backward-char"))))
+
 (define-command "minibuffer-confirm" "Accept the selected minibuffer candidate"
-  (lambda () (minibuffer-confirm!)))
+  (lambda () (if (mb-rail-confirm!) #t (minibuffer-confirm!))))
 ;; RET takes the candidate. C-RET takes the same candidate with a
 ;; different verb, and the prompt that cares (the buffer switcher)
 ;; reads and resets the flag:
@@ -2491,12 +2555,45 @@
   (lambda () (minibuffer-confirm-input!)))
 (define-command "minibuffer-cancel" "Cancel the minibuffer prompt"
   (lambda () (minibuffer-cancel!)))
+
+;;; The shape is not a different prompt. What you opened as a modal can
+;;; finish as the bottom bar and go back, carrying the same input, the same
+;;; candidates and the same selection: only the geometry changes. A prompt
+;;; that says what its row means (a question, a filter) keeps its shape.
+
+(define (minibuffer-shape)
+  (let* ((st (minibuffer-state))
+         (style (and st (plist-get st 'style))))
+    (cond ((member style '("modal" "palette")) "modal")
+          ((equal? style "popup") "popup")
+          (else "minibuffer"))))
+
+(define (minibuffer-shape-after here)
+  (cond ((equal? here "minibuffer") "popup")
+        ((equal? here "popup") "modal")
+        (else "minibuffer")))
+
+(define-command "minibuffer-cycle-shape"
+  "Show this prompt as the bottom bar, the popup, or the modal"
+  (lambda ()
+    (if (not (minibuffer-active?))
+        (message "No prompt")
+        (let ((style (plist-get (minibuffer-state) 'style)))
+          (if (member style '("question" "filter"))
+              (message "This prompt keeps its shape")
+              (let ((next (minibuffer-shape-after (minibuffer-shape))))
+                (minibuffer-style! next)
+                (message next)))))))
 (define-command "minibuffer-next-candidate" "Select the next minibuffer candidate"
   (lambda ()
-    (if (mb-list-move! 1) #t (begin (minibuffer-next!) (mb-select-notify!)))))
+    (cond ((mb-rail-move! 1) #t)
+          ((mb-list-move! 1) #t)
+          (else (minibuffer-next!) (mb-select-notify!)))))
 (define-command "minibuffer-previous-candidate" "Select the previous minibuffer candidate"
   (lambda ()
-    (if (mb-list-move! -1) #t (begin (minibuffer-prev!) (mb-select-notify!)))))
+    (cond ((mb-rail-move! -1) #t)
+          ((mb-list-move! -1) #t)
+          (else (minibuffer-prev!) (mb-select-notify!)))))
 (define-command "minibuffer-delete-backward" "Delete the character before point"
   (lambda () (minibuffer-del!)))
 (define-command "minibuffer-complete"
@@ -2563,6 +2660,8 @@
   (when (minibuffer-active?)
     (minibuffer-cancel!)
     (message "Quit the outer prompt"))
+  ;; a rail belongs to one prompt: the next one starts without it
+  (mb-rail-reset!)
   (minibuffer-read*--raw prompt cands handlers))
 
 ;; one interaction model: a completion prompt is the BOTTOM bar, like
@@ -2763,6 +2862,14 @@
 ;; COLLECT, when given, receives the candidate rows left after narrowing.
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
                                  &optional match-hint style complete collect)
+  ;; the outer prompt's cancel handler clears *mb-select-fn*, so let it run
+  ;; BEFORE this prompt installs its own. minibuffer-read* would quit the
+  ;; outer prompt for us, but by then the new hook is already in place and
+  ;; the old prompt's teardown takes it away: the new prompt opens with no
+  ;; preview and no rail, which is the bug this line prevents.
+  (when (minibuffer-active?)
+    (minibuffer-cancel!)
+    (message "Quit the outer prompt"))
   (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
   (minibuffer-read* prompt cands
     (append
@@ -2788,6 +2895,11 @@
   (local-set-key* mb "<down>" "minibuffer-next-candidate")
   (local-set-key* mb "C-p" "minibuffer-previous-candidate")
   (local-set-key* mb "<up>" "minibuffer-previous-candidate")
+  ;; the palette's two lists: <right> steps into the one on the right,
+  ;; <left> steps back. With no rail they are the point motion they have
+  ;; always been, and C-f/C-b move point either way
+  (local-set-key* mb "<right>" "minibuffer-rail-enter")
+  (local-set-key* mb "<left>" "minibuffer-rail-exit")
   ;; a list behind the prompt takes these first; with no list they are
   ;; the history walk they have always been
   (local-set-key* mb "M-p" "minibuffer-previous-section")
@@ -2798,6 +2910,8 @@
   (local-set-key* mb "C-r" "isearch-repeat-backward")
   ;; the prompt continues as a buffer — see minibuffer-collect below
   (local-set-key* mb "C-c C-o" "minibuffer-collect")
+  ;; the same prompt as the bar, the popup, or the modal, while it is up
+  (local-set-key* mb "C-c C-t" "minibuffer-cycle-shape")
   (local-set-key* mb "DEL" "minibuffer-delete-backward"))
 
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
@@ -5328,6 +5442,203 @@
         (when new (buffer-created! name))
         name)))
 
+;;; --- write policy ----------------------------------------------------------
+;; Two primitives put text on disk: write-file! and buffer-save!. Every write
+;; this editor makes goes through one of them, so they are the one door, and
+;; this is the one guard on it. Elixir supplies the raw write. The rules here
+;; decide which writes happen.
+;;
+;; A rule is a record: a name, a reason, a confirmable flag, and a predicate.
+;; The predicate reads the target PATH and the SOURCE buffer, and answers #t
+;; to refuse. SOURCE is #f when a program writes a file it owns (a theme file,
+;; a cache, a test fixture), and the rules that need a buffer pass on those.
+;;
+;; The list is data: write-rules reads it, a package appends to it. This is
+;; why there is no policy language here. A rule needs buffer-path, the buffer
+;; locals and the file system, and Scheme already reads all three. A language
+;; that could express this rule would have to reach the same three things,
+;; and then it would be Scheme with worse spelling.
+;;
+;; The rule that exists first: on 2026-09-09 layouts.ex, 3982 lines, became
+;; the 730-line transcript of a chat buffer. The daemon then could not boot,
+;; because a clobbered .ex fails the compile.
+
+(domain! 'files)
+(effects! '(pure))
+
+(defvar '*write-rules* '())
+
+;; a one-shot permit, and it names the file it permits. The door spends it,
+;; so an error on the way cannot leave the rules off, and a permit for one
+;; file can never carry a write to another.
+(defvar '*write-permit* #f)
+
+;; The raw primitives, kept under their own names before the shadows below
+;; take the plain ones. The boundp guard matters: a hot reload of this file
+;; re-evaluates these two forms, and without it the raw name would capture
+;; the shadow and the door would call itself.
+(define raw-write-file!
+  (if (boundp 'raw-write-file!) raw-write-file! write-file!))
+(define raw-buffer-save!
+  (if (boundp 'raw-buffer-save!) raw-buffer-save! buffer-save!))
+
+;; CONFIRMABLE? says whether a human answering a question can set this rule
+;; aside. A rule about clobbering is confirmable, because overwriting a file
+;; on purpose is a real gesture. A rule about where a kind of file may live
+;; is not: no answer makes a .scm belong outside a Scheme root.
+(define (defwrite-rule! name reason confirmable? pred)
+  (set! *write-rules*
+        (append (remove (lambda (r) (equal? (car r) name)) *write-rules*)
+                (list (list name reason confirmable? pred))))
+  name)
+
+(define (write-rules) *write-rules*)
+
+(define (write-rule-name r) (car r))
+(define (write-rule-reason r) (cadr r))
+(define (write-rule-confirmable? r) (caddr r))
+(define (write-rule-pred r) (cadr (cddr r)))
+
+;; #f when the write is allowed, else the reason it is not.
+(define (write-refusal path source permitted?)
+  (let loop ((rules *write-rules*))
+    (cond ((null? rules) #f)
+          ((and permitted? (write-rule-confirmable? (car rules)))
+           (loop (cdr rules)))
+          (((write-rule-pred (car rules)) path source)
+           (string-append (write-rule-reason (car rules))
+                          " [" (symbol->string (write-rule-name (car rules))) "]"))
+          (else (loop (cdr rules))))))
+
+;; Let the next write to PATH set the confirmable rules aside. Only a human
+;; answer reaches this: the overwrite question in write-file. An agent never
+;; sees that question, so an agent never gets the permit.
+(define (allow-one-write! path)
+  (set! *write-permit* path)
+  path)
+
+;; the door. Spend the permit whatever the verdict, so it never outlives the
+;; write it was given for.
+(define (write-check! path source)
+  (let ((permitted? (equal? *write-permit* path)))
+    (set! *write-permit* #f)
+    (write-refusal path source permitted?)))
+
+(define (write-refuse! path reason)
+  (error (string-append "Refused to write " (abbreviate-file-name path)
+                        ": " reason)))
+
+(effects! '(write))
+
+;; PATH is the file; TEXT is what goes in it; SOURCE is the buffer whose text
+;; this is, or absent when a program writes a file it owns.
+(define (write-file! path &optional text source)
+  (let ((no (write-check! path (if source source #f))))
+    (if no
+        (write-refuse! path no)
+        (raw-write-file! path text))))
+
+(define (buffer-save! &optional path)
+  (let* ((source (current-buffer))
+         (target (if path path (buffer-path source))))
+    (if (not target)
+        (raw-buffer-save!)
+        (let ((no (write-check! target source)))
+          (cond (no (write-refuse! target no))
+                (path (raw-buffer-save! path))
+                (else (raw-buffer-save!)))))))
+
+(effects! '(read))
+
+;; #t when writing OLD to P replaces a file that OLD is not already the
+;; buffer for. This is the question write-file asks a person.
+(define (write-overwrites? old p)
+  (and (file-exists? p)
+       (not (file-directory? p))
+       (not (equal? (buffer-path old) p))))
+
+(define (write--under-root? path root)
+  (and (string? root)
+       (let ((r (file-realpath root)))
+         (or (equal? path r)
+             (string-prefix? (string-append r "/") path)))))
+
+;; Where a .scm file may live. The priv tree is the editor's own source; the
+;; config home holds init.scm, custom.scm and the user's packages. Add a
+;; directory here to work on Scheme somewhere else.
+(defvar '*scheme-write-roots* '())
+
+(define (scheme-write-roots)
+  (append (list (compos-priv-dir) (compos-home)) *scheme-write-roots*))
+
+(effects! '(pure))
+
+;; 1. The disaster rule. A buffer writes the file it read, or a file that is
+;;    not there yet. It never writes over a file whose text it never held:
+;;    that text is not the file plus edits, it is a replacement.
+(defwrite-rule! 'buffer-reads-what-it-writes
+  "the file is there and this buffer never read it" #t
+  (lambda (path source)
+    (and source (write-overwrites? source path))))
+
+;; A directory that already holds a .scm file is a Scheme directory. This is
+;; what lets the rule below leave every worktree and every other project
+;; alone, while a stray .scm still cannot appear in a directory that has
+;; none. The scan runs only when the file is not there yet.
+(define (scheme-directory? dir)
+  (let loop ((names (list-dir dir)))
+    (cond ((null? names) #f)
+          ((string-suffix? ".scm" (car names)) #t)
+          (else (loop (cdr names))))))
+
+(define (under-scheme-root? path)
+  (let ((real (file-realpath path)))
+    (let loop ((roots (scheme-write-roots)))
+      (cond ((null? roots) #f)
+            ((write--under-root? real (car roots)) #t)
+            (else (loop (cdr roots)))))))
+
+;; 2. A Scheme file is source, and source belongs where the source is. A .scm
+;;    may join a directory that already holds one, and it may start a new one
+;;    under a Scheme root. It may not appear anywhere else. No answer to a
+;;    question changes where a kind of file lives, so this rule is absolute:
+;;    to work on Scheme somewhere new, name the directory in
+;;    *scheme-write-roots*.
+(defwrite-rule! 'scheme-files-in-scheme-roots
+  "a .scm file belongs beside other Scheme, or under a Scheme root; see *scheme-write-roots*" #f
+  (lambda (path source)
+    (and source
+         (string-suffix? ".scm" path)
+         (not (file-exists? path))
+         (not (under-scheme-root? path))
+         (not (scheme-directory? (path-directory path))))))
+
+;; 3. A chat buffer holds a rendering of a conversation. The only files it
+;;    can become are the ones that read back as one. No answer to a question
+;;    puts a transcript in a source file, so this rule is absolute too.
+(defwrite-rule! 'chat-writes-chat-files
+  "a chat buffer writes only a .chat or a .md file" #f
+  (lambda (path source)
+    (and source
+         (buffer-local source 'agent-slug)
+         (not (string-suffix? ".chat" path))
+         (not (string-suffix? ".md" path)))))
+
+(effects! '(read))
+
+(define-command "write-rules" "List the rules that decide which writes happen"
+  (lambda ()
+    (for-each
+      (lambda (r)
+        (message (string-append (symbol->string (write-rule-name r))
+                                (if (write-rule-confirmable? r)
+                                    " (a person can confirm past it): "
+                                    " (absolute): ")
+                                (write-rule-reason r))))
+      *write-rules*)
+    (message (string-append (number->string (length *write-rules*))
+                            " write rules; see *messages*"))))
+
 ;; remote buffers save over ssh, never through the local filesystem
 (define (save-remote-buffer! bpath)
   (let ((hp (remote-parse bpath)))
@@ -5349,7 +5660,8 @@
             ;; the portable transcript, which is what an opened .chat reads
             ((and bpath (boundp (quote chat-file-text))
                   (chat-file-text (current-buffer)))
-             (write-file! bpath (chat-file-text (current-buffer)))
+             (write-file! bpath (chat-file-text (current-buffer))
+                          (current-buffer))
              (buffer-mark-saved! (current-buffer))
              (run-hooks 'after-save-hook)
              (message (string-append "Wrote " bpath)))
@@ -5396,10 +5708,23 @@
         (string-append p "/" (write-file-default-name old))
         p)))
 
+;; C-x C-w over a file that is already there is a real gesture, so a person
+;; may do it. The question is the only way past the confirmable write rules,
+;; and the answer buys exactly one write, to exactly this file. An agent
+;; never sees a question, so this door does not open for one.
 (define (write-buffer-to-file! old path0)
   (unless (equal? (string-trim path0) "")
     (let ((p (write-file-target old path0)))
-      (if (equal? p old)
+      (if (write-overwrites? old p)
+          (y-or-n (string-append (abbreviate-file-name p) " is a file. Replace it with "
+                                 old "?")
+                  (lambda ()
+                    (allow-one-write! p)
+                    (write-buffer-to-file-now! old p)))
+          (write-buffer-to-file-now! old p)))))
+
+(define (write-buffer-to-file-now! old p)
+  (if (equal? p old)
           ;; the buffer already carries this name: adopt, do not re-visit
           (begin
             (buffer-save! p)
@@ -5410,7 +5735,7 @@
                 (chat? (buffer-local old 'agent-slug)))
             (when chat?
               (buffer-set-local! old 'chat-directory (path-directory p)))
-            (write-file! p (or (chat-file-text old) (buffer-text old)))
+            (write-file! p (or (chat-file-text old) (buffer-text old)) old)
             (visit p)
             (when g (buffer-set-local! (current-buffer) 'group g))
             (when record
@@ -5420,7 +5745,7 @@
                                  (path-directory p)))
             (buffer-kill! old)
             (run-hooks 'after-save-hook)
-            (message (string-append "Wrote " p)))))))
+            (message (string-append "Wrote " p)))))
 
 ;; A pathless buffer still has a useful name and mode. Use both when C-x C-w
 ;; asks for a destination. Outer stars are editor notation, not filename
@@ -13033,6 +13358,11 @@
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'sh-quote "(sh-quote S) — S as one safe single-quoted word for a shell command")
 (public! 'buffer-save! "(buffer-save! [PATH]) — save the current buffer to its path; with PATH, save there and adopt PATH")
+(public! 'write-rules "(write-rules) — the rules that decide which writes happen, as (NAME REASON CONFIRMABLE? PRED) records")
+(public! 'defwrite-rule! "(defwrite-rule! 'NAME REASON CONFIRMABLE? PRED) — add or replace a write rule; PRED reads (PATH SOURCE) and answers #t to refuse")
+(public! 'write-refusal "(write-refusal PATH SOURCE PERMITTED?) — #f when the write is allowed, else the reason it is not")
+(public! 'allow-one-write! "(allow-one-write! PATH) — let the next write to PATH set the confirmable rules aside; a person's answer buys this, and it is spent once")
+(public! '*scheme-write-roots* "extra directories where a buffer may start a new .scm file")
 (public! 'save-buffer-named! "(save-buffer-named! NAME) — save another buffer; the window goes back where it was")
 (catalog-meta! 'function "save-buffer-named!" 'domain 'files 'effects '(write))
 (catalog-meta! 'command "write-file" 'domain 'files 'effects '(write))

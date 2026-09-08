@@ -75,9 +75,11 @@ Prefix these examples with `https://www.googleapis.com/auth/`.
 `google` opens the application list. Press `RET` to open the selected application.
 Lists support `RET` to read, `g` to refresh, `s` to search, and `]` for the next page.
 `[` returns to the first page. The standard list filter remains available.
-Drive, Docs, Sheets, Slides, Forms, and Apps Script indexes share a dired-style
-file mode. Drive starts at My Drive; the other indexes keep their file-type filters.
-`RET` opens, `^` goes up, `m`/`SPC` marks, `u` unmarks, and `*` toggles all marks.
+Drive, Docs, Sheets, Slides, Forms, and Apps Script indexes use the real `Dired`
+mode with a Google directory provider. Drive starts at My Drive; the other indexes
+keep their file-type filters. `RET` on `..` goes up; `^` is the same shortcut.
+The parent row cannot be marked or included in file actions.
+`RET` opens files, `m`/`SPC` marks, `u` unmarks, and `*` toggles all marks.
 `C` copies selected files into a folder chosen by name. `R` offers rename or move;
 with multiple marks it moves the selection. `+` creates a folder in the current
 folder (My Drive for a global file-type index). `d` flags for trash and `x` trashes
@@ -85,6 +87,8 @@ flagged files, otherwise marked files or the current file. A confirmation preced
 mutations; successful rows clear their marks, while failures retain them for retry.
 These file actions run directly and refresh the source listing, without JSON drafts.
 Folder copies are currently unsupported; folders can be moved, renamed, and trashed.
+Filesystem-only commands such as chmod and symlink report that the provider does
+not support them. They never run against a local path for a Google buffer.
 `/` filters locally, `s` toggles name/date sorting, `f` searches remotely, and `o`
 opens the other API operations. `]` reaches the next remote page.
 Remote search applies to Gmail, Drive document lists, and Calendar events.
@@ -191,7 +195,7 @@ The current development client is stored in Doppler, not bundled into the source
 ## Development verification
 
 The focused tests cover native OAuth and editor interactions without using live account data.
-The Google and relevant list checks pass: 29 tests, zero failures.
+The Google and relevant list checks pass: 31 tests, zero failures.
 The full repository suite still reports failures outside those checks.
 Live account consent is complete. Read-only smoke checks against Gmail, Calendar,
 Drive, People, and Tasks each returned HTTP 200. Docs, Sheets, and Slides content

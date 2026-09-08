@@ -1738,12 +1738,21 @@
          (hint (if (null? names)
                    "no buffers"
                    (string-append (number->string n) " buffer" (if (= n 1) "" "s")))))
+    ;; the card names the group and counts it; the members are the rail's
+    ;; list now, so the card does not repeat them as chips
     (list (group-name g)
           hint
           "container"
-          (take-n names 4)
+          '()
           ""
           (group-switch-facts hint (group-preview-shape-in index g) names))))
+
+;; the rail for one group: its buffers as ibuffer draws them, small. The
+;; third field is the buffer itself, which the frame carries untouched and
+;; hands back on RET.
+(define (group-switch-rail-rows index g)
+  (map (lambda (b) (list (buffer-modeline-name b) (ibuffer-row-label b) b))
+       (group-members-in index g)))
 
 (define (group-switch-candidate g)
   (group-switch-candidate-in (group-members-index) g))
@@ -1857,6 +1866,34 @@
 (define (in-groups-board?)
   (equal? (list-mode-of (current-buffer)) "groups-mode"))
 
+;; M-m in the group prompt: the buffer you came from joins the group under
+;; the highlight, and the prompt stays open. The switcher already knows the
+;; group; asking for it again in a second prompt is the step this removes.
+;; The key is M-m, not m: the prompt's letters narrow the list, and a bare
+;; letter cannot be both a filter and a verb.
+(define-command "group-switch-move-buffer"
+  "Move the buffer you came from into the group under the highlight"
+  (lambda ()
+    (let* ((sel (and (minibuffer-active?) (minibuffer-selected)))
+           (g (and sel (group-resolve-id (string-trim sel)))))
+      (if (not g)
+          (message "No group here")
+          (with-invoking-buffer
+            (lambda ()
+              (let ((buf (current-buffer)))
+                (cond ((chat-buffer? buf) (message "A chat stays with its group"))
+                      ((group-scratch-buffer? buf)
+                       (message "The group scratch stays with its group"))
+                      ((not (group-work-buffer? buf))
+                       (message "The current buffer is not a work buffer"))
+                      (else
+                       (buffer-move-family-to-group! buf g)
+                       (message (string-append (buffer-modeline-name buf)
+                                               " moved to "
+                                               (group-name g))))))))))))
+
+(local-set-key* (minibuffer-buffer) "M-m" "group-switch-move-buffer")
+
 (define-command "group-switch" "Switch to a group and restore its layout"
   (lambda ()
     (if (in-groups-board?)
@@ -1887,11 +1924,28 @@
                            ;; the new-context row previews nothing: it names
                            ;; no group yet, so the windows stay as they were
                            (show-here!))))))
+               ;; RET in the rail goes to that buffer, in its own group.
+               ;; The prompt closes the way C-g closes it, so the look it
+               ;; was showing is put back before the switch moves anything.
+               (rail-pick!
+                 (lambda (row)
+                   (let ((buf (caddr row)))
+                     (minibuffer-cancel!)
+                     (switch-to-buffer-in-group! buf))))
+               ;; the rail follows the highlight with no delay: it is a
+               ;; list, not a look, and costs nothing to redraw
+               (rail!
+                 (lambda (name)
+                   (let ((id (group-resolve-id (string-trim name))))
+                     (if id
+                         (mb-rail! (group-switch-rail-rows index id) rail-pick!)
+                         (mb-rail! '() #f)))))
                ;; a look per highlight that RESTS: C-n held down moves the
                ;; highlight faster than a frame draws, and each look is a
                ;; draw (and a wake, for a dormant member)
                (peek!
                  (lambda (name)
+                   (rail! name)
                    (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name))))
           (if (null? candidates)
               (message "No groups")

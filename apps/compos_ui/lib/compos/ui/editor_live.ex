@@ -1091,7 +1091,9 @@ defmodule Compos.Ui.EditorLive do
     # at one byte, what precedes draws its :after chrome before what
     # follows draws its :before chrome
     ordered =
-      Enum.sort_by(chrome, fn {pos, side, _, _, _} -> {pos, if(side == :after, do: 0, else: 1)} end)
+      Enum.sort_by(chrome, fn {pos, side, _, _, _} ->
+        {pos, if(side == :after, do: 0, else: 1)}
+      end)
 
     {done, rest, _off} =
       Enum.reduce(ordered, {[], segs, 0}, fn {pos, _side, cls, text, click}, {done, rest, off} ->
@@ -1280,36 +1282,38 @@ defmodule Compos.Ui.EditorLive do
               <% end %>
             </div>
           <% end %>
-          <div class="mb-body">
-            <div class="mb-cands" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
+          <div class={"mb-body #{if mb_rail_focused?(@state.minibuffer), do: "rail-focus"}"}>
+            <div id="mb-cands" class="mb-cands" phx-hook="SelectionScroll" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
               <%= for c <- @state.minibuffer.candidates do %>
                 <%= if Map.get(c, :kind) == "separator" do %>
                   <div class="mb-sep"><span class="mb-sep-label">{c.label}</span></div>
-                <% else %>
-                  <%= if Map.get(c, :kind) == "container" do %>
-                  <div class={"mb-container #{if c.selected, do: "selected"}"}>
-                    <div class="mb-container-head">
-                      <span class="mb-container-dot"></span>
-                      <span class="mb-container-name">{c.label}</span>
-                      <span class="mb-container-action">switch to group</span>
-                      <span class="mb-container-meta">{c.hint}</span>
-                    </div>
-                    <div :if={Map.get(c, :chips, []) != []} class="mb-chips">
-                      <span class="mb-chips-key">buffers</span>
-                      <span :for={w <- Map.get(c, :chips, [])} class="mb-chip">{w}</span>
-                    </div>
-                  </div>
                 <% else %>
                   <div class={"mb-cand #{if c.selected, do: "selected"}"}>
                     <span class={"mb-label #{candidate_face_class(c)}"}>{c.label}</span>
                     <span class="mb-hint">{c.hint}</span>
                   </div>
-                  <% end %>
                 <% end %>
               <% end %>
             </div>
             <div
-              :if={mb_geom(@state.minibuffer) == "modal" && mb_preview(@state.minibuffer)}
+              :if={mb_geom(@state.minibuffer) == "modal" && mb_rail(@state.minibuffer)}
+              id="mb-rail"
+              class={"mb-preview mb-rail #{if mb_rail_focused?(@state.minibuffer), do: "focused"}"}
+              phx-hook="SelectionScroll"
+            >
+              <%= with rail <- mb_rail(@state.minibuffer) do %>
+                <div class="mb-preview-title">buffers</div>
+                <div :for={row <- rail.rows} class={"mb-rail-row #{if row.selected, do: "selected"}"}>
+                  <span class="mb-rail-name">{row.label}</span>
+                  <span class="mb-rail-hint">{row.hint}</span>
+                </div>
+              <% end %>
+            </div>
+            <div
+              :if={
+                mb_geom(@state.minibuffer) == "modal" && !mb_rail(@state.minibuffer) &&
+                  mb_preview(@state.minibuffer)
+              }
               class="mb-preview"
             >
               <%= with p <- mb_preview(@state.minibuffer) do %>
@@ -1344,7 +1348,7 @@ defmodule Compos.Ui.EditorLive do
               <span :if={@state.transient[:context] not in [nil, ""]} class="transient-context">{@state.transient.context}</span>
             </div>
             <div class="transient-body">
-              <div id="transient-groups" class="transient-groups" phx-hook="TransientScroll">
+              <div id="transient-groups" class="transient-groups" phx-hook="SelectionScroll">
                 <div :for={column <- transient_columns(@state.transient)} class="transient-column">
                   <section :for={group <- Enum.filter(@state.transient.groups, &(&1.title in column))} class="transient-group">
                     <div class="transient-group-title">{group.title}</div>
@@ -1602,6 +1606,17 @@ defmodule Compos.Ui.EditorLive do
       %{key: "C-c C-o", label: "collect"},
       %{key: "C-g", label: "quit"}
     ]
+  end
+
+  # The rail as a list: the prompt wrote the rows, so the view only says
+  # which one is on. A prompt without a rail gets the facts panel instead.
+  defp mb_rail(mb), do: Map.get(mb, :rail)
+
+  defp mb_rail_focused?(mb) do
+    case Map.get(mb, :rail) do
+      %{focused: true} -> true
+      _ -> false
+    end
   end
 
   # The palette's right-hand rail: facts about the highlighted row. A row
@@ -2026,7 +2041,13 @@ defmodule Compos.Ui.EditorLive do
           # same long-line guard as every other one, and on a one-line buffer
           # this is the only line there is
           segs =
-            line_segs(line.part, line.start, line.ts, line.ov ++ overlays, Map.get(line, :chrome, []))
+            line_segs(
+              line.part,
+              line.start,
+              line.ts,
+              line.ov ++ overlays,
+              Map.get(line, :chrome, [])
+            )
 
           segs =
             case image_at_point do
@@ -2110,6 +2131,7 @@ defmodule Compos.Ui.EditorLive do
           phx-value-id={@click}
         >{@txt}</span>
         """
+
       is_binary(src) ->
         avatar? = String.ends_with?(txt, "#compos-avatar")
 
@@ -3831,5 +3853,4 @@ defmodule Compos.Ui.EditorLive do
       inset: face(faces, "window-inactive", "bg", "#f4f0e6")
     }
   end
-
 end
