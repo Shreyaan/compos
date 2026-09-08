@@ -12736,10 +12736,19 @@
 ;;; surface (layouts.ex editingAfterKey), where the Cmd-arrows are native in
 ;;; the editing state and never reach this map.
 (define-keymap! "editing-state-map")
-(define-key "editing-state-map" "s-<left>" "beginning-of-line")
-(define-key "editing-state-map" "s-<right>" "end-of-line")
-(define-key "editing-state-map" "s-<up>" "beginning-of-buffer")
-(define-key "editing-state-map" "s-<down>" "end-of-buffer")
+
+;; The Cmd-arrows the editing state hands to the caret sit on a map of
+;; their own, so a mode can refuse that map and keep the chords for window
+;; motion. A chat is such a mode: you type in it without pause, so it would
+;; hold the Cmd-arrows for good. The unset drops the bindings a reload left
+;; on editing-state-map, which is now the state's marker and nothing else.
+(for-each (lambda (k) (keymap-unset! "editing-state-map" k))
+          '("s-<left>" "s-<right>" "s-<up>" "s-<down>"))
+(define-keymap! "editing-caret-map")
+(define-key "editing-caret-map" "s-<left>" "beginning-of-line")
+(define-key "editing-caret-map" "s-<right>" "end-of-line")
+(define-key "editing-caret-map" "s-<up>" "beginning-of-buffer")
+(define-key "editing-caret-map" "s-<down>" "end-of-buffer")
 
 (define *editing-landing* #f)   ; (frame window buffer) of the last landing
 
@@ -12747,12 +12756,13 @@
   (if (member "editing-state-map" (buffer-minor-maps buf)) #t #f))
 
 ;; The maps the editing state puts in force in the buffer. editing-state-map
-;; is the state's own; cua.scm adds cua-mode-map, so the Shift selections
-;; answer in a buffer you are editing and a buffer you have just landed on
-;; keeps the plain meaning of those chords. The ladder reads a minor map's
-;; own bindings and not its parents, so a map that must answer here is on
-;; this list and not a parent of another.
-(define *editing-state-maps* '("editing-state-map"))
+;; is the state's marker; editing-caret-map holds the Cmd-arrows; cua.scm
+;; adds cua-mode-map, so the Shift selections answer in a buffer you are
+;; editing and a buffer you have just landed on keeps the plain meaning of
+;; those chords. The ladder reads a minor map's own bindings and not its
+;; parents, so a map that must answer here is on this list and not a parent
+;; of another.
+(define *editing-state-maps* '("editing-state-map" "editing-caret-map"))
 
 (define (editing-state-maps! names)
   (for-each (lambda (n)
@@ -12764,9 +12774,33 @@
   (set! *editing-state-maps*
     (remove (lambda (m) (member m names)) *editing-state-maps*)))
 
+;; A mode can refuse one of those maps, by name, for its buffers. The
+;; marker map is not refusable: it is what says the buffer is in the state.
+(define *editing-state-maps-off* '())   ; ((MODE (MAP ...)) ...)
+
+(define (editing-state-maps-off! mode names)
+  (set! *editing-state-maps-off*
+    (cons (list mode (remove (lambda (m) (equal? m "editing-state-map")) names))
+          (remove (lambda (e) (equal? (car e) mode)) *editing-state-maps-off*))))
+
+(define (editing--maps-for buf)
+  (let ((off '()))
+    (for-each (lambda (e)
+                (when (buffer-mode-is? buf (car e))
+                  (set! off (append off (cadr e)))))
+              *editing-state-maps-off*)
+    (if (null? off)
+        *editing-state-maps*
+        (remove (lambda (m) (member m off)) *editing-state-maps*))))
+
+;; A chat keeps the Cmd-arrows on the window motion, armed or not: it is a
+;; conversation you type in without pause, and a buffer that never returns
+;; to the movement state would never answer the focus chords again.
+(editing-state-maps-off! "chat-mode" '("editing-caret-map"))
+
 (define (editing-state-on! buf)
   (unless (editing-state? buf)
-    (buffer-minor-maps! buf (append *editing-state-maps* (buffer-minor-maps buf))))
+    (buffer-minor-maps! buf (append (editing--maps-for buf) (buffer-minor-maps buf))))
   (unless (equal? (buffer-local buf 'editing-state) #t)
     (buffer-set-local! buf 'editing-state #t)
     (desktop-skip! buf 'editing-state)))
