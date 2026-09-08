@@ -6819,6 +6819,7 @@
 
 ;; Window changes reflow occupied slots. Closing a pane does not reopen hidden work.
 (define (layout-target-on-change!)
+  (layout-target-modeline!)
   (when (and (layout-target) (not *layout-busy*)
              (not (minibuffer-state)) (not (popup-open?)))
     (let ((panes (layout-target-visible-buffers))
