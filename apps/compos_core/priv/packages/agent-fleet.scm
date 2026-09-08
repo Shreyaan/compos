@@ -424,12 +424,9 @@
 (ibuffer-view! *ichat-prompt-buffer* 'sort 'recent)
 
 (define-command "ichat-prompt"
-  "Switch to a chat from the table"
+  "Switch to a chat in the minibuffer"
   (lambda ()
-    (ibuffer-prompt! 'chats *ichat-prompt-buffer* "ichat-mode" "Chat: "
-      (lambda (row close!)
-        (ibuffer-pick! row close!)
-        (when (buffer-known? row) (end-of-buffer!))))))
+    (run-command "chat-switch-prompt")))
 
 (define-command "chat-list" "List every chat: agent threads and API companions"
   (lambda () (ichat-open!)))
@@ -485,7 +482,7 @@
 (define (chat-prompt-live-bufs)
   (let* ((bs (chat-list-bufs))
          (mru (filter (lambda (b) (member b bs)) (buffer-list-mru))))
-    (agents-sorted (append mru (filter (lambda (b) (not (member b mru))) bs)))))
+    (append mru (filter (lambda (b) (not (member b mru))) bs))))
 
 (define (chat-prompt-tag r)
   (if (equal? (nth 2 r) "saved") (chat-log-leaf (nth 3 r)) (nth 3 r)))
