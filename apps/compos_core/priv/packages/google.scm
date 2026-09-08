@@ -160,11 +160,11 @@
          (list 'service service 'path "/users/me/calendarList" 'key 'items 'params (list 'maxResults limit))))
       ((or mime (equal? service "drive"))
        (list 'service "drive" 'path "/files" 'key 'files
-         'params (list 'pageSize limit 'fields "nextPageToken,files(id,name,mimeType,modifiedTime,webViewLink)"
-           'supportsAllDrives #t 'includeItemsFromAllDrives #t 'orderBy "modifiedTime desc"
+         'params (list 'pageSize limit 'fields "nextPageToken,files(id,name,mimeType,size,modifiedTime,parents,webViewLink)"
+           'supportsAllDrives #t 'includeItemsFromAllDrives #t 'orderBy (or (buffer-local buf 'google-drive-sort) "folder,name")
            'q (string-append "trashed = false"
                 (if mime (string-append " and mimeType = '" mime "'") "")
-                (if parent (string-append " and '" (google--query-escape parent) "' in parents") "")
+                (if (or parent (equal? service "drive")) (string-append " and '" (google--query-escape (or parent "root")) "' in parents") "")
                 (if (equal? query "") "" (string-append " and fullText contains '" (google--query-escape query) "'"))))))
       ((equal? service "contacts")
        (list 'service service 'path "/people/me/connections" 'key 'connections
@@ -250,6 +250,170 @@
             ("g" "google-refresh") ("x" "google-operation") ("c" "google-compose"))
     'footer (lambda (buf) '(("RET" "read") ("s" "search") ("]" "next page") ("g" "refresh") ("x" "operation") ("c" "compose")))))
 
+(define (google--file-service? service)
+  (or (equal? service "drive") (and (google--service service) (plist-get (google--service service) 'mime))))
+
+(define-list-mode! "google-drive-mode"
+  (list 'transient #f
+    'doc "Google file index. RET opens, ^ goes up, C copies, R renames or moves, + creates a folder. m marks, u unmarks, d flags, x trashes. s sorts and / filters."
+    'rows (lambda (buf) (list-entries buf)) 'cache-fetch google--fetch 'cache-ttl 120
+    'columns (lambda (buf) '(("Name" #f) ("Size" 12 right) ("Modified" 20) ("Type" 24)))
+    'cells (lambda (buf row)
+      (list (string-append (google--line (google--row-title row))
+              (if (equal? (google--get row 'mimeType) "application/vnd.google-apps.folder") "/" ""))
+            (or (google--get row 'size) "—") (or (google--get row 'modifiedTime) "")
+            (google--replace (or (google--get row 'mimeType) "") "application/vnd.google-apps." "")))
+    'key (lambda (buf row) (google--row-id row))
+    'title (lambda (buf) (string-append (plist-get (google--service (buffer-local buf 'google-service)) 'title) " / " (or (buffer-local buf 'google-drive-path) (if (equal? (buffer-local buf 'google-service) "drive") "My Drive" "All files"))))
+    'meta (lambda (buf) (string-append (google--email (buffer-local buf 'google-account)) "  "
+                         (or (buffer-local buf 'google-status) "")))
+    'keys '(("RET" "google-read") ("^" "google-drive-up") ("R" "google-drive-rename")
+            ("C" "google-drive-copy") ("d" "google-drive-flag") ("+" "google-drive-mkdir") ("SPC" "list-mark") ("x" "google-drive-trash")
+            ("g" "google-refresh") ("]" "google-next-page") ("[" "google-first-page")
+            ("s" "google-drive-sort") ("f" "google-search") ("o" "google-operation"))
+    'footer (lambda (buf) '(("RET" "open") ("^" "up") ("m" "mark") ("u" "unmark")
+       ("d" "flag") ("x" "trash") ("C" "copy") ("R" "rename/move") ("+" "new folder") ("/" "filter") ("s" "sort") ("g" "refresh") ("]" "next page")))))
+
+(define-command "google-drive-sort" "Toggle Google file sorting between name and modification time"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'google-drive-sort
+        (if (equal? (buffer-local buf 'google-drive-sort) "folder,modifiedTime desc")
+            "folder,name" "folder,modifiedTime desc"))
+      (buffer-set-local! buf 'google-page #f)
+      (google--refresh buf))))
+
+(define-command "google-drive-up" "Open the parent Google Drive directory"
+  (lambda ()
+    (let* ((buf (current-buffer)) (account (buffer-local buf 'google-account))
+           (folder (buffer-local buf 'google-parent)) (up (buffer-local buf 'google-drive-up)))
+      (cond ((or (not folder) (equal? folder "root"))
+             (if (equal? (buffer-local buf 'google-service) "drive") (message "Already at My Drive.")
+                 (google-open account "drive")))
+            (up (google-open account "drive" (if (equal? up "root") #f up)))
+            (else (google-request account "drive" "GET" (string-append "/files/" (google--id folder))
+              '(fields "parents" supportsAllDrives #t) #f
+              (lambda (r)
+                (if (plist-get r 'ok)
+                  (let ((parents (google--get (plist-get r 'data) 'parents)))
+                    (google-open account "drive" (and (pair? parents) (car parents))))
+                  (message (plist-get r 'error))))))))))
+
+(define (google--file-op row method suffix params body)
+  (list 'id (google--row-id row) 'name (google--row-title row)
+    'method method 'path (string-append "/files/" (google--id (google--row-id row)) suffix)
+    'params (append '(supportsAllDrives #t) params) 'body body))
+
+;; Capture account and targets before prompting. Batch mutations run once, in order;
+;; only successful rows lose their marks, so failed files remain easy to retry.
+(define (google--file-apply buf label ops)
+  (let ((account (buffer-local buf 'google-account)))
+    (if (buffer-local buf 'google-file-busy) (message "A file operation is already running.")
+      (when (pair? ops)
+        (y-or-n-p (string-append label " " (number->string (length ops)) " file(s) as "
+                      (google--email account) ": " (string-join (map (lambda (op) (plist-get op 'name)) ops) ", ") "? ")
+          (lambda (yes)
+            (when (and yes (buffer-exists? buf) (not (buffer-local buf 'google-file-busy)))
+              (buffer-set-local! buf 'google-file-busy #t)
+              (desktop-skip! buf 'google-file-busy)
+              (let loop ((remaining ops) (failed '()))
+                (if (null? remaining)
+                    (begin
+                      (when (buffer-exists? buf)
+                        (buffer-set-local! buf 'google-file-busy #f)
+                        (google--refresh buf))
+                      (message (if (null? failed) (string-append label " completed.")
+                                   (string-append "Some files failed: " (string-join (reverse failed) "; ")))))
+                    (let ((op (car remaining)))
+                      (google-request account "drive" (plist-get op 'method) (plist-get op 'path)
+                        (plist-get op 'params) (plist-get op 'body)
+                        (lambda (r)
+                          (when (and (plist-get r 'ok) (buffer-exists? buf))
+                            (buffer-set-local! buf 'list-marks
+                              (filter (lambda (m) (not (equal? (car m) (plist-get op 'id)))) (list-marks buf))))
+                          (loop (cdr remaining)
+                            (if (plist-get r 'ok) failed
+                                (cons (string-append (plist-get op 'name) ": " (plist-get r 'error)) failed)))))))))))))))
+
+;; Walk folders by name, keeping the selected folder's ID separate from its label.
+;; Each page remains reachable, without requiring users to know Drive IDs.
+(define (google--folder-pick account k)
+  (let browse ((folder "root") (path "My Drive") (trail '()) (page #f))
+    (google-request account "drive" "GET" "/files"
+      (append (list 'q (string-append "trashed = false and mimeType = 'application/vnd.google-apps.folder' and '"
+                               (google--query-escape folder) "' in parents")
+                    'pageSize 100 'orderBy "name" 'fields "nextPageToken,files(id,name)"
+                    'supportsAllDrives #t 'includeItemsFromAllDrives #t)
+              (if page (list 'pageToken page) '())) #f
+      (lambda (r)
+        (if (not (plist-get r 'ok)) (message (plist-get r 'error))
+          (let* ((data (plist-get r 'data)) (rows (or (google--get data 'files) '()))
+                 (next (google--get data 'nextPageToken))
+                 (labels (map (lambda (row) (string-append (google--row-title row) " [" (google--row-id row) "]/")) rows)))
+            (completing-read (string-append "Destination / " path ": ")
+              (append '("Use this folder") (if (pair? trail) '("..") '()) labels (if next '("Next page") '()))
+              (lambda (answer)
+                (cond ((equal? answer "Use this folder") (k folder path))
+                      ((and (equal? answer "..") (pair? trail))
+                       (browse (caar trail) (cadar trail) (cdr trail) #f))
+                      ((and next (equal? answer "Next page")) (browse folder path trail next))
+                      (else (let choose ((rs rows) (ls labels))
+                        (when (pair? rs)
+                          (if (equal? answer (car ls))
+                              (browse (google--row-id (car rs)) (string-append path "/" (google--row-title (car rs)))
+                                (cons (list folder path) trail) #f)
+                              (choose (cdr rs) (cdr ls)))))))))))))))
+
+(define (google--file-transfer buf rows copy?)
+  (let ((account (buffer-local buf 'google-account)))
+    (if (and copy? (pair? (filter (lambda (row) (equal? (google--get row 'mimeType) "application/vnd.google-apps.folder")) rows)))
+        (message "Folder copying is not supported yet. Select files to copy, or R to move folders.")
+        (google--folder-pick account
+          (lambda (destination label)
+            (google--file-apply buf (string-append (if copy? "Copy to " "Move to ") label)
+              (map (lambda (row)
+                (if copy?
+                    (google--file-op row "POST" "/copy" '() (list 'name (google--row-title row) 'parents (list destination)))
+                    (google--file-op row "PATCH" ""
+                      (append (list 'addParents destination)
+                        (let ((parents (google--get row 'parents)))
+                          (if (pair? parents) (list 'removeParents (string-join parents ",")) '())))
+                      (list 'name (google--row-title row))))) rows)))))))
+
+(define-command "google-drive-copy" "Copy marked files, or the current file, to a Drive folder"
+  (lambda () (let ((buf (current-buffer))) (google--file-transfer buf (list-targets buf) #t))))
+(define-command "google-drive-rename" "Rename the current file or move selected files to a folder"
+  (lambda ()
+    (let* ((buf (current-buffer)) (rows (list-targets buf)))
+      (when (pair? rows)
+        (if (> (length rows) 1) (google--file-transfer buf rows #f)
+          (completing-read "Rename or move: " '("Rename" "Move to folder")
+            (lambda (action)
+              (cond ((equal? action "Move to folder") (google--file-transfer buf rows #f))
+                    ((equal? action "Rename")
+                     (read-string "New name: "
+                       (lambda (name) (unless (equal? (string-trim name) "")
+                         (google--file-apply buf "Rename"
+                           (list (google--file-op (car rows) "PATCH" "" '() (list 'name name))))))))))))))))
+
+(define-command "google-drive-mkdir" "Create a folder in this Drive directory"
+  (lambda ()
+    (let* ((buf (current-buffer)) (parent (or (buffer-local buf 'google-parent) "root")))
+      (read-string "Folder name: "
+        (lambda (name) (unless (equal? (string-trim name) "")
+          (google--file-apply buf "Create folder"
+            (list (list 'id "" 'name name 'method "POST" 'path "/files" 'params '(supportsAllDrives #t)
+              'body (list 'name name 'mimeType "application/vnd.google-apps.folder" 'parents (list parent)))))))))))
+
+(define-command "google-drive-flag" "Flag this Google file for trash"
+  (lambda () (list-mark-at-point! "D")))
+(define-command "google-drive-trash" "Trash flagged files, otherwise marked files or the current file"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (flagged (filter (lambda (row) (equal? (list-mark-of buf row) "D")) (list-entries buf)))
+           (rows (if (pair? flagged) flagged (list-targets buf))))
+      (google--file-apply buf "Trash" (map (lambda (row) (google--file-op row "PATCH" "" '() '(trashed #t))) rows)))))
+
 (define (google-open account service &optional parent)
   (let ((buf (string-append "*Google " (google--email account) " [" account "] / " service
                 (if parent (string-append " / " parent) "") "*")))
@@ -257,7 +421,7 @@
     (buffer-set-local! buf 'google-account account)
     (buffer-set-local! buf 'google-service service)
     (buffer-set-local! buf 'google-parent (or parent #f))
-    (with-current-buffer buf (lambda () (set-mode! "google-service-mode")))
+    (with-current-buffer buf (lambda () (set-mode! (if (google--file-service? service) "google-drive-mode" "google-service-mode"))))
     (pop-to-buffer buf) buf))
 (define (google--refresh buf)
   ;; A new user query supersedes an older request. Its callback is discarded.
@@ -345,7 +509,12 @@
                (target (if (and (equal? service "drive") (pair? matches)) (plist-get (car matches) 'id) service)))
           (if (or (and (not parent) (member service '("calendar" "tasks")))
                   (equal? (google--get row 'mimeType) "application/vnd.google-apps.folder"))
-              (google-open account service id)
+              (let ((child (google-open account service id)))
+                (when (equal? service "drive")
+                  (buffer-set-local! child 'google-drive-up (or parent "root"))
+                  (buffer-set-local! child 'google-drive-path
+                    (string-append (or (buffer-local buf 'google-drive-path) "My Drive") "/" (google--row-title row)))
+                  (list-redraw! child)))
               (google-request account target "GET" (google--item-path target id parent)
                 (if (equal? service "contacts") '(personFields "names,emailAddresses,phoneNumbers") '()) #f
                 (lambda (r)
@@ -388,7 +557,7 @@
     (name "Meet: create space" service "meet" method "POST" path "/spaces")
     (name "Apps Script: create" service "script" method "POST" path "/projects" body (title "New project"))))
 (define (google--context-operation op buf)
-  (let* ((row (if (equal? (buffer-local buf 'mode-name) "google-service-mode") (list-current buf)
+  (let* ((row (if (member (buffer-local buf 'mode-name) '("google-service-mode" "google-drive-mode")) (list-current buf)
                  (buffer-local buf 'google-data)))
          (id (or (google--get row 'documentId) (google--get row 'spreadsheetId)
                  (google--get row 'presentationId) (and row (google--row-id row))))
@@ -569,3 +738,89 @@
 (catalog-meta! 'function "google-draft" 'effects '(write))
 (catalog-meta! 'command "google-submit" 'effects '(unknown external))
 (catalog-meta! 'command "google-disconnect" 'effects '(destroy external))
+
+;;; Headless file functions: explicit account, structured result, no UI or prompts.
+(domain! 'google)
+(category! 'google)
+(effects! '(read external))
+(define (google-files account folder &optional query page service)
+  (let ((mime (and service (google--get (google--service service) 'mime))))
+    (if (and service (not (google--file-service? service)))
+      '(ok #f error "Choose drive, docs, sheets, slides, forms, or script.")
+      (google-read-api account "drive" "/files"
+        (append (list 'pageSize 100 'orderBy "folder,name" 'supportsAllDrives #t 'includeItemsFromAllDrives #t
+          'fields "nextPageToken,files(id,name,mimeType,size,modifiedTime,parents,webViewLink)"
+          'q (string-append "trashed = false"
+             (if (and folder (not (equal? folder ""))) (string-append " and '" (google--query-escape folder) "' in parents") "")
+             (if mime (string-append " and mimeType = '" mime "'") "")
+             (if (and query (not (equal? query ""))) (string-append " and fullText contains '" (google--query-escape query) "'") "")))
+          (if (and page (not (equal? page ""))) (list 'pageToken page) '()))))))
+(define (google-file account id)
+  (google-read-api account "drive" (string-append "/files/" (google--id id))
+    '(supportsAllDrives #t fields "id,name,mimeType,size,modifiedTime,parents,webViewLink,capabilities")))
+(public! 'google-files "(google-files ACCOUNT FOLDER [QUERY PAGE SERVICE]) — list files; root is My Drive, empty FOLDER searches all accessible files. SERVICE filters docs/sheets/slides/forms/script. Returns data.files and nextPageToken.")
+(public! 'google-file "(google-file ACCOUNT ID) — read one file's metadata and capabilities, including its current parents.")
+
+(effects! '(write external))
+(define (google--file-write account method path params body)
+  (google-http! account method (string-append "https://www.googleapis.com/drive/v3" path)
+    (append '(supportsAllDrives #t) params) body))
+(define (google-file-rename! account id name)
+  (if (equal? (string-trim name) "") '(ok #f error "File name must not be empty.")
+    (google--file-write account "PATCH" (string-append "/files/" (google--id id)) '() (list 'name name))))
+(define (google-folder-create! account parent name)
+  (if (or (equal? (string-trim name) "") (equal? parent ""))
+    '(ok #f error "Provide a parent folder and a nonempty name.")
+    (google--file-write account "POST" "/files" '()
+      (list 'name name 'mimeType "application/vnd.google-apps.folder" 'parents (list parent)))))
+(define (google-file-copy! account id destination &optional name)
+  (let ((file (google-file account id)))
+    (cond ((not (plist-get file 'ok)) file)
+          ((equal? (google--get (plist-get file 'data) 'mimeType) "application/vnd.google-apps.folder")
+           '(ok #f error "Folder copying is not supported."))
+          ((equal? destination "") '(ok #f error "Provide a destination folder."))
+          (else (google--file-write account "POST" (string-append "/files/" (google--id id) "/copy") '()
+            (list 'name (if (and name (not (equal? name ""))) name (google--get (plist-get file 'data) 'name))
+                  'parents (list destination)))))))
+(define (google-file-move! account id destination)
+  (let ((file (google-file account id)))
+    (if (not (plist-get file 'ok)) file
+      (let ((parents (or (google--get (plist-get file 'data) 'parents) '())))
+        (cond ((equal? destination "") '(ok #f error "Provide a destination folder."))
+              ((member destination parents) file)
+              (else (google--file-write account "PATCH" (string-append "/files/" (google--id id))
+                (append (list 'addParents destination)
+                  (if (pair? parents) (list 'removeParents (string-join parents ",")) '()))
+                (list 'name (google--get (plist-get file 'data) 'name)))))))))
+(public! 'google-file-rename! "(google-file-rename! ACCOUNT ID NAME) — rename a file immediately; returns the Google result, without opening a buffer.")
+(public! 'google-folder-create! "(google-folder-create! ACCOUNT PARENT NAME) — create a folder; PARENT may be root. Executes immediately.")
+(public! 'google-file-copy! "(google-file-copy! ACCOUNT ID DESTINATION [NAME]) — copy a file into a folder, optionally renaming the copy. Executes immediately; folders are unsupported.")
+(public! 'google-file-move! "(google-file-move! ACCOUNT ID DESTINATION) — move a file or folder using freshly fetched parents. Executes immediately; same-parent moves do nothing.")
+(effects! '(destroy external))
+(define (google-file-trash! account id)
+  (google--file-write account "PATCH" (string-append "/files/" (google--id id)) '() '(trashed #t)))
+(public! 'google-file-trash! "(google-file-trash! ACCOUNT ID) — move a file or folder to trash immediately. Does not permanently delete it.")
+
+(define-tool! 'google-files "List Google files without opening the editor. Use account from google-accounts; folder root means My Drive, empty folder means all files. Follow data.nextPageToken to list more."
+  '((account "string" "Google account subject") (folder "string" "Folder ID, root, or empty for all files")
+    (query "string" "Search text, or empty") (page "string" "Next page token, or empty")
+    (service "string" "drive, docs, sheets, slides, forms, or script"))
+  (lambda (a) (google-files (plist-get a 'account) (plist-get a 'folder) (plist-get a 'query) (plist-get a 'page) (plist-get a 'service))) '(read external))
+(define-tool! 'google-file "Get Google file metadata and capabilities. Does not open a buffer."
+  '((account "string" "Google account subject") (id "string" "File ID"))
+  (lambda (a) (google-file (plist-get a 'account) (plist-get a 'id))) '(read external))
+(define-tool! 'google-file-rename "Rename a Google file immediately. Use only within the user's authorized task."
+  '((account "string" "Google account subject") (id "string" "File ID") (name "string" "New name"))
+  (lambda (a) (google-file-rename! (plist-get a 'account) (plist-get a 'id) (plist-get a 'name))) '(write external))
+(define-tool! 'google-file-copy "Copy a Google file immediately to a destination folder. Use only within the user's authorized task."
+  '((account "string" "Google account subject") (id "string" "File ID") (destination "string" "Destination folder ID") (name "string" "New name, or empty to keep name"))
+  (lambda (a) (google-file-copy! (plist-get a 'account) (plist-get a 'id) (plist-get a 'destination) (plist-get a 'name))) '(write external))
+(define-tool! 'google-file-move "Move a Google file or folder immediately. Use only within the user's authorized task."
+  '((account "string" "Google account subject") (id "string" "File ID") (destination "string" "Destination folder ID"))
+  (lambda (a) (google-file-move! (plist-get a 'account) (plist-get a 'id) (plist-get a 'destination))) '(write external))
+(define-tool! 'google-folder-create "Create a Google folder immediately. Use only within the user's authorized task."
+  '((account "string" "Google account subject") (parent "string" "Parent folder ID or root") (name "string" "Folder name"))
+  (lambda (a) (google-folder-create! (plist-get a 'account) (plist-get a 'parent) (plist-get a 'name))) '(write external))
+(define-tool! 'google-file-trash "Move a Google file or folder to trash immediately. Use only when the user's task authorizes trashing it."
+  '((account "string" "Google account subject") (id "string" "File ID"))
+  (lambda (a) (google-file-trash! (plist-get a 'account) (plist-get a 'id))) '(destroy external))

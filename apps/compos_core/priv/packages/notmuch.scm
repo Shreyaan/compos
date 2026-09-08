@@ -161,6 +161,33 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--host-label)
   (if (equal? notmuch-host "") "this machine" notmuch-host))
 
+;; which notmuch: several databases answer to the same program name, so
+;; the identity is the host, the profile, and the database that profile
+;; opens. The path costs one round trip, so hold it per identity and drop
+;; the cache when the host changes.
+(define *nm-db-paths* '())
+
+(define (nm--db-key)
+  (string-append (nm--host-label) "|" notmuch-profile))
+
+(define (nm--db-path)
+  (let ((hit (assoc (nm--db-key) *nm-db-paths*)))
+    (if hit
+        (cadr hit)
+        (let ((path (string-trim (nm--run "config get database.path"))))
+          ;; a failed lookup is not an answer: leave it uncached and retry
+          (when (not (equal? path ""))
+            (set! *nm-db-paths* (cons (list (nm--db-key) path) *nm-db-paths*)))
+          path))))
+
+(define (nm--source-label)
+  (let ((path (nm--db-path)))
+    (string-append (nm--host-label)
+                   (if (equal? notmuch-profile "")
+                       ""
+                       (string-append " [" notmuch-profile "]"))
+                   (if (equal? path "") "" (string-append ":" path)))))
+
 (define (nm--run args)
   (shell-command->string (nm--cmd args)))
 
@@ -306,16 +333,31 @@ when a message has no text/plain part." 'group 'notmuch)
                 (list (nm--th-authors th) "nm-author")
                 (list (nm--tags-text th) "nm-tags")))))
 
+;; every draw asks for this line, and one draw must not cost a round
+;; trip: count once per database and query, and let nm--refresh! drop the
+;; answer when the mail behind it can have changed.
+(define (nm--count-for buf query)
+  (let ((key (string-append (nm--source-label) "|" query))
+        (hit (buffer-local buf 'nm-count)))
+    (if (and (pair? hit) (equal? (car hit) key))
+        (cadr hit)
+        ;; count, and not count --output=threads: grouping threads over a
+        ;; large query costs seconds
+        (let ((n (string-trim
+                   (nm--run (string-append "count -- " (nm--quote query))))))
+          (buffer-set-local! buf 'nm-count (list key n))
+          n))))
+
 (define (nm--search-meta buf)
-  (let* ((query (nm--query-of buf))
-         (total (string-trim
-                  (nm--run
-                    (string-append "count --output=threads -- " (nm--quote query))))))
-    (string-append total " threads · " query)))
+  (let ((query (nm--query-of buf)))
+    (string-append (nm--count-for buf query) " messages · "
+                   (nm--source-label) " · " query)))
 
 ;; the list machinery owns the refresh, the row lookup and the header
 ;; offset (R8); these names stay for the commands and tests that call them
-(define (nm--refresh! buf) (list-refresh! buf))
+(define (nm--refresh! buf)
+  (buffer-set-local! buf 'nm-count #f)
+  (list-refresh! buf))
 (define (nm--index-at buf) (list-index buf))
 (define (nm--thread-at buf) (list-current buf))
 
@@ -330,16 +372,16 @@ when a message has no text/plain part." 'group 'notmuch)
            "`l` adds a tag filter; `\\` removes it. "
            "`s` starts a new search; `q` goes back "
            "to the mailboxes.")
-    'rows nm--search-rows
+    'rows (lambda (buf) (nm--search-rows buf))
     'key (lambda (buf th) (nm--th-id th))
     'selection-face "select"
-    'row-columns nm--search-columns
-    'row-cells nm--search-cells
+    'row-columns (lambda (buf) (nm--search-columns buf))
+    'row-cells (lambda (buf th) (nm--search-cells buf th))
     'title (lambda (buf)
                (if (equal? notmuch-host "")
                    "Mail"
                    (string-append "Mail on " notmuch-host)))
-    'meta nm--search-meta
+    'meta (lambda (buf) (nm--search-meta buf))
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
               (if (nm--any-marked? buf)
@@ -472,17 +514,18 @@ when a message has no text/plain part." 'group 'notmuch)
            "counts. `RET` opens one as a thread list; `s` runs a free-form "
            "search.")
     'buffer *notmuch-hello-buffer*
-    'rows nm--hello-rows
+    'rows (lambda (buf) (nm--hello-rows buf))
     'columns (lambda (buf)
                (list (list "mailbox" 16) (list "unread" 7 'right)
                      (list "total" 7 'right) (list "query" #f)))
-    'cells nm--hello-cells
+    'cells (lambda (buf row) (nm--hello-cells buf row))
     'title (lambda (buf)
                (if (equal? notmuch-host "")
                    "Mailboxes"
                    (string-append "Mailboxes on " notmuch-host)))
     'meta (lambda (buf)
-            (string-append (number->string (length (list-entries buf))) " saved searches"))
+            (string-append (number->string (length (list-entries buf)))
+                           " saved searches · " (nm--source-label)))
     'total (lambda (buf) (length (list-source-entries buf)))
     'local-filter #t
     'footer (lambda (buf)
@@ -516,13 +559,14 @@ when a message has no text/plain part." 'group 'notmuch)
 ;;; view stale. Drop the rows and read again rather than keep ids that no
 ;;; longer resolve.
 (define (nm--host-changed! buf)
+  (set! *nm-db-paths* '())
   (for-each (lambda (b)
               (when (buffer-exists? b) (buffer-set-local! b 'list-entries '())))
             (list *notmuch-search-buffer* *notmuch-hello-buffer*))
   (when (buffer-exists? *notmuch-search-buffer*)
     (nm--query-reset! *notmuch-search-buffer* notmuch-default-query))
   (list-refresh! buf)
-  (message (string-append "Mail on " (nm--host-label))))
+  (message (string-append "Mail on " (nm--source-label))))
 
 (define-command "notmuch-switch-host" "Read mail from another machine"
   (lambda ()

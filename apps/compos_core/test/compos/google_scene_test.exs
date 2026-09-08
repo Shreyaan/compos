@@ -66,6 +66,62 @@ defmodule Compos.GoogleSceneTest do
              ~s["https://accounts.google.com/o/oauth2/v2/auth?test=1"]
   end
 
+  test "headless file functions preserve account, pagination, and fresh move parents" do
+    eval!("(define *google-test-native-original* google-http!)")
+    on_exit(fn -> Session.eval("(set! google-http! *google-test-native-original*)") end)
+
+    eval!(
+      ~S[(set! google-http! (lambda (a m u p b)
+      (set! *google-test-calls* (cons (list a m u p b) *google-test-calls*))
+      '(ok #t status 200 data (id "file1" name "Document" mimeType "application/vnd.google-apps.document" parents ("old-parent")))))]
+    )
+
+    source = Editor.current_buffer()
+    eval!(~S[(google-files "alpha" "root" "O'Reilly" "page2" "docs")])
+    assert eval!("(plist-get (nth 3 (car *google-test-calls*)) 'pageToken)") == ~s["page2"]
+
+    assert eval!("(plist-get (nth 3 (car *google-test-calls*)) 'q)") =~
+             "application/vnd.google-apps.document"
+
+    eval!(~S[(google-file-move! "beta" "file1" "new-parent")])
+    assert eval!("(car (car *google-test-calls*))") == ~s["beta"]
+
+    assert eval!("(plist-get (nth 3 (car *google-test-calls*)) 'removeParents)") ==
+             ~s["old-parent"]
+
+    eval!(~S[(google-file-copy! "alpha" "file1" "root" "Copy")])
+    assert eval!("(plist-get (nth 4 (car *google-test-calls*)) 'name)") == ~s["Copy"]
+    eval!(~S[(google-file-rename! "alpha" "file1" "Renamed")])
+    assert eval!("(plist-get (nth 4 (car *google-test-calls*)) 'name)") == ~s["Renamed"]
+    eval!(~S[(google-folder-create! "alpha" "root" "Folder")])
+    assert eval!("(plist-get (nth 4 (car *google-test-calls*)) 'parents)") == ~s[("root")]
+    eval!(~S[(google-file-trash! "alpha" "file1")])
+    assert eval!("(plist-get (nth 4 (car *google-test-calls*)) 'trashed)") == "#t"
+    assert Editor.current_buffer() == source
+    assert Editor.all_minibuffers() == []
+
+    assert eval!(~S[(plist-get (catalog-entry 'function "google-file-trash!") 'effects)]) =~
+             "destroy"
+  end
+
+  test "headless move stops on lookup failure and does not mutate a same-parent file" do
+    eval!("(define *google-test-native-original* google-http!)")
+    on_exit(fn -> Session.eval("(set! google-http! *google-test-native-original*)") end)
+    eval!(~S[(set! google-http! (lambda (a m u p b)
+      (set! *google-test-calls* (cons (list a m u p b) *google-test-calls*))
+      '(ok #f status 403 error "Permission denied")))])
+    assert eval!(~S[(plist-get (google-file-move! "alpha" "file1" "dest") 'ok)]) == "#f"
+    assert eval!("(length *google-test-calls*)") == "1"
+    eval!(~S[(set! google-http! (lambda (a m u p b)
+      (set! *google-test-calls* (cons (list a m u p b) *google-test-calls*))
+      '(ok #t data (name "File" parents ("dest")))))])
+    eval!(~S[(google-file-move! "alpha" "file1" "dest")])
+
+    assert eval!(
+             ~S[(length (filter (lambda (call) (equal? (cadr call) "PATCH")) *google-test-calls*))]
+           ) == "0"
+  end
+
   test "bundled package opens account-owned lists and restores their mode" do
     eval!(~S[(google-open "alpha" "docs")])
     first = Editor.current_buffer()
@@ -79,6 +135,127 @@ defmodule Compos.GoogleSceneTest do
     eval!(~S[(set-mode! "google-service-mode")])
     assert Buffer.get_local(second, "google-account") == "beta"
     assert Buffer.text(second) =~ "First document"
+  end
+
+  test "Drive opens as a directory and RET and up retain account and folder ownership" do
+    eval!(
+      ~S[(set! *google-transport* (lambda (a m u p b k)
+      (set! *google-test-calls* (cons (list a m u p b) *google-test-calls*))
+      (k '(ok #t data (files ((id "folder1" name "Projects" mimeType "application/vnd.google-apps.folder")))))))]
+    )
+
+    eval!(~S[(google-open "alpha" "drive")])
+    root = Editor.current_buffer()
+    assert Buffer.get_local(root, "mode-name") == "google-drive-mode"
+    assert Buffer.text(root) =~ "Projects/"
+    assert eval!("(plist-get (nth 3 (car *google-test-calls*)) 'q)") =~ "'root' in parents"
+    KeyDispatch.handle_key("RET")
+    child = Editor.current_buffer()
+    assert Buffer.get_local(child, "google-parent") == "folder1"
+    assert Buffer.get_local(child, "google-account") == "alpha"
+    assert Buffer.text(child) =~ "My Drive/Projects"
+    eval!(~S[(set-mode! "google-drive-mode")])
+    KeyDispatch.handle_key("^")
+    assert Editor.current_buffer() == root
+    KeyDispatch.handle_key("m")
+    KeyDispatch.handle_key("x")
+    KeyDispatch.handle_key("y")
+
+    assert eval!(
+             ~S[(length (filter (lambda (call) (equal? (cadr call) "PATCH")) *google-test-calls*))]
+           ) == "1"
+
+    assert eval!(
+             ~S[(plist-get (nth 4 (car (filter (lambda (call) (equal? (cadr call) "PATCH")) *google-test-calls*))) 'trashed)]
+           ) == "#t"
+
+    assert Buffer.get_local(root, "google-account") == "alpha"
+  end
+
+  test "all Google file indexes share dired keys and copy via a named folder picker" do
+    for service <- ["drive", "docs", "sheets", "slides", "forms", "script"] do
+      eval!("(google-open \"alpha\" #{Jason.encode!(service)})")
+      assert Buffer.get_local(Editor.current_buffer(), "mode-name") == "google-drive-mode"
+    end
+
+    eval!(~S[(google-open "alpha" "docs")])
+    source = Editor.current_buffer()
+    KeyDispatch.handle_key("m")
+    KeyDispatch.handle_key("C")
+    KeyDispatch.handle_key("RET")
+
+    assert eval!(
+             ~S[(length (filter (lambda (call) (equal? (cadr call) "POST")) *google-test-calls*))]
+           ) == "0"
+
+    KeyDispatch.handle_key("y")
+
+    assert eval!(
+             ~S[(length (filter (lambda (call) (equal? (cadr call) "POST")) *google-test-calls*))]
+           ) == "1"
+
+    assert eval!(
+             ~S[(nth 2 (car (filter (lambda (call) (equal? (cadr call) "POST")) *google-test-calls*)))]
+           ) ==
+             ~s["https://www.googleapis.com/drive/v3/files/file1/copy"]
+
+    assert Buffer.get_local(source, "google-account") == "alpha"
+  end
+
+  test "R renames through prompts and move uses Drive parent updates" do
+    eval!(~S[(google-open "alpha" "sheets")])
+    source = Editor.current_buffer()
+    KeyDispatch.handle_key("R")
+    Enum.each(String.graphemes("Rename"), &KeyDispatch.handle_key/1)
+    KeyDispatch.handle_key("RET")
+    Enum.each(String.graphemes("Renamed sheet"), &KeyDispatch.handle_key/1)
+    KeyDispatch.handle_key("RET")
+    KeyDispatch.handle_key("y")
+
+    assert eval!(
+             ~S[(plist-get (nth 4 (car (filter (lambda (call) (equal? (cadr call) "PATCH")) *google-test-calls*))) 'name)]
+           ) == ~s["Renamed sheet"]
+
+    eval!(~S[(define *google-test-folder-picker* google--folder-pick)])
+    on_exit(fn -> Session.eval("(set! google--folder-pick *google-test-folder-picker*)") end)
+    eval!(~S[(set! google--folder-pick (lambda (account k) (k "destination" "Projects")))])
+
+    eval!(
+      ~S[(google--file-transfer (current-buffer) '((id "file1" name "Sheet" parents ("old-folder"))) #f)]
+    )
+
+    KeyDispatch.handle_key("y")
+
+    assert eval!(
+             ~S[(plist-get (nth 3 (car (filter (lambda (call) (equal? (cadr call) "PATCH")) *google-test-calls*))) 'addParents)]
+           ) == ~s["destination"]
+
+    assert eval!(
+             ~S[(plist-get (nth 3 (car (filter (lambda (call) (equal? (cadr call) "PATCH")) *google-test-calls*))) 'removeParents)]
+           ) == ~s["old-folder"]
+
+    assert Buffer.get_local(source, "google-account") == "alpha"
+  end
+
+  test "cancelled trash makes no request and failed trash preserves its flag" do
+    eval!(~S[(google-open "alpha" "slides")])
+    source = Editor.current_buffer()
+    KeyDispatch.handle_key("d")
+    KeyDispatch.handle_key("x")
+    KeyDispatch.handle_key("n")
+
+    assert eval!(
+             ~S[(length (filter (lambda (call) (equal? (cadr call) "PATCH")) *google-test-calls*))]
+           ) == "0"
+
+    eval!(
+      ~S[(set! *google-transport* (lambda (a m u p b k) (k '(ok #f error "Permission denied"))))]
+    )
+
+    KeyDispatch.handle_key("x")
+    KeyDispatch.handle_key("y")
+    assert eval!(~S[(list-marked (current-buffer) "D")]) == ~s[("file1")]
+    assert Buffer.get_local(source, "google-file-busy") == false
   end
 
   test "search escapes Drive literals and pagination reaches the API" do

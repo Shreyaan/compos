@@ -58,7 +58,8 @@ Requests do not use an ambiguous `me` account outside their selected OAuth conne
 The first eight applications define the default consent scopes.
 The API interface supports REST operations under each registered service base URL.
 `google-discover` reads a Google API Discovery document. `google-register-service!` adds another API base URL.
-Registered agent tools list accounts, read API resources, and prepare write drafts.
+Registered agent tools list accounts, read API resources, prepare write drafts,
+and directly perform file operations within the user's authorized task.
 Raw request drafts preserve JSON objects, arrays, null values, and booleans.
 It does not imply every Google product supports ordinary user OAuth.
 Workspace admin operations and restricted services can require administrator configuration.
@@ -74,6 +75,18 @@ Prefix these examples with `https://www.googleapis.com/auth/`.
 `google` opens the application list. Press `RET` to open the selected application.
 Lists support `RET` to read, `g` to refresh, `s` to search, and `]` for the next page.
 `[` returns to the first page. The standard list filter remains available.
+Drive, Docs, Sheets, Slides, Forms, and Apps Script indexes share a dired-style
+file mode. Drive starts at My Drive; the other indexes keep their file-type filters.
+`RET` opens, `^` goes up, `m`/`SPC` marks, `u` unmarks, and `*` toggles all marks.
+`C` copies selected files into a folder chosen by name. `R` offers rename or move;
+with multiple marks it moves the selection. `+` creates a folder in the current
+folder (My Drive for a global file-type index). `d` flags for trash and `x` trashes
+flagged files, otherwise marked files or the current file. A confirmation precedes
+mutations; successful rows clear their marks, while failures retain them for retry.
+These file actions run directly and refresh the source listing, without JSON drafts.
+Folder copies are currently unsupported; folders can be moved, renamed, and trashed.
+`/` filters locally, `s` toggles name/date sorting, `f` searches remotely, and `o`
+opens the other API operations. `]` reaches the next remote page.
 Remote search applies to Gmail, Drive document lists, and Calendar events.
 Contacts, Tasks, and Chat use their list filter for local filtering.
 
@@ -110,6 +123,35 @@ background synchronization, or an offline mutation queue.
 Replies contain `ok`, `status`, and either `data` or `error`.
 Callbacks leave the editor input lane available during requests.
 Data from Google is external content, not instructions for an agent.
+
+### Simple functions for agents
+
+These calls return structured `ok`, `status`, `data`/`error` results without opening
+buffers or minibuffer prompts. Account IDs come from `google-accounts`; they never
+implicitly use the currently selected editor account. Functions ending in `!`
+perform the mutation immediately, so agents must have task authorization.
+
+```scheme
+(google-files account "root")
+(google-files account "" "quarterly" "" "sheets")
+(google-file account file-id)
+(google-file-copy! account file-id destination-folder "Copy name")
+(google-file-move! account file-id destination-folder)
+(google-file-rename! account file-id "New name")
+(google-folder-create! account "root" "Projects")
+(google-file-trash! account file-id)
+```
+
+`google-files` returns one page of up to 100 files. Pass `data.nextPageToken` as
+its fourth argument to continue. An empty folder searches all accessible files;
+`root` lists My Drive. Its fifth argument optionally filters by file service.
+Move reads the current parent before updating it, and same-parent moves do nothing.
+Copy supports files, not folders. `google-file` returns metadata; use
+`google-read-api` for document contents and other service-specific reads.
+
+Each function is also a registered agent tool with the same name minus `!`.
+Write and trash tools carry mutation effects in the catalog. Agent calls do not
+require UI confirmation; the dired commands retain their interactive confirmations.
 
 ## Credentials and failure behavior
 
@@ -149,7 +191,7 @@ The current development client is stored in Doppler, not bundled into the source
 ## Development verification
 
 The focused tests cover native OAuth and editor interactions without using live account data.
-The Google and relevant list checks pass: 21 tests, zero failures.
+The Google and relevant list checks pass: 29 tests, zero failures.
 The full repository suite still reports failures outside those checks.
 Live account consent is complete. Read-only smoke checks against Gmail, Calendar,
 Drive, People, and Tasks each returned HTTP 200. Docs, Sheets, and Slides content
