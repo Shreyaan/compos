@@ -1905,7 +1905,9 @@
 (define *group-switch-restore* #f)
 
 (define (group-switch-row label)
-  (and label (assoc (string-trim label) *group-switch-rows*)))
+  ;; a selection is a string or nothing, and nothing here is nil as often as
+  ;; it is #f: both are false to this lookup
+  (and (string? label) (assoc (string-trim label) *group-switch-rows*)))
 
 (define (group-switch-id label)
   (let ((row (group-switch-row label)))
@@ -1935,7 +1937,27 @@
                                                " moved to "
                                                (group-name g))))))))))))
 
+(define-command "group-switch-kill"
+  "Kill the group under the highlight; outside the group prompt, kill the line"
+  (lambda ()
+    (let ((g (group-switch-highlighted)))
+      (if (not g)
+          ;; C-k sits in the minibuffer's own map, so every other prompt keeps
+          ;; the editing key it has always had
+          (run-command "kill-line")
+          (with-invoking-buffer
+            (lambda ()
+              ;; the look is showing this group and its buffers are about to
+              ;; die: the arrangement you came from goes back first
+              (when *group-switch-restore* (*group-switch-restore*))
+              (group-kill! g)
+              ;; the killed row leaves the list without closing the prompt
+              (let ((rows (group-switch-prompt-rows)))
+                (set! *group-switch-rows* (cdr rows))
+                (minibuffer-set-candidates! (car rows)))))))))
+
 (local-set-key* (minibuffer-buffer) "M-m" "group-switch-move-buffer")
+(local-set-key* (minibuffer-buffer) "C-k" "group-switch-kill")
 
 (define-command "group-switch" "Switch to a group and restore its layout"
   (lambda ()
@@ -1943,7 +1965,8 @@
         (let ((g (groups--current)))
           (when g (switch-to-group! g)))
         (let* ((action (group-switch-new-action))
-               (candidates (switch-to-group-candidates))
+               (prompt-rows (group-switch-prompt-rows))
+               (candidates (car prompt-rows))
                (index (group-members-index))
                ;; the arrangement you came from: a look replaces the
                ;; whole frame, so the whole frame is what comes back
@@ -1958,10 +1981,17 @@
                  (lambda ()
                    (for-each (lambda (buf) (buffer-sleep! buf)) woken)
                    (set! woken '())))
+               (restore!
+                 (lambda () (show-here!) (sleep-woken!)))
+               (close!
+                 (lambda ()
+                   (set! open #f)
+                   (set! *group-switch-rows* '())
+                   (set! *group-switch-restore* #f)))
                (peek-now!
                  (lambda (name)
                    (when open
-                     (let ((id (group-resolve-id (string-trim name))))
+                     (let ((id (group-switch-id name)))
                        (if id
                            (set! woken (append (group-preview-draw! index id) woken))
                            ;; the new-context row previews nothing: it names
@@ -1975,13 +2005,13 @@
                    (let ((buf (caddr row)))
                      (minibuffer-cancel!)
                      (switch-to-buffer-in-group! buf))))
-               ;; the rail follows the highlight with no delay: it is a
-               ;; list, not a look, and costs nothing to redraw
+               ;; the rail follows the highlight with no delay and no work:
+               ;; its rows were built with the candidates
                (rail!
                  (lambda (name)
-                   (let ((id (group-resolve-id (string-trim name))))
-                     (if id
-                         (mb-rail! (group-switch-rail-rows index id) rail-pick!)
+                   (let ((row (group-switch-row name)))
+                     (if row
+                         (mb-rail! (caddr row) rail-pick!)
                          (mb-rail! '() #f)))))
                ;; a look per highlight that RESTS: C-n held down moves the
                ;; highlight faster than a frame draws, and each look is a
@@ -1990,24 +2020,26 @@
                  (lambda (name)
                    (rail! name)
                    (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name))))
+          (set! *group-switch-rows* (cdr prompt-rows))
+          (set! *group-switch-restore* restore!)
           (if (null? candidates)
               (message "No groups")
               (minibuffer-read-preview "Switch group: " candidates
                 peek!
                 (lambda (name)
-                  (set! open #f)
-                  ;; the switch saves the layout you leave, so put the
-                  ;; windows back before it looks: a preview is not the
-                  ;; arrangement you were working in
-                  (show-here!)
-                  (let ((id (group-resolve-id (string-trim name))))
+                  (let ((id (group-switch-id name)))
+                    (close!)
+                    ;; the switch saves the layout you leave, so put the
+                    ;; windows back before it looks: a preview is not the
+                    ;; arrangement you were working in
+                    (show-here!)
                     (cond (id (switch-to-group! id))
                           ((equal? name (car action))
                            (group-switch-run-new-action! action))
                           (else (message "No such group"))))
                   (sleep-woken!))
                 (lambda ()
-                  (set! open #f)
+                  (close!)
                   (show-here!)
                   (sleep-woken!))
                 #f

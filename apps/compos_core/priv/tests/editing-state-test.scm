@@ -109,3 +109,24 @@
     (editing-quit!)
     (editing--after-command! "forward-char")
     (check-equal! (editing-state? t--es-a) #f "editing-quit! makes the command a quit")))
+
+;; A mode may refuse one of the state's maps. chat-mode refuses the caret
+;; map: a chat is typed in without pause, so a buffer that held the
+;; Cmd-arrows while armed would never answer the window motion again.
+(deftest 'a-chat-keeps-the-cmd-arrows-for-the-window-motion
+  "the caret map is in force in a plain buffer and not in a chat"
+  (lambda ()
+    (t--es-setup!)
+    (editing--after-command! "forward-char")
+    (check-equal! (if (member "editing-caret-map" (buffer-minor-maps t--es-a)) #t #f) #t
+                  "a plain buffer hands the Cmd-arrows to the caret")
+    (editing-state-off! t--es-a)
+    (buffer-set-local! t--es-a 'mode-name "chat-mode")
+    (editing--after-command! "forward-char")
+    (check-equal! (editing-state? t--es-a) #t "a chat still enters the editing state")
+    (check-equal! (if (member "editing-caret-map" (buffer-minor-maps t--es-a)) #t #f) #f
+                  "and keeps the Cmd-arrows on the window motion")
+    (check-equal! (if (member "cua-mode-map" (buffer-minor-maps t--es-a)) #t #f) #t
+                  "the Shift selections still arm there")
+    (editing-state-off! t--es-a)
+    (buffer-kill! t--es-a)))
