@@ -1894,11 +1894,31 @@
 ;; group; asking for it again in a second prompt is the step this removes.
 ;; The key is M-m, not m: the prompt's letters narrow the list, and a bare
 ;; letter cannot be both a filter and a verb.
+;; The open group prompt as (LABEL ID RAIL-ROWS) rows. A selection comes back
+;; as its label alone, so this is the one place that says which group the
+;; highlight means. Empty while no group prompt is up, which is also how a key
+;; bound in the minibuffer's own map knows it is somewhere else.
+(define *group-switch-rows* '())
+
+;; the arrangement you came from, put back. A verb that destroys what the look
+;; is showing calls this first, so no window is left naming a dead buffer.
+(define *group-switch-restore* #f)
+
+(define (group-switch-row label)
+  (and label (assoc (string-trim label) *group-switch-rows*)))
+
+(define (group-switch-id label)
+  (let ((row (group-switch-row label)))
+    (and row (cadr row))))
+
+(define (group-switch-highlighted)
+  (and (minibuffer-active?)
+       (group-switch-id (minibuffer-selected))))
+
 (define-command "group-switch-move-buffer"
   "Move the buffer you came from into the group under the highlight"
   (lambda ()
-    (let* ((sel (and (minibuffer-active?) (minibuffer-selected)))
-           (g (and sel (group-resolve-id (string-trim sel)))))
+    (let ((g (group-switch-highlighted)))
       (if (not g)
           (message "No group here")
           (with-invoking-buffer
