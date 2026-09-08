@@ -253,6 +253,20 @@ defmodule Compos.Scheme.Builtins do
           v -> v
         end
       end,
+      "list-head" => fn [l, k] when is_list(l) and is_integer(k) ->
+        if k < 0 or k > length(l) do
+          raise Eval.Error, message: "list-head: count #{k} out of 0..#{length(l)}"
+        end
+
+        Enum.take(l, k)
+      end,
+      "list-tail" => fn [l, k] when is_list(l) and is_integer(k) ->
+        if k < 0 or k > length(l) do
+          raise Eval.Error, message: "list-tail: count #{k} out of 0..#{length(l)}"
+        end
+
+        Enum.drop(l, k)
+      end,
       "display" => fn [x] ->
         IO.write(Printer.display(x))
         :void
@@ -401,6 +415,8 @@ defmodule Compos.Scheme.Builtins do
       "plist-get" =>
         "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST, or false.",
       "list-ref" => "(list-ref LST I) — return the element of LST at the 0-based index I; an error past the end.",
+      "list-head" => "(list-head LST K) — return the first K elements of LST; an error past the end.",
+      "list-tail" => "(list-tail LST K) — return LST without its first K elements; an error past the end.",
       "display" => "(display X) — write X to standard output without quotes.",
       "newline" => "(newline) — write a newline to standard output.",
       "error" => "(error X ...) — raise an error; the message joins the displayed arguments with spaces.",
