@@ -59,8 +59,6 @@
     ("S-<down>" "cua-select-down")
     ("S-<home>" "cua-select-line-start")
     ("S-<end>" "cua-select-line-end")
-    ("M-S-<left>" "cua-select-backward-word")
-    ("M-S-<right>" "cua-select-forward-word")
     ("C-S-<left>" "cua-select-backward-word")
     ("C-S-<right>" "cua-select-forward-word")
     ("C-S-<home>" "cua-select-buffer-start")
@@ -82,11 +80,13 @@
 ;; with it: the state installs this map beside its own, and takes both
 ;; away at the next landing.
 (define-keymap! "cua-mode-map")
-;; Cmd-Shift-arrows move views between panes. Remove old selection bindings
-;; on reload too; Shift-Home/End retain line selection.
-(for-each (lambda (dir)
-            (keymap-unset! "cua-mode-map" (string-append "s-S-<" dir ">")))
-          '("left" "right" "up" "down"))
+;; Cmd-Shift-arrows move views between panes and Alt-Shift-arrows move
+;; between groups (groups.scm binds those two in this map, so the move
+;; answers in a buffer you are editing as well). Neither chord is cua's:
+;; a word selection is C-S-<left>/<right>. The unset drops the old
+;; bindings on a reload; Shift-Home/End retain line selection.
+(for-each (lambda (k) (keymap-unset! "cua-mode-map" k))
+          '("s-S-<left>" "s-S-<right>" "s-S-<up>" "s-S-<down>"))
 (for-each (lambda (k) (define-key "cua-mode-map" (car k) (cadr k))) cua--keys)
 
 (define (cua--others)

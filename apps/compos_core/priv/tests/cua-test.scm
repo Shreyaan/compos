@@ -72,8 +72,8 @@
     (editing-state-on! t--cua-buf)
     (check-true! (t--cua-in-force? "cua-mode-map") "a buffer you are editing has them")
     (check-equal! (t--cua-select-key) "S-<left>" "and Shift-Left extends the region")
-    (check-equal! (keymap-lookup "cua-mode-map" "M-S-<left>") "group-tab-left"
-                  "the group move holds in the map itself, armed or not")
+    (check-equal! (key-for-command "group-tab-left" t--cua-buf) "M-S-<left>"
+                  "and the group move holds in a buffer you are editing")
     (buffer-kill! t--cua-buf)))
 
 (deftest 'any-key-but-a-cua-chord-arms-the-buffer

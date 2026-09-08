@@ -1608,8 +1608,9 @@
 (global-set-key "M-S-<right>" "group-tab-right")
 
 ;; The chord is a group move in a buffer you are editing too: cua-mode's
-;; map is the one that answers there, so the move is bound in it as well,
-;; and the chord never arms a buffer it lands on.
+;; map is the one that answers there, ahead of a mode that wants the same
+;; chord, so the move is bound in it as well. The chord never arms a
+;; buffer it lands on.
 (define-key "cua-mode-map" "M-S-<left>" "group-tab-left")
 (define-key "cua-mode-map" "M-S-<right>" "group-tab-right")
 (editing-neutral-commands! '("group-tab-left" "group-tab-right"))
