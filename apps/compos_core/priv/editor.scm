@@ -6694,7 +6694,28 @@
             (cons (car (reverse visible)) (take-n visible (- (length visible) 1)))
             visible))))
   (set-frame-local! 'layout-target-count (length (layout-visible-buffers)))
+  (layout-target-modeline!)
   name)
+
+;;; The modeline names the chosen layout as Markdown: `*layout*:NAME`. The label
+;;; is bold and the target reads plainly beside it, with no segment gap between
+;;; the two spans. The text is compared before it is set, so the change hook
+;;; that calls this on every window move does no work on an unchanged frame.
+(define (layout-target-modeline-text)
+  (let ((target (layout-target)))
+    (string-append ":" (cond ((not target) "free")
+                             ((symbol? target) (symbol->string target))
+                             (else target)))))
+
+(define (layout-target-modeline-shown)
+  (let ((entry (assq 'layout-value *global-mode-string*)))
+    (and entry (pair? (cadr entry)) (cadr (cadr entry)))))
+
+(define (layout-target-modeline!)
+  (let ((text (layout-target-modeline-text)))
+    (unless (equal? text (layout-target-modeline-shown))
+      (global-mode-string-set! 'layout-label '("ml-segment ml-strong" "layout"))
+      (global-mode-string-set! 'layout-value (list "ml-segment ml-tight" text)))))
 
 ;; A target is an algorithm and a capacity, not a frozen accidental tree.
 (define (layout-target-capacity target)
