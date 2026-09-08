@@ -24,15 +24,47 @@
   (when (transient--active) (transient--render!)))
 
 (define (llm-config--setup! _buf)
-  (set-frame-local! 'llm-config-selected #f))
+  (set-frame-local! 'llm-config-selected #f)
+  (set-frame-local! 'llm-config-pending #f))
 
 (define (llm-config--mark-selected!)
   (set-frame-local! 'llm-config-selected #t))
+
+;;; Choosing a bundle does not apply it: it parks it as the frame's pending
+;;; choice and the menu stays open, so a wrong letter costs one more letter
+;;; and not a whole re-open. The choice applies once, when level one closes.
+;;; It carries its own target buffer, because the menu can close from a
+;;; child level whose scope is the same buffer but need not be read again.
+(define (llm-config--pending) (frame-local 'llm-config-pending))
+
+(define (llm-config--pending-bundle)
+  (let ((p (llm-config--pending))) (and (pair? p) (cadr p))))
+
+(define (llm-config--choose-bundle! buf bundle)
+  (set-frame-local! 'llm-config-pending (list buf bundle))
+  (llm-config--refresh!)
+  (message (string-append "selected " (or (llm-bundle-name bundle) "recent setup")
+                          " — applies when the menu closes")))
+
+(define (llm-config--commit-pending!)
+  (let ((p (llm-config--pending)))
+    (set-frame-local! 'llm-config-pending #f)
+    (when (pair? p)
+      (let ((buf (car p)) (bundle (cadr p)))
+        (llm-bundle-apply! buf bundle)
+        (llm-config-remember! bundle)
+        (set-frame-local! 'llm-config-base (llm-bundle-name bundle))
+        (set-frame-local! 'llm-config-selected #f)))))
 
 (define (llm-config--quit! buf)
   (when (frame-local 'llm-config-selected)
     (llm-config-remember! (llm-config-combination buf)))
   (set-frame-local! 'llm-config-selected #f))
+
+;; level one owns the pending choice, so only its exit applies it
+(define (llm-config--quit-top! buf)
+  (llm-config--commit-pending!)
+  (llm-config--quit! buf))
 
 ;;; Presets are the tool selection: a preset names MCP servers, and the
 ;;; servers serve the tools. So the menu picks presets and reports what
@@ -266,13 +298,7 @@
         (string-append "RET sets how hard " (if (equal? model "default") connector model)
                        " reasons. More effort costs more time and tokens.")))))
 
-;; Applying a bundle ends the menu: it just set everything the menu sets.
-(define (llm-config--apply-bundle! buf bundle)
-  (llm-bundle-apply! buf bundle)
-  (llm-config-remember! bundle)
-  (set-frame-local! 'llm-config-base (llm-bundle-name bundle))
-  (set-frame-local! 'llm-config-selected #f)
-  (run-command "transient-quit-all"))
+
 
 ;;; --- what stops to ask ----------------------------------------------------
 ;;; Permissions are part of the setup, not a separate subject: the same
@@ -465,7 +491,7 @@
           (llm-config-read! "Bundle: " (llm-config--bundle-candidates)
             (lambda (name)
               (let ((b (and (not (equal? name "")) (llm-bundle-named name))))
-                (when b (llm-config--apply-bundle! buf b))))
+                (when b (llm-config--choose-bundle! buf b))))
             (lambda () #f))))))
 
 (define-command "llm-config-forget-bundle" "Forget a saved bundle"
@@ -493,8 +519,11 @@
               (transient-suffix
                 (llm-config--history-key index)
                 (llm-bundle-label choice)
-                (lambda () (llm-config--apply-bundle! buf choice))
-                'transient 'stay 'bundle choice)
+                (lambda () (llm-config--choose-bundle! buf choice))
+                'transient 'stay 'bundle choice
+                'value-fn (lambda (_scope)
+                            (if (equal? (llm-config--pending-bundle) choice)
+                                "selected" "")))
               items))))))
 
 (define (llm-config--bundle-items buf)
@@ -507,10 +536,14 @@
                 (cons
                   (transient-suffix key
                     (or (llm-bundle-name b) "?")
-                    (lambda () (llm-config--apply-bundle! buf b))
+                    (lambda () (llm-config--choose-bundle! buf b))
                     'transient 'stay 'bundle b
                     'value-fn (lambda (scope)
-                                (if (llm-config--bundle-active? scope b) "active" "")))
+                                (cond ((llm-config--pending-bundle)
+                                       (if (equal? (llm-config--pending-bundle) b)
+                                           "selected" ""))
+                                      ((llm-config--bundle-active? scope b) "active")
+                                      (else ""))))
                   items)
                 items))))))
 
