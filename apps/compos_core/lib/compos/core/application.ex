@@ -3,8 +3,33 @@ defmodule Compos.Core.Application do
 
   use Application
 
+  require Logger
+
   @impl true
   def start(_type, _args) do
+    # One daemon per home, and the socket is the lock. A second daemon used
+    # to remove the live socket and bind its own (Compos.Rpc.Server.init), so
+    # two daemons served one home. Both then saved the desktop, and the one
+    # that never installed the restored globals wrote its empty set over the
+    # good file: on 2026-09-09 that lost every group, every graveyard entry
+    # and every LLM bundle. The probe runs before the supervision tree, so a
+    # second daemon dies before it can restore or save anything.
+    case live_daemon(daemon_socket_path()) do
+      nil ->
+        start_tree()
+
+      path ->
+        message =
+          "another compos daemon already serves #{Compos.Core.home()} " <>
+            "(it answers on #{path}). Stop that one first, or point this one " <>
+            "at another home with COMPOS_HOME."
+
+        Logger.error(message)
+        {:error, message}
+    end
+  end
+
+  defp start_tree do
     # Before anything can ask for structure. A bundled grammar is part
     # of the editor the way the compiled-in four are, and a mode that
     # reads one must not race its arrival — an empty answer from the
@@ -80,5 +105,36 @@ defmodule Compos.Core.Application do
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Compos.Core.Supervisor)
+  end
+
+  # --- one daemon per home ----------------------------------------------------
+
+  defp daemon_socket_path do
+    Application.get_env(:compos_rpc, :socket_path) ||
+      Path.join(Compos.Core.home(), "sock")
+  end
+
+  @probe ~s({"jsonrpc":"2.0","id":1,"method":"ping","params":{}}\n)
+
+  # The socket PATH when a daemon answers on it, else nil. A socket file with
+  # nothing behind it refuses the connection, which is the stale case, and the
+  # RPC server removes it on the way up as it always did.
+  defp live_daemon(path) do
+    if Application.get_env(:compos_core, :single_daemon_guard, true) and File.exists?(path) do
+      case :gen_tcp.connect({:local, path}, 0, [:binary, packet: :line, active: false], 1_000) do
+        {:ok, sock} ->
+          :gen_tcp.send(sock, @probe)
+          answer = :gen_tcp.recv(sock, 0, 2_000)
+          :gen_tcp.close(sock)
+
+          case answer do
+            {:ok, line} -> if String.contains?(to_string(line), "pong"), do: path
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+    end
   end
 end

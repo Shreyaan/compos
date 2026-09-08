@@ -12507,7 +12507,7 @@
   '("split-window-below" "split-window-right" "delete-window"
     "delete-other-windows" "other-window"))
 
-;; Cmd-arrows (s- = super) are geometric windmove: window-rects gives each
+;; Cmd-arrows (s- = super) move the focus geometrically: window-rects gives each
 ;; leaf's normalized frame rectangle, and the neighbor in DIR is the nearest
 ;; window past the active edge whose span contains the active center — so
 ;; motion follows what's on screen, not the split tree's shape.
@@ -12544,7 +12544,7 @@
                        (loop (cdr l) r d)
                        (loop (cdr l) best bestd)))))))))
 
-(define (windmove! dir)
+(define (focus-move! dir)
   (let ((w (window-in-direction dir)))
     (if w
         (begin (select-window! (car w))
@@ -12553,25 +12553,25 @@
 
 ;; a move that lands on a peek's window goes back: a preview takes no
 ;; focus. M-<down> scrolls it; RET on its row opens it.
-(define (windmove-focusable! dir)
+(define (focus-move-safe! dir)
   (let ((from (active-window)))
-    (windmove! dir)
+    (focus-move! dir)
     (unless (window-focusable? (active-window))
       (select-window! from)
       (message "A peek: RET on its row opens it, M-<down> scrolls it"))))
 
-(define-command "windmove-left" "Select the window to the left"
-  (lambda () (windmove-focusable! 'left)))
-(define-command "windmove-right" "Select the window to the right"
-  (lambda () (windmove-focusable! 'right)))
-(define-command "windmove-up" "Select the window above"
-  (lambda () (windmove-focusable! 'up)))
-(define-command "windmove-down" "Select the window below"
-  (lambda () (windmove-focusable! 'down)))
+(define-command "focus-left" "Select the window to the left"
+  (lambda () (focus-move-safe! 'left)))
+(define-command "focus-right" "Select the window to the right"
+  (lambda () (focus-move-safe! 'right)))
+(define-command "focus-up" "Select the window above"
+  (lambda () (focus-move-safe! 'up)))
+(define-command "focus-down" "Select the window below"
+  (lambda () (focus-move-safe! 'down)))
 
-;; Move a view onto the neighboring stack; consume the source's previous
+;; Move the buffer onto the neighboring stack; consume the source's previous
 ;; entry instead of exchanging the two visible buffers. Splits stay intact.
-(define (window-move-view! dir)
+(define (buffer-move! dir)
   (let* ((source (active-window))
          (neighbor (window-in-direction dir))
          (buf (window-buffer source))
@@ -12587,7 +12587,7 @@
                (not (layout-visible-window? neighbor))
                (not (layout-visible-window? (list source buf)))
                (not (window-fill-member? buf)))
-           (message "Cannot move this view into that pane"))
+           (message "Cannot move this buffer into that pane"))
           ((null? eligible) (message "No previous buffer to reveal"))
           (else
             (switch-to-buffer-here! (car eligible))
@@ -12601,14 +12601,14 @@
 
 (for-each
   (lambda (dir)
-    (let ((name (string-append "windmove-view-" (symbol->string dir))))
-      (define-command name "Move this view to the neighboring pane and reveal its previous buffer"
-        (lambda () (window-move-view! dir)))
+    (let ((name (string-append "buffer-" (symbol->string dir))))
+      (define-command name "Move this buffer to the neighboring pane and reveal its previous buffer"
+        (lambda () (buffer-move! dir)))
       (catalog-meta! 'command name 'domain 'windows 'effects '(write display))))
   '(left right up down))
 
-;; Swap this pane's buffer with the directional neighbor's and follow it
-;; (Emacs windmove-swap-states-*)
+;; Swap this window's buffer with the directional neighbor's and follow it
+;; (window-left/right/up/down — the window family)
 (define (window-swap! dir)
   (let ((nb (window-in-direction dir)))
     (if nb
@@ -12619,19 +12619,19 @@
           (chat-snap-to-input!))
         (message (string-append "No window " (symbol->string dir))))))
 
-(define-command "windmove-swap-states-left" "Swap this window's buffer leftward and follow it"
+(define-command "window-left" "Swap this window's buffer leftward and follow it"
   (lambda () (window-swap! 'left)))
-(define-command "windmove-swap-states-right" "Swap this window's buffer rightward and follow it"
+(define-command "window-right" "Swap this window's buffer rightward and follow it"
   (lambda () (window-swap! 'right)))
-(define-command "windmove-swap-states-up" "Swap this window's buffer upward and follow it"
+(define-command "window-up" "Swap this window's buffer upward and follow it"
   (lambda () (window-swap! 'up)))
-(define-command "windmove-swap-states-down" "Swap this window's buffer downward and follow it"
+(define-command "window-down" "Swap this window's buffer downward and follow it"
   (lambda () (window-swap! 'down)))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
-  '("windmove-left" "windmove-right" "windmove-up" "windmove-down"
-    "windmove-swap-states-left" "windmove-swap-states-right"
-    "windmove-swap-states-up" "windmove-swap-states-down"))
+  '("focus-left" "focus-right" "focus-up" "focus-down"
+    "window-left" "window-right"
+    "window-up" "window-down"))
 
 ;; Eat the pane next door: it goes away and this window takes exactly its
 ;; rectangle. Only a neighbor that shares a whole edge is a meal, so the
@@ -12686,16 +12686,17 @@
   (lambda () (window-eat!)))
 (catalog-meta! 'command "window-eat" 'domain 'windows 'effects '(write display))
 
-;; Emacs windmove has no default keys. A keymap installs them:
-;; (windmove-default-keybindings MODIFIERS) binds the four arrows with
-;; MODIFIERS to windmove-*. MODIFIERS is one symbol or a list of symbols
-;; from shift, control, meta, super; no argument means shift. The client
-;; sends the Cmd-arrows from an editable buffer only in its movement
-;; state (before the first key, or after ESC); in the editing state the
+;; No arrow family has default keys; an installer binds them:
+;; (focus-default-keybindings MODIFIERS) binds the arrows to focus-*,
+;; (window-default-keybindings MODIFIERS) to window-*, and
+;; (buffer-default-keybindings MODIFIERS) to buffer-*. MODIFIERS is one
+;; symbol or a list from shift, control, meta, super. The client sends
+;; the Cmd-arrows from an editable buffer only in its movement state
+;; (before the first key, or after ESC); in the editing state the
 ;; browser keeps them as line and document start and end.
-(define *windmove-directions* '("left" "right" "up" "down"))
+(define *direction-names* '("left" "right" "up" "down"))
 
-(define (windmove-chord modifiers key)
+(define (arrow-chord modifiers key)
   (let* ((mods (cond ((or (not modifiers) (null? modifiers)) '(shift))
                      ((symbol? modifiers) (list modifiers))
                      (else modifiers)))
@@ -12706,24 +12707,26 @@
                    (if (has? 'shift) "S-" "")
                    key)))
 
-(define (windmove-install-keybindings! modifiers prefix)
+(define (install-arrow-keys! modifiers prefix)
   (for-each
     (lambda (dir)
-      (global-set-key (windmove-chord modifiers (string-append "<" dir ">"))
+      (global-set-key (arrow-chord modifiers (string-append "<" dir ">"))
                       (string-append prefix dir)))
-    *windmove-directions*))
+    *direction-names*))
 
-(define (windmove-default-keybindings &optional modifiers)
-  (windmove-install-keybindings! modifiers "windmove-"))
+(define (focus-default-keybindings &optional modifiers)
+  (install-arrow-keys! modifiers "focus-"))
 
-;; Emacs default for the swap: shift and super
-(define (windmove-swap-states-default-keybindings &optional modifiers)
-  (windmove-install-keybindings! (or modifiers '(shift super))
-                                 "windmove-swap-states-"))
+;; default chords: Cmd-Shift for the window and buffer families
+(define (window-default-keybindings &optional modifiers)
+  (install-arrow-keys! (or modifiers '(shift super)) "window-"))
+
+(define (buffer-default-keybindings &optional modifiers)
+  (install-arrow-keys! (or modifiers '(shift super)) "buffer-"))
 
 ;;; --- the movement state and the editing state ------------------------------
 ;;; An editable buffer has two states, and neither is a mode. The user lands
-;;; on a window in the movement state: the Cmd-arrows run windmove. The first
+;;; on a window in the movement state: the Cmd-arrows move the focus. The first
 ;;; command that is not keyboard-quit enters the editing state: the keymap
 ;;; editing-state-map is in force, ahead of the buffer's maps, and the
 ;;; Cmd-arrows move point to the line and buffer ends. keyboard-quit (ESC,
@@ -12804,7 +12807,7 @@
 (define *editing-quit* #f)
 (define (editing-quit!) (set! *editing-quit* #t))
 
-;; A window command (split, delete, layout, windmove) changes what you
+;; A window command (split, delete, layout, an arrow move) changes what you
 ;; look at, not the text. It is a landing: the buffer returns to the
 ;; movement state, and the next Cmd-arrow moves the focus. The catalog's
 ;; domain says which commands those are. One lookup walks the whole
@@ -12813,9 +12816,16 @@
 (define *editing--domain-cache* '())
 (define *editing--domain-gen* -1)
 
+;; The directional commands are window commands by name, so a
+;; redefinition that loses their catalog domain still counts as a landing.
+(define *direction-command-names*
+  '("focus-left" "focus-right" "focus-up" "focus-down"
+    "window-left" "window-right" "window-up" "window-down"
+    "buffer-left" "buffer-right" "buffer-up" "buffer-down"))
+
 (define (editing--window-command? cmd)
   (and (string? cmd)
-       (or (string-prefix? "windmove-" cmd)
+       (or (and (member cmd *direction-command-names*) #t)
            (begin
              (unless (equal? *editing--domain-gen* (catalog-generation))
                (set! *editing--domain-cache* '())
@@ -13276,9 +13286,9 @@
 (global-set-key "C-x o" "other-window")
 (global-set-key "C-x l" "window-layout")
 (global-set-key "C-c p" "popup-buffer")
-;; Cmd-arrows move between windows; Cmd-Shift-arrows carry the buffer over
-(windmove-default-keybindings 'super)
-(windmove-install-keybindings! '(shift super) "windmove-view-")
+;; Cmd-arrows move the focus; Cmd-Shift-arrows carry the buffer over
+(focus-default-keybindings 'super)
+(buffer-default-keybindings '(shift super))
 (global-set-key "S-<left>" "previous-buffer")
 (global-set-key "S-<right>" "next-buffer")
 (global-set-key "C-x <left>" "previous-buffer")
@@ -13497,13 +13507,14 @@
 (public! 'key-for-command "(key-for-command NAME [BUF]) -> the tersest key bound to NAME, in BUF's keymap and the global one (\"\" if none)")
 (public! 'global-set-key "(global-set-key KEYS COMMAND-NAME), e.g. \"C-c x\"")
 (public! 'global-unset-key "(global-unset-key KEYS) — remove one global binding")
-(public! 'windmove-default-keybindings "(windmove-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to windmove-left/right/up/down")
+(public! 'focus-default-keybindings "(focus-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to focus-left/right/up/down")
 (public! 'editing-state? "(editing-state? BUF) — #t when BUF is in the editing state: editing-state-map is in force and the Cmd-arrows move point, not the focus")
 (public! 'editing-state-on! "(editing-state-on! BUF) — enter the editing state in BUF; the first command after a landing does this")
-(public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows run windmove; keyboard-quit, a window command, and a new landing do this")
+(public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows move the focus; keyboard-quit, a window command, and a new landing do this")
 (public! 'editing-quit! "(editing-quit!) — mark the running command as a quit: after it the buffer is in the movement state; keyboard-quit calls this, and a command that aborts something calls it too")
-(public! 'windmove-swap-states-default-keybindings "(windmove-swap-states-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to windmove-swap-states-*")
-(public! 'windmove-chord "(windmove-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (windmove-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
+(public! 'window-default-keybindings "(window-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to window-left/right/up/down; the two panes' buffers swap and the focus follows")
+(public! 'buffer-default-keybindings "(buffer-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to buffer-left/right/up/down; the buffer moves to the neighbor and its previous buffer shows here")
+(public! 'arrow-chord "(arrow-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (arrow-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")
 (public! 'define-derived-mode "(define-derived-mode NAME PARENT SETUP) — NAME is PARENT with SETUP on top: PARENT's setup, keymap and hook come first")
 (public! 'major-mode-set! "(major-mode-set! NAME) — enter the major mode NAME and say so; the M-x form of a mode")

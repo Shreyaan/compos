@@ -178,7 +178,7 @@
     (message "")))
 
 (define (overview--move! dir)
-  (when (overview-active?) (windmove! dir)))
+  (when (overview-active?) (focus-move! dir)))
 
 (define (overview-mark!)
   (when (overview-active?)

@@ -84,6 +84,9 @@ if config_env() == :test do
 
   config :compos_core,
     home: "/tmp/compos-test-home-#{suffix}",
+    # each partition owns its socket already; the guard would only add a
+    # probe with a timeout to every test VM's boot
+    single_daemon_guard: false,
     provenance_path: ":memory:",
     desktop_path: "/tmp/compos-desktop-test-#{suffix}.etf",
     daemon_registry_path: "/tmp/compos-daemons-test-#{suffix}.json",
