@@ -815,6 +815,10 @@ defmodule Compos.Ui.Layouts do
           }
           .ml-extra .ml-segment { color: var(--dim-fg, #8a857a); }
           .ml-extra .ml-attention { color: var(--agent-permission-fg, #a8741a); font-weight: 600; }
+          /* a segment reads as Markdown: ml-strong is `*bold*`, and ml-tight
+             joins a segment to the one before it with no gap between them. */
+          .ml-extra .ml-strong { font-weight: 600; }
+          .ml-extra .ml-tight { margin-left: -12px; }
           /* font-lock scopes (tree-sitter): the .ts-SCOPE rules come from the
              ts-SCOPE faces, see Compos.Ui.FaceCSS. A theme or a defface! owns
              every syntax colour, weight and slant. */
