@@ -262,7 +262,7 @@ defmodule Compos.PermissionTest do
       # the proxy has no chat, so it reads the default — which IS the
       # chat-wide setting a user changes with C-c p
       eval!("(set! *permission-default-mode* 'ask)")
-      on_exit(fn -> Session.eval("(set! *permission-default-mode* 'approve)") end)
+      on_exit(fn -> Session.eval("(set! *permission-default-mode* 'auto)") end)
 
       args = Base.encode64(Jason.encode!(%{"code" => "(+ 1 1)"}))
 

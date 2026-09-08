@@ -1,0 +1,93 @@
+The `_session/steering` extension for the DeepSeek Harness ACP adapter.
+
+The harness agent loop already has the three primitives (followup, steer,
+inject); its ACP bridge exposed none of them, so a running DeepSeek turn
+could not be steered and every RET only queued for the next turn. This
+patch gives the bridge the same extension claude-code-acp carries: it
+advertises `_meta.steering.supported` at initialize and answers
+`_session/steering` by admitting the content and handing it to
+`agent.steer()`, which the loop takes at its next step boundary. An idle
+session answers `promptRequired`, which is the outcome the ACP backend
+(lib/compos/core/agent/backend/acp.ex) turns back into a queued prompt.
+
+The adapter is an npm build, so `npm install` in ~/src/dsh-acp drops this.
+Replay it with:
+
+  cd ~/src/dsh-acp/node_modules/@deepseek-ai/dsh-acp
+  patch -p1 < ~/src/compos/docs/dsh-acp-steering.patch
+
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -864,7 +864,42 @@
+ 			return { stopReason: await completion.promise };
+ 		} finally {
+ 			requestSignal?.removeEventListener("abort", onRequestAbort);
++		}
++	}
++	/**
++	* Inject text into the RUNNING turn: the `_session/steering` extension.
++	* The harness loop takes a steered message at its next step boundary, so
++	* the turn keeps its tools and its context and changes direction. An idle
++	* session has no turn to steer, and the client is told to send an ordinary
++	* prompt instead.
++	* @param params - steering request: sessionId and prompt content.
++	* @param imageEnabled - connection capability advertised at initialization.
++	* @param requestSignal - JSON-RPC request cancellation signal.
++	* @returns injected when the loop took the message, promptRequired when not.
++	*/
++	async steer(params, imageEnabled, requestSignal) {
++		this.assertActive();
++		if (this.inflight === void 0 || this.agent.status !== "running") return { outcome: "promptRequired" };
++		const selection = this.modelControl.snapshot();
++		let content;
++		try {
++			content = await admitAcpPrompt(this.ctx, selection, params.prompt, imageEnabled, requestSignal);
++		} catch (error) {
++			if (error instanceof AcpContentError) throw error.kind === "invalid" ? invalidParams$1(error.message) : internalError$1(error.message);
++			throw error;
+ 		}
++		const message = createUserMessage({
++			content,
++			source: { kind: "user" }
++		});
++		if (selection !== void 0) this.pendingSelections.set(message.id, selection);
++		try {
++			this.agent.steer(message);
++		} catch (error) {
++			this.pendingSelections.delete(message.id);
++			throw internalError$1(`steering was not delivered: ${errorChain(error)}`);
++		}
++		return { outcome: "injected" };
+ 	}
+ 	/** Cancel the active prompt, or autonomous work when no ACP prompt exists. */
+ 	cancel() {
+@@ -1161,7 +1196,8 @@
+ 						resume: {}
+ 					}
+ 				},
+-				authMethods: []
++				authMethods: [],
++				_meta: { steering: { supported: true } }
+ 			};
+ 		},
+ 		authenticate(_params) {
+@@ -1311,6 +1347,10 @@
+ 		async prompt(params, requestSignal) {
+ 			assertOpen();
+ 			return requireSession(brandString(params.sessionId)).prompt(params, imagePromptEnabled, requestSignal);
++		},
++		async steer(params, requestSignal) {
++			assertOpen();
++			return requireSession(brandString(params.sessionId)).steer(params, imagePromptEnabled, requestSignal);
+ 		},
+ 		cancel(params) {
+ 			sessions.get(brandString(params.sessionId))?.cancel();
+@@ -1322,7 +1362,7 @@
+ 	const connection = agent({ name: "deepseek-harness-acp" }).onRequest(methods.agent.initialize, ({ params }) => implementation.initialize(params)).onRequest(methods.agent.authenticate, async ({ params }) => {
+ 		await implementation.authenticate(params);
+ 		return {};
+-	}).onRequest(methods.agent.session.new, ({ params, signal }) => implementation.newSession(params, signal)).onRequest(methods.agent.session.list, ({ params, signal }) => implementation.listSessions(params, signal)).onRequest(methods.agent.session.resume, ({ params, signal }) => implementation.resumeSession(params, signal)).onRequest(methods.agent.session.close, ({ params }) => implementation.closeSession(params)).onRequest(methods.agent.session.setConfigOption, ({ params, signal }) => implementation.setSessionConfigOption(params, signal)).onRequest(methods.agent.session.prompt, ({ params, signal }) => implementation.prompt(params, signal)).onNotification(methods.agent.session.cancel, ({ params }) => implementation.cancel(params)).connect(stream);
++	}).onRequest(methods.agent.session.new, ({ params, signal }) => implementation.newSession(params, signal)).onRequest(methods.agent.session.list, ({ params, signal }) => implementation.listSessions(params, signal)).onRequest(methods.agent.session.resume, ({ params, signal }) => implementation.resumeSession(params, signal)).onRequest(methods.agent.session.close, ({ params }) => implementation.closeSession(params)).onRequest(methods.agent.session.setConfigOption, ({ params, signal }) => implementation.setSessionConfigOption(params, signal)).onRequest(methods.agent.session.prompt, ({ params, signal }) => implementation.prompt(params, signal)).onRequest("_session/steering", (params) => params, ({ params, signal }) => implementation.steer(params, signal)).onNotification(methods.agent.session.cancel, ({ params }) => implementation.cancel(params)).connect(stream);
+ 	const conn = connection.client;
+ 	let quiescing;
+ 	const quiesce = () => {

@@ -10155,7 +10155,7 @@
         (else buf)))
 
 (define (llm-config-permission buf)
-  (if (boundp (quote chat-permission-mode)) (chat-permission-mode buf) 'approve))
+  (if (boundp (quote chat-permission-mode)) (chat-permission-mode buf) 'auto))
 
 ;; The configuration menu keeps recent complete choices, not three unrelated
 ;; input histories. The transient records one final choice when it closes.

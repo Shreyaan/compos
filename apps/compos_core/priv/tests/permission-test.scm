@@ -31,11 +31,16 @@
   "approve, ask and auto, at our own chokepoints"
   (lambda ()
     (let ((buf (t--perm-buf "*zz-policy*")))
-      ;; default (approve): ordinary tools run, deny-listed ones ask
+      ;; default (auto): ordinary tools run, deny-listed ones ask
       (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(+ 1 1)")
-                    'allow-always "approve runs an ordinary tool")
+                    'allow-always "the default runs an ordinary tool")
       (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(mail-send ...)")
-                    'ask "approve still asks for the deny-list")
+                    'ask "the default still asks for the deny-list")
+
+      ;; approve: a shell command is the one thing it stops for
+      (buffer-set-local! buf 'chat-permission-mode 'approve)
+      (check-equal! (*permission-policy* buf "Bash" "execute" "{}")
+                    'ask "approve asks before a shell command")
 
       ;; ask mode: everything asks
       (buffer-set-local! buf 'chat-permission-mode 'ask)
@@ -192,4 +197,53 @@
       ;; the read side of git in Scheme is untouched
       (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(git-diff d)")
                     'allow-always "the catalog's own git readers stay open")
+      (buffer-kill! buf))))
+
+(deftest 'an-always-answer-becomes-a-rule-the-chat-keeps
+  "The backend's own allow_always binds the backend. This policy runs
+   first, so the answer has to live here or the next call asks again."
+  (lambda ()
+    (let ((buf (t--perm-buf "*zz-always*"))
+          (raw "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"gh api repos/a\"}}"))
+      ;; the verb is the key: a command's arguments differ every time
+      (check-equal! (permission-signature "Run command" "execute" raw) "gh api"
+                    "an execute rule is keyed by the command's verb")
+      (check-equal! (permission-signature "Read notes.md" "read" "{}")
+                    "read read notes.md"
+                    "everything else is keyed by its own title")
+
+      ;; approve asks before a shell command...
+      (buffer-set-local! buf 'chat-permission-mode 'approve)
+      (check-equal! (*permission-policy* buf "Run command" "execute" raw) 'ask
+                    "the first call asks")
+
+      ;; ...and the answer ends the asking for the whole family
+      (permission-always-allow! buf (permission-signature "Run command" "execute" raw))
+      (check-equal! (*permission-policy* buf "Run command" "execute" raw) 'allow-always
+                    "the call that was answered runs")
+      (check-equal! (*permission-policy* buf "Run command" "execute"
+                      "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"gh api repos/b\"}}")
+                    'allow-always "and so does the next one in the family")
+      (check-equal! (*permission-policy* buf "Run command" "execute"
+                      "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"curl example.com\"}}")
+                    'ask "a verb nobody answered for still asks")
+
+      ;; the rule belongs to the chat that gave it
+      (let ((other (t--perm-buf "*zz-always-other*")))
+        (buffer-set-local! other 'chat-permission-mode 'approve)
+        (check-equal! (*permission-policy* other "Run command" "execute" raw) 'ask
+                      "another chat never learned it")
+        (buffer-kill! other))
+
+      ;; ask mode says every tool call asks, and it outranks a rule
+      (buffer-set-local! buf 'chat-permission-mode 'ask)
+      (check-equal! (*permission-policy* buf "Run command" "execute" raw) 'ask
+                    "ask mode means ask, rule or no rule")
+
+      ;; and no answer of the user's reaches past the deny-list
+      (buffer-set-local! buf 'chat-permission-mode 'auto)
+      (let ((bad "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"git push origin\"}}"))
+        (permission-always-allow! buf (permission-signature "Run command" "execute" bad))
+        (check-equal! (*permission-policy* buf "Run command" "execute" bad) 'ask
+                      "an irreversible verb asks even with a rule"))
       (buffer-kill! buf))))

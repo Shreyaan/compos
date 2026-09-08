@@ -180,7 +180,8 @@
       ((equal? type 'permission)
        (let* ((title (plist-get e 'title))
               (kind (or (plist-get e 'kind) ""))
-              (verdict (*permission-policy* buf title kind (or (plist-get e 'raw) ""))))
+              (raw (or (plist-get e 'raw) ""))
+              (verdict (*permission-policy* buf title kind raw)))
          (cond
            ((equal? verdict 'allow)
             (agent-answer-permission! slug "allow_once" "allow"))
@@ -196,6 +197,10 @@
                              "agent-meta")))
                 (agent-block-push! buf start (agent-mark slug) "meta" '()))))
            (else
+             ;; what was asked, kept for the answer: the backend's pending
+             ;; record holds no arguments, and "Always" needs them to
+             ;; write a rule the policy can match next time
+             (buffer-set-local! buf 'permission-asked (list title kind raw))
              ;; only a real ask waits on the user — an auto-answered
              ;; request must never claim it
              (chat-activity! buf "needs permission")

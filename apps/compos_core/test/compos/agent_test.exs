@@ -620,7 +620,7 @@ defmodule Compos.AgentTest do
 
   # boot a thread through (execute ...) and complete the ACP handshake.
   # Threads boot in ask mode here: these tests are about the banner flow,
-  # and the default (approve) answers most requests without one.
+  # and the default (auto) answers most requests without one.
   defp boot(task) do
     {:ok, _} = Session.eval(~s[(execute* "#{task}" '(permission-mode ask))])
     assert_receive {:transport_open, agent}, 1_000

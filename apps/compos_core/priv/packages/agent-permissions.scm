@@ -7,7 +7,10 @@
 (effects! '(write))
 (category! 'chat)
 
-(define *permission-default-mode* 'approve)
+;; auto: the agent is not interrupted for ordinary work. The deny-list
+;; below still stops the irreversible outward acts, whatever the stance,
+;; and C-c b sets a stricter one per chat.
+(define *permission-default-mode* 'auto)
 
 (define (chat-permission-mode buf)
   (or (and buf (buffer-exists? buf) (buffer-local buf 'chat-permission-mode))
@@ -69,6 +72,58 @@
           ((and (equal? name (car (car rules)))
                 ((cadr (car rules)) buf)) #t)
           (else (loop (cdr rules))))))
+
+;; "Always" has to mean something on OUR side. The backend's own
+;; allow_always binds the backend alone; this policy runs first and would
+;; re-derive `ask` on the next call, so the button used to promise a
+;; memory nobody kept. The answer becomes a rule, held by the chat that
+;; gave it.
+;;
+;; The rule is keyed by the VERB, not the call. A shell command's
+;; arguments differ every time, so "gh api repos/a" would never match
+;; "gh api repos/b" — and the family is what the user meant.
+
+(define (permission-command-text title raw)
+  ;; ACP carries the tool call's own input beside the title; a Bash call
+  ;; puts the command there. The title is the fallback, and on the direct
+  ;; lane it is all there is.
+  (let* ((call (json-parse (or raw "")))
+         (input (and call (plist-get call 'rawInput)))
+         (cmd (and input (plist-get input 'command))))
+    (if (and (string? cmd) (not (equal? cmd ""))) cmd (or title ""))))
+
+(define (permission-verb text)
+  (let ((words (remove (lambda (w) (equal? w ""))
+                       (string-split (string-trim (or text "")) " "))))
+    (cond ((null? words) "")
+          ((null? (cdr words)) (car words))
+          (else (string-append (car words) " " (cadr words))))))
+
+(define (permission-signature title kind raw)
+  (string-downcase
+    (if (equal? kind "execute")
+        (permission-verb (permission-command-text title raw))
+        (string-trim (string-append (or kind "") " " (or title ""))))))
+
+(define (permission-always-rules buf)
+  (or (and buf (buffer-exists? buf) (buffer-local buf 'permission-always-rules))
+      '()))
+
+(define (permission-always-allow! buf sig)
+  (when (and buf (buffer-exists? buf) (not (equal? sig "")))
+    (buffer-set-local! buf 'permission-always-rules
+      (cons sig (remove (lambda (s) (equal? s sig))
+                        (permission-always-rules buf)))))
+  sig)
+
+(define (permission-always-allowed? buf title kind raw)
+  ;; ask mode says every tool call asks, and it means it: a standing rule
+  ;; does not survive the user turning the stance back up.
+  (and buf
+       (not (equal? (chat-permission-mode buf) 'ask))
+       (member (permission-signature title kind raw)
+               (permission-always-rules buf))
+       #t))
 
 (define (permission-tool-effects title)
   (let ((e (and title (catalog-entry 'tool title))))
@@ -133,6 +188,12 @@
                          (buffer-local buf 'agent-permission-profile))))
       (cond ((permission-denied-verb? text) 'ask)
             ((profile-denies? profile text) 'reject)
+            ;; the user already answered "always" for this verb in this
+            ;; chat. It sits under the deny-list and the profile, which
+            ;; no answer of the user's can wave through, and over
+            ;; everything else — including the file gate, because a gate
+            ;; set to ask that asks again after "always" is the bug.
+            ((permission-always-allowed? buf title kind raw) 'allow-always)
             ((filesystem-tool-verdict title kind))  ; files go through buffers
             ;; a shell command is exactly the irreversible act the approve
             ;; stance promises to surface: the popup decides, not a silent
@@ -156,6 +217,12 @@
 
 (public! 'allow-command-when!
   "(allow-command-when! NAME PREDICATE) — register a permission predicate that can allow one M-x command for a chat buffer")
+
+(public! 'permission-signature
+  "(permission-signature TITLE KIND RAW) — the verb an Always answer is remembered by")
+
+(public! 'permission-always-rules
+  "(permission-always-rules BUF) — the verbs this chat answered Always for")
 
 (catalog-meta! 'function "allow-command-when!" 'domain 'permissions 'effects '(write))
 
@@ -244,7 +311,8 @@
 ;; and which C-c b key moves each part. The dialog can only hold three
 ;; labels; this is the rest of the answer to "am I seeing everything?"
 (define (permission-policy-report buf)
-  (let ((stance (chat-permission-mode buf)))
+  (let ((stance (chat-permission-mode buf))
+        (rules (permission-always-rules buf)))
     (string-append
       "Permissions — " buf "\n\n"
       "asks (C-c b k): " (symbol->string stance)
@@ -259,6 +327,14 @@
       (if (equal? stance 'auto) "runs without asking" "asks first") "\n"
       "editor commands: catalogued effects decide — pure and read run, "
       "destroy and spend ask\n"
+      ;; what "Always" built. A standing rule is state the user made, so
+      ;; the page that explains the gate has to name it.
+      (if (null? rules)
+          ""
+          (string-append
+            "\nyou answered Always here, so these no longer ask:\n"
+            (apply string-append
+              (map (lambda (r) (string-append "  " r "\n")) rules))))
       "\nalways stops to ask, whatever the stance:\n"
       (apply string-append
         (map (lambda (p) (string-append "  " p "\n"))
@@ -318,8 +394,20 @@
                                        "allow_once" "allow")))
 
 (define-command "agent-permission-always" "Allow and stop asking for this tool"
-  (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
-                                       "allow_always" "allow")))
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (slug (agent-slug-of buf))
+           (info (and slug (agent-info slug)))
+           (pending (and info (plist-get info 'permission)))
+           (asked (buffer-local buf 'permission-asked)))
+      ;; the answer becomes this chat's rule, so the next call of the same
+      ;; verb never reaches the user. agent.scm recorded what was asked,
+      ;; because the backend's pending record keeps no arguments.
+      (when (and pending asked)
+        (let ((sig (permission-signature (car asked) (cadr asked) (nth 2 asked))))
+          (permission-always-allow! buf sig)
+          (message (string-append "always allowing in this chat: " sig))))
+      (agent-answer-permission! slug "allow_always" "allow"))))
 
 (define-command "agent-permission-deny" "Deny the pending permission request"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
