@@ -1598,7 +1598,6 @@
                      to))))
             (else (find (cdr rest) (+ i 1)))))))
 
-(define (frame-tabs)
 (define-command "group-tab-left" "Switch to the group shown immediately to the left in the top bar"
   (lambda () (or (group-tab-step! -1) (message "No group to the left"))))
 
@@ -1608,10 +1607,14 @@
 (global-set-key "M-S-<left>" "group-tab-left")
 (global-set-key "M-S-<right>" "group-tab-right")
 
-;; CUA's global minor-mode map has precedence over global bindings.
+;; The chord is a group move in a buffer you are editing too: cua-mode's
+;; map is the one that answers there, so the move is bound in it as well,
+;; and the chord never arms a buffer it lands on.
 (define-key "cua-mode-map" "M-S-<left>" "group-tab-left")
 (define-key "cua-mode-map" "M-S-<right>" "group-tab-right")
+(editing-neutral-commands! '("group-tab-left" "group-tab-right"))
 
+(define (frame-tabs)
   (let* ((here (frame-group))
          (mru (group-ids-mru))
          (shown (frame-tab-order here mru)))
