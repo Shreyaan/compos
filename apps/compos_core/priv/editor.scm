@@ -12191,9 +12191,27 @@
 (define (editing-state? buf)
   (if (member "editing-state-map" (buffer-minor-maps buf)) #t #f))
 
+;; The maps the editing state puts in force in the buffer. editing-state-map
+;; is the state's own; cua.scm adds cua-mode-map, so the Shift selections
+;; answer in a buffer you are editing and a buffer you have just landed on
+;; keeps the plain meaning of those chords. The ladder reads a minor map's
+;; own bindings and not its parents, so a map that must answer here is on
+;; this list and not a parent of another.
+(define *editing-state-maps* '("editing-state-map"))
+
+(define (editing-state-maps! names)
+  (for-each (lambda (n)
+              (unless (member n *editing-state-maps*)
+                (set! *editing-state-maps* (append *editing-state-maps* (list n)))))
+            names))
+
+(define (editing-state-maps-drop! names)
+  (set! *editing-state-maps*
+    (remove (lambda (m) (member m names)) *editing-state-maps*)))
+
 (define (editing-state-on! buf)
   (unless (editing-state? buf)
-    (buffer-minor-maps! buf (cons "editing-state-map" (buffer-minor-maps buf))))
+    (buffer-minor-maps! buf (append *editing-state-maps* (buffer-minor-maps buf))))
   (unless (equal? (buffer-local buf 'editing-state) #t)
     (buffer-set-local! buf 'editing-state #t)
     (desktop-skip! buf 'editing-state)))
@@ -12201,7 +12219,7 @@
 (define (editing-state-off! buf)
   (when (editing-state? buf)
     (buffer-minor-maps! buf
-      (remove (lambda (m) (equal? m "editing-state-map")) (buffer-minor-maps buf))))
+      (remove (lambda (m) (member m *editing-state-maps*)) (buffer-minor-maps buf))))
   (when (buffer-local buf 'editing-state)
     (buffer-set-local! buf 'editing-state #f)))
 
@@ -12294,6 +12312,8 @@
 (catalog-meta! 'function "editing-state-on!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-state-off!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-quit!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "editing-state-maps!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "editing-state-maps-drop!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-neutral-commands!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-neutral-command?" 'domain 'windows 'effects '(read))
 

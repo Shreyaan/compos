@@ -78,10 +78,9 @@
 ;; the plain meaning of the Shift chords: S-<left> walks buffer history,
 ;; M-S-<left> moves to the group on the left. The first key that says you
 ;; are editing here -- a letter, RET, an arrow, anything but the Shift
-;; chords themselves -- arms the editing state, and from then on Shift
-;; selects. editing-state-map is the buffer-local map that state installs;
-;; cua-mode-map is its parent, so the selections come and go with it and
-;; no other binding moves.
+;; chords themselves -- arms the editing state, and the selections come
+;; with it: the state installs this map beside its own, and takes both
+;; away at the next landing.
 (define-keymap! "cua-mode-map")
 ;; Cmd-Shift-arrows move views between panes. Remove old selection bindings
 ;; on reload too; Shift-Home/End retain line selection.
@@ -93,15 +92,23 @@
 (define (cua--others)
   (remove (lambda (m) (equal? m "cua-mode-map")) (global-minor-maps)))
 
+(define (cua--drop-from-buffers!)
+  (for-each (lambda (b)
+              (when (member "cua-mode-map" (buffer-minor-maps b))
+                (buffer-minor-maps! b
+                  (remove (lambda (m) (equal? m "cua-mode-map")) (buffer-minor-maps b)))))
+            (buffer-list)))
+
 (define (cua--enable!)
   ;; the map was a global minor map once; a reload takes it back out
   (global-minor-maps! (cua--others))
-  (keymap-parent! "editing-state-map" "cua-mode-map")
+  (editing-state-maps! '("cua-mode-map"))
   (set! *cua-mode* #t))
 
 (define (cua--disable!)
   (global-minor-maps! (cua--others))
-  (keymap-parent! "editing-state-map" #f)
+  (editing-state-maps-drop! '("cua-mode-map"))
+  (cua--drop-from-buffers!)
   (set! *cua-mode* #f))
 
 ;; the chords cua owns say nothing about whether you are editing: pressing
@@ -111,7 +118,7 @@
 (editing-neutral-commands!
   (append (map cadr cua--keys) '("previous-buffer" "next-buffer")))
 
-(define-command "cua-mode" "Toggle Shift-selection in every buffer"
+(define-command "cua-mode" "Toggle Shift-selection in a buffer you are editing"
   (lambda ()
     (if *cua-mode*
         (begin (cua--disable!) (message "CUA mode disabled"))

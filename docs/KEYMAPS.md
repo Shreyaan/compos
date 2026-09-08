@@ -16,7 +16,7 @@ prefix anywhere. A remap applies to the result.
 2. The keymap of the thing at point: a fenced block's kind declares one,
    and morg sets it after every command. Emacs's overlay keymap.
 3. The buffer's minor-mode maps, in order, first wins.
-4. The global minor-mode maps (`cua-mode`).
+4. The global minor-mode maps: a minor mode in force in every buffer.
 5. The buffer's own map, then its parents.
 6. The read-only map, when the buffer is read-only.
 7. The global map.

@@ -106,8 +106,16 @@ in the movement state.
 The state lives in two places that agree. Scheme owns it for every buffer
 (`editing-state-on!`, `editing-state-off!`, `editing-state?` in `editor.scm`):
 the post-command hook enters the editing state after any command except
-`keyboard-quit` and `windmove-*`, the landing check leaves it, and the keymap
-`editing-state-map` is in force only in the editing state. A buffer the
+`keyboard-quit`, `windmove-*` and the neutral commands, the landing check
+leaves it, and the keymap `editing-state-map` is in force only in the editing
+state. A neutral command is one a Shift chord runs (`editing-neutral-commands!`
+in `editor.scm`, called by `cua.scm` and `groups.scm`): pressing S-<left> or
+M-S-<left> says nothing about whether you are editing here, so it leaves the
+state as it found it. The state installs the maps on `*editing-state-maps*`,
+and `cua.scm` adds `cua-mode-map` to that list, so the Shift selections answer
+in a buffer you are editing and a buffer you have just landed on keeps the
+plain meaning of those chords: S-<left> walks buffer history, M-S-<left> moves
+to the group on the left. A buffer the
 server draws (the chat) is handled here alone. The client mirrors the state
 for a contenteditable surface (`editingAfterKey` in `layouts.ex`), because
 the native-or-key decision for a Cmd-arrow must run inside `keydown`; a
