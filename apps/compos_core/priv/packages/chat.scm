@@ -1201,14 +1201,25 @@
                     (let ((flat (chat-summary--flatten text)))
                       (unless (equal? flat (buffer-local buf 'chat-summary))
                         (chat-summary-land! buf flat)))))))
-      ;; The on-device card writer returns TITLE and DESCRIPTION. TITLE
-      ;; becomes the chat title; DESCRIPTION becomes its running summary.
+      ;; The on-device card writer returns TITLE and DESCRIPTION. The title
+      ;; names the chat, once: a name that moved with every refresh would
+      ;; make the modeline flap and break every reference to the chat. The
+      ;; description is the running summary, and it does move.
       (if (and (boundp 'title-card) (title-ready?))
           (title-card (chat-summary--tail buf)
                       (lambda (card)
-                        (when (and (pair? card) (pair? (cdr card)))
-                          (chat-title buf (car card))
-                          (land (cadr card)))))
+                        (when (and (pair? card) (buffer-known? buf))
+                          (let ((title (car card))
+                                (desc (and (pair? (cdr card)) (cadr card))))
+                            (when (and (string? title)
+                                       (not (equal? (string-trim title) ""))
+                                       (not (string? (buffer-local buf 'chat-title))))
+                              (buffer-set-local! buf 'chat-title title)
+                              (chat-title buf title))
+                            (land (if (and (string? desc)
+                                           (not (equal? (string-trim desc) "")))
+                                      desc
+                                      title))))))
           (llm-with-model
             (string-append
               "You maintain a one-sentence label for a work chat between a person"
