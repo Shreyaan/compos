@@ -69,7 +69,7 @@
         (let ((id (buffer-local (car bs) 'chat-log-id)))
           (loop (cdr bs)
                 (if id
-                    (cons (string-append (chat-log-dir) "/" id ".chat") acc)
+                    (cons (string-append (chat-log-dir-for (car bs)) "/" id ".chat") acc)
                     acc))))))
 
 (define (chats-archived-rows)

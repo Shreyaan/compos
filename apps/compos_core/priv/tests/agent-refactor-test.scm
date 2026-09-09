@@ -127,7 +127,7 @@
       (test-buffer! known "")
       (buffer-set-local! live-buf 'mode-name "chat-mode")
       (buffer-set-local! live-buf 'chat-log-id "zz-agent-live")
-      (let ((live (string-append (chat-log-dir) "/zz-agent-live.chat")))
+      (let ((live (string-append (chat-log-dir-for live-buf) "/zz-agent-live.chat")))
         (set-symbol-value! 'chat-log-files-newest
           (lambda ()
             (list live "/tmp/zz-agent-one.chat" known

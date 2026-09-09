@@ -546,8 +546,20 @@ defmodule Compos.Core.LLM do
     end
   end
 
+  # Where a provider answers, when that is not the provider's own cloud. A
+  # self-hosted OpenAI-compatible server is the same provider shape at a
+  # different address, so the address is Scheme config beside the key — the
+  # same one resolution point, asked the same way. No answer leaves req_llm's
+  # own default in place, which is what every hosted provider wants.
+  defp base_url_opts(spec) do
+    case Session.call_named("llm-base-url", [provider_of(spec)]) do
+      {:ok, url} when is_binary(url) and url != "" -> [base_url: url]
+      _ -> []
+    end
+  end
+
   defp req_opts(spec, tools) do
-    base = [receive_timeout: 180_000, max_tokens: max_tokens(spec)]
+    base = [receive_timeout: 180_000, max_tokens: max_tokens(spec)] ++ base_url_opts(spec)
 
     tools_opt =
       if tools == [], do: [], else: [tools: Enum.map(tools, &to_req_tool/1)]

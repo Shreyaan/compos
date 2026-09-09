@@ -58,6 +58,25 @@
 (define (group-record-settings record)
   (and (> (length record) 9) (nth 9 record)))
 
+(define (group-home-slug s)
+  (let loop ((r s))
+    (let ((next (re-replace "[^A-Za-z0-9._-]" r "-")))
+      (if (equal? next r) r (loop next)))))
+
+;; the durable directory a group saves its chats and other artifacts
+;; under. A group founded from a path (Dired, a project root) keeps its
+;; home IN that path, tucked into .compos beside it — the same way a
+;; project's annotations travel with its repo (annotate.scm). A group
+;; with no origin path gets a home under compos-home, keyed by its id so
+;; a rename never orphans what it already saved.
+(define (group-home-dir g)
+  (let* ((id (group-resolve-id g))
+         (record (and id (group-record-by-id id)))
+         (origin (and record (group-record-origin record))))
+    (if (and origin (file-directory? origin))
+        (string-append origin "/.compos")
+        (string-append (compos-home) "/groups/" (group-home-slug (or id "group"))))))
+
 ;; VALUE names a group, or is a colour slot already. -> the face name for
 ;; that slot, or "accent" for anything off the scale.
 (define (group-color-face value)
@@ -2916,6 +2935,15 @@
           (message "No current group")
           (group-chat-show! id)))))
 
+(define-command "group-home" "Open Dired at the current group's home directory"
+  (lambda ()
+    (let ((g (group-here)))
+      (if (not g)
+          (message "No current group")
+          (let ((dir (group-home-dir g)))
+            (make-directory! (string-append dir "/chats"))
+            (dired-open dir))))))
+
 (define (group-chat-buffer-show! buf)
   (let ((w (window-showing buf)))
     (if w
@@ -3697,6 +3725,9 @@
 (public! 'group-move-buffers-here! "(group-move-buffers-here! BUFFERS) — move BUFFERS to the frame's current group, without a switch")
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
 (effects! '(read))
+(public! 'group-home-dir
+  "(group-home-dir G) -> the directory G saves its chats and other artifacts under"
+  'buffers)
 (public! 'buffer-color-group
   "(buffer-color-group NAME) -> the buffer-owned group that supplies its color, or #f"
   'buffers)

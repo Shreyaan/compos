@@ -84,6 +84,26 @@
   (let ((e (assoc provider *llm-keys*)))
     (if e (cadr e) #f)))
 
+;; Explicit provider -> the address its requests go to, when that is not the
+;; provider's own cloud. A self-hosted OpenAI-compatible server is the same
+;; provider SHAPE at a different address (mlx_lm.server, vLLM, ollama), so the
+;; address is config beside the key rather than a second mechanism. Elixir asks
+;; for it by provider exactly as it asks for the key, and #f leaves req_llm's
+;; own default in place. Compile-time Elixir config would answer too; a port
+;; that needs a daemon restart to change is why this lives here instead.
+(define *llm-base-urls* '()) ; (("vllm" "http://127.0.0.1:8127/v1") ...)
+
+(define (register-llm-base-url! provider value)
+  (let ((p (if (symbol? provider) (symbol->string provider) provider)))
+    (set! *llm-base-urls*
+      (cons (list p value)
+            (remove (lambda (e) (equal? (car e) p)) *llm-base-urls*)))
+    value))
+
+(define (llm-base-url provider)
+  (let ((e (assoc provider *llm-base-urls*)))
+    (if e (cadr e) #f)))
+
 ;; drop VAR from the cache, so the next key-get walks the chain again
 (define (key-forget! var)
   (set! *key-cache*
@@ -169,3 +189,7 @@
   "(llm-key PROVIDER) — the resolved key VALUE for a provider id, or #f when unregistered; pass this to the LLM config")
 (public! 'register-llm-key!
   "(register-llm-key! PROVIDER VALUE) — set the explicit key VALUE for a provider")
+(public! 'llm-base-url
+  "(llm-base-url PROVIDER) — the address a provider's requests go to, or #f for the provider's own")
+(public! 'register-llm-base-url!
+  "(register-llm-base-url! PROVIDER VALUE) — send a provider's requests to a self-hosted OpenAI-compatible server")

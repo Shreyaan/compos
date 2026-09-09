@@ -877,14 +877,34 @@
 (domain! 'chat)
 (effects! '(write))
 
-(define (chat-log-dir) (string-append (compos-home) "/chats"))
+;; the pre-group flat archive. A chat with no group — none of them once —
+;; still lands here, and it stays the fallback so an old archive keeps
+;; reading back.
+(define (chat-log-legacy-dir) (string-append (compos-home) "/chats"))
+
+;; the directory THIS chat archives to: a member of a group logs into
+;; that group's home (group-home-dir, groups.scm), so C-c C-h group-home
+;; shows every chat the group ever had, beside whatever else it saved.
+;; A chat with no group falls back to the flat legacy archive.
+(define (chat-log-dir-for buf)
+  (let ((g (and buf (buffer-group buf))))
+    (if g
+        (string-append (group-home-dir g) "/chats")
+        (chat-log-legacy-dir))))
+
+(define (chat-log-files-in dir)
+  (if (not (file-exists? dir))
+      '()
+      (map (lambda (name) (string-append dir "/" name))
+           (filter (lambda (name) (string-suffix? ".chat" name))
+                   (list-dir dir)))))
 
 (define (chat-log-files)
-  (if (not (file-exists? (chat-log-dir)))
-      '()
-      (map (lambda (name) (string-append (chat-log-dir) "/" name))
-           (filter (lambda (name) (string-suffix? ".chat" name))
-                   (list-dir (chat-log-dir))))))
+  (apply append
+    (map chat-log-files-in
+         (cons (chat-log-legacy-dir)
+               (map (lambda (g) (string-append (group-home-dir g) "/chats"))
+                    (group-ids))))))
 
 (effects! '(read))
 (public! 'chat-log-files
@@ -950,17 +970,17 @@
           (let ((id (if (= n 0)
                         base
                         (string-append base "-" (number->string n)))))
-            (if (file-exists? (string-append (chat-log-dir) "/" id ".chat"))
+            (if (file-exists? (string-append (chat-log-dir-for buf) "/" id ".chat"))
                 (loop (+ n 1))
                 (begin (buffer-set-local! buf 'chat-log-id id) id)))))))
 
 (public! 'chat-log-path
   "(chat-log-path BUF) — the file this conversation logs itself to")
 (define (chat-log-path buf)
-  (string-append (chat-log-dir) "/" (chat-log-id! buf) ".chat"))
+  (string-append (chat-log-dir-for buf) "/" (chat-log-id! buf) ".chat"))
 
 (public! 'chat-log-save!
-  "(chat-log-save! BUF) — write this conversation to <compos-home>/chats as a .chat file")
+  "(chat-log-save! BUF) — write this conversation to its group's home, else <compos-home>/chats, as a .chat file")
 (define (chat-log-save! buf)
   (let ((text (chat-file-text buf)))
     (when text
@@ -1138,29 +1158,51 @@
     (let loop ((ls lines) (extra (- n *chat-summary-tail-lines*)))
       (if (and (pair? ls) (> extra 0))
           (loop (cdr ls) (- extra 1))
-          (string-join ls "\n")))))
+          ;; A tail cut mid-turn and a tail of finished work read the same,
+          ;; and they are not the same: one names work in flight, the other
+          ;; names work that landed. The marker is the only thing that tells
+          ;; the summarizer which it is holding.
+          (string-append (string-join ls "\n")
+                         (if (buffer-local buf 'chat-turn-active) "" "\n\n*FINISHED*"))))))
 
 (define (chat-summary-refresh! buf)
   (when (buffer-known? buf)
-    (llm-with-model
-      (string-append
-        "You maintain a one-sentence label for a work chat between a person"
-        " and a coding agent. The label names the task the chat is on, the"
-        " way a title does: what kind of work, on what. Do not report steps"
-        " taken, findings, or status. Rewrite the label only when the task"
-        " changed. One sentence, plain text, no markdown, five or six words."
-        " Answer with the sentence only.\n\nCurrent label:\n"
-        (or (buffer-local buf 'chat-summary) "(none yet)")
-        "\n\nLatest transcript:\n"
-        (chat-summary--tail buf))
-      chat-summary-model
-      (lambda (text)
-        (when (and (string? text) (not (equal? text "")) (buffer-known? buf))
-          (let ((flat (chat-summary--flatten text)))
-            (unless (equal? flat (buffer-local buf 'chat-summary))
-              (chat-summary-land! buf flat))))))))
+    (let ((land (lambda (text)
+                  (when (and (string? text) (not (equal? text "")) (buffer-known? buf))
+                    (let ((flat (chat-summary--flatten text)))
+                      (unless (equal? flat (buffer-local buf 'chat-summary))
+                        (chat-summary-land! buf flat)))))))
+      ;; The on-device card writer is fine-tuned on exactly this task -- name
+      ;; a passage in three to eight words -- so it gets the transcript and
+      ;; nothing else, and its TITLE line is the label. A remote model has
+      ;; learned no such thing, so it needs the instruction and the current
+      ;; label to keep it from rewriting one that is still true.
+      (if (and (boundp 'title-card) (title-ready?))
+          (title-card (chat-summary--tail buf)
+                      (lambda (card) (land (and card (car card)))))
+          (llm-with-model
+            (string-append
+              "You maintain a one-sentence label for a work chat between a person"
+              " and a coding agent. The label names the task the chat is on, the"
+              " way a title does: what kind of work, on what. Do not report steps"
+              " taken, findings, or status. Rewrite the label only when the task"
+              " changed. One sentence, plain text, no markdown, five or six words."
+              " Answer with the sentence only.\n\nCurrent label:\n"
+              (or (buffer-local buf 'chat-summary) "(none yet)")
+              "\n\nLatest transcript:\n"
+              (chat-summary--tail buf))
+            chat-summary-model
+            land)))))
 
 (define *chat-summary-log-max* 200)
+
+;; One hook for both facts a chat learns about itself. It runs as (BUF KIND
+;; TEXT), KIND being 'title or 'summary: the title fires once, when the chat
+;; takes the first label it will keep, and the summary fires on every fresh
+;; paragraph. A list, a bar, or an index that wants to follow what a chat is
+;; doing adds itself here instead of polling the buffer-local.
+(public! 'chat-summary-hook
+  "chat-summary-hook — runs (BUF KIND TEXT) when a chat's title or running summary lands; KIND is 'title or 'summary")
 
 ;; a fresh paragraph: the bar shows it, the log keeps it, the archive
 ;; takes it
@@ -1169,8 +1211,11 @@
   ;; the first label a chat writes is its title, and it is fixed from
   ;; here on. A chat whose log predates the title takes the oldest entry
   ;; the log holds, so the title is still the label it wore first.
-  (unless (string? (buffer-local buf 'chat-title))
-    (buffer-set-local! buf 'chat-title (or (chat-title--first-summary buf) text)))
+  (let ((titled (string? (buffer-local buf 'chat-title))))
+    (unless titled
+      (buffer-set-local! buf 'chat-title (or (chat-title--first-summary buf) text))
+      (run-hook-with-args 'chat-summary-hook buf 'title (buffer-local buf 'chat-title))))
+  (run-hook-with-args 'chat-summary-hook buf 'summary text)
   (let ((log (or (buffer-local buf 'chat-summary-log) '())))
     (buffer-set-local! buf 'chat-summary-log
       (chat-summary--take (cons (list (current-time) text) log) *chat-summary-log-max*)))
