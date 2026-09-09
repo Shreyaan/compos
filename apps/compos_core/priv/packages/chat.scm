@@ -68,11 +68,40 @@
 ;; the display text of a turn: its text blocks, joined. A turn made only of
 ;; tool calls or tool results has none — it is wire, not conversation.
 (define (chat-turn-display t)
+  ;; Keep tool calls and results in the transcript sent to title-card.
+  ;; Their compact labels give the local model enough context to describe
+  ;; the work without exposing the full rendered card machinery.
   (let loop ((bs (or (plist-get t 'blocks) '())) (acc ""))
-    (cond ((null? bs) acc)
-          ((equal? (car (car bs)) "text")
-           (loop (cdr bs) (string-append acc (car (cdr (car bs))))))
-          (else (loop (cdr bs) acc)))))
+    (if (null? bs)
+        acc
+        (let* ((b (car bs))
+               (kind (car b))
+               (tail (cdr b)))
+          (cond
+            ((equal? kind "text")
+             (loop (cdr bs) (string-append acc (car tail))))
+            ((equal? kind "tool-use")
+             (loop (cdr bs)
+                   (string-append acc
+                     "TOOL CALL\nname: " (or (car (cdr tail)) "unknown")
+                     "\narguments: "
+                     (if (pair? (cdr (cdr tail)))
+                         (or (car (cdr (cdr tail))) "{}")
+                         "{}")
+                     "\n")))
+            ((equal? kind "tool-result")
+             (loop (cdr bs)
+                   (string-append acc
+                     "TOOL RESULT\nresult: "
+                     (if (pair? (cdr tail))
+                         (or (car (cdr tail)) "")
+                         "")
+                     (if (and (pair? (cdr (cdr tail)))
+                              (car (cdr (cdr tail))))
+                         "\nstatus: failed"
+                         "\nstatus: completed")
+                     "\n")))
+            (else (loop (cdr bs) acc)))))))
 
 ;; the same view over any record: (role text) pairs in the record's own
 ;; order. Replay reads parsed .chat records that never lived in a buffer,
@@ -1172,14 +1201,14 @@
                     (let ((flat (chat-summary--flatten text)))
                       (unless (equal? flat (buffer-local buf 'chat-summary))
                         (chat-summary-land! buf flat)))))))
-      ;; The on-device card writer is fine-tuned on exactly this task -- name
-      ;; a passage in three to eight words -- so it gets the transcript and
-      ;; nothing else, and its TITLE line is the label. A remote model has
-      ;; learned no such thing, so it needs the instruction and the current
-      ;; label to keep it from rewriting one that is still true.
+      ;; The on-device card writer returns TITLE and DESCRIPTION. TITLE
+      ;; becomes the chat title; DESCRIPTION becomes its running summary.
       (if (and (boundp 'title-card) (title-ready?))
           (title-card (chat-summary--tail buf)
-                      (lambda (card) (land (and card (car card)))))
+                      (lambda (card)
+                        (when (and (pair? card) (pair? (cdr card)))
+                          (chat-title buf (car card))
+                          (land (cadr card)))))
           (llm-with-model
             (string-append
               "You maintain a one-sentence label for a work chat between a person"
