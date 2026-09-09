@@ -711,23 +711,30 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; Only when no pane shows the mail view does this fall back to making
 ;; one, and it always puts focus back where it started.
 (define (nm--show-pane! buf)
-  ;; the layout engine is mid-build: it places every declared pane itself,
-  ;; so the view is rendered and no window is touched. A split here lands
-  ;; between the engine's own splits and leaves the frame in neither
-  ;; arrangement.
   (cond
+    ;; the layout engine is mid-build: it places every declared pane
+    ;; itself, so the view is rendered and no window is touched. A split
+    ;; here lands between the engine's own splits and leaves the frame in
+    ;; neither arrangement, and a switch here takes the index's window.
     ((layout-arranging?) #f)
     (else
-      (let ((pane (scene-window 'show)))
-        (if pane
-            ;; a scene names its mail pane, so fill exactly that one
-            (begin (window-set-buffer! pane buf) pane)
-            ;; otherwise the display chain places it: it reuses a window
-            ;; already showing the mail view, splits when the frame has
-            ;; room, and never takes the window the index is in. Focus and
-            ;; point stay where the user left them.
-            (begin (display-buffer-other-window! buf)
-                   (window-showing buf)))))))
+      (let ((pane (or (scene-window 'show) (window-showing buf))))
+        (cond
+          ;; a scene names its mail pane, and a window already showing the
+          ;; mail view IS the pane: fill it, select nothing
+          (pane (window-set-buffer! pane buf) pane)
+          (else
+            ;; A one-window frame has no other window, and a frame target
+            ;; never splits on its own (display--keep-shape drops
+            ;; pop-up-window), so make the pane here. Without it the
+            ;; display chain runs out of actions and its last resort,
+            ;; same-window, hands the mail view the index's own window.
+            (when (null? (cdr (window-list))) (split-window! 'h 0.45))
+            ;; the chain places it in a window that is not this one and
+            ;; selects nothing, so focus and point stay where the user
+            ;; left them
+            (display-buffer-other-window! buf)
+            (window-showing buf)))))))
 
 (define (nm--preview! buf)
   (let ((th (nm--thread-at buf)))
@@ -1683,16 +1690,17 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-open-thread" "Open the thread at point in the mail pane"
   (lambda ()
     (let ((buf (current-buffer)))
-      ;; A thread never takes the list's window. RET renders into the mail
-      ;; pane exactly as SPC does, then goes there; SPC leaves point on the
-      ;; list. Without a scene the pane is the other window, split once when
-      ;; the frame has only the list.
       (if (nm--thread-at buf)
-          (begin
+          ;; The thread never takes the index's window: it is rendered into
+          ;; the mail pane exactly as SPC renders it. RET then goes to that
+          ;; pane, so `a`, `r` and `v` act on the message that was opened.
+          ;; A scene is the exception — its panes are all on screen at once
+          ;; and the reading is done from the index, so focus stays there.
+          (let ((scene (scene-window 'show)))
             (nm--preview! buf)
-            (let ((pane (or (scene-window 'show)
-                            (window-showing *notmuch-show-buffer*))))
-              (when pane (select-window! pane))))
+            (unless scene
+              (let ((pane (window-showing *notmuch-show-buffer*)))
+                (when pane (select-window! pane)))))
           (message "No thread on this line")))))
 
 (define-command "notmuch-show-toggle-view" "Switch between the HTML and text views"
