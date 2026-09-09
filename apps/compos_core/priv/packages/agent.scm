@@ -81,7 +81,12 @@
            (agent-block-push! buf start (agent-mark slug) "user" (list txt))))
        (agent-thought-forget! slug)
        (agent-show-waiting! slug)
-       (chat-activity! buf "waiting…"))
+       (chat-activity! buf "waiting…")
+       ;; the chat's first instruction seeds its running summary right
+       ;; away, so a chat that never runs a tool still gets a label
+       (when (and (boundp (quote chat-summary-refresh!))
+                  (not (buffer-local buf 'chat-summary)))
+         (chat-summary-refresh! buf)))
 
       ((equal? type 'chunk)
        ;; the assistant's prose accumulates across the turn; turn-end
@@ -297,6 +302,11 @@
        ;; turns, so the restart cannot kill the turn that triggered it
        (when (boundp (quote code-agent-apply-pending!))
          (code-agent-apply-pending! buf))
+       ;; chat.scm listens too: every turn end nudges the running summary,
+       ;; same debounce as a tool-call burst (chat-summary-refresh! itself
+       ;; skips the write when the label comes back unchanged)
+       (when (boundp (quote chat-summary-note-tool!))
+         (chat-summary-note-tool! buf))
        ;; the chat log: every completed turn writes the conversation to
        ;; <compos-home>/chats (chat.scm loads after this file)
        (when (boundp (quote chat-log-save!))

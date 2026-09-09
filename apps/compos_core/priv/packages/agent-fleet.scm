@@ -181,6 +181,13 @@
 ;; whole title stands; only the narrow candidate line clips.
 (define (chats-title b) (chat-prompt-full-label b))
 
+;; a chat needing a reply wears its alert glyph in the name itself, so it
+;; survives even a narrow table that drops the dot and label columns
+(define (chats-alert-name b)
+  (if (equal? (chat-row-status b) 'needs_attention)
+      (string-append "! " (chats-title b))
+      (chats-title b)))
+
 (define (chats-match-text b)
   (string-append (chats-title b) " "
                  (or (chats-summary b) "") " "
@@ -193,7 +200,7 @@
         'dot (lambda (b)
                (let ((s (chat-row-status b)))
                  (list (agent-status-glyph s) (chats-state-face s))))
-        'name (lambda (b) (list "" (chats-title b)))
+        'name (lambda (b) (list "" (chats-alert-name b)))
         'size chats-tokens
         'label (lambda (b) (chats-state-label (chat-row-status b)))
         'last (lambda (b)

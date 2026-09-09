@@ -1156,7 +1156,9 @@
       chat-summary-model
       (lambda (text)
         (when (and (string? text) (not (equal? text "")) (buffer-known? buf))
-          (chat-summary-land! buf (chat-summary--flatten text)))))))
+          (let ((flat (chat-summary--flatten text)))
+            (unless (equal? flat (buffer-local buf 'chat-summary))
+              (chat-summary-land! buf flat))))))))
 
 (define *chat-summary-log-max* 200)
 
