@@ -1679,18 +1679,19 @@ when a message has no text/plain part." 'group 'notmuch)
     (nm--run (string-append "tag -unread -- thread:" thread-id))
     buf))
 
-(define-command "notmuch-open-thread" "Open the thread at point"
+(define-command "notmuch-open-thread" "Open the thread at point in the mail pane"
   (lambda ()
-    (let ((buf (current-buffer))
-          (th (nm--thread-at (current-buffer)))
-          ;; A scene names semantics, not coordinates. RET fills its `show`
-          ;; pane without moving focus from `index`. Outside a scene it keeps
-          ;; the traditional behavior of opening in the current window.
-          (pane (scene-window 'show)))
-      (if th
-          (if pane
-              (nm--preview! buf)
-              (nm--open-thread! (nm--th-id th) (nm--th-subject th)))
+    (let ((buf (current-buffer)))
+      ;; A thread never takes the list's window. RET renders into the mail
+      ;; pane exactly as SPC does, then goes there; SPC leaves point on the
+      ;; list. Without a scene the pane is the other window, split once when
+      ;; the frame has only the list.
+      (if (nm--thread-at buf)
+          (begin
+            (nm--preview! buf)
+            (let ((pane (or (scene-window 'show)
+                            (window-showing *notmuch-show-buffer*))))
+              (when pane (select-window! pane))))
           (message "No thread on this line")))))
 
 (define-command "notmuch-show-toggle-view" "Switch between the HTML and text views"
