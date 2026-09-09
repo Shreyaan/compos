@@ -1011,7 +1011,7 @@ defmodule Compos.Ui.Layouts do
             background: var(--window-bg, #fdfcf8);
             border: 1px solid var(--border-bg, #e2dbc9);
             border-top: 3px solid var(--accent-fg, #26356b);
-            border-radius: 14px;
+            border-radius: 0;
             box-shadow: 0 28px 80px rgba(0, 0, 0, 0.32);
             overflow: hidden;
           }
