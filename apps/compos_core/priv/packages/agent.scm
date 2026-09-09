@@ -174,26 +174,6 @@
            (agent-block-push! buf start (agent-mark slug) "tool"
              (list (plist-get e 'id) title (plist-get e 'kind)
                    "running" (agent-mark slug)))))
-       ;; On first render only, let the local title model replace the
-       ;; tool card's title. Existing cards loaded from a saved chat never
-       ;; pass through this path, so reloads do not resummarize history.
-       (when (and summarize-tool-calls?
-                  (boundp (quote title-card))
-                  (title-ready?))
-         (let ((id (plist-get e 'id))
-               (tool (or (plist-get e 'name) "tool"))
-               (args (or (agent-tool-input-text e) "{}")))
-           (title-card
-             (string-append "Tool call: " tool "\nArguments: " args)
-             (lambda (card)
-               (when (and (pair? card) (string? (car card)))
-                 (let ((title (car card))
-                       (desc (and (pair? (cdr card)) (cadr card))))
-                   (agent-block-retitle!
-                     buf id
-                     (if (and (string? desc) (not (equal? desc "")))
-                         (string-append title " — " desc)
-                         title))))))))
        ;; remember where this tool's body will start (= current mark)
        (buffer-set-local! buf 'agent-tool-bodies
          (cons (list (plist-get e 'id) (agent-mark slug))
