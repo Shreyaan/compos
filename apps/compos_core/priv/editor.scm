@@ -10130,6 +10130,13 @@
           (presets chat-presets) (permission-mode chat-permission-mode)
           (title chat-title) (summary chat-summary)
           (directory chat-directory)))
+      ;; A chat wears its title, not its file name. chat-restore renamed
+      ;; the buffer itself; every other door into an archived conversation
+      ;; -- the desktop, the chats list, plain find-file -- left it named
+      ;; after the .chat path, so the modeline said the path.
+      (let ((title (buffer-local buf 'chat-title)))
+        (when (and (string? title) (not (equal? (string-trim title) "")))
+          (rename-buffer! buf title)))
       (let* ((end (or (chat-file-record-at text) (string-byte-length text)))
              (recorded (chat-file-record text))
              (turns (chat-parse-transcript (substring-bytes text (or nl 0) end))))
