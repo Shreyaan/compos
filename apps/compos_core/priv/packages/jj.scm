@@ -360,3 +360,30 @@
                   (else
                     (jj-sh root (string-append "jj bookmark set " bm " -r " tip " 2>&1"))
                     (message (string-trim (jj-sh root "jj git push 2>&1"))))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; What one chat changed
+;;;
+;;; A conversation is safe to close when the work is no longer only in it: the
+;;; buffers are saved, the changes say what they were, and the changes are past
+;;; the bookmark. The Agent: line is the whole link between a chat and the repo,
+;;; so every question below is one revset over that line. None of it widens to
+;;; the repo. A chat asks about itself.
+
+(define (jj-agent-revset slug)
+  ;; anchored to the line, so chat-...-16 does not answer for chat-...-167
+  (string-append "description(regex:\"(?m)^Agent: " slug "$\")"))
+
+(define (jj-lines root cmd)
+  (filter (lambda (s) (not (equal? s "")))
+          (map string-trim (string-split (jj-sh root cmd) "\n"))))
+
+(define (jj-revs root revset)
+  (jj-lines root (string-append "jj log --no-graph --color never -r '" revset
+                                "' -T 'change_id.short() ++ \"\\n\"' 2>/dev/null")))
+
+(define (jj-change-files root change)
+  (map (lambda (l)
+         (list (substring l 0 1) (string-trim (substring l 1 (string-length l)))))
+       (jj-lines root (string-append "jj diff -r " change
+                                     " --summary --color never 2>/dev/null"))))
