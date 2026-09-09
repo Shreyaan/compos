@@ -51,6 +51,7 @@
 (load-bundled-package "google.scm")
 (load-bundled-package "groups.scm")
 (load-bundled-package "help.scm")
+(load-bundled-package "http.scm")
 (load-bundled-package "ibuffer.scm")
 ;; the chats table is the ibuffer template over the chats: it loads after it
 (load-bundled-package "agent-fleet.scm")

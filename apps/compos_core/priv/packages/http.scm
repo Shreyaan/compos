@@ -56,7 +56,10 @@
   (if (symbol? v) (symbol->string v) v))
 
 (define (http--first-line s)
-  (if (string? s) (string-trim (car (string-split s "\n"))) ""))
+  (if (string? s)
+      (let ((line (string-trim (car (string-split s "\n")))))
+        (if (> (string-length line) 200) (substring line 0 200) line))
+      ""))
 
 (define (http-ok? reply) (if (http--get reply 'ok) #t #f))
 
