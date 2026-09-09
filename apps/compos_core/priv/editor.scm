@@ -10403,6 +10403,8 @@
           (buffer-set-local! buf 'agent-models #f)
           (buffer-set-local! buf 'agent-modes #f)
           (buffer-set-local! buf 'agent-mode #f)
+          ;; a mode parked for the old backend names nothing on the new one
+          (buffer-set-local! buf 'agent-mode-wanted #f)
           (buffer-set-local! buf 'agent-effort #f))
         (when effort
           (buffer-set-local! buf 'agent-effort
@@ -10770,6 +10772,36 @@
              (list (car e) (if (pair? (cdr e)) (or (cadr e) "") "")))
            entries)
       (map (lambda (m) (list m "")) (connector-models connector)))))
+
+;; A backend's session modes are the connector's truth as well, and they
+;; arrive on the same asynchronous event. Remembering them is what lets the
+;; menu offer them to a chat that has not attached yet, and to one whose
+;; session is still restarting after a backend switch — the wait for the
+;; first mode-state event is why the row used to read "none".
+(defvar '*llm-connector-modes* '())
+
+(persist-global! 'llm-connector-modes
+  (lambda () *llm-connector-modes*)
+  (lambda (v) (set! *llm-connector-modes* (or v '()))))
+
+(define (llm-modes-remembered connector)
+  (let ((e (assoc connector *llm-connector-modes*)))
+    (if e (cadr e) '())))
+
+(define (llm-modes-seen! connector entries)
+  (when (and connector (pair? entries))
+    (set! *llm-connector-modes*
+      (cons (list connector entries)
+            (remove (lambda (e) (equal? (car e) connector))
+                    *llm-connector-modes*))))
+  entries)
+
+;; the live session's own list when it has one, the connector's remembered
+;; list otherwise. Entries are (id label description), as the adapter sends.
+(define (chat-mode-options buf connector)
+  (let ((live (and (equal? connector (buffer-local buf 'agent-connector))
+                   (buffer-local buf 'agent-modes))))
+    (if (pair? live) live (llm-modes-remembered connector))))
 
 ;; NOTE is the rail's footer: one line on what RET does here.
 (define (llm-config-read! prompt candidates confirm cancel &optional note)

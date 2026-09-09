@@ -1015,6 +1015,120 @@ when a message has no text/plain part." 'group 'notmuch)
                                           (if (= n 1) "" "s") " from " email)))))))))
 (catalog-meta! 'command "notmuch-delete-all-from-sender" 'domain 'mail 'effects '(destroy))
 
+(define (nm--contains? haystack needle)
+  (> (length (string-split (string-downcase haystack) (string-downcase needle))) 1))
+
+(define (nm--looks-unsubscribed? html)
+  (or (nm--contains? html "unsubscribed")
+      (nm--contains? html "successfully removed")
+      (nm--contains? html "been removed")
+      (nm--contains? html "you're unsubscribed")
+      (nm--contains? html "miss you")
+      (nm--contains? html "no longer receive")))
+
+;; RFC 2369/8058: List-Unsubscribe (and List-Unsubscribe-Post for the
+;; one-click POST variant) are plain header text, never quoted-printable —
+;; decoding them would corrupt hash params like "u=80fc49..." that happen
+;; to look like =XX escapes. Read them raw; only the body fallback below
+;; needs QP decoding, and only as a last resort for senders with no header.
+(define (nm--unsubscribe-header-links msg-id)
+  (let* ((hdr (string-trim (nm--run (string-append
+                 "show --format=raw -- " (nm--quote (string-append "id:" msg-id))
+                 " | grep -i '^list-unsubscribe:' | head -1"))))
+         (post (string-trim (nm--run (string-append
+                 "show --format=raw -- " (nm--quote (string-append "id:" msg-id))
+                 " | grep -i '^list-unsubscribe-post:' | head -1"))))
+         (https (let ((m (string-trim (shell-command->string
+                    (string-append "printf '%s' " (nm--quote hdr)
+                                   " | grep -oE '<https?://[^>]*>' | head -1")
+                    (default-directory)))))
+                  (if (equal? m "") #f (substring m 1 (- (string-length m) 1)))))
+         (mailto (let ((m (string-trim (shell-command->string
+                    (string-append "printf '%s' " (nm--quote hdr)
+                                   " | grep -oE '<mailto:[^>]*>' | head -1")
+                    (default-directory)))))
+                   (if (equal? m "") #f (substring m 1 (- (string-length m) 1)))))
+         (one-click? (nm--contains? post "one-click")))
+    (list https mailto one-click?)))
+
+;; last resort when there's no List-Unsubscribe header at all: naive
+;; whole-message quoted-printable decode, then hunt for an "unsubscribe"
+;; link in the body. No real MIME parsing, so it can find the wrong link
+;; or nothing on an oddly-encoded message — acceptable as a fallback only.
+(define (nm--unsubscribe-body-link msg-id)
+  (let* ((cmd (string-append
+                "show --format=raw -- " (nm--quote (string-append "id:" msg-id))
+                " | perl -MMIME::QuotedPrint -0777 -ne '"
+                "my $raw = $_; my $dec = eval { decode_qp($raw) }; $dec = $raw unless defined $dec; "
+                "if ($dec =~ /(https?:\\/\\/[^\\s\"\\x27<>]*unsubscribe[^\\s\"\\x27<>]*)/i) { print \"$1\\n\"; exit } "
+                "if ($raw =~ /(https?:\\/\\/[^\\s\"\\x27<>]*unsubscribe[^\\s\"\\x27<>]*)/i) { print \"$1\\n\"; exit }'"))
+         (out (string-trim (nm--run cmd))))
+    (if (equal? out "") #f out)))
+
+(define (nm--curl-text url)
+  (shell-command->string (string-append "curl -sL --max-time 15 " (nm--quote url)) (default-directory)))
+
+(define (nm--purge-unsubscribe! msg-id)
+  (let* ((links (and msg-id (nm--unsubscribe-header-links msg-id)))
+         (https (and links (car links)))
+         (mailto (and links (cadr links)))
+         (one-click? (and links (caddr links))))
+    (cond
+      ((and https one-click?)
+       (let ((code (string-trim (shell-command->string
+                      (string-append "curl -sL --max-time 15 -X POST "
+                                     "-H 'Content-Type: application/x-www-form-urlencoded' "
+                                     "-d 'List-Unsubscribe=One-Click' -o /dev/null -w '%{http_code}' "
+                                     (nm--quote https))
+                      (default-directory)))))
+         (if (member code '("200" "202" "204"))
+             (string-append "unsubscribed (RFC 8058 one-click, " code ")")
+             (string-append "tried the one-click unsubscribe but got HTTP " code " — check by hand: " https))))
+      (https
+       (if (nm--looks-unsubscribed? (nm--curl-text https))
+           "unsubscribed (confirmed)"
+           (string-append "visited " https " but couldn't confirm — check by hand")))
+      (mailto
+       (string-append "unsubscribe is by email only, not sent: " mailto))
+      (else
+        (let ((body-link (and msg-id (nm--unsubscribe-body-link msg-id))))
+          (cond
+            ((not body-link) "no unsubscribe link found")
+            ((nm--looks-unsubscribed? (nm--curl-text body-link))
+             "unsubscribed (found in body, confirmed)")
+            (else (string-append "found a possible link in the body but couldn't confirm — check by hand: " body-link))))))))
+
+(define-command "notmuch-purge-sender"
+  "Trash every message from this thread's sender and try to unsubscribe: RFC 8058 one-click POST when offered, else a plain GET, else a best-effort scan of the body (works on a *notmuch* list row or an open notmuch-show buffer)"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (thread-id (if (buffer-mode-is? buf "notmuch-show-mode")
+                          (buffer-local buf 'notmuch-thread)
+                          (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
+      (if (not thread-id)
+          (message "No thread here")
+          (let* ((msgs (nm--flatten-msgs
+                         (or (nm--json (string-append "show --format=json --body=false thread:" thread-id))
+                             '())))
+                 (from (if (null? msgs)
+                           ""
+                           (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
+                 (email (let ((parts (string-split from "<")))
+                          (if (null? (cdr parts))
+                              (string-trim from)
+                              (car (string-split (cadr parts) ">"))))))
+            (if (equal? email "")
+                (message "Could not extract the sender")
+                (let* ((n (nm--count (string-append "from:" email)))
+                       (msg-id (nm--newest-msg-id thread-id))
+                       (verdict (nm--purge-unsubscribe! msg-id)))
+                  (nm--run (string-append "tag +trash -inbox -unread -- " (nm--quote (string-append "from:" email))))
+                  (when (buffer-exists? *notmuch-search-buffer*)
+                    (nm--refresh! *notmuch-search-buffer*))
+                  (message (string-append "trashed " (number->string n) " message"
+                                          (if (= n 1) "" "s") " from " email "; " verdict)))))))))
+(catalog-meta! 'command "notmuch-purge-sender" 'domain 'mail 'effects '(destroy external))
+
  ;;; --- local selection ---------------------------------------------------------
 
 ;; Selection is an editor operation, never a mail tag. ALL selects the query;

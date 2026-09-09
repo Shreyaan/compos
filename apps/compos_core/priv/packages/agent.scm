@@ -54,13 +54,20 @@
              (cur (plist-get e 'current))
              (known (buffer-local buf 'agent-modes)))
          (when avail (buffer-set-local! buf 'agent-modes avail))
+         ;; and the connector keeps the list, the same way it keeps the
+         ;; models: the menu can then name a mode for a chat that has not
+         ;; attached to this backend yet
+         (llm-modes-seen! (buffer-local buf 'agent-connector) avail)
          (when (and cur (not (equal? cur "")))
            (buffer-set-local! buf 'agent-mode cur))
          ;; Apply the compos stance when modes are first discovered. Later
          ;; updates acknowledge explicit choices (or entering plan mode);
-         ;; synchronizing again would immediately undo those choices.
+         ;; synchronizing again would immediately undo those choices. A mode
+         ;; chosen before the session existed is such a choice, and it wins
+         ;; over the stance.
          (when (and avail (not (pair? known)))
-           (agent-sync-permission-mode! slug)))
+           (unless (agent-mode-take-pending! buf)
+             (agent-sync-permission-mode! slug))))
        (agent-update-modeline! buf))
 
       ((equal? type 'user-msg)

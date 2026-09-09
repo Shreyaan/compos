@@ -80,8 +80,8 @@
       (check-equal! (chat-permission-mode buf) 'ask "the stance is buffer-local")
       (check-contains! (buffer-local buf 'modeline-info) "ask"
                        "and the modeline says what will stop to ask")
-      (check-false! (agent-mode-set! buf "plan")
-                    "a buffer with no session cannot take a backend mode")
+      (check-equal! (agent-mode-set! buf "plan") "plan"
+                    "a buffer with no session parks the mode for the session to come")
       (buffer-kill! buf))))
 
 (deftest 'applying-a-bundle-applies-all-of-it
@@ -193,3 +193,33 @@ a hang, and the user never learns there was anything to answer."
       (buffer-kill! work)
       (buffer-kill! lone)
       (group-record-delete! id))))
+
+(deftest 'a-connectors-mode-list-outlives-its-session
+  "The session modes a backend reported are offered again for that connector"
+  (lambda ()
+    (let ((saved *llm-connector-modes*)
+          (buf (test-buffer! "zz-llm-modes" "")))
+      (set! *llm-connector-modes* '())
+      (llm-modes-seen! "zz-connector"
+        '(("plan" "Plan" "plans only") ("go" "Go" "runs tools")))
+      (buffer-set-local! buf 'agent-connector "zz-connector")
+      (check-equal! (map car (chat-mode-options buf "zz-connector")) '("plan" "go")
+                    "a chat with no session still knows the backend's modes")
+      (check-equal! (agent-mode-options buf) '(("plan" "plans only") ("go" "runs tools"))
+                    "and the menu can name one")
+      (set! *llm-connector-modes* saved)
+      (buffer-kill! buf))))
+
+(deftest 'an-agent-mode-chosen-with-no-session-waits-for-one
+  "A mode chosen before the session exists parks, and is applied or dropped"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-llm-mode-park" "")))
+      (check-equal! (agent-mode-set! buf "plan") "plan"
+                    "the choice is taken, not refused")
+      (check-equal! (buffer-local buf 'agent-mode-wanted) "plan" "and parked")
+      (check-equal! (buffer-local buf 'agent-mode) "plan" "the menu shows it")
+      (buffer-set-local! buf 'agent-modes '(("default" "Default" "asks")))
+      (check-false! (agent-mode-take-pending! buf)
+                    "a mode this backend does not have is dropped")
+      (check-false! (buffer-local buf 'agent-mode-wanted) "and not kept forever")
+      (buffer-kill! buf))))

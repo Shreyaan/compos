@@ -341,7 +341,7 @@
                       (agent-mode-options buf)
                       '())))
       (if (null? modes)
-          (message "no backend modes here — this session is not running one")
+          (message "this backend has no session modes")
           (llm-config-read! "Agent mode: "
             (llm-config-current-first
               modes (or (buffer-local buf 'agent-mode) ""))

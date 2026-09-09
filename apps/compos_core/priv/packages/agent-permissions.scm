@@ -265,29 +265,61 @@
       (when (llm-session-set-mode! slug want)
         (buffer-set-local! buf 'agent-mode want)))))
 
+;; the session that can answer right now, or #f
+(define (agent-mode--live buf)
+  (let ((slug (buffer-local buf 'agent-slug)))
+    (and slug (not (equal? (agent-status slug) 'dead)) slug)))
+
 ;; The ACP session's OWN mode. The backend owns the list and the answer:
 ;; it can refuse, and a refusal must not leave the local claiming it took.
+;; With no session to ask — a chat that has not attached, or one still
+;; restarting after a backend switch — the choice PARKS, and
+;; agent-mode-take-pending! applies it as soon as the session names its
+;; modes. Choosing a mode never waits on a running agent.
+(define (agent-mode--park! buf mode)
+  (buffer-set-local! buf 'agent-mode-wanted mode)
+  (buffer-set-local! buf 'agent-mode mode)
+  (agent-update-modeline! buf)
+  mode)
+
 (define (agent-mode-set! buf mode)
-  (let ((slug (buffer-local buf 'agent-slug)))
-    (cond ((not slug) #f)
+  (let ((slug (agent-mode--live buf)))
+    (cond ((not slug) (agent-mode--park! buf mode))
           ((llm-session-set-mode! slug mode)
+           (buffer-set-local! buf 'agent-mode-wanted #f)
            (buffer-set-local! buf 'agent-mode mode)
            (agent-update-modeline! buf)
            mode)
+          ;; a session that has not named its modes yet is still starting:
+          ;; that is a wait, not a refusal
+          ((not (pair? (buffer-local buf 'agent-modes)))
+           (agent-mode--park! buf mode))
           (else #f))))
 
-;; (NAME DESCRIPTION) per mode the running session offers.
+;; called when a session first names its modes: an explicit choice made
+;; before it existed wins over the stance sync, and a mode this backend
+;; does not have is dropped rather than kept forever
+(define (agent-mode-take-pending! buf)
+  (let ((want (buffer-local buf 'agent-mode-wanted))
+        (avail (map car (or (buffer-local buf 'agent-modes) '()))))
+    (and want
+         (begin
+           (buffer-set-local! buf 'agent-mode-wanted #f)
+           (and (member want avail) (agent-mode-set! buf want))))))
+
+;; (NAME DESCRIPTION) per mode. The running session's own list when it has
+;; one, otherwise the list this connector was last seen offering — so the
+;; menu can name a mode for a chat whose session is not up.
 (define (agent-mode-options buf)
   (map (lambda (m) (list (car m) (or (nth 2 m) "")))
-       (or (buffer-local buf 'agent-modes) '())))
+       (chat-mode-options buf (buffer-local buf 'agent-connector))))
 
 (define-command "agent-set-mode" "Switch the agent session's mode (plan, acceptEdits, ...)"
   (lambda ()
     (let* ((buf (current-buffer))
-           (slug (buffer-local buf 'agent-slug))
-           (modes (buffer-local buf 'agent-modes)))
-      (cond ((not slug) (message "not an agent chat"))
-            ((not modes) (message "this backend has no session modes"))
+           (modes (agent-mode-options buf)))
+      (cond ((not (buffer-local buf 'agent-connector)) (message "not an agent chat"))
+            ((null? modes) (message "this backend has no session modes"))
             (else
               (minibuffer-read
                 (string-append "Mode (now " (or (buffer-local buf 'agent-mode) "?") "): ")
