@@ -292,6 +292,10 @@
   "How many bytes of a tool call's main argument the card's title shows."
   'group 'chat 'type 'integer)
 
+(defcustom 'summarize-tool-calls? #f
+  "Replace tool-call cards with output from the local title model."
+  'group 'chat 'type 'boolean)
+
 (define (agent-first-line s)
   (let ((i (string-index s "\n")))
     (if i (substring-bytes s 0 i) s)))
