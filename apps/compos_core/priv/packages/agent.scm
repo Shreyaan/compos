@@ -15,6 +15,47 @@
 ;; a turn-end after none of them is a silent turn
 (define *agent-output-kinds* '(chunk thought tool-call tool-update plan question error))
 
+;; A tool event arrives in pieces, and no two backends send the same
+;; pieces. The direct lane names the tool and its arguments on the call
+;; and hands back the body on completion. ACP calls first with an empty
+;; argument list, states the name, the arguments and the body in later
+;; updates, and leaves the completion bare. The record wants ONE whole
+;; event, so the pieces gather here per tool id and land together when
+;; the tool finishes.
+(define (agent-tool-note! buf e)
+  (let* ((id (plist-get e 'id))
+         (pending (or (buffer-local buf 'chat-tool-pending) '()))
+         (cur (or (assoc id pending) (list id #f "" "")))
+         (raw (plist-get e 'input))
+         (body (nth 3 cur)))
+    (buffer-set-local! buf 'chat-tool-pending
+      (cons (list id
+                  ;; plist-get answers nil, not #f, for a key the event
+                  ;; does not carry, and nil is true -- ask for the string
+                  (if (string? (plist-get e 'name)) (plist-get e 'name) (nth 1 cur))
+                  (if (and (string? raw) (not (equal? raw "")) (not (equal? raw "{}")))
+                      raw
+                      (nth 2 cur))
+                  ;; the body streams, so it accumulates -- to the same
+                  ;; limit a card shows, because a summary reads no more
+                  (let ((txt (agent-tool-update-text e)))
+                    (if (or (equal? txt "")
+                            (>= (string-byte-length body) agent-tool-body-limit))
+                        body
+                        (string-append body txt))))
+            (filter (lambda (x) (not (equal? (car x) id))) pending)))))
+
+(define (agent-tool-record! buf id failed?)
+  (let* ((pending (or (buffer-local buf 'chat-tool-pending) '()))
+         (cur (assoc id pending)))
+    (when cur
+      (buffer-set-local! buf 'chat-tool-pending
+        (filter (lambda (x) (not (equal? (car x) id))) pending))
+      (chat-record-event! buf "assistant"
+        (list (list "tool-use" id (if (string? (nth 1 cur)) (nth 1 cur) "tool")
+                    (if (equal? (nth 2 cur) "") "{}" (nth 2 cur)))
+              (list "tool-result" id (nth 3 cur) failed?))))))
+
 (define (agent-handle-event slug e)
   (let* ((buf (agent-buf slug))
          (type (plist-get e 'type)))
@@ -115,6 +156,7 @@
 
       ((equal? type 'tool-call)
        (chat-activity! buf (string-append "tool · " (agent-tool-title e)))
+       (agent-tool-note! buf e)
        ;; code.scm listens: the first tool call that edits code turns the
        ;; chat into a coding session (code-agent-mode)
        (when (boundp (quote code-agent-note-tool!))
@@ -148,6 +190,7 @@
 
       ((equal? type 'tool-update)
        (agent-tool-refine! slug buf e)
+       (agent-tool-note! buf e)
        (let ((text (agent-tool-update-text e)))
          (unless (equal? text "")
            (agent-render! slug text #f))
@@ -162,18 +205,9 @@
              (when (and entry (> (agent-mark slug) (car (cdr entry))))
                (agent-add-fold! buf (car (cdr entry)) (agent-mark slug))))
            (agent-card-set-open! buf (plist-get e 'id) #f)
-           ;; The tool event reaches the record whole, and here: a
-           ;; tool-call event carries no arguments yet -- the update is
-           ;; where the backend states them -- so recording the call on
-           ;; arrival would file it with an empty argument list, and a
-           ;; running summary would see the name and nothing it did.
-           (chat-record-event! buf "assistant"
-             (list (list "tool-use" (plist-get e 'id)
-                         (or (plist-get e 'name) (agent-tool-title e))
-                         (let ((raw (plist-get e 'input)))
-                           (if (and (string? raw) (not (equal? raw ""))) raw "{}")))
-                   (list "tool-result" (plist-get e 'id) text
-                         (equal? (plist-get e 'status) "failed"))))
+           ;; the gathered call and its result reach the record together
+           (agent-tool-record! buf (plist-get e 'id)
+                               (equal? (plist-get e 'status) "failed"))
            (when (boundp (quote chat-summary-note-tool!))
              (chat-summary-note-tool! buf)))))
 
@@ -302,6 +336,9 @@
        (buffer-set-local! buf 'agent-turn-text #f)
        (agent-thought-forget! slug)
        (buffer-set-local! buf 'agent-turn-any #f)
+       ;; a tool that never completed leaves its pieces behind; the turn
+       ;; is over, so they name nothing now
+       (buffer-set-local! buf 'chat-tool-pending '())
        (agent-block-drop-kind! buf "permission")
        (agent-block-drop-kind! buf "question")
        ;; The record used to compact itself here. It does not any more: a
