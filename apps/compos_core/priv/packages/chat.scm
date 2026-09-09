@@ -1198,38 +1198,42 @@
           (loop (cdr ls) (- extra 1))
           (string-join ls "\n")))))
 
-(define (chat-summary-refresh! buf)
+(define (chat-summary-refresh! buf &optional force?)
   (when (buffer-known? buf)
-    (let ((land (lambda (text)
-                  (when (and (string? text) (not (equal? text "")) (buffer-known? buf))
-                    (let ((flat (chat-summary--flatten text)))
-                      (unless (equal? flat (buffer-local buf 'chat-summary))
-                        (chat-summary-land! buf flat)))))))
-      ;; The on-device card writer returns TITLE and DESCRIPTION. The title
-      ;; names the chat, once: a name that moved with every refresh would
-      ;; make the modeline flap and break every reference to the chat. The
-      ;; description is the running summary, and it does move.
+    (let* ((titled (string? (buffer-local buf 'chat-title)))
+           ;; the name is a label: one clipped line, and only for a chat
+           ;; that has none -- unless the user asked for a fresh one
+           (retitle
+             (lambda (b t)
+               (let ((name (and (string? t)
+                                (not (equal? (string-trim t) ""))
+                                (or force? (not titled))
+                                (chat-summary--clip
+                                  (chat-summary--flatten t)
+                                  chat-title-max-bytes))))
+                 (if (and name (chat-title b name)) name b))))
+           (land
+             (lambda (b text)
+               (when (and (string? text) (not (equal? text "")) (buffer-known? b))
+                 (let ((flat (chat-summary--flatten
+                               (chat-summary--first-sentence text))))
+                   (unless (equal? flat (buffer-local b 'chat-summary))
+                     (chat-summary-land! b flat)))))))
+      ;; The on-device card writer returns TITLE and DESCRIPTION. TITLE
+      ;; names the chat, once. DESCRIPTION is the running summary, and it
+      ;; does move. The rename comes first, so the summary lands in the
+      ;; buffer that now wears the name.
       (if (and (boundp 'title-card) (title-ready?))
           (title-card (chat-summary--tail buf)
-                      (lambda (card)
-                        (when (and (pair? card) (buffer-known? buf))
-                          (let ((title (car card))
-                                (desc (and (pair? (cdr card)) (cadr card))))
-                            (when (and (string? title)
-                                       (not (equal? (string-trim title) ""))
-                                       (not (string? (buffer-local buf 'chat-title))))
-                              ;; a card model that skips the TITLE line hands
-                              ;; back its first sentence, and that sentence
-                              ;; would become the buffer's name
-                              (let ((name (chat-summary--clip
-                                            (chat-summary--flatten title)
-                                            chat-title-max-bytes)))
-                                (buffer-set-local! buf 'chat-title name)
-                                (chat-title buf name)))
-                            (land (if (and (string? desc)
-                                           (not (equal? (string-trim desc) "")))
-                                      desc
-                                      title))))))
+            (lambda (card)
+              (when (and (pair? card) (buffer-known? buf))
+                (let* ((title (car card))
+                       (desc (and (pair? (cdr card)) (cadr card)))
+                       (b (retitle buf title)))
+                  (land b (if (and (string? desc)
+                                   (not (equal? (string-trim desc) "")))
+                              desc
+                              title))))))
           (llm-with-model
             (string-append
               "You maintain a one-sentence label for a work chat between a person"
@@ -1242,7 +1246,9 @@
               "\n\nLatest transcript:\n"
               (chat-summary--tail buf))
             chat-summary-model
-            land)))))
+            (lambda (text)
+              (let ((b (if force? (retitle buf text) buf)))
+                (land b text))))))))
 
 (define *chat-summary-log-max* 200)
 
@@ -1348,3 +1354,15 @@
 (define (chat-summary-note-tool! buf)
   (debounce! (string-append "chat-summary:" buf) *chat-summary-debounce-ms*
              chat-summary-refresh! buf))
+
+;; One command for both facts a chat learns about itself: it names the
+;; chat again, and lands a fresh running summary. Every other path titles
+;; a chat once; this is the one that overrules a title already there.
+(define-command "chat-retitle" "Name this chat again and refresh its summary"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+          (message "not a chat buffer")
+          (begin
+            (message "chat-retitle: asking the model")
+            (chat-summary-refresh! buf #t))))))
