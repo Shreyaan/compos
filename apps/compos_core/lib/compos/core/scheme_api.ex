@@ -66,12 +66,13 @@ defmodule Compos.Core.SchemeAPI do
     }
   end
 
-  # Every HTTP request in the editor used to be its own curl command line.
+  # Every HTTP request in the editor is its own curl command line.
   # graphql.scm, sentry.scm, feeds.scm, notmuch.scm and package.scm each
-  # built their own quoting, their own timeout, and their own way of digging
-  # the status code out of the output. One door instead, through Req, which
-  # is already a dependency. No shell means no quoting to get wrong and no
-  # token in a command line, so a header can carry a secret directly.
+  # wrote their own quoting, their own timeout, and their own way of digging
+  # the status code out of the output. This is one door instead, through Req,
+  # which is already a dependency. No shell means no quoting to get wrong and
+  # no token in a command line, so a header can carry a secret directly.
+  # Those five still shell out: they move over one at a time.
   #
   # Scheme asks in a plist and reads a plist back:
   #

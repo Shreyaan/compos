@@ -17,8 +17,9 @@
 ;;;   (http-get url '(headers (authorization ("Bearer " "@SENTRY_TOKEN"))))
 ;;;
 ;;; There is no shell, so there is no quoting to get wrong, and a token
-;;; is never in a command line or in a temporary config file. This is
-;;; what every curl call in the editor was reinventing.
+;;; is never in a command line or in a temporary config file. graphql.scm,
+;;; sentry.scm, feeds.scm, notmuch.scm and package.scm each built that by
+;;; hand around curl. They still do: they move over one at a time.
 ;;;
 ;;; A body is a string, or a plist that becomes JSON:
 ;;;
@@ -146,8 +147,8 @@
 
 ;;; --- the short forms ------------------------------------------------------------
 
-;; The text of a page, or #f. This is the curl inside a
-;; shell-command->string that appeared in five files.
+;; The text of a page, or #f. This is the whole job of a curl inside a
+;; shell-command->string, which is how five other packages still do it.
 (define (http-text url &optional opts k)
   (if k
       (http-get url opts (lambda (reply) (k (and (http-ok? reply) (http-body reply)))))
