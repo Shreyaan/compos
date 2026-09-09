@@ -1028,7 +1028,7 @@ defmodule Compos.Ui.Layouts do
             display: flex; flex-direction: column;
             border: 1px solid var(--border-bg, #e2dbc9);
             border-top: 2px solid var(--accent-fg, #26356b);
-            border-radius: 10px;
+            border-radius: 0;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
             overflow: hidden;
             z-index: 40;
@@ -1087,7 +1087,7 @@ defmodule Compos.Ui.Layouts do
           .mb-panel.palette .mb-preview-fact { min-height: 40px; align-items: center; gap: 16px; }
           .mb-panel.palette .mb-preview-k { flex: 0 0 11ch; }
           .mb-panel.palette .mb-preview-note {
-            padding: 16px 18px; border-radius: 10px; font-size: 17px; line-height: 1.45;
+            padding: 16px 18px; border-radius: 0; font-size: 17px; line-height: 1.45;
             border: 1px solid var(--border-bg, #e2dbc9); background: var(--window-bg, #fdfcf8);
             color: var(--default-fg, #1b1a17);
           }
