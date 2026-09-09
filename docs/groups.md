@@ -528,6 +528,8 @@ A group grows only while it is the destination of some frame, or by an explicit 
 
 A chat is a buffer with groups like any other. There is no chat ownership store and no primary chat.
 
+`move` and `remove` act on a chat as its own buffer: the chat leaves alone and no member travels with it. A chat holds one group, so `add` on a chat that has one changes nothing, and `add` on a chat with none makes it a member. A chat that moves keeps its name.
+
 At the start of a turn an agent reads one `context` value:
 
 - files: the members of the chat's group (the destination of the frame that shows the chat; else the chat's groups, see Membership).

@@ -785,6 +785,51 @@
                     "the scratch keeps no membership"))
     (t--sw-done!)))
 
+(deftest 'a-chat-moves-to-another-group
+  "a chat leaves its group like any member, and it travels alone"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((source (group-record-create! "zzsw-chat-home"))
+           (destination (group-record-create! "zzsw-chat-away"))
+           (chat (group-chat source))
+           (id-before (chat-stable-id! chat)))
+      (buffer-add-group! t--sw-first source)
+      (switch-to-buffer! chat)
+      (run-command "group-move")
+      (t--sw-type! "zzsw-chat-away")
+      (t--sw-key! "confirm")
+      (let ((moved chat))
+        (check-true! (buffer-known? moved)
+                     "the chat keeps its name through the move")
+        (check-equal! (buffer-local moved 'chat-id) id-before
+                      "it is the same chat buffer, not a new one")
+        (check-equal! (chat-group-id moved) destination
+                      "the chat belongs to the destination")
+        (check-true! (buffer-in-group? t--sw-first source)
+                     "the source keeps its work buffer")
+        (check-false! (buffer-in-group? t--sw-first destination)
+                      "no member travelled with the chat")
+        (when (buffer-known? moved) (buffer-kill! moved))))
+    (t--sw-done!)))
+
+(deftest 'a-chat-removes-its-own-group
+  "remove on a chat drops its membership and touches no member"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((source (group-record-create! "zzsw-chat-drop"))
+           (chat (group-chat source)))
+      (buffer-add-group! t--sw-first source)
+      (switch-to-buffer! chat)
+      (run-command "remove-group-from-buffer")
+      (t--sw-type! "zzsw-chat-drop")
+      (t--sw-key! "confirm")
+      (t--sw-key! "cancel")
+      (check-false! (chat-group-id chat) "the chat holds no group")
+      (check-true! (buffer-in-group? t--sw-first source)
+                   "the group keeps its work buffer")
+      (when (buffer-known? chat) (buffer-kill! chat)))
+    (t--sw-done!)))
+
 (deftest 'move-includes-the-explicit-transient-work-buffer
   "moving a Dired-like listing moves the listing itself"
   (lambda ()

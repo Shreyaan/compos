@@ -530,6 +530,27 @@ defmodule Compos.Ui.EditorLiveTest do
     keys(view, ["C-g"])
   end
 
+  test "imenu draws the definition the highlight is on", %{conn: conn} do
+    buf = "zz-imenu-ui-#{System.unique_integer([:positive])}.py"
+    Compos.Core.Buffer.append(buf, "def alpha():\n    return 1\n\ndef beta():\n    return 2\n")
+    Compos.Core.Buffer.goto(buf, 0)
+    Compos.Core.Editor.set_window_buffer(buf)
+
+    {:ok, view, _html} = live(conn, "/")
+
+    assert {:ok, _} = Compos.Core.Session.eval(~S|(run-command "imenu")|)
+    assert has_element?(view, ".mb-panel .mb-input-row .prompt", "Imenu:")
+
+    # stepping the highlight is the preview: point lands on the definition
+    # in the window the prompt came from, and the row it marks is the one
+    # the reader is looking at
+    keys(view, ["C-n", "C-n"])
+    assert has_element?(view, ".window.active .buf .line.hl-line", "def beta")
+
+    keys(view, ["C-g"])
+    Compos.Core.Session.eval(~s|(buffer-kill! "#{buf}")|)
+  end
+
   test "minibuffer shows on M-x with selectable candidates", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     html = keys(view, ["M-x"])

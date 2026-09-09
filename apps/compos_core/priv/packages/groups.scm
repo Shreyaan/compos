@@ -500,6 +500,12 @@
        (not (chat-buffer? b))
        (not (string-prefix? " " b))))
 
+;; the buffers a membership verb takes: ordinary work, and a chat. A chat
+;; is not work, it is the conversation, but it belongs to a group the way
+;; any buffer does (docs/groups.md), so it moves and it leaves.
+(define (group-membership-buffer? b)
+  (or (group-work-buffer? b) (chat-buffer? b)))
+
 ;; the group's own scratch, its blank pane. It refuses kill-buffer
 ;; while its group exists (docs/groups.md), but move and remove act on
 ;; it as its own buffer: the group recreates a blank pane when its
@@ -709,7 +715,11 @@
 (define (buffer-add-group! b value)
   (let ((id (group-ensure-record! value)))
     (cond ((not id) #f)
-          ((chat-buffer? b) #f)
+          ;; a chat holds ONE group, so `add` on a chat that has one
+          ;; would be a move, and add never removes. A chat with no group
+          ;; joins like any buffer.
+          ((chat-buffer? b)
+           (if (chat-group-id b) #f (chat-set-group! b id)))
           ;; already a member, but asking for it is still a declaration:
           ;; the membership stops being one the buffer merely inherited
           ((buffer-in-group? b id)
@@ -1963,8 +1973,7 @@
           (with-invoking-buffer
             (lambda ()
               (let ((buf (current-buffer)))
-                (cond ((chat-buffer? buf) (message "A chat stays with its group"))
-                      ((not (group-work-buffer? buf))
+                (cond ((not (group-membership-buffer? buf))
                        (message "The current buffer is not a work buffer"))
                       (else
                        (buffer-move-family-to-group! buf g)
@@ -3207,14 +3216,14 @@
          (selected (filter (lambda (candidate)
                              (buffer-local candidate 'buffer-selected))
                            (buffer-list-mru))))
-    (filter group-work-buffer? (dedupe-names (append marked selected)))))
+    (filter group-membership-buffer? (dedupe-names (append marked selected)))))
 
 ;; With no selection at all, the command means the current buffer.
 (define (group-command-work-buffers)
   (let ((buf (current-buffer))
         (chosen (group-command-selected-buffers)))
     (cond ((pair? chosen) chosen)
-          ((group-work-buffer? buf) (list buf))
+          ((group-membership-buffer? buf) (list buf))
           (else '()))))
 
 ;; The prompt takes a typed name as well as a listed one, and a name it
@@ -3230,9 +3239,12 @@
         (begin
           (for-each
             (lambda (buf)
-              (if (and (buffer-known? buf) (group-work-buffer? buf))
+              ;; a chat that already has a group is skipped, not moved:
+              ;; add never removes a membership
+              (if (and (buffer-known? buf)
+                       (group-membership-buffer? buf)
+                       (buffer-add-group! buf id))
                   (begin
-                    (buffer-add-group! buf id)
                     (buffer-set-local! buf 'buffer-selected #f)
                     (set! changed (+ changed 1)))
                   (set! skipped (+ skipped 1))))
@@ -3311,7 +3323,7 @@
         (let ((eligible
                (filter (lambda (buf)
                          (and (buffer-known? buf)
-                              (group-work-buffer? buf)
+                              (group-membership-buffer? buf)
                               (not (group-scratch-buffer? buf))))
                        buffers))
               (here (frame-group)))
@@ -3348,7 +3360,7 @@
         (let ((eligible
                 (filter (lambda (buf)
                           (and (buffer-known? buf)
-                               (group-work-buffer? buf)
+                               (group-membership-buffer? buf)
                                (not (group-scratch-buffer? buf))))
                         buffers)))
           (for-each (lambda (buf) (buffer-move-to-group! buf id)) eligible)
@@ -3372,13 +3384,13 @@
                                   " to " (group-name id)))
           family))))
 
-;; The buffers a membership verb acts on for BUF. A group scratch acts
-;; on itself: its family is the whole group, and moving or removing that
-;; family would sweep every work buffer along. Any other buffer acts on
-;; its family, minus the group's shared scratch, which is a pane rather
-;; than a member.
+;; The buffers a membership verb acts on for BUF. A chat and a group
+;; scratch act on themselves: their family is the whole group, and moving
+;; or removing that family would sweep every work buffer along. Any other
+;; buffer acts on its family, minus the group's shared scratch, which is a
+;; pane rather than a member.
 (define (group-membership-targets buf)
-  (if (group-scratch-buffer? buf)
+  (if (or (chat-buffer? buf) (group-scratch-buffer? buf))
       (list buf)
       (remove group-scratch-buffer? (buffer-family buf))))
 
@@ -3424,9 +3436,7 @@
     (let ((buf (current-buffer))
           (selected (group-command-selected-buffers)))
       (cond ((pair? selected) (group-move-read-destination! selected))
-            ((chat-buffer? buf)
-             (message "A chat stays with its group"))
-            ((not (group-work-buffer? buf))
+            ((not (group-membership-buffer? buf))
              (message "The current buffer is not a work buffer"))
             (else (buffer-move-read-destination! buf))))))
 
@@ -3481,8 +3491,8 @@
             (else (buffer-remove-read! buf ids '()))))))
 
 ;; The other direction. One group is named by where the command runs, and
-;; the buffers are the rows. A chat never appears: it stays with its
-;; group. A group scratch is removed from the buffer side instead
+;; the buffers are the rows. A chat is a row like any other. A group
+;; scratch is removed from the buffer side instead
 ;; (remove-group-from-buffer).
 (define (group-remove-candidates names pending)
   (map
@@ -3530,10 +3540,7 @@
                   (groups--current)
                   (or (buffer-group (current-buffer)) (frame-group))))
            (names (if g
-                      (remove (lambda (name)
-                                (or (group-scratch-buffer? name)
-                                    (chat-buffer? name)))
-                              (group-buffers-mru g))
+                      (remove group-scratch-buffer? (group-buffers-mru g))
                       '())))
       (cond ((not g) (message "Not in a group"))
             ((null? names) (message "The group has no buffer to remove"))
