@@ -179,8 +179,8 @@
 
 ;;; --- founding a group -----------------------------------------------------------
 
-(deftest 'new-from-a-selection-preserves-old-memberships-and-the-layout
-  "group-new on marked buffers takes the arrangement and leaves what was already true"
+(deftest 'new-from-a-selection-takes-the-buffers-and-the-layout
+  "group-new on marked buffers takes the arrangement, and the buffers with it"
   (lambda ()
     (t--sw-setup!)
     (let ((old (group-record-create! "zzsw-old")))
@@ -199,8 +199,8 @@
       (t--sw-key! "confirm")
 
       (let ((id (group-resolve-id "zzsw-visible")))
-        (check-true! (buffer-in-group? t--sw-first old) "the old membership is kept")
-        (check-true! (buffer-in-group? t--sw-first id) "and the new one added")
+        (check-false! (buffer-in-group? t--sw-first old) "the old membership is left behind")
+        (check-equal! (buffer-group-ids t--sw-first) (list id) "the new one is the only one")
         (check-true! (buffer-in-group? t--sw-second id) "the other selected buffer joins")
         (check-equal! (frame-local 'current-group) id "the frame stands in it")
         (check-equal! (group-layout id) (window-tree) "and it remembers this layout")
@@ -433,10 +433,10 @@
     (t--sw-setup!)
     (set! *group-graveyard* '())
     (t--sw-two-groups! "zzsw-rev-one" "zzsw-rev-two")
-    (let ((one (group-resolve-id "zzsw-rev-one"))
-          (two (group-resolve-id "zzsw-rev-two")))
-      ;; second is in both groups, so the kill of two keeps it open
-      (buffer-add-group! t--sw-second one)
+    (let ((two (group-resolve-id "zzsw-rev-two")))
+      ;; a member belongs to ONE group, so no member is spared by living
+      ;; somewhere else too: the record, its color, and every member that
+      ;; still exists as a buffer or a file are what a revival brings back
       (let ((color (group-record-color (group-record-by-id two))))
         (run-command "group-kill")
         (check-false! (group-resolve-id "zzsw-rev-two") "the group is gone")
@@ -446,7 +446,6 @@
           (check-true! again "the record is back")
           (check-equal! (group-record-color (group-record-by-id again)) color
                         "with its color")
-          (check-true! (buffer-in-group? t--sw-second again) "the member that lived joins")
           (check-equal! (frame-group) again "and the frame enters it")
           (check-false! (assoc "zzsw-rev-two" *group-graveyard*) "the grave is empty"))))
     (t--sw-done!)))
@@ -574,8 +573,8 @@
       '("group-pull-buffer" "group-push-buffer" "group-push-visible"
         "group-push-selected" "group-pop"))))
 
-(deftest 'add-keeps-existing-memberships-and-visible-context
-  "add makes the buffer family available elsewhere without entering the destination"
+(deftest 'add-moves-the-buffer-family-to-the-destination
+  "a buffer holds one group, so add puts the family there and leaves the source"
   (lambda ()
     (t--sw-setup!)
     (let ((source (group-record-create! "zzsw-source"))
@@ -587,14 +586,16 @@
       (t--sw-type! "zzsw-destination")
       (t--sw-key! "confirm")
 
-      (check-true! (buffer-in-group? t--sw-first source) "the source membership remains")
-      (check-true! (buffer-in-group? t--sw-first destination) "the destination is added")
-      (check-equal! (frame-group) source "the visible context remains the source")
+      (check-false! (buffer-in-group? t--sw-first source) "the source membership is left")
+      (check-equal! (buffer-group-ids t--sw-first) (list destination)
+                    "the destination is the only membership")
+      (check-equal! (frame-group) destination
+                    "the visible buffer takes the frame with it")
       (check-equal! (current-buffer) t--sw-first "the command does not change windows"))
     (t--sw-done!)))
 
-(deftest 'add-can-create-a-destination-without-entering-it
-  "a typed destination creates one group and adds the current buffer"
+(deftest 'add-can-create-a-destination-by-name
+  "a typed destination creates one group and puts the current buffer in it"
   (lambda ()
     (t--sw-setup!)
     (let ((source (group-record-create! "zzsw-source")))
@@ -607,8 +608,11 @@
 
       (let ((created (group-resolve-id "zzsw-created")))
         (check-true! created "the typed destination creates a group")
-        (check-true! (buffer-in-group? t--sw-first created) "the buffer joins it")
-        (check-equal! (frame-group) source "the frame does not enter it")))
+        (check-equal! (buffer-group-ids t--sw-first) (list created)
+                      "the buffer joins it, and only it")
+        (check-false! (buffer-in-group? t--sw-first source) "the source is left")
+        (check-equal! (frame-group) created
+                      "the visible buffer takes the frame with it")))
     (t--sw-done!)))
 
 (deftest 'add-works-without-a-current-group
@@ -717,13 +721,12 @@
     (t--sw-done!)))
 
 (deftest 'move-never-asks-for-a-source-group
-  "a multiply grouped buffer asks only for its destination"
+  "the buffer's own group is not a question; only the destination is"
   (lambda ()
     (t--sw-setup!)
     (let ((first (group-record-create! "zzsw-first-source"))
           (second (group-record-create! "zzsw-second-source"))
           (destination (group-record-create! "zzsw-destination")))
-      (buffer-add-group! t--sw-first first)
       (buffer-add-group! t--sw-first second)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group #f)
@@ -734,8 +737,8 @@
       (t--sw-type! "zzsw-destination")
       (t--sw-key! "confirm")
 
-      (check-false! (buffer-in-group? t--sw-first first) "the first old group is removed")
-      (check-false! (buffer-in-group? t--sw-first second) "the second old group is removed")
+      (check-false! (buffer-in-group? t--sw-first first) "a group it never joined stays empty")
+      (check-false! (buffer-in-group? t--sw-first second) "the old group is removed")
       (check-true! (buffer-in-group? t--sw-first destination) "the destination is added"))
     (t--sw-done!)))
 
@@ -870,34 +873,30 @@
                    "the group scratch keeps its home group"))
     (t--sw-done!)))
 
-(deftest 'a-failed-move-keeps-every-existing-membership
+(deftest 'a-failed-move-keeps-the-existing-membership
   "move changes no membership when it cannot resolve the destination"
   (lambda ()
     (t--sw-setup!)
-    (let ((first (group-record-create! "zzsw-first"))
-          (second (group-record-create! "zzsw-second")))
-      (buffer-add-group! t--sw-first first)
-      (buffer-add-group! t--sw-first second)
+    (let ((home (group-record-create! "zzsw-first")))
+      (buffer-add-group! t--sw-first home)
       (buffer-move-family-to-group! t--sw-first "grp:missing")
-      (check-equal! (buffer-group-ids t--sw-first) (list first second)
-                    "the failed move keeps every membership"))
+      (check-equal! (buffer-group-ids t--sw-first) (list home)
+                    "the failed move keeps the membership"))
     (t--sw-done!)))
 
-(deftest 'remove-drops-one-membership-and-keeps-the-buffer
-  "remove changes one membership without killing work"
+(deftest 'remove-drops-the-membership-and-keeps-the-buffer
+  "remove changes the membership without killing work"
   (lambda ()
     (t--sw-setup!)
-    (let ((removed (group-record-create! "zzsw-removed"))
-          (kept (group-record-create! "zzsw-kept")))
+    (let ((removed (group-record-create! "zzsw-removed")))
       (buffer-add-group! t--sw-first removed)
-      (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group removed)
       (run-command "remove-group-from-buffer")
 
       (check-equal! (plist-get (minibuffer-state) 'prompt)
                     "Toggle group removal (C-g applies): "
-                    "multiple memberships always open the picker")
+                    "the membership opens the picker")
       (t--sw-type! "zzsw-removed")
       (t--sw-key! "confirm")
       (check-true! (minibuffer-state) "the picker stays open after a toggle")
@@ -906,24 +905,22 @@
       (t--sw-key! "cancel")
 
       (check-false! (buffer-in-group? t--sw-first removed) "the named membership is removed")
-      (check-true! (buffer-in-group? t--sw-first kept) "the other membership remains")
+      (check-equal! (buffer-group-ids t--sw-first) '() "the buffer is left in no group")
       (check-true! (buffer-known? t--sw-first) "the buffer remains alive"))
     (t--sw-done!)))
 
 (deftest 'remove-asks-for-a-membership-without-a-current-group
-  "a multiply grouped buffer chooses one membership when the frame has no context"
+  "the buffer's own group answers, even when the frame stands in none"
   (lambda ()
     (t--sw-setup!)
-    (let ((removed (group-record-create! "zzsw-null-remove"))
-          (kept (group-record-create! "zzsw-null-kept")))
+    (let ((removed (group-record-create! "zzsw-null-remove")))
       (buffer-add-group! t--sw-first removed)
-      (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group #f)
       (run-command "remove-group-from-buffer")
       (check-equal! (plist-get (minibuffer-state) 'prompt)
                     "Toggle group removal (C-g applies): "
-                    "the command asks which membership to remove")
+                    "the command asks before it removes")
       (t--sw-type! "zzsw-null-remove")
       (t--sw-key! "confirm")
       (check-true! (minibuffer-state) "the picker remains active")
@@ -931,19 +928,15 @@
                    "the selection remains pending until close")
       (t--sw-key! "cancel")
       (check-false! (buffer-in-group? t--sw-first removed)
-                    "the selected membership is removed")
-      (check-true! (buffer-in-group? t--sw-first kept)
-                   "the other membership remains"))
+                    "the selected membership is removed"))
     (t--sw-done!)))
 
 (deftest 'remove-picker-can-clear-a-pending-removal
   "selecting the same membership again keeps it when C-g applies the changes"
   (lambda ()
     (t--sw-setup!)
-    (let ((first (group-record-create! "zzsw-toggle-first"))
-          (second (group-record-create! "zzsw-toggle-second")))
+    (let ((first (group-record-create! "zzsw-toggle-first")))
       (buffer-add-group! t--sw-first first)
-      (buffer-add-group! t--sw-first second)
       (switch-to-buffer! t--sw-first)
       (run-command "remove-group-from-buffer")
       (t--sw-type! "zzsw-toggle-first")
@@ -1231,27 +1224,22 @@
       (check-false! (buffer-in-group? t--sw-third current) "it did not join this group"))
     (t--sw-done!)))
 
-(deftest 'context-confirm-asks-which-membership-to-enter
-  "C-RET on a multiply grouped buffer does not guess its destination"
+(deftest 'context-confirm-enters-the-buffers-one-group
+  "C-RET has nothing to guess: the buffer names one group and the frame enters it"
   (lambda ()
     (t--sw-setup!)
     (let ((here (group-record-create! "zzsw-here"))
-          (first (group-record-create! "zzsw-first-choice"))
-          (second (group-record-create! "zzsw-second-choice")))
+          (there (group-record-create! "zzsw-second-choice")))
       (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second first)
-      (buffer-add-group! t--sw-second second)
+      (buffer-add-group! t--sw-second there)
       (switch-to-buffer! t--sw-first)
 
       (t--sw-open-all!)
       (t--sw-type! t--sw-second)
       (t--sw-key! "confirm-context")
-      (check-true! (member "zzsw-first-choice" (t--sw-labels)) "the first membership is offered")
-      (check-true! (member "zzsw-second-choice" (t--sw-labels)) "the second membership is offered")
-      (t--sw-type! "zzsw-second-choice")
-      (t--sw-key! "confirm")
 
-      (check-equal! (frame-group) second "the chosen membership was entered")
+      (check-false! (minibuffer-state) "no prompt stands between C-RET and the group")
+      (check-equal! (frame-group) there "the buffer's group was entered")
       (check-equal! (current-buffer) t--sw-second "the candidate has focus"))
     (t--sw-done!)))
 
@@ -1746,10 +1734,8 @@
   "the explicit action replaces memberships with the new group"
   (lambda ()
     (t--sw-setup!)
-    (let ((source (group-record-create! "zzsw-source"))
-          (kept (group-record-create! "zzsw-kept")))
+    (let ((source (group-record-create! "zzsw-source")))
       (buffer-add-group! t--sw-first source)
-      (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group source)
       (run-command "group-switch")
@@ -1761,7 +1747,7 @@
       (let ((moved (group-resolve-id "zzsw-moved")))
         (check-true! (buffer-in-group? t--sw-first moved) "the destination was added")
         (check-false! (buffer-in-group? t--sw-first source) "the visible source was removed")
-        (check-false! (buffer-in-group? t--sw-first kept) "the old membership is removed")
+        (check-equal! (buffer-group-ids t--sw-first) (list moved) "and it is the only group")
         (check-equal! (frame-group) moved "the new group was entered")))
     (t--sw-done!)))
 

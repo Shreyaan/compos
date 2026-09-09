@@ -173,7 +173,7 @@
              (list (list "tool-result" (plist-get e 'id) text
                           (equal? (plist-get e 'status) "failed"))))
            (when (boundp (quote chat-summary-note-tool!))
-             (chat-summary-note-tool! buf))))))
+             (chat-summary-note-tool! buf)))))
 
       ((equal? type 'plan)
        (let ((start (agent-render! slug

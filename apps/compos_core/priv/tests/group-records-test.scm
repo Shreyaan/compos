@@ -88,19 +88,20 @@
       (t--gs-kill! buf))))
 
 (deftest 'a-role-belongs-to-one-buffer-group-membership
-  "the same buffer can mean different things in different groups"
+  "a role is a role in the one group the buffer is in, and it leaves with it"
   (lambda ()
     (let ((buf (t--gs-buf))
           (left (group-record-create! "zzgs-role-left"))
           (right (group-record-create! "zzgs-role-right")))
       (buffer-add-group-as! buf left 'index)
-      (buffer-add-group-as! buf right "reference")
       (check-equal! (buffer-group-role buf left) "index" "the symbol became a role")
-      (check-equal! (buffer-group-role buf right) "reference" "the other role is independent")
       (check-equal! (group-buffer-as left 'index) buf "a role finds its buffer")
-      (check-false! (group-buffer-as right 'index) "roles do not leak between groups")
-      (buffer-remove-group! buf left)
-      (check-false! (buffer-group-role buf left) "leaving removes the role too")
+      (buffer-add-group-as! buf right "reference")
+      (check-equal! (buffer-group-role buf right) "reference" "the new group holds the new role")
+      (check-false! (buffer-group-role buf left) "the group it left keeps no role")
+      (check-false! (group-buffer-as left 'index) "and nothing answers to the old role")
+      (buffer-remove-group! buf right)
+      (check-false! (buffer-group-role buf right) "leaving removes the role too")
       (t--gs-drop! left right)
       (t--gs-kill! buf))))
 
