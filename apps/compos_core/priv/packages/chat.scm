@@ -68,40 +68,11 @@
 ;; the display text of a turn: its text blocks, joined. A turn made only of
 ;; tool calls or tool results has none — it is wire, not conversation.
 (define (chat-turn-display t)
-  ;; Keep tool calls and results in the transcript sent to title-card.
-  ;; Their compact labels give the local model enough context to describe
-  ;; the work without exposing the full rendered card machinery.
   (let loop ((bs (or (plist-get t 'blocks) '())) (acc ""))
-    (if (null? bs)
-        acc
-        (let* ((b (car bs))
-               (kind (car b))
-               (tail (cdr b)))
-          (cond
-            ((equal? kind "text")
-             (loop (cdr bs) (string-append acc (car tail))))
-            ((equal? kind "tool-use")
-             (loop (cdr bs)
-                   (string-append acc
-                     "TOOL CALL\nname: " (or (car (cdr tail)) "unknown")
-                     "\narguments: "
-                     (if (pair? (cdr (cdr tail)))
-                         (or (car (cdr (cdr tail))) "{}")
-                         "{}")
-                     "\n")))
-            ((equal? kind "tool-result")
-             (loop (cdr bs)
-                   (string-append acc
-                     "TOOL RESULT\nresult: "
-                     (if (pair? (cdr tail))
-                         (or (car (cdr tail)) "")
-                         "")
-                     (if (and (pair? (cdr (cdr tail)))
-                              (car (cdr (cdr tail))))
-                         "\nstatus: failed"
-                         "\nstatus: completed")
-                     "\n")))
-            (else (loop (cdr bs) acc)))))))
+    (cond ((null? bs) acc)
+          ((equal? (car (car bs)) "text")
+           (loop (cdr bs) (string-append acc (car (cdr (car bs))))))
+          (else (loop (cdr bs) acc)))))
 
 ;; the same view over any record: (role text) pairs in the record's own
 ;; order. Replay reads parsed .chat records that never lived in a buffer,
@@ -810,9 +781,16 @@
 ;; Set a chat's title by renaming its buffer in place.
 (define (chat-title buf title)
   (let ((name (string-trim title)))
-    (if (equal? name "")
-        #f
-        (rename-buffer! buf name))))
+    (cond ((equal? name "") #f)
+          ;; a chat that already wears this name is titled all the same:
+          ;; the local is what says so, and the auto-titler reads it
+          ((equal? name buf) (buffer-set-local! name 'chat-title name) #t)
+          ((rename-buffer! buf name)
+           ;; a title, once set, is the chat's own: the auto-titler names
+           ;; a chat that has none, and never renames one that has
+           (buffer-set-local! name 'chat-title name)
+           #t)
+          (else #f))))
 
 (public! 'chat-title
   "(chat-title BUF TITLE) — set a chat's title by renaming its buffer")
@@ -1170,12 +1148,43 @@
 (define *chat-summary-debounce-ms* 10000)
 (define *chat-summary-tail-lines* 60)
 
+(defcustom 'chat-summary-max-bytes 120
+  "How long a chat's running summary may be. A longer answer is cut at a word."
+  'group 'chat 'type 'integer)
+
+(defcustom 'chat-title-max-bytes 56
+  "How long a chat's title may be. The name is a label, not a sentence."
+  'group 'chat 'type 'integer)
+
 ;; one line, because the .chat header is one line
+;; N bytes at most, cut at the last word inside the budget so the line
+;; ends on a word and not mid-syllable
+(define (chat-summary--clip s n)
+  (if (<= (string-byte-length s) n)
+      s
+      (let* ((head (substring-bytes s 0 n))
+             (sp (string-rindex head " ")))
+        (string-trim (if (and sp (> sp (quotient n 2)))
+                         (substring-bytes head 0 sp)
+                         head)))))
+
+;; The bar and the buffer name hold one line, and the card writer answers
+;; in one sentence or two: the first names the work, the second elaborates.
+;; Take the first, so the line is short because it says less, and not
+;; because something cut it.
+(define (chat-summary--first-sentence s)
+  (let* ((t (string-trim s))
+         (i (string-index t ". ")))
+    (if i (substring-bytes t 0 (+ i 1)) t)))
+
 (define (chat-summary--flatten s)
   (let loop ((cur s))
     (let ((next (re-replace "[\\s][\\s]+|[\\n\\t\\r]" cur " ")))
       (if (equal? next cur)
-          (string-trim cur)
+          ;; the bar, the buffer name and the .chat header all show this
+          ;; line whole, so a model that answers in two sentences must not
+          ;; be the thing that decides how wide they are
+          (chat-summary--clip (string-trim cur) chat-summary-max-bytes)
           (loop next)))))
 
 ;; the tail of the rendered transcript, cut on line boundaries so a
@@ -1187,12 +1196,7 @@
     (let loop ((ls lines) (extra (- n *chat-summary-tail-lines*)))
       (if (and (pair? ls) (> extra 0))
           (loop (cdr ls) (- extra 1))
-          ;; A tail cut mid-turn and a tail of finished work read the same,
-          ;; and they are not the same: one names work in flight, the other
-          ;; names work that landed. The marker is the only thing that tells
-          ;; the summarizer which it is holding.
-          (string-append (string-join ls "\n")
-                         (if (buffer-local buf 'chat-turn-active) "" "\n\n*FINISHED*"))))))
+          (string-join ls "\n")))))
 
 (define (chat-summary-refresh! buf)
   (when (buffer-known? buf)
@@ -1214,8 +1218,14 @@
                             (when (and (string? title)
                                        (not (equal? (string-trim title) ""))
                                        (not (string? (buffer-local buf 'chat-title))))
-                              (buffer-set-local! buf 'chat-title title)
-                              (chat-title buf title))
+                              ;; a card model that skips the TITLE line hands
+                              ;; back its first sentence, and that sentence
+                              ;; would become the buffer's name
+                              (let ((name (chat-summary--clip
+                                            (chat-summary--flatten title)
+                                            chat-title-max-bytes)))
+                                (buffer-set-local! buf 'chat-title name)
+                                (chat-title buf name)))
                             (land (if (and (string? desc)
                                            (not (equal? (string-trim desc) "")))
                                       desc
