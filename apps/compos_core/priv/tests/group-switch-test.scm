@@ -756,24 +756,33 @@
                     "the destination becomes the only membership"))
     (t--sw-done!)))
 
-(deftest 'the-group-scratch-refuses-move
-  "the group's shared scratch keeps its membership through move and remove"
+(deftest 'the-group-scratch-moves-and-removes-as-its-own-buffer
+  "the group's shared scratch moves and removes like any work buffer"
   (lambda ()
     (t--sw-setup!)
     (let ((source (group-record-create! "zzsw-scratch-home"))
+          (other (group-record-create! "zzsw-scratch-other"))
           (destination (group-record-create! "zzsw-scratch-away")))
       (buffer-add-group-as! t--sw-second source 'scratch)
+      (buffer-add-group-as! t--sw-second other 'scratch)
       (switch-to-buffer! t--sw-second)
       (run-command "group-move")
-      (check-false! (minibuffer-state) "move opens no prompt on the scratch")
-      (check-true! (buffer-in-group? t--sw-second source)
-                   "the scratch keeps its group")
+      (t--sw-type! "zzsw-scratch-away")
+      (t--sw-key! "confirm")
+      (check-true! (buffer-in-group? t--sw-second destination)
+                   "the scratch reaches the destination")
+      (check-false! (buffer-in-group? t--sw-second source)
+                    "the scratch leaves its first group")
+      (check-false! (buffer-in-group? t--sw-second other)
+                    "the scratch leaves its second group")
       (run-command "remove-group-from-buffer")
-      (check-false! (minibuffer-state) "remove opens no prompt on the scratch")
-      (check-true! (buffer-in-group? t--sw-second source)
-                   "remove changes nothing on the scratch")
+      (t--sw-type! "zzsw-scratch-away")
+      (t--sw-key! "confirm")
+      (t--sw-key! "cancel")
       (check-false! (buffer-in-group? t--sw-second destination)
-                    "the scratch reaches no other group"))
+                    "remove drops the chosen membership")
+      (check-equal! (buffer-group-ids t--sw-second) '()
+                    "the scratch keeps no membership"))
     (t--sw-done!)))
 
 (deftest 'move-includes-the-explicit-transient-work-buffer

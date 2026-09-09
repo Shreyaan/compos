@@ -500,10 +500,10 @@
        (not (chat-buffer? b))
        (not (string-prefix? " " b))))
 
-;; the group's own scratch, its blank pane. It refuses move and remove
-;; (docs/groups.md, invariant 14): its name and its membership must
-;; agree, or the group's layout shows a foreign buffer and the frame
-;; loses its derived current group.
+;; the group's own scratch, its blank pane. It refuses kill-buffer
+;; while its group exists (docs/groups.md), but move and remove act on
+;; it as its own buffer: the group recreates a blank pane when its
+;; layout needs one.
 (define (group-scratch-buffer? b)
   (let ((g (buffer-group b)))
     (and g (equal? (buffer-group-role b g) "scratch"))))
@@ -1964,8 +1964,6 @@
             (lambda ()
               (let ((buf (current-buffer)))
                 (cond ((chat-buffer? buf) (message "A chat stays with its group"))
-                      ((group-scratch-buffer? buf)
-                       (message "The group scratch stays with its group"))
                       ((not (group-work-buffer? buf))
                        (message "The current buffer is not a work buffer"))
                       (else
@@ -3374,10 +3372,19 @@
                                   " to " (group-name id)))
           family))))
 
+;; The buffers a membership verb acts on for BUF. A group scratch acts
+;; on itself: its family is the whole group, and moving or removing that
+;; family would sweep every work buffer along. Any other buffer acts on
+;; its family, minus the group's shared scratch, which is a pane rather
+;; than a member.
+(define (group-membership-targets buf)
+  (if (group-scratch-buffer? buf)
+      (list buf)
+      (remove group-scratch-buffer? (buffer-family buf))))
+
 (define (buffer-move-family-to-group! buf destination)
-  ;; the group's shared scratch never travels (docs/groups.md, invariant
-  ;; 14); a legacy owner-companion pair still moves as one
-  (let ((family (remove group-scratch-buffer? (buffer-family buf)))
+  ;; a legacy owner-companion pair still moves as one
+  (let ((family (group-membership-targets buf))
         (to (group-resolve-id destination)))
     (cond ((not to) (message "No destination group"))
           ((null? family) (message "Nothing to move"))
@@ -3410,8 +3417,8 @@
     (lambda (group) (buffer-move-family-to-group! buf group))))
 
 ;; A selection moves as a set; the current buffer alone moves with its
-;; legacy companion. The group's shared scratch never moves: it is the
-;; group's blank pane, not a member passing through.
+;; family. A group scratch moves as its own buffer, and its group makes
+;; a new blank pane when its layout needs one.
 (define-command "group-move" "Move the selected buffers, else this buffer, to one group"
   (lambda ()
     (let ((buf (current-buffer))
@@ -3419,8 +3426,6 @@
       (cond ((pair? selected) (group-move-read-destination! selected))
             ((chat-buffer? buf)
              (message "A chat stays with its group"))
-            ((group-scratch-buffer? buf)
-             (message "The group scratch stays with its group"))
             ((not (group-work-buffer? buf))
              (message "The current buffer is not a work buffer"))
             (else (buffer-move-read-destination! buf))))))
@@ -3432,8 +3437,7 @@
         (lambda (member)
           (when (buffer-in-group? member id)
             (buffer-remove-group! member id)))
-        ;; the group's shared scratch keeps its membership (invariant 14)
-        (remove group-scratch-buffer? (buffer-family buf))))
+        (group-membership-targets buf)))
     ids)
   (when (pair? ids) (run-hooks 'group-membership-hook))
   (message
@@ -3473,14 +3477,13 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (ids (group-buffer-memberships buf)))
-      (cond ((group-scratch-buffer? buf)
-             (message "The group scratch stays with its group"))
-            ((null? ids) (message "The buffer is not in a group"))
+      (cond ((null? ids) (message "The buffer is not in a group"))
             (else (buffer-remove-read! buf ids '()))))))
 
-;; The other direction. One group is named by where the command runs, and the
-;; buffers are the rows. The chat and the group scratch never appear: they
-;; stay with their group (invariant 14).
+;; The other direction. One group is named by where the command runs, and
+;; the buffers are the rows. A chat never appears: it stays with its
+;; group. A group scratch is removed from the buffer side instead
+;; (remove-group-from-buffer).
 (define (group-remove-candidates names pending)
   (map
     (lambda (name)

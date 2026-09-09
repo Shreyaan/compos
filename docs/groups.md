@@ -507,7 +507,7 @@ One predicate, `transient?`, is true for the minibuffer, `*switch*`, the echo ar
 Every group has one scratch buffer named `*scratch: NAME*`.
 
 - It is in `scratch-mode`, a Morg note: headings fold, code blocks run, and the motions walk headings, siblings, and links.
-- It is always in the group. `move` and `remove` refuse it.
+- `move` and `remove` act on it like any buffer; the group recreates its blank pane when it needs one.
 - `kill-buffer` refuses it while the group exists. The echo area names the group.
 - `kill G` and `dissolve G` remove it.
 - It is the buffer of last resort for window fill inside the group.
@@ -612,7 +612,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 11. Three-section lists: all combinations of destination and project present or absent; filter across sections; project section follows the current buffer.
 12. `dissolve` drops memberships and keeps buffers; frames go to `previous`. With a live parent, the members join the parent and the frame switches to it.
 13. `kill` drops the membership on shared buffers, kills exclusive ones, honours modified protection, switches frames to the next group.
-14. Scratch buffer refuses `kill-buffer`, `move`, `remove`; goes with `kill` and `dissolve`; persists content.
+14. Scratch buffer refuses `kill-buffer`; `move` and `remove` act on it; goes with `kill` and `dissolve`; persists content.
 15. Per-frame destination and `previous`; two frames on one group with two layouts.
 16. Persistence: groups, memberships, layouts, scratch, frame slots survive a restart; malformed state isolates to one group.
 17. Agent context: files and focus from the chat's frame, else from the chat's groups.
