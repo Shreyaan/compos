@@ -595,19 +595,22 @@
       '()
       (let ((ids (buffer-local b 'group-ids)))
         (if (pair? ids)
-            ;; The answer holds only ids that resolve now. The local is
+            ;; The answer holds only ids that resolve now, and only one of
+            ;; them: a buffer belongs to ONE group. A local left from the
+            ;; days of many keeps the group it joined first. The local is
             ;; rewritten only when every id resolved: a transient
             ;; resolution failure must not erase a membership (see
             ;; chat-group-id above). Kill and dissolve sweep explicitly.
-            (let ((normalized
-                    (fold (lambda (out id)
-                            (let ((valid (group-resolve-id id)))
-                              (if (or (not valid) (member valid out))
-                                  out
-                                  (append out (list valid)))))
-                          '() ids)))
+            (let* ((resolved
+                     (fold (lambda (out id)
+                             (let ((valid (group-resolve-id id)))
+                               (if (or (not valid) (member valid out))
+                                   out
+                                   (append out (list valid)))))
+                           '() ids))
+                   (normalized (if (pair? resolved) (list (car resolved)) '())))
               (when (and (not (equal? normalized ids))
-                         (equal? (length normalized) (length ids)))
+                         (equal? (length resolved) (length ids)))
                 (buffer-set-local! b 'group-ids normalized))
               ;; a write only when a legacy name is still there: every
               ;; local write is a change the frame refreshes for
@@ -628,13 +631,12 @@
 (define (buffer-groups b) (buffer-group-ids b))
 
 (define (buffer-group b)
+  ;; One group, so there is nothing to choose between. The frame's own
+  ;; group used to break a tie among many; a buffer no longer has one.
   (if (chat-buffer? b)
       (chat-group-id b)
-      (let* ((ids (buffer-group-ids b))
-             (current (frame-local 'current-group)))
-        (cond ((and current (member current ids)) current)
-              ((pair? ids) (car ids))
-              (else #f)))))
+      (let ((ids (buffer-group-ids b)))
+        (and (pair? ids) (car ids)))))
 
 ;; ALWAYS a string. This is a marginalia field, and marginalia measures
 ;; its columns with string-length: one #f here breaks the annotation of
@@ -734,9 +736,8 @@
 (define (buffer-add-group! b value)
   (let ((id (group-ensure-record! value)))
     (cond ((not id) #f)
-          ;; a chat holds ONE group, so `add` on a chat that has one
-          ;; would be a move, and add never removes. A chat with no group
-          ;; joins like any buffer.
+          ;; a chat holds ONE group and only `move` changes it: joining is
+          ;; how a new chat gets its group, never how a live one travels.
           ((chat-buffer? b)
            (if (chat-group-id b) #f (chat-set-group! b id)))
           ;; already a member, but asking for it is still a declaration:
@@ -745,9 +746,15 @@
            (buffer-set-local! b 'group-inherited #f)
            (buffer-modeline-group-refresh! b)
            id)
+          ;; ONE group at a time. Joining is leaving: a buffer that lived
+          ;; somewhere else moves here rather than answering two questions
+          ;; about where it lives. Only an explicit verb gets this far.
           (else
-            (buffer-set-local! b 'group-ids
-              (append (buffer-group-ids b) (list id)))
+            (buffer-set-local! b 'group-ids (list id))
+            ;; a role is a role in one group, so the roles it left go too
+            (buffer-set-local! b 'group-roles
+              (filter (lambda (entry) (equal? (car entry) id))
+                      (or (buffer-local b 'group-roles) '())))
             (buffer-set-local! b 'group #f)
             (buffer-set-local! b 'group-inherited #f)
             (buffer-set-local! b 'companion-of #f)
@@ -1376,7 +1383,16 @@
 ;; not inherited, and every explicit path below clears the mark.
 (on-buffer-created!
   (lambda (buf)
-    (let ((group (frame-group)))
+    ;; A new buffer lands where the work that opened it lives: the group
+    ;; of the buffer you are in, and the frame's group only when that
+    ;; buffer has none. An agent's chat is a current buffer like any
+    ;; other, so a file it opens joins the chat's group.
+    (let* ((here (current-buffer))
+           (group (or (and here
+                           (not (equal? here buf))
+                           (buffer-known? here)
+                           (buffer-group here))
+                      (frame-group))))
       (when (and group (group-work-buffer? buf))
         (buffer-add-group! buf group)
         (buffer-set-local! buf 'group-inherited group)
@@ -3213,13 +3229,9 @@
       ((null? ids)
        (group-read-new-name "Start a group with this buffer: "
          (lambda (name) (group-create-with-buffer! name buf #f))))
-      ((null? (cdr ids)) (switch-buffer-to-group! buf (car ids)))
-      (else
-        (let ((ordered (filter (lambda (id) (member id ids)) (group-ids-mru))))
-          (minibuffer-read "Switch buffer to group: " (map group-name ordered)
-            (lambda (name)
-              (let ((id (group-resolve-id name)))
-                (when id (switch-buffer-to-group! buf id))))))))))
+      ;; A buffer belongs to ONE group, so there is never a group to
+      ;; choose between. This used to be the system's only prompt.
+      (else (switch-buffer-to-group! buf (car ids))))))
 
 (set! buffer-context-switch! group-buffer-context-switch!)
 
