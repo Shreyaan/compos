@@ -224,6 +224,62 @@ defmodule Compos.Core.SchemeAPI do
   defp http_scalar(value) when is_boolean(value), do: to_string(value)
   defp http_scalar(value), do: value
 
+  # Three ways to say what to send, tried in the order a caller means them:
+  # json encodes and sets the content type, form url-encodes, body is the
+  # bytes verbatim.
+  defp http_body(req, o, json) do
+    cond do
+      match?({:ok, _}, json) ->
+        {:ok, value} = json
+        Keyword.put(req, :json, value)
+
+      Map.get(o, "form", false) != false ->
+        Keyword.put(req, :form, http_pairs(Map.get(o, "form")))
+
+      is_binary(Map.get(o, "body")) ->
+        Keyword.put(req, :body, Map.get(o, "body"))
+
+      true ->
+        req
+    end
+  end
+
+  # The seam lets a test answer a request with no network, the way
+  # :google_http does for Google.
+  defp http_perform(req) do
+    case Application.get_env(:compos_core, :http_request) do
+      nil -> Req.request(req)
+      adapter -> adapter.(req)
+    end
+  end
+
+  # One shape for every answer, reached or not. graphql.scm had to tell a
+  # transport failure from an HTTP status by whether the last line of curl's
+  # output parsed as a number; a caller here reads ok, then status.
+  defp http_reply(status, headers, body, o) do
+    body = if is_binary(body), do: body, else: IO.iodata_to_binary(body)
+    {body, truncated?} = http_truncate(body, Map.get(o, "max-bytes"))
+
+    reply = %{
+      "ok" => status in 200..299,
+      "status" => status,
+      "headers" => http_reply_headers(headers),
+      "body" => body
+    }
+
+    reply = if truncated?, do: Map.put(reply, "truncated", true), else: reply
+
+    # The body stays the bytes that arrived. A JSON answer is parsed as well,
+    # under its own key, so no caller parses it a second time.
+    reply =
+      case Jason.decode(body) do
+        {:ok, value} when is_map(value) or is_list(value) -> Map.put(reply, "json", value)
+        _ -> reply
+      end
+
+    Compos.Core.LLM.json_to_scheme(reply)
+  end
+
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
   def docs do
     %{
