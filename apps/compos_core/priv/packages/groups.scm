@@ -2232,15 +2232,13 @@
     ;; window falls to the next buffer, as any kill does.
     (when stood (set-frame-local! 'current-group #f))
     (set! *group-dying* id)
+    ;; A member belongs to ONE group, so no member is spared by living
+    ;; somewhere else as well. Unsaved work is the only thing that survives.
     (for-each
       (lambda (b)
-        (cond
-          ((and (buffer-path b) (buffer-modified? b))
-           (set! survivors (cons b survivors)))
-          ((and (not (chat-buffer? b))
-                (pair? (cdr (buffer-group-ids b))))
-           (set! survivors (cons b survivors)))
-          (else (buffer-kill! b))))
+        (if (and (buffer-path b) (buffer-modified? b))
+            (set! survivors (cons b survivors))
+            (buffer-kill! b)))
       members)
     (for-each
       (lambda (b)
@@ -3279,8 +3277,9 @@
         (begin
           (for-each
             (lambda (buf)
-              ;; a chat that already has a group is skipped, not moved:
-              ;; add never removes a membership
+              ;; a buffer holds ONE group, so joining this one is leaving
+              ;; the last. A chat that already has a group is skipped:
+              ;; only `move` sends a live chat somewhere else.
               (if (and (buffer-known? buf)
                        (group-membership-buffer? buf)
                        (buffer-add-group! buf id))
@@ -3290,8 +3289,8 @@
                   (set! skipped (+ skipped 1))))
             buffers)
           (message
-            (string-append "Added " (number->string changed) " buffer"
-                           (if (= changed 1) "" "s") " to "
+            (string-append (number->string changed) " buffer"
+                           (if (= changed 1) "" "s") " now in "
                            (group-name id)
                            (if (= skipped 0) ""
                                (string-append "; skipped "
@@ -3322,8 +3321,8 @@
          (names (filter (lambda (g) (not (equal? g default))) (group-names))))
     (minibuffer-read
       (if default
-          (string-append "Add buffers to group (default " default "): ")
-          "Add buffers to group: ")
+          (string-append "Put buffers in group (default " default "): ")
+          "Put buffers in group: ")
       (append (if default (list (list default "last visited")) '())
               (list (list "New group" "create without entering"))
               names)
@@ -3338,8 +3337,9 @@
                (lambda (name)
                  (let ((id (group-record-create! name)))
                    (when id (group-add-buffers-to! buffers id))))))
-            ;; add is additive and one `remove` undoes it (docs/groups.md),
-            ;; so no confirmation stands between RET and the join
+;; a buffer holds one group, so this join is a move, and one
+            ;; `move` back undoes it (docs/groups.md): no confirmation
+            ;; stands between RET and the join
             (else
               (let ((id (or (group-resolve-id destination)
                             (group-record-create! destination))))
@@ -3457,7 +3457,7 @@
                                       " to " (group-name to)))
               family)))))
 
-(define-command "group-add" "Add the selected buffers, else this buffer, to a group"
+(define-command "group-add" "Put the selected buffers, else this buffer, in a group"
   (lambda ()
     (let ((buffers (group-command-work-buffers)))
       (if (null? buffers)
