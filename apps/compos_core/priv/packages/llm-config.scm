@@ -313,6 +313,14 @@
   (let ((m (buffer-local (llm-config--session buf) 'agent-mode)))
     (if (or (not m) (equal? m "")) "none" m)))
 
+;; the modes this buffer's backend can actually be put in. Empty for a
+;; backend with no ACP session at all, and for one whose modes no session
+;; has named yet: the row is hidden then, so `a` never sits there dead
+(define (llm-config--agent-modes buf)
+  (if (and buf (boundp (quote agent-mode-options)))
+      (agent-mode-options (llm-config--session buf))
+      '()))
+
 (define (llm-config--filesystem)
   (if (boundp (quote agent-filesystem-tools)) agent-filesystem-tools "deny"))
 
@@ -337,9 +345,7 @@
 (define-command "llm-config-pick-agent-mode" "Choose the agent session's own mode"
   (lambda ()
     (let* ((buf (llm-config--session (transient-scope)))
-           (modes (if (boundp (quote agent-mode-options))
-                      (agent-mode-options buf)
-                      '())))
+           (modes (llm-config--agent-modes buf)))
       (if (null? modes)
           (message "this backend has no session modes")
           (llm-config-read! "Agent mode: "
@@ -834,7 +840,8 @@
       (transient-infix "k" "asks" "llm-config-pick-permission"
         (lambda (scope) (llm-config--permission-label scope)))
       (transient-infix "a" "agent mode" "llm-config-pick-agent-mode"
-        (lambda (scope) (llm-config--agent-mode-label scope)))
+        (lambda (scope) (llm-config--agent-mode-label scope))
+        'if (lambda (scope) (pair? (llm-config--agent-modes scope))))
       (transient-infix "f" "files" "llm-config-pick-filesystem"
         (lambda (_scope) (llm-config--filesystem)))
       (transient-suffix "d" "policy" "llm-config-permission-report"
