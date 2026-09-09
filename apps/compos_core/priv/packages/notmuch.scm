@@ -1673,8 +1673,10 @@ when a message has no text/plain part." 'group 'notmuch)
     (when (buffer-exists? *notmuch-search-buffer*)
       (for-each (lambda (id) (buffer-add-group! buf id))
                 (buffer-group-ids *notmuch-search-buffer*)))
-    (switch-to-buffer! buf)
-    (set-mode! "notmuch-show-mode")
+    ;; render into the buffer and into no window at all. Placement belongs
+    ;; to the caller (nm--show-pane!): a switch here takes whichever window
+    ;; happens to be current, which is the index's own window.
+    (with-current-buffer buf (lambda () (set-mode! "notmuch-show-mode")))
     ;; reading marks read, like every mail client
     (nm--run (string-append "tag -unread -- thread:" thread-id))
     buf))
