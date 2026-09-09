@@ -31,7 +31,25 @@
   ;; install via PATH, so point at a from-source build instead:
   ;; ~/src/claude-code-acp, `npm run build` with node >=22.
   '(cmd "/Users/svs/.asdf/installs/nodejs/24.0.2/bin/node /Users/svs/src/claude-code-acp/dist/index.js"
-    meta (claudeCode (options (settingSources () strictMcpConfig #t)))
+    ;; The editor names every tool through MCP and writes the whole
+    ;; system prompt, so the adapter's own tools have no place in an
+    ;; editor thread: everything goes through Scheme. settingSources and
+    ;; strictMcpConfig take the user's settings file and MCP registry
+    ;; away; they do NOT touch the tools the SDK ships with, which is why
+    ;; Bash kept running under a prompt that said shell was disabled.
+    ;; The adapter merges this list with its own (acp-agent.ts,
+    ;; createSessionOptions). ExitPlanMode and AskUserQuestion stay: plan
+    ;; mode has to have a way out, and the adapter owns the second one.
+    meta (claudeCode
+           (options (settingSources () strictMcpConfig #t
+                     disallowedTools ("Bash" "BashOutput" "KillShell"
+                                      "Read" "Write" "Edit" "MultiEdit"
+                                      "NotebookEdit" "Glob" "Grep"
+                                      "WebFetch" "WebSearch"
+                                      "Task" "Agent" "TodoWrite"
+                                      "SlashCommand" "ReportFindings"
+                                      "TaskCreate" "TaskUpdate"
+                                      "TaskList" "TaskGet"))))
     ;; the seed only has to hold until a session reports its own list;
     ;; llm-models-seen! keeps that answer for the connector
     models ("default" "opus[1m]" "claude-fable-5[1m]" "sonnet" "haiku")))
