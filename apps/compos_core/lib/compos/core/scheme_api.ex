@@ -333,6 +333,8 @@ defmodule Compos.Core.SchemeAPI do
         "(google-http! ACCOUNT METHOD URL PARAMS BODY [CALLBACK]) — authenticated Google HTTP request with an explicit account.",
       "google-revoke!" =>
         "(google-revoke! ACCOUNT CALLBACK) — revoke and remove one Google account connection.",
+      "http-request" =>
+        "(http-request URL [OPTS] [CALLBACK]) — make one HTTP request and return (ok BOOL status N headers PLIST body STRING [json VALUE] [error TEXT]). OPTS is a plist of method, headers, params, body, json, form, timeout, connect-timeout, redirect and max-bytes. Without CALLBACK it holds the lane for up to 15 seconds; with CALLBACK it runs in a Task and CALLBACK gets the answer.",
       "buffer-create" =>
         "(buffer-create NAME) — create an empty buffer NAME and return NAME. A NAME that is a file on disk loads that file instead.",
       "buffer-list" => "(buffer-list) — return the names of all buffers.",
