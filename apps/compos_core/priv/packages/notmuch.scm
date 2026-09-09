@@ -710,30 +710,29 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; preview would then evict the chat and leave the frame a window short.
 ;; Only when no pane shows the mail view does this fall back to making
 ;; one, and it always puts focus back where it started.
-(define (nm--in-other-window! thunk)
+(define (nm--show-pane! buf)
+  ;; the layout engine is mid-build: it places every declared pane itself,
+  ;; so the view is rendered and no window is touched. A split here lands
+  ;; between the engine's own splits and leaves the frame in neither
+  ;; arrangement.
   (cond
-    ;; the layout engine is mid-build: it places every declared pane
-    ;; itself, so render the mail view and touch no windows at all. A
-    ;; split here lands between the engine's own splits and leaves the
-    ;; frame in neither arrangement.
-    ((layout-arranging?) (thunk))
+    ((layout-arranging?) #f)
     (else
-      (let ((back (active-window))
-            (pane (or (scene-window 'show)
-                      (window-showing *notmuch-show-buffer*))))
+      (let ((pane (scene-window 'show)))
         (if pane
-            (select-window! pane)
-            (begin
-              (when (null? (cdr (window-list))) (split-window! 'h 0.45))
-              (other-window!)))
-        (thunk)
-        (select-window! back)))))
+            ;; a scene names its mail pane, so fill exactly that one
+            (begin (window-set-buffer! pane buf) pane)
+            ;; otherwise the display chain places it: it reuses a window
+            ;; already showing the mail view, splits when the frame has
+            ;; room, and never takes the window the index is in. Focus and
+            ;; point stay where the user left them.
+            (begin (display-buffer-other-window! buf)
+                   (window-showing buf)))))))
 
 (define (nm--preview! buf)
   (let ((th (nm--thread-at buf)))
     (when th
-      (nm--in-other-window!
-        (lambda () (nm--open-thread! (nm--th-id th) (nm--th-subject th))))
+      (nm--show-pane! (nm--open-thread! (nm--th-id th) (nm--th-subject th)))
       ;; opening marked it read — show that in the index right away
       (when (member "unread" (nm--th-tags th))
         (nm--refresh! buf)))))
@@ -1890,9 +1889,10 @@ when a message has no text/plain part." 'group 'notmuch)
         (list "mark"     (lambda (id)
                            (nm--toggle-selection! *notmuch-search-buffer* id)))
         (list "read"     (lambda (id)
-                           (nm--open-thread! id
-                             (let ((th (nm--thread-at (current-buffer))))
-                               (if th (nm--th-subject th) "")))))
+                           (nm--show-pane!
+                             (nm--open-thread! id
+                               (let ((th (nm--thread-at (current-buffer))))
+                                 (if th (nm--th-subject th) ""))))))
         (list "reply"    (lambda (id)
                            (let ((mid (nm--newest-msg-id id)))
                              (if mid
