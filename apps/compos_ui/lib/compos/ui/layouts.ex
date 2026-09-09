@@ -1197,7 +1197,7 @@ defmodule Compos.Ui.Layouts do
           .transient-rail-row.drift .transient-rail-v { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
           .transient-rail-row.dim .transient-rail-v { color: var(--dim-fg, #8a857a); }
           .transient-rail-note {
-            margin-top: auto; padding: 16px 18px; border-radius: 10px; font-size: 17px;
+            margin-top: auto; padding: 16px 18px; border-radius: 0; font-size: 17px;
             border: 1px solid var(--border-bg, #e2dbc9); background: var(--window-bg, #fdfcf8);
             color: var(--default-fg, #1b1a17); white-space: pre-line;
           }
