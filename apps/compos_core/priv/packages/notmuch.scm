@@ -986,6 +986,35 @@ when a message has no text/plain part." 'group 'notmuch)
                   (list-goto-first-entry buf)
                   (message (string-append "from:" email)))))))))
 
+(define-command "notmuch-delete-all-from-sender"
+  "Trash every message in the mailbox from this thread's sender (works on a *notmuch* list row or an open notmuch-show buffer)"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (thread-id (if (buffer-mode-is? buf "notmuch-show-mode")
+                          (buffer-local buf 'notmuch-thread)
+                          (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
+      (if (not thread-id)
+          (message "No thread here")
+          (let* ((msgs (nm--flatten-msgs
+                         (or (nm--json (string-append "show --format=json --body=false thread:" thread-id))
+                             '())))
+                 (from (if (null? msgs)
+                           ""
+                           (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
+                 (email (let ((parts (string-split from "<")))
+                          (if (null? (cdr parts))
+                              (string-trim from)
+                              (car (string-split (cadr parts) ">"))))))
+            (if (equal? email "")
+                (message "Could not extract the sender")
+                (let ((n (nm--count (string-append "from:" email))))
+                  (nm--run (string-append "tag +trash -inbox -unread -- " (nm--quote (string-append "from:" email))))
+                  (when (buffer-exists? *notmuch-search-buffer*)
+                    (nm--refresh! *notmuch-search-buffer*))
+                  (message (string-append "trashed " (number->string n) " message"
+                                          (if (= n 1) "" "s") " from " email)))))))))
+(catalog-meta! 'command "notmuch-delete-all-from-sender" 'domain 'mail 'effects '(destroy))
+
  ;;; --- local selection ---------------------------------------------------------
 
 ;; Selection is an editor operation, never a mail tag. ALL selects the query;
@@ -1045,7 +1074,8 @@ when a message has no text/plain part." 'group 'notmuch)
       (message "No selected messages")
       (begin
         (nm--run (string-append "tag " changes " -- " (nm--quote (nm--marked-query buf))))
-        (buffer-set-local! buf 'notmuch-selection #f)
+        ;; Keep the local selection across the refresh. The selected thread IDs
+        ;; remain valid even when their displayed tags change.
         (nm--refresh! buf))))
 
 (define (nm--toggle-selection! buf id)
@@ -1724,6 +1754,22 @@ when a message has no text/plain part." 'group 'notmuch)
                          (if (= n 1) "" "s") " in thread " id
                          " (" changes ")")))))
 
+(define (notmuch-sender-count query limit)
+  (let* ((raw (nm--run (string-append
+                "address --output=sender --output=count --deduplicate=address -- "
+                (nm--quote query))))
+         (lines (filter (lambda (l) (> (string-length l) 0)) (string-split raw "\n")))
+         (rows (map (lambda (l)
+                      (let ((parts (string-split l "\t")))
+                        (list (string->number (car parts)) (cadr parts))))
+                    lines))
+         (top (list-head (reverse (sort rows)) (min limit (length rows)))))
+    (if (null? top)
+        "no matches"
+        (fold (lambda (acc row)
+                (string-append acc (number->string (car row)) "\t" (cadr row) "\n"))
+              "" top))))
+
 ;; the raw CLI, for whatever mail-search/mail-tag! don't cover — bulk
 ;; tag/archive by QUERY ("tag -inbox -- from:luma.com") in one call
 ;; instead of enumerating thread ids and tagging them one at a time, or
@@ -1746,5 +1792,7 @@ when a message has no text/plain part." 'group 'notmuch)
   "(mail-read-thread THREAD-ID) — full text of an email thread, thread: prefix optional")
 (public! 'mail-tag!
   "(mail-tag! THREAD-ID CHANGES) — apply space-separated +tag/-tag changes to a thread; returns how many messages it actually matched (a real count, not a blind \"done\") — 0 means the thread id was wrong")
+(public! 'notmuch-sender-count
+  "(notmuch-sender-count QUERY LIMIT) — biggest senders matching QUERY (from: addresses, deduplicated), top LIMIT as \"COUNT\\tSENDER\" lines, most first")
 (public! 'notmuch
   "(notmuch ARGS) — the raw notmuch CLI, ARGS is everything after `notmuch` as one string, e.g. \"tag -inbox -- from:luma.com\" or \"count -- tag:inbox from:luma.com\"; prefer this for bulk ops by query (archive/tag many at once) and for verifying a change actually happened, instead of enumerating thread ids one at a time")

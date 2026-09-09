@@ -8,7 +8,8 @@
 /deps/
 
 # Where third-party dependencies like ExDoc output generated docs.
-/doc/
+/doc/*
+!/doc/WINDOWS.md
 
 # Temporary files, for example, from tests.
 /tmp/

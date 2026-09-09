@@ -13,6 +13,29 @@ defmodule Compos.Ui.EditorLiveTest do
 
   defp type(view, str), do: keys(view, String.graphemes(str))
 
+  # The panel is debounced (which-key-idle-delay), so it is NOT in the first
+  # render after a prefix. Press, then wait for it the way a reader does.
+  # NOT `html =~ "which-key"`: the stylesheet carries that string inside a
+  # :has() selector, so a text match is true whether the panel is there or
+  # not. Ask for the element.
+  defp which_key_up?(view), do: has_element?(view, ".which-key .wk-title")
+
+  defp which_key(view, specs, tries \\ 60) do
+    keys(view, specs)
+    wait_for_which_key(view, tries)
+  end
+
+  defp wait_for_which_key(view, 0), do: render(view)
+
+  defp wait_for_which_key(view, tries) do
+    if which_key_up?(view) do
+      render(view)
+    else
+      Process.sleep(25)
+      wait_for_which_key(view, tries - 1)
+    end
+  end
+
   setup do
     Compos.Core.Editor.minibuffer_close()
     Compos.Core.Editor.completion_dismiss()
@@ -537,11 +560,38 @@ defmodule Compos.Ui.EditorLiveTest do
     keys(view, ["C-g"])
   end
 
-  test "which-key renders on C-x", %{conn: conn} do
+  test "which-key renders on C-x, after the idle delay", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
-    html = keys(view, ["C-x"])
-    assert html =~ "which-key"
-    assert html =~ "switch-to-buffer"
+    # what it must show is A PANEL after the delay, never a particular
+    # binding: a binding is a preference and moves.
+    assert which_key(view, ["C-x"]) =~ ~s(class="which-key)
+    assert which_key_up?(view)
+
+    keys(view, ["C-g"])
+  end
+
+  # The debounce is what makes a fast chord free. Hiding the panel with CSS
+  # after rendering it was not one: the browser still built its rows on the
+  # first key of every chord, so C-x b drew the whole C-x panel and threw it
+  # away. The first render after a prefix must carry no panel at all.
+  test "a prefix key draws no which-key panel until the delay passes", %{conn: conn} do
+    {:ok, view, _} = live(conn, "/")
+
+    keys(view, ["C-x"])
+    refute which_key_up?(view), "the panel must not be built before the delay"
+
+    keys(view, ["C-g"])
+  end
+
+  test "a completed chord never draws the panel", %{conn: conn} do
+    {:ok, view, _} = live(conn, "/")
+
+    # C-x b is the chord this cost was paid on every time
+    keys(view, ["C-x", "b"])
+    refute which_key_up?(view), "a completed chord draws no panel"
+    # long enough that a timer armed by C-x would have fired
+    Process.sleep(700)
+    refute which_key_up?(view), "and the armed timer must not draw one later"
 
     keys(view, ["C-g"])
   end
@@ -560,7 +610,7 @@ defmodule Compos.Ui.EditorLiveTest do
       """)
 
     {:ok, view, _} = live(conn, "/")
-    html = keys(view, ["<f9>"])
+    html = which_key(view, ["<f9>"])
 
     assert html =~ "Hold a modifier · / filters commands"
     assert html =~ ~s(data-modifiers="")

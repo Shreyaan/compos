@@ -62,6 +62,8 @@ defmodule Compos.Ui.EditorLive do
           line_cache: %{},
           tabs: @no_tabs,
           tabs_key: nil,
+          wk_timer: nil,
+          wk_shown: false,
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           instance_name: identity.name,
           instance_accent: identity.accent
@@ -512,6 +514,10 @@ defmodule Compos.Ui.EditorLive do
 
   @impl true
   def handle_info({:frame_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
+  def handle_info(:which_key_show, socket) do
+    {:noreply, socket |> assign(wk_timer: nil, wk_shown: true) |> refresh()}
+  end
+
   def handle_info({:editor_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:buffer_change, _, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
 
@@ -541,6 +547,47 @@ defmodule Compos.Ui.EditorLive do
     )
 
     socket
+  end
+
+  # A real debounce. The CSS animation only made the panel INVISIBLE for the
+  # idle delay; the browser still built its 219 nodes on the first key of
+  # every chord, so C-x b rendered the whole C-x panel and threw it away.
+  # Holding the render back means a fast chord costs nothing and draws
+  # nothing. The delay is Scheme's which-key-idle-delay, which appearance.scm
+  # publishes as the 'ui face's which-key-delay.
+  defp hold_which_key(%{which_key: nil} = state, socket),
+    do: {state, cancel_which_key(socket)}
+
+  defp hold_which_key(state, socket) do
+    cond do
+      socket.assigns[:wk_shown] ->
+        {state, socket}
+
+      socket.assigns[:wk_timer] ->
+        {%{state | which_key: nil}, socket}
+
+      true ->
+        timer = Process.send_after(self(), :which_key_show, which_key_delay_ms(state))
+        {%{state | which_key: nil}, assign(socket, wk_timer: timer)}
+    end
+  end
+
+  defp cancel_which_key(socket) do
+    if t = socket.assigns[:wk_timer], do: Process.cancel_timer(t)
+    assign(socket, wk_timer: nil, wk_shown: false)
+  end
+
+  @which_key_default_ms 500
+
+  defp which_key_delay_ms(state) do
+    with %{} = faces <- state.faces,
+         %{} = ui <- Map.get(faces, "ui"),
+         value when is_binary(value) <- Map.get(ui, "which-key-delay"),
+         {seconds, _} <- Float.parse(value) do
+      seconds |> Kernel.*(1000) |> round() |> max(0)
+    else
+      _ -> @which_key_default_ms
+    end
   end
 
   defp refresh_state(socket) do
@@ -573,6 +620,8 @@ defmodule Compos.Ui.EditorLive do
       decorate(state.tree, socket.assigns.line_cache, state.faces, caret_owner)
 
     state = %{state | tree: tree}
+
+    {state, socket} = hold_which_key(state, socket)
 
     # cache entries for windows that left the tree die with them (S15)
     ids = state.tree |> leaf_ids() |> MapSet.new()
