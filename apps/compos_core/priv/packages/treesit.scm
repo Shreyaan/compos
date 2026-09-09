@@ -11,6 +11,9 @@
     ("python" "https://github.com/tree-sitter/tree-sitter-python")
     ("javascript" "https://github.com/tree-sitter/tree-sitter-javascript")
     ("css" "https://github.com/tree-sitter/tree-sitter-css")
+    ("html" "https://github.com/tree-sitter/tree-sitter-html")
+    ("elixir" "https://github.com/elixir-lang/tree-sitter-elixir")
+    ("heex" "https://github.com/phoenixframework/tree-sitter-heex")
     ("bash" "https://github.com/tree-sitter/tree-sitter-bash")
     ("ruby" "https://github.com/tree-sitter/tree-sitter-ruby")
     ("go" "https://github.com/tree-sitter/tree-sitter-go")
@@ -53,15 +56,36 @@
 (define-mode "ruby-mode" (ts-mode "ruby"))
 (define-mode "js-mode" (ts-mode "javascript"))
 
+;; The editor's own surfaces are Elixir, HEEx, HTML and CSS, so those
+;; four read structurally too. Two of the names already existed without
+;; a mode behind them: lsp.scm registers elixir-ls for "elixir-mode",
+;; and browse sets "html-mode" on a page it renders.
+(define-mode "css-mode" (ts-mode "css"))
+(define-mode "html-mode" (ts-mode "html"))
+(define-mode "elixir-mode" (ts-mode "elixir"))
+(define-mode "heex-mode" (ts-mode "heex"))
+
 (mode-doc! "ruby-mode"
   "Ruby. Run `M-x ts-install-grammar ruby` to get the colours.")
 (mode-doc! "js-mode"
   "JavaScript. Run `M-x ts-install-grammar javascript` to get the colours.")
+(mode-doc! "css-mode"
+  "CSS. Run `M-x ts-install-grammar css` to get the colours.")
+(mode-doc! "html-mode"
+  "HTML. Run `M-x ts-install-grammar html` to get the colours.")
+(mode-doc! "elixir-mode"
+  "Elixir. Run `M-x ts-install-grammar elixir` to get the colours.")
+(mode-doc! "heex-mode"
+  "HEEx: the Phoenix template language. Run `M-x ts-install-grammar heex` to get the colours.")
 
 (set! *auto-mode-alist*
   (append *auto-mode-alist*
           '((".rb" "ruby-mode")
-            (".js" "js-mode") (".mjs" "js-mode") (".jsx" "js-mode"))))
+            (".js" "js-mode") (".mjs" "js-mode") (".jsx" "js-mode")
+            (".css" "css-mode")
+            (".html" "html-mode") (".htm" "html-mode")
+            (".ex" "elixir-mode") (".exs" "elixir-mode")
+            (".heex" "heex-mode"))))
 
 (mode-doc! "scheme-mode"
   "Scheme: the language the editor is written in. `C-M-f` and `C-M-b` step over forms, and `M-g i` lists the definitions. Run `M-x ts-install-grammar scheme` to get the colours.")
