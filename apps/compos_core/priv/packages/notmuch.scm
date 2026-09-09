@@ -373,7 +373,8 @@ when a message has no text/plain part." 'group 'notmuch)
   (list
     'doc (string-append
            "One notmuch search as a list of threads. `RET` opens, `SPC` "
-           "previews, `a`/`d`/`t` tag, `L` files a thread for the agent (+liked -inbox), "
+           "previews, `a`/`d` tag, `t` classifies with the mailbox's own tags, "
+           "`L` files a thread for the agent (+liked -inbox), "
            "`0` strips every tag, `m` marks and the capital keys act "
            "on every marked thread. Selection is local and clears after bulk actions or filter changes. `/` adds a custom query filter. "
            "`l` adds a tag filter; `\\` removes it. "
@@ -394,6 +395,7 @@ when a message has no text/plain part." 'group 'notmuch)
               (nm--footer buf
                 (if (nm--any-marked? buf)
                     '(("notmuch-archive" "archive") ("notmuch-trash" "trash")
+                      ("notmuch-autotag" "autotag")
                       ("notmuch-tag-marked" "tag") ("notmuch-like" "like")
                       ("notmuch-filter-marked" "filter")
                       ("notmuch-unmark-all" "unmark")
@@ -404,7 +406,8 @@ when a message has no text/plain part." 'group 'notmuch)
                     '(("notmuch-open-thread" "open") ("notmuch-preview" "preview")
                       ("notmuch-mark-toggle" "mark")
                       ("notmuch-archive" "archive") ("notmuch-trash" "trash")
-                      ("notmuch-edit-tags" "tag") ("notmuch-like" "like")
+                      ("notmuch-edit-tags" "tag") ("notmuch-autotag" "autotag")
+                      ("notmuch-like" "like")
                       ("notmuch-search" "search")
                       ("notmuch-filter" "custom filter")
                       ("notmuch-filter-by-tag" "tag filter")
@@ -420,7 +423,8 @@ when a message has no text/plain part." 'group 'notmuch)
             ("m" "notmuch-mark-toggle") ("M" "notmuch-mark-all")
             ("*" "notmuch-mark-all") ("U" "notmuch-unmark-all")
             ("F" "notmuch-filter-marked") ("A" "notmuch-archive-marked")
-            ("D" "notmuch-trash-marked") ("t" "notmuch-tag-marked")
+            ("D" "notmuch-trash-marked") ("t" "notmuch-autotag")
+            ("C-c t" "notmuch-tag-marked")
             ("T" "notmuch-edit-tags") ("+" "notmuch-add-tag")
             ("-" "notmuch-remove-tag") ("0" "notmuch-remove-all-tags")
             ("L" "notmuch-like")
@@ -948,6 +952,125 @@ when a message has no text/plain part." 'group 'notmuch)
                       (nm--tag! buf "--remove-all"))
                   (message "Cancelled"))))))))
 (catalog-meta! 'command "notmuch-remove-all-tags" 'domain 'mail 'effects '(destroy))
+;; Autotag: the mailbox's own tag list is the label set. The model reads one
+;; thread and picks from that list, so it cannot invent a folder. The state tags
+;; (inbox, unread, replied) are not on offer, and nothing is ever removed, so a
+;; classification can only add tags this mailbox already uses.
+(defcustom 'notmuch-autotag-exclude
+  '("inbox" "unread" "attachment" "signed" "encrypted" "draft" "sent"
+    "replied" "trash" "flagged" "compos-mark")
+  "Tags notmuch-autotag never offers. These say delivery state, not subject.")
+
+(defcustom 'notmuch-autotag-limit 6000
+  "How much of a thread's text notmuch-autotag sends to the model.")
+
+(define (nm--autotag-vocabulary)
+  (filter (lambda (t) (not (member t notmuch-autotag-exclude))) (nm--all-tags)))
+
+(define (nm--thread-tags id)
+  (filter (lambda (t) (not (equal? t "")))
+    (string-split
+      (string-trim (nm--run (string-append "search --output=tags -- thread:" id)))
+      "\n")))
+
+(define (nm--uniq lst)
+  (let loop ((l lst) (acc '()))
+    (cond ((null? l) (reverse acc))
+          ((member (car l) acc) (loop (cdr l) acc))
+          (else (loop (cdr l) (cons (car l) acc))))))
+
+(define (nm--autotag-prompt id vocab)
+  (string-append
+    "Classify one email thread for a mail client.\n\n"
+    "These are the only tags you may use:\n" (string-join vocab ", ") "\n\n"
+    "Pick every tag that tells the truth about this thread. Copy each tag "
+    "exactly. Do not invent a tag. Pick nothing rather than a tag that only "
+    "nearly fits.\n\n"
+    "Answer with the tags on one line, separated by commas. Answer NONE when no "
+    "tag fits. Write no other words.\n\n"
+    "--- thread ---\n"
+    (nm--trunc (mail-read-thread id) notmuch-autotag-limit)))
+
+(define (nm--autotag-word s)
+  (let* ((s (string-trim s))
+         (s (if (and (> (string-length s) 1)
+                     (member (substring s 0 1) '("-" "*" "+")))
+                (string-trim (substring s 1 (string-length s)))
+                s)))
+    (string-join (string-split s "\"") "")))
+
+(define (nm--autotag-words reply)
+  ;; The answer is one line of commas when the model obeys, and a bullet list or
+  ;; a sentence when it does not. Both cut into candidate words the same way.
+  (let loop ((lines (string-split (string-trim reply) "\n")) (acc '()))
+    (if (null? lines)
+        (reverse acc)
+        (loop (cdr lines)
+              (append (reverse (map nm--autotag-word (string-split (car lines) ",")))
+                      acc)))))
+
+(define (nm--autotag-choose reply vocab)
+  (nm--uniq (filter (lambda (t) (member t vocab)) (nm--autotag-words reply))))
+
+(define (nm--autotag-thread-id line)
+  (if (and (>= (string-length line) 7) (equal? (substring line 0 7) "thread:"))
+      (substring line 7 (string-length line))
+      line))
+
+(define (nm--autotag-targets buf)
+  (if (nm--any-marked? buf)
+      (map nm--autotag-thread-id
+           (filter (lambda (l) (not (equal? l "")))
+             (string-split
+               (string-trim (nm--run (string-append "search --output=threads -- "
+                                       (nm--quote (nm--marked-query buf)))))
+               "\n")))
+      (let ((th (nm--thread-at buf))) (if th (list (nm--th-id th)) '()))))
+
+(define (nm--autotag-one! id vocab k)
+  ;; K gets the tags this thread actually gained, so the caller reports a real
+  ;; change and never a blind \"done\".
+  (llm (nm--autotag-prompt id vocab)
+    (lambda (reply)
+      (let* ((have (nm--thread-tags id))
+             (new (filter (lambda (t) (not (member t have)))
+                          (nm--autotag-choose reply vocab))))
+        (unless (null? new)
+          (nm--run (string-append "tag "
+                     (string-join
+                       (map (lambda (t) (nm--quote (string-append "+" t))) new) " ")
+                     " -- thread:" id)))
+        (k new)))))
+
+(define (nm--autotag-run! buf ids vocab added)
+  ;; One thread at a time: the model call is the slow part, and a queue of them
+  ;; would spend on threads the user can no longer see going wrong.
+  (if (null? ids)
+      (begin
+        (nm--refresh! buf)
+        (message (if (null? added)
+                     "Autotag: no tag fits"
+                     (string-append "Autotag: "
+                       (string-join (map (lambda (t) (string-append "+" t))
+                                         (nm--uniq added)) " ")))))
+      (begin
+        (message (string-append "Autotag: " (number->string (length ids)) " to go"))
+        (nm--autotag-one! (car ids) vocab
+          (lambda (new)
+            (nm--autotag-run! buf (cdr ids) vocab (append added new)))))))
+
+(define-command "notmuch-autotag"
+  "Classify the marked threads, or the thread at point, with this mailbox's own tags"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (vocab (nm--autotag-vocabulary))
+           (ids (nm--autotag-targets buf)))
+      (cond ((null? ids) (message "No thread on this line"))
+            ((null? vocab) (message "This mailbox has no tags to classify with"))
+            (else (nm--autotag-run! buf ids vocab '()))))))
+(catalog-meta! 'command "notmuch-autotag" 'domain 'mail
+               'effects '(write external execute spend))
+
 
 
 ;;; --- jump & filter ---------------------------------------------------------------
