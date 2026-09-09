@@ -75,6 +75,28 @@ defmodule Compos.NotmuchSceneTest do
     assert eval!(~S|(member "tag -unread -- thread:zz-thread" *zz-notmuch-calls*)|) != "#f"
   end
 
+  test "dismissal closes the visible thread before invoking mail back" do
+    eval!(~S|(run-command "notmuch-inbox")|)
+    assert eval!(~S|(buffer-parent "*mail*")|) == ~s{"*notmuch*"}
+    index = eval!(~S|(list-index "*notmuch*")|)
+    KeyDispatch.handle_key("q")
+    assert eval!(~S|(buffer-known? "*mail*")|) == "#f"
+    assert eval!(~S|(current-buffer)|) == ~s{"*notmuch*"}
+    assert eval!(~S|(list-index "*notmuch*")|) == index
+    assert eval!(~S|(buffer-known? "*notmuch*")|) == "#t"
+    KeyDispatch.handle_key("q")
+    assert eval!(~S|(buffer-mode-is? (current-buffer) "notmuch-hello-mode")|) == "#t"
+  end
+
+  test "dismissal from a selected thread preserves the search" do
+    eval!(~S|(run-command "notmuch-inbox")|)
+    eval!(~S|(select-window! (window-showing "*mail*"))|)
+    KeyDispatch.handle_key("q")
+    assert eval!(~S|(buffer-known? "*mail*")|) == "#f"
+    assert eval!(~S|(buffer-known? "*notmuch*")|) == "#t"
+    assert eval!(~S|(window-showing "*notmuch*")|) != "#f"
+  end
+
   test "reopening a cached inbox replaces the previous thread preview" do
     eval!(~S"""
     (begin

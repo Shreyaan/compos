@@ -355,7 +355,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (list
     'doc (string-append
            "One notmuch search as a list of threads. `RET` opens, `SPC` "
-           "previews, `a`/`d`/`t` tag, `m` marks and the capital keys act "
+           "previews, `a`/`d`/`t` tag, `0` strips every tag, `m` marks and the capital keys act "
            "on every marked thread. Selection is local and clears after bulk actions or filter changes. `/` adds a custom query filter. "
            "`l` adds a tag filter; `\\` removes it. "
            "`s` starts a new search; `q` removes the last filter, "
@@ -373,9 +373,9 @@ when a message has no text/plain part." 'group 'notmuch)
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
               (if (nm--any-marked? buf)
-                  '(("a" "archive marked") ("d" "trash marked")
-                    ("t" "tag marked") ("F" "show marked")
-                    ("U" "unmark all") ("m" "unmark this")
+                  '(("a" "archive") ("d" "trash")
+                    ("t" "tag") ("F" "filter")
+                    ("U" "unmark") ("m" "unmark this")
                     ("RET" "open") ("g" "refresh") ("q" "back"))
                   '(("RET" "open") ("SPC" "preview") ("m" "mark")
                     ("a" "archive") ("d" "trash") ("T" "tag")
@@ -394,7 +394,8 @@ when a message has no text/plain part." 'group 'notmuch)
             ("F" "notmuch-filter-marked") ("A" "notmuch-archive-marked")
             ("D" "notmuch-trash-marked") ("t" "notmuch-tag-marked")
             ("T" "notmuch-edit-tags") ("+" "notmuch-add-tag")
-            ("-" "notmuch-remove-tag") ("j" "notmuch-jump")
+            ("-" "notmuch-remove-tag") ("0" "notmuch-remove-all-tags")
+            ("j" "notmuch-jump")
             ("/" "notmuch-filter")
             ("\\" "notmuch-unfilter-last") ("l" "notmuch-filter-by-tag")
             ("s" "notmuch-search") ("g" "notmuch-refresh")
@@ -886,6 +887,33 @@ when a message has no text/plain part." 'group 'notmuch)
                     (nm--tag! buf (nm--quote (string-append "-" (string-trim tag))))))))
           (message "No thread on this line")))))
 (catalog-meta! 'command "notmuch-remove-tag" 'domain 'mail 'effects '(write external execute))
+;; Archive drops one tag and trash swaps three. This is the blunt one:
+;; after it the thread answers to no tag: search at all, so it names the
+;; tags it is about to take and asks first.
+;; Archive drops one tag and trash swaps three. This is the blunt one:
+;; notmuch's own --remove-all takes them all, whatever they are. (`-*` is
+;; the tag-file spelling of that wildcard; on the command line it reads as
+;; a literal tag named * and quietly does nothing.) After it the thread
+;; answers to no tag: search at all, so it asks first.
+(define-command "notmuch-remove-all-tags" "Remove every tag from the marked threads, or the thread at point"
+  (lambda ()
+    (let* ((buf (current-buffer)) (th (nm--thread-at buf))
+           (marked? (nm--any-marked? buf)))
+      (if (not (or marked? th))
+          (message "No thread on this line")
+          (minibuffer-read
+            (if marked?
+                "Remove all tags from the marked threads? "
+                (string-append "Remove all tags (" (string-join (nm--th-tags th) " ") ")? "))
+            (list "yes" "no")
+            (lambda (ans)
+              (if (equal? ans "yes")
+                  (if marked?
+                      (nm--tag-marked! buf "--remove-all")
+                      (nm--tag! buf "--remove-all"))
+                  (message "Cancelled"))))))))
+(catalog-meta! 'command "notmuch-remove-all-tags" 'domain 'mail 'effects '(destroy))
+
 
 ;;; --- jump & filter ---------------------------------------------------------------
 
@@ -1128,6 +1156,32 @@ when a message has no text/plain part." 'group 'notmuch)
                   (message (string-append "trashed " (number->string n) " message"
                                           (if (= n 1) "" "s") " from " email "; " verdict)))))))))
 (catalog-meta! 'command "notmuch-purge-sender" 'domain 'mail 'effects '(destroy external))
+
+(define-command "notmuch-unsubscribe"
+  "Try to unsubscribe from this thread's sender without deleting anything: RFC 8058 one-click POST when offered, else a plain GET, else a best-effort scan of the body (works on a *notmuch* list row or an open notmuch-show buffer)"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (thread-id (if (buffer-mode-is? buf "notmuch-show-mode")
+                          (buffer-local buf 'notmuch-thread)
+                          (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
+      (if (not thread-id)
+          (message "No thread here")
+          (let* ((msgs (nm--flatten-msgs
+                         (or (nm--json (string-append "show --format=json --body=false thread:" thread-id))
+                             '())))
+                 (from (if (null? msgs)
+                           ""
+                           (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
+                 (email (let ((parts (string-split from "<")))
+                          (if (null? (cdr parts))
+                              (string-trim from)
+                              (car (string-split (cadr parts) ">"))))))
+            (if (equal? email "")
+                (message "Could not extract the sender")
+                (let* ((msg-id (nm--newest-msg-id thread-id))
+                       (verdict (nm--purge-unsubscribe! msg-id)))
+                  (message (string-append email ": " verdict)))))))))
+(catalog-meta! 'command "notmuch-unsubscribe" 'domain 'mail 'effects '(write external))
 
  ;;; --- local selection ---------------------------------------------------------
 
@@ -1498,7 +1552,8 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
-      
+      (when (and (boundp 'buffer-child!) (buffer-known? *notmuch-search-buffer*))
+        (buffer-child! *notmuch-search-buffer* buf))
       (let ((th (buffer-local buf 'notmuch-thread)))
         (when th
           (let* ((subject (or (buffer-local buf 'notmuch-subject) ""))

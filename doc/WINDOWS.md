@@ -328,3 +328,39 @@ they were not fixed, and not all are explanations for window-history loss.
 The highest-confidence gaps to turn into regression tests are nested local
 unwind, nested temporary-pane dismissal, consistent `q` versus kill predecessor
 selection, stale quit records after kill/rename, and complete view restoration.
+
+## Child-first dismissal and reading surfaces
+
+Buffer ownership and window history answer different questions. A parent owns
+related, dismissible child buffers. A window remembers what those buffers cover.
+Ownership chooses which child `q` dismisses. Window history chooses what appears
+underneath. Dismissing a child must not invoke the parent's back/quit handler in
+the same keypress.
+
+- `buffer-child!` registers a parent and child. Relationships reject cycles and
+  use reciprocal buffer locals. Rename updates both sides; kill removes links.
+- `q` prefers a visible descendant in the current frame, deepest first. It then
+  considers hidden dismissible descendants. Unrelated buffers do not participate.
+- With no dismissible descendants, an owned reading buffer dismisses itself.
+  Otherwise, `q` delegates to the buffer's original command, including remaps.
+- Each affected window reveals its own previous buffer, including transient
+  lists or buffers also visible elsewhere. Existing work panes remain present.
+  A pane recorded as created for this display can be removed when it is dismissed.
+- A child still displayed in another frame remains alive. That other frame's
+  view does not block this frame's next `q` from reaching the parent handler.
+- Writable buffers retain normal text entry, including typing `q`. Merely owning
+  a dismissible child does not turn an editable document into a reading surface.
+- Dismissible reading buffers have a distinct header with a prominent, clickable
+  `q Back` control. Their text cursor is hidden by default. `M-x
+  caret-browsing-mode` toggles the cursor without changing edit permissions.
+
+Notmuch thread views register as children of their search buffer during mode
+setup, including reload/restore. From the search, the first `q` dismisses its
+visible thread and preserves the selected search row. The next `q` invokes
+notmuch's own back handler. From the thread, `q` dismisses the thread and keeps
+the search alive. An explicit `notmuch-quit` still means to close mail.
+
+Regression coverage lives in `Compos.DismissTest`, `Compos.NotmuchSceneTest`, and
+`Compos.Ui.DismissTest`. This adds child-first routing and reading cues; it does
+not claim to repair every Winner identity or nested temporary-window ownership
+gap listed in the audit above.

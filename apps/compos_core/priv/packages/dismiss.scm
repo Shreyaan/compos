@@ -1,0 +1,185 @@
+;;; dismiss.scm --- child-first dismissal and reading surfaces.
+
+(domain! 'windows)
+(effects! '(read))
+
+(define (buffer-parent buf)
+  (let ((parent (buffer-local buf 'dismiss-parent)))
+    (and parent (buffer-known? parent)
+         (member buf (or (buffer-local parent 'dismiss-children) '()))
+         parent)))
+
+(define (buffer-children buf)
+  (filter (lambda (child)
+            (and (buffer-known? child) (equal? (buffer-parent child) buf)))
+          (or (buffer-local buf 'dismiss-children) '())))
+
+(define (dismiss--descendants buf)
+  (fold (lambda (out child)
+          (append out (dismiss--descendants child) (list child)))
+        '() (buffer-children buf)))
+
+;; Read the normal maps without our q wrapper. The actual fallback command
+;; is resolved again with key-binding at dispatch, so remaps remain effective.
+(define (dismiss--normal-command buf)
+  (let loop ((maps (buffer-keymaps buf)))
+    (cond ((null? maps) #f)
+          ((equal? (car maps) "dismiss-mode-map") (loop (cdr maps)))
+          (else
+            (let ((cmd (keymap-lookup (car maps) "q")))
+              (if cmd cmd (loop (cdr maps))))))))
+
+(define (buffer-dismissible? buf)
+  (and (buffer-known? buf) (buffer-read-only? buf)
+       (let ((cmd (dismiss--normal-command buf)))
+         (or (buffer-parent buf) (pair? (buffer-children buf))
+             (member cmd '("quit-window" "dired-quit" "collect-quit"
+                           "switch-quit" "overview-quit" "notmuch-back"
+                           "notmuch-quit" "peek-dismiss"))))
+       #t))
+
+(public! 'buffer-parent "(buffer-parent BUF) — BUF's live dismissal parent, or #f")
+(public! 'buffer-children "(buffer-children BUF) — BUF's live children, newest first")
+(public! 'buffer-dismissible? "(buffer-dismissible? BUF) — whether BUF offers child-first q dismissal")
+
+(effects! '(write display))
+
+(define (buffer-child! parent child)
+  (unless (and (buffer-known? parent) (buffer-known? child))
+    (error "A buffer relationship needs two known buffers"))
+  (when (or (equal? parent child) (member parent (dismiss--descendants child)))
+    (error "A buffer cannot be its own descendant"))
+  (let ((old (buffer-parent child)))
+    (when old
+      (buffer-set-local! old 'dismiss-children
+        (remove (lambda (b) (equal? b child)) (buffer-children old)))))
+  (buffer-set-local! child 'dismiss-parent parent)
+  (buffer-set-local! parent 'dismiss-children
+    (cons child (remove (lambda (b) (equal? b child)) (buffer-children parent))))
+  (dismiss--sync! parent)
+  (dismiss--sync! child)
+  child)
+
+(define (dismiss--sync! buf)
+  (when (buffer-exists? buf)
+    (let ((on (buffer-dismissible? buf)))
+      (desktop-skip! buf 'dismissible)
+      (unless (equal? (buffer-local buf 'dismissible) on)
+        (buffer-set-local! buf 'dismissible on))
+      (cond ((and on (not (minor-mode-on? buf "dismiss-mode")))
+             (enable-minor-mode! buf "dismiss-mode"))
+            ((and (not on) (minor-mode-on? buf "dismiss-mode"))
+             (disable-minor-mode! buf "dismiss-mode"))))))
+
+(define (dismiss-sync-visible!)
+  (for-each (lambda (row) (dismiss--sync! (cadr row))) (window-list)))
+
+(register-minor-mode! "dismiss-mode" (lambda (buf) #t) (lambda (buf) #t))
+(minor-mode-keys! "dismiss-mode" '(("q" "dismiss-buffer")))
+
+(register-minor-mode! "caret-browsing-mode" (lambda (buf) #t) (lambda (buf) #t))
+(define-command "caret-browsing-mode" "Toggle the text cursor while reading a dismissible buffer"
+  (lambda () (toggle-minor-mode! "caret-browsing-mode")))
+
+;; Only descendants owned by this buffer participate. Prefer a visible
+;; descendant in this frame, deepest first, before touching hidden children.
+(define (dismiss--child-target buf)
+  (let* ((shown (map cadr (window-list)))
+         (all-shown (map cadr (window-list-all)))
+         (children (filter (lambda (child)
+                             (and (buffer-dismissible? child)
+                                  (or (member child shown) (not (member child all-shown)))))
+                           (dismiss--descendants buf))))
+    (or (let loop ((rest children))
+          (cond ((null? rest) #f)
+                ((member (car rest) shown) (car rest))
+                (else (loop (cdr rest)))))
+        (and (pair? children) (car children)))))
+
+;; Ownership chooses the child. Each destination's history chooses what
+;; replaces it. Transient lists and buffers visible elsewhere remain valid.
+(define (dismiss--close-child! child)
+  (let ((focus (active-window))
+        (parent (buffer-parent child)))
+    (if (and (buffer-path child) (buffer-modified? child))
+        (begin (message "Buffer is modified — save it before dismissing") #f)
+        (begin
+          (for-each
+            (lambda (row)
+              (when (equal? (cadr row) child)
+                (let* ((win (car row)) (rec (window-quit-restore win))
+                       (past (filter (lambda (b) (and (buffer-known? b)
+                                                     (not (equal? b child))))
+                                     (window-buffer-history win))))
+                  (cond
+                    ((and (popup-open?) (equal? win (popup-window))) (popup-dismiss!))
+                    ((and rec (equal? (cadr rec) 'window) (> (length (window-list)) 1))
+                     (delete-window-id! win))
+                    (else
+                      (window-set-buffer! win
+                        (if (pair? past) (car past) (or parent "*scratch*")))
+                      (window-history-set! win (if (pair? past) (cdr past) '()))))
+                  (window-quit-restore-forget! win))))
+            (window-list))
+          ;; A child displayed in another frame remains that frame's view.
+          (unless (let loop ((rows (window-list-all)))
+                    (and (pair? rows)
+                         (or (equal? (cadr (car rows)) child) (loop (cdr rows)))))
+            ;; Visible-first may close a child before its hidden descendants.
+            ;; Keep those descendants reachable for the parent's next q.
+            (when parent
+              (for-each (lambda (grandchild) (buffer-child! parent grandchild))
+                        (reverse (buffer-children child))))
+            (buffer-kill! child))
+          (when (window-exists? focus) (select-window! focus))
+          (dismiss-sync-visible!)
+          #t))))
+
+(define-command "dismiss-buffer" "Dismiss a child first, otherwise run this buffer's normal q action"
+  (lambda ()
+    (let* ((buf (current-buffer)) (child (dismiss--child-target buf)))
+      (cond (child (dismiss--close-child! child))
+            ((and (buffer-parent buf) (buffer-dismissible? buf)) (dismiss--close-child! buf))
+            (else
+              ;; Resolve without our map, then put it back before calling.
+              ;; The original command may kill BUF or replace its mode.
+              (let ((maps (buffer-minor-maps buf)))
+                (buffer-minor-maps! buf (remove (lambda (m) (equal? m "dismiss-mode-map")) maps))
+                (let ((cmd (key-binding "q")))
+                  (buffer-minor-maps! buf maps)
+                  (when (and (string? cmd) (not (equal? cmd "dismiss-buffer")))
+                    (run-command cmd)))))))))
+
+;; Reciprocal links prevent a reused buffer name from inheriting ownership.
+;; Clean both sides on kill and rewrite both sides on rename.
+(define (dismiss--before-kill! buf)
+  (let ((parent (buffer-parent buf)))
+    (when parent
+      (buffer-set-local! parent 'dismiss-children
+        (remove (lambda (b) (equal? b buf)) (buffer-children parent)))))
+  (for-each (lambda (child) (buffer-set-local! child 'dismiss-parent #f))
+            (buffer-children buf)))
+
+(define (dismiss--renamed! old new)
+  (for-each
+    (lambda (buf)
+      (when (equal? (buffer-local buf 'dismiss-parent) old)
+        (buffer-set-local! buf 'dismiss-parent new))
+      (let ((children (buffer-local buf 'dismiss-children)))
+        (when (and children (member old children))
+          (buffer-set-local! buf 'dismiss-children
+            (map (lambda (b) (if (equal? b old) new b)) children)))))
+    (buffer-list)))
+
+(define (dismiss--after-mode! &rest args) (dismiss-sync-visible!))
+(advice-add! 'buffer-kill! 'before 'dismiss-unlink 'dismiss--before-kill!)
+(advice-add! 'set-mode! 'after 'dismiss-presentation 'dismiss--after-mode!)
+(advice-add! 'buffer-set-read-only! 'after 'dismiss-presentation 'dismiss--after-mode!)
+(add-hook! 'buffer-renamed-hook 'dismiss--renamed!)
+(add-hook! 'window-configuration-change-hook 'dismiss-sync-visible!)
+(add-hook! 'post-command-hook 'dismiss-sync-visible!)
+
+(public! 'buffer-child! "(buffer-child! PARENT CHILD) — register a child for child-first dismissal; reject ownership cycles")
+(public! 'dismiss-sync-visible! "(dismiss-sync-visible!) — rebuild dismissal cues and maps for visible buffers")
+
+(dismiss-sync-visible!)

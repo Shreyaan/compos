@@ -127,10 +127,12 @@ defmodule Compos.Ui.EditorLiveTest do
   defp restore_env(key, nil), do: Application.delete_env(:compos_core, key)
   defp restore_env(key, value), do: Application.put_env(:compos_core, key, value)
 
-  test "keeps the cursor visible on a blank line", %{conn: conn} do
+  test "caret browsing keeps the cursor visible on a blank line", %{conn: conn} do
     buf = Compos.Core.Editor.current_buffer()
     Compos.Core.Buffer.insert(buf, "\ntext")
     Compos.Core.Buffer.set_read_only(buf, true)
+    Compos.Core.Buffer.goto(buf, 0)
+    assert {:ok, _} = Compos.Core.Session.eval(~s{(enable-minor-mode! "#{buf}" "caret-browsing-mode")})
 
     {:ok, view, _html} = live(conn, "/")
 

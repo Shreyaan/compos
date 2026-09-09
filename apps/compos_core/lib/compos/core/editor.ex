@@ -3130,6 +3130,10 @@ defmodule Compos.Core.Editor do
       # modeline read these two; the client renders no UI for them yet.
       path: snap.path,
       read_only: snap.read_only,
+      dismissible: Map.get(locals, "dismissible") == true,
+      cursor_visible:
+        Map.get(locals, "dismissible") != true or
+          "caret-browsing-mode" in (Map.get(locals, "minor-modes") || []),
       text: text,
       point: point,
       mark: snap.mark,

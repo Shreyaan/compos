@@ -514,6 +514,7 @@ defmodule Compos.Ui.EditorLive do
 
   @impl true
   def handle_info({:frame_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
+
   def handle_info(:which_key_show, socket) do
     {:noreply, socket |> assign(wk_timer: nil, wk_shown: true) |> refresh()}
   end
@@ -773,7 +774,12 @@ defmodule Compos.Ui.EditorLive do
         _ -> render_preview(preview_engine(leaf.buffer, rm), rm, leaf, pt, mark, faces, cache)
       end
 
-    {Map.merge(leaf, %{lines: [], preview: html}),
+    shown_html =
+      if Map.get(leaf, :cursor_visible, true),
+        do: html,
+        else: html <> "<style>.pt{visibility:hidden!important}</style>"
+
+    {Map.merge(leaf, %{lines: [], preview: shown_html}),
      Map.put(cache, {:preview, leaf.id}, {key, html})}
   end
 
@@ -930,7 +936,13 @@ defmodule Compos.Ui.EditorLive do
 
     lines =
       visible
-      |> render_pass(leaf.text, leaf.point, leaf.mark, leaf.id == active and not leaf.read_only)
+      |> render_pass(
+        leaf.text,
+        leaf.point,
+        leaf.mark,
+        leaf.id == active and not leaf.read_only,
+        Map.get(leaf, :cursor_visible, true)
+      )
       |> Enum.map(fn ln ->
         # a visible line whose successor is folded gets a fold marker
         if MapSet.member?(hidden, ln.num),
@@ -1763,19 +1775,28 @@ defmodule Compos.Ui.EditorLive do
         # client renders neither yet; /raw previews and the modeline will.
         path: assigns.node.path,
         read_only: assigns.node.read_only,
+        dismissible?: Map.get(assigns.node, :dismissible, false),
         active?: assigns.node.id == assigns.active
       )
 
     ~H"""
     <div
       id={"win-#{@node.id}"}
-      class={"window #{if @active?, do: "active", else: "inactive"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
+      class={"window #{if @active?, do: "active", else: "inactive"} #{if @dismissible?, do: "dismissible"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       style={window_style(@node)}
       data-win-id={@node.id}
       data-buffer={@node.buffer}
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
+      <div :if={@dismissible?} class="dismiss-bar">
+        <span class="dismiss-title">Reading</span>
+        <button type="button" class="dismiss-action" phx-click="ui_cmd"
+          phx-value-win={@node.id} phx-value-cmd="dismiss-buffer"
+          aria-label="Dismiss child or go back (q)">
+          <kbd>q</kbd><span>Back</span>
+        </button>
+      </div>
       <div :if={@node.header_line} class="buffer-header">{@node.header_line}</div>
       <div :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
         <div
@@ -1890,7 +1911,7 @@ defmodule Compos.Ui.EditorLive do
           <div class="ag-inputrow">
             <span class="ag-label">YOU</span>
             <span class="ag-input">{@node.ag_input.pre}<span
-                :if={@node.ag_input.cur != ""}
+                :if={@node.ag_input.cur != "" && Map.get(@node, :cursor_visible, true)}
                 class="cursor"
               >{@node.ag_input.cur}</span>{@node.ag_input.post}</span>
             <span
@@ -2042,7 +2063,7 @@ defmodule Compos.Ui.EditorLive do
   # The focused editable surface draws no cursor and no region of its own.
   # The browser owns the caret and selection there. An inactive editable
   # surface draws the server marker, so its window still shows point.
-  defp render_pass(static, text, point, mark, native_caret?) do
+  defp render_pass(static, text, point, mark, native_caret?, show_cursor?) do
     {rs, re} =
       case mark do
         nil -> {point, point}
@@ -2081,7 +2102,7 @@ defmodule Compos.Ui.EditorLive do
           overlays =
             [
               if(rs != re, do: {rs, re, "region"}),
-              if(point < cursor_end and is_nil(image_at_point),
+              if(show_cursor? and point < cursor_end and is_nil(image_at_point),
                 do: {point, cursor_end, "cursor"}
               )
             ]
@@ -2126,7 +2147,7 @@ defmodule Compos.Ui.EditorLive do
             end
 
           # cursor sitting on this line's newline (or at EOF on the last line)
-          if point >= line.start and point == le,
+          if show_cursor? and point >= line.start and point == le,
             do: segs ++ [{@cursor_placeholder, "cursor"}],
             else: segs
         else

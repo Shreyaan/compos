@@ -493,6 +493,12 @@ defmodule Compos.Ui.Layouts do
             color: var(--window-bg, #fdfcf8);
             border-radius: 1px;
           }
+          .window.dismissible { outline: 1px solid color-mix(in srgb, var(--cursor-bg, #26356b) 25%, transparent); outline-offset: -1px; }
+          .dismiss-bar { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; padding: 6px 12px; background: color-mix(in srgb, var(--cursor-bg, #26356b) 9%, var(--window-bg, #fdfcf8)); border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+          .dismiss-title { font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
+          .dismiss-action { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px 3px 4px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 6px; background: var(--window-bg, #fdfcf8); color: inherit; cursor: pointer; font: 600 12px var(--font-mono); }
+          .dismiss-action kbd { display: inline-grid; place-items: center; min-width: 25px; height: 25px; border-radius: 4px; background: var(--cursor-bg, #26356b); color: var(--cursor-fg, #fff); font: 700 18px var(--font-mono); }
+          .dismiss-action:hover, .dismiss-action:focus-visible { outline: 2px solid var(--cursor-bg, #26356b); outline-offset: 2px; }
           .window.active .cursor { }
           .window.inactive .cursor {
             background: transparent;

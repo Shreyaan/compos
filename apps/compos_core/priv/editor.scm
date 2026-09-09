@@ -13081,6 +13081,7 @@
          (run-command cmd))
         ;; the modeline's name is the dashboard's click target
         ((equal? cmd "modeline-expand") (run-command cmd))
+        ((equal? cmd "dismiss-buffer") (run-command cmd))
         ;; a mode name in the modeline toggles that mode
         ((and (string? cmd) (string-prefix? "mode:" cmd))
          (modeline-toggle-mode! (string-join (cdr (string-split cmd ":")) ":")))

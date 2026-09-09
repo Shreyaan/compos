@@ -98,6 +98,7 @@
 (load-bundled-package "web-server.scm")
 (load-bundled-package "worktrees.scm")
 (load-bundled-package "writing.scm")
+(load-bundled-package "dismiss.scm")
 
 (begin
   ;; the run and result blocks live with the other blocks and lean on
