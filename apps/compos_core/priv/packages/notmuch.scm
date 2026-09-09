@@ -351,11 +351,30 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (mode-icon! "notmuch-mode" "")
 
+;; Footer hints read the buffer's own keymap. A hardcoded hint goes stale the
+;; moment a key is rebound or taken by another map, so only the label is written
+;; here and the key is looked up.
+(define (nm--footer-key buf names)
+  (let loop ((n (if (pair? names) names (list names))))
+    (if (null? n)
+        ""
+        (let ((k (key-for-command (car n) buf)))
+          (if (equal? k "") (loop (cdr n)) k)))))
+
+(define (nm--footer buf specs)
+  (let loop ((s specs) (acc '()))
+    (if (null? s)
+        (reverse acc)
+        (let ((k (nm--footer-key buf (car (car s)))))
+          (loop (cdr s)
+                (if (equal? k "") acc (cons (list k (cadr (car s))) acc)))))))
+
 (define-list-mode! "notmuch-mode"
   (list
     'doc (string-append
            "One notmuch search as a list of threads. `RET` opens, `SPC` "
-           "previews, `a`/`d`/`t` tag, `0` strips every tag, `m` marks and the capital keys act "
+           "previews, `a`/`d`/`t` tag, `L` files a thread for the agent (+liked -inbox), "
+           "`0` strips every tag, `m` marks and the capital keys act "
            "on every marked thread. Selection is local and clears after bulk actions or filter changes. `/` adds a custom query filter. "
            "`l` adds a tag filter; `\\` removes it. "
            "`s` starts a new search; `q` removes the last filter, "
@@ -372,17 +391,26 @@ when a message has no text/plain part." 'group 'notmuch)
     'meta (lambda (buf) (nm--search-meta buf))
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
-              (if (nm--any-marked? buf)
-                  '(("a" "archive") ("d" "trash")
-                    ("t" "tag") ("F" "filter")
-                    ("U" "unmark") ("m" "unmark this")
-                    ("RET" "open") ("g" "refresh") ("q" "back"))
-                  '(("RET" "open") ("SPC" "preview") ("m" "mark")
-                    ("a" "archive") ("d" "trash") ("T" "tag")
-                    ("s" "search") ("/" "custom filter") ("l" "tag filter")
-                    ("\\" "unfilter")
-                    ("g" "refresh")
-                    ("q" "back"))))
+              (nm--footer buf
+                (if (nm--any-marked? buf)
+                    '(("notmuch-archive" "archive") ("notmuch-trash" "trash")
+                      ("notmuch-tag-marked" "tag") ("notmuch-like" "like")
+                      ("notmuch-filter-marked" "filter")
+                      ("notmuch-unmark-all" "unmark")
+                      ("notmuch-mark-toggle" "unmark this")
+                      ("notmuch-open-thread" "open")
+                      ("notmuch-refresh" "refresh")
+                      (("notmuch-back" "dismiss-buffer") "back"))
+                    '(("notmuch-open-thread" "open") ("notmuch-preview" "preview")
+                      ("notmuch-mark-toggle" "mark")
+                      ("notmuch-archive" "archive") ("notmuch-trash" "trash")
+                      ("notmuch-edit-tags" "tag") ("notmuch-like" "like")
+                      ("notmuch-search" "search")
+                      ("notmuch-filter" "custom filter")
+                      ("notmuch-filter-by-tag" "tag filter")
+                      ("notmuch-unfilter-last" "unfilter")
+                      ("notmuch-refresh" "refresh")
+                      (("notmuch-back" "dismiss-buffer") "back")))))
     'keys '(("n" "notmuch-next") ("p" "notmuch-prev")
             ("RET" "notmuch-open-thread") ("SPC" "notmuch-preview")
             ("M-<" "notmuch-first-thread") ("M->" "notmuch-last-thread")
@@ -395,6 +423,7 @@ when a message has no text/plain part." 'group 'notmuch)
             ("D" "notmuch-trash-marked") ("t" "notmuch-tag-marked")
             ("T" "notmuch-edit-tags") ("+" "notmuch-add-tag")
             ("-" "notmuch-remove-tag") ("0" "notmuch-remove-all-tags")
+            ("L" "notmuch-like")
             ("j" "notmuch-jump")
             ("/" "notmuch-filter")
             ("\\" "notmuch-unfilter-last") ("l" "notmuch-filter-by-tag")
@@ -1183,6 +1212,28 @@ when a message has no text/plain part." 'group 'notmuch)
                   (message (string-append email ": " verdict)))))))))
 (catalog-meta! 'command "notmuch-unsubscribe" 'domain 'mail 'effects '(write external))
 
+;; Filing for the agent: `+liked` marks a thread as worth keeping and takes it
+;; out of the inbox. The tag is the whole record, so any agent query can read it
+;; back later with tag:liked.
+(define-command "notmuch-like"
+  "File this thread for the agent (+liked -inbox): the marked threads on a list row, or the thread at point, or the open thread"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (cond
+        ((buffer-mode-is? buf "notmuch-show-mode")
+         (let ((th (buffer-local buf 'notmuch-thread)))
+           (if (not th)
+               (message "No thread here")
+               (begin
+                 (nm--run (string-append "tag +liked -inbox -- thread:" th))
+                 (when (buffer-exists? *notmuch-search-buffer*)
+                   (nm--refresh! *notmuch-search-buffer*))
+                 (message "Liked")))))
+        ((nm--any-marked? buf) (nm--confirm-marked buf "Like" "+liked -inbox"))
+        (else (nm--tag! buf "+liked -inbox"))))))
+
+(catalog-meta! 'command "notmuch-like" 'domain 'mail 'effects '(write))
+
  ;;; --- local selection ---------------------------------------------------------
 
 ;; Selection is an editor operation, never a mail tag. ALL selects the query;
@@ -1544,7 +1595,7 @@ when a message has no text/plain part." 'group 'notmuch)
           (else (loop (cdr ms))))))
 
 (mode-doc! "notmuch-show-mode"
-  "One mail thread, read. `a` archives it and `r` starts a reply. `C-c a` opens an attachment. `v` changes between HTML and plain text. `q` goes back to the search.")
+  "One mail thread, read. `a` archives it, `L` files it for the agent (+liked -inbox) and `r` starts a reply. `C-c a` opens an attachment. `v` changes between HTML and plain text. `q` goes back to the search.")
 
 (mode-icon! "notmuch-show-mode" "")
 
@@ -1597,6 +1648,7 @@ when a message has no text/plain part." 'group 'notmuch)
     ("a" "notmuch-show-archive")
     ("r" "notmuch-show-reply")
     ("v" "notmuch-show-toggle-view")
+    ("L" "notmuch-like")
     ("j" "notmuch-jump")
     ("C-c a" "notmuch-open-attachment")
     ("A" "notmuch-open-attachment")
