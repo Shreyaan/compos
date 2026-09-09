@@ -115,11 +115,6 @@
 
       ((equal? type 'tool-call)
        (chat-activity! buf (string-append "tool · " (agent-tool-title e)))
-       ;; Keep the same tool call that renders as a transcript card in the
-       ;; chat record, so running summaries can describe the actual work.
-       (chat-record-event! buf "assistant"
-         (list (list "tool-use" (plist-get e 'id) (plist-get e 'name)
-                      (or (agent-tool-input-text e) "{}"))))
        ;; code.scm listens: the first tool call that edits code turns the
        ;; chat into a coding session (code-agent-mode)
        (when (boundp (quote code-agent-note-tool!))
@@ -167,11 +162,18 @@
              (when (and entry (> (agent-mark slug) (car (cdr entry))))
                (agent-add-fold! buf (car (cdr entry)) (agent-mark slug))))
            (agent-card-set-open! buf (plist-get e 'id) #f)
-           ;; Close the same tool-call card in the chat record with its
-           ;; result, so summaries see the complete tool event.
+           ;; The tool event reaches the record whole, and here: a
+           ;; tool-call event carries no arguments yet -- the update is
+           ;; where the backend states them -- so recording the call on
+           ;; arrival would file it with an empty argument list, and a
+           ;; running summary would see the name and nothing it did.
            (chat-record-event! buf "assistant"
-             (list (list "tool-result" (plist-get e 'id) text
-                          (equal? (plist-get e 'status) "failed"))))
+             (list (list "tool-use" (plist-get e 'id)
+                         (or (plist-get e 'name) (agent-tool-title e))
+                         (let ((raw (plist-get e 'input)))
+                           (if (and (string? raw) (not (equal? raw ""))) raw "{}")))
+                   (list "tool-result" (plist-get e 'id) text
+                         (equal? (plist-get e 'status) "failed"))))
            (when (boundp (quote chat-summary-note-tool!))
              (chat-summary-note-tool! buf)))))
 
