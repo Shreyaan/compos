@@ -119,6 +119,7 @@
 ;;; --- the card -------------------------------------------------------------------
 
 (define (title-card text k)
+  (message "title: title-card requested by Desertant")
   (if (not (title-ready?))
       (k #f)
       (llm-with-model (title--prompt text) (title--model)
