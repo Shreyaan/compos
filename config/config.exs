@@ -47,8 +47,14 @@ if config_env() == :dev do
     hotload: true,
     hotload_recompile: {Compos.Core.Hotload.Compile, :compile, []}
 
+  # code_reloader runs `mix compile` inside this VM on a browser request, and
+  # purges the modules an outside compile changed before it starts. Both steps
+  # leave a module missing for as long as the compile runs. Hotload above does
+  # the same work in a child process and swaps the beams in without a gap, so
+  # the endpoint must not reload code itself. live_reload stays: it only tells
+  # the browser to reload the page.
   config :compos_ui, Compos.Ui.Endpoint,
-    code_reloader: true,
+    code_reloader: false,
     debug_errors: true,
     live_reload: [
       patterns: [

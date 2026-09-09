@@ -6,7 +6,12 @@ defmodule Compos.MixProject do
       apps_path: "apps",
       version: "0.1.0",
       start_permanent: Mix.env() == :prod,
-      listeners: [Phoenix.CodeReloader],
+      # No Phoenix.CodeReloader listener. It purges and deletes, in this VM,
+      # every module an outside `mix compile` or `mix test` rebuilt — including
+      # the ones Compos.Core.Hotload's own child compile rebuilds. A call
+      # landing in that window raises "module is not available", which is how
+      # Compos.Core.Editor disappeared under a keystroke. Hotload owns code
+      # loading here, and its swap loads before it purges.
       deps: deps(),
       releases: releases()
     ]
