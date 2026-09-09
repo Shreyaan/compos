@@ -3787,6 +3787,14 @@ defmodule Compos.Ui.Layouts do
                   // a window being hidden scrolls itself to 0; that is not
                   // the reader (see AgentScroll.scrollH)
                   if (!el.isConnected || el.clientHeight === 0) return;
+                  // neither is a scroll WE made to keep point in view. It
+                  // reports as a pin (S1 sets manual), and a pinned window
+                  // stops following: the first imenu step would scroll, and
+                  // every step after it would mark the row and leave the
+                  // window where it was — a preview that quits after one
+                  // move. The mark expires, so a reader scroll right after
+                  // ours still counts.
+                  if (el._composSelfScroll && performance.now() - el._composSelfScroll < 300) return;
                   const winEl = el.closest(".window[data-win-id]");
                   if (!winEl) return;
                   const win = parseInt(winEl.dataset.winId, 10);
@@ -3994,6 +4002,9 @@ defmodule Compos.Ui.Layouts do
                   const eb = el.getBoundingClientRect();
                   const cb = container.getBoundingClientRect();
                   if (eb.top < cb.top || eb.bottom > cb.bottom) {
+                    // ours, not the reader's: cscrollH reads this and sends
+                    // no pin
+                    container._composSelfScroll = performance.now();
                     el.scrollIntoView({ block: "center" });
                   }
                 });

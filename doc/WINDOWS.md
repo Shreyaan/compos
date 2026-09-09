@@ -353,6 +353,11 @@ the same keypress.
 - Dismissible reading buffers have a distinct header with a prominent, clickable
   `q Back` control. Their text cursor is hidden by default. `M-x
   caret-browsing-mode` toggles the cursor without changing edit permissions.
+- A mode that navigates by point keeps its cursor: `dismiss-keep-caret!` names
+  such a mode, and its buffers get caret browsing when they become dismissible.
+  `browse-mode` is one, because `RET` follows the link at point and `n`, `p` and
+  `TAB` walk the links. The default is applied once per mode, so a later `M-x
+  caret-browsing-mode` is still the reader's answer.
 
 Notmuch thread views register as children of their search buffer during mode
 setup, including reload/restore. From the search, the first `q` dismisses its

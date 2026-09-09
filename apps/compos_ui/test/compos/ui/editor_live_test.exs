@@ -532,9 +532,9 @@ defmodule Compos.Ui.EditorLiveTest do
 
   test "imenu draws the definition the highlight is on", %{conn: conn} do
     buf = "zz-imenu-ui-#{System.unique_integer([:positive])}.py"
+    Compos.Core.Editor.set_window_buffer(buf)
     Compos.Core.Buffer.append(buf, "def alpha():\n    return 1\n\ndef beta():\n    return 2\n")
     Compos.Core.Buffer.goto(buf, 0)
-    Compos.Core.Editor.set_window_buffer(buf)
 
     {:ok, view, _html} = live(conn, "/")
 

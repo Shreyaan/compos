@@ -60,12 +60,33 @@
   (dismiss--sync! child)
   child)
 
+;; A reading surface hides its text cursor, but a mode that navigates by
+;; point has to show where point stands: in browse-mode RET follows the
+;; link at point, and n, p and TAB walk the links. Those modes get caret
+;; browsing when they become dismissible, once per mode, so a later
+;; M-x caret-browsing-mode is still the reader's answer.
+(define *dismiss-caret-modes* '("browse-mode"))
+
+(define (dismiss-keep-caret! mode)
+  (unless (member mode *dismiss-caret-modes*)
+    (set! *dismiss-caret-modes* (cons mode *dismiss-caret-modes*))))
+
+(define (dismiss--caret-default! buf)
+  (let ((mode (buffer-local buf 'mode-name)))
+    (unless (equal? (buffer-local buf 'dismiss-caret-default) mode)
+      (desktop-skip! buf 'dismiss-caret-default)
+      (buffer-set-local! buf 'dismiss-caret-default mode)
+      (when (and (member mode *dismiss-caret-modes*)
+                 (not (minor-mode-on? buf "caret-browsing-mode")))
+        (enable-minor-mode! buf "caret-browsing-mode")))))
+
 (define (dismiss--sync! buf)
   (when (buffer-exists? buf)
     (let ((on (buffer-dismissible? buf)))
       (desktop-skip! buf 'dismissible)
       (unless (equal? (buffer-local buf 'dismissible) on)
         (buffer-set-local! buf 'dismissible on))
+      (when on (dismiss--caret-default! buf))
       (cond ((and on (not (minor-mode-on? buf "dismiss-mode")))
              (enable-minor-mode! buf "dismiss-mode"))
             ((and (not on) (minor-mode-on? buf "dismiss-mode"))
@@ -179,6 +200,7 @@
 (add-hook! 'window-configuration-change-hook 'dismiss-sync-visible!)
 (add-hook! 'post-command-hook 'dismiss-sync-visible!)
 
+(public! 'dismiss-keep-caret! "(dismiss-keep-caret! MODE) — MODE's dismissible buffers show the text cursor, because they navigate by point")
 (public! 'buffer-child! "(buffer-child! PARENT CHILD) — register a child for child-first dismissal; reject ownership cycles")
 (public! 'dismiss-sync-visible! "(dismiss-sync-visible!) — rebuild dismissal cues and maps for visible buffers")
 

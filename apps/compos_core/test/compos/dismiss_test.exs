@@ -141,6 +141,31 @@ defmodule Compos.DismissTest do
     refute Editor.render_state(f).tree.cursor_visible
   end
 
+  test "a dismissible mode that navigates by point keeps its cursor", %{frame: f} do
+    eval!(
+      """
+      (define-mode "zz-point-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
+      (dismiss-keep-caret! "zz-point-mode")
+      (switch-to-buffer! "zz-dismiss-child")
+      (buffer-child! "zz-dismiss-parent" "zz-dismiss-child")
+      (with-current-buffer "zz-dismiss-child" (lambda () (set-mode! "zz-point-mode")))
+      """,
+      f
+    )
+
+    assert Editor.render_state(f).tree.dismissible
+    assert Editor.render_state(f).tree.cursor_visible
+
+    # the default is applied once, so the reader's toggle still answers
+    eval!("(run-command \"caret-browsing-mode\")", f)
+    eval!("(dismiss-sync-visible!)", f)
+    refute Editor.render_state(f).tree.cursor_visible
+  end
+
+  test "browse-mode is one of the modes that keep their cursor", %{frame: f} do
+    assert eval!(~s{(if (member "browse-mode" *dismiss-caret-modes*) #t #f)}, f) == "#t"
+  end
+
   test "killing a child and reusing its name does not adopt the new buffer", %{frame: f} do
     eval!(
       """
