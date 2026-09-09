@@ -280,6 +280,46 @@ defmodule Compos.Core.SchemeAPI do
     Compos.Core.LLM.json_to_scheme(reply)
   end
 
+  defp http_reply_headers(headers) when is_map(headers) or is_list(headers) do
+    Map.new(headers, fn {name, value} -> {to_string(name), http_header_value(value)} end)
+  rescue
+    _ -> %{}
+  end
+
+  defp http_reply_headers(_), do: %{}
+
+  defp http_header_value(value) when is_list(value), do: Enum.join(value, ", ")
+  defp http_header_value(value), do: to_string(value)
+
+  # max-bytes counts bytes, not characters: the point is a ceiling on what a
+  # buffer has to hold when a URL answers with a gigabyte.
+  defp http_truncate(body, max) when is_integer(max) and max > 0 and byte_size(body) > max,
+    do: {binary_part(body, 0, max), true}
+
+  defp http_truncate(body, _max), do: {body, false}
+
+  defp http_failure(message) do
+    Compos.Core.LLM.json_to_scheme(%{
+      "ok" => false,
+      "status" => false,
+      "headers" => %{},
+      "body" => "",
+      "error" => message
+    })
+  end
+
+  defp http_reason(%{__exception__: true} = e), do: Exception.message(e)
+  defp http_reason({:error, reason}), do: http_reason(reason)
+  defp http_reason(reason) when is_atom(reason), do: "the request failed: " <> to_string(reason)
+  defp http_reason(reason), do: "the request failed: " <> inspect(reason)
+
+  defp http_limit(value, _default) when is_integer(value) and value > 0, do: value
+  defp http_limit(_value, default), do: default
+
+  defp http_inline_limit, do: Application.get_env(:compos_core, :http_timeout_ms, 15_000)
+
+  defp http_async_limit, do: Application.get_env(:compos_core, :http_async_timeout_ms, 120_000)
+
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
   def docs do
     %{
