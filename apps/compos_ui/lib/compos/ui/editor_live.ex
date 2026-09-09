@@ -1267,6 +1267,8 @@ defmodule Compos.Ui.EditorLive do
     ~H"""
     <div
       id="editor"
+      role="application"
+      aria-label="compos editor"
       class={instance_class("editor-root", @instance_accent)}
       style={root_style(@state, @instance_accent)}
       phx-hook="Keys"
@@ -1276,7 +1278,7 @@ defmodule Compos.Ui.EditorLive do
     >
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(Compos.Ui.FaceCSS.css(@state.faces)) %></style>
     <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
-      <div :if={@state.workspace} class="workspace-bar">
+      <header :if={@state.workspace} class="workspace-bar">
         <span class="workspace-bar-kind">WORKTREE</span>
         <strong :if={@state.workspace.project && @state.workspace.name}>
           {@state.workspace.project} / {@state.workspace.name}
@@ -1287,11 +1289,11 @@ defmodule Compos.Ui.EditorLive do
         <span class="workspace-bar-port">PORT {workspace_port(@state.workspace.url)}</span>
         <span class="workspace-bar-root">{@state.workspace.root}</span>
         <span class="workspace-bar-help">C-x w new tab · C-x d switch daemon</span>
-      </div>
+      </header>
       <.frame_modeline state={@state} tabs={@tabs} />
-      <div class="windows">
+      <main class="windows">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
-      </div>
+      </main>
       <div :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key mb-geom-popup">
         <div class="wk-title">
           <span>
@@ -1457,7 +1459,7 @@ defmodule Compos.Ui.EditorLive do
   # after the spacer. A message never moves a tab.
   defp frame_modeline(assigns) do
     ~H"""
-    <div
+    <footer
       :if={true}
       class="echo-bar"
     >
@@ -1478,10 +1480,10 @@ defmodule Compos.Ui.EditorLive do
       </span>
       <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
       <span class="mb-spacer"></span>
-      <span class="echo">{@state.echo}</span>
+      <span class="echo" role="status">{@state.echo}</span>
       <span :if={@state.minibuffer == nil && @state.transient == nil && @state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><span class="ml-attention">{@state.modeline_extra}</span><% else %><span :for={{c, t} <- @state.modeline_extra} class={c}>{t}</span><% end %></span>
       <span class="echo-hint" :if={@state.minibuffer == nil && @state.transient == nil && @state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
-    </div>
+    </footer>
     """
   end
 
