@@ -168,6 +168,42 @@
                     "and every list row leads with the same name")
       (buffer-kill! buf))))
 
+(deftest 'the-summary-falls-back-to-the-cheap-model-when-the-card-writer-answers-nothing
+  "ready but empty is the same case as not installed: the chat still gets a label"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-fallback*")
+          (old-ready title-ready?)
+          (old-card title-card)
+          (old-llm llm-with-model)
+          (seen-model #f))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (buffer-set-local! buf 'chat-turn-active #t)
+      (buffer-set-local! buf 'agent-saved-mark 0)
+      (buffer-set-local! buf 'agent-blocks '())
+
+      ;; the on-device model claims to be ready, then hands back nothing --
+      ;; a drifted-off-format answer, a crashed server, a timed-out call
+      (set! title-ready? (lambda () #t))
+      (set! title-card (lambda (text k) (k #f)))
+      (set! llm-with-model
+        (lambda (prompt model k)
+          (set! seen-model model)
+          (k "Falling back when the card writer answers nothing.")))
+
+      (chat-summary-refresh! buf)
+
+      (check-equal! seen-model chat-summary-model
+                    "the fallback call names the cheap hosted model")
+      (check-equal! (buffer-local buf 'chat-summary)
+                    "Falling back when the card writer answers nothing."
+                    "the fallback text still lands as the summary")
+
+      (set! title-ready? old-ready)
+      (set! title-card old-card)
+      (set! llm-with-model old-llm)
+      (buffer-kill! buf))))
+
 (deftest 'the-summary-log-interleaves-summaries-and-jj-lines-by-time
   "every paragraph lands in chat-summary-log; the entries merge with the repo's line history in time order"
   (lambda ()

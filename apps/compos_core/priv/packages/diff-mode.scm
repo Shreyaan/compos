@@ -835,7 +835,9 @@
   (buffer-set-local! name 'diff-card-cache '())
   (buffer-append! name (if (string? text) text "could not read that revision\n"))
   (pop-to-buffer name)
-  (set-mode! "diff-show")
+  ;; name it: an agent's pop-to-buffer displays nothing, and a bare set-mode!
+  ;; would then land the diff mode on whatever buffer the caller stood in
+  (with-current-buffer name (lambda () (set-mode! "diff-show")))
   (buffer-goto! name 0)
   name)
 

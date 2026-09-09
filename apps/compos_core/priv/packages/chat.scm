@@ -1218,7 +1218,28 @@
                  (let ((flat (chat-summary--flatten
                                (chat-summary--first-sentence text))))
                    (unless (equal? flat (buffer-local b 'chat-summary))
-                     (chat-summary-land! b flat)))))))
+                     (chat-summary-land! b flat))))))
+           ;; The on-device card writer can be missing, still loading, or
+           ;; answer nothing for a passage it could not parse. Every one of
+           ;; those is the same case to a chat: fall back to the cheap
+           ;; hosted model rather than leave the summary stale.
+           (fallback!
+             (lambda ()
+               (llm-with-model
+                 (string-append
+                   "You maintain a one-sentence label for a work chat between a person"
+                   " and a coding agent. The label names the task the chat is on, the"
+                   " way a title does: what kind of work, on what. Do not report steps"
+                   " taken, findings, or status. Rewrite the label only when the task"
+                   " changed. One sentence, plain text, no markdown, five or six words."
+                   " Answer with the sentence only.\n\nCurrent label:\n"
+                   (or (buffer-local buf 'chat-summary) "(none yet)")
+                   "\n\nLatest transcript:\n"
+                   (chat-summary--tail buf))
+                 chat-summary-model
+                 (lambda (text)
+                   (let ((b (if force? (retitle buf text) buf)))
+                     (land b text)))))))
       ;; The on-device card writer returns TITLE and DESCRIPTION. TITLE
       ;; names the chat, once. DESCRIPTION is the running summary, and it
       ;; does move. The rename comes first, so the summary lands in the
@@ -1226,29 +1247,17 @@
       (if (and (boundp 'title-card) (title-ready?))
           (title-card (chat-summary--tail buf)
             (lambda (card)
-              (when (and (pair? card) (buffer-known? buf))
-                (let* ((title (car card))
-                       (desc (and (pair? (cdr card)) (cadr card)))
-                       (b (retitle buf title)))
-                  (land b (if (and (string? desc)
-                                   (not (equal? (string-trim desc) "")))
-                              desc
-                              title))))))
-          (llm-with-model
-            (string-append
-              "You maintain a one-sentence label for a work chat between a person"
-              " and a coding agent. The label names the task the chat is on, the"
-              " way a title does: what kind of work, on what. Do not report steps"
-              " taken, findings, or status. Rewrite the label only when the task"
-              " changed. One sentence, plain text, no markdown, five or six words."
-              " Answer with the sentence only.\n\nCurrent label:\n"
-              (or (buffer-local buf 'chat-summary) "(none yet)")
-              "\n\nLatest transcript:\n"
-              (chat-summary--tail buf))
-            chat-summary-model
-            (lambda (text)
-              (let ((b (if force? (retitle buf text) buf)))
-                (land b text))))))))
+              (cond ((not (buffer-known? buf)) #f)
+                    ((pair? card)
+                     (let* ((title (car card))
+                            (desc (and (pair? (cdr card)) (cadr card)))
+                            (b (retitle buf title)))
+                       (land b (if (and (string? desc)
+                                        (not (equal? (string-trim desc) "")))
+                                   desc
+                                   title))))
+                    (else (fallback!)))))
+          (fallback!)))))
 
 (define *chat-summary-log-max* 200)
 

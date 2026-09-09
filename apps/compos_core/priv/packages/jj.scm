@@ -387,3 +387,152 @@
          (list (substring l 0 1) (string-trim (substring l 1 (string-length l)))))
        (jj-lines root (string-append "jj diff -r " change
                                      " --summary --color never 2>/dev/null"))))
+
+;; One row per change of SLUG's, oldest first. A change is open while it is @,
+;; because a later burst can still amend it; past that it is local, then on the
+;; bookmark, then on the bookmark's remote, which is the only state that means
+;; the work left this checkout.
+(define (jj-agent-changes root slug)
+  (let* ((mine (jj-agent-revset slug))
+         (bm (jj-tracked-bookmark root))
+         (here (let ((r (jj-revs root "@"))) (and (pair? r) (car r))))
+         (on-bm (if bm (jj-revs root (string-append mine " & ::" bm)) '()))
+         (pushed (if bm
+                     (jj-revs root (string-append mine
+                                                  " & ::remote_bookmarks(exact:\""
+                                                  bm "\")"))
+                     '()))
+         (rows (jj-lines root (string-append
+                 "jj log --no-graph --color never -r '" mine "' "
+                 "-T 'change_id.short() ++ \"\\t\" ++ commit_id.short() ++ \"\\t\" "
+                 "++ if(empty,\"empty\",\"full\") ++ \"\\t\" "
+                 "++ description.first_line() ++ \"\\n\"' 2>/dev/null"))))
+    (reverse
+      (map (lambda (row)
+             (let* ((f (string-split row "\t"))
+                    (change (car f))
+                    (subject (if (> (length f) 3) (list-ref f 3) "")))
+               (list 'change change
+                     'commit (cadr f)
+                     'state (cond ((equal? change here) 'open)
+                                  ((member change pushed) 'pushed)
+                                  ((member change on-bm) 'bookmarked)
+                                  (else 'local))
+                     'empty (equal? (list-ref f 2) "empty")
+                     'described (and (not (equal? subject ""))
+                                     (not (string-prefix? "Agent: " subject)))
+                     'subject subject
+                     'files (jj-change-files root change))))
+           rows))))
+
+(define (jj-chat-slug buf) (buffer-local buf 'agent-slug))
+
+(public! 'chat-changes
+  "(chat-changes [BUF]) -- the jj changes this chat made, oldest first, each with its state")
+(define (chat-changes &optional buf0)
+  (let* ((buf (or buf0 (current-buffer)))
+         (slug (jj-chat-slug buf))
+         (root (jj-buffer-root buf)))
+    (if (and slug root) (jj-agent-changes root slug) '())))
+
+(public! 'chat-work-state
+  "(chat-work-state [BUF]) -- what this chat still holds, and whether closing it loses anything")
+(define (chat-work-state &optional buf0)
+  (let* ((buf (or buf0 (current-buffer)))
+         (slug (jj-chat-slug buf))
+         (root (jj-buffer-root buf))
+         (changes (if (and slug root) (jj-agent-changes root slug) '()))
+         (unsaved (if slug (jj-dirty-by (string-append "agent:" slug)) '()))
+         (live (filter (lambda (c) (not (plist-get c 'empty))) changes))
+         (unpushed (filter (lambda (c) (not (equal? (plist-get c 'state) 'pushed))) live))
+         (unnamed (filter (lambda (c) (not (plist-get c 'described))) live)))
+    (list 'slug (or slug #f)
+          'root (or root #f)
+          'bookmark (if root (or (jj-tracked-bookmark root) #f) #f)
+          'changes changes
+          'unsaved unsaved
+          'unpushed (map (lambda (c) (plist-get c 'change)) unpushed)
+          'unnamed (map (lambda (c) (plist-get c 'change)) unnamed)
+          'verdict (cond ((not slug) 'not-a-chat)
+                         ((not root) 'no-repo)
+                         ((pair? unsaved) 'unsaved)
+                         ((null? live) 'nothing)
+                         ((pair? unpushed) 'unpushed)
+                         (else 'in)))))
+
+(define (jj-state-word s)
+  (cond ((equal? s 'pushed) "pushed")
+        ((equal? s 'bookmarked) "on the bookmark")
+        ((equal? s 'open) "open")
+        (else "local")))
+
+(define (jj-verdict-line st)
+  (let ((v (plist-get st 'verdict))
+        (bm (or (plist-get st 'bookmark) "the bookmark"))
+        (n (length (plist-get st 'unpushed)))
+        (u (length (plist-get st 'unsaved))))
+    (cond ((equal? v 'not-a-chat) "Not a chat: this buffer has no agent slug.")
+          ((equal? v 'no-repo) "This chat does not stand in a jj repo.")
+          ((equal? v 'unsaved)
+           (string-append (number->string u)
+                          " buffer(s) this chat wrote are still unsaved. Closing loses them."))
+          ((equal? v 'nothing) "This chat changed nothing in the repo. Safe to close.")
+          ((equal? v 'unpushed)
+           (string-append (number->string n) " change(s) have not reached " bm
+                          "@remote. Closing keeps them in the repo, but they are not in yet."))
+          (else (string-append "Every change is past " bm "@remote. Safe to close.")))))
+
+(public! 'chat-changes-report
+  "(chat-changes-report [BUF]) -- this chat's changes and its closing verdict, as text")
+(define (chat-changes-report &optional buf0)
+  (let* ((buf (or buf0 (current-buffer)))
+         (st (chat-work-state buf))
+         (out (list (string-append (or (plist-get st 'slug) "(no slug)")
+                                   "  " (or (plist-get st 'root) "")))))
+    (for-each
+      (lambda (c)
+        (set! out (cons (string-append "  " (plist-get c 'commit)
+                                       "  " (jj-state-word (plist-get c 'state))
+                                       (if (plist-get c 'empty) "  empty" "")
+                                       "  " (if (plist-get c 'described)
+                                                 (plist-get c 'subject)
+                                                 "(no description)"))
+                        out))
+        (for-each (lambda (f)
+                    (set! out (cons (string-append "      " (car f) " " (cadr f)) out)))
+                  (plist-get c 'files)))
+      (plist-get st 'changes))
+    (for-each (lambda (b) (set! out (cons (string-append "  unsaved: " b) out)))
+              (plist-get st 'unsaved))
+    (set! out (cons (string-append "\n" (jj-verdict-line st)) out))
+    (string-join (reverse out) "\n")))
+
+(public! 'chat-diff
+  "(chat-diff [BUF]) -- the unified diff of every change this chat made, oldest first")
+(define (chat-diff &optional buf0)
+  (let* ((buf (or buf0 (current-buffer)))
+         (root (jj-buffer-root buf))
+         (changes (filter (lambda (c) (not (plist-get c 'empty)))
+                          (chat-changes buf))))
+    (if (not root)
+        ""
+        (string-join
+          (map (lambda (c)
+                 (jj-sh root (string-append "jj diff -r " (plist-get c 'change)
+                                            " --git --color never 2>/dev/null")))
+               changes)
+          ""))))
+
+(effects! '(write external execute display))
+
+(define-command "chat-changes" "Show what this chat changed: its jj changes, their state, and its diff"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (slug (or (jj-chat-slug buf) "chat"))
+           (name (string-append "*changes: " slug "*"))
+           (text (string-append (chat-changes-report buf) "\n\n" (chat-diff buf))))
+      (diff-show! name text)
+      ;; diff-show! sets the mode on whatever is current, and an agent's
+      ;; pop-to-buffer displays nothing, so say which buffer it was
+      (with-current-buffer name (lambda () (set-mode! "diff-show")))
+      (message (jj-verdict-line (chat-work-state buf))))))
