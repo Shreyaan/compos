@@ -29,6 +29,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(discovery_primitives())
     |> Map.merge(irc_primitives())
     |> Map.merge(google_primitives())
+    |> Map.merge(http_primitives())
   end
 
   defp google_primitives do
@@ -64,6 +65,164 @@ defmodule Compos.Core.SchemeAPI do
       end
     }
   end
+
+  # Every HTTP request in the editor used to be its own curl command line.
+  # graphql.scm, sentry.scm, feeds.scm, notmuch.scm and package.scm each
+  # built their own quoting, their own timeout, and their own way of digging
+  # the status code out of the output. One door instead, through Req, which
+  # is already a dependency. No shell means no quoting to get wrong and no
+  # token in a command line, so a header can carry a secret directly.
+  #
+  # Scheme asks in a plist and reads a plist back:
+  #
+  #   (http-request "https://api.example.com/v1/people"
+  #                 '(method "POST" headers (authorization "Bearer t")
+  #                   json (name "ada")))
+  #   => (ok #t status 201 headers (content-type "application/json")
+  #       body "{...}" json (id 7))
+  #
+  # Without a callback this holds the calling lane, like the inline form of
+  # shell-command->string, and carries the same short limit for the same
+  # reason: the caller is often the Session. With a callback the request
+  # runs in a Task and may wait much longer.
+  defp http_primitives do
+    %{
+      "http-request" => fn
+        [url] ->
+          http_call(url, [], http_inline_limit())
+
+        [url, opts] ->
+          if is_list(opts) or opts == false do
+            http_call(url, opts, http_inline_limit())
+          else
+            async_dispatch(opts, fn -> http_call(url, [], http_async_limit()) end)
+          end
+
+        [url, opts, callback] ->
+          async_dispatch(callback, fn -> http_call(url, opts, http_async_limit()) end)
+      end
+    }
+  end
+
+  @http_methods %{
+    "get" => :get,
+    "post" => :post,
+    "put" => :put,
+    "patch" => :patch,
+    "delete" => :delete,
+    "head" => :head,
+    "options" => :options
+  }
+
+  defp http_call(url, opts, limit) do
+    o = http_opts(opts)
+
+    with {:ok, url} <- http_url(url),
+         {:ok, method} <- http_method(o) do
+      http_send(method, url, o, http_json_body(opts), limit)
+    else
+      {:error, message} -> http_failure(message)
+    end
+  end
+
+  defp http_opts(opts) when is_list(opts) do
+    case Compos.Core.Plist.to_json(opts) do
+      map when is_map(map) -> map
+      _ -> %{}
+    end
+  end
+
+  defp http_opts(_), do: %{}
+
+  # #f in a JSON body means null, not the boolean false, so the body is
+  # converted on its own. Everywhere else in OPTS, #f means off.
+  defp http_json_body(opts) when is_list(opts) do
+    opts
+    |> Enum.chunk_every(2)
+    |> Enum.find_value(fn
+      [{:sym, "json"}, value] -> {:ok, Compos.Core.Plist.to_json(value, :null)}
+      _ -> nil
+    end)
+  end
+
+  defp http_json_body(_), do: nil
+
+  # A relative URL has nowhere to go, and a scheme we do not speak reaches a
+  # different part of Req entirely: say so here instead of raising there.
+  defp http_url(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        {:ok, url}
+
+      _ ->
+        {:error, "Use an absolute http:// or https:// URL: " <> url}
+    end
+  end
+
+  defp http_url(_), do: {:error, "The URL must be a string."}
+
+  defp http_method(o) do
+    name =
+      case Map.get(o, "method") do
+        value when value in [nil, false, ""] -> "get"
+        value -> value |> to_string() |> String.downcase()
+      end
+
+    case Map.fetch(@http_methods, name) do
+      {:ok, verb} -> {:ok, verb}
+      :error -> {:error, "Unsupported HTTP method: " <> name}
+    end
+  end
+
+  defp http_send(method, url, o, json, limit) do
+    req =
+      [
+        method: method,
+        url: url,
+        decode_body: false,
+        retry: false,
+        redirect: Map.get(o, "redirect", true) != false,
+        receive_timeout: http_limit(Map.get(o, "timeout"), limit),
+        connect_options: [timeout: http_limit(Map.get(o, "connect-timeout"), 10_000)]
+      ]
+      |> http_option(:headers, http_pairs(Map.get(o, "headers")))
+      |> http_option(:params, http_pairs(Map.get(o, "params")))
+      |> http_body(o, json)
+
+    case http_perform(req) do
+      {:ok, %{status: status, headers: headers, body: body}} ->
+        http_reply(status, headers, body, o)
+
+      other ->
+        http_failure(http_reason(other))
+    end
+  rescue
+    e -> http_failure(http_reason(e))
+  end
+
+  defp http_option(req, _key, []), do: req
+  defp http_option(req, key, value), do: Keyword.put(req, key, value)
+
+  # Scheme writes a header set as a plist, (authorization "Bearer t"), and as
+  # a list of pairs when a name is not a symbol: (("X-Trace-Id" "7")).
+  defp http_pairs(map) when is_map(map),
+    do: for({key, value} <- map, do: {to_string(key), http_scalar(value)})
+
+  defp http_pairs(list) when is_list(list) do
+    Enum.flat_map(list, fn
+      [key, value] -> [{to_string(key), http_scalar(value)}]
+      {key, value} -> [{to_string(key), http_scalar(value)}]
+      _ -> []
+    end)
+  end
+
+  defp http_pairs(_), do: []
+
+  defp http_scalar(value) when is_binary(value), do: value
+  defp http_scalar(value) when is_number(value), do: to_string(value)
+  defp http_scalar(value) when is_boolean(value), do: to_string(value)
+  defp http_scalar(value), do: value
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
   def docs do
