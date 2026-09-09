@@ -178,13 +178,6 @@ defmodule Compos.Ui.Layouts do
             min-width: min(520px, 100%);
             height: 62%;
           }
-          @keyframes popup-rise { from { opacity: 0; } to { opacity: 1; } }
-          @keyframes win-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
-          /* Window content persists across keyboard-panel patches. Keep it
-             visually stable; only newly opened popups use an entry animation. */
-          .editor-root:has(.mb-panel, .which-key, .transient-panel) .window {
-
-          }
           .window {
             display: flex; flex-direction: column;
             background: var(--window-inactive-bg, #f4f0e6);
@@ -327,7 +320,7 @@ defmodule Compos.Ui.Layouts do
             content: ""; width: .9em; height: .9em; flex: 0 0 auto;
             border: 2px solid color-mix(in srgb, var(--accent-fg, #26356b) 24%, transparent);
             border-top-color: var(--accent-fg, #26356b); border-radius: 50%;
-            animation: llm-thinking-spin .72s linear infinite;
+            animation: llm-thinking-spin var(--chrome-anim, .72s) linear infinite;
           }
           @keyframes llm-thinking-spin { to { transform: rotate(360deg); } }
           @media (prefers-reduced-motion: reduce) {
@@ -482,12 +475,6 @@ defmodule Compos.Ui.Layouts do
             margin-left: auto; font-size: 10px; letter-spacing: 0.1em;
             text-transform: uppercase; color: var(--dim-fg, #8a857a);
           }
-          /* off-phase shows the glyph as normal text (Emacs GUI behavior) —
-             never blink the character itself away */
-          @keyframes blink { 50%, 100% { background-color: transparent; color: inherit; } }
-          /* translate only — an opacity keyframe leaves panels invisible in
-             backgrounded tabs where animations never run */
-          @keyframes rise { from { transform: translateY(6px); } to { transform: none; } }
           .cursor {
             background: var(--cursor-bg, #26356b);
             color: var(--window-bg, #fdfcf8);
@@ -710,7 +697,7 @@ defmodule Compos.Ui.Layouts do
           .ag-chevron {
             width: 11px; flex: 0 0 11px; color: var(--agent-meta-fg, #8a8577);
             font-family: var(--font-sans); font-size: calc(var(--ag-base) * 1.0); line-height: 1;
-            transform: rotate(0deg); transition: transform 100ms ease;
+            transform: rotate(0deg); transition: transform var(--chrome-anim, 100ms) ease;
           }
           .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
           .ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-meta-fg, #999); }
@@ -824,10 +811,6 @@ defmodule Compos.Ui.Layouts do
             display: block; height: 1.5em; line-height: 1.5em;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           }
-          @keyframes ag-shimmer {
-            0%, 18% { transform: translateX(-120%); }
-            82%, 100% { transform: translateX(120%); }
-          }
           .ag-status {
             display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline;
             margin: 16px 0; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 28%, transparent);
@@ -839,7 +822,6 @@ defmodule Compos.Ui.Layouts do
           .ag-status .ag-label { margin: 0; color: var(--accent-fg, #26356b); font-weight: 750; letter-spacing: .08em; }
           .ag-status-text { min-width: 0; font-size: calc(var(--ag-base) * .94); line-height: 1.55; font-weight: 500; }
           .ag-meta { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.8); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
-          @keyframes ag-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
           .ag-inputrow {
             display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;
             border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
@@ -988,7 +970,7 @@ defmodule Compos.Ui.Layouts do
             background: color-mix(in srgb, var(--border-bg, #cbc4b1) 30%, transparent);
             border: 1px solid transparent;
             max-width: 20ch; overflow: hidden; text-overflow: ellipsis;
-            transition: background 90ms ease, color 90ms ease;
+            transition: background var(--chrome-anim, 90ms) ease, color var(--chrome-anim, 90ms) ease;
           }
           .ml-tab:hover {
             color: var(--fg, #2b2723);

@@ -94,6 +94,22 @@
 
 (set-face-attribute! 'ui 'which-key-delay (which-key-delay-css which-key-idle-delay))
 
+;; Motion is a setting, not a constant. Every duration the page animates
+;; over reads --chrome-anim, which is the 'chrome face's anim attribute:
+;; FaceCSS publishes every face attribute as a :root variable, so one
+;; Scheme value moves them all. Zero is off, and off is the default: a
+;; zero-length transition lands its element at the new value in the same
+;; frame, and a zero-length animation draws the unanimated state.
+(define (animation-css on) (if on "140ms" "0ms"))
+
+(defcustom 'ui-animation #f
+  "Whether editor chrome moves: panes resizing, spinners, the caret blink."
+  'group 'appearance 'type 'boolean
+  'set (lambda (on)
+         (set-face-attribute! 'chrome 'anim (animation-css on))))
+
+(set-face-attribute! 'chrome 'anim (animation-css ui-animation))
+
 ;; The size of buffer text is the default face's size. 13px was the
 ;; design size; the reading size stands two steps up the same 1.2 ladder
 ;; (13 x 1.44). A defface! default survives a theme load, because no
