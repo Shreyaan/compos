@@ -2384,7 +2384,7 @@ defmodule Compos.EditorTest do
       # geometry, not tree order: no window above in a pure h-split
       press(["s-<up>"])
       assert Editor.snapshot().active == active
-      # 2x2-ish grid: split the left pane below, then windmove down and back
+      # 2x2-ish grid: split the left pane below, then focus down and back
       press(["C-x", "2"])
       press(["s-<down>"])
       below = Editor.snapshot().active
