@@ -7842,9 +7842,45 @@
       (peek-show! buf))
     buf))
 
+;;; --- how big a file a look opens --------------------------------------------
+;;; A look is not an open. Reading the file costs its bytes, the mode costs
+;;; a parse of them, and the window costs one line structure per line. A
+;;; listing of machine-generated files can put an 18 MB blob under the
+;;; point, and a look there is seconds of work for a row the reader passes
+;;; over. Above the cap a look shows nothing and says the size.
+;;;
+;;; The cap holds a LOOK only. RET opens the file, whatever its size: the
+;;; reader asked for that one. A buffer that is open already is shown as
+;;; before, because the work is paid.
+;;;
+;;; layouts.scm makes the variable customizable.
+
+(define peek-max-file-size 1048576)
+
+;; #t when a look at PATH would open a file too big to look at. A path
+;; with a buffer already, a directory, and a remote path all answer #f:
+;; file-size reads local files, and a remote stat answers 0.
+(define (peek-too-big? path)
+  (and (> peek-max-file-size 0)
+       (string? path)
+       (let ((p (normalize-file-input path)))
+         (and (not (buffer-known? p))
+              (not (file-directory? p))
+              (> (file-size p) peek-max-file-size)))))
+
+;; Say why the window did not change. The size is the whole reason, so the
+;; message carries it and the name of the variable that sets the cap.
+(define (peek-say-too-big! path)
+  (let ((p (normalize-file-input path)))
+    (message (string-append (cadr (path-split p)) " is " (cadr (file-stat p))
+                            ", too big to look at. RET opens it."))
+    #f))
+
 ;; a file, peeked: the one opener every listing of files shares
 (define (peek-file! path)
-  (peek! path (lambda () (visit-quietly path))))
+  (if (peek-too-big? path)
+      (peek-say-too-big! path)
+      (peek! path (lambda () (visit-quietly path)))))
 
 ;; RET twice: the first press peeks KNOWN, the second keeps it and goes
 ;; there. Returns 'peek or 'keep.
@@ -7994,6 +8030,10 @@
   "(peek-keep! NAME) — keep a peek: clear the mark; the buffer and its window stay")
 (public! 'peek-buffer?
   "(peek-buffer? NAME) — #t when NAME is a peek: shown to look at, killed when the next peek replaces it")
+(public! 'peek-too-big?
+  "(peek-too-big? PATH) — #t when a look at PATH would open a file over peek-max-file-size; a path with a buffer already, a directory, and a remote path answer #f")
+(public! 'peek-say-too-big!
+  "(peek-say-too-big! PATH) — say that PATH is too big to look at, and answer #f; the message names the size")
 
 ;;; --- mode layouts -------------------------------------------------------------
 ;;; A display rule says where ONE buffer goes. A mode that owns the frame needs

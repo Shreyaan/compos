@@ -369,11 +369,20 @@
   (filter (lambda (s) s)
           (map (lambda (b) (buffer-local b 'agent-slug)) (buffer-list))))
 
+(define (agent-chat-buffer slug) (string-append "*chat:" slug "*"))
+
 (define (agent-next-slug)
+  ;; The collision check must name the buffer execute* actually creates.
+  ;; It used agent-buffer, which still answers "*agent: a1*" from the old
+  ;; naming, so a live "*chat:a1*" looked free: buffer-create reused it,
+  ;; re-stamped a chat header over the transcript, chat-attach-agent! handed
+  ;; back the FIRST chat's slug, and the new prompt was sent into a dead
+  ;; session and lost. Two spawns collapsed into one chat.
   (let ((claimed (agent-claimed-slugs)))
     (let loop ((n 1))
       (let ((slug (string-append "a" (number->string n))))
         (if (or (member slug (agent-list))
+                (buffer-exists? (agent-chat-buffer slug))
                 (buffer-exists? (agent-buffer slug))
                 (member slug claimed))
             (loop (+ n 1))
@@ -438,6 +447,160 @@
     ("C-c C-d" "chat-unqueue")
     ("C-c C-v" "chat-toggle-view")))
 
+;;; --- the spawn edge -----------------------------------------------------------
+;;;
+;;; A spawned chat and the chat that spawned it name each other. The edge
+;;; lives where group parentage already lives: the group record, in the
+;;; record's extension slot. It is durable for the same reason a group's
+;;; parent is: the record outlives every buffer in it. A killed child
+;;; stays findable, and a killed parent still answers for its children.
+;;; The buffer-locals are a cache over this store, never a second copy of
+;;; the truth.
+;;;
+;;; One slot per parent: (PARENT-SLUG STATE CHILD-SLUG ...), children
+;;; newest last. STATE is live until the parent chat is killed and gone
+;;; after. A child is never killed with its parent.
+
+(domain! 'chat)
+(effects! '(pure))
+
+(define *subagent-setting* 'subagents)
+
+(define (subagent-slot-parent slot) (nth 0 slot))
+(define (subagent-slot-state slot) (nth 1 slot))
+(define (subagent-slot-children slot) (cdr (cdr slot)))
+
+(effects! '(read))
+
+;; a chat names itself by buffer or by slug, the way agent-continue! reads
+;; a thread. A killed chat has only its slug left, and the slug is what
+;; the store is keyed by.
+(define (subagent-slug chat)
+  (and (string? chat)
+       (or (and (buffer-exists? chat) (agent-slug-of chat)) chat)))
+
+;; the chat that owns this eval. An agent calling over the eval door runs
+;; inside with-edit-author agent:SLUG, the same signal jj.scm reads to
+;; name a change's author.
+(define (subagent-spawner)
+  (let ((author (current-edit-author)))
+    (and (agent-edit-author? author)
+         (let ((slug (substring author 6 (string-length author))))
+           (and (not (equal? slug "")) slug)))))
+
+(define (subagent-slots g)
+  (let ((held (group-setting g *subagent-setting*)))
+    (if (pair? held) held '())))
+
+;; Which group record holds a slot is an accident of where the spawn
+;; happened, and a chat can move group afterwards, so a reader scans the
+;; records rather than guessing one. -> (GROUP SLOT)
+(define (subagent-find-slot pick)
+  (let loop ((ids (group-ids)))
+    (if (null? ids)
+        #f
+        (let scan ((slots (subagent-slots (car ids))))
+          (cond ((null? slots) (loop (cdr ids)))
+                ((pick (car slots)) (list (car ids) (car slots)))
+                (else (scan (cdr slots))))))))
+
+(define (subagent-slot-of slug)
+  (and slug
+       (subagent-find-slot
+         (lambda (slot) (equal? (subagent-slot-parent slot) slug)))))
+
+(define (subagent-parent-slot-of slug)
+  (and slug
+       (subagent-find-slot
+         (lambda (slot) (member slug (subagent-slot-children slot))))))
+
+(define (subagent-parent chat)
+  (let ((found (subagent-parent-slot-of (subagent-slug chat))))
+    (and found (subagent-slot-parent (nth 1 found)))))
+
+(define (subagent-children chat)
+  (let ((found (subagent-slot-of (subagent-slug chat))))
+    (if found (subagent-slot-children (nth 1 found)) '())))
+
+;; #t when CHAT spawned children and CHAT itself is gone
+(define (subagent-gone? chat)
+  (let ((found (subagent-slot-of (subagent-slug chat))))
+    (and found (equal? (subagent-slot-state (nth 1 found)) "gone"))))
+
+(effects! '(write))
+
+;; the buffer-locals are a cache: written from the store, read by nobody
+;; above, and rebuildable at any time.
+(define (subagent-cache-rebuild! chat)
+  (let* ((slug (subagent-slug chat))
+         (here (and (string? chat) (buffer-exists? chat) chat))
+         (buf (or here
+                  (and slug (let ((b (agent-buf slug)))
+                              (and b (buffer-exists? b) b))))))
+    (when buf
+      (buffer-set-local! buf 'subagent-parent (subagent-parent slug))
+      (buffer-set-local! buf 'subagent-children (subagent-children slug)))
+    slug))
+
+(define (subagent-slot-put! g slot)
+  (let ((rest (filter
+                (lambda (s) (not (equal? (subagent-slot-parent s)
+                                         (subagent-slot-parent slot))))
+                (subagent-slots g))))
+    (group-setting-set! g *subagent-setting* (append rest (list slot)))))
+
+;; record PARENT -> CHILD. -> the group holding the edge, or #f when the
+;; parent chat is not here to give the edge a durable home.
+(define (subagent-record! parent child)
+  (let* ((pslug (subagent-slug parent))
+         (cslug (subagent-slug child))
+         (named (and pslug (agent-buf pslug)))
+         (buf (and named (buffer-exists? named) named)))
+    (and pslug cslug (not (equal? pslug cslug)) buf
+         (let* ((found (subagent-slot-of pslug))
+                (home (if found (car found) (group-ensure! buf)))
+                (slot (if found (nth 1 found) (list pslug "live")))
+                (kids (subagent-slot-children slot)))
+           (and home
+                (begin
+                  (unless (member cslug kids)
+                    (subagent-slot-put! home
+                      (append (list pslug (subagent-slot-state slot))
+                              kids (list cslug))))
+                  (subagent-cache-rebuild! pslug)
+                  (subagent-cache-rebuild! cslug)
+                  home))))))
+
+;; The kill seam (groups.scm group-buffer-kill-repair) calls this for
+;; every buffer, while the buffer can still answer for itself. Only a
+;; chat with a slot has anything to say: the slot stays, the children keep
+;; running, and the state records that the parent is gone.
+(define (subagent-chat-killed! name)
+  (let* ((slug (and (string? name) (buffer-exists? name) (agent-slug-of name)))
+         (found (and slug (subagent-slot-of slug))))
+    (when found
+      (let ((slot (nth 1 found)))
+        (subagent-slot-put! (car found)
+          (append (list slug "gone") (subagent-slot-children slot)))))))
+
+(category! 'chat)
+
+(public! 'subagent-parent
+  "(subagent-parent CHAT) -> the durable slug of the chat that spawned CHAT, or #f; CHAT is a buffer name or a slug")
+(public! 'subagent-children
+  "(subagent-children CHAT) -> the slugs of the chats CHAT spawned, newest last")
+(public! 'subagent-gone?
+  "(subagent-gone? CHAT) -> #t when CHAT spawned children and CHAT itself has been killed")
+(public! 'subagent-record!
+  "(subagent-record! PARENT CHILD) - record the spawn edge in PARENT's group record; returns the group")
+(public! 'subagent-cache-rebuild!
+  "(subagent-cache-rebuild! CHAT) - put CHAT's subagent-parent and subagent-children locals back from the store")
+(catalog-meta! 'function "subagent-parent" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-children" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-gone?" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-record!" 'domain 'chat 'effects '(write))
+(catalog-meta! 'function "subagent-cache-rebuild!" 'domain 'chat 'effects '(write))
+
 (category! 'chat)
 
 (public! 'execute "(execute \"task\") — spawn a task chat on an ACP backend; returns its slug")
@@ -450,7 +613,7 @@
   ;; agent-next-slug only names the buffer now; the session slug is the
   ;; chat's durable id, assigned by chat-attach-agent!
   (let* ((name (agent-next-slug))
-         (buf (string-append "*chat:" name "*")))
+         (buf (agent-chat-buffer name)))
     (buffer-create buf)
     ;; Callers over RPC have no meaningful selected file buffer to inherit
     ;; from. An explicit directory is ordinary chat identity policy and wins
@@ -477,10 +640,18 @@
                   (or (plist-get opts 'connector) *default-connector*)
                   (plist-get opts 'model)
                   opts)))
-      (pop-to-buffer buf)
-      (when (equal? (current-buffer) buf)
-        (set-mode! "chat-mode")
-        (end-of-buffer!))
+      ;; a spawn is quiet: the child gets its mode on its own buffer, and no
+      ;; window, point or focus of the spawner's moves. Interactive callers
+      ;; display it themselves.
+      (with-current-buffer buf
+        (lambda ()
+          (set-mode! "chat-mode")
+          (end-of-buffer!)))
+      ;; the spawner in scope, if there is one: the chat that owns this
+      ;; eval. With no parent in scope nothing is recorded and the spawn
+      ;; is what it always was.
+      (let ((parent (subagent-spawner)))
+        (when parent (subagent-record! parent slug)))
       (unless (equal? prompt "")
         (llm-session-send! slug prompt))
       slug)))
@@ -488,4 +659,9 @@
 (define-command "agent-open" "Prompt for a task and spawn a new agent thread"
   (lambda ()
     (minibuffer-read "Task (empty for blank thread): " '()
-      (lambda (task) (execute task)))))
+      (lambda (task)
+        ;; execute is quiet, so the interactive caller is the one that shows
+        ;; the new thread — in the other window, never stealing focus
+        (let ((slug (execute task)))
+          (display-buffer-other-window! (agent-buf slug))
+          slug)))))

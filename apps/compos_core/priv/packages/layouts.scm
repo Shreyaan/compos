@@ -19,6 +19,11 @@
   "At this usable frame width, three panes become columns and four become a grid."
   'group 'windows 'type 'number)
 
+;; peek! and the ripgrep preview (editor.scm) read this one.
+(defcustom 'peek-max-file-size 1048576
+  "The largest file a look opens. A peek or a ripgrep preview of a bigger file shows nothing and says the size; RET still opens it. 0 removes the cap."
+  'group 'windows 'type 'number)
+
 ;; The display-buffer chain (editor.scm) reads these. They are plain
 ;; defines there, because editor.scm loads before custom.scm.
 (defcustom 'split-height-threshold 80

@@ -14,6 +14,9 @@ defmodule Compos.Core.EmbeddingIndex do
   @batch_size 256
   @batch_concurrency 4
   @query_cache_limit 128
+  # A query embeds one short string. A caller that waits for it holds a
+  # lane, so the query path gives up long before the catalog sync does.
+  @query_timeout 8_000
   @cache_version 1
   @endpoint "https://api.openai.com/v1/embeddings"
 
@@ -29,6 +32,7 @@ defmodule Compos.Core.EmbeddingIndex do
     if api_key == "" do
       {:error, :missing_api_key}
     else
+      opts = Keyword.put_new(opts, :receive_timeout, @query_timeout)
       model = Keyword.get(opts, :model, @default_model)
       dimensions = Keyword.get(opts, :dimensions, @default_dimensions)
       path = Keyword.get(opts, :path, cache_path())

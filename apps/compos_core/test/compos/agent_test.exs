@@ -673,6 +673,21 @@ defmodule Compos.AgentTest do
     _ = agent
   end
 
+  test "execute* is quiet: a spawn opens no window and moves none" do
+    windows = fn -> Session.eval(~s[(json-encode (window-list-all))]) end
+    before = windows.()
+
+    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
+    assert_receive {:transport_open, _agent}, 1_000
+
+    # the child never displays itself: same windows, same buffers, same order
+    assert windows.() == before
+
+    # ...and it still ends up a chat, on its own buffer
+    assert "*chat:a1*" in Compos.Core.list_buffers()
+    assert Buffer.get_local("*chat:a1*", "mode-name") == "chat-mode"
+  end
+
   test "chunks stream in order across a tool-call interleave; body folds on completion" do
     {slug, buf, agent} = boot("")
 
@@ -2440,7 +2455,7 @@ defmodule Compos.AgentTest do
     assert eventually(fn -> Buffer.get_local(buf, "modeline-info") =~ "plan" end)
   end
 
-  test "auto mode tells a session-mode backend to stop asking us at all" do
+  test "auto mode moves a session-mode backend to a permitting mode" do
     {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode auto))])
     assert_receive {:transport_open, agent}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
@@ -2457,16 +2472,19 @@ defmodule Compos.AgentTest do
           "availableModes" => [
             %{"id" => "default", "name" => "Default"},
             %{"id" => "dontAsk", "name" => "Don't Ask"},
+            %{"id" => "acceptEdits", "name" => "Accept Edits"},
             %{"id" => "auto", "name" => "Auto"}
           ]
         }
       }
     })
 
-    # learning the session takes modes is enough — no user gesture needed
+    # learning the session takes modes is enough — no user gesture needed.
+    # dontAsk is offered and must NOT be chosen: it denies anything not
+    # pre-approved, so an auto chat in that mode can use no tool at all.
     assert_receive {:frame, %{"method" => "session/set_mode", "params" => sp}}, 1_000
-    assert sp["modeId"] == "dontAsk"
-    assert eventually(fn -> Buffer.get_local("*chat:a1*", "agent-mode") == "dontAsk" end)
+    assert sp["modeId"] == "acceptEdits"
+    assert eventually(fn -> Buffer.get_local("*chat:a1*", "agent-mode") == "acceptEdits" end)
 
     # An explicit mode selected through the UI must survive its backend
     # acknowledgement, even though compos's permission stance is auto.

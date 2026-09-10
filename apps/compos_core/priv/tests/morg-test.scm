@@ -390,6 +390,132 @@
     (check-equal! (buffer-text t--morg-buf) "# task\nbody\n" "one undo took the keyword back")
     (t--morg-done!)))
 
+(deftest 'morg-todo-cycles-a-checkbox-item
+  "[ ] to [@] to [x] and round again, each state with its own faces"
+  (lambda ()
+    (t--morg! "[ ] task\n" 0)
+    (check-true! (member '(0 3 "morg-task-open") (buffer-overlays t--morg-buf))
+                 "the open marker has its own face")
+    (check-true! (member '(4 8 "morg-task-open-text") (buffer-overlays t--morg-buf))
+                 "and so does the text beside it")
+
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "[@] task\n" "open to in progress")
+    (check-true! (member '(0 3 "morg-task-doing") (buffer-overlays t--morg-buf))
+                 "the doing marker face")
+    (check-true! (member '(4 8 "morg-task-doing-text") (buffer-overlays t--morg-buf))
+                 "and its text face")
+
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "[x] task\n" "in progress to done")
+    (check-true! (member '(0 3 "morg-task-done") (buffer-overlays t--morg-buf))
+                 "the done marker face")
+    (check-true! (member '(4 8 "morg-task-done-text") (buffer-overlays t--morg-buf))
+                 "and its text face")
+
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "[ ] task\n" "and back to open")
+    (t--morg-done!)))
+
+(deftest 'morg-todo-cycles-a-nested-checkbox-item
+  "the indentation and the bullet are the line's own at any depth"
+  (lambda ()
+    ;; "- [ ] one\n  - [ ] two\n    - [ ] three\n"
+    ;;   0.......9  10........21  22...........37
+    (t--morg! "- [ ] one\n  - [ ] two\n    - [ ] three\n" 14)
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf)
+                  "- [ ] one\n  - [@] two\n    - [ ] three\n"
+                  "one indent level cycled, and only its marker changed")
+    (check-true! (member '(14 17 "morg-task-doing") (buffer-overlays t--morg-buf))
+                 "the marker face sits past the indent and the bullet")
+    (check-true! (member '(10 14 "org-meta") (buffer-overlays t--morg-buf))
+                 "and the bullet reads as metadata")
+
+    (buffer-goto! t--morg-buf 24)
+    (t--morg-run! "morg-todo")
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf)
+                  "- [ ] one\n  - [@] two\n    - [x] three\n"
+                  "the deeper item cycles on its own")
+    (t--morg-done!)))
+
+(deftest 'morg-todo-cycles-a-bulleted-checkbox-item
+  "a bullet before the marker is kept, whichever bullet it is"
+  (lambda ()
+    (t--morg! "* [ ] star\n" 0)
+    (check-true! (member '(2 5 "morg-task-open") (buffer-overlays t--morg-buf))
+                 "the marker starts after the bullet")
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "* [@] star\n" "the bullet survived")
+    (t--morg! "+ [x] plus\n" 0)
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "+ [ ] plus\n" "and so did this one")
+    (t--morg-done!)))
+
+(deftest 'morg-todo-leaves-a-freeform-marker-alone
+  "a status of the writer's own is displayed, never cycled"
+  (lambda ()
+    (t--morg! "[?] maybe\n" 0)
+    (check-equal! (morg-toggle-todo-at! t--morg-buf 0) 'freeform
+                  "the cycle says the marker is the writer's")
+    (check-equal! (buffer-text t--morg-buf) "[?] maybe\n" "and the line is untouched")
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "[?] maybe\n" "the command changes nothing either")
+    (check-true! (member '(0 3 "org-meta") (buffer-overlays t--morg-buf))
+                 "the marker is still displayed")
+    (t--morg-done!)))
+
+(deftest 'morg-todo-reads-a-named-doing-marker
+  "[@:NAME] says who has it: still doing, and it cycles on to done"
+  (lambda ()
+    ;; "- [ ] one\n  - [@:svs] two\n"
+    ;;   0.......9  10.............25
+    (t--morg! "- [ ] one\n  - [@:svs] two\n" 14)
+    (check-equal! (morg-checkbox-at "  - [@:svs] two") '(4 "@:svs" 10 12)
+                  "the whole marker parses, name and all")
+    (check-equal! (morg-checkbox-state "@:svs") "DOING" "a named marker is the doing state")
+    (check-equal! (morg-checkbox-name "@:svs") "svs" "and it carries the name")
+    (check-true! (member '(14 21 "morg-task-doing") (buffer-overlays t--morg-buf))
+                 "the doing face covers the name too")
+
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "- [ ] one\n  - [x] two\n"
+                  "cycling on from a named doing marker gives done")
+
+    ;; a name is the user's to type: the toggle never invents one
+    (buffer-goto! t--morg-buf 4)
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "- [@] one\n  - [x] two\n"
+                  "cycling into doing gives a plain marker")
+    (t--morg-done!)))
+
+(deftest 'a-bracketed-phrase-is-prose-and-not-a-task
+  "only one character, or a name after @:, stands as a marker"
+  (lambda ()
+    (check-false! (morg-checkbox-at "[see below] for the rest") "a phrase in brackets")
+    (check-false! (morg-checkbox-at "[link](http://a) text") "and a link")
+    (t--morg! "[see below] for the rest\n" 0)
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "[see below] for the rest\n" "nothing cycled")
+    (t--morg-done!)))
+
+(deftest 'morg-todo-still-cycles-a-heading-beside-checkboxes
+  "the keyword cycle and the box cycle live in one document"
+  (lambda ()
+    (t--morg! "# task\n[ ] box\n" 0)
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "# TODO task\n[ ] box\n"
+                  "the heading took the keyword")
+    (check-true! (member '(2 6 "org-todo") (buffer-overlays t--morg-buf))
+                 "with the heading's own face")
+
+    (buffer-goto! t--morg-buf 12)
+    (t--morg-run! "morg-todo")
+    (check-equal! (buffer-text t--morg-buf) "# TODO task\n[@] box\n"
+                  "and the box below it cycled on its own")
+    (t--morg-done!)))
+
 ;;; --- fenced code --------------------------------------------------------------
 
 (deftest 'fenced-code-renders-with-the-themes-ts-faces

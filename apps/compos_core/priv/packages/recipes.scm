@@ -20,16 +20,27 @@
 
 (define (recipes) *recipes*)
 
-;; recipes are searched FIRST: a task-level hit beats four name-level ones
+;; recipes are searched FIRST: a task-level hit beats four name-level ones.
+;;
+;; The expression is searched too, so "http-text" finds the recipe that
+;; runs it. That match is a weaker thing than a match on the task, and it
+;; must not lead the answer: seven graphql recipes led "string", because
+;; every one of them writes (string->symbol ...). A hit that only the
+;; expression made says so, and the ranking puts it back with the rest.
 (define (recipe-search query)
   (let ((words (apropos--words query)))
-    (map (lambda (r)
-           (apropos--enrich
-             (list 'kind "recipe" 'task (car r) 'name (car r)
-                   'run (cadr r) 'inputs (caddr r))
-             "recipe"))
-         (filter (lambda (r) (apropos--hit? (string-append (car r) " " (cadr r)) words))
-                 *recipes*))))
+    (apropos--compact
+      (map (lambda (r)
+             (let ((task-hit? (apropos--hit? (car r) words))
+                   (any-hit? (apropos--hit? (string-append (car r) " " (cadr r)) words)))
+               (and any-hit?
+                    (apropos--enrich
+                      (append
+                        (list 'kind "recipe" 'task (car r) 'name (car r)
+                              'run (cadr r) 'inputs (caddr r))
+                        (if task-hit? '() (list 'match "expression")))
+                      "recipe"))))
+           *recipes*))))
 
 ;; the primer's tail: enough recipes to work from, not the whole book
 (define (recipes-text)

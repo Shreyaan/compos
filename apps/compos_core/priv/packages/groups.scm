@@ -880,6 +880,35 @@
   (let ((id (group-resolve-id g)))
     (when id (group-record-update! id 'parent (group-resolve-id parent)))))
 
+;; The record's tenth field is the extension slot. Group parentage is a
+;; field of its own, and anything that hangs off a group but has not
+;; earned a field lives here, as a plist of SYMBOL VALUE pairs. One
+;; store, so a reader never has to ask a second one.
+(define (group-setting-plist g)
+  (let* ((id (group-resolve-id g))
+         (record (and id (group-record-by-id id)))
+         (settings (and record (group-record-settings record))))
+    (if (pair? settings) settings '())))
+
+(define (group-setting g key)
+  (let loop ((rest (group-setting-plist g)))
+    (cond ((null? rest) #f)
+          ((null? (cdr rest)) #f)
+          ((equal? (car rest) key) (car (cdr rest)))
+          (else (loop (cdr (cdr rest)))))))
+
+(define (group-setting-set! g key value)
+  (let ((id (group-resolve-id g)))
+    (when id
+      (let loop ((rest (group-setting-plist g)) (kept '()))
+        (cond ((or (null? rest) (null? (cdr rest)))
+               (group-record-update! id 'settings
+                 (append (reverse kept) (list key value))))
+              ((equal? (car rest) key) (loop (cdr (cdr rest)) kept))
+              (else (loop (cdr (cdr rest))
+                          (cons (car (cdr rest)) (cons (car rest) kept)))))))
+    id))
+
 
 (define (group-layout g)
   (let* ((record (and (group-resolve-id g)
@@ -2596,6 +2625,10 @@
 ;; it to another window while the buffer dies, and that window was the
 ;; popup.
 (define (group-buffer-kill-repair name)
+  ;; The kill is the last moment the buffer can still answer for itself.
+  ;; A chat that spawned children leaves its slot behind, marked gone: the
+  ;; children keep running and keep naming a parent that is no longer here.
+  (when (boundp 'subagent-chat-killed!) (subagent-chat-killed! name))
   (let ((places
           (fold
             (lambda (found row)
@@ -2754,12 +2787,8 @@
                     (not (buffer-local buf 'agent-saved-mark)))))
     (when (and (= (buffer-size buf) 0)
                (not (buffer-local buf 'agent-saved-mark)))
-      (chat-surface-init! buf (string-append "companion · " (group-name id))
-        (string-append
-          "RET sends · C-c w hops to the document · "
-          "C-c m model · C-c C-v plain view\n"
-          "it reads the live buffers before it speaks, "
-          "and edits them in place when you ask\n")))
+      (buffer-set-local! buf 'agent-saved-mark 0)
+      (buffer-set-local! buf 'agent-marker-bytes 0))
     (when setup?
       (with-current-buffer buf
         (lambda () (set-mode! "chat-mode"))))
@@ -3758,6 +3787,10 @@
 (public! 'group-record-create! "(group-record-create! NAME) -> new stable ID or #f")
 (public! 'group-parent "(group-parent G) -> the live parent group id, or #f")
 (public! 'group-parent-set! "(group-parent-set! G PARENT) — record PARENT as the group G popped out of")
+(public! 'group-setting "(group-setting G KEY) -> the group record's KEY, or #f")
+(public! 'group-setting-set! "(group-setting-set! G KEY VALUE) — durable per-group state in the group record")
+(catalog-meta! 'function "group-setting" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "group-setting-set!" 'domain 'buffers 'effects '(write))
 (public! 'group-read-or-create!
   "(group-read-or-create! PROMPT RECEIVE) — read an existing group or create the typed name")
 (public! 'switch-to-buffer-in-group!

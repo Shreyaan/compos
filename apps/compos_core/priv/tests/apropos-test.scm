@@ -511,3 +511,83 @@
       (check-false! (plist-get duplicate 'use) "an identical use is omitted")
       (check-equal! (plist-get example 'use) "(read-csv \"orders.csv\")"
                     "a distinct example stays"))))
+
+;;; A tool asks its question once. The first ask of a query nobody embedded
+;;; before answered from the catalog alone and warmed the vector for an ask
+;;; that never came, so every novel agent question lost the semantic pass.
+
+(deftest 'a-waiting-caller-buys-the-query-vector-now
+  "a cold query embeds on the spot instead of warming for an ask that never comes"
+  (lambda ()
+    (let ((old-search *apropos--embedding-search*)
+          (old-key llm-key)
+          (cached-only-asks 0)
+          (network-asks 0))
+      (set! llm-key (lambda (provider) "test-key"))
+      ;; the index answers #f for a query it has no vector for, exactly as
+      ;; the primitive does, and scores it when the caller pays for one
+      (set! *apropos--embedding-search*
+        (lambda (query texts key limit eligible gen cached-only)
+          (if cached-only
+              (begin (set! cached-only-asks (+ cached-only-asks 1)) #f)
+              (begin (set! network-asks (+ network-asks 1))
+                     (list (list 0 0.94))))))
+      (let ((hits (apropos--semantic-hits "zz cold query" (apropos--rows-cached) '() #t)))
+        (set! *apropos--embedding-search* old-search)
+        (set! llm-key old-key)
+        (check-true! (pair? hits) "the first ask answers")
+        (check-equal! (plist-get (car hits) 'note) "semantic match" "from the vector lane")
+        (check-true! (> network-asks 0) "and it paid for the vector")))))
+
+(deftest 'a-typing-caller-never-waits-for-the-network
+  "'wait #f warms a cold query off-lane and answers from the catalog"
+  (lambda ()
+    (let ((old-search *apropos--embedding-search*)
+          (old-key llm-key)
+          (network-asks 0))
+      (set! llm-key (lambda (provider) "test-key"))
+      (set! *apropos--embedding-search*
+        (lambda (query texts key limit eligible gen cached-only)
+          (if cached-only
+              #f
+              (begin (set! network-asks (+ network-asks 1)) (list (list 0 0.94))))))
+      (let ((hits (apropos--semantic-hits "zz cold query" (apropos--rows-cached) '() #f)))
+        (set! *apropos--embedding-search* old-search)
+        (set! llm-key old-key)
+        (check-equal! hits '() "the catalog answers alone")
+        (check-equal! network-asks 0 "and nothing waited for OpenAI")))))
+
+(deftest 'waiting-is-the-default-and-a-caller-can-refuse-it
+  "a search waits unless it says otherwise; plist-get cannot say #f out loud"
+  (lambda ()
+    (check-equal! (apropos--flag '() 'wait #t) #t "an absent flag reads the default")
+    (check-equal! (apropos--flag '(wait #f) 'wait #t) #f "a stated #f is not an absence")
+    (check-equal! (apropos--flag '(kind "command" wait #f) 'wait #t) #f
+                  "and it reads past the other filters")))
+
+;;; Seven graphql recipes led the answer for "string": every one of them
+;;; writes (string->symbol ...), and a recipe led the ranking whatever it
+;;; matched on.
+
+(deftest 'a-recipe-leads-only-when-its-task-matched
+  "an expression-only recipe hit ranks with the rest, not ahead of the names"
+  (lambda ()
+    (let ((task-hit '(kind "recipe" task "fetch a URL" name "fetch a URL"))
+          (expression-hit '(kind "recipe" task "run a graphql query"
+                            name "run a graphql query" match "expression"))
+          (function-hit '(kind "function" name "string-index")))
+      (let ((ranked (apropos--rank-by-name
+                      (list expression-hit function-hit task-hit) "string")))
+        (check-equal! (plist-get (car ranked) 'task) "fetch a URL"
+                      "the task-level hit leads")
+        (check-equal! (plist-get (nth 1 ranked) 'name) "string-index"
+                      "the name beats the expression match")))))
+
+(deftest 'a-recipe-hit-does-not-say-how-it-matched
+  "the match marker ranks the hit; it is not result data"
+  (lambda ()
+    (check-false! (plist-get (apropos--public-hit
+                               '(kind "recipe" name "run a graphql query"
+                                 match "expression"))
+                             'match)
+                  "the marker stays private")))

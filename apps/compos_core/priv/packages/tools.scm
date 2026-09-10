@@ -611,7 +611,7 @@
 (define (apropos-sync-embeddings!)
   (apropos--schedule-embedding-sync!))
 
-(define (apropos--semantic-hits query rows filters)
+(define (apropos--semantic-hits query rows filters &optional wait?)
   (let ((key (apropos--embedding-key)))
     (if (or (not key) (equal? key "") (equal? (string-trim query) ""))
         '()
@@ -650,16 +650,31 @@
                            scores0)))
           (unless (equal? scores 'not-prepared) (set! *apropos--prepared-gen* gen))
           (cond
+            ;; #f is "nobody embedded this query yet". A caller that waits
+            ;; buys the vector now, on this lane: a tool asks its question
+            ;; once, and an answer that lands after the call is no answer.
+            ;; A caller that does not wait warms it off-lane and answers
+            ;; from the catalog, so a keystroke never waits for OpenAI.
+            ((and (equal? scores #f) wait?)
+             (let ((warmed (*apropos--embedding-search*
+                             query (if ready? '() texts) key
+                             apropos-semantic-limit eligible gen #f)))
+               (if (or (equal? warmed #f) (equal? warmed 'not-prepared))
+                   '()
+                   (apropos--semantic-rows warmed sources))))
             ((equal? scores #f)
              (when (boundp (quote embedding-warm!))
                (embedding-warm! query texts key (catalog-generation)))
              '())
-            (else
-              (map (lambda (score)
-                     (append (nth (car score) sources)
-                             (list 'note "semantic match" 'semantic-score (nth 1 score))))
-                   (filter (lambda (score) (>= (nth 1 score) apropos-semantic-threshold))
-                           scores))))))))
+            (else (apropos--semantic-rows scores sources)))))))
+
+;; the scores above the threshold, as catalog hits that name their lane
+(define (apropos--semantic-rows scores sources)
+  (map (lambda (score)
+         (append (nth (car score) sources)
+                 (list 'note "semantic match" 'semantic-score (nth 1 score))))
+       (filter (lambda (score) (>= (nth 1 score) apropos-semantic-threshold))
+               scores)))
 
 (define (apropos-rebuild-embeddings!)
   (let ((path (embedding-cache-clear!))
@@ -764,7 +779,10 @@
          (short-of (lambda (h)
                      (string-downcase (or (plist-get h 'name) (plist-get h 'task) ""))))
          (exact? (lambda (h) (or (equal? q (name-of h)) (equal? q (short-of h)))))
-         (recipe? (lambda (h) (equal? (plist-get h 'kind) "recipe")))
+         ;; a recipe whose task matched. One whose expression alone matched
+         ;; is a weaker hit than a name, and it waits with the rest.
+         (recipe? (lambda (h) (and (equal? (plist-get h 'kind) "recipe")
+                                   (not (equal? (plist-get h 'match) "expression")))))
          (prefix? (lambda (h)
                     (or (string-prefix? q (name-of h))
                         (string-prefix? q (short-of h)))))
@@ -808,7 +826,7 @@
   (let ((name (plist-get hit 'name))
         (package (plist-get hit 'package))
         (domain (plist-get hit 'domain)))
-    (cond ((member key '(note semantic-score)) #t)
+    (cond ((member key '(note semantic-score match)) #t)
           ;; a command's use line stays: agents are told to read it, and a
           ;; row that drops it asks every reader to know the shape by heart
           ((equal? key 'use) (equal? value (plist-get hit 'sig)))
@@ -847,17 +865,38 @@
 ;; 'lexical #t asks for the catalog alone. The semantic pass embeds the
 ;; query through an external service: it spends money and waits for the
 ;; network on every call. A surface that searches while the user types
-;; must ask for the literal catalog. Remove the flag before the filters
-;; reach the match test, which reads the catalog fields only.
+;; must ask for the literal catalog.
+;;
+;; 'wait #f asks for the vectors already bought. A query nobody embedded
+;; before is embedded at ask time and the caller waits, because a caller
+;; asks its question once and an answer that arrives after the call is no
+;; answer. One short query embeds in well under a second. A surface that
+;; searches on every keystroke wants 'lexical #t instead.
+;;
+;; Both are instructions to the search, not catalog fields. Remove them
+;; before the filters reach the match test, which reads the catalog
+;; fields only.
+(define *apropos--search-flags* '(lexical wait))
+
+;; KEY's value, or DEFAULT when the filters do not name it. plist-get
+;; cannot tell an absent key from one whose value is #f, and the whole
+;; point of 'wait #f is to say #f out loud.
+(define (apropos--flag filters key default)
+  (let loop ((in filters))
+    (cond ((or (null? in) (null? (cdr in))) default)
+          ((equal? (car in) key) (nth 1 in))
+          (else (loop (cdr (cdr in)))))))
+
 (define (apropos--without-lexical filters)
   (let loop ((in filters) (out '()))
     (cond ((or (null? in) (null? (cdr in))) (reverse out))
-          ((equal? (car in) 'lexical) (loop (cdr (cdr in)) out))
+          ((member (car in) *apropos--search-flags*) (loop (cdr (cdr in)) out))
           (else (loop (cdr (cdr in))
                       (cons (nth 1 in) (cons (car in) out)))))))
 
 (define (apropos--search query filters0 index rows)
   (let* ((lexical? (plist-get filters0 'lexical))
+         (wait? (apropos--flag filters0 'wait #t))
          (filters (apropos--without-lexical filters0))
          (words (apropos--words query))
          (recipes (if (boundp (quote recipe-search)) (recipe-search query) '()))
@@ -876,7 +915,7 @@
                (filter (lambda (hit)
                          (and (not (apropos--has-hit? literal-hits hit))
                               (not (apropos--has-hit? suggestions hit))))
-                       (apropos--semantic-hits query rows filters))))
+                       (apropos--semantic-hits query rows filters wait?))))
          (hits (append literal-hits suggestions semantic-hits))
          (filtered (filter (lambda (h) (apropos--filter-match? h filters)) hits)))
     (if (or (pair? filtered) (null? words) (pair? filters))
