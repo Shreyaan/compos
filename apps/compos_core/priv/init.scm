@@ -98,6 +98,8 @@
 (load-bundled-package "treesit.scm")
 (load-bundled-package "web.scm")
 (load-bundled-package "web-server.scm")
+;; the recruiting queue is read through web.scm's reader, so it loads after it
+(load-bundled-package "recruiting.scm")
 (load-bundled-package "worktrees.scm")
 (load-bundled-package "writing.scm")
 (load-bundled-package "dismiss.scm")

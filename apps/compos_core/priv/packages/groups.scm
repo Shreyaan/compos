@@ -2754,12 +2754,8 @@
                     (not (buffer-local buf 'agent-saved-mark)))))
     (when (and (= (buffer-size buf) 0)
                (not (buffer-local buf 'agent-saved-mark)))
-      (chat-surface-init! buf (string-append "companion · " (group-name id))
-        (string-append
-          "RET sends · C-c w hops to the document · "
-          "C-c m model · C-c C-v plain view\n"
-          "it reads the live buffers before it speaks, "
-          "and edits them in place when you ask\n")))
+      (buffer-set-local! buf 'agent-saved-mark 0)
+      (buffer-set-local! buf 'agent-marker-bytes 0))
     (when setup?
       (with-current-buffer buf
         (lambda () (set-mode! "chat-mode"))))
