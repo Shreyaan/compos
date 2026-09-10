@@ -138,11 +138,13 @@ defmodule Compos.IbufferTest do
       (list-set-filters! "*ibuffer*" (list (list "match" "zz-ibuffer-"))))})
 
     text = Buffer.text("*ibuffer*")
-    assert text =~ "▾  in this group"
+    # every section wears the name of its group; the current one leads
+    assert text =~ "▾  #{current}"
     assert text =~ "▾  #{foreign}"
     assert text =~ "▾  ungrouped"
     assert text =~ ~r/^3 buffers · by group · name/m
-    assert :binary.match(text, "in this group") < :binary.match(text, "*zz-ibuffer-a*")
+    refute text =~ "in this group"
+    assert :binary.match(text, current) < :binary.match(text, "*zz-ibuffer-a*")
     assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, foreign)
     assert :binary.match(text, foreign) < :binary.match(text, "*zz-ibuffer-b*")
     assert :binary.match(text, "*zz-ibuffer-b*") < :binary.match(text, "ungrouped")

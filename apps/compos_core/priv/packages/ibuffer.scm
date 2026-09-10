@@ -58,10 +58,17 @@
 (define *ibuffer-sorts* '(name recent size))
 (define *ibuffer-groupings* '(group mode directory))
 
-;; the tint under a heading and under a marked row: a background alone, so
-;; the row's own faces show through
-(defface! 'ibuffer-heading 'bg "rgba(128, 128, 128, 0.10)")
+;; the tint under a marked row: a background alone, so the row's own
+;; faces show through
 (defface! 'ibuffer-marked 'bg "rgba(213, 172, 102, 0.13)")
+
+;; A section heading is a BAND, not a highlight on its own text. A face
+;; paints the bytes it covers, and a heading's bytes stop where its name
+;; does, so the tint stopped a third of the way across the table. A face
+;; named row-* covering the start of a line puts its name on the whole
+;; line instead (editor_live row_class), and the stylesheet paints the
+;; line: the band reaches both edges whatever the heading says.
+(define *list-section-row-face* "row-list-section")
 
 ;;; --- views --------------------------------------------------------------------
 ;;; A view is a table buffer. The registry names them, with the defaults
@@ -464,9 +471,12 @@
          (buckets (map (lambda (id)
                          (let ((ms (of id)))
                            (and (pair? ms)
-                                (list (if (equal? id current)
-                                          "in this group"
-                                          (or (group-name id) id))
+                                ;; every section wears the name of its
+                                ;; group. The current one leads the table,
+                                ;; and that is what says it is current: a
+                                ;; row that answers "in this group" makes
+                                ;; the reader work out which group that is.
+                                (list (or (group-name id) id)
                                       (string-append "group:" id)
                                       ms
                                       (group-color-face id)))))
@@ -564,42 +574,33 @@
       (ibuffer-heading-text buf row)
       (ibuffer-row-title row)))
 
-;; The width nine names in ten fit in, and never more than
-;; *ibuffer-name-max*. One long path must not push the fields to the
-;; window's edge and leave a desert beside every short name: ten paths
-;; in a table of fifty put the ninth-of-ten at the longest path. The
-;; names that pass this width trim in the middle, where the head of a
-;; path is dim already.
+;; The width the names ask for. A window with room to spare shows every
+;; name whole: trimming a name while forty columns of the window stand
+;; empty throws the window away, and the name is what the row is for.
+;; Only a window too narrow for the names it has to show trims, and then
+;; it trims in the middle, where the head of a path is dim already.
+;;
+;; The old rule capped the column at *ibuffer-name-max* and at the width
+;; nine names in ten fit in, to keep one long path from pushing the
+;; fields to the window's edge. The room the fields leave already does
+;; that: the name never takes a column a field needs.
 (define *ibuffer-name-max* 40)
 
-;; A table of paths takes the width nine names in ten fit in: one long
-;; path must not push the fields to the window's edge. A table whose row
-;; IS its name -- a chat title, which nothing else on the row repeats --
-;; asks for 'full instead: the longest name, bounded only by the room the
-;; fields leave.
-(define (ibuffer-name-full? buf)
-  (equal? (plist-get (list-mode-opts (list-mode-of buf)) 'name-fit) 'full))
-
 (define (ibuffer-name-fit buf)
-  (let* ((lengths (map (lambda (row)
-                         (let ((n (string-length (ibuffer-row-line-name buf row))))
-                           (list n n)))
-                       (list-entries buf)))
-         (sorted (map car (sort lengths)))
-         (n (length sorted)))
-    (cond ((= n 0) 0)
-          ((ibuffer-name-full? buf) (nth (- n 1) sorted))
-          (else (nth (min (- n 1) (quotient (* n 9) 10)) sorted)))))
+  (fold (lambda (n row) (max n (string-length (ibuffer-row-line-name buf row))))
+        0
+        (list-entries buf)))
 
 ;; the room the fields and the fixed head leave: the mark, the dot, the
 ;; icon, one gap after each column, and every field's own width
+(define (ibuffer-name-room buf fields)
+  (let ((gap (string-length *list-gap*)))
+    (- (list-view-width buf) 2 1 1
+       (fold (lambda (n c) (+ n (list-col-width c))) 0 fields)
+       (* gap (+ 2 (length fields))))))
+
 (define (ibuffer-name-width buf fields)
-  (let* ((gap (string-length *list-gap*))
-         (room (- (list-view-width buf) 2 1 1
-                  (fold (lambda (n c) (+ n (list-col-width c))) 0 fields)
-                  (* gap (+ 2 (length fields)))))
-         (cap (if (ibuffer-name-full? buf) room *ibuffer-name-max*)))
-    (max 12 (min room (max 24 (min cap (ibuffer-name-fit buf)))))))
+  (max 12 (min (ibuffer-name-room buf fields) (ibuffer-name-fit buf))))
 
 (define (ibuffer-columns buf fields)
   (append (list (list "" 1)
@@ -622,10 +623,37 @@
 (define *ibuffer-wide-fields*
   '((size 7 right end) (mode 14 left end) (group 16 left end) (last 4 right end)))
 
+;; The width a field declares is the width it needs at least. A window
+;; with room to spare gives each field the width its longest cell asks
+;; for, so "Fundamental" reads as itself and not as "Fundament…".
+(define *ibuffer-name-floor* 24)
+
 (define (ibuffer-field-tag f) (car f))
 
 (define (ibuffer-field-column f)
   (list "" (nth 1 f) (nth 2 f) (nth 3 f)))
+
+(define (ibuffer-field-fit buf f)
+  (let ((tag (ibuffer-field-tag f)))
+    (fold (lambda (n row)
+            (if (ibuffer-heading? row)
+                n
+                (max n (string-length (ibuffer-field-cell row tag)))))
+          (nth 1 f)
+          (list-entries buf))))
+
+(define (ibuffer-field-grown buf f)
+  (list (car f) (ibuffer-field-fit buf f) (nth 2 f) (nth 3 f)))
+
+;; The fields take their content's width when the names can still be
+;; read at their own floor; otherwise every field keeps the width it
+;; declares, and the names give the rest of the ground, as before.
+(define (ibuffer-fields-fitted buf fields)
+  (let ((grown (map (lambda (f) (ibuffer-field-grown buf f)) fields)))
+    (if (>= (ibuffer-name-room buf (map ibuffer-field-column grown))
+            (min *ibuffer-name-floor* (ibuffer-name-fit buf)))
+        grown
+        fields)))
 
 (define (ibuffer-field-live? buf tag)
   (let ((g (ibuffer-grouping buf)))
@@ -642,7 +670,8 @@
         (else (ibuffer-row-last b))))
 
 (define (ibuffer-columns-for buf all)
-  (ibuffer-columns buf (map ibuffer-field-column (ibuffer-fields buf all))))
+  (ibuffer-columns buf
+    (map ibuffer-field-column (ibuffer-fields-fitted buf (ibuffer-fields buf all)))))
 
 (define (ibuffer-cells-for buf b all)
   (let ((fields (ibuffer-fields buf all)))
@@ -705,7 +734,7 @@
 
 (define (ibuffer-row-overlays buf b off)
   (cond ((ibuffer-heading? b)
-         (append (ibuffer-band buf b off "ibuffer-heading")
+         (append (ibuffer-band buf b off *list-section-row-face*)
                  (ibuffer-count-overlay buf b off)))
         ((not (equal? (list-mark-of buf b) " "))
          (append (ibuffer-band buf b off "ibuffer-marked")
@@ -950,7 +979,7 @@
 ;;; and the filter line are the whole surface.
 
 (define *ibuffer-prompt-buffer* " *buffers*")
-(add-display-rule! *ibuffer-prompt-buffer* 'popup '(side bottom size 0.4))
+(add-display-rule! *ibuffer-prompt-buffer* 'shaped '(side bottom size 0.4))
 (ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent)
 
 (define-style! 'ibuffer-prompt "
@@ -972,12 +1001,14 @@
 ;; standing is no longer a popup to anything, so nothing else would ever
 ;; close it. The close reads the result rather than trusting the attempt.
 (define (ibuffer-prompt-close! view)
+  ;; a dock is a pane of the frame: deleting it gives its rows back to
+  ;; the windows it took them from, and the tree is as it was
+  (window-undock! view)
   (when (and (popup-open?) (equal? (window-buffer (popup-window)) view))
     (popup-dismiss!))
   (let ((w (window-showing view)))
-    (when w
-      (window-quit-restore! w)
-      (buffer-kill! view))))
+    (when w (window-quit-restore! w)))
+  (when (buffer-known? view) (buffer-kill! view)))
 
 ;; the wall time of the last ibuffer-prompt-line!, the minibuffer setup
 ;; alone: (ibuffer-prompt-line-ms) reads it back
@@ -1022,10 +1053,13 @@
 ;; open VIEW on SCOPE in MODE as a popup, then its prompt line. The
 ;; classes and the line numbers go on before the display rule floats the
 ;; buffer: popup-float! reads them when it writes the window class.
-(define (ibuffer-prompt! scope view mode label pick)
+(define (ibuffer-prompt! scope view mode label pick &optional shape)
   (let ((home (active-window)))
     (buffer-create view)
-    (buffer-set-locals! view (list 'line-numbers "off" 'window-classes "bare"))
+    ;; the shape goes on before the display: the display reads it
+    (buffer-set-locals! view
+      (list 'line-numbers "off" 'window-classes "bare"
+            'window-shape (or shape minibuffer-default-shape)))
     (ibuffer-open! scope view mode)
     ;; Mode setup clears ordinary locals, so remember the invoking window
     ;; after the prompt view has been opened and initialized.

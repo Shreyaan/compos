@@ -2572,31 +2572,124 @@
 ;;; The shape is not a different prompt. What you opened as a modal can
 ;;; finish as the bottom bar and go back, carrying the same input, the same
 ;;; candidates and the same selection: only the geometry changes. A prompt
-;;; that says what its row means (a question, a filter) keeps its shape.
+;;; that says what its row means (a question) keeps its shape.
+;;;
+;;; A prompt that stands in front of a LIST changes shape with it. The
+;;; table is a window and the prompt is a line, and the two are one
+;;; surface: the shape says where that surface is.
+;;;
+;;;   minibuffer  a DOCK: the bottom rows of the frame, in the flow. The
+;;;               window tree shrinks by exactly that much, so the surface
+;;;               covers no work and hides nothing. This is the default.
+;;;   panel       the same rows, floating over the work. Nothing reflows
+;;;               and the work underneath is hidden while you look.
+;;;   modal       the centred palette.
+;;;
+;;; A panel is not a popup window. The popup (display-buffer's 'popup
+;;; action, C-\) is a side window a buffer is sent to and lives in; a
+;;; panel is a shape a prompt wears for as long as it is open.
+
+(define minibuffer-default-shape "minibuffer")
+
+(define *minibuffer-shapes* '("minibuffer" "panel" "modal"))
+
+;;; --- the dock ------------------------------------------------------------
+;;; A dock is a pane of the FRAME. split-root! splits the whole tree, so
+;;; the pane spans the frame and every window above keeps its share of
+;;; what is left: the surface takes rows rather than covering them. This
+;;; is what makes the minibuffer shape a minibuffer and not a panel.
+;;;
+;;; Splitting the selected window instead gives a pane as wide as whatever
+;;; window happened to be selected, which is a sub-pane, not a dock.
+
+(define (window-docked buf)
+  (and (buffer-known? buf) (buffer-local buf 'window-dock)))
+
+;; A dock is not a work window. Every rule that keeps the popup out of
+;; the layout keeps a dock out too: the tiler must not count it, fill it,
+;; or renumber it away, and a display must never land in it.
+(define (window-dock? win buf) (and buf (equal? (window-docked buf) win)))
+
+(define (window-dock! buf size)
+  (let ((win (split-root! 'v (- 1 size))))
+    (when win
+      (window-float-class! buf #f)
+      (buffer-set-local! buf 'window-dock win)
+      (display-buffer-in-window! win buf)
+      (select-window! win))
+    win))
+
+(define (window-undock! buf)
+  (let ((win (window-docked buf)))
+    (when (buffer-known? buf) (buffer-set-local! buf 'window-dock #f))
+    (and win (window-exists? win) (delete-window-id! win))))
+
+;; BUF's window wears SHAPE. The buffer remembers it, so a display of
+;; this buffer takes the shape too, and a shape change moves the surface
+;; and nothing else: no mode setup runs, so a table keeps its rows, its
+;; filter and the row the reader is on.
+(define (window-shape! buf shape)
+  (buffer-set-local! buf 'window-shape shape)
+  (if (equal? shape "minibuffer")
+      (begin
+        (when (and (popup-open?) (equal? (window-buffer (popup-window)) buf))
+          (popup-dismiss!))
+        (window-float-class! buf #f)
+        (unless (window-docked buf)
+          (window-dock! buf (display-param buf 'size))))
+      (begin
+        (window-undock! buf)
+        (window-float-class! buf
+          (if (equal? shape "modal") 'center 'bottom)
+          (display-param buf 'size))
+        (unless (window-showing buf) (display-buffer buf)))))
+
+;; the list standing behind the prompt takes the shape the prompt takes
+(define (mb-list-shape! shape)
+  (let ((buf *mb-list-buffer*))
+    (when (and buf (buffer-known? buf)) (window-shape! buf shape))))
 
 (define (minibuffer-shape)
   (let* ((st (minibuffer-state))
          (style (and st (plist-get st 'style))))
     (cond ((member style '("modal" "palette")) "modal")
-          ((equal? style "popup") "popup")
+          ((member style '("panel" "popup")) "panel")
           (else "minibuffer"))))
 
 (define (minibuffer-shape-after here)
-  (cond ((equal? here "minibuffer") "popup")
-        ((equal? here "popup") "modal")
+  (cond ((equal? here "minibuffer") "panel")
+        ((equal? here "panel") "modal")
         (else "minibuffer")))
+
+;; The shape of a prompt with a list behind it is the shape of the list:
+;; the filter line is one row either way, and what moves is the table.
+;; So a filter prompt cycles, and only a question keeps its shape.
+(define (minibuffer-list-shape)
+  (and *mb-list-buffer*
+       (buffer-known? *mb-list-buffer*)
+       (let ((side (popup-side-of *mb-list-buffer*)))
+         (cond ((equal? side 'center) "modal")
+               (side "panel")
+               (else "minibuffer")))))
 
 (define-command "minibuffer-cycle-shape"
   "Show this prompt as the bottom bar, the popup, or the modal"
   (lambda ()
     (if (not (minibuffer-active?))
         (message "No prompt")
-        (let ((style (plist-get (minibuffer-state) 'style)))
-          (if (member style '("question" "filter"))
-              (message "This prompt keeps its shape")
+        (let ((style (plist-get (minibuffer-state) 'style))
+              (list-shape (minibuffer-list-shape)))
+          (cond
+            ((equal? style "question") (message "This prompt keeps its shape"))
+            (list-shape
+              (let ((next (minibuffer-shape-after list-shape)))
+                (mb-list-shape! next)
+                (message next)))
+            ((equal? style "filter") (message "This prompt keeps its shape"))
+            (else
               (let ((next (minibuffer-shape-after (minibuffer-shape))))
                 (minibuffer-style! next)
-                (message next)))))))
+                (message next))))))))
 (define-command "minibuffer-next-candidate" "Select the next minibuffer candidate"
   (lambda ()
     (cond ((mb-rail-move! 1) #t)
@@ -4459,6 +4552,8 @@
     ;; the history walk they have always been
     ("M-p" "minibuffer-previous-section")
     ("M-n" "minibuffer-next-section")
+    ("M-<up>" "minibuffer-previous-section")
+    ("M-<down>" "minibuffer-next-section")
     ("M-g" "minibuffer-regroup")
     ;; a search repeats from inside its own prompt
     ("C-s" "isearch-repeat-forward")
@@ -6863,16 +6958,24 @@
         (string-append " " extra)
         "")))
 
+;; A window floats because of its class, and for no other reason: the
+;; pane is in the tree either way. So a change of shape is a change of
+;; two locals. It runs no mode setup, which is what lets a prompt change
+;; shape with its table still standing, filter and row intact.
+(define (window-float-class! name side &optional size)
+  (buffer-set-locals! name
+    (list 'window-class
+            (and side (string-append "popup popup-" (symbol->string side)
+                                     (popup--extra-classes name)))
+          ;; the share is a number, and CSS cannot read a Scheme list —
+          ;; hand it over as a custom property the stylesheet already reads
+          'window-style
+            (and side size
+                 (string-append "--popup-size:" (number->string (* 100 size)) "%")))))
+
 (define (popup-float! name side &optional size)
   (let ((had-keys (buffer-local name 'popup-keys)))
-    (buffer-set-local! name 'window-class
-      (and side (string-append "popup popup-" (symbol->string side)
-                               (popup--extra-classes name))))
-    ;; the share is a number, and CSS cannot read a Scheme list — hand it
-    ;; over as a custom property the stylesheet already reads
-    (buffer-set-local! name 'window-style
-      (and side size
-           (string-append "--popup-size:" (number->string (* 100 size)) "%")))
+    (window-float-class! name side size)
     (cond (side (popup-keys! name #t))
           (had-keys
            (popup-keys! name #f)
@@ -7125,7 +7228,8 @@
 
 (define (layout-visible-window? row)
   (and (not (equal? (car row) (popup-window)))
-       (not (popup--class? (cadr row)))))
+       (not (popup--class? (cadr row)))
+       (not (window-dock? (car row) (cadr row)))))
 
 (define (layout-target-visible-buffers)
   (let ((visible (map cadr (filter layout-visible-window? (window-list)))))
@@ -7285,6 +7389,7 @@
 (define (display--work-windows)
   (let ((popup (and (popup-open?) (popup-window))))
     (filter (lambda (w) (and (not (equal? w popup))
+                             (not (window-dock? w (window-buffer w)))
                              (not (and (boundp 'peek-buffer?) (peek-buffer? (window-buffer w))))))
             (map car (window-list)))))
 
@@ -7358,6 +7463,17 @@
 
 (define-display-action! 'popup
   (lambda (name alist) (popup-show name)))
+
+;; Where a shaped surface goes: the dock when it is a minibuffer, the
+;; popup window when it is a panel or a modal. A buffer says which with
+;; its own 'window-shape, so the rule needs no argument.
+(define-display-action! 'shaped
+  (lambda (name alist)
+    (let ((shape (or (buffer-local name 'window-shape) minibuffer-default-shape))
+          (docked (window-docked name)))
+      (cond ((not (equal? shape "minibuffer")) (popup-show name))
+            ((and docked (window-exists? docked)) (select-window! docked) docked)
+            (else (window-dock! name (display-param name 'size)))))))
 
 (define-display-action! 'same-window
   (lambda (name alist)

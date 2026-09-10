@@ -579,7 +579,7 @@ defmodule Compos.Ui.EditorLiveTest do
                ~S|(minibuffer-read* "Choose: " '("one") (list (list 'style "popup")))|
              )
 
-    assert has_element?(view, ".mb-panel.mb-geom-popup:not(.palette)")
+    assert has_element?(view, ".mb-panel.mb-geom-panel:not(.palette)")
     keys(view, ["C-g"])
   end
 

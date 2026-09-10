@@ -329,6 +329,18 @@ defmodule Compos.Ui.Layouts do
 
           /* the block shapes of a drawn page: the marker stepped back, the
              row takes the shape */
+          /* A section heading in a list is a band across the table. It is
+             painted on the line, so it reaches both edges however short
+             the heading is, and it is a different colour from hl-line:
+             the section a reader is in and the row they are on must
+             never read as the same thing. On the heading itself the two
+             stack, and the band deepens rather than being replaced. */
+          .line.row-list-section {
+            background: color-mix(in srgb, var(--accent-fg, #26356b) 11%, transparent);
+          }
+          .window.active .line.row-list-section.hl-line {
+            background: color-mix(in srgb, var(--accent-fg, #26356b) 24%, transparent);
+          }
           .line.row-li .line-content { padding-left: 1.4em; }
           .line.row-li .line-content::before {
             content: "\2022"; display: inline-block; width: 1.4em; margin-left: -1.4em;
@@ -1397,7 +1409,7 @@ defmodule Compos.Ui.Layouts do
             display: block; padding: 0; background: none;
           }
           .mb-panel.mb-geom-minibuffer,
-          .mb-panel.mb-geom-popup {
+          .mb-panel.mb-geom-panel {
             width: 100%; max-width: none; max-height: none;
             border: none; border-top: 2px solid var(--accent-fg, #26356b);
             border-radius: 0; box-shadow: none;
@@ -1406,20 +1418,20 @@ defmodule Compos.Ui.Layouts do
              cost: it covers the windows instead of taking their space, so
              opening and closing the prompt reflows nothing. The layer keeps
              the keyboard and drops the scrim, so nothing below is dimmed. */
-          .mb-modal-layer:has(.mb-panel.mb-geom-popup) {
+          .mb-modal-layer:has(.mb-panel.mb-geom-panel) {
             display: block; padding: 0; background: none;
             /* the layer covers the frame but claims none of it: a click
                lands on the window under the popup, not on empty air */
             pointer-events: none;
           }
-          .mb-panel.mb-geom-popup { max-height: 44dvh; pointer-events: auto; }
+          .mb-panel.mb-geom-panel { max-height: 44dvh; pointer-events: auto; }
           .mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 11.5px; }
           /* The popup shape, and every surface that takes it says so with
              this class. It docks to the bottom edge above the echo bar and
              sits over the windows: it keeps the buffer geometry unchanged,
              dims nothing and moves nothing. which-key was the only surface
              with this shape; a completion prompt now asks for it by name. */
-          .mb-geom-popup {
+          .mb-geom-panel {
             position: absolute; left: 0; right: 0; bottom: 30px; z-index: 50;
             background: var(--window-bg, #fdfcf8);
             border-top: 2px solid var(--accent-fg, #26356b);

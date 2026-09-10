@@ -1294,7 +1294,7 @@ defmodule Compos.Ui.EditorLive do
       <main class="windows">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </main>
-      <div :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key mb-geom-popup">
+      <div :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key mb-geom-panel">
         <div class="wk-title">
           <span>
             {Enum.join(@state.pending, " ")} —
@@ -1601,13 +1601,19 @@ defmodule Compos.Ui.EditorLive do
   # renderer includes `geometry` so a LiveView patch does not have to infer a
   # panel shape from a presentation style; the style fallback keeps an older
   # daemon and a freshly recompiled UI compatible during development.
-  defp mb_geom(%{geometry: geometry}) when geometry in ["minibuffer", "popup", "modal"],
+  # The three shapes are minibuffer, panel and modal. "popup" is the name
+  # panel used to wear; it is still accepted here so an older daemon and a
+  # freshly recompiled UI agree during development. A popup WINDOW is a
+  # different thing (display-buffer's popup action) and shares no name.
+  defp mb_geom(%{geometry: geometry}) when geometry in ["minibuffer", "panel", "modal"],
     do: geometry
+
+  defp mb_geom(%{geometry: "popup"}), do: "panel"
 
   defp mb_geom(mb) do
     case Map.get(mb, :style) do
       style when style in ["palette", "modal"] -> "modal"
-      "popup" -> "popup"
+      style when style in ["panel", "popup"] -> "panel"
       _ -> "minibuffer"
     end
   end
@@ -1617,7 +1623,7 @@ defmodule Compos.Ui.EditorLive do
       # `palette` remains the visual vocabulary for the existing large
       # completion panel; `mb-geom-modal` names its layout role.
       "modal" -> "mb-panel palette mb-geom-modal"
-      "popup" -> "mb-panel mb-geom-popup"
+      "panel" -> "mb-panel mb-geom-panel"
       "minibuffer" -> "mb-panel mb-geom-minibuffer"
     end
   end

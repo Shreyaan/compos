@@ -30,14 +30,19 @@
         ((equal? s 'api) "-")
         (else "x")))
 
+;; Every chat, most recently used first. The order is the editor's one
+;; MRU, so a view that sorts by recency reads it and sorts nothing: the
+;; chat you were last in leads the table. The MRU names sleeping chats
+;; too, and (buffer-list) catches a chat nobody has shown yet.
+(define (chat-list-buf? b)
+  (and (not (string-prefix? " " b))
+       (or (buffer-local b 'agent-slug) (chat-buffer? b))))
+
 (define (chat-list-bufs)
-  (let loop ((bs (buffer-list)) (acc '()))
-    (cond ((null? bs) (reverse acc))
-          ((and (not (string-prefix? " " (car bs)))
-                (or (buffer-local (car bs) 'agent-slug)
-                    (chat-buffer? (car bs))))
-           (loop (cdr bs) (cons (car bs) acc)))
-          (else (loop (cdr bs) acc)))))
+  (let ((mru (filter chat-list-buf? (buffer-list-mru))))
+    (append mru
+            (filter (lambda (b) (and (chat-list-buf? b) (not (member b mru))))
+                    (buffer-list)))))
 
 ;; the ibuffer row kind asks this three times for one row (dot, label,
 ;; face), and a read from a chat buffer's own process is far slower than
@@ -409,9 +414,6 @@
              "one reads its file back and revives the chat.")
       'buffer *agents-buffer*
       'category 'chat
-      ;; a chat's title is the whole row: nothing else on the line repeats
-      ;; it, so the name column takes every column the fields leave
-      'name-fit 'full
       'title (lambda (buf) "Chats")
       'noun "chat"
       'rows (lambda (buf) (chats-rows buf))
@@ -437,13 +439,16 @@
 ;; C-x c: the same table in the minibuffer form, with its own view so
 ;; the sort and the folds of *chats* stay what you set them to
 (define *ichat-prompt-buffer* " *chats*")
-(add-display-rule! *ichat-prompt-buffer* 'popup '(side bottom size 0.4))
+(add-display-rule! *ichat-prompt-buffer* 'shaped '(side bottom size 0.4))
 (ibuffer-view! *ichat-prompt-buffer* 'sort 'recent)
 
 (define-command "ichat-prompt"
-  "Switch to a chat in the minibuffer"
+  "Switch to a chat from the table"
   (lambda ()
-    (run-command "chat-switch-prompt")))
+    (ibuffer-prompt! 'chats *ichat-prompt-buffer* "ichat-mode" "Chat: "
+      (lambda (row close!)
+        (ibuffer-pick! row close!)
+        (when (buffer-known? row) (end-of-buffer!))))))
 
 (define-command "chat-list" "List every chat: agent threads and API companions"
   (lambda () (ichat-open!)))
@@ -496,10 +501,7 @@
 
 ;; attention first, then the order you last used them: the chat you were
 ;; last in is the one you come back to
-(define (chat-prompt-live-bufs)
-  (let* ((bs (chat-list-bufs))
-         (mru (filter (lambda (b) (member b bs)) (buffer-list-mru))))
-    (append mru (filter (lambda (b) (not (member b mru))) bs))))
+(define (chat-prompt-live-bufs) (chat-list-bufs))
 
 (define (chat-prompt-tag r)
   (if (equal? (nth 2 r) "saved") (chat-log-leaf (nth 3 r)) (nth 3 r)))
@@ -543,7 +545,7 @@
       (fold (lambda (out id)
               (append out
                 (chat-prompt-section
-                  (if (equal? id current) "in this group" (or (group-name id) id))
+                  (or (group-name id) id)
                   (rows-of id))))
             '() ordered)
       (chat-prompt-section "ungrouped" ungrouped)

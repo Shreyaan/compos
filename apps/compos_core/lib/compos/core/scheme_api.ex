@@ -672,6 +672,8 @@ defmodule Compos.Core.SchemeAPI do
       "face-list" => "(face-list) — the names of every face the editor holds.",
       "split-window!" =>
         "(split-window! DIR [RATIO]) — split the active window 'h or 'v at RATIO (default 0.5).",
+      "split-root!" =>
+        "(split-root! DIR [RATIO]) — split the FRAME 'h or 'v at RATIO; the new window spans the frame and every other window shrinks. Returns the new window.",
       "delete-window!" => "(delete-window!) — delete the active window; return #t on success.",
       "delete-window-id!" => "(delete-window-id! WIN) — delete window WIN; return #t on success.",
       "window-list" =>
@@ -1951,6 +1953,12 @@ defmodule Compos.Core.SchemeAPI do
         [dir, ratio] ->
           Editor.split(dir_atom(dir), ratio / 1)
           :void
+      end,
+      # a dock is a pane of the FRAME, not of a window: it spans the frame
+      # and the windows above it shrink by its share
+      "split-root!" => fn
+        [dir] -> Editor.split_root(dir_atom(dir))
+        [dir, ratio] -> Editor.split_root(dir_atom(dir), ratio / 1)
       end,
       "delete-window!" => fn [] -> Editor.delete_window() == :ok end,
       "delete-window-id!" => fn [id] -> Editor.delete_window_by_id(id) == :ok end,

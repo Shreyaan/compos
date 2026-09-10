@@ -1198,7 +1198,7 @@ defmodule Compos.Core.Session do
         "(minibuffer-state) — return the active prompt as a plist (prompt, input, sel, total, legend, candidates), or #f.",
       "minibuffer-input!" => "(minibuffer-input! INPUT) — set the minibuffer input text.",
       "minibuffer-style!" =>
-        "(minibuffer-style! STYLE) — change the open prompt's style, and so its shape, without closing it: \"modal\", \"popup\", \"minibuffer\", or #f.",
+        "(minibuffer-style! STYLE) — change the open prompt's style, and so its shape, without closing it: \"modal\", \"panel\", \"minibuffer\", or #f.",
       "minibuffer-change!" =>
         "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler.",
       "debounce!" =>

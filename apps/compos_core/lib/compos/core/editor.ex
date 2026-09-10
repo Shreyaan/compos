@@ -426,6 +426,21 @@ defmodule Compos.Core.Editor do
   def split(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
     do: GenServer.call(__MODULE__, {:split, dir, ratio, fid(fid)})
 
+  @doc """
+  Split the frame's ROOT and answer the new window's id.
+
+  `split/3` splits the selected window, so the pane it makes is as wide as
+  whatever window happened to be selected. This splits the whole tree: the
+  new pane spans the frame, and every existing window keeps its share of
+  what is left. It is what a bottom dock needs — a surface that takes rows
+  from the frame rather than covering them.
+
+  Deleting the new window puts the tree back: one half of a root split
+  left alone becomes the root again.
+  """
+  def split_root(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
+    do: GenServer.call(__MODULE__, {:split_root, dir, ratio, fid(fid)})
+
   def delete_window(fid \\ nil), do: GenServer.call(__MODULE__, {:delete_window, fid(fid)})
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
   def eat_window(id, victim), do: GenServer.call(__MODULE__, {:eat_window, id, victim})
@@ -1954,6 +1969,28 @@ defmodule Compos.Core.Editor do
     changed(:ok, put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}), f.id)
   end
 
+  def handle_call({:split_root, dir, ratio, fid}, _from, state) do
+    f = frame(state, fid)
+    seed = find_leaf(f.tree, f.active) || first_leaf(f.tree)
+
+    new_leaf = %{
+      type: :leaf,
+      id: state.next_win,
+      buffer: seed.buffer,
+      history: Map.get(seed, :history, []),
+      top: 0,
+      manual: false
+    }
+
+    tree = %{type: :split, dir: dir, ratio: ratio, children: [f.tree, new_leaf]}
+
+    changed(
+      new_leaf.id,
+      put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}),
+      f.id
+    )
+  end
+
   def handle_call({:delete_window_by_id, id}, _from, state) do
     case find_window_frame(state, id) do
       nil ->
@@ -2730,7 +2767,34 @@ defmodule Compos.Core.Editor do
 
   defp frame_buffer_cols(f, buf) do
     cols = Map.get(f, :win_cols, %{})
-    Enum.find_value(wins_showing(f.tree, buf), &Map.get(cols, &1))
+    wins = wins_showing(f.tree, buf)
+    Enum.find_value(wins, &Map.get(cols, &1)) || estimated_cols(f, wins)
+  end
+
+  # The client measures a window and reports its columns; a window made a
+  # moment ago has no measurement yet. Estimating from the tree keeps the
+  # first draw at the width the window will have: without it, a new window
+  # draws once at the default width and reflows when the report arrives,
+  # which a table shows as a flash of narrow, wrongly trimmed rows.
+  defp estimated_cols(_f, []), do: nil
+
+  defp estimated_cols(f, [win | _]) do
+    measured = Map.get(f, :win_cols, %{})
+    rects = leaf_rects(f.tree, {0.0, 0.0, 1.0, 1.0})
+
+    per_frame =
+      for [id, _buffer, _x, _y, width, _height] <- rects,
+          cols when is_number(cols) <- [Map.get(measured, id)],
+          width > 0,
+          do: cols / width
+
+    with [_ | _] <- per_frame,
+         [_, _, _, _, width, _] <- Enum.find(rects, fn [id | _] -> id == win end),
+         true <- width > 0 do
+      round(Enum.max(per_frame) * width)
+    else
+      _ -> nil
+    end
   end
 
   defp wins_showing(%{type: :leaf, id: id, buffer: b}, buf), do: if(b == buf, do: [id], else: [])
