@@ -13,6 +13,7 @@ thirteen keys and the `cua-select-*` commands they run, in
 | `S-<up>` `S-<down>` | one visual line |
 | `S-<home>` `S-<end>` | to the start or the end of the line |
 | `C-S-<left>` `C-S-<right>` | one word |
+| `M-S-<left>` `M-S-<right>` | one word (the macOS shape) |
 | `C-S-<home>` `C-S-<end>` | to the start or the end of the buffer |
 | `S-<prior>` `S-<next>` | one screen |
 | `s-a` | the whole buffer (`cua-select-all`) |
@@ -21,8 +22,11 @@ Each command starts a region at point when there is none, and extends the one
 that is there. They move by the same primitives as the plain motions, so a
 mode that changes what a line or a word is changes the selections with it.
 
-`groups.scm` puts `M-S-<left>` and `M-S-<right>` on the same map, so the group
-move answers in a buffer you are editing too. Those two are not cua's.
+`M-S-<left>` and `M-S-<right>` move between groups where you are not editing
+(`groups.scm` binds them in the global map). cua-mode's map answers ahead of
+the global one, so the chord extends the selection in a buffer you are
+editing. Press `ESC` first, or use the group prefix, to move between groups
+from a buffer you are editing.
 
 ## Where it answers
 
