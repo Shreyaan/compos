@@ -125,6 +125,31 @@
             (check-true! (buffer-exists? a) "a existed before: not killed")
             (check-false! (peek-buffer? a) "and was never a peek")))))))
 
+(deftest 'a-peek-leaves-the-recency-ring-alone
+  "the ring records what the reader used; a look is not a use, and keeping it is"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (b (t--peek-file "b.txt" "beta\n")))
+          (visit a) (visit b)
+          (switch-to-buffer! "*scratch*")
+          (run-command "delete-other-windows")
+          (let ((before (buffer-list-mru)))
+            (peek! a (lambda () a))
+            (check-equal! (buffer-list-mru) before "a look at a buffer moved nothing")
+            (peek! b (lambda () b))
+            (check-equal! (buffer-list-mru) before "and the next look moved nothing")
+            ;; the ring lists every buffer, so a new one shows up in it; the
+            ;; claim is the ORDER: a look never puts a buffer at the head
+            (let ((c (t--peek-file "c.txt" "gamma\n")))
+              (peek-file! c)
+              (check-equal! (car (buffer-list-mru)) (car before)
+                            "the buffer the reader is in still leads the ring")
+              ;; RET again keeps it: that IS a use, and the ring says so
+              (peek-or-keep! c (lambda () c))
+              (check-equal! (car (buffer-list-mru)) c "a kept buffer leads the ring"))))))))
+
 (deftest 'ret-again-opens-the-peek-here
   "peek-or-open!: the first call peeks, the second opens it as your own in the selected window"
   (lambda ()

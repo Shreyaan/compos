@@ -2131,7 +2131,9 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:preview_buffer, buffer, fid, win}, _from, state) do
     if Compos.Core.Buffer.exists?(buffer) or Compos.Core.BufferStore.known?(buffer) do
-      f = frame(state, fid)
+      # a named window says which frame: a look driven from one frame can
+      # name a window of another, as window_set_buffer already allows
+      f = (win && find_window_frame(state, win)) || frame(state, fid)
       target = win || f.active
 
       case find_leaf(f.tree, target) do
@@ -2850,9 +2852,19 @@ defmodule Compos.Core.Editor do
     history = leaf |> Map.get(:history, []) |> List.delete(buffer)
 
     if leaf.buffer == buffer do
-      own = Enum.find(history, &(&1 not in shown and Buffer.exists?(&1)))
+      # a preview writes no history: the buffer it covers is the origin,
+      # and it leads what this window showed before
+      back =
+        case Map.get(leaf, :preview_origin) do
+          nil -> history
+          origin -> List.delete([origin | List.delete(history, origin)], buffer)
+        end
+
+      own = Enum.find(back, &(&1 not in shown and Buffer.exists?(&1)))
       next = own || fallback
-      %{leaf | buffer: next, history: List.delete(history, next), top: 0, manual: false}
+
+      %{leaf | buffer: next, history: List.delete(back, next), top: 0, manual: false}
+      |> Map.delete(:preview_origin)
     else
       %{leaf | history: history}
     end

@@ -7176,6 +7176,32 @@
           (set-frame-local! 'popup-window (active-window))
           (switch-to-buffer! name))))
 
+;;; --- a look is not a use ------------------------------------------------------
+;;; The MRU ring records the buffers the reader USED. A preview is not a
+;;; use: the reader moves down a listing and every row shows for as long
+;;; as the point rests on it. The buffer table sorts its rows by the ring,
+;;; so a preview that bumped the ring rewrote the list under the point.
+;;;
+;;; While this flag stands, a display sets the window's buffer through
+;;; window-preview-buffer!, which changes the window and leaves the ring
+;;; alone. peek-show! binds it, so every look goes this way: the buffer
+;;; table, dired, occur, and every list mode that peeks a row.
+
+(define *display-preview* #f)
+
+;; show NAME in WIN: the ring records it, unless this is a look
+(define (window-show-buffer! win name)
+  (if *display-preview*
+      (window-preview-buffer! name win)
+      (window-set-buffer! win name)))
+
+(define (with-display-preview thunk)
+  (let ((was *display-preview*))
+    (set! *display-preview* #t)
+    (let ((r (thunk)))
+      (set! *display-preview* was)
+      r)))
+
 ;; where the popup floats: the rule's side, else the side the buffer was
 ;; last moved to, else the default, which is the right edge
 ;; Show NAME in the popup without moving the selection: a preview takes
@@ -7197,14 +7223,14 @@
     (if (popup-open?)
         (let* ((w (popup-window))
                (was (window-buffer w)))
-          (window-set-buffer! w name)
+          (window-show-buffer! w name)
           (when (and was (not (equal? was name)) (buffer-exists? was))
             (popup-float! was #f)))
         (begin
           (popup--split-for side size)
           (let ((w (active-window)))
             (set-frame-local! 'popup-window w)
-            (window-set-buffer! w name)
+            (window-show-buffer! w name)
             (select-window! me))))
     (window-state-changed!)
     (popup-window)))
@@ -7557,8 +7583,8 @@
 ;; is a buffer the user can switch to; a floating buffer shown anywhere
 ;; but the popup stops floating.
 (define (display-buffer-in-window! win name)
-  (when (boundp 'buffer-promote!) (buffer-promote! name))
-  (window-set-buffer! win name)
+  (when (and (not *display-preview*) (boundp 'buffer-promote!)) (buffer-promote! name))
+  (window-show-buffer! win name)
   (when (and (popup--class? name) (not (equal? win (frame-local 'popup-window))))
     (popup-float! name #f))
   (window-state-changed!)
@@ -7785,9 +7811,13 @@
 (define (peek-show! name)
   (let* ((me (active-window))
          (actions (display-buffer-actions-for name '(category preview)))
-         (win (if (equal? (car actions) 'popup)
-                  (peek-show-in-popup! name me)
-                  (peek-show-in-window! name me))))
+         ;; a look leaves the MRU ring where it was: the reader looked,
+         ;; the reader did not switch
+         (win (with-display-preview
+                (lambda ()
+                  (if (equal? (car actions) 'popup)
+                      (peek-show-in-popup! name me)
+                      (peek-show-in-window! name me))))))
     (set-frame-local! 'peek-window win)
     ;; what the look put on screen, by name: a buffer that existed
     ;; before wears no mode, and q must still take it away

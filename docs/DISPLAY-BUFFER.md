@@ -2,6 +2,19 @@
 
 Where a buffer goes when a command shows it. The mechanism is Emacs' `display-buffer`, in Scheme, in the display-buffer section of `priv/editor.scm`.
 
+## Which window
+
+Where a buffer lands follows from what you did, not from what the buffer is.
+
+- You found a file, or ran a command that opens one thing: it takes the
+  **selected window**. That is `switch-to-buffer!`, verb 1 below.
+- You opened a row from a list — dired, ibuffer, a table, a search result:
+  it takes the **other window**, the one the list was previewing it in. The
+  list keeps its own window until it closes. That is the peek chain
+  (docs/PEEK.md) and `show-in-other-work-window!`.
+- A preview lands in the window the pick will land in. Look and open are
+  the same window, always.
+
 ## The three verbs
 
 1. `switch-to-buffer!` visits a buffer. With a target layout it reuses an existing view, fills spare capacity, then replaces the selected pane. Without a target it takes the selected window. Foreign buffers use the popup.

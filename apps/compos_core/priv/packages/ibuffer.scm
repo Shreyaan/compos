@@ -1014,7 +1014,18 @@
 ;; restores can put the table straight back on screen. A table left
 ;; standing is no longer a popup to anything, so nothing else would ever
 ;; close it. The close reads the result rather than trusting the attempt.
-(define (ibuffer-prompt-close! view)
+(define (ibuffer-prompt-restore-home! view &optional keep)
+  ;; the preview borrowed the invoking window; put back what it showed,
+  ;; unless the pick is what it is showing now — that one stays
+  (let ((w (buffer-local view 'ibuffer-prompt-home-window))
+        (orig (buffer-local view 'ibuffer-prompt-home-buffer)))
+    (when (and w orig (window-exists? w) (buffer-known? orig)
+               (not (equal? (window-buffer w) orig))
+               (not (and (string? keep) (equal? (window-buffer w) keep))))
+      (window-preview-buffer! orig w))))
+
+(define (ibuffer-prompt-close! view &optional keep)
+  (ibuffer-prompt-restore-home! view keep)
   ;; a dock is a pane of the frame: deleting it gives its rows back to
   ;; the windows it took them from, and the tree is as it was
   (window-undock! view)
@@ -1052,7 +1063,7 @@
                              (ibuffer-toggle-fold! (ibuffer-heading-key row) view))
                             (else
                              (list-set-query! view "")
-                             (pick row (lambda () (ibuffer-prompt-close! view))))))))
+                             (pick row (lambda () (ibuffer-prompt-close! view row))))))))
             (list 'cancel
                   (lambda ()
                     (done)
@@ -1068,7 +1079,8 @@
 ;; classes and the line numbers go on before the display rule floats the
 ;; buffer: popup-float! reads them when it writes the window class.
 (define (ibuffer-prompt! scope view mode label pick &optional shape)
-  (let ((home (active-window)))
+  (let* ((home (active-window))
+         (was (and home (window-buffer home))))
     (buffer-create view)
     ;; the shape goes on before the display: the display reads it
     (buffer-set-locals! view
@@ -1076,8 +1088,11 @@
             'window-shape (or shape minibuffer-default-shape)))
     (ibuffer-open! scope view mode)
     ;; Mode setup clears ordinary locals, so remember the invoking window
-    ;; after the prompt view has been opened and initialized.
+    ;; after the prompt view has been opened and initialized. The buffer
+    ;; it showed rides along: the preview borrows that window, so every
+    ;; way out of the prompt has to be able to give it back.
     (buffer-set-local! view 'ibuffer-prompt-home-window home)
+    (buffer-set-local! view 'ibuffer-prompt-home-buffer was)
     (ibuffer-prompt-line! view label pick)))
 
 ;; what RET does with a row, in the window form and in the minibuffer
@@ -1085,8 +1100,28 @@
 ;; holds the row, and the buffer takes a pane there. A row of the group
 ;; at hand, and a row no group holds, open where they are. A file no
 ;; buffer holds is visited where the table came from.
-(define (ibuffer-pick! row close!)
+(define (ibuffer-pick! row close! &optional where)
   (cond ((not (string? row)) (message "no buffer here"))
+        ;; the window form: a row you open from a list lands where you
+        ;; were looking at it — the window beside the list, never the
+        ;; window the list was using. Settle the peek claim first, or
+        ;; CLOSE! spends itself on the peek and leaves the table up
+        ((and (equal? where 'other) (buffer-known? row))
+         (let ((w (window-showing row)))
+           (when (peek-buffer? row) (peek-keep! row))
+           (set-frame-local! 'peek-shown #f)
+           (set-frame-local! 'peek-window #f)
+           (close!)
+           (if (and w (window-exists? w) (equal? (window-buffer w) row))
+               (select-window! w)
+               (show-in-other-work-window! row))
+           (group-current-recalculate!)))
+        ((and (equal? where 'other) (file-exists? row))
+         (peek-dismiss!)
+         (close!)
+         (let ((w (other-work-window-id (active-window))))
+           (when w (select-window! w)))
+         (visit-in-group row (and (boundp 'group-here) (group-here))))
         ;; the look goes first: quit-window takes a peek before it takes
         ;; the table, so a table that peeked must give the peek back here
         ;; or CLOSE! spends itself on the peek and leaves the table up.
@@ -1113,7 +1148,7 @@
     (let ((b (ibuffer-current)))
       (if (ibuffer-heading? b)
           (ibuffer-toggle-fold! (ibuffer-heading-key b))
-          (ibuffer-pick! b (lambda () (run-command "quit-window")))))))
+          (ibuffer-pick! b (lambda () (run-command "quit-window")) 'other)))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer table"
   (lambda () (ibuffer-refresh!)))
@@ -1157,18 +1192,21 @@
 ;; so it peeks: the peek takes another window, takes no focus, and q
 ;; gives the window back.
 (define (ibuffer-preview! &optional buf b)
-  (let ((buf (or buf (ibuffer-view)))
-        (b (or b (ibuffer-current buf))))
+  (let* ((buf (or buf (ibuffer-view)))
+         (b (or b (ibuffer-current buf)))
+         ;; the window RET will hand the pick to: the one that invoked
+         ;; the prompt. A look belongs where the pick will land, so the
+         ;; preview goes there and nowhere else
+         (home (buffer-local buf 'ibuffer-prompt-home-window)))
     (when (and (string? b) (buffer-known? b) (not (equal? b buf)))
-      (if (and (popup-open?) (equal? (window-buffer (popup-window)) buf))
-          ;; The prompt popup is selected while its keys run. Preview in
-          ;; the window that invoked it: the same window RET will replace.
-          (let ((w (buffer-local buf 'ibuffer-prompt-home-window)))
-            (when w (window-preview-buffer! b w)))
-          ;; the window form: preview only from the table's own window,
-          ;; so a move in a table nobody looks at moves no other window
-          (when (equal? (window-buffer (active-window)) buf)
-            (peek! b (lambda () b)))))))
+      (cond
+        ((and home (window-exists? home)
+              (not (equal? (window-buffer home) buf)))
+         (window-preview-buffer! b home))
+        ;; the window form: preview only from the table's own window,
+        ;; so a move in a table nobody looks at moves no other window
+        ((equal? (window-buffer (active-window)) buf)
+         (peek! b (lambda () b)))))))
 
 (define-command "ibuffer-next" "Move down and preview the selected buffer"
   (lambda () (list-move! 1)))
@@ -1219,7 +1257,7 @@
   (list
     (list "go"
           (lambda (id)
-            (ibuffer-pick! id (lambda () (run-command "quit-window")))))
+            (ibuffer-pick! id (lambda () (run-command "quit-window")) 'other)))
     (list "add here"
           (ibuffer-act
             (lambda (targets)
@@ -1481,5 +1519,5 @@
 (public! 'ibuffer-view! "(ibuffer-view! BUF . DEFAULTS) — register a table buffer with its default 'sort, 'grouping, and 'footer fn")
 (public! 'ibuffer-mode-opts "(ibuffer-mode-opts OVERRIDES) — the template's list-mode options with OVERRIDES; 'keys add to the template's")
 (public! 'ibuffer-prompt! "(ibuffer-prompt! SCOPE VIEW MODE LABEL PICK) — the table in the minibuffer form: a bottom popup with its filter line; RET calls (PICK ROW CLOSE!)")
-(public! 'ibuffer-pick! "(ibuffer-pick! ROW CLOSE!) — show a buffer row in the other window, close the table with CLOSE!, select that window; visit a file row")
+(public! 'ibuffer-pick! "(ibuffer-pick! ROW CLOSE! [WHERE]) — open a row: WHERE 'other keeps it in the window that previewed it, else the window the table leaves; CLOSE! closes the table")
 (public! 'ibuffer-group-buckets "(ibuffer-group-buckets ROWS CURRENT MEMBERSHIPS-OF) — rows in (LABEL KEY MEMBERS FACE) buckets: this group, the others by name, ungrouped")
