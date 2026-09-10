@@ -15,17 +15,130 @@ defmodule Compos.Core.BufferStore do
 
   @catalog_version 1
 
+  # The catalog rows live in a public table, not in the process state: a
+  # buffer list reads a row fact for every cell of every row, and a
+  # hundred rows must not queue a thousand messages here.
+  @table :compos_buffer_catalog
+
+  # A local this big or smaller is indexed with its buffer's row. The
+  # ones above it (a chat's block index, a list's row cache) stay in the
+  # checkpoint, and a reader that wants one pays for the file.
+  @local_index_bytes 1024
+
+  # The facts a row read answers from the catalog. Every other key falls
+  # through to the checkpoint.
+  @fact_keys ~w(id path size modified read_only point mark buffer_version)a
+
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
+
+  @doc "The catalog table."
+  def table, do: @table
 
   def dir, do: Path.join(Compos.Core.home(), "buffers")
   def catalog_path, do: Path.join(dir(), "catalog.etf")
   def checkpoint_path(id), do: Path.join(dir(), id <> ".etf")
 
-  def lookup(name), do: GenServer.call(__MODULE__, {:lookup, name})
-  def lookup_id(id), do: GenServer.call(__MODULE__, {:lookup_id, id})
+  def lookup(name), do: row(name)
+  def lookup_id(id), do: row({:id, id})
   def load(name), do: GenServer.call(__MODULE__, {:load, name})
   def load_id(id), do: GenServer.call(__MODULE__, {:load_id, id})
-  def known?(name), do: GenServer.call(__MODULE__, {:known?, name})
+  def known?(name), do: row(name) != nil
+
+  # A row read never waits on this process. The table is made in `init`,
+  # so a hot swap of this module into a running daemon finds none: the
+  # read asks the process, exactly as it did before the table existed,
+  # until a restart makes one.
+  defp row(key) do
+    case :ets.whereis(@table) do
+      :undefined -> GenServer.call(__MODULE__, {:lookup, key})
+      _ -> from_table(key)
+    end
+  end
+
+  defp from_table(key) do
+    case :ets.lookup(@table, key) do
+      [{^key, meta}] -> meta
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc """
+  One row fact of a buffer, as `{:ok, value}`, or `:error` when the
+  catalog holds no such fact.
+
+  A buffer list draws a row per name it shows and asks each row for its
+  path, its size, its state and a local or two. For a dormant buffer
+  every one of those reads used to load the whole checkpoint file: the
+  text, the locals and the overlays, to answer one small field.
+  """
+  def fact(name, key) when key in @fact_keys do
+    case row(name) do
+      %{^key => value} -> {:ok, value}
+      _ -> :error
+    end
+  end
+
+  def fact(_name, _key), do: :error
+
+  @doc """
+  One indexed buffer-local: `{:ok, VALUE}`, `:absent` when the buffer
+  holds no such local, or `:error` when the catalog cannot say and the
+  checkpoint must answer.
+  """
+  def local(name, key) do
+    case row(name) do
+      %{locals: locals, local_keys: keys} ->
+        cond do
+          Map.has_key?(locals, key) -> {:ok, Map.get(locals, key)}
+          key in keys -> :error
+          true -> :absent
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  @doc """
+  Every buffer-local of a dormant buffer, but only when the catalog holds
+  them all: a buffer with one local too big to index answers `:error`, and
+  its checkpoint gives the complete map.
+  """
+  def locals(name) do
+    case row(name) do
+      %{locals: locals, local_keys: keys} when map_size(locals) == length(keys) -> {:ok, locals}
+      _ -> :error
+    end
+  end
+
+  @doc """
+  The row facts of one checkpoint. `metadata/1` in `Compos.Core.Buffer`
+  builds the same shape from a live buffer's state, so a checkpoint write
+  and a boot scan index the same facts.
+  """
+  def facts(%{} = checkpoint) do
+    locals = if is_map(checkpoint[:locals]), do: checkpoint[:locals], else: %{}
+
+    %{
+      path: checkpoint[:path],
+      size: byte_size(checkpoint[:text] || ""),
+      modified: checkpoint[:modified],
+      read_only: checkpoint[:read_only],
+      point: checkpoint[:point],
+      mark: checkpoint[:mark],
+      buffer_version: checkpoint[:buffer_version],
+      locals: small_locals(locals),
+      local_keys: Map.keys(locals)
+    }
+  end
+
+  @doc "The locals small enough to index with their buffer's row."
+  def small_locals(locals) do
+    for {k, v} <- locals, :erlang.external_size(v) <= @local_index_bytes, into: %{}, do: {k, v}
+  end
+
   def names, do: GenServer.call(__MODULE__, :names)
   def history, do: GenServer.call(__MODULE__, :history)
   def note(meta), do: GenServer.call(__MODULE__, {:note, meta})
@@ -39,7 +152,9 @@ defmodule Compos.Core.BufferStore do
   @impl true
   def init(_) do
     File.mkdir_p!(dir())
+    :ets.new(@table, [:named_table, :protected, :set, read_concurrency: true])
     disk = scan_checkpoints()
+    Enum.each(disk, fn {_name, meta} -> put_row(meta) end)
 
     history =
       case read_term(catalog_path()) do
@@ -57,9 +172,9 @@ defmodule Compos.Core.BufferStore do
   end
 
   @impl true
-  def handle_call({:lookup, name}, _from, state), do: {:reply, state.entries[name], state}
+  def handle_call({:lookup, {:id, id}}, _from, state), do: {:reply, state.ids[id], state}
 
-  def handle_call({:lookup_id, id}, _from, state), do: {:reply, state.ids[id], state}
+  def handle_call({:lookup, name}, _from, state), do: {:reply, state.entries[name], state}
 
   def handle_call({:load, name}, _from, state) do
     value =
@@ -81,13 +196,12 @@ defmodule Compos.Core.BufferStore do
     {:reply, value, state}
   end
 
-  def handle_call({:known?, name}, _from, state),
-    do: {:reply, Map.has_key?(state.entries, name), state}
-
   def handle_call(:names, _from, state), do: {:reply, Map.keys(state.entries), state}
   def handle_call(:history, _from, state), do: {:reply, state.history, state}
 
   def handle_call({:note, meta}, _from, state) do
+    put_row(meta)
+
     state = %{
       state
       | entries: Map.put(state.entries, meta.name, meta),
@@ -110,6 +224,8 @@ defmodule Compos.Core.BufferStore do
         :ok
     end
 
+    drop_row(state.entries[name])
+
     state = %{
       state
       | entries: Map.delete(state.entries, name),
@@ -126,6 +242,8 @@ defmodule Compos.Core.BufferStore do
   end
 
   def handle_call({:renamed, old, meta}, _from, state) do
+    drop_row(state.entries[old])
+    put_row(meta)
     entries = state.entries |> Map.delete(old) |> Map.put(meta.name, meta)
     history = Enum.map(state.history, &if(&1 == old, do: meta.name, else: &1))
 
@@ -224,6 +342,25 @@ defmodule Compos.Core.BufferStore do
       :ok
   end
 
+  # The writers. Only this process writes the table, and it writes the row
+  # before it answers the call that made it: a caller that noted a change
+  # reads the change back.
+  defp put_row(%{name: name, id: id} = meta) do
+    :ets.insert(@table, {name, meta})
+    :ets.insert(@table, {{:id, id}, meta})
+    :ok
+  end
+
+  defp put_row(_), do: :ok
+
+  defp drop_row(%{name: name, id: id}) do
+    :ets.delete(@table, name)
+    :ets.delete(@table, {:id, id})
+    :ok
+  end
+
+  defp drop_row(_), do: :ok
+
   defp scan_checkpoints do
     Path.wildcard(Path.join(dir(), "*.etf"))
     |> Enum.reject(&(&1 == catalog_path()))
@@ -233,7 +370,14 @@ defmodule Compos.Core.BufferStore do
           if String.starts_with?(name, " "),
             do: acc,
             else:
-              Map.put(acc, name, %{id: id, name: name, path: checkpoint[:path], checkpoint: path})
+              Map.put(
+                acc,
+                name,
+                Map.merge(
+                  %{id: id, name: name, checkpoint: path},
+                  facts(checkpoint)
+                )
+              )
 
         _ ->
           acc

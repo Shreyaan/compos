@@ -193,7 +193,18 @@ defmodule Compos.Core.Buffer do
     end
   end
 
-  def byte_size(name), do: viewed(name, :size, fn -> Kernel.byte_size(text(name)) end)
+  # The size is the one row fact a checkpoint does not carry under its own
+  # name: the file holds the text, and the size is its length. So this
+  # reads the catalog by hand rather than through `dormant_read/3`, whose
+  # last resort is the checkpoint's own key.
+  def byte_size(name) do
+    viewed(name, :size, fn ->
+      case catalog_fact(name, :size) do
+        {:ok, size} when is_integer(size) -> size
+        _ -> Kernel.byte_size(text(name))
+      end
+    end)
+  end
 
   def version(name),
     do: viewed(name, :version, fn -> dormant_read(name, :buffer_version, :version) end)
@@ -273,7 +284,23 @@ defmodule Compos.Core.Buffer do
   def get_local(name, key) do
     case BufferView.local(name, key) do
       {:ok, value} -> value
-      :error -> Map.get(locals(name), key)
+      :absent -> nil
+      :error -> dormant_local(name, key)
+    end
+  end
+
+  # The catalog indexes a dormant buffer's small locals and names the rest,
+  # so a mode name reads from memory and an absent key answers without any
+  # read at all. Only a local too big to index reaches the checkpoint.
+  defp dormant_local(name, key) do
+    if exists?(name) do
+      Map.get(locals(name), key)
+    else
+      case BufferStore.local(name, key) do
+        {:ok, value} -> value
+        :absent -> nil
+        :error -> Map.get(locals(name), key)
+      end
     end
   end
 
@@ -281,8 +308,15 @@ defmodule Compos.Core.Buffer do
     viewed(name, :locals, fn ->
       if exists?(name),
         do: GenServer.call(registry_name(name), :locals),
-        else: name |> dormant() |> Map.get(:locals, %{})
+        else: dormant_locals(name)
     end)
+  end
+
+  defp dormant_locals(name) do
+    case BufferStore.locals(name) do
+      {:ok, locals} -> locals
+      :error -> name |> dormant() |> Map.get(:locals, %{})
+    end
   end
 
   # overlays: per-tag face ranges (fontification). Byte positions auto-adjust
@@ -728,12 +762,30 @@ defmodule Compos.Core.Buffer do
     try do
       if exists?(name),
         do: GenServer.call(registry_name(name), message),
-        else: Map.get(dormant(name), key)
+        else: dormant_fact(name, key)
     catch
       # A buffer can die after exists?/1 and before the call. Fall back to
       # its checkpoint; a truly stale name/ref reads as absent, never :noproc.
-      :exit, _ -> Map.get(dormant(name), key)
+      :exit, _ -> dormant_fact(name, key)
     end
+  end
+
+  # A dormant buffer's small facts live in the catalog, next to its name.
+  # Reading one there costs a table lookup. Reading it from the checkpoint
+  # costs the whole file: the text, every local and every overlay, decoded
+  # to answer one field. A buffer list asks a dozen such questions per row.
+  defp dormant_fact(name, key) do
+    case catalog_fact(name, key) do
+      {:ok, value} -> value
+      :error -> Map.get(dormant(name), key)
+    end
+  end
+
+  # A live buffer answers for itself. The catalog holds what its last
+  # checkpoint said, which is the truth about a dormant buffer and stale
+  # about a running one.
+  defp catalog_fact(name, key) do
+    if exists?(name), do: :error, else: BufferStore.fact(name, key)
   end
 
   defp dormant(%Ref{id: id}) do
@@ -1005,7 +1057,10 @@ defmodule Compos.Core.Buffer do
   defp on_call({:goto, pos}, _from, state),
     do:
       {:reply, :ok,
-       state |> Map.put(:point, clamp(pos, state)) |> Map.put(:goal_col, nil) |> checkpoint_later()}
+       state
+       |> Map.put(:point, clamp(pos, state))
+       |> Map.put(:goal_col, nil)
+       |> checkpoint_later()}
 
   defp on_call(:mark, _from, state), do: {:reply, state.mark, state}
 
@@ -1484,8 +1539,7 @@ defmodule Compos.Core.Buffer do
 
         %{
           state
-          | goal_col:
-              state.goal_col || String.length(binary_part(text, bol, state.point - bol))
+          | goal_col: state.goal_col || String.length(binary_part(text, bol, state.point - bol))
         }
       else
         %{state | goal_col: nil}
@@ -2316,13 +2370,29 @@ defmodule Compos.Core.Buffer do
     }
   end
 
-  defp metadata(state),
-    do: %{
+  # The catalog row: the buffer's identity, and the facts a list reads for
+  # a row it never opens. `BufferStore.facts/1` builds the same shape from
+  # a checkpoint on the boot scan, so the two agree.
+  defp metadata(state) do
+    # the locals the checkpoint would hold, so the catalog and the file on
+    # disk answer a dormant read alike
+    locals = serializable_locals(state.locals)
+
+    %{
       id: state.id,
       name: state.name,
       path: state.path,
-      checkpoint: BufferStore.checkpoint_path(state.id)
+      checkpoint: BufferStore.checkpoint_path(state.id),
+      size: Rope.byte_size(state.rope),
+      modified: state.version != state.saved_version,
+      read_only: state.read_only,
+      point: clamp(state.point, state),
+      mark: state.mark && clamp(state.mark, state),
+      buffer_version: state.version,
+      locals: BufferStore.small_locals(locals),
+      local_keys: Map.keys(locals)
     }
+  end
 
   # Provenance flushes on every checkpoint boundary, including the ones that
   # write no state: a dormant, unsaved, or discarded buffer still owns its

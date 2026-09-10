@@ -140,6 +140,11 @@ defmodule Compos.Core.BufferView do
   small local from a buffer whose locals map holds a large value under
   another key (a chat's block index, a list-mode's row cache) must not
   copy that other value to find this one.
+
+  `{:ok, VALUE}` when the buffer holds the local, `:absent` when it has a
+  row and no such local, `:error` when it has no row. The caller needs the
+  two misses apart: a row is the whole truth about a live buffer, so an
+  absent key there is nil and no other store may answer for it.
   """
   def local(%Ref{id: id}, key) do
     case lookup({:id, id}) do
@@ -152,20 +157,26 @@ defmodule Compos.Core.BufferView do
     spec = [
       {{name, :"$1"},
        [
-         {:andalso, {:is_map_key, :locals, :"$1"},
-          {:is_map_key, key, {:map_get, :locals, :"$1"}}}
+         {:andalso, {:is_map_key, :locals, :"$1"}, {:is_map_key, key, {:map_get, :locals, :"$1"}}}
        ], [{:map_get, key, {:map_get, :locals, :"$1"}}]}
     ]
 
     case :ets.select(@table, spec) do
       [value] -> {:ok, value}
-      [] -> :error
+      [] -> if has_row?(name), do: :absent, else: :error
     end
   rescue
     ArgumentError -> :error
   end
 
   def local(_, _), do: :error
+
+  # whether NAME has a row, without copying it
+  defp has_row?(name) do
+    :ets.select(@table, [{{name, :_}, [], [true]}]) != []
+  rescue
+    ArgumentError -> false
+  end
 
   @doc """
   The buffer text. The writer's flattened copy when it published one,

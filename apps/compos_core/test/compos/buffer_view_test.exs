@@ -290,7 +290,9 @@ defmodule Compos.BufferViewTest do
 
       # the projection copies the field alone: the row is far larger
       {:ok, view} = BufferView.fetch(name)
-      assert :erts_debug.flat_size(view) > 10 * :erts_debug.flat_size(BufferView.field(name, :version))
+
+      assert :erts_debug.flat_size(view) >
+               10 * :erts_debug.flat_size(BufferView.field(name, :version))
     end
 
     test "a name without a row reads as :error" do
@@ -321,12 +323,13 @@ defmodule Compos.BufferViewTest do
       assert BufferView.local(:not_a_name, "mode-name") == :error
     end
 
-    test "a local the row lacks reads as :error", %{name: name} do
-      assert BufferView.local(name, "no-such-local") == :error
+    test "a local the row lacks reads as :absent", %{name: name} do
+      Buffer.set_local(name, "mode-name", "chat-mode")
+      assert BufferView.local(name, "no-such-local") == :absent
     end
 
-    test "a buffer with no locals set at all reads as :error", %{name: name} do
-      assert BufferView.local(name, "mode-name") == :error
+    test "a buffer with no locals set at all reads as :absent", %{name: name} do
+      assert BufferView.local(name, "mode-name") == :absent
       assert Buffer.get_local(name, "mode-name") == nil
     end
   end
