@@ -55,6 +55,32 @@
           (check-true! (buffer-read-only? a) "read-only")
           (check-contains! (buffer-modeline-name a) "peek" "and its modeline says so"))))))
 
+(deftest 'a-peek-does-not-open-a-file-over-the-cap
+  "a peek of a big file shows nothing, opens nothing, and says the size"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let* ((small (t--peek-file "small.txt" "alpha\n"))
+               (big (t--peek-file "big.txt" (string-repeat "x" 4096)))
+               (saved peek-max-file-size))
+          (set! peek-max-file-size 2048)
+          (peek-file! small)
+          (check-true! (peek-buffer? small) "a file under the cap is looked at")
+          (check-false! (peek-file! big) "a file over the cap answers #f")
+          (check-false! (buffer-known? big) "and nothing opened it")
+          (check-true! (peek-buffer? small) "the last look is still on screen")
+          ;; the cap is a look's, not a visit's: RET opens whatever it names
+          (visit big)
+          (check-true! (buffer-known? big) "a visit the reader asked for still opens it")
+          (buffer-kill! big)
+          ;; a buffer that is open already costs nothing more to show
+          (find-file big)
+          (check-false! (peek-too-big? big) "an open buffer is never too big")
+          (set! peek-max-file-size 0)
+          (check-false! (peek-too-big? (t--peek-file "big2.txt" (string-repeat "x" 4096)))
+                        "0 removes the cap")
+          (set! peek-max-file-size saved))))))
+
 (deftest 'the-next-peek-replaces-the-last-and-kills-what-peek-made
   "one peek at a time; a buffer that existed before is only shown"
   (lambda ()

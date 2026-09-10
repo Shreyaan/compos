@@ -303,12 +303,20 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 ;; so a previewed match costs the same read as an opened one. The mode is
 ;; set AFTER the window shows the buffer: set-mode! acts on the current
 ;; buffer, and the preview is what makes it current.
+;; A preview is a look, so it obeys the same cap a peek does: a match in a
+;; machine-generated blob leaves the window alone and says the size. The
+;; jump is not a look — RET opens the file whatever its size.
 (define (rg--show root m preview?)
   (let ((path (string-append root "/" (nth 1 m))))
-    (if preview?
-        (begin (window-preview-buffer! (find-file path)) (auto-mode path))
-        (visit path))
-    (goto-char! (line-start-position (nth 2 m)))))
+    (cond
+      ((not preview?)
+       (visit path)
+       (goto-char! (line-start-position (nth 2 m))))
+      ((peek-too-big? path) (peek-say-too-big! path))
+      (else
+       (window-preview-buffer! (find-file path))
+       (auto-mode path)
+       (goto-char! (line-start-position (nth 2 m)))))))
 
 (define (project-ripgrep-in root pattern)
   (let ((matches (rg--matches root pattern))

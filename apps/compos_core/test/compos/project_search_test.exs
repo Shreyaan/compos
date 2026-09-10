@@ -111,6 +111,36 @@ defmodule Compos.ProjectSearchTest do
       assert window_buffer() == ~s{"*zz-ps*"}
     end
 
+    test "a match in a file over the cap previews nothing and opens nothing", %{root: root} do
+      # a generated blob in the checkout: reading it, parsing it and building
+      # one line structure per line is seconds of work for a row the reader
+      # steps over. The look leaves the window alone and says the size.
+      big = Path.join(root, "lib/big.txt")
+      File.write!(big, String.duplicate("needle in a haystack\n", 400))
+      saved = eval!("peek-max-file-size")
+      eval!("(set! peek-max-file-size 1024)")
+
+      eval!(~s{(begin (buffer-create "*zz-ps*") (switch-to-buffer! "*zz-ps*"))})
+      eval!(~s{(project-ripgrep-in "#{root}" "needle")})
+
+      labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
+      assert "lib/big.txt:1" in labels, "the match is still offered"
+
+      # step onto a big-file match: nothing opens, and the window stays
+      press(["C-n"])
+      assert window_buffer() == ~s{"#{root}/lib/b.txt"}
+      press(["C-n"])
+      assert eval!(~s{(buffer-known? "#{big}")}) == "#f"
+      assert window_buffer() == ~s{"#{root}/lib/b.txt"}
+
+      # RET is not a look: the file the reader asked for opens
+      press("RET")
+      assert eval!("(current-buffer)") == ~s{"#{big}"}
+
+      eval!("(set! peek-max-file-size #{saved})")
+      Compos.Core.kill_buffer(big)
+    end
+
     test "a pattern with no match says so and opens no prompt", %{root: root} do
       eval!(~s{(project-ripgrep-in "#{root}" "zzz-no-such-text")})
       refute Editor.render_state().minibuffer
