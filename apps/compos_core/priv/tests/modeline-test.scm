@@ -168,6 +168,30 @@
                     "and every list row leads with the same name")
       (buffer-kill! buf))))
 
+(deftest 'a-chat-title-holds-at-most-six-words
+  "the card writer answers with a longer factual title; the chat clips it to a label"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-title-words*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (buffer-set-local! buf 'chat-turn-active #t)
+      (buffer-set-local! buf 'agent-saved-mark 0)
+      (buffer-set-local! buf 'agent-blocks '())
+      (chat-summary-land! buf "Finding where the chat title is set in code")
+      (check-equal! (buffer-local buf 'chat-title)
+                    "Finding where the chat title is"
+                    "the first label keeps only its first six words")
+      (check-equal! (buffer-local buf 'chat-summary)
+                    "Finding where the chat title is set in code"
+                    "the running summary keeps the whole sentence")
+      (check-equal! (chat-title--short "one two three four five six seven")
+                    "one two three four five six"
+                    "a seven-word title clips to six")
+      (check-equal! (chat-title--short "a short label")
+                    "a short label"
+                    "a label under the cap keeps every word")
+      (buffer-kill! buf))))
+
 (deftest 'the-summary-falls-back-to-the-cheap-model-when-the-card-writer-answers-nothing
   "ready but empty is the same case as not installed: the chat still gets a label"
   (lambda ()

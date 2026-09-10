@@ -1453,7 +1453,8 @@
   ;; the log holds, so the title is still the label it wore first.
   (let ((titled (string? (buffer-local buf 'chat-title))))
     (unless titled
-      (buffer-set-local! buf 'chat-title (chat-title--short (or (chat-title--first-summary buf) text)))
+      (buffer-set-local! buf 'chat-title
+        (chat-title--short (or (chat-title--first-summary buf) text))))
       (run-hook-with-args 'chat-summary-hook buf 'title (buffer-local buf 'chat-title))))
   (run-hook-with-args 'chat-summary-hook buf 'summary text)
   (let ((log (or (buffer-local buf 'chat-summary-log) '())))
