@@ -34,11 +34,38 @@ defmodule Compos.Core.EmbeddingIndex do
       path = Keyword.get(opts, :path, cache_path())
 
       query_hash = content_hash(model, dimensions, query)
+      query_cache = :persistent_term.get({__MODULE__, :queries, path}, %{})
+      available = prepared(texts, model, dimensions, path, Keyword.get(opts, :gen))
 
-      :global.trans({{__MODULE__, :query, path, query_hash}, self()}, fn ->
-        do_search(query, texts, api_key, model, dimensions, path, opts)
-      end)
+      cond do
+        available == :not_prepared ->
+          {:error, :not_prepared}
+
+        available == [] ->
+          {:ok, []}
+
+        # Everything this query needs is already known: score it here and
+        # now. The lock below serialises callers that would embed the same
+        # text twice, and taking it here made a warm running off-lane block
+        # the very query it was warming FOR.
+        Map.has_key?(query_cache, query_hash) ->
+          {:ok, score(Map.fetch!(query_cache, query_hash), available)}
+
+        Keyword.get(opts, :cached_only, false) ->
+          {:error, :absent}
+
+        true ->
+          :global.trans({{__MODULE__, :query, path, query_hash}, self()}, fn ->
+            do_search(query, texts, api_key, model, dimensions, path, opts)
+          end)
+      end
     end
+  end
+
+  defp score(query_vector, available) do
+    available
+    |> Enum.map(fn {index, vector} -> {index, cosine(query_vector, vector)} end)
+    |> Enum.sort_by(fn {_index, score} -> -score end)
   end
 
   def search(_, _, _, _), do: {:error, :invalid_arguments}
@@ -83,24 +110,61 @@ defmodule Compos.Core.EmbeddingIndex do
     end)
   end
 
+  # The corpus side of a query never changes between two queries of the same
+  # catalog generation: the same texts hash to the same vectors. Hashing
+  # eighteen hundred strings and gathering their vectors on every lookup was
+  # the whole cost of a repeated query. Prepare it once per generation and a
+  # query is the cosine pass alone.
+  defp prepared(texts, model, dimensions, path, gen) do
+    key = {__MODULE__, :prepared, path, model, dimensions}
+
+    case :persistent_term.get(key, :missing) do
+      %{gen: ^gen, available: available} when not is_nil(gen) ->
+        available
+
+      # the caller kept its texts because it believed this generation was
+      # ready, and it is not: say so rather than score against nothing
+      _ when texts == [] ->
+        :not_prepared
+
+      _ ->
+        cache = load_cache(path, model, dimensions)
+
+        available =
+          texts
+          |> Enum.map(&to_string/1)
+          |> Enum.map(&content_hash(model, dimensions, &1))
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {hash, index} ->
+            case Map.fetch(cache.vectors, hash) do
+              {:ok, vector} -> [{index, vector}]
+              :error -> []
+            end
+          end)
+
+        if gen, do: :persistent_term.put(key, %{gen: gen, available: available})
+        available
+    end
+  end
+
+  @doc "Forget the prepared corpus matrix; the next query rebuilds it."
+  def forget_prepared(opts \\ []) do
+    path = Keyword.get(opts, :path, cache_path())
+    model = Keyword.get(opts, :model, @default_model)
+    dimensions = Keyword.get(opts, :dimensions, @default_dimensions)
+    :persistent_term.erase({__MODULE__, :prepared, path, model, dimensions})
+    :ok
+  end
+
+  # Only reached when the query has no vector yet, under the lock that keeps
+  # two callers from buying the same embedding twice. Another caller may have
+  # bought it while we waited, so the cache is read again here.
   defp do_search(query, texts, api_key, model, dimensions, path, opts) do
-    texts = Enum.map(texts, &to_string/1)
-    hashes = Enum.map(texts, &content_hash(model, dimensions, &1))
-    cache = load_cache(path, model, dimensions)
     query_hash = content_hash(model, dimensions, query)
     query_cache = :persistent_term.get({__MODULE__, :queries, path}, %{})
+    available = prepared(texts, model, dimensions, path, Keyword.get(opts, :gen))
 
-    available =
-      hashes
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {hash, index} ->
-        case Map.fetch(cache.vectors, hash) do
-          {:ok, vector} -> [{index, vector}]
-          :error -> []
-        end
-      end)
-
-    if available == [] do
+    if available == [] or available == :not_prepared do
       {:ok, []}
     else
       missing =
@@ -110,15 +174,8 @@ defmodule Compos.Core.EmbeddingIndex do
 
       with {:ok, fresh} <- embed_missing(missing, api_key, model, dimensions, opts) do
         query_vector = Map.get(fresh, query_hash) || Map.fetch!(query_cache, query_hash)
-
         put_query(path, query_hash, query_vector, query_cache)
-
-        scores =
-          available
-          |> Enum.map(fn {index, vector} -> {index, cosine(query_vector, vector)} end)
-          |> Enum.sort_by(fn {_index, score} -> -score end)
-
-        {:ok, scores}
+        {:ok, score(query_vector, available)}
       else
         {:error, reason} = error ->
           Logger.warning("apropos query embedding unavailable: #{inspect(reason)}")
@@ -145,6 +202,9 @@ defmodule Compos.Core.EmbeddingIndex do
         # Keep every vector already paid for. A package can unload and load
         # again without embedding the same content a second time.
         write_cache!(path, model, dimensions, Map.merge(cache.vectors, fresh))
+        # the prepared matrix was gathered before these vectors existed, so
+        # it names fewer entries than the catalog now has
+        forget_prepared(path: path, model: model, dimensions: dimensions)
       end
 
       {:ok, map_size(fresh)}

@@ -965,9 +965,19 @@
   '(("C-n/C-p" "move") ("M-n/M-p" "section") ("TAB" "fold")
     ("M-g" "regroup") ("RET" "visit") ("C-g" "close")))
 
+;; C-g ends the prompt, so the table it stood in front of goes with it.
+;; Ask the popup to take it first, then check: popup-close! clears the
+;; popup class before it disposes the window, and its work and layout
+;; restores can put the table straight back on screen. A table left
+;; standing is no longer a popup to anything, so nothing else would ever
+;; close it. The close reads the result rather than trusting the attempt.
 (define (ibuffer-prompt-close! view)
   (when (and (popup-open?) (equal? (window-buffer (popup-window)) view))
-    (popup-dismiss!)))
+    (popup-dismiss!))
+  (let ((w (window-showing view)))
+    (when w
+      (window-quit-restore! w)
+      (buffer-kill! view))))
 
 ;; the wall time of the last ibuffer-prompt-line!, the minibuffer setup
 ;; alone: (ibuffer-prompt-line-ms) reads it back

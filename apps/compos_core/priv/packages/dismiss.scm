@@ -29,8 +29,18 @@
             (let ((cmd (keymap-lookup (car maps) "q")))
               (if cmd cmd (loop (cdr maps))))))))
 
+;; The table a prompt stands in front of is part of the prompt, not a
+;; thing to read: C-x b is the minibuffer's own form. It is read-only and
+;; its mode gives it q, which is what a reading surface is made of, so
+;; the test above lets it through and the reader gets a Reading bar and a
+;; q that means nothing. The prompt takes the whole surface away.
+(define (dismiss--prompt-surface? buf)
+  (and (boundp '*mb-list-buffer*) (equal? buf *mb-list-buffer*)))
+
 (define (buffer-dismissible? buf)
   (and (buffer-known? buf) (buffer-read-only? buf)
+       (not (minibuffer-buffer? buf))
+       (not (dismiss--prompt-surface? buf))
        (let ((cmd (dismiss--normal-command buf)))
          (or (buffer-parent buf) (pair? (buffer-children buf))
              (member cmd '("quit-window" "dired-quit" "collect-quit"
@@ -196,6 +206,17 @@
 (advice-add! 'buffer-kill! 'before 'dismiss-unlink 'dismiss--before-kill!)
 (advice-add! 'set-mode! 'after 'dismiss-presentation 'dismiss--after-mode!)
 (advice-add! 'buffer-set-read-only! 'after 'dismiss-presentation 'dismiss--after-mode!)
+;; A prompt is not a reading surface, so the flag that makes one never
+;; lands there. A mode setup that runs while a prompt is up takes the
+;; prompt for the current buffer, and list-mode, collect-mode and peek
+;; all end in a read-only flag: that is how q and the Reading bar reached
+;; a minibuffer. The mode is the whole test.
+(advice-add! 'buffer-set-read-only! 'around 'minibuffer-never-read-only
+  (lambda (next &rest args)
+    (if (and (pair? args) (pair? (cdr args)) (cadr args)
+             (minibuffer-buffer? (car args)))
+        #f
+        (apply next args))))
 (add-hook! 'buffer-renamed-hook 'dismiss--renamed!)
 (add-hook! 'window-configuration-change-hook 'dismiss-sync-visible!)
 (add-hook! 'post-command-hook 'dismiss-sync-visible!)

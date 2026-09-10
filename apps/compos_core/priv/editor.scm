@@ -2675,7 +2675,10 @@
     (message "Quit the outer prompt"))
   ;; a rail belongs to one prompt: the next one starts without it
   (mb-rail-reset!)
-  (minibuffer-read*--raw prompt cands handlers))
+  (let ((r (minibuffer-read*--raw prompt cands handlers)))
+    ;; the frame's prompt buffer exists once a prompt has opened in it
+    (minibuffer-mode-ensure!)
+    r))
 
 ;; one interaction model: a completion prompt is the BOTTOM bar, like
 ;; Emacs — the candidates sit above the input and the input sits on the
@@ -2897,35 +2900,6 @@
             (list 'style style))
       (if complete (list (list 'complete complete)) '())
       (if collect (list (list 'collect collect)) '()))))
-
-(let ((mb (minibuffer-buffer)))
-  (local-set-key* mb "RET" "minibuffer-confirm")
-  (local-set-key* mb "M-RET" "minibuffer-confirm-input")
-  (local-set-key* mb "C-RET" "minibuffer-confirm-context")
-  (local-set-key* mb "C-g" "minibuffer-cancel")
-  (local-set-key* mb "TAB" "minibuffer-complete")
-  (local-set-key* mb "C-n" "minibuffer-next-candidate")
-  (local-set-key* mb "<down>" "minibuffer-next-candidate")
-  (local-set-key* mb "C-p" "minibuffer-previous-candidate")
-  (local-set-key* mb "<up>" "minibuffer-previous-candidate")
-  ;; the palette's two lists: <right> steps into the one on the right,
-  ;; <left> steps back. With no rail they are the point motion they have
-  ;; always been, and C-f/C-b move point either way
-  (local-set-key* mb "<right>" "minibuffer-rail-enter")
-  (local-set-key* mb "<left>" "minibuffer-rail-exit")
-  ;; a list behind the prompt takes these first; with no list they are
-  ;; the history walk they have always been
-  (local-set-key* mb "M-p" "minibuffer-previous-section")
-  (local-set-key* mb "M-n" "minibuffer-next-section")
-  (local-set-key* mb "M-g" "minibuffer-regroup")
-  ;; a search repeats from inside its own prompt
-  (local-set-key* mb "C-s" "isearch-repeat-forward")
-  (local-set-key* mb "C-r" "isearch-repeat-backward")
-  ;; the prompt continues as a buffer — see minibuffer-collect below
-  (local-set-key* mb "C-c C-o" "minibuffer-collect")
-  ;; the same prompt as the bar, the popup, or the modal, while it is up
-  (local-set-key* mb "C-c C-t" "minibuffer-cycle-shape")
-  (local-set-key* mb "DEL" "minibuffer-delete-backward"))
 
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
 ;;; A hook is a name and a list of functions. add-hook! puts a function on
@@ -4447,6 +4421,64 @@
             (if dir? "Dired" (or mode "Fundamental"))
             (string-pad-left (car (cdr st)) 6)
             (car (cdr (cdr st)))))))
+
+;;; The prompt's input is a buffer, because typing, DEL, yank and undo are
+;;; a buffer's own work. It is not a buffer of the buffer world: nothing
+;;; reads it, dismisses it, or saves it. That difference is a major mode,
+;;; so every rule about prompts asks the mode instead of matching the
+;;; name — and the prompt's keys are the mode's map, so every frame's
+;;; prompt has them, not only the frame that was up when this file loaded.
+(define-mode "minibuffer-mode"
+  (lambda ()
+    ;; A prompt is input, never a reading surface. The read-only flag —
+    ;; and the q dismissal and Reading bar that follow it — belongs to
+    ;; the buffers you look at. A mode setup that runs while a prompt is
+    ;; up sees the prompt as the current buffer, and that is how the flag
+    ;; arrived there at all.
+    (buffer-set-read-only! (current-buffer) #f)))
+
+(mode-doc! "minibuffer-mode"
+  "The buffer behind a prompt. It holds what you type and nothing else: no read-only flag, no dismissal, no reading surface.")
+
+(mode-keys! "minibuffer-mode"
+  '(("RET" "minibuffer-confirm")
+    ("M-RET" "minibuffer-confirm-input")
+    ("C-RET" "minibuffer-confirm-context")
+    ("C-g" "minibuffer-cancel")
+    ("TAB" "minibuffer-complete")
+    ("C-n" "minibuffer-next-candidate")
+    ("<down>" "minibuffer-next-candidate")
+    ("C-p" "minibuffer-previous-candidate")
+    ("<up>" "minibuffer-previous-candidate")
+    ;; the palette's two lists: <right> steps into the one on the right,
+    ;; <left> steps back. With no rail they are the point motion they have
+    ;; always been, and C-f/C-b move point either way
+    ("<right>" "minibuffer-rail-enter")
+    ("<left>" "minibuffer-rail-exit")
+    ;; a list behind the prompt takes these first; with no list they are
+    ;; the history walk they have always been
+    ("M-p" "minibuffer-previous-section")
+    ("M-n" "minibuffer-next-section")
+    ("M-g" "minibuffer-regroup")
+    ;; a search repeats from inside its own prompt
+    ("C-s" "isearch-repeat-forward")
+    ("C-r" "isearch-repeat-backward")
+    ;; the prompt continues as a buffer — see minibuffer-collect
+    ("C-c C-o" "minibuffer-collect")
+    ;; the same prompt as the bar, the popup, or the modal, while it is up
+    ("C-c C-t" "minibuffer-cycle-shape")
+    ("DEL" "minibuffer-delete-backward")))
+
+(define (minibuffer-buffer? buf)
+  (if (and buf (buffer-known? buf) (buffer-mode-is? buf "minibuffer-mode")) #t #f))
+
+;; Every frame makes its own prompt buffer, on its first prompt. The mode
+;; goes on there rather than at load: a frame opened later is a prompt too.
+(define (minibuffer-mode-ensure! &optional buf)
+  (let ((buf (or buf (minibuffer-buffer))))
+    (when (and buf (buffer-exists? buf) (not (minibuffer-buffer? buf)))
+      (with-current-buffer buf (lambda () (set-mode! "minibuffer-mode"))))
+    buf))
 
 (define-mode "text-mode" (lambda () #t))
 (define-mode "scheme-mode" (lambda () #t))   ; scheme grammar pending
@@ -11556,6 +11588,10 @@
 (define (dash--vcs buf)
   (and (boundp 'jj-modeline-line) (jj-modeline-line buf)))
 
+(define (dash--preset buf)
+  (and (boundp (quote llm-config-preset-name))
+       (llm-config-preset-name buf)))
+
 ;; the chat's title: the first label its running summary wrote. The bar
 ;; names the chat, and a name that changes under you names nothing --
 ;; the paragraph the summary says now is a click away, in the log.
@@ -13583,6 +13619,8 @@
 (catalog-meta! 'function "name-icon!" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "buffer-name-segments" 'domain 'interaction 'effects '(read))
 (public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT STYLE COMPLETE COLLECT) — preview candidates and optionally route collected rows")
+(public! 'minibuffer-buffer? "(minibuffer-buffer? BUF) — whether BUF is a prompt's input buffer, i.e. in minibuffer-mode")
+(public! 'minibuffer-mode-ensure! "(minibuffer-mode-ensure! &optional BUF) — put minibuffer-mode on this frame's prompt buffer; answers the buffer")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 (catalog-meta! 'function "window-preview-buffer!"
   'domain 'interaction 'effects '(write display))

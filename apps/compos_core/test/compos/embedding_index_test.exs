@@ -106,6 +106,49 @@ defmodule Compos.EmbeddingIndexTest do
     assert rebuilt_request["input"] == changed
   end
 
+  test "a generation is gathered once, and an unknown query never reaches the network",
+       %{path: path} do
+    texts = [
+      "function buffer-kill! Kill buffer B and remove its working copy.",
+      "function load-theme Apply a named color theme."
+    ]
+
+    opts = [path: path, dimensions: 2, gen: 7]
+    assert {:ok, 2} = EmbeddingIndex.sync(texts, "test-key", opts)
+    assert_receive {:embedding_request, _sync}
+
+    # a query nobody has asked has no vector, and this caller will not wait
+    # for one: it says so instead of embedding on the spot
+    assert {:error, :absent} =
+             EmbeddingIndex.search("remove the current document", texts, "test-key",
+               opts ++ [cached_only: true]
+             )
+
+    refute_receive {:embedding_request, _}, 100
+
+    # asked for real, it embeds once and the generation is gathered
+    assert {:ok, [{0, _}, {1, _}]} =
+             EmbeddingIndex.search("remove the current document", texts, "test-key", opts)
+
+    assert_receive {:embedding_request, query_request}
+    assert query_request["input"] == ["remove the current document"]
+
+    # now the caller may keep its texts at home: the generation names them
+    assert {:ok, [{0, _}, {1, _}]} =
+             EmbeddingIndex.search("remove the current document", [], "test-key",
+               opts ++ [cached_only: true]
+             )
+
+    # a generation the index never gathered cannot be answered from nothing
+    assert {:error, :not_prepared} =
+             EmbeddingIndex.search(
+               "remove the current document",
+               [],
+               "test-key",
+               [path: path, dimensions: 2, gen: 8, cached_only: true]
+             )
+  end
+
   test "a smaller corpus keeps the vectors it left out" do
     root = Path.join(System.tmp_dir!(), "compos-embedding-#{System.unique_integer([:positive])}")
     path = Path.join(root, "apropos.etf")

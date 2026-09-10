@@ -454,7 +454,9 @@ defmodule Compos.Core.SchemeAPI do
       "vm-process-kill!" =>
         "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive.",
       "embedding-search" =>
-        "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE) — embed QUERY with OpenAI and return eligible cosine scores from the synchronized text vectors.",
+        "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE GEN CACHED-ONLY) — eligible cosine scores for QUERY against the vectors of catalog generation GEN. CACHED-ONLY answers #f rather than embedding a query over the network.",
+      "embedding-warm!" =>
+        "(embedding-warm! QUERY TEXTS KEY GEN) — embed QUERY off the caller's lane so the next ask scores without waiting.",
       "embedding-sync!" =>
         "(embedding-sync! TEXTS KEY) — embed missing catalog TEXTS with OpenAI and persist their vectors by content hash.",
       "embedding-cache-clear!" =>
@@ -1456,21 +1458,57 @@ defmodule Compos.Core.SchemeAPI do
           {:error, _reason} -> false
         end
       end,
-      "embedding-search" => fn [query, texts, key, limit, eligible] ->
-        case Compos.Core.EmbeddingIndex.search(to_string(query), texts, to_string(key)) do
-          {:ok, scores} ->
-            mask = List.to_tuple(eligible)
+      # GEN is the catalog generation the texts belong to: the index keeps
+      # the vectors it gathered for that generation and rebuilds them for no
+      # other. `false` for a query nobody asked before, which needs the
+      # network — the caller decides whether to wait for one.
+      "embedding-search" => fn [query, texts, key, limit, eligible, gen, cached_only] ->
+        opts = [gen: gen, cached_only: cached_only == true]
 
+        case Compos.Core.EmbeddingIndex.search(to_string(query), texts, to_string(key), opts) do
+          {:ok, scores} ->
+            # ELIGIBLE is #t when no filter narrows the answer. Building that
+            # mask and handing it over was most of what a query cost, and
+            # every entry in it said yes.
             scores
-            |> Enum.filter(fn {index, _score} ->
-              index < tuple_size(mask) and elem(mask, index)
+            |> then(fn scored ->
+              if is_list(eligible) do
+                mask = List.to_tuple(eligible)
+
+                Enum.filter(scored, fn {index, _score} ->
+                  index < tuple_size(mask) and elem(mask, index)
+                end)
+              else
+                scored
+              end
             end)
             |> Enum.take(max(0, limit))
             |> Enum.map(fn {index, score} -> [index, score] end)
 
+          {:error, :absent} ->
+            false
+
+          # the caller withheld the texts for a generation the index has not
+          # gathered yet; it retries with them
+          {:error, :not_prepared} ->
+            {:sym, "not-prepared"}
+
           {:error, _reason} ->
             []
         end
+      end,
+      # Embed QUERY for the next ask. It runs off the caller's lane, so the
+      # ask that missed answers from the catalog now and the one after it
+      # gets the semantic pass for free.
+      "embedding-warm!" => fn [query, texts, key, gen] ->
+        q = to_string(query)
+        k = to_string(key)
+
+        Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+          Compos.Core.EmbeddingIndex.search(q, texts, k, gen: gen)
+        end)
+
+        :void
       end
     }
   end

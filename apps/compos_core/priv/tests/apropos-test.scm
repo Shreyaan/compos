@@ -246,7 +246,7 @@
           (old-key llm-key)
           (seen #f))
       (set! *apropos--embedding-search*
-        (lambda (query texts key limit eligible)
+        (lambda (query texts key limit eligible gen cached-only)
           (set! seen query)
           '()))
       (set! llm-key (lambda (provider) "test-key"))

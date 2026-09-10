@@ -668,6 +668,16 @@
         (buffer-set-local! b 'modeline-group-color color))
       known)))
 
+;; A membership change rewrites the headline too: its group segment reads
+;; the buffer's own memberships. post-command! syncs the buffer the
+;; command ran in and no other, and a move takes every marked buffer at
+;; once — the rest kept drawing the group they had just left. The sweep
+;; above stays out of this: it runs over every buffer there is, and a
+;; dashboard apiece is what made a keystroke cost 175ms once.
+(define (buffer-group-display-refresh! b)
+  (buffer-modeline-group-refresh! b)
+  (when (boundp 'dashboard--sync!) (dashboard--sync! b)))
+
 (define (modeline-groups-refresh!)
   ;; the list can name a buffer that sleeps or died: a local set there exits
   (for-each buffer-modeline-group-refresh! (filter buffer-exists? (buffer-list)))
@@ -694,7 +704,7 @@
     (buffer-set-local! b 'group-roles '())
     (buffer-set-local! b 'group #f)
     (buffer-set-local! b 'companion-of #f)
-    (buffer-modeline-group-refresh! b)
+    (buffer-group-display-refresh! b)
     (when (boundp 'group-current-recalculate!)
       (group-current-recalculate!))
     id))
@@ -744,7 +754,7 @@
           ;; the membership stops being one the buffer merely inherited
           ((buffer-in-group? b id)
            (buffer-set-local! b 'group-inherited #f)
-           (buffer-modeline-group-refresh! b)
+           (buffer-group-display-refresh! b)
            id)
           ;; ONE group at a time. Joining is leaving: a buffer that lived
           ;; somewhere else moves here rather than answering two questions
@@ -758,7 +768,7 @@
             (buffer-set-local! b 'group #f)
             (buffer-set-local! b 'group-inherited #f)
             (buffer-set-local! b 'companion-of #f)
-            (buffer-modeline-group-refresh! b)
+            (buffer-group-display-refresh! b)
             (when (boundp 'group-current-recalculate!)
               (group-current-recalculate!))
             id))))
@@ -777,7 +787,7 @@
           (buffer-set-local! b 'group #f)
           (buffer-set-local! b 'group-inherited #f)
           (buffer-set-local! b 'companion-of #f)
-          (buffer-modeline-group-refresh! b)))
+          (buffer-group-display-refresh! b)))
     (when (boundp 'group-current-recalculate!)
       (group-current-recalculate!))
     id))
@@ -794,7 +804,7 @@
             (buffer-set-local! b 'group-roles
               (remove (lambda (entry) (equal? (car entry) id))
                       (or (buffer-local b 'group-roles) '())))))
-      (buffer-modeline-group-refresh! b))
+      (buffer-group-display-refresh! b))
     (when (boundp 'group-current-recalculate!)
       (group-current-recalculate!))))
 
@@ -3355,6 +3365,23 @@
     (group-restore-sanitize! here)
     (group-layout-save! here)))
 
+;; Put the buffers a move brought here on screen, and let the frame's own
+;; layout algorithm place them: the one you were on becomes the main pane,
+;; the rest join the stack. The arrangement is then this group's, so it is
+;; what the group shows the next time you enter it.
+(define (group-move-show! id buffers)
+  (let ((mine (filter buffer-known? buffers)))
+    (when (pair? mine)
+      (for-each (lambda (buf)
+                  (unless (member buf (layout-visible-buffers))
+                    (display-buffer buf)))
+                mine)
+      (let ((w (window-showing (car mine))))
+        (when w (select-window! w)))
+      (when (and (boundp 'autolayout-mode) autolayout-mode)
+        (autolayout-apply! (car mine)))
+      (group-layout-save! id))))
+
 (define (group-move-buffers-to! buffers destination &optional keep-windows?)
   (let ((id (group-ensure-record! destination)))
     (cond
@@ -3381,6 +3408,10 @@
           ;; the buffers leave, enter the destination so the user is not left
           ;; looking at the old group's repaired layout.
           (switch-to-group! id)
+          ;; The destination's saved layout was made before these buffers
+          ;; joined it, so entering the group draws it as it was and the move
+          ;; looks like it did nothing. What moved is what you want to see.
+          (unless keep-windows? (group-move-show! id eligible))
           (group-current-recalculate!)
           (run-hooks 'group-membership-hook)
           (message (string-append "Moved " (number->string (length eligible))

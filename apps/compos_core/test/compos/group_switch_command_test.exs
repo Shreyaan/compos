@@ -74,6 +74,63 @@ defmodule Compos.GroupSwitchCommandTest do
     %{first: first, second: second, third: third}
   end
 
+  test "a move shows what it moved, not the destination as it was", %{
+    first: first,
+    second: second
+  } do
+    # The destination's saved layout was made before the buffer joined it, so
+    # entering the group drew it as it was: you moved a buffer somewhere and
+    # landed looking at everything except it.
+    destination = group_id("move-show-dest-#{System.unique_integer([:positive])}")
+
+    eval!(~s{(buffer-add-group! "#{second}" "#{destination}")})
+    eval!(~s{(switch-to-group! "#{destination}")})
+    eval!(~s{(switch-to-buffer-here! "#{second}")})
+    eval!(~s{(group-layout-save! (group-resolve-id "#{destination}"))})
+
+    eval!(~s{(switch-to-buffer! "#{first}")})
+    eval!(~s{(group-move-buffers-to! (list "#{first}") "#{destination}")})
+
+    assert eval!("(layout-visible-buffers)") =~ first,
+           "the moved buffer is not on screen in the group it moved to"
+
+    assert eval!("(current-buffer)") == ~s("#{first}")
+  end
+
+  test "a move rewrites the headline of every buffer it moved", %{
+    first: first,
+    second: second
+  } do
+    # post-command! syncs the buffer the command ran in and no other, so a
+    # move that takes several buffers left the rest drawing the group they
+    # had just left. Only the current one caught up.
+    source = group_id("headline-source-#{System.unique_integer([:positive])}")
+    destination = group_id("headline-dest-#{System.unique_integer([:positive])}")
+
+    eval!(~s{(buffer-add-group! "#{first}" "#{source}")})
+    eval!(~s{(buffer-add-group! "#{second}" "#{source}")})
+    eval!(~s{(switch-to-buffer! "#{first}")})
+
+    # a real command, so the headline exists to go stale in the first place
+    Session.run_command("beginning-of-buffer")
+
+    eval!(~s{(define-command "zz-headline-move"
+               (lambda () (group-move-buffers-to! (list "#{first}" "#{second}") "#{destination}")))})
+
+    Session.run_command("zz-headline-move")
+
+    for buffer <- [first, second] do
+      assert eval!(~s{(map group-label (dashboard--group-ids "#{buffer}"))}) =~ "headline-dest",
+             "#{buffer} did not move"
+
+      assert eval!(
+               ~s{(equal? (buffer-local "#{buffer}" 'dashboard-line-blocks)
+                          (dashboard-line-blocks "#{buffer}"))}
+             ) == "#t",
+             "#{buffer} kept a headline from before the move"
+    end
+  end
+
   test "grouped filenames carry their group face in minibuffer candidates", %{
     first: first,
     second: second

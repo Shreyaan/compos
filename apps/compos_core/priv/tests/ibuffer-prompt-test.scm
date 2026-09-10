@@ -116,7 +116,23 @@
     (minibuffer-change! "zz-ibp-c")
     (minibuffer-cancel!)
     (check-false! (popup-open?) "the popup is closed")
+    ;; the table went with the prompt: a table left standing in a window is
+    ;; no longer a popup to anything, so nothing would ever close it
+    (check-false! (window-showing " *buffers*") "the table is not left standing")
     (check-equal! (current-buffer) "*zz-ibp-a*" "the buffer you came from")
+    (ibp-reset!)))
+
+(deftest 'cancel-still-closes-the-table-when-the-popup-lost-its-floating-window
+  "the work window can die under the popup (or C-x 1 collapses to it); C-g still closes the table"
+  (lambda ()
+    (ibp-setup!)
+    (run-command "ibuffer-prompt")
+    (delete-other-windows!)
+    (check-false! (popup-open?) "with nothing left under it, it no longer counts as floating")
+    (minibuffer-cancel!)
+    (check-false! (minibuffer-state) "the prompt is closed")
+    (check-false! (window-showing " *buffers*") "the table is closed, not left standing")
+    (check-false! (buffer-known? " *buffers*") "and its buffer is gone, the way q's own close leaves it")
     (ibp-reset!)))
 
 (deftest 'the-chat-prompt-is-the-same-table-over-the-chats

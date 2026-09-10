@@ -105,6 +105,22 @@ defmodule Compos.DismissTest do
     assert eval!("(map cadr (window-list))", f) == ~s{("zz-dismiss-parent" "zz-dismiss-parent")}
   end
 
+  test "the table a prompt stands in front of is not a reading surface", %{frame: f} do
+    # C-x b is the minibuffer's own form: a prompt line with the buffer
+    # table behind it. The table is read-only and its mode gives it q,
+    # which is what a reading surface is made of — but it is part of the
+    # prompt, and the prompt closes with C-g. A Reading bar there offers a
+    # q that means nothing.
+    eval!(~s{(run-command "ibuffer-prompt")}, f)
+
+    assert eval!(~s{(and (minibuffer-state) #t)}, f) == "#t"
+    assert eval!(~s{(buffer-dismissible? " *buffers*")}, f) == "#f"
+    assert eval!(~s{(buffer-local " *buffers*" 'dismissible)}, f) == "#f"
+    assert eval!(~s{(minor-mode-on? " *buffers*" "dismiss-mode")}, f) == "#f"
+
+    eval!(~s{(minibuffer-cancel!)}, f)
+  end
+
   test "writable buffers keep typing q even when they own a child", %{frame: f} do
     eval!(
       """

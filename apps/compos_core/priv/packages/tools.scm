@@ -535,6 +535,10 @@
 ;; path local and cheap, then reconcile the durable vector index once after
 ;; the burst. A foreground query reads the last complete index and embeds only
 ;; its own text; it never repairs catalog vectors while an agent waits.
+;; the catalog generation whose vectors the index has already gathered, so a
+;; query can leave its texts at home
+(define *apropos--prepared-gen* -1)
+
 (define *apropos--embedding-sync-running* #f)
 (define *apropos--embedding-sync-pending* #f)
 (define *apropos--embedding-synced-gen* -1)
@@ -614,17 +618,48 @@
         (let* ((both (apropos--sources-cached rows))
                (sources (car both))
                (texts (nth 1 both))
-               (eligible (map (lambda (hit) (apropos--filter-match? hit filters)) sources))
+               ;; #t is "every entry is eligible": with no filter to apply,
+               ;; the mask is eighteen hundred yeses, and building and
+               ;; handing it over cost more than the scoring it guards
+               (eligible (if (null? filters)
+                             #t
+                             (map (lambda (hit) (apropos--filter-match? hit filters)) sources)))
                ;; The catalog texts already identify themselves as editor API
                ;; candidates. A repeated instruction prefix overwhelms a short
                ;; task query and changes its meaning in embedding space.
-               (scores (*apropos--embedding-search* query texts key
-                                                    apropos-semantic-limit eligible)))
-          (map (lambda (score)
-                 (append (nth (car score) sources)
-                         (list 'note "semantic match" 'semantic-score (nth 1 score))))
-               (filter (lambda (score) (>= (nth 1 score) apropos-semantic-threshold))
-                       scores))))))
+               ;;
+               ;; The generation names the vectors: the index gathers them
+               ;; once for it and answers every later query from that. And the
+               ;; search never goes to the network here — this runs on the
+               ;; Session, which takes one form at a time, so a question
+               ;; nobody has asked before would park every other caller for
+               ;; seconds. A miss warms the query off-lane and says so by
+               ;; answering #f; the next ask scores it.
+               ;; Handing eighteen hundred strings over on every query cost
+               ;; more than the scoring did. The index gathered them once for
+               ;; this generation; withhold them until it says it needs them.
+               (gen (catalog-generation))
+               (ready? (equal? gen *apropos--prepared-gen*))
+               (scores0 (*apropos--embedding-search* query (if ready? '() texts) key
+                                                     apropos-semantic-limit eligible
+                                                     gen #t))
+               (scores (if (equal? scores0 'not-prepared)
+                           (*apropos--embedding-search* query texts key
+                                                        apropos-semantic-limit eligible
+                                                        gen #t)
+                           scores0)))
+          (unless (equal? scores 'not-prepared) (set! *apropos--prepared-gen* gen))
+          (cond
+            ((equal? scores #f)
+             (when (boundp (quote embedding-warm!))
+               (embedding-warm! query texts key (catalog-generation)))
+             '())
+            (else
+              (map (lambda (score)
+                     (append (nth (car score) sources)
+                             (list 'note "semantic match" 'semantic-score (nth 1 score))))
+                   (filter (lambda (score) (>= (nth 1 score) apropos-semantic-threshold))
+                           scores))))))))
 
 (define (apropos-rebuild-embeddings!)
   (let ((path (embedding-cache-clear!))
@@ -762,20 +797,45 @@
 ;; QUERY is words, not a regex: "split window", "open a file", "chat cost".
 ;; Recipes come first: a task-level hit beats four name-level ones, and it
 ;; is the answer the caller actually wanted.
+;; What a reader cannot work out from the rest of the row. The enrichment
+;; appends the catalog entry to the hit, so a key the hit already carried
+;; arrives twice and only the first is ever read; the qualified name is
+;; the package and the name with a slash between them; the namespace and
+;; the category repeat the package and the domain in the common case; and
+;; a command's use line is its name in the one shape a command takes.
+;; Half the answer said nothing, and every agent reads this.
+(define (apropos--derivable? hit key value)
+  (let ((name (plist-get hit 'name))
+        (package (plist-get hit 'package))
+        (domain (plist-get hit 'domain)))
+    (cond ((member key '(note semantic-score)) #t)
+          ;; a command's use line stays: agents are told to read it, and a
+          ;; row that drops it asks every reader to know the shape by heart
+          ((equal? key 'use) (equal? value (plist-get hit 'sig)))
+          ((equal? key 'category) (equal? value domain))
+          ((equal? key 'namespace) (equal? value package))
+          ;; the qualified name is the NAMESPACE and the name: core/... for
+          ;; the editor's own, whose package is "editor". catalog-meta!
+          ;; takes a symbol for these as readily as a string, so join only
+          ;; what is already a string and keep the row whole otherwise.
+          ((equal? key 'qualified-name)
+           (let ((owner (or (plist-get hit 'namespace) package)))
+             (and (string? value) (string? name) (string? owner)
+                  (equal? value (string-append owner "/" name)))))
+          (else #f))))
+
 (define (apropos--public-hit hit)
   (if (not hit)
       #f
-      (let ((signature (plist-get hit 'sig)))
-        (let loop ((xs hit) (out '()))
-          (cond ((or (null? xs) (null? (cdr xs))) (reverse out))
-                ((or (member (car xs) '(note semantic-score))
-                     (and (equal? (car xs) 'use)
-                          signature
-                          (equal? (cadr xs) signature)))
-                 (loop (cdr (cdr xs)) out))
-                (else
-                  (loop (cdr (cdr xs))
-                        (cons (cadr xs) (cons (car xs) out)))))))))
+      (let loop ((xs hit) (seen '()) (out '()))
+        (cond ((or (null? xs) (null? (cdr xs))) (reverse out))
+              ((or (member (car xs) seen)
+                   (apropos--derivable? hit (car xs) (cadr xs)))
+               (loop (cdr (cdr xs)) (cons (car xs) seen) out))
+              (else
+                (loop (cdr (cdr xs))
+                      (cons (car xs) seen)
+                      (cons (cadr xs) (cons (car xs) out))))))))
 
 (define (apropos query &rest filters)
   ;; Build rows first. Their single-flight refresh also publishes the index.
@@ -805,8 +865,13 @@
          (literal-hits (append recipes (map (lambda (row) (car (cdr row))) literal-rows)))
          (suggestions (if (pair? literal-hits) '()
                           (apropos--name-suggestions query words index)))
+         ;; The semantic pass embeds the query through a network service,
+         ;; and it runs on the Session, which takes one form at a time: every
+         ;; caller waits behind it, so a keystroke that needs the Session
+         ;; queued for seconds. It is worth that only when the words found
+         ;; nothing. A query the catalog already answered is answered.
          (semantic-hits
-           (if lexical?
+           (if (or lexical? (pair? literal-hits))
                '()
                (filter (lambda (hit)
                          (and (not (apropos--has-hit? literal-hits hit))
