@@ -805,6 +805,10 @@
   (let ((owner (and (boundp (quote daemon-workspace-owner))
                     (daemon-workspace-owner root))))
     (cond
+      ;; A fresh registry can have no owner even though this daemon already
+      ;; runs the checkout. Claim it before considering another process.
+      ((and (not owner) (equal? (daemon-source-root) root))
+        (daemon-claim-workspace! root))
       ((and owner
             (equal? (plist-get owner 'url) (editor-url))
             (worktree--runs-compos? root)

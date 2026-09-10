@@ -11,6 +11,7 @@ defmodule Compos.Ui.MobileLive do
   """
 
   use Phoenix.LiveView
+  import Compos.Ui.ComposML, only: [sigil_M: 2]
 
   alias Compos.Core.{Editor, Events, Input, Session}
   alias Compos.Ui.EditorLive
@@ -541,46 +542,45 @@ defmodule Compos.Ui.MobileLive do
 
   # ── render ─────────────────────────────────────────────────────────
 
-  @impl true
-  def render(%{state: nil} = assigns) do
-    ~H"""
-    <div id="hh" class="hh splash" phx-hook="Handheld" data-boot={@boot_id}>
-      <div class="hh-splash">compos — connecting…</div>
-    </div>
+  def composml(%{state: nil} = assigns) do
+    ~M"""
+    <c-frame id="hh" class="hh splash" phx-hook="Handheld" data-boot={@boot_id}>
+      <c-group class="hh-splash">compos — connecting…</c-group>
+    </c-frame>
     """
   end
 
-  def render(assigns) do
-    ~H"""
-    <div id="hh" class="hh" phx-hook="Handheld" data-boot={@boot_id} data-frame={@frame} data-mb={to_string(@state.minibuffer != nil)}>
+  def composml(assigns) do
+    ~M"""
+    <c-frame id="hh" class="hh" phx-hook="Handheld" data-boot={@boot_id} data-frame={@frame} data-mb={to_string(@state.minibuffer != nil)}>
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(Compos.Ui.FaceCSS.css(@state.faces)) %></style>
       <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
 
       <.modeline leaf={@leaf} state={@state} />
 
-      <div class="hh-body">
-        <div
+      <c-group class="hh-body">
+        <c-group
           :if={@leaf && @leaf.render_mode not in ["agent", "html", "markdown", "file", "app", "terminal"]}
           class="hh-rail"
           data-rail="1"
         >
-          <span class="hh-rail-k">C-p</span>
-          <span class="hh-rail-w">point</span>
-          <span class="hh-rail-k">C-n</span>
-          <div class="hh-rail-mark" style={"top: #{rail_top(@leaf)}%"}></div>
-        </div>
+          <c-text class="hh-rail-k">C-p</c-text>
+          <c-text class="hh-rail-w">point</c-text>
+          <c-text class="hh-rail-k">C-n</c-text>
+          <c-group class="hh-rail-mark" style={"top: #{rail_top(@leaf)}%"}></c-group>
+        </c-group>
         <.content leaf={@leaf} />
-      </div>
+      </c-group>
 
-      <div class={"hh-composer #{if @state.minibuffer, do: "prompting"}"}>
-        <div class="hh-chips">
-          <div :for={c <- @view.chips} class="hh-chip" phx-click="compose" phx-value-text={c.chord}>
-            <span class="hh-chip-label">{c.label}</span>
-            <span class="hh-chip-chord">{c.chord}</span>
-          </div>
-        </div>
-        <div class="hh-input-row">
-          <span class="hh-prompt">{if @state.minibuffer, do: String.trim_trailing(@state.minibuffer.prompt, " "), else: "›"}</span>
+      <c-prompt class={"hh-composer #{if @state.minibuffer, do: "prompting"}"}>
+        <c-group class="hh-chips">
+          <c-group :for={c <- @view.chips} class="hh-chip" phx-click="compose" phx-value-text={c.chord}>
+            <c-text class="hh-chip-label">{c.label}</c-text>
+            <c-text class="hh-chip-chord">{c.chord}</c-text>
+          </c-group>
+        </c-group>
+        <c-group class="hh-input-row">
+          <c-text class="hh-prompt">{if @state.minibuffer, do: String.trim_trailing(@state.minibuffer.prompt, " "), else: "›"}</c-text>
           <input
             id="composer"
             class="hh-input"
@@ -592,13 +592,13 @@ defmodule Compos.Ui.MobileLive do
             enterkeyhint="send"
             placeholder={placeholder(@leaf, @state)}
           />
-          <span id="composer-send" class="hh-send">RET</span>
-        </div>
-        <div class={"hh-echo #{if echo_error?(@state.echo), do: "err"}"}>{@state.echo}</div>
-      </div>
+          <c-text id="composer-send" class="hh-send">RET</c-text>
+        </c-group>
+        <c-group class={"hh-echo #{if echo_error?(@state.echo), do: "err"}"}>{@state.echo}</c-group>
+      </c-prompt>
 
-      <div class="hh-tabs">
-        <div
+      <c-group class="hh-tabs">
+        <c-group
           :for={t <- @view.tabs}
           class={"hh-tab #{if t.current, do: "on"}"}
           data-kind={t.kind}
@@ -606,51 +606,52 @@ defmodule Compos.Ui.MobileLive do
           phx-click="tab"
           phx-value-buf={t.buf}
         >
-          <div class="hh-tab-kind">{t.kind}</div>
-          <div class="hh-tab-title">{t.label}</div>
-        </div>
-      </div>
+          <c-group class="hh-tab-kind">{t.kind}</c-group>
+          <c-group class="hh-tab-title">{t.label}</c-group>
+        </c-group>
+      </c-group>
 
-      <div :if={@fan} class="hh-scrim" phx-click="fan_quit"></div>
+      <c-group :if={@fan} class="hh-scrim" phx-click="fan_quit"></c-group>
       <.keys_panel :if={@fan} state={@state} keys={@keys} tab={@fan_tab} path={@fan_path} search={@search} />
 
-      <div id="chord-key" class={"hh-key #{if @fan, do: "on"}"}>
-        <span class="hh-key-glyph">{key_glyph(@state)}</span>
-        <span class="hh-key-cap">{if @fan, do: "close", else: "keys"}</span>
-      </div>
+      <c-group id="chord-key" class={"hh-key #{if @fan, do: "on"}"}>
+        <c-text class="hh-key-glyph">{key_glyph(@state)}</c-text>
+        <c-text class="hh-key-cap">{if @fan, do: "close", else: "keys"}</c-text>
+      </c-group>
 
       <.sheet :if={@state.minibuffer || (@state.transient && @state.transient[:groups])} state={@state} />
-    </div>
+    </c-frame>
     """
   end
 
   defp modeline(assigns) do
-    ~H"""
-    <div class="hh-modeline" phx-click="run" phx-value-cmd="modeline-expand">
-      <span class="hh-ml-flags">{flags(@leaf)}</span>
-      <span class="hh-ml-name">{ml_name(@leaf)}</span>
-      <span :if={@leaf && @leaf.modeline_preset not in [nil, ""]} class="hh-ml-mode">{@leaf.modeline_preset}</span>
-      <span class="hh-spacer"></span>
-      <span :if={@leaf && @leaf.modeline_info not in [nil, ""]} class="hh-ml-info">{@leaf.modeline_info}</span>
-      <span :if={@state.pending != []} class="hh-ml-pending">{Enum.join(@state.pending, " ")}-</span>
-    </div>
+    ~M"""
+    <c-modeline class="hh-modeline" phx-click="run" phx-value-cmd="modeline-expand">
+      <c-text class="hh-ml-flags">{flags(@leaf)}</c-text>
+      <c-buffer-name class="hh-ml-name">{ml_name(@leaf)}</c-buffer-name>
+      <c-mode :if={@leaf && @leaf.modeline_preset not in [nil, ""]} class="hh-ml-mode">{@leaf.modeline_preset}</c-mode>
+      <c-text class="hh-spacer"></c-text>
+      <c-text :if={@leaf && @leaf.modeline_info not in [nil, ""]} class="hh-ml-info">{@leaf.modeline_info}</c-text>
+      <c-text :if={@state.pending != []} class="hh-ml-pending">{Enum.join(@state.pending, " ")}-</c-text>
+    </c-modeline>
     """
   end
 
   defp content(%{leaf: nil} = assigns) do
-    ~H"""
-    <div class="hh-content"></div>
+    ~M"""
+    <c-buffer class="hh-content"></c-buffer>
     """
   end
 
   defp content(%{leaf: %{render_mode: "agent"}} = assigns) do
-    ~H"""
-    <div class="hh-content agent-view">
+    ~M"""
+    <c-buffer class="hh-content agent-view" presentation="agent" buffer={@leaf.buffer}>
       <.live_component
         :if={Map.has_key?(@leaf, :ag_blocks)}
         module={Compos.Ui.AgentTranscript}
         id={"agtx-#{@leaf.id}"}
         blocks={@leaf.ag_blocks}
+        verbosity={@leaf.agent.verbosity}
         win={@leaf.id}
         buf={@leaf.buffer}
         stick={@leaf.agent.stick}
@@ -658,21 +659,21 @@ defmodule Compos.Ui.MobileLive do
         scroll_anchor={@leaf.agent.scroll_anchor}
         scroll_offset={@leaf.agent.scroll_offset}
       />
-      <div :for={q <- Map.get(@leaf, :ag_queued, [])} class="ag-user ag-queued ag-queued-row">
-        <span class="ag-label">YOU</span>
-        <div class="ag-user-text">{q}</div>
-      </div>
-      <div
+      <c-user state="queued" :for={q <- Map.get(@leaf, :ag_queued, [])} class="ag-user ag-queued ag-queued-row">
+        <c-label class="ag-label">YOU</c-label>
+        <c-group class="ag-user-text">{q}</c-group>
+      </c-user>
+      <c-activity
         :if={Map.get(@leaf, :ag_activity) && @leaf.ag_activity != "disconnected"}
         class="ag-wait ag-activity"
-      ><span class="hh-blink"></span> <span class="ag-activity-text">{@leaf.ag_activity}</span> · C-g interrupts</div>
-    </div>
+      ><c-text class="hh-blink"></c-text> <c-text class="ag-activity-text">{@leaf.ag_activity}</c-text> · C-g interrupts</c-activity>
+    </c-buffer>
     """
   end
 
   defp content(%{leaf: %{render_mode: rm}} = assigns) when rm in ["html", "markdown"] do
-    ~H"""
-    <div class="hh-content">
+    ~M"""
+    <c-buffer class="hh-content">
       <iframe
         :if={Map.has_key?(@leaf, :preview)}
         class="hh-preview"
@@ -681,27 +682,27 @@ defmodule Compos.Ui.MobileLive do
         sandbox="allow-same-origin"
         title={@leaf.buffer}
       ></iframe>
-    </div>
+    </c-buffer>
     """
   end
 
   defp content(%{leaf: %{render_mode: "file"}} = assigns) do
-    ~H"""
-    <div class="hh-content">
+    ~M"""
+    <c-buffer class="hh-content">
       <iframe :if={Map.has_key?(@leaf, :file_url)} class="hh-preview" src={@leaf.file_url} sandbox="" title={@leaf.buffer}></iframe>
-    </div>
+    </c-buffer>
     """
   end
 
   defp content(assigns) do
-    ~H"""
-    <div class="hh-content hh-lines" id={"lines-#{@leaf.id}"}>
-      <div :for={ln <- Map.get(@leaf, :lines, [])} class={"hh-line #{if ln.current, do: "cur"}"} data-s={ln.start}>
-        <span class="hh-linenum">{ln.num}</span>
-        <span class="hh-line-text"><span :for={{txt, cls} <- ln.segs} class={cls}>{txt}</span><br :if={ln.segs == []} /></span>
-      </div>
-      <div :if={Map.get(@leaf, :lines, []) == []} class="hh-empty">{@leaf.buffer} · {@leaf.mode}</div>
-    </div>
+    ~M"""
+    <c-buffer class="hh-content hh-lines" id={"lines-#{@leaf.id}"}>
+      <c-group :for={ln <- Map.get(@leaf, :lines, [])} class={"hh-line #{if ln.current, do: "cur"}"} data-s={ln.start}>
+        <c-text class="hh-linenum">{ln.num}</c-text>
+        <c-text class="hh-line-text"><c-text :for={{txt, cls} <- ln.segs} class={cls}>{txt}</c-text><br :if={ln.segs == []} /></c-text>
+      </c-group>
+      <c-group :if={Map.get(@leaf, :lines, []) == []} class="hh-empty">{@leaf.buffer} · {@leaf.mode}</c-group>
+    </c-buffer>
     """
   end
 
@@ -732,16 +733,16 @@ defmodule Compos.Ui.MobileLive do
           )
       )
 
-    ~H"""
-    <div class={"hh-keys #{if @search, do: "filtering"}"} id="keys-panel">
-      <div class="hh-keys-tabs">
-        <span :if={@chord != ""} class="hh-keys-back" phx-click="fan_back">‹ {@chord}</span>
-        <span class="hh-spacer"></span>
-        <span :if={@pending != []} class="hh-keys-release" phx-click="fan_release">release {Enum.join(@pending, " ")}</span>
-        <span class="hh-keys-quit" phx-click="fan_quit">C-g</span>
-      </div>
-      <div class="hh-keys-filter" id="keys-filter" phx-update="ignore">
-        <span class="hh-prompt">/</span>
+    ~M"""
+    <c-group class={"hh-keys #{if @search, do: "filtering"}"} id="keys-panel">
+      <c-group class="hh-keys-tabs">
+        <c-text :if={@chord != ""} class="hh-keys-back" phx-click="fan_back">‹ {@chord}</c-text>
+        <c-text class="hh-spacer"></c-text>
+        <c-text :if={@pending != []} class="hh-keys-release" phx-click="fan_release">release {Enum.join(@pending, " ")}</c-text>
+        <c-text class="hh-keys-quit" phx-click="fan_quit">C-g</c-text>
+      </c-group>
+      <c-group class="hh-keys-filter" id="keys-filter" phx-update="ignore">
+        <c-text class="hh-prompt">/</c-text>
         <input
           id="keys-filter-input"
           class="hh-input"
@@ -752,29 +753,29 @@ defmodule Compos.Ui.MobileLive do
           spellcheck="false"
           placeholder="type to search every command"
         />
-      </div>
-      <div class="hh-keys-list">
+      </c-group>
+      <c-group class="hh-keys-list">
         <%= if @search do %>
-          <div class="hh-keys-section" data-section="matches">
-            <div class="hh-keys-section-title">matches</div>
+          <c-group class="hh-keys-section" data-section="matches">
+            <c-group class="hh-keys-section-title">matches</c-group>
             <.key_rows section="matches" rows={@search.rows} />
-            <div :if={@search.rows == []} class="hh-empty">nothing matches</div>
-          </div>
+            <c-group :if={@search.rows == []} class="hh-empty">nothing matches</c-group>
+          </c-group>
         <% else %>
-          <div class="hh-keys-section" data-section={@current}>
+          <c-group class="hh-keys-section" data-section={@current}>
             <.key_caps section={@current} caps={@caps} />
-            <div :if={@caps == []} class="hh-empty">{empty_word(@current)}</div>
-          </div>
+            <c-group :if={@caps == []} class="hh-empty">{empty_word(@current)}</c-group>
+          </c-group>
         <% end %>
-      </div>
-    </div>
+      </c-group>
+    </c-group>
     """
   end
 
   # one section's rows: the key, the command, the first doc line
   defp key_rows(assigns) do
-    ~H"""
-    <div
+    ~M"""
+    <c-group
       :for={r <- @rows}
       class="hh-key-row"
       phx-click="fan_run"
@@ -782,12 +783,12 @@ defmodule Compos.Ui.MobileLive do
       phx-value-k={r.key}
       phx-value-c={r.command}
     >
-      <span class="hh-key-box">{r.key}</span>
-      <div class="hh-row-main">
-        <div class="hh-key-cmd">{r.command}</div>
-        <div :if={r.doc != ""} class="hh-key-doc">{r.doc}</div>
-      </div>
-    </div>
+      <c-text class="hh-key-box">{r.key}</c-text>
+      <c-group class="hh-row-main">
+        <c-group class="hh-key-cmd">{r.command}</c-group>
+        <c-group :if={r.doc != ""} class="hh-key-doc">{r.doc}</c-group>
+      </c-group>
+    </c-group>
     """
   end
 
@@ -796,9 +797,9 @@ defmodule Compos.Ui.MobileLive do
   # chord; a modifier or a prefix latches and the caps become what it
   # arms; a prefix that has a tab of its own goes to that tab.
   defp key_caps(assigns) do
-    ~H"""
-    <div class="hh-key-caps">
-      <div
+    ~M"""
+    <c-group class="hh-key-caps">
+      <c-group
         :for={c <- @caps}
         class={"hh-keycap " <> to_string(c.kind)}
         phx-click={cap_event(c.kind)}
@@ -808,10 +809,10 @@ defmodule Compos.Ui.MobileLive do
         phx-value-p={c.step}
         phx-value-t={c.key}
       >
-        <span class={cap_key_class(c.step)}>{c.step}</span>
-        <span class="hh-cap-cmd">{c.label}</span>
-      </div>
-    </div>
+        <c-text class={cap_key_class(c.step)}>{c.step}</c-text>
+        <c-text class="hh-cap-cmd">{c.label}</c-text>
+      </c-group>
+    </c-group>
     """
   end
 
@@ -1017,99 +1018,99 @@ defmodule Compos.Ui.MobileLive do
   defp sheet(%{state: %{minibuffer: mb}} = assigns) when is_map(mb) do
     assigns = assign(assigns, mb: mb, split: mb_split(mb))
 
-    ~H"""
-    <div class="hh-sheet-layer">
-      <div class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></div>
-      <div class="hh-sheet" role="dialog" aria-modal="true">
-        <div class="hh-sheet-head">
-          <span class="hh-kicker">{sheet_kicker(@state)}</span>
-          <span class="hh-spacer"></span>
-          <span class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</span>
-        </div>
-        <div class="hh-sheet-title">{String.trim_trailing(@mb.prompt, ": ")}</div>
-        <div class="hh-sheet-hint">{sheet_hint(@mb)}</div>
-        <div class="hh-sheet-input">
-          <span class="hh-prompt">›</span>
-          <span class="hh-mb-input"><%= with {pre, cur, post} <- @split do %>{pre}<span class="cursor">{cur}</span>{post}<% end %></span>
-          <span class="hh-spacer"></span>
-          <span class="hh-count">{count_text(@mb)}</span>
-        </div>
-        <div class="hh-sheet-rows">
+    ~M"""
+    <c-group class="hh-sheet-layer">
+      <c-group class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></c-group>
+      <c-group class="hh-sheet" role="dialog" aria-modal="true">
+        <c-group class="hh-sheet-head">
+          <c-text class="hh-kicker">{sheet_kicker(@state)}</c-text>
+          <c-text class="hh-spacer"></c-text>
+          <c-text class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-text>
+        </c-group>
+        <c-group class="hh-sheet-title">{String.trim_trailing(@mb.prompt, ": ")}</c-group>
+        <c-group class="hh-sheet-hint">{sheet_hint(@mb)}</c-group>
+        <c-group class="hh-sheet-input">
+          <c-text class="hh-prompt">›</c-text>
+          <c-text class="hh-mb-input"><%= with {pre, cur, post} <- @split do %>{pre}<c-cursor class="cursor">{cur}</c-cursor>{post}<% end %></c-text>
+          <c-text class="hh-spacer"></c-text>
+          <c-text class="hh-count">{count_text(@mb)}</c-text>
+        </c-group>
+        <c-group class="hh-sheet-rows">
           <%= for {c, i} <- Enum.with_index(@mb.candidates) do %>
             <%= if Map.get(c, :kind) == "separator" do %>
-              <div class="hh-sep">{c.label}</div>
+              <c-group class="hh-sep">{c.label}</c-group>
             <% else %>
-              <div class={"hh-row #{if c.selected, do: "on"}"} phx-click="cand" phx-value-i={i}>
-                <span class="hh-row-box">{if c.selected, do: "●", else: ""}</span>
-                <div class="hh-row-main">
-                  <div class="hh-row-label">{c.label}</div>
-                  <div :if={Map.get(c, :hint) not in [nil, ""]} class="hh-row-sub">{c.hint}</div>
-                </div>
-              </div>
+              <c-group class={"hh-row #{if c.selected, do: "on"}"} phx-click="cand" phx-value-i={i}>
+                <c-text class="hh-row-box">{if c.selected, do: "●", else: ""}</c-text>
+                <c-group class="hh-row-main">
+                  <c-group class="hh-row-label">{c.label}</c-group>
+                  <c-group :if={Map.get(c, :hint) not in [nil, ""]} class="hh-row-sub">{c.hint}</c-group>
+                </c-group>
+              </c-group>
             <% end %>
           <% end %>
-        </div>
-        <div :if={@mb.legend != []} class="hh-sheet-legend">
-          <span :for={row <- @mb.legend} class="hh-legend"><b>{row.key}</b> {row.label}</span>
-        </div>
-      </div>
-    </div>
+        </c-group>
+        <c-group :if={@mb.legend != []} class="hh-sheet-legend">
+          <c-text :for={row <- @mb.legend} class="hh-legend"><b>{row.key}</b> {row.label}</c-text>
+        </c-group>
+      </c-group>
+    </c-group>
     """
   end
 
   defp sheet(%{state: %{transient: t}} = assigns) do
     assigns = assign(assigns, t: t)
 
-    ~H"""
-    <div class="hh-sheet-layer">
-      <div class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></div>
-      <div class="hh-sheet" role="dialog" aria-modal="true">
-        <div class="hh-sheet-head">
-          <span class="hh-kicker">{if @state.pending != [], do: Enum.join(@state.pending, " ") <> " · ", else: ""}transient</span>
-          <span class="hh-spacer"></span>
-          <span class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</span>
-        </div>
-        <div class="hh-sheet-title">{@t.title}</div>
-        <div :if={@t[:subtitle] not in [nil, ""]} class="hh-sheet-hint">{@t.subtitle}</div>
-        <div :if={@t[:chips] not in [nil, []]} class="hh-tchips">
-          <span :for={chip <- @t.chips} class={"hh-tchip #{if chip.active, do: "on"}"}>{chip.label}</span>
-        </div>
-        <div class="hh-sheet-rows">
+    ~M"""
+    <c-group class="hh-sheet-layer">
+      <c-group class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></c-group>
+      <c-group class="hh-sheet" role="dialog" aria-modal="true">
+        <c-group class="hh-sheet-head">
+          <c-text class="hh-kicker">{if @state.pending != [], do: Enum.join(@state.pending, " ") <> " · ", else: ""}transient</c-text>
+          <c-text class="hh-spacer"></c-text>
+          <c-text class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-text>
+        </c-group>
+        <c-group class="hh-sheet-title">{@t.title}</c-group>
+        <c-group :if={@t[:subtitle] not in [nil, ""]} class="hh-sheet-hint">{@t.subtitle}</c-group>
+        <c-group :if={@t[:chips] not in [nil, []]} class="hh-tchips">
+          <c-text :for={chip <- @t.chips} class={"hh-tchip #{if chip.active, do: "on"}"}>{chip.label}</c-text>
+        </c-group>
+        <c-group class="hh-sheet-rows">
           <%= for group <- @t.groups do %>
-            <div class="hh-group-title">{group.title}</div>
-            <div
+            <c-group class="hh-group-title">{group.title}</c-group>
+            <c-group
               :for={item <- group.items}
               class={"hh-trow #{if item.selected, do: "on"} #{item.behavior}"}
               phx-click="keys"
               phx-value-ks={item.key}
             >
-              <span class="hh-tkey">{item.key}</span>
-              <div class="hh-row-main">
-                <div class="hh-trow-desc">{item.description}</div>
-                <div :if={item.value != ""} class="hh-trow-value">{item.value}</div>
-              </div>
-              <span class="hh-chev">›</span>
-            </div>
+              <c-text class="hh-tkey">{item.key}</c-text>
+              <c-group class="hh-row-main">
+                <c-group class="hh-trow-desc">{item.description}</c-group>
+                <c-group :if={item.value != ""} class="hh-trow-value">{item.value}</c-group>
+              </c-group>
+              <c-text class="hh-chev">›</c-text>
+            </c-group>
           <% end %>
-          <div :if={@t[:detail]} class="hh-detail">
-            <div class="hh-group-title">{@t.detail.title}</div>
-            <div :for={row <- @t.detail.rows} class={"hh-detail-row #{row.tone}"}>
-              <span class="hh-detail-k">{row.k}</span>
-              <span class="hh-detail-v">{row.v}</span>
-            </div>
-            <div :if={@t.detail.note != ""} class="hh-detail-note">{@t.detail.note}</div>
-          </div>
-        </div>
-        <div class="hh-sheet-legend">
+          <c-group :if={@t[:detail]} class="hh-detail">
+            <c-group class="hh-group-title">{@t.detail.title}</c-group>
+            <c-group :for={row <- @t.detail.rows} class={"hh-detail-row #{row.tone}"}>
+              <c-text class="hh-detail-k">{row.k}</c-text>
+              <c-text class="hh-detail-v">{row.v}</c-text>
+            </c-group>
+            <c-group :if={@t.detail.note != ""} class="hh-detail-note">{@t.detail.note}</c-group>
+          </c-group>
+        </c-group>
+        <c-group class="hh-sheet-legend">
           <%= if @t[:legend] not in [nil, []] do %>
-            <span :for={row <- @t.legend} class="hh-legend" phx-click="keys" phx-value-ks={row.key}><b>{row.key}</b> {row.label}</span>
+            <c-text :for={row <- @t.legend} class="hh-legend" phx-click="keys" phx-value-ks={row.key}><b>{row.key}</b> {row.label}</c-text>
           <% else %>
-            <span class="hh-legend" phx-click="key" phx-value-k="RET"><b>RET</b> invoke</span>
-            <span class="hh-legend" phx-click="key" phx-value-k="C-g"><b>C-g</b> quit</span>
+            <c-text class="hh-legend" phx-click="key" phx-value-k="RET"><b>RET</b> invoke</c-text>
+            <c-text class="hh-legend" phx-click="key" phx-value-k="C-g"><b>C-g</b> quit</c-text>
           <% end %>
-        </div>
-      </div>
-    </div>
+        </c-group>
+      </c-group>
+    </c-group>
     """
   end
 
@@ -1175,4 +1176,8 @@ defmodule Compos.Ui.MobileLive do
   end
 
   defp mb_split(mb), do: {Map.get(mb, :input, ""), " ", ""}
+
+  @impl true
+  def render(assigns), do: Compos.Ui.Representation.live(__MODULE__, assigns)
+
 end

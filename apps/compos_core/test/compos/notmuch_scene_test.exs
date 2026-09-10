@@ -75,6 +75,28 @@ defmodule Compos.NotmuchSceneTest do
     assert eval!(~S|(member "tag -unread -- thread:zz-thread" *zz-notmuch-calls*)|) != "#f"
   end
 
+  test "a preview read-tag failure leaves focus in the index" do
+    eval!(~S|(run-command "notmuch-inbox")|)
+
+    eval!(
+      ~S|(set! nm--run (lambda (args) (if (string-prefix? "tag " args) (error "write denied") (*zz-notmuch-old-run* args))))|
+    )
+
+    # The view already exists; force the open path to fail only at the write.
+    eval!(~S|(define zz-open-thread nm--open-thread!)|)
+
+    eval!(
+      ~S|(set! nm--open-thread! (lambda (id subject &rest opts) (switch-to-buffer! "*mail*")))|
+    )
+
+    try do
+      assert {:error, _} = Session.eval(~S|(nm--preview! "*notmuch*")|)
+      assert eval!(~S|(current-buffer)|) == ~s{"*notmuch*"}
+    after
+      eval!(~S|(set! nm--open-thread! zz-open-thread)|)
+    end
+  end
+
   test "dismissal closes the visible thread before invoking mail back" do
     eval!(~S|(run-command "notmuch-inbox")|)
     assert eval!(~S|(buffer-parent "*mail*")|) == ~s{"*notmuch*"}

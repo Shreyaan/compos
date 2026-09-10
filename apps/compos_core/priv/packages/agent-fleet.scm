@@ -397,6 +397,8 @@
 (define-list-mode! "ichat-mode"
   (ibuffer-mode-opts
     (list
+      'composml-root (lambda (buf) (list 'tag "chat-list"))
+      'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
       'doc (string-append
              "Every chat and agent thread in the ibuffer table, split by "
              "group the way C-x b is. A section is a group, a state, or a "

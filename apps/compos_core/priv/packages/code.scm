@@ -1470,12 +1470,18 @@
 (define-command "imenu" "Jump to a definition in this buffer"
   (lambda ()
     (let ((rows (imenu-rows (current-buffer)))
+          (source (current-buffer))
           (orig (point)))
       (if (null? rows)
           (message "imenu: no definitions in this buffer")
           (let ((cands (imenu--candidates rows)))
             (minibuffer-read-preview "Imenu: "
-              (map (lambda (c) (list (car c) (caddr c))) cands)
+              (map (lambda (c)
+                (let ((row (assoc (cadr c) rows)))
+                  (list (car c) (caddr c) "symbol" '() ""
+                    (list (list "name" (caddr row)) (list "kind" (cadr row))
+                          (list "source" source) (list "line" (number->string (car row)))
+                          (list "doc" (imenu--snip (or (nth 3 row) ""))))))) cands)
               (lambda (label)
                 (let ((c (assoc label cands)))
                   (when c (goto-char! (line-start-position (cadr c))))))

@@ -1,0 +1,57 @@
+/* ComposML is ordinary light DOM. Low-specificity defaults leave full CSS control. */
+:where(c-frame, c-windows, c-split, c-window, c-buffer, c-line, c-modeline, c-headerline, c-headline, c-statusbar, c-tabs, c-field, c-minibuffer, c-completions, c-completion, c-which-key, c-transcript, c-message, c-tool-call, c-result, c-activity, c-prompt, c-toolbar, c-action, c-value, c-group) { display: block; }
+:where(c-buffer-name, c-mode, c-position, c-status, c-progress, c-tab, c-label, c-metric, c-key-hints, c-arguments, c-input, c-cursor, c-echo, c-text) { display: inline; }
+:where(c-frame, c-windows, c-split, c-window, c-buffer, c-line, c-modeline, c-headerline, c-buffer-name, c-mode, c-position, c-headline, c-statusbar, c-status, c-progress, c-tabs, c-tab, c-field, c-label, c-metric, c-key-hints, c-minibuffer, c-completions, c-completion, c-which-key, c-transcript, c-message, c-tool-call, c-arguments, c-result, c-activity, c-prompt, c-input, c-cursor, c-toolbar, c-echo, c-action, c-value, c-group, c-text)[hidden] { display: none; }
+
+/* The list component owns layout; modes supply domain names and field roles. */
+.semantic-list-header pre { margin: 0; white-space: pre-wrap; font: inherit; }
+.semantic-list { display: block; padding: 0 .5em; }
+.semantic-list > .semantic-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: .15em 1em; padding: .45em .85em; cursor: pointer; position: relative;
+  border-left: 2px solid transparent;
+}
+.semantic-item.selected { background: var(--hl-line-bg, rgba(128,128,128,.12)); }
+.semantic-item[marked="true"] { background: var(--select-bg, #e6e3db); color: var(--select-fg, inherit); }
+.semantic-item[unread="true"] { border-left-color: var(--list-unread-fg, currentColor); }
+.semantic-item[unread="true"] > [field="primary"] { font-weight: 700; }
+.semantic-item[marked="true"] { border-left-color: var(--list-marked-fg, var(--accent-fg, #a03020)); }
+.semantic-item > .list-mark { position: absolute; left: .05em; top: .6em; font-size: .75em; color: var(--list-marked-fg, var(--accent-fg, currentColor)); }
+.semantic-item > [field] { display: block; min-width: 0; overflow-wrap: anywhere; }
+.semantic-item > [field="primary"] { grid-column: 1; }
+.semantic-item > [field="trailing"] { grid-column: 3; }
+.semantic-item > [field="secondary"] { grid-column: 1; grid-row: 2; }
+.semantic-item > [field="detail"] { grid-column: 1 / -1; }
+.semantic-item > [field="count"] { text-align: right; font-variant-numeric: tabular-nums; }
+.semantic-item > [field="tags"] {
+  grid-column: 2 / -1; grid-row: 2; display: flex; flex-wrap: wrap;
+  justify-content: end; gap: .4em;
+}
+.semantic-item > :is([field="trailing"], [field="tags"], [field="detail"]) { color: var(--dim-fg, #8a857a); }
+
+.semantic-document, .semantic-document-section { display: block; padding: .5em; }
+.semantic-document-section { border-top: 1px solid var(--border-bg, #ccc); }
+.semantic-document-section > *, .semantic-document-section mail-attachment { display: block; }
+.semantic-document pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+
+:where(c-message-body, c-question, c-answers, c-hint) { display: block; }
+:where(c-message-body, c-question, c-answers, c-hint)[hidden] { display: none; }
+
+:where(c-row, c-card, morg-agenda, agenda-day, agenda-entry) { display: block; }
+
+:where(c-empty, c-properties) { display: block; }
+
+:where(c-list, c-item) { display: block; }
+:where(c-list, c-item, c-row, c-card, c-preview, c-empty, c-properties)[hidden] { display: none; }
+
+:where(c-user, c-agent, c-toolcall, c-info, c-summary, c-permission, c-plan) { display: block; }
+:where(c-user, c-agent, c-toolcall, c-info, c-summary, c-permission, c-plan)[hidden] { display: none; }
+
+:where(symbol-list, symbol-entry) { display: block; }
+:where(filename, size, modified, permissions, vcs-status, icon, size-bar, buffer-name, buffer-mode, buffer-size, buffer-state, buffer-icon, buffer-group, buffer-activity, chat-name, chat-state, chat-tokens, agenda-title, agenda-time, agenda-deadline, agenda-scheduled, agenda-task-state, agenda-tags, agenda-source, symbol-name, symbol-kind, symbol-location) { display: inline; }
+
+/* A semantic list record is also the editor's addressable display row. */
+.buf > .semantic-direct.line { position: relative; padding-left: 50px; }
+.semantic-direct::before { content: attr(data-line); position: absolute; left: 8px; width: 30px; text-align: right; font-size: 11px; color: var(--linenum-fg, #b3ac9c); user-select: none; }
+.no-nums .semantic-direct::before { display: none; }
+.no-nums .buf > .semantic-direct.line { padding-left: 8px; }

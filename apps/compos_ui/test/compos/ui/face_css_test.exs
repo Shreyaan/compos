@@ -3,6 +3,12 @@ defmodule Compos.Ui.FaceCSSTest do
 
   alias Compos.Ui.FaceCSS
 
+  test "ComposML face attributes share the existing theme variables and priority" do
+    css = FaceCSS.css(%{"dim" => %{"fg" => "#888"}, "shadow" => %{"inherit" => "dim"}})
+    assert css =~ ~S|[face~="dim"]{color:var(--dim-fg);}|
+    assert css =~ ~S|[face~="shadow"]{color:var(--dim-fg);}|
+  end
+
   test "a face writes only the attributes it declares" do
     css = FaceCSS.css(%{"tint" => %{"bg" => "#eee"}})
     assert css =~ "--tint-bg:#eee;"
@@ -69,7 +75,9 @@ defmodule Compos.Ui.FaceCSSTest do
 
   test "a ts- face styles the tree-sitter span as well" do
     css = FaceCSS.css(%{"ts-keyword" => %{"fg" => "#26356b", "weight" => "600"}})
-    assert css =~ ".f-ts-keyword,.ts-keyword{color:var(--ts-keyword-fg);font-weight:var(--ts-keyword-weight);}"
+
+    assert css =~
+             ".f-ts-keyword,.ts-keyword{color:var(--ts-keyword-fg);font-weight:var(--ts-keyword-weight);}"
   end
 
   test "symbols and atoms are accepted as names and values" do

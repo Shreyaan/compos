@@ -38,7 +38,7 @@ defmodule Compos.Ui.PerfViewTest do
     Editor.set_window_buffer(buf)
     {:ok, _view, html} = live(conn, "/")
 
-    assert html =~ ~r/<div[^>]*class="perf-grid"/
+    assert html =~ ~r/<c-group[^>]*class="perf-grid"/
     assert html =~ "Fig. 1"
     assert html =~ "Fig. 7"
     assert html =~ ~r/<svg[^>]*class="perf-svg[^"]*"[^>]*viewBox="0 0 \d+ 100"/

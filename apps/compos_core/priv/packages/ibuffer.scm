@@ -982,6 +982,20 @@
 (add-display-rule! *ibuffer-prompt-buffer* 'shaped '(side bottom size 0.4))
 (ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent)
 
+(define-style! 'ibuffer-semantic-list "
+:is(buffers, chat-list) > .semantic-direct.line {
+  display: grid; grid-template-columns: none; grid-auto-columns: 1ch;
+  column-gap: 0; align-items: baseline; white-space: nowrap;
+}
+:is(buffers, chat-list) > .semantic-direct > [data-col] {
+  grid-row: 1; grid-column: var(--field-column) / span var(--field-width);
+  min-width: 0; white-space: pre; overflow: hidden;
+}
+:is(buffers, chat-list) > .semantic-direct[marked=true] {
+  box-shadow: inset 3px 0 var(--accent-fg, #7aa2f7);
+}
+")
+
 (define-style! 'ibuffer-prompt "
 .window.bare .dash-top { display: none; }
 .window.bare .modeline { display: none; }
@@ -1313,8 +1327,37 @@
 ;; once, and a hot reload that redefines a fn must reach the mode. A
 ;; procedure stored by value stays the old one, and the old cells fn
 ;; calling a new heading fn was an arity error in the live editor.
+(define (ibuffer-composml-record buf entry)
+  (if (ibuffer-heading? entry) (list 'tag "c-headline")
+    (list 'tag (if (equal? (list-mode-of buf) "ichat-mode") "chat-entry" "buffer") 'layout "columns"
+          'attrs (append (list (list "name" entry)
+                               (list "modified" (if (ibuffer-row-modified? entry) "true" "false"))
+                               (list "marked" (if (assoc entry (list-marks buf)) "true" "false")))
+            (if (buffer-exists? entry)
+              (list (list "mode" (or (buffer-local entry 'mode-name) ""))
+                    (list "bytes" (buffer-size entry))) '())))))
+
+(define (ibuffer-composml-fields buf entry)
+  (let* ((chat? (equal? (list-mode-of buf) "ichat-mode"))
+         (layout (plist-get (list-active-layout buf) 'name))
+         (all (cond ((equal? layout 'narrow) *ibuffer-narrow-fields*)
+                    ((equal? layout 'compact) *ibuffer-compact-fields*)
+                    (else *ibuffer-wide-fields*))))
+    (map (lambda (tag) (list 'tag tag))
+      (append (list (if chat? "chat-state" "buffer-state") "buffer-icon"
+                    (if (ibuffer-heading? entry) "c-label" (if chat? "chat-name" "buffer-name")))
+        (map (lambda (f)
+          (cond
+            ((equal? (car f) 'size) (if chat? "chat-tokens" "buffer-size"))
+            ((equal? (car f) 'mode) (if chat? "chat-state" "buffer-mode"))
+            ((equal? (car f) 'group) "buffer-group")
+            (else "buffer-activity"))) (ibuffer-fields buf all))))))
+
 (define *ibuffer-opts*
   (list
+    'composml-root (lambda (buf) (list 'tag "buffers"))
+    'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
+    'composml-fields (lambda (buf entry) (ibuffer-composml-fields buf entry))
     'doc (string-append
            "A traditional buffer management table. A section is a group, "
            "a mode, or a directory; ; cycles the grouping. Rows inside a "

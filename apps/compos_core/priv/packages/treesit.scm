@@ -92,3 +92,13 @@
 
 (category! 'syntax)
 (public! 'ts-install-grammar! "(ts-install-grammar! NAME URL) — async grammar install")
+
+;; ComposML ships its parser through the bundled-grammar loader.
+(domain! 'syntax)
+(effects! '(write display))
+(define-mode "composml-mode" (ts-mode "composml"))
+(mode-doc! "composml-mode"
+  "Edit semantic ComposML documents with the bundled grammar. Structural navigation and queries use semantic element names.")
+(set! *auto-mode-alist*
+  (cons '(".composml" "composml-mode")
+        (remove (lambda (entry) (equal? (car entry) ".composml")) *auto-mode-alist*)))

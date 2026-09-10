@@ -9,6 +9,7 @@ defmodule Compos.Ui.EditorLive do
   """
 
   use Phoenix.LiveView
+  import Compos.Ui.ComposML, only: [sigil_M: 2]
 
   alias Compos.Core.{Events, Input}
   alias Compos.Scheme.Text
@@ -868,7 +869,7 @@ defmodule Compos.Ui.EditorLive do
 
     line = Compos.Core.Text.line_index(leaf.text, leaf.point) + 1
 
-    {Map.merge(leaf, %{lines: [], blk: blocks, blk_line: line}),
+    {Map.merge(leaf, %{lines: [], blk: blocks, blk_line: line, blk_root: block_root(Map.get(leaf, :blocks_root))}),
      Map.put(cache, {:blocks, leaf.id}, {key, blocks})}
   end
 
@@ -1243,12 +1244,11 @@ defmodule Compos.Ui.EditorLive do
     end)
   end
 
-  @impl true
   # the disconnected mount is not a client: it attaches no frame and
   # renders a neutral splash — the connected mount replaces it (S14)
-  def render(%{state: nil} = assigns) do
-    ~H"""
-    <div
+  def composml(%{state: nil} = assigns) do
+    ~M"""
+    <c-frame
       id="editor"
       class={instance_class("editor-root splash", @instance_accent)}
       style={instance_style(@instance_accent)}
@@ -1256,16 +1256,16 @@ defmodule Compos.Ui.EditorLive do
       data-boot={@boot_id}
       data-instance={@instance_name}
     >
-      <div style="display:flex;align-items:center;justify-content:center;height:100vh;opacity:.5;font-family:monospace">
+      <c-group style="display:flex;align-items:center;justify-content:center;height:100vh;opacity:.5;font-family:monospace">
         compos — connecting…
-      </div>
-    </div>
+      </c-group>
+    </c-frame>
     """
   end
 
-  def render(assigns) do
-    ~H"""
-    <div
+  def composml(assigns) do
+    ~M"""
+    <c-frame
       id="editor"
       role="application"
       aria-label="compos editor"
@@ -1278,101 +1278,108 @@ defmodule Compos.Ui.EditorLive do
     >
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(Compos.Ui.FaceCSS.css(@state.faces)) %></style>
     <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
-      <header :if={@state.workspace} class="workspace-bar">
-        <span class="workspace-bar-kind">WORKTREE</span>
+      <c-group :if={@state.workspace} class="workspace-bar" role="banner">
+        <c-text class="workspace-bar-kind">WORKTREE</c-text>
         <strong :if={@state.workspace.project && @state.workspace.name}>
           {@state.workspace.project} / {@state.workspace.name}
         </strong>
         <strong :if={!(@state.workspace.project && @state.workspace.name)}>
           {@state.workspace.daemon}
         </strong>
-        <span class="workspace-bar-port">PORT {workspace_port(@state.workspace.url)}</span>
-        <span class="workspace-bar-root">{@state.workspace.root}</span>
-        <span class="workspace-bar-help">C-x w new tab · C-x d switch daemon</span>
-      </header>
+        <c-text class="workspace-bar-port">PORT {workspace_port(@state.workspace.url)}</c-text>
+        <c-text class="workspace-bar-root">{@state.workspace.root}</c-text>
+        <c-text class="workspace-bar-help">C-x w new tab · C-x d switch daemon</c-text>
+      </c-group>
       <.frame_modeline state={@state} tabs={@tabs} />
-      <main class="windows">
+      <c-windows class="windows" role="main">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
-      </main>
-      <div :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key mb-geom-panel">
-        <div class="wk-title">
-          <span>
+      </c-windows>
+      <c-which-key :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key mb-geom-panel">
+        <c-group class="wk-title">
+          <c-text>
             {Enum.join(@state.pending, " ")} —
-            <span class="wk-count" data-total={length(@state.which_key)}>
+            <c-text class="wk-count" data-total={length(@state.which_key)}>
               {length(@state.which_key)} bindings
-            </span>
-          </span>
-          <span class="wk-filter" aria-live="polite">Hold a modifier · / filters commands</span>
-        </div>
-        <div class="wk-groups">
+            </c-text>
+          </c-text>
+          <c-text class="wk-filter" aria-live="polite">Hold a modifier · / filters commands</c-text>
+        </c-group>
+        <c-group class="wk-groups">
           <%= for {label, modifiers, bindings} <- which_key_groups(@state.which_key) do %>
             <section class="wk-group" data-modifiers={Enum.join(modifiers, " ")}>
-              <h3 class="wk-group-title">{label}<span>{length(bindings)}</span></h3>
-              <div class="wk-grid">
-                <div :for={w <- bindings} class="wk-item" data-command={String.downcase(w.command)}>
-                  <span class="wk-key">{w.key}</span>
-                  <span class="wk-cmd">{w.command}</span>
-                </div>
-              </div>
+              <h3 class="wk-group-title">{label}<c-text>{length(bindings)}</c-text></h3>
+              <c-group class="wk-grid">
+                <c-group :for={w <- bindings} class="wk-item" data-command={String.downcase(w.command)}>
+                  <c-text class="wk-key">{w.key}</c-text>
+                  <c-text class="wk-cmd">{w.command}</c-text>
+                </c-group>
+              </c-group>
             </section>
           <% end %>
-          <div class="wk-empty" hidden>No matching commands</div>
-        </div>
-      </div>
+          <c-group class="wk-empty" hidden>No matching commands</c-group>
+        </c-group>
+      </c-which-key>
       <%= if @state.minibuffer do %>
-        <div class="mb-modal-layer">
-          <div
+        <c-group class="mb-modal-layer">
+          <c-group
             class={mb_panel_class(@state.minibuffer)}
             role="dialog"
             aria-modal="true"
             aria-label={String.trim_trailing(@state.minibuffer.prompt, ": ")}
           >
           <%= if mb_geom(@state.minibuffer) == "modal" do %>
-            <div class="mb-head">
-              <span class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</span>
-              <span class="mb-head-spacer"></span>
-              <span class="mb-head-legend">
-                <span :for={row <- palette_legend(@state.minibuffer)} class="transient-legend"><span class="transient-legend-key">{row.key}</span> {row.label}</span>
-              </span>
-            </div>
+            <c-group class="mb-head">
+              <c-text class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</c-text>
+              <c-text class="mb-head-spacer"></c-text>
+              <c-text class="mb-head-legend">
+                <c-text :for={row <- palette_legend(@state.minibuffer)} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
+              </c-text>
+            </c-group>
           <% else %>
-            <div class="mb-label-row">
+            <c-group class="mb-label-row">
               <%= case Map.get(@state.minibuffer, :legend, []) do %>
                 <% [_ | _] = legend -> %>
-                  <span :for={row <- legend} class="transient-legend"><span class="transient-legend-key">{row.key}</span> {row.label}</span>
+                  <c-text :for={row <- legend} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
                 <% _ -> %>
                   {label_row(@state.minibuffer)}
               <% end %>
-            </div>
+            </c-group>
           <% end %>
-          <div class={"mb-body #{if mb_rail_focused?(@state.minibuffer), do: "rail-focus"}"}>
-            <div id="mb-cands" class="mb-cands" phx-hook="SelectionScroll" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
+          <c-group class={"mb-body #{if mb_rail_focused?(@state.minibuffer), do: "rail-focus"}"}>
+            <.dynamic_tag tag_name={if Enum.any?(@state.minibuffer.candidates, &(Map.get(&1, :kind) == "symbol")), do: "symbol-list", else: "c-completions"} aria-label={@state.minibuffer.prompt} id="mb-cands" class="mb-cands" phx-hook="SelectionScroll" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
               <%= for c <- @state.minibuffer.candidates do %>
                 <%= if Map.get(c, :kind) == "separator" do %>
-                  <div class="mb-sep"><span class="mb-sep-label">{c.label}</span></div>
+                  <c-group class="mb-sep"><c-text class="mb-sep-label">{c.label}</c-text></c-group>
                 <% else %>
-                  <div class={"mb-cand #{if c.selected, do: "selected"}"}>
-                    <span class={"mb-label #{candidate_face_class(c)}"}>{c.label}</span>
-                    <span class="mb-hint">{c.hint}</span>
-                  </div>
+                  <.dynamic_tag tag_name={if Map.get(c, :kind) == "symbol", do: "symbol-entry", else: "c-completion"}
+                    selected={to_string(c.selected)} class={"mb-cand #{if c.selected, do: "selected"}"}
+                    {if Map.get(c, :kind) == "symbol", do: symbol_attrs(c), else: []}>
+                    <%= if Map.get(c, :kind) == "symbol" do %>
+                      <symbol-name class={"mb-label #{candidate_face_class(c)}"}>{c.label}</symbol-name>
+                      <c-text class="mb-hint"><symbol-kind>{symbol_fact(c, "kind")}</symbol-kind> · <symbol-location source={symbol_fact(c, "source")} line={symbol_fact(c, "line")}>L{symbol_fact(c, "line")}</symbol-location><%= if symbol_fact(c, "doc") != "" do %> — {symbol_fact(c, "doc")}<% end %></c-text>
+                    <% else %>
+                      <c-text class={"mb-label #{candidate_face_class(c)}"}>{c.label}</c-text>
+                      <c-text class="mb-hint">{c.hint}</c-text>
+                    <% end %>
+                  </.dynamic_tag>
                 <% end %>
               <% end %>
-            </div>
-            <div
+            </.dynamic_tag>
+            <c-group
               :if={mb_geom(@state.minibuffer) == "modal" && mb_rail(@state.minibuffer)}
               id="mb-rail"
               class={"mb-preview mb-rail #{if mb_rail_focused?(@state.minibuffer), do: "focused"}"}
               phx-hook="SelectionScroll"
             >
               <%= with rail <- mb_rail(@state.minibuffer) do %>
-                <div class="mb-preview-title">buffers</div>
-                <div :for={row <- rail.rows} class={"mb-rail-row #{if row.selected, do: "selected"}"}>
-                  <span class="mb-rail-name">{row.label}</span>
-                  <span class="mb-rail-hint">{row.hint}</span>
-                </div>
+                <c-group class="mb-preview-title">buffers</c-group>
+                <c-group :for={row <- rail.rows} class={"mb-rail-row #{if row.selected, do: "selected"}"}>
+                  <c-text class="mb-rail-name">{row.label}</c-text>
+                  <c-text class="mb-rail-hint">{row.hint}</c-text>
+                </c-group>
               <% end %>
-            </div>
-            <div
+            </c-group>
+            <c-group
               :if={
                 mb_geom(@state.minibuffer) == "modal" && !mb_rail(@state.minibuffer) &&
                   mb_preview(@state.minibuffer)
@@ -1380,76 +1387,76 @@ defmodule Compos.Ui.EditorLive do
               class="mb-preview"
             >
               <%= with p <- mb_preview(@state.minibuffer) do %>
-                <div class="mb-preview-title">{p.title}</div>
-                <div :for={{k, v} <- p.facts} class="mb-preview-fact">
-                  <span class="mb-preview-k">{k}</span>
-                  <span class="mb-preview-v">{v}</span>
-                </div>
-                <div :if={p.note != ""} class="mb-preview-note">{p.note}</div>
+                <c-group class="mb-preview-title">{p.title}</c-group>
+                <c-group :for={{k, v} <- p.facts} class="mb-preview-fact">
+                  <c-text class="mb-preview-k">{k}</c-text>
+                  <c-text class="mb-preview-v">{v}</c-text>
+                </c-group>
+                <c-group :if={p.note != ""} class="mb-preview-note">{p.note}</c-group>
               <% end %>
-            </div>
-          </div>
-          <div class={"mb-input-row #{if Map.get(@state.minibuffer, :prompt_sel), do: "selected"}"}>
-            <span class="prompt">{@state.minibuffer.prompt}</span>
-            <span class="mb-input"><%= with {pre, cur, post} <- mb_split(@state.minibuffer) do %>{pre}<span class="cursor">{cur}</span>{post}<% end %></span>
-            <span class="mb-spacer"></span>
-            <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
-            <span class="mb-count">{count_text(@state.minibuffer)}</span>
-          </div>
-        </div>
-      </div>
+            </c-group>
+          </c-group>
+          <c-group class={"mb-input-row #{if Map.get(@state.minibuffer, :prompt_sel), do: "selected"}"}>
+            <c-text class="prompt">{@state.minibuffer.prompt}</c-text>
+            <c-text class="mb-input"><%= with {pre, cur, post} <- mb_split(@state.minibuffer) do %>{pre}<c-cursor class="cursor">{cur}</c-cursor>{post}<% end %></c-text>
+            <c-text class="mb-spacer"></c-text>
+            <c-text :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</c-text>
+            <c-text class="mb-count">{count_text(@state.minibuffer)}</c-text>
+          </c-group>
+        </c-group>
+      </c-group>
       <% else %>
         <%= if @state.transient && @state.transient[:groups] do %>
-          <div class={"mb-panel palette mb-geom-modal transient-panel #{if @state.transient[:detail], do: "with-rail"}"}>
-            <div class="transient-head">
-              <span class="transient-title">{@state.transient.title}</span>
-              <span :if={@state.transient[:subtitle] not in [nil, ""]} class="transient-subtitle">{@state.transient.subtitle}</span>
-              <span class="transient-head-spacer"></span>
-              <span :if={@state.transient[:chips] not in [nil, []]} class="transient-chips">
-                <span :for={chip <- @state.transient.chips} class={"transient-chip #{if chip.active, do: "active"}"}>{chip.label}</span>
-              </span>
-              <span :if={@state.transient[:context] not in [nil, ""]} class="transient-context">{@state.transient.context}</span>
-            </div>
-            <div class="transient-body">
-              <div id="transient-groups" class="transient-groups" phx-hook="SelectionScroll">
-                <div :for={column <- transient_columns(@state.transient)} class="transient-column">
+          <c-minibuffer class={"mb-panel palette mb-geom-modal transient-panel #{if @state.transient[:detail], do: "with-rail"}"}>
+            <c-group class="transient-head">
+              <c-text class="transient-title">{@state.transient.title}</c-text>
+              <c-text :if={@state.transient[:subtitle] not in [nil, ""]} class="transient-subtitle">{@state.transient.subtitle}</c-text>
+              <c-text class="transient-head-spacer"></c-text>
+              <c-text :if={@state.transient[:chips] not in [nil, []]} class="transient-chips">
+                <c-text :for={chip <- @state.transient.chips} class={"transient-chip #{if chip.active, do: "active"}"}>{chip.label}</c-text>
+              </c-text>
+              <c-text :if={@state.transient[:context] not in [nil, ""]} class="transient-context">{@state.transient.context}</c-text>
+            </c-group>
+            <c-group class="transient-body">
+              <c-group id="transient-groups" class="transient-groups" phx-hook="SelectionScroll">
+                <c-group :for={column <- transient_columns(@state.transient)} class="transient-column">
                   <section :for={group <- Enum.filter(@state.transient.groups, &(&1.title in column))} class="transient-group">
-                    <div class="transient-group-title">{group.title}</div>
-                    <div
+                    <c-group class="transient-group-title">{group.title}</c-group>
+                    <c-group
                       :for={item <- group.items}
                       class={"transient-item #{if item.selected, do: "selected"} #{item.behavior}"}
                     >
-                      <span class="transient-key">{item.key}</span>
-                      <span class="transient-description">{item.description}</span>
-                      <span :if={item.value != ""} class="transient-value">{item.value}</span>
-                    </div>
+                      <c-text class="transient-key">{item.key}</c-text>
+                      <c-text class="transient-description">{item.description}</c-text>
+                      <c-text :if={item.value != ""} class="transient-value">{item.value}</c-text>
+                    </c-group>
                   </section>
-                </div>
-              </div>
+                </c-group>
+              </c-group>
               <aside :if={@state.transient[:detail]} class="transient-rail">
-                <div class="transient-rail-title">{@state.transient.detail.title}</div>
-                <div :for={row <- @state.transient.detail.rows} class={"transient-rail-row #{row.tone}"}>
-                  <span class="transient-rail-k">{row.k}</span>
-                  <span class="transient-rail-v">{row.v}</span>
-                </div>
-                <div :if={@state.transient.detail.note != ""} class="transient-rail-note">{@state.transient.detail.note}</div>
+                <c-group class="transient-rail-title">{@state.transient.detail.title}</c-group>
+                <c-group :for={row <- @state.transient.detail.rows} class={"transient-rail-row #{row.tone}"}>
+                  <c-text class="transient-rail-k">{row.k}</c-text>
+                  <c-text class="transient-rail-v">{row.v}</c-text>
+                </c-group>
+                <c-group :if={@state.transient.detail.note != ""} class="transient-rail-note">{@state.transient.detail.note}</c-group>
               </aside>
-            </div>
-            <div class="transient-help">
+            </c-group>
+            <c-group class="transient-help">
               <%= if @state.transient[:legend] not in [nil, []] do %>
-                <span :for={row <- @state.transient.legend} class="transient-legend"><span class="transient-legend-key">{row.key}</span> {row.label}</span>
+                <c-text :for={row <- @state.transient.legend} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
               <% else %>
-                <span class="transient-legend"><span class="transient-legend-key">RET</span> invoke</span>
-                <span class="transient-legend"><span class="transient-legend-key">C-g</span> quit</span>
-                <span class="transient-legend"><span class="transient-legend-key">↑↓</span> select</span>
-                <span class="transient-legend"><span class="transient-legend-key">?</span> help</span>
+                <c-text class="transient-legend"><c-text class="transient-legend-key">RET</c-text> invoke</c-text>
+                <c-text class="transient-legend"><c-text class="transient-legend-key">C-g</c-text> quit</c-text>
+                <c-text class="transient-legend"><c-text class="transient-legend-key">↑↓</c-text> select</c-text>
+                <c-text class="transient-legend"><c-text class="transient-legend-key">?</c-text> help</c-text>
               <% end %>
-            </div>
-          </div>
+            </c-group>
+          </c-minibuffer>
         <% else %>
         <% end %>
       <% end %>
-    </div>
+    </c-frame>
     """
   end
 
@@ -1458,32 +1465,32 @@ defmodule Compos.Ui.EditorLive do
   # echo, the global mode string and the key hint are the ephemeral half,
   # after the spacer. A message never moves a tab.
   defp frame_modeline(assigns) do
-    ~H"""
-    <footer
+    ~M"""
+    <c-statusbar
       :if={true}
       class="echo-bar"
     >
-      <span :if={@tabs.tabs != []} class="ml-tabs">
-        <span
+      <c-tabs :if={@tabs.tabs != []} class="ml-tabs">
+        <c-tab
           :for={t <- @tabs.tabs}
           class={"ml-tab #{if t.current, do: "ml-tab-on"}"}
           title={"switch to #{t.label}"}
           phx-click="frame_tab"
           phx-value-id={t.id}
-        ><%= if t.segs != [] do %><span :for={{c, x} <- t.segs} class={c}>{x}</span><% else %>{t.label}<% end %></span>
-        <span
+        ><%= if t.segs != [] do %><c-text :for={{c, x} <- t.segs} class={c}>{x}</c-text><% else %>{t.label}<% end %></c-tab>
+        <c-tab
           :if={@tabs.more > 0}
           class="ml-tab ml-tab-more"
           title="every group (C-x C-g l)"
           phx-click="frame_tab"
-        >{@tabs.more} more</span>
-      </span>
-      <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
-      <span class="mb-spacer"></span>
-      <span class="echo" role="status">{@state.echo}</span>
-      <span :if={@state.minibuffer == nil && @state.transient == nil && @state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><span class="ml-attention">{@state.modeline_extra}</span><% else %><span :for={{c, t} <- @state.modeline_extra} class={c}>{t}</span><% end %></span>
-      <span class="echo-hint" :if={@state.minibuffer == nil && @state.transient == nil && @state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
-    </footer>
+        >{@tabs.more} more</c-tab>
+      </c-tabs>
+      <c-text :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</c-text>
+      <c-text class="mb-spacer"></c-text>
+      <c-echo class="echo" role="status">{@state.echo}</c-echo>
+      <c-text :if={@state.minibuffer == nil && @state.transient == nil && @state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><c-text class="ml-attention">{@state.modeline_extra}</c-text><% else %><c-text :for={{c, t} <- @state.modeline_extra} class={c}>{t}</c-text><% end %></c-text>
+      <c-key-hints class="echo-hint" :if={@state.minibuffer == nil && @state.transient == nil && @state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</c-key-hints>
+    </c-statusbar>
     """
   end
 
@@ -1576,6 +1583,10 @@ defmodule Compos.Ui.EditorLive do
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
     |> Enum.join("; ")
   end
+
+  defp symbol_fact(candidate, key), do: Map.get(Map.new(Map.get(candidate, :facts, [])), key, "")
+
+  defp symbol_attrs(candidate), do: Enum.filter(Map.get(candidate, :facts, []), fn {key, _} -> key in ~w(name kind source line) end)
 
   defp candidate_face_class(%{face: face}) when is_binary(face) do
     if Regex.match?(~r/^[a-zA-Z0-9_-]+$/, face), do: "f-#{face}", else: ""
@@ -1736,15 +1747,15 @@ defmodule Compos.Ui.EditorLive do
   defp tree(%{node: %{type: :split}} = assigns) do
     assigns = assign(assigns, ratio: Map.get(assigns.node, :ratio, 0.5))
 
-    ~H"""
-    <div class={"split #{@node.dir}"}>
-      <div class="split-child" style={"flex: #{@ratio} 1 0%"}>
+    ~M"""
+    <c-split class={"split #{@node.dir}"}>
+      <c-group class="split-child" style={"flex: #{@ratio} 1 0%"}>
         <.tree node={Enum.at(@node.children, 0)} active={@active} completion={@completion} />
-      </div>
-      <div class="split-child" style={"flex: #{1.0 - @ratio} 1 0%"}>
+      </c-group>
+      <c-group class="split-child" style={"flex: #{1.0 - @ratio} 1 0%"}>
         <.tree node={Enum.at(@node.children, 1)} active={@active} completion={@completion} />
-      </div>
-    </div>
+      </c-group>
+    </c-split>
     """
   end
 
@@ -1756,7 +1767,7 @@ defmodule Compos.Ui.EditorLive do
   # each window a new node map on every render. The component id is the
   # id of the window's own div.
   defp tree(%{node: %{type: :leaf}} = assigns) do
-    ~H"""
+    ~M"""
     <.live_component
       module={Compos.Ui.Window}
       id={"win-#{@node.id}"}
@@ -1787,27 +1798,29 @@ defmodule Compos.Ui.EditorLive do
         active?: assigns.node.id == assigns.active
       )
 
-    ~H"""
-    <div
+    ~M"""
+    <c-window
       id={"win-#{@node.id}"}
       class={"window #{if @active?, do: "active", else: "inactive"} #{if @dismissible?, do: "dismissible"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       style={window_style(@node)}
+      active={to_string(@active?)}
+      buffer={@node.buffer}
       data-win-id={@node.id}
       data-buffer={@node.buffer}
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
-      <div :if={@dismissible?} class="dismiss-bar">
-        <span class="dismiss-title">Reading</span>
+      <c-group :if={@dismissible?} class="dismiss-bar">
+        <c-text class="dismiss-title">Reading</c-text>
         <button type="button" class="dismiss-action" phx-click="ui_cmd"
           phx-value-win={@node.id} phx-value-cmd="dismiss-buffer"
           aria-label="Dismiss child or go back (q)">
-          <kbd>q</kbd><span>Back</span>
+          <kbd>q</kbd><c-text>Back</c-text>
         </button>
-      </div>
-      <div :if={@node.header_line} class="buffer-header">{@node.header_line}</div>
-      <div :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
-        <div
+      </c-group>
+      <c-headerline :if={@node.header_line} class="buffer-header">{@node.header_line}</c-headerline>
+      <c-group :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
+        <c-headerline
           :if={@node.dashboard_line_blocks}
           class="dash-persistent"
           title="open dashboard"
@@ -1816,65 +1829,65 @@ defmodule Compos.Ui.EditorLive do
           phx-value-cmd="modeline-expand"
         >
           <.blk :for={b <- @node.dashboard_line_blocks} b={block_view(b)} line={-1} win={@node.id} />
-        </div>
-        <div :if={@node.dash} class="dash-live">
-          <span>L{@line}:C{@col}</span>
-          <span>point {@node.point}</span>
-          <span>{ml_bytes(@node.text)}</span>
-          <span>{pct(@node)}</span>
-          <span :if={@node.modified} class="dash-live-mod">modified</span>
-        </div>
+        </c-headerline>
+        <c-group :if={@node.dash} class="dash-live">
+          <c-text>L{@line}:C{@col}</c-text>
+          <c-text>point {@node.point}</c-text>
+          <c-text>{ml_bytes(@node.text)}</c-text>
+          <c-text>{pct(@node)}</c-text>
+          <c-text :if={@node.modified} class="dash-live-mod">modified</c-text>
+        </c-group>
         <%= case @node.dash do %>
           <% [head | cards] -> %>
             <.blk b={block_view(head)} line={0} win={@node.id} />
-            <div class="dash-grid">
-              <div class="dash-cell">
-                <div class="dash-title">modes</div>
-                <div
+            <c-group class="dash-grid">
+              <c-group class="dash-cell">
+                <c-group class="dash-title">modes</c-group>
+                <c-group
                   class="dash-big dash-toggle"
                   title={"toggle #{@node.mode}"}
                   phx-click="ui_cmd"
                   phx-value-win={@node.id}
                   phx-value-cmd={"mode:" <> @node.mode}
-                >{@node.mode}</div>
-                <div :if={@node.minor_modes != []} class="dash-chips">
-                  <span
+                >{@node.mode}</c-group>
+                <c-group :if={@node.minor_modes != []} class="dash-chips">
+                  <c-text
                     :for={m <- @node.minor_modes}
                     class="dash-chip dash-chip-on"
                     title={"toggle #{m}"}
                     phx-click="ui_cmd"
                     phx-value-win={@node.id}
                     phx-value-cmd={"mode:" <> m}
-                  >{m}</span>
-                </div>
-                <div class="dash-row">
-                  <span class="dash-k">read-only</span><span class="dash-sp"></span><span class="dash-v">{if @node.read_only, do: "yes", else: "no"}</span>
-                </div>
-              </div>
+                  >{m}</c-text>
+                </c-group>
+                <c-group class="dash-row">
+                  <c-text class="dash-k">read-only</c-text><c-text class="dash-sp"></c-text><c-text class="dash-v">{if @node.read_only, do: "yes", else: "no"}</c-text>
+                </c-group>
+              </c-group>
               <.blk :for={b <- Enum.map(cards, &block_view/1)} b={b} line={0} win={@node.id} />
-            </div>
+            </c-group>
           <% _ -> %>
         <% end %>
-      </div>
+      </c-group>
       <%= if @node.render_mode == "terminal" do %>
-        <div
+        <c-group
           class="terminal-view"
           id={"terminal-#{@node.id}"}
           phx-hook="Terminal"
           phx-update="ignore"
           data-buffer={@node.buffer}
           data-win={@node.id}
-        ></div>
+        ></c-group>
       <% else %>
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
-        <div class="blocks-view" id={"blocks-#{@node.id}"} phx-hook="BlockScroll">
-          <div class="blocks-scroll">
+        <.dynamic_tag tag_name={@node.blk_root.tag} class="blocks-view" id={"blocks-#{@node.id}"} phx-hook="BlockScroll" {@node.blk_root.attrs}>
+          <c-buffer class="blocks-scroll">
             <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
-          </div>
-        </div>
+          </c-buffer>
+        </.dynamic_tag>
       <% else %>
       <%= if @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) do %>
-        <div
+        <c-buffer
           class="agent-view"
           id={"agent-#{@node.id}"}
           style={@node.style}
@@ -1901,41 +1914,43 @@ defmodule Compos.Ui.EditorLive do
                event never moves them and their churn never diffs the
                block list — excise + re-insert per event was the flicker.
                C-c C-d takes the newest one back into the input. --%>
-          <div :for={q <- @node.ag_queued} class="ag-user ag-queued ag-queued-row">
-            <span class="ag-label">YOU</span>
-            <div class="ag-user-text">{q}</div>
-          </div>
+          <c-user :for={q <- @node.ag_queued} state="queued" class="ag-user ag-queued ag-queued-row">
+            <c-label class="ag-label">YOU</c-label>
+            <c-group class="ag-user-text">{q}</c-group>
+          </c-user>
           <%!-- the turn pulse: the activity word agent.scm sets on every
                event, alive until turn-end clears it. The transcript alone
                cannot say working vs done once paragraphs stream. Outside
                the component and the scroll area, so it never moves and
                its churn never diffs the block list. "disconnected" is a
                dead chat, not motion — the [agent exited] line says it. --%>
-          <div
+          <c-activity
             :if={@node.ag_activity && @node.ag_activity != "disconnected"}
             id={"ag-activity-#{@node.id}"}
             class="ag-wait ag-activity"
-          ><span class="ag-activity-text">⋯ {@node.ag_activity}</span></div>
-          <div class="ag-inputrow">
-            <span class="ag-label">YOU</span>
-            <span class="ag-input">{@node.ag_input.pre}<span
+          ><c-text class="ag-activity-text">⋯ {@node.ag_activity}</c-text></c-activity>
+          <c-prompt class="ag-inputrow">
+            <c-label class="ag-label">YOU</c-label>
+            <c-input class="ag-input">{@node.ag_input.pre}<c-cursor
                 :if={@node.ag_input.cur != "" && Map.get(@node, :cursor_visible, true)}
                 class="cursor"
-              >{@node.ag_input.cur}</span>{@node.ag_input.post}</span>
-            <span
+              >{@node.ag_input.cur}</c-cursor>{@node.ag_input.post}</c-input>
+            <c-key-hints
               :if={@node.ag_input.pre == "" and @node.ag_input.post == ""}
               class="ag-hint"
-            >RET sends · C-RET interrupts</span>
-          </div>
-        </div>
+            >RET sends · C-RET interrupts</c-key-hints>
+          </c-prompt>
+        </c-buffer>
       <% else %>
       <%= if @node.render_mode == "file" and Map.has_key?(@node, :file_url) do %>
+        <c-preview kind="file" source={@node.file_url} buffer={@node.buffer} style="display: contents">
         <iframe
           class="file-preview"
           src={@node.file_url}
           sandbox=""
           title={@node.buffer}
         ></iframe>
+        </c-preview>
       <% else %>
       <%= if @node.render_mode == "app" and Map.has_key?(@node, :app_url) do %>
         <%!-- An app runs its own scripts, so it must not share the editor's
@@ -1944,6 +1959,7 @@ defmodule Compos.Ui.EditorLive do
              origin, which buys it storage and relative URLs; the browser
              still refuses it every reach into this page. src, not srcdoc,
              for the same reason — a srcdoc document inherits us. --%>
+        <c-preview kind="app" source={@node.app_url} buffer={@node.buffer} style="display: contents">
         <iframe
           class="app-preview"
           id={"app-#{@node.id}-#{:erlang.phash2(@node.app_url)}"}
@@ -1955,12 +1971,14 @@ defmodule Compos.Ui.EditorLive do
           title={@node.buffer}
         >
         </iframe>
+        </c-preview>
       <% else %>
       <%= if @node.render_mode in ["html", "markdown"] do %>
         <%!-- allow-same-origin, and nothing else. The parent must reach
              the frame's document to scroll it from a key; without it the
              page only answers the mouse. No allow-scripts, so the
              previewed document still runs nothing. --%>
+        <c-preview kind="document" format={@node.render_mode} source={@node.buffer} buffer={@node.buffer} style="display: contents">
         <iframe
           class="html-preview"
           id={"prev-#{@node.id}"}
@@ -1976,8 +1994,10 @@ defmodule Compos.Ui.EditorLive do
           sandbox="allow-same-origin"
           title={@node.buffer}
         ></iframe>
+        </c-preview>
       <% else %>
-      <div
+      <.dynamic_tag tag_name={block_root(Map.get(@node, :text_root)).tag}
+        {block_root(Map.get(@node, :text_root)).attrs}
         class={"buf #{if @node.client_scroll?, do: "client-scroll"}"}
         style={@node.style}
         data-ctop={@node.ctop}
@@ -1994,82 +2014,88 @@ defmodule Compos.Ui.EditorLive do
         autocorrect="off"
         autocapitalize="off"
       >
-        <div
-          :for={ln <- @lines}
+        <%= for group <- semantic_line_groups(@lines, Map.get(@node, :semantic_records)) do %>
+        <%= if group.direct do %>
+          <.dynamic_tag :for={ln <- group.lines} tag_name={group.tag} {group.attrs}
+            id={"ln-#{@node.id}-#{ln.num}"}
+            class={"line line-content semantic-direct #{ln.row} #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
+            data-s={ln.start} data-line={ln.num} selected={to_string(ln.current)}><.semantic_line id_prefix={"sg-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={true} /></.dynamic_tag>
+        <% else %>
+        <.dynamic_tag tag_name={group.tag} class="semantic-record" style="display: contents" {group.attrs}>
+        <c-line
+          :for={ln <- group.lines}
           id={"ln-#{@node.id}-#{ln.num}"}
           class={"line #{ln.row} #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
           data-s={ln.start}
         >
-          <span class="linenum" contenteditable="false">{ln.num}</span>
-          <span class="line-content"><.seg
-            :for={{{txt, cls}, sx} <- Enum.with_index(ln.segs)}
-            id={"sg-#{@node.id}-#{ln.num}-#{sx}"}
-            txt={txt}
-            cls={cls}
-            base={@node.buffer}
-            win={@node.id}
-          /><br
+          <c-text class="linenum" contenteditable="false">{ln.num}</c-text>
+          <c-text class="line-content"><.semantic_line id_prefix={"sg-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} /><br
               :if={ln.segs == []}
               class="empty-row"
-            /><span
+            /><c-text
               :if={@active? && @completion && ln.current}
               class="cap-pop"
               contenteditable="false"
               style={"left: #{pop_col(@node.text, ln.start, @completion.start)}ch"}
-            ><span class="cap-title">completion-at-point · {@completion.total}</span><span
+            ><c-text class="cap-title">completion-at-point · {@completion.total}</c-text><c-text
               :for={c <- @completion.candidates}
               class={"cap-row #{if c.selected, do: "selected"}"}
-            ><span class="cap-label">{c.label}</span><span class="cap-kind">{c.hint}</span></span></span></span>
-        </div>
-      </div>
+            ><c-text class="cap-label">{c.label}</c-text><c-text class="cap-kind">{c.hint}</c-text></c-text></c-text></c-text>
+        </c-line>
+        </.dynamic_tag>
+        <% end %>
+        <% end %>
+      </.dynamic_tag>
       <% end %>
       <% end %>
       <% end %>
       <% end %>
       <% end %>
       <% end %>
-      <div :if={@node.footer_line} class="buffer-footer">{@node.footer_line}</div>
-      <div class="modeline">
-        <span
+      <c-group :if={@node.footer_line} class="buffer-footer">{@node.footer_line}</c-group>
+      <c-modeline class="modeline">
+        <c-text
           class="ml-caret"
           title="expand (C-x ?)"
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
-        >{if @node.dash, do: "▾", else: "▸"}</span>
-        <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
-        <span
+        >{if @node.dash, do: "▾", else: "▸"}</c-text>
+        <c-text class={"ml-dot #{if @node.modified, do: "modified"}"}></c-text>
+        <c-buffer-name
+          buffer={@node.buffer}
+          modified={to_string(@node.modified)}
           class="name"
           style="cursor:pointer"
           title={@node.buffer}
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
-        ><%= if ml_segs(@node) != [] do %><span :for={{c, t} <- ml_segs(@node)} class={c}>{t}</span><% else %>{ml_name(@node)}<% end %></span>
-        <span :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
+        ><%= if ml_segs(@node) != [] do %><c-text :for={{c, t} <- ml_segs(@node)} class={c}>{t}</c-text><% else %>{ml_name(@node)}<% end %></c-buffer-name>
+        <c-field name="project" :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
           · {@node.modeline_project}
-        </span>
-        <span :if={@node.group} class="ml-group">· {@node.group}</span>
-        <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
-        <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
-        <span
+        </c-field>
+        <c-field name="group" :if={@node.group} class="ml-group">· {@node.group}</c-field>
+        <c-status state="selected" :if={@node.selected} class="ml-mode ml-selected">● selected</c-status>
+        <c-mode :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</c-mode>
+        <c-field name="info"
           :if={@node.modeline_info}
           class="ml-mode"
           style="cursor:pointer"
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-buf={@node.buffer}
-        >{@node.modeline_info}</span>
-        <span class="mb-spacer"></span>
-        <span class="ml-pos">
+        >{@node.modeline_info}</c-field>
+        <c-text class="mb-spacer"></c-text>
+        <c-position class="ml-pos" line={@line} column={@col}>
           <%= if @node.render_mode == "terminal" do %>
-            <span class="ml-icon">▣</span> PTY · transcript {ml_bytes(@node.text)}
+            <c-text class="ml-icon">▣</c-text> PTY · transcript {ml_bytes(@node.text)}
           <% else %>
-            <span class="ml-icon">≡</span> {ml_bytes(@node.text)} · <span class="ml-icon">⌖</span> L{@line}:C{@col} · {pct(@node)}
+            <c-text class="ml-icon">≡</c-text> {ml_bytes(@node.text)} · <c-text class="ml-icon">⌖</c-text> L{@line}:C{@col} · {pct(@node)}
           <% end %>
-        </span>
-      </div>
-    </div>
+        </c-position>
+      </c-modeline>
+    </c-window>
     """
   end
 
@@ -2212,8 +2238,8 @@ defmodule Compos.Ui.EditorLive do
         {shown, click} = chrome_click_off(cls)
         assigns = assign(assigns, cls: shown, click: click)
 
-        ~H"""
-        <span
+        ~M"""
+        <c-text
           id={@id}
           class={@cls}
           contenteditable="false"
@@ -2221,7 +2247,7 @@ defmodule Compos.Ui.EditorLive do
           phx-click={@click && "block_click"}
           phx-value-win={@click && @win}
           phx-value-id={@click}
-        >{@txt}</span>
+        >{@txt}</c-text>
         """
 
       is_binary(src) ->
@@ -2234,13 +2260,13 @@ defmodule Compos.Ui.EditorLive do
             image_class: if(avatar?, do: "img-embed img-avatar", else: "img-embed")
           )
 
-        ~H|<img id={@id} src={@src} class={@image_class} loading="lazy" contenteditable="false" data-len={@len} />|
+        ~M|<img id={@id} src={@src} class={@image_class} loading="lazy" contenteditable="false" data-len={@len} />|
 
       cls =~ "x-embed" ->
         assigns = assign(assigns, len: byte_size(txt), card: Compos.Ui.Oembed.card(txt))
 
-        ~H"""
-        <span id={@id} class="x-card" contenteditable="false" data-len={@len}><%= case @card do %><% {:ok, html} -> %>{Phoenix.HTML.raw(html)}<% _ -> %><span class="x-pending">{@txt}</span><% end %></span>
+        ~M"""
+        <c-text id={@id} class="x-card" contenteditable="false" data-len={@len}><%= case @card do %><% {:ok, html} -> %>{Phoenix.HTML.raw(html)}<% _ -> %><c-text class="x-pending">{@txt}</c-text><% end %></c-text>
         """
 
       cls =~ "youtube-embed" and youtube_id(txt) ->
@@ -2252,12 +2278,12 @@ defmodule Compos.Ui.EditorLive do
             thumbnail: youtube_thumbnail(id)
           )
 
-        ~H"""
-        <a id={@id} class="youtube-card youtube-island" href={@txt} target="_blank" rel="noopener noreferrer" contenteditable="false" data-len={@len} aria-label="Watch this video on YouTube"><img src={@thumbnail} alt="YouTube video thumbnail" loading="lazy" /><span class="youtube-play" aria-hidden="true">▶</span></a>
+        ~M"""
+        <a id={@id} class="youtube-card youtube-island" href={@txt} target="_blank" rel="noopener noreferrer" contenteditable="false" data-len={@len} aria-label="Watch this video on YouTube"><img src={@thumbnail} alt="YouTube video thumbnail" loading="lazy" /><c-text class="youtube-play" aria-hidden="true">▶</c-text></a>
         """
 
       true ->
-        ~H|<span id={@id} class={@cls} data-href={@href}>{@txt}</span>|
+        ~M|<c-text id={@id} class={@cls} data-href={@href}>{@txt}</c-text>|
     end
   end
 
@@ -2552,16 +2578,16 @@ defmodule Compos.Ui.EditorLive do
   # inside the range — and, when it also has an anchor, a data-current
   # attribute the scroll hook follows.
   defp blk(%{b: %{tag: "pre"}} = assigns) do
-    ~H|<pre class={blk_class(@b, @line)}>{@b.text}</pre>|
+    ~M|<pre class={blk_class(@b, @line)}>{@b.text}</pre>|
   end
 
   defp blk(%{b: %{tag: "span"}} = assigns) do
-    ~H|<span class={blk_class(@b, @line)}><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %></span>|
+    ~M|<c-text class={blk_class(@b, @line)}><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %></c-text>|
   end
 
   defp blk(%{b: %{tag: "div"}} = assigns) do
-    ~H"""
-    <div
+    ~M"""
+    <c-group
       class={blk_class(@b, @line)}
       data-anchor={@b.anchor}
       data-current={if @b.anchor && blk_current?(@b, @line), do: "1"}
@@ -2569,22 +2595,26 @@ defmodule Compos.Ui.EditorLive do
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
       {@b.attrs}
-    ><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></div>
+    ><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></c-group>
     """
   end
 
   # any other tag: an SVG chart, a table, a label. The attributes are the
   # mode's, filtered by the allowlist below; a click still routes by id.
   defp blk(assigns) do
-    ~H"""
+    ~M"""
     <.dynamic_tag
       tag_name={@b.tag}
       class={blk_class(@b, @line)}
+      id={@b.anchor && "block-#{@win}-#{@b.anchor}"}
+      data-anchor={@b.anchor}
+      data-current={if @b.anchor && blk_current?(@b, @line), do: "1"}
+      {if @b.anchor, do: [{"selected", to_string(blk_current?(@b, @line))}], else: []}
       phx-click={@b.click && "block_click"}
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
       {@b.attrs}
-    ><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></.dynamic_tag>
+    ><c-text :if={{"marked", "true"} in @b.attrs} class="list-mark" aria-label="Marked">✱</c-text><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></.dynamic_tag>
     """
   end
 
@@ -2598,6 +2628,11 @@ defmodule Compos.Ui.EditorLive do
   defp blk_class(b, line),
     do: if(blk_current?(b, line), do: "#{b.class} #{b.mark}", else: b.class)
 
+  defp block_faces(classes) do
+    classes |> String.split() |> Enum.filter(&String.starts_with?(&1, "f-"))
+    |> Enum.map(&String.replace_prefix(&1, "f-", "")) |> Enum.join(" ")
+  end
+
   defp blk_current?(%{lines: [a, b], mark: m}, line) when is_binary(m),
     do: line >= a and line <= b
 
@@ -2607,26 +2642,88 @@ defmodule Compos.Ui.EditorLive do
   # Presentation only: style, and the SVG geometry and paint attributes.
   # Nothing that loads a resource, runs a script, or submits a form. A tag
   # outside the list draws as a div, an attribute outside it is dropped.
-  @block_tags ~w(div span pre p h1 h2 h3 h4 table thead tbody tr th td ul ol li
+  @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre p h1 h2 h3 h4 table thead tbody tr th td ul ol li
                  svg g path rect circle ellipse line polyline polygon text tspan title)
-  @block_attrs ~w(style d viewBox preserveAspectRatio fill stroke stroke-width
+  @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target style d viewBox preserveAspectRatio fill stroke stroke-width
                   stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
                   stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
                   width height points transform vector-effect text-anchor font-size
                   dominant-baseline shape-rendering title colspan rowspan)
+
+  defp semantic_line(%{fields: []} = assigns) do
+    ~M"""
+    <.seg :for={{{txt, cls}, sx} <- Enum.with_index(@segs)} id={"#{@id_prefix}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} />
+    """
+  end
+
+  defp semantic_line(assigns) do
+    {segments, _} = Enum.map_reduce(assigns.segs, assigns.start, fn {txt, cls}, at ->
+      {{at, at + byte_size(txt), txt, cls}, at + byte_size(txt)}
+    end)
+    stop = case List.last(segments) do nil -> assigns.start; {_, b, _, _} -> b end
+    fields = Enum.filter(assigns.fields, fn {a, b, _} -> a < stop and b > assigns.start end)
+    boundaries = ([assigns.start, stop] ++ Enum.flat_map(fields, fn {a, b, _} -> [max(a, assigns.start), min(b, stop)] end)) |> Enum.uniq() |> Enum.sort()
+    pieces = for [a, b] <- Enum.chunk_every(boundaries, 2, 1, :discard), a < b do
+      field = Enum.find_value(fields, fn {x, y, field} -> if x <= a and b <= y, do: field end)
+      segs = for {x, y, txt, cls} <- segments, x < b and y > a, do: {binary_part(txt, max(x, a) - x, min(y, b) - max(x, a)), cls}
+      prefix = for {x, y, txt, _} <- segments, x < a, do: binary_part(txt, 0, min(y, a) - x)
+      %{field: field, segs: segs, col: String.length(Enum.join(prefix)), width: max(1, String.length(Enum.map_join(segs, &elem(&1, 0))))}
+    end
+    assigns = assigns |> assign(:pieces, pieces) |> assign(:direct, Map.get(assigns, :direct, false))
+    ~M"""
+    <%= for {piece, px} <- Enum.with_index(@pieces) do %><%= if piece.field do %><%= if @direct do %><.direct_field id_prefix={"#{@id_prefix}-#{px}"} field={piece.field} segs={piece.segs} col={piece.col} width={piece.width} base={@base} win={@win} /><% else %><.dynamic_tag tag_name={piece.field.tag} {piece.field.attrs}><.seg :for={{{txt, cls}, sx} <- Enum.with_index(piece.segs)} id={"#{@id_prefix}-#{px}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /></.dynamic_tag><% end %><% else %><%= unless @direct do %><.seg :for={{{txt, cls}, sx} <- Enum.with_index(piece.segs)} id={"#{@id_prefix}-#{px}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /><% end %><% end %><% end %>
+    """
+  end
+
+  # Uniform field styling belongs on the domain element itself. Only mixed
+  # cursor/face runs need inner spans.
+  defp direct_field(assigns) do
+    classes = assigns.segs |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+    assigns = assign(assigns, uniform: length(classes) == 1, face_class: List.first(classes) || "",
+      text: Enum.map_join(assigns.segs, &elem(&1, 0)))
+    ~M"""
+    <.dynamic_tag tag_name={@field.tag} {@field.attrs} data-col={@col} style={"--field-column: #{@col + 1}; --field-width: #{@width}"} class={if @uniform, do: @face_class}><%= if @uniform do %>{@text}<% else %><.seg :for={{{txt, cls}, sx} <- Enum.with_index(@segs)} id={"#{@id_prefix}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /><% end %></.dynamic_tag>
+    """
+  end
+
+  # Wrap existing lines without introducing layout boxes or replacing text nodes.
+  defp semantic_line_groups(lines, records) do
+    records = for [start, stop, pl] <- records || [], is_integer(start) and is_integer(stop), do: {start, stop, block_view(pl)}
+    {tagged, _} = Enum.map_reduce(lines, records, fn line, remaining ->
+      remaining = Enum.drop_while(remaining, fn {_, stop, _} -> stop <= line.start end)
+      block = case remaining do
+        [{start, _, block} | _] when start <= line.start -> Map.put(block, :record_start, start)
+        _ -> %{tag: "c-group", attrs: [], fields: [], direct: false}
+      end
+      {{block, line}, remaining}
+    end)
+    tagged
+    |> Enum.chunk_by(fn {block, _} -> {block.tag, block.attrs, Map.get(block, :record_start)} end)
+    |> Enum.map(fn [{block, _} | _] = chunk ->
+      %{tag: block.tag, attrs: block.attrs, fields: block.fields, direct: block.direct, lines: Enum.map(chunk, &elem(&1, 1))}
+    end)
+  end
+
+  defp block_root(pl) do
+    block = block_view(pl || [])
+    %{tag: if(block.tag == "div", do: "c-buffer", else: block.tag), attrs: block.attrs}
+  end
 
   defp block_view(pl) do
     tag = pget(pl, "tag") || "div"
 
     %{
       tag: if(tag in @block_tags, do: tag, else: "div"),
+      direct: pget(pl, "layout") == "columns",
+      fields: for([a, b, field] <- pget(pl, "fields") || [], is_integer(a) and is_integer(b) and a < b, do: {a, b, block_view(field)}),
       class: pget(pl, "class") || "",
       anchor: falsy(pget(pl, "anchor")),
       lines: falsy(pget(pl, "lines")),
       mark: falsy(pget(pl, "mark")),
       click: falsy(pget(pl, "click")),
       text: falsy(pget(pl, "text")),
-      segs: for([c, t] <- pget(pl, "segs") || [], do: {c, t}),
+      segs: for([c, t | _] <- pget(pl, "segs") || [], do: {c, t}),
+      semantic_segs: for([c, t | tags] <- pget(pl, "segs") || [], do: {c, t, if(List.first(tags) in @block_tags, do: List.first(tags), else: "c-text")}),
       attrs: block_attrs(pget(pl, "attrs") || []),
       children: Enum.map(pget(pl, "children") || [], &block_view/1)
     }
@@ -3945,4 +4042,8 @@ defmodule Compos.Ui.EditorLive do
       inset: face(faces, "window-inactive", "bg", "#f4f0e6")
     }
   end
+
+  @impl true
+  def render(assigns), do: Compos.Ui.Representation.live(__MODULE__, assigns)
+
 end

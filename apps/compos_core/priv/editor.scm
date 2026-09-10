@@ -989,6 +989,8 @@
 ;;;
 ;;;   'row-columns (buf) -> (COLUMNS ...)
 ;;;   'row-cells   (buf entry) -> (CELLS ...)
+;;;   'collection semantic collection tag; 'composml (buf entry) -> block
+;;;              Optional semantic row projection; keys must be strings.
 ;;;
 ;;; The mark goes on the first line and the lines under it start where it
 ;;; does. A two-line row has no single label row, so the head shows none.
@@ -1141,10 +1143,11 @@
 ;; one row of cells as text plus the faces on it. A span is (OFFSET
 ;; LENGTH FACE) inside the line, in bytes, so the writer below is the
 ;; only place that counts absolute offsets.
-(define (list-lay-out cells cols)
-  (let loop ((cs cells) (ks cols) (text "") (spans '()))
+(define (list-lay-out cells cols &optional fields?)
+  (let loop ((cs cells) (ks cols) (text "") (spans '()) (fields '()))
     (if (or (null? cs) (null? ks))
-        (list text (reverse spans))
+        (if fields? (list text (reverse spans) (reverse fields))
+                    (list text (reverse spans)))
         (let* ((k (car ks))
                (fitted (list-fit (list-cell-text (car cs)) (list-col-width k)
                                  (list-col-trim k)))
@@ -1166,7 +1169,8 @@
                                (if (null? (cdr ks)) "" *list-gap*))
                 (if face
                     (cons (list start (string-byte-length fitted) face) spans)
-                    spans))))))
+                    spans)
+                (if fields? (cons (list start (string-byte-length fitted)) fields) fields))))))
 
 (define (list-shift-spans spans n)
   (map (lambda (s) (list (+ (car s) n) (car (cdr s)) (nth 2 s))) spans))
@@ -1971,6 +1975,86 @@
                     (window-set-point! (car place) p))))))))
       places)))
 
+;; Optional semantic projection of the same selectable rows. Text offsets stay
+;; authoritative for commands, search, marks, and per-window selection.
+;; Field boundaries come from the same layout operation that wrote the text.
+(define (list-composml-fields buf row start)
+  (let ((fields (list-opt buf 'composml-fields)))
+    (if (not fields) '()
+      (let* ((ctx (list-row-ctx buf))
+             (prefix (+ (string-byte-length (if (list-ctx-marks? ctx) (list-mark-of buf row ctx) "")) 1))
+             (laid (list-lay-out (car (list-row-cells buf row ctx))
+                                (car (list-ctx-column-lines ctx)) #t)))
+        (let loop ((ranges (nth 2 laid)) (descs (fields buf row)) (out '()))
+          (if (or (null? ranges) (null? descs)) (reverse out)
+            (let* ((r (car ranges)) (a (+ start prefix (car r))))
+              (loop (cdr ranges) (cdr descs)
+                (if (> (cadr r) 0) (cons (list a (+ a (cadr r)) (car descs)) out) out)))))))))
+
+;; Semantic text records keep the existing text, faces and line geometry.
+(define (list-composml-text! buf rows)
+  (let ((record (or (list-opt buf 'composml-record)
+                    (lambda (b row) (list 'tag "c-item"))))
+        (root (or (list-opt buf 'composml-root)
+                  (lambda (b) (list 'tag "c-list" 'attrs
+                    (list (list "mode" (list-mode-of b))))))))
+    (unless (list-opt buf 'composml)
+      (desktop-skip! buf 'render-text-root)
+      (desktop-skip! buf 'render-records)
+      (list-set-locals! buf
+        (list 'render-text-root (root buf)
+              'render-records
+              (let loop ((rs rows) (offsets (list-offsets buf)) (out '()))
+                (if (or (null? rs) (null? offsets)) (reverse out)
+                  (let* ((row (car rs)) (start (car offsets))
+                         (size (fold (lambda (n ln) (+ n (string-byte-length (car ln)) 1))
+                                     0 (list-row-lines buf row)))
+                         (block (record buf row)))
+                    (loop (cdr rs) (cdr offsets)
+                      (cons (list start (+ start size)
+                              (append (list 'fields (list-composml-fields buf row start)
+                                            'attrs (append
+                                (list (list "record-id" (let ((key (list-key buf row)))
+                                  (if (string? key) key (value->string key)))))
+                                (or (plist-get block 'attrs) '()))) block)) out))))))))))
+
+(define (list-composml! buf rows head)
+  (let ((render (list-opt buf 'composml))
+        (collection (list-opt buf 'collection)))
+    (when (and render collection)
+      (desktop-skip! buf 'render-blocks)
+      (desktop-skip! buf 'render-root)
+      (let ((per (list-row-height buf)) (first (length head)))
+        (list-set-locals! buf
+          (list 'render-mode "blocks"
+                'render-root (let ((root (list-opt buf 'composml-root)))
+                               (if root (root buf) (list 'tag "c-buffer")))
+                'render-blocks
+                (list
+                  (list 'tag "c-headerline" 'class "semantic-list-header"
+                        'children (map (lambda (ln) (list 'tag "pre" 'text (car ln))) head))
+                  (list 'tag collection 'class "semantic-list"
+                        'attrs '(("role" "list"))
+                        'children
+                        (let loop ((rest rows) (i 0) (out '()))
+                          (if (null? rest) (reverse out)
+                            (let* ((row (car rest))
+                                   (key (list-key buf row))
+                                   (block (render buf row))
+                                   (start (+ first (* i per) 1)))
+                              (loop (cdr rest) (+ i 1)
+                                (cons
+                                  (append
+                                    (list 'class (string-append "semantic-item " (or (plist-get block 'class) ""))
+                                          'anchor (string-append "list:" (url-encode key))
+                                          'click (string-append "list:" key)
+                                          'lines (list start (+ start per -1))
+                                          'mark "selected"
+                                          'attrs (append (list (list "record-id" key) (list "role" "listitem"))
+                                                         (or (plist-get block 'attrs) '())))
+                                    block)
+                                  out)))))))))))))
+
 (define (list-render! buf fetch)
   (when (buffer-exists? buf)
     ;; the layout cache needs no reset here: it names the width it was
@@ -2027,7 +2111,9 @@
                                   (list-row-height buf) extra)))
           ;; the tag's old ranges go with this set: one change, not a
           ;; clear and then a set
-          (overlay-set! buf 'list (append base (list-row-overlays buf shown)))))
+          (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
+          (list-composml! buf shown head)
+          (list-composml-text! buf shown)))
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
             (last (- (list-shown-count buf) 1)))
         ;; Restore the buffer's point without moving every window that
@@ -2177,6 +2263,8 @@
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
     (buffer-set-local! buf 'render-mode #f)
+    (buffer-set-local! buf 'render-text-root #f)
+    (buffer-set-local! buf 'render-records #f)
     ;; the keys are the mode's map, under list-mode-map (define-list-mode!);
     ;; a layout profile's own flags are buffer state and bind here
     (list-install-mark-keys! buf)
@@ -3618,7 +3706,11 @@
     ;; a change of major mode starts the buffer's own map afresh, as
     ;; use-local-map does in Emacs. The mode's setup puts its keys back,
     ;; and the minor modes put theirs back after it.
-    (when changed (clear-local-map! buf))
+    (when changed
+      (clear-local-map! buf)
+      ;; Semantic projections belong to the old mode; the new setup rebuilds them.
+      (for-each (lambda (key) (buffer-set-local! buf key #f))
+                '(render-root render-text-root render-records)))
     (define-keymap! (mode-keymap name))
     (use-local-map! buf (mode-keymap name))
     (buffer-set-local! buf 'mode-name name)
@@ -11669,16 +11761,17 @@
 ;;; machine state goes right, and a hairline rule separates them.
 
 (define (dash--seg key segs align &optional extra-class)
-  (list 'tag "div"
+  (list 'tag "c-field"
         'class (string-append
                 (if (equal? align 'right) "dseg dseg-r" "dseg")
                 (if extra-class (string-append " " extra-class) ""))
+        'attrs (if key (list (list "name" key)) '())
         'children
         (append
           (if key
-              (list (list 'tag "div" 'class "dseg-k" 'text key))
+              (list (list 'tag "c-label" 'class "dseg-k" 'text key))
               '())
-          (list (list 'tag "div" 'class "dseg-v" 'segs segs)))))
+          (list (list 'tag "c-value" 'class "dseg-v" 'segs segs)))))
 
 (define (dash--seg-rule)
   (list 'tag "span" 'class "dseg-rule"))
@@ -11839,9 +11932,14 @@
                cells)))))
 
 (define (dash--wide-seg key text)
-  (append (dash--seg key (list (list "f-dim" text)) 'left "dseg-inline dseg-wide")
-          (list 'click "summary-log"
-                'attrs (list (list "title" "open the summary log")))))
+  (let ((base (dash--seg key (list (list "f-dim" text)) 'left "dseg-inline dseg-wide")))
+    (list 'tag "c-action"
+          'class (plist-get base 'class)
+          'children (plist-get base 'children)
+          'click "summary-log"
+          'attrs (append (if key (list (list "name" key)) '())
+                         (list (list "target" "summary-log")
+                               (list "title" "open the summary log"))))))
 
 ;; The modeline names the buffer the short way: project coordinates inside
 ;; a project, "~" for the home directory outside one. The buffer name keeps
@@ -13825,7 +13923,7 @@
 (public! 'buffer-mode-is? "(buffer-mode-is? BUF NAME) — #t when the buffer's major mode is NAME or descends from it")
 (public! 'mode-setup! "(mode-setup! NAME) — run NAME's setup in the current buffer, the way a derived mode inherits it")
 (public! 'define-list-mode!
-  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Set transient to #f for persistent app buffers (default #t). Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact."
+  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Set transient to #f for persistent app buffers (default #t). Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
   'ui)
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 (public! 'marginalia! "(marginalia! CATEGORY FN) — FN turns one candidate of CATEGORY ('file 'buffer 'command) into the text beside it; replaces the annotator for that category")

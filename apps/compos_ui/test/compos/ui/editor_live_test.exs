@@ -363,7 +363,7 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, view, _} = live(conn, "/")
     html = render(view)
 
-    assert html =~ ~r{<span[^>]* class="f-morg-code">group-add</span>}
+    assert html =~ ~r{<c-text[^>]* class="f-morg-code">group-add</c-text>}
     assert html =~ ~s(--morg-code-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;)
     assert html =~ "font-family:var(--morg-code-family);"
   end
@@ -647,10 +647,10 @@ defmodule Compos.Ui.EditorLiveTest do
     {unmodified, _} = :binary.match(html, ">Unmodified<")
     {control, _} = :binary.match(html, ">Control<")
     {meta, _} = :binary.match(html, ">Meta<")
-    {plain_a, _} = :binary.match(html, ">a</span>")
-    {plain_z, _} = :binary.match(html, ">z</span>")
-    {control_a, _} = :binary.match(html, ">C-a</span>")
-    {control_z, _} = :binary.match(html, ">C-z</span>")
+    {plain_a, _} = :binary.match(html, ">a</c-text>")
+    {plain_z, _} = :binary.match(html, ">z</c-text>")
+    {control_a, _} = :binary.match(html, ">C-a</c-text>")
+    {control_z, _} = :binary.match(html, ">C-z</c-text>")
 
     assert unmodified < control and control < meta
     assert plain_a < plain_z and control_a < control_z
@@ -879,7 +879,7 @@ defmodule Compos.Ui.EditorLiveTest do
     assert html =~ ~s(phx-value-cmd="mode:visual-line-mode")
 
     html =
-      view |> element(~s(span[phx-value-cmd="mode:visual-line-mode"])) |> render_click()
+      view |> element(~s(c-text[phx-value-cmd="mode:visual-line-mode"])) |> render_click()
 
     refute html =~ "mode:visual-line-mode"
     assert html =~ "visual-line-mode disabled"

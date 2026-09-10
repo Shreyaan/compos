@@ -1,0 +1,107 @@
+<!-- Proposed semantic rendition of the live localhost:4004 DOM inspected on
+     2026-09-09. Repeated tabs and transcript entries are abbreviated.
+     This is a design specimen, not generated output or a migrated live view.
+     Session tokens and generated Phoenix bookkeeping are deliberately omitted.
+     Existing event names and targets are retained where demonstrated. -->
+<c-frame id="editor" frame="f-icrsaba" instance="compos">
+  <c-statusbar scope="frame">
+    <c-tabs kind="group" aria-label="Groups">
+      <c-tab target="grp:1788639211:1" selected="true">
+        <button type="button" aria-current="true"
+                phx-click="frame_tab" phx-value-id="grp:1788639211:1">GROUPS</button>
+      </c-tab>
+      <c-tab target="grp:1788648622:25" selected="false">
+        <button type="button" phx-click="frame_tab"
+                phx-value-id="grp:1788648622:25">CHAT</button>
+      </c-tab>
+      <!-- fixes, doppler, TESTING -->
+      <c-action kind="more-groups" remaining="20">
+        <button type="button" phx-click="frame_tab">20 more</button>
+      </c-action>
+    </c-tabs>
+    <c-echo></c-echo>
+    <c-field name="layout"><c-label>layout</c-label><c-value>:free</c-value></c-field>
+    <c-metric name="vm-memory" value="397" unit="MiB">397 MiB vm</c-metric>
+    <c-metric name="host-memory" value="82" unit="percent">82% host</c-metric>
+    <c-key-hints><kbd>C-x C-f</kbd> · <kbd>C-x b</kbd> · <kbd>M-x</kbd> · <kbd>C-g</kbd></c-key-hints>
+  </c-statusbar>
+
+  <c-windows>
+    <c-window id="win-82" window="82" buffer="*chat:GROUPS:9*"
+              active="true" read-only="false">
+      <c-headerline>
+        <c-field name="mode">
+          <c-label>mode</c-label>
+          <c-value><c-mode>chat</c-mode> · <c-mode>code-agent</c-mode></c-value>
+        </c-field>
+        <c-field name="group"><c-label>group</c-label><c-value>GROUPS</c-value></c-field>
+        <c-field name="preset"><c-label>preset</c-label><c-value>Coding</c-value></c-field>
+        <c-action kind="summary" target="summary-log">
+          <button type="button" phx-click="block_click" phx-value-win="82"
+                  phx-value-id="summary-log" title="open the summary log">
+            <c-text face="dim">Disabling group preview buffer animation</c-text>
+          </button>
+        </c-action>
+      </c-headerline>
+
+      <c-buffer name="*chat:GROUPS:9*" presentation="agent">
+        <c-transcript id="ag-scroll-82" verbosity="info" follow-tail="true">
+          <c-toolbar aria-label="Transcript verbosity">
+            <button type="button" aria-pressed="true" phx-click="ui_cmd"
+                    phx-value-win="82" phx-value-cmd="agent-verbosity-info">info</button>
+            <button type="button" aria-pressed="false" phx-click="ui_cmd"
+                    phx-value-win="82" phx-value-cmd="agent-verbosity-log">log</button>
+            <button type="button" aria-pressed="false" phx-click="ui_cmd"
+                    phx-value-win="82" phx-value-cmd="agent-verbosity-debug">debug</button>
+          </c-toolbar>
+          <c-message index="1" author="user">
+            <c-label>YOU</c-label>
+            <p>group preview should not animate the buffers. instant switch.</p>
+          </c-message>
+          <c-message index="2" kind="summary">
+            <c-label>SUMMARY</c-label>
+            <p>Disabling group preview buffer animation</p>
+          </c-message>
+          <c-message index="3" author="assistant">
+            <p>I'll look at how group preview switches buffers and find the animation.</p>
+          </c-message>
+          <c-tool-call index="4" call="toolu_01Vdmcq7kZM8fHeHty8jnR3b"
+                       name="ToolSearch" state="done">
+            <details>
+              <summary phx-click="agent_card" phx-value-win="82"
+                       phx-value-id="toolu_01Vdmcq7kZM8fHeHty8jnR3b">
+                <c-label>ToolSearch</c-label>
+                <c-arguments>select:mcp__compos__eval-scheme,mcp__compos__apropos</c-arguments>
+                <c-metric name="duration" value="892" unit="ms">892ms</c-metric>
+                <c-metric name="tokens" value="43" approximate="true">~43 tok</c-metric>
+              </summary>
+              <c-result><pre>Tool: mcp__compos__eval-scheme
+Tool: mcp__compos__apropos</pre></c-result>
+            </details>
+          </c-tool-call>
+          <!-- Remaining messages and tool calls follow in their original order. -->
+        </c-transcript>
+        <c-activity state="streaming">streaming</c-activity>
+        <c-prompt>
+          <c-label>YOU</c-label>
+          <c-input><c-cursor> </c-cursor></c-input>
+          <c-key-hints><kbd>RET</kbd> sends · <kbd>C-RET</kbd> interrupts</c-key-hints>
+        </c-prompt>
+      </c-buffer>
+
+      <c-modeline>
+        <c-action kind="expand-dashboard">
+          <button type="button" phx-click="ui_cmd" phx-value-win="82"
+                  phx-value-cmd="modeline-expand" aria-label="Expand dashboard">▸</button>
+        </c-action>
+        <c-buffer-name buffer="*chat:GROUPS:9*" modified="true">
+          Disabling group preview buffer animation
+        </c-buffer-name>
+        <c-field name="project"><c-value>~/src/compos/</c-value></c-field>
+        <c-field name="group"><c-value>GROUPS</c-value></c-field>
+        <c-metric name="buffer-size" unit="kB">69.9 kB</c-metric>
+        <c-position line="524" column="235" location="bottom">L524:C235 · Bot</c-position>
+      </c-modeline>
+    </c-window>
+  </c-windows>
+</c-frame>

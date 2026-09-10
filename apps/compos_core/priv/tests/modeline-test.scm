@@ -57,7 +57,7 @@
   (let loop ((bs blocks))
     (cond ((null? bs) #f)
           ((and (pair? (car bs))
-                (equal? (plist-get (car bs) 'tag) "div")
+                (member (plist-get (car bs) 'tag) '("c-field" "c-action"))
                 (let ((kids (plist-get (car bs) 'children)))
                   (and (pair? kids)
                        (equal? (plist-get (car kids) 'text) key))))
@@ -479,3 +479,17 @@
                     "a buffer you are editing keeps them for the caret")
       (editing-state-off! buf)
       (buffer-kill! buf))))
+
+(deftest 'dashboard-fields-preserve-composml-semantics
+  "Dashboard metadata and summary actions declare their semantic structure."
+  (lambda ()
+    (let* ((field (dash--seg "mode" '(("f-dim" "Scheme")) 'left))
+           (children (plist-get field 'children))
+           (action (dash--wide-seg #f "Summary")))
+      (check-equal! (plist-get field 'tag) "c-field" "metadata is a field")
+      (check-equal! (plist-get (car children) 'tag) "c-label" "the key has a label")
+      (check-equal! (plist-get (cadr children) 'tag) "c-value" "the value is explicit")
+      (check-equal! (plist-get action 'tag) "c-action" "summary is an action")
+      (check-equal! (plist-get action 'click) "summary-log" "the original action target survives")
+      (check-true! (member '("title" "open the summary log") (plist-get action 'attrs))
+              "the summary retains its hint"))))

@@ -172,4 +172,32 @@ defmodule Compos.NotmuchTagSelectionTest do
 
     assert eval!(~S|(nm--any-marked? "*notmuch*")|) == "#f"
   end
+
+  test "archive follows the marks and dispatches only after confirmation" do
+    KeyDispatch.handle_key("m")
+    assert eval!(~S|(list-marks "*notmuch*")|) == ~s{(("one" "*"))}
+    KeyDispatch.handle_key("a")
+    assert eval!(~S|(filter (lambda (cmd) (string-prefix? "tag " cmd)) zz-tag-calls)|) == "()"
+    eval!(~S|(minibuffer-change! "yes")|)
+    KeyDispatch.handle_key("RET")
+
+    assert eval!(~S|(filter (lambda (cmd) (string-prefix? "tag " cmd)) zz-tag-calls)|) ==
+             ~s{("tag -inbox -- '( tag:inbox ) and ( thread:one )'")}
+  end
+
+  test "header counts selected threads and identifies selection beyond loaded rows" do
+    KeyDispatch.handle_key("m")
+    assert eval!(~S|(nm--search-meta "*notmuch*")|) =~ "1 thread selected"
+    KeyDispatch.handle_key("U")
+    refute eval!(~S|(nm--search-meta "*notmuch*")|) =~ "selected"
+    narrow()
+    KeyDispatch.handle_key("*")
+    assert eval!(~S|(nm--search-meta "*notmuch*")|) =~ "All 10000 matching messages selected"
+    assert eval!("zz-tag-fetches") == "0"
+    assert eval!("zz-tag-calls") == "()"
+    KeyDispatch.handle_key("m")
+
+    assert eval!(~S|(nm--search-meta "*notmuch*")|) =~
+             "All matching messages selected except 1 thread"
+  end
 end

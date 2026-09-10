@@ -96,7 +96,7 @@ defmodule Compos.Ui.MobileLiveTest do
     hook(view, "fan_tab", %{"t" => "<f9>"})
 
     caps =
-      ~r{<span class="hh-cap-key[^"]*">([^<]*)</span>}
+      ~r{<c-text class="hh-cap-key[^"]*">([^<]*)</c-text>}
       |> Regex.scan(render(view))
       |> Enum.map(fn [_, key] -> key end)
 
@@ -218,7 +218,7 @@ defmodule Compos.Ui.MobileLiveTest do
     {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-group! (group-record-create! "#{other}"))})
     render(view)
     hook(view, "tab", %{"buf" => g})
-    assert has_element?(view, ".hh-ml-mode", "chat-mode")
+    assert has_element?(view, ~s(c-buffer[presentation="agent"]))
   end
 
   test "the rail moves point to the line the drag names", %{conn: conn} do

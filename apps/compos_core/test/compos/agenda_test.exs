@@ -74,12 +74,14 @@ defmodule Compos.AgendaTest do
     |> Enum.filter(&((&1[:class] || "") =~ "agenda-day"))
   end
 
-  defp row_segs(row), do: Enum.map(row[:segs] || [], fn [c, t] -> {c, t} end)
+  defp row_segs(row), do: Enum.map(row[:segs] || [], fn [c, t | _] -> {c, t} end)
 
   defp pl([{:sym, _} | _] = plist) do
     plist
     |> Enum.chunk_every(2)
-    |> Map.new(fn [{:sym, k}, v] -> {String.to_atom(k), if(is_list(v), do: pl_list(v), else: v)} end)
+    |> Map.new(fn [{:sym, k}, v] ->
+      {String.to_atom(k), if(is_list(v), do: pl_list(v), else: v)}
+    end)
   end
 
   defp pl(other), do: other
@@ -103,8 +105,11 @@ defmodule Compos.AgendaTest do
     assert text =~ ":work:"
     assert text =~ "— work.md"
 
+    assert Buffer.get_local(buf, "render-root") == [{:sym, "tag"}, "morg-agenda"]
+
     # the card view carries the same facts as segs
     row = Enum.find(rows(buf), &(&1[:segs] |> inspect() =~ "Standup"))
+    assert row[:tag] == "agenda-entry"
     segs = row_segs(row)
     assert {"agenda-time", "09:30"} in segs
     assert {"agenda-badge agenda-todo", "TODO"} in segs
@@ -166,6 +171,7 @@ defmodule Compos.AgendaTest do
 
   test "n steps onto the entry and RET opens the file at its heading", %{dir: dir} do
     path = Path.join(dir, "work.md")
+
     File.write!(path, """
     some preamble
     # TODO Water the plants #{stamp(0)}

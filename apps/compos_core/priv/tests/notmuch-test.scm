@@ -172,12 +172,12 @@
     (check-equal! (current-buffer) "*mail*" "the mail view is current")
     (check-equal! (buffer-local (current-buffer) 'render-mode) "html" "rendered as html")
     (let ((text (buffer-text (current-buffer))))
-      (check-contains! text "<!doctype html" "a whole document")
+      (check-contains! text "<!DOCTYPE html" "a whole document")
       (check-contains! text "Hello <b>HTML</b> world" "with the body")
       (check-contains! text "Quarterly report" "and the subject"))
 
     (t--nm-run! "notmuch-show-toggle-view")
-    (check-false! (buffer-local (current-buffer) 'render-mode) "the toggle drops to text")
+    (check-equal! (buffer-local (current-buffer) 'render-mode) "blocks" "the toggle renders semantic plain text")
     ;; the renderer is stubbed to cat, so the text view carries the raw html
     (check-contains! (buffer-text (current-buffer)) "Hello <b>HTML" "which is the raw html here")
 

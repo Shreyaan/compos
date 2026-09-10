@@ -63,8 +63,8 @@ defmodule Compos.Ui.IslandTest do
     html = render(view)
     assert html =~ ~s(data-ws="true")
     # the test renderer collapses whitespace-only text; the class is the fact
-    assert html =~ ~r{<span[^>]* class="f-ws-space">\s*</span><span[^>]* class="">b}
-    assert html =~ ~r{<span[^>]* class="f-ws-tab">\s*</span><span[^>]* class="">c}
+    assert html =~ ~r{<c-text[^>]* class="f-ws-space">\s*</c-text><c-text[^>]* class="">b}
+    assert html =~ ~r{<c-text[^>]* class="f-ws-tab">\s*</c-text><c-text[^>]* class="">c}
     Buffer.set_local(buf, "whitespace-mode", false)
   end
 
@@ -110,10 +110,10 @@ defmodule Compos.Ui.IslandTest do
     html = render(view)
 
     assert html =~
-             ~r{<span id="sg-[^"]+" class="chrome-seg zz-badge" contenteditable="false" data-len="0">chip</span>}
+             ~r{<c-text id="sg-[^"]+" class="chrome-seg zz-badge" contenteditable="false" data-len="0">chip</c-text>}
 
     # behind byte 3: after "abc", on the first line
-    assert html =~ ~r{>abc</span><span id="sg-[^"]+" class="chrome-seg zz-badge"}
+    assert html =~ ~r{>abc</c-text><c-text id="sg-[^"]+" class="chrome-seg zz-badge"}
   end
 
   test "a before attachment splits the seg it lands inside", %{conn: conn} do
@@ -122,8 +122,8 @@ defmodule Compos.Ui.IslandTest do
     {:ok, view, _} = live(conn, "/")
     html = render(view)
 
-    assert html =~ ~r{>abc</span><span id="sg-[^"]+" class="chrome-seg zz-mark"[^>]*>HERE</span>}
-    assert html =~ ~r{data-len="0"[^>]*>HERE</span><span[^>]* class="">def}
+    assert html =~ ~r{>abc</c-text><c-text id="sg-[^"]+" class="chrome-seg zz-mark"[^>]*>HERE</c-text>}
+    assert html =~ ~r{data-len="0"[^>]*>HERE</c-text><c-text[^>]* class="">def}
   end
 
   test "a chrome click routes through the block-click registry", %{conn: conn} do
@@ -150,7 +150,7 @@ defmodule Compos.Ui.IslandTest do
     assert html =~ ~s(class="chrome-seg zz-verb")
     refute html =~ "chrome-click:"
 
-    view |> element(~s(span[phx-value-id="zz:verb:7"])) |> render_click()
+    view |> element(~s(c-text[phx-value-id="zz:verb:7"])) |> render_click()
     want = ~s{("#{buf}" "zz:verb:7")}
     assert {:ok, ^want} = Session.eval("*zz-chrome-click*")
   end

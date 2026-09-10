@@ -9,14 +9,16 @@ defmodule Compos.Ui.MobileLayouts do
   face variables the daemon sends.
   """
   use Phoenix.Component
+  import Compos.Ui.ComposML, only: [sigil_M: 2]
 
   def root(assigns) do
     assigns = assign_new(assigns, :page_title, fn -> "compos" end)
 
-    ~H"""
+    ~M"""
     <!DOCTYPE html>
     <html lang="en">
       <head>
+        <link rel="stylesheet" href="/composml.css?v=semantic-grid-6" />
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
         <meta name="csrf-token" content={Phoenix.Controller.get_csrf_token()} />

@@ -231,6 +231,42 @@
               (list (car st) "faint")
               (list vc (dired-vc-face vc))))))
 
+(define (dired-composml-record buf entry)
+  (let* ((parent? (equal? entry ".."))
+         (info (and (not parent?) (dired-info buf entry)))
+         (path (if parent? (dired-parent (dired-dir buf))
+                   (string-append (dired-dir buf) "/" entry))))
+    (list 'tag "file" 'layout "columns"
+          'attrs (append
+            (list (list "path" path) (list "name" entry)
+                  (list "kind" (if parent? "directory" (or (and info (plist-get info 'type)) "unknown")))
+                  (list "mark" (or (cadr (or (assoc entry (list-marks buf)) (list entry ""))) "")))
+            (if info (list
+              (list "bytes" (or (plist-get info 'bytes) 0))
+              (list "mtime" (or (plist-get info 'mtime) 0))
+              (list "permissions" (or (plist-get info 'perms) ""))) '())))))
+
+(define (dired-composml-fields buf entry)
+  (let ((info (and (not (equal? entry "..")) (dired-info buf entry))))
+    (let loop ((cols (list-columns buf)) (i 0) (out '()))
+      (if (null? cols) (reverse out)
+        (let* ((name (car (car cols)))
+               (tag (cond ((equal? name "name") "filename")
+                          ((equal? name "size") "size")
+                          ((equal? name "modified") "modified")
+                          ((equal? name "perms") "permissions")
+                          ((equal? name "vc") "vcs-status")
+                          ((= i 0) "icon")
+                          (else "size-bar"))))
+          (loop (cdr cols) (+ i 1)
+            (cons (list 'tag tag 'attrs
+              (cond ((equal? name "size")
+                     (list (list "bytes" (or (and info (plist-get info 'bytes)) 0))))
+                    ((equal? name "modified")
+                     (list (list "mtime" (or (and info (plist-get info 'mtime)) 0))))
+                    ((equal? name "name") (list (list "name" entry)))
+                    (else '()))) out)))))))
+
 ;;; --- narrow windows -----------------------------------------------------------
 ;;; The same row with fewer columns. Dired's furniture (bar, size, date,
 ;;; perms, vc) costs about 58 characters before the name gets one, so a
@@ -473,6 +509,9 @@
 
 (define-list-mode! "Dired"
   (list
+    'composml-root (lambda (buf) (list 'tag "directory" 'attrs (list (list "path" (dired-dir buf)))))
+    'composml-record (lambda (buf entry) (dired-composml-record buf entry))
+    'composml-fields (lambda (buf entry) (dired-composml-fields buf entry))
     'preview dired--preview
     'doc (string-append
            "One directory as a table: name, size, modified, perms and what "
@@ -960,3 +999,17 @@
     "dired-rename" "dired-copy" "dired-mkdir" "dired-chmod" "dired-touch"
     "dired-symlink" "dired-sort-cycle" "dired-sort-reverse" "dired-dirs-first" "dired-filter-dotfiles"))
 (public! 'dired-register-provider! "(dired-register-provider! NAME LIST-MODE COMMANDS) — register a directory listing and Dired-command dispatch map; set buffer-local dired-provider before applying Dired.")
+
+(define-style! 'dired-semantic-list "
+directory > file.semantic-direct.line {
+  display: grid; grid-template-columns: none; grid-auto-columns: 1ch;
+  column-gap: 0; align-items: baseline; white-space: nowrap;
+}
+directory > file.semantic-direct > [data-col] {
+  grid-row: 1; grid-column: var(--field-column) / span var(--field-width);
+  min-width: 0; white-space: pre; overflow: hidden;
+}
+directory > file.semantic-direct[mark]:not([mark='']):not([mark=' ']) {
+  box-shadow: inset 3px 0 var(--accent-fg, #7aa2f7);
+}
+")

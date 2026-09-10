@@ -114,11 +114,16 @@ defmodule Compos.Ui.FaceCSS do
       |> Enum.reject(&is_nil/1)
       |> Enum.join("")
 
-    cond do
-      body == "" -> ""
-      String.starts_with?(name, "ts-") -> ".f-#{name},.#{name}{#{body}}"
-      true -> ".f-#{name}{#{body}}"
-    end
+    legacy =
+      cond do
+        body == "" -> ""
+        String.starts_with?(name, "ts-") -> ".f-#{name},.#{name}{#{body}}"
+        true -> ".f-#{name}{#{body}}"
+      end
+
+    # Attribute selectors have the same specificity as face classes. Emitting
+    # them in the same priority order preserves overlay and inheritance rules.
+    if body == "", do: "", else: legacy <> ~s([face~="#{name}"]{#{body}})
   end
 
   # one face attribute -> one CSS declaration, reading the variable of the

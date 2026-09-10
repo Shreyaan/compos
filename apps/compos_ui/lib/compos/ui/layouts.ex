@@ -1,13 +1,15 @@
 defmodule Compos.Ui.Layouts do
   use Phoenix.Component
+  import Compos.Ui.ComposML, only: [sigil_M: 2]
 
   def root(assigns) do
     assigns = assign_new(assigns, :page_title, fn -> "compos.el" end)
 
-    ~H"""
+    ~M"""
     <!DOCTYPE html>
     <html lang="en">
       <head>
+        <link rel="stylesheet" href="/composml.css?v=semantic-grid-6" />
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={Phoenix.Controller.get_csrf_token()} />
@@ -674,18 +676,18 @@ defmodule Compos.Ui.Layouts do
             background: var(--agent-tool-fg, #26356b); color: var(--window-bg, #fdfcf8);
           }
           .ag-thought { display: none; }
-          .ag-scroll.ag-verbosity-info > .ag-tool:has(+ .ag-tool) { display: none; }
-          .ag-scroll.ag-verbosity-info > .ag-tool {
+          .ag-scroll.ag-verbosity-info > c-toolcall:has(+ c-toolcall) { display: none; }
+          .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool {
             margin: 2px 0; border-color: transparent; background: transparent; opacity: .76;
           }
-          .ag-scroll.ag-verbosity-info > .ag-tool summary {
+          .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool summary {
             min-height: 25px; padding-block: 1px;
           }
-          .ag-scroll.ag-verbosity-info > .ag-tool .ag-preview,
-          .ag-scroll.ag-verbosity-info > .ag-tool .ag-duration,
-          .ag-scroll.ag-verbosity-info > .ag-tool .ag-tokens { display: none; }
-          .ag-scroll.ag-verbosity-debug > .ag-tool > .ag-body { display: block; }
-          .ag-scroll.ag-verbosity-debug > .ag-tool .ag-preview { display: none; }
+          .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-preview,
+          .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-duration,
+          .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-tokens { display: none; }
+          .ag-scroll.ag-verbosity-debug > c-toolcall > .ag-tool > c-result > .ag-body { display: block; }
+          .ag-scroll.ag-verbosity-debug > c-toolcall > .ag-tool .ag-preview { display: none; }
           .ag-tool, .ag-thought {
             margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
             border-radius: 0; font-family: var(--font-mono); font-size: var(--ag-base);
@@ -1476,7 +1478,7 @@ defmodule Compos.Ui.Layouts do
             font-family: var(--font-mono); font-size: 12.5px;
             letter-spacing: 0.08em; text-transform: uppercase;
           }
-          .wk-group-title span {
+          .wk-group-title c-text {
             color: var(--dim-fg, #8a857a); font-size: 10.5px; font-weight: 400;
           }
           .wk-grid {
@@ -2999,7 +3001,7 @@ defmodule Compos.Ui.Layouts do
                   if (!line) return null;
                   const start = parseInt(line.dataset.s, 10);
                   if (isNaN(start)) return null;
-                  const content = line.querySelector(".line-content");
+                  const content = (line.matches(".line-content") ? line : line.querySelector(".line-content"));
                   if (!content) return start;
                   // an element position names the text before its child
                   let target = node, at = offset, after = false;
@@ -3110,7 +3112,7 @@ defmodule Compos.Ui.Layouts do
                 // or before the byte, then the text node that holds it; an
                 // island is one unit, so a byte inside it lands after it
                 const domPos = (buf, byte) => {
-                  const lines = Array.from(buf.querySelectorAll(":scope > .line"));
+                  const lines = Array.from(buf.querySelectorAll(":scope > .line, :scope > .semantic-record > .line"));
                   let line = null;
                   for (const l of lines) {
                     const st = parseInt(l.dataset.s, 10);
@@ -3118,7 +3120,7 @@ defmodule Compos.Ui.Layouts do
                     line = l;
                   }
                   if (!line) return null;
-                  const content = line.querySelector(".line-content");
+                  const content = (line.matches(".line-content") ? line : line.querySelector(".line-content"));
                   if (!content) return null;
                   let rem = byte - parseInt(line.dataset.s, 10);
                   const walker = document.createTreeWalker(content, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
@@ -3173,7 +3175,7 @@ defmodule Compos.Ui.Layouts do
                   const f = sel && sel.focusNode;
                   const el = f ? (f.nodeType === 1 ? f : f.parentElement) : null;
                   const row = el && buf.contains(el) ? el.closest(".line") : null;
-                  buf.querySelectorAll(":scope > .line.hl-line").forEach((l) => { if (l !== row) l.classList.remove("hl-line"); });
+                  buf.querySelectorAll(":scope > .line.hl-line, :scope > .semantic-record > .line.hl-line").forEach((l) => { if (l !== row) l.classList.remove("hl-line"); });
                   if (row) row.classList.add("hl-line");
                 };
                 this.beforeInputH = (e) => {
@@ -3419,18 +3421,19 @@ defmodule Compos.Ui.Layouts do
                   const el = node.nodeType === 1 ? node : node.parentElement;
                   const lineEl = el && el.closest(".line");
                   if (!lineEl) return null;
-                  const content = lineEl.querySelector(".line-content");
+                  const content = (lineEl.matches(".line-content") ? lineEl : lineEl.querySelector(".line-content"));
                   const numEl = lineEl.querySelector(".linenum");
-                  if (!content || !numEl) return null;
-                  let col = 0, found = false;
-                  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+                  if (!content || (!numEl && !lineEl.dataset.line)) return null;
+                  const field = el.closest(".semantic-direct > [data-col]");
+                  let col = field ? parseInt(field.dataset.col, 10) : 0, found = false;
+                  const walker = document.createTreeWalker(field || content, NodeFilter.SHOW_TEXT);
                   let t;
                   while ((t = walker.nextNode())) {
                     if (t === node) { col += offset; found = true; break; }
                     col += t.textContent.length;
                   }
                   if (!found && !content.contains(node)) col = 0;
-                  return { line: parseInt(numEl.textContent, 10), col };
+                  return { line: parseInt(lineEl.dataset.line || numEl.textContent, 10), col };
                 };
                 this.mouseH = (e) => {
                   if (e.button !== 0) return;
@@ -3578,7 +3581,7 @@ defmodule Compos.Ui.Layouts do
                 // rows inside it are where its own text wraps
                 const measureRaw = (buf) => {
                   const rows = [];
-                  const lines = buf.querySelectorAll(":scope > .line");
+                  const lines = buf.querySelectorAll(":scope > .line, :scope > .semantic-record > .line");
                   if (!lines.length) return rows;
                   const box = buf.getBoundingClientRect();
                   const lo = box.top - box.height, hi = box.bottom + box.height;
@@ -3587,7 +3590,7 @@ defmodule Compos.Ui.Layouts do
                     if (ln.getBoundingClientRect().top > hi) break;
                     const start = parseInt(ln.dataset.s, 10);
                     if (!Number.isFinite(start)) continue;
-                    const content = ln.querySelector(".line-content");
+                    const content = (ln.matches(".line-content") ? ln : ln.querySelector(".line-content"));
                     if (!content) continue;
                     const nodes = sourceTextNodes(content, document);
                     const text = nodes.map((n) => n.textContent).join("");
@@ -3678,7 +3681,7 @@ defmodule Compos.Ui.Layouts do
                     if (h > 0) rows[win.dataset.winId] = Math.max(3, Math.floor(buf.clientHeight / h));
                     // how many characters fit on one line: the probe wears
                     // the line's own font, and the gutter is not text
-                    const content = ln && ln.querySelector(".line-content");
+                    const content = ln && (ln.matches(".line-content") ? ln : ln.querySelector(".line-content"));
                     if (content) {
                       const probe = document.createElement("span");
                       probe.textContent = "0".repeat(80);

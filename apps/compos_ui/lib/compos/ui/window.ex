@@ -15,6 +15,9 @@ defmodule Compos.Ui.Window do
   """
   use Phoenix.LiveComponent
 
+  def composml(assigns), do: Compos.Ui.EditorLive.window(assigns)
+
   @impl true
-  def render(assigns), do: Compos.Ui.EditorLive.window(assigns)
+  def render(assigns), do: Compos.Ui.Representation.live(__MODULE__, assigns)
+
 end

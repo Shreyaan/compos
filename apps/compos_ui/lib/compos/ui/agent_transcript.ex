@@ -15,13 +15,16 @@ defmodule Compos.Ui.AgentTranscript do
   parent LiveView, which owns every handler.
   """
   use Phoenix.LiveComponent
+  import Compos.Ui.ComposML, only: [sigil_M: 2]
 
-  @impl true
-  def render(assigns) do
-    ~H"""
-    <div
+  def composml(assigns) do
+    ~M"""
+    <c-transcript
       id={"ag-scroll-#{@win}"}
       class={"ag-scroll ag-verbosity-#{@verbosity}"}
+      verbosity={@verbosity}
+      buffer={@buf}
+      follow-tail={to_string(@stick)}
       phx-hook="AgentScroll"
       data-buf={@buf}
       data-win={@win}
@@ -30,22 +33,23 @@ defmodule Compos.Ui.AgentTranscript do
       data-scroll-anchor={@scroll_anchor}
       data-scroll-offset={@scroll_offset}
     >
-      <div class="ag-verbosity" role="group" aria-label="Transcript verbosity">
+      <c-toolbar class="ag-verbosity" role="group" aria-label="Transcript verbosity">
         <button type="button" class={if @verbosity == "info", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-info">info</button>
         <button type="button" class={if @verbosity == "log", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-log">log</button>
         <button type="button" class={if @verbosity == "debug", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-debug">debug</button>
-      </div>
+      </c-toolbar>
       <%= for {b, block_index} <- Enum.with_index(@blocks) do %>
         <%= case b.kind do %>
           <% :user -> %>
-            <div data-ag-index={block_index} class="ag-user"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
+            <c-user author="user" kind={b.kind} data-ag-index={block_index} class="ag-user"><c-label class="ag-label">YOU</c-label><c-message-body class="ag-user-text">{b.text}</c-message-body></c-user>
           <% :queued -> %>
-            <div data-ag-index={block_index} class="ag-user ag-queued"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
+            <c-user author="user" kind={b.kind} data-ag-index={block_index} class="ag-user ag-queued"><c-label class="ag-label">YOU</c-label><c-message-body class="ag-user-text">{b.text}</c-message-body></c-user>
           <% :prose -> %>
-            <div data-ag-index={block_index} class="ag-prose">{Phoenix.HTML.raw(b.html)}</div>
+            <c-agent author="assistant" kind={b.kind} data-ag-index={block_index} class="ag-prose">{Phoenix.HTML.raw(b.html)}</c-agent>
           <% :thought -> %>
-            <details data-ag-index={block_index} class="ag-thought"><summary>thought</summary><div class="ag-thought-text">{b.text}</div></details>
+            <details data-ag-index={block_index} class="ag-thought"><summary>thought</summary><c-group class="ag-thought-text">{b.text}</c-group></details>
           <% :tool -> %>
+            <c-toolcall call={b.id} name={b.name} state={b.status}>
             <details data-ag-index={block_index} class={"ag-tool #{b.status}"} open={b.open}>
               <summary
                 phx-click="agent_card"
@@ -54,28 +58,29 @@ defmodule Compos.Ui.AgentTranscript do
                 aria-label={"#{b.verb} #{b.title}, #{b.status}. Toggle call details"}
                 onclick="event.preventDefault()"
               >
-                <span class="ag-chevron" aria-hidden="true">›</span>
-                <span class={"ag-dot #{b.status}"}></span>
-                <span :if={b.verb not in [nil, "", "tool", "mcp", "other"]} class="ag-verb ag-kind">{b.verb}</span>
-                <span class="ag-summary-copy">
-                  <span class="ag-title" title={b.title}><span class="ag-tool-name">{b.name}</span><span
+                <c-text class="ag-chevron" aria-hidden="true">›</c-text>
+                <c-text class={"ag-dot #{b.status}"}></c-text>
+                <c-text :if={b.verb not in [nil, "", "tool", "mcp", "other"]} class="ag-verb ag-kind">{b.verb}</c-text>
+                <c-text class="ag-summary-copy">
+                  <c-text class="ag-title" title={b.title}><c-text class="ag-tool-name">{b.name}</c-text><c-arguments
                       :if={b.arg != ""}
                       class="ag-arg"
-                    >{b.arg}</span></span>
-                  <span :if={!b.open && b.preview != ""} class="ag-preview">{b.preview}</span>
-                </span>
-                <span :if={b.status != "done"} class={"ag-tstatus #{b.status}"}>{b.status}</span>
-                <span :if={b.duration} class="ag-duration">{b.duration}</span>
-                <span :if={b.tokens} class="ag-duration ag-tokens">{b.tokens}</span>
+                    >{b.arg}</c-arguments></c-text>
+                  <c-text :if={!b.open && b.preview != ""} class="ag-preview">{b.preview}</c-text>
+                </c-text>
+                <c-status state={b.status} :if={b.status != "done"} class={"ag-tstatus #{b.status}"}>{b.status}</c-status>
+                <c-text :if={b.duration} class="ag-duration">{b.duration}</c-text>
+                <c-text :if={b.tokens} class="ag-duration ag-tokens">{b.tokens}</c-text>
               </summary>
-              <pre :if={b.body != ""} class="ag-body">{b.body}</pre>
+              <c-result :if={b.body != ""}><pre class="ag-body">{b.body}</pre></c-result>
             </details>
+            </c-toolcall>
           <% :plan -> %>
-            <pre data-ag-index={block_index} class="ag-plan">{b.text}</pre>
+            <c-plan data-ag-index={block_index}><pre class="ag-plan">{b.text}</pre></c-plan>
           <% :permission -> %>
-            <div data-ag-index={block_index} class="ag-perm">
-              <span class="ag-perm-title">needs permission — {b.title}</span>
-              <div class="ag-perm-actions">
+            <c-permission kind={b.kind} data-ag-index={block_index} class="ag-perm">
+              <c-text class="ag-perm-title">needs permission — {b.title}</c-text>
+              <c-toolbar class="ag-perm-actions">
                 <button
                   class="ag-btn allow"
                   phx-click="ui_cmd"
@@ -94,12 +99,12 @@ defmodule Compos.Ui.AgentTranscript do
                   phx-value-win={@win}
                   phx-value-cmd="agent-permission-deny"
                 >Deny</button>
-              </div>
-            </div>
+              </c-toolbar>
+            </c-permission>
           <% :question -> %>
-            <div data-ag-index={block_index} class="ag-question">
-              <div class="ag-question-title">{b.question}</div>
-              <div class="ag-question-answers">
+            <c-question data-ag-index={block_index} class="ag-question">
+              <c-headline class="ag-question-title">{b.question}</c-headline>
+              <c-answers class="ag-question-answers">
                 <button
                   :for={answer <- b.answers}
                   class="ag-btn answer"
@@ -109,16 +114,20 @@ defmodule Compos.Ui.AgentTranscript do
                   phx-value-question={b.id}
                   phx-value-answer={answer}
                 >{answer}</button>
-              </div>
-              <div class="ag-question-hint">Choose an answer or type another reply below.</div>
-            </div>
+              </c-answers>
+              <c-hint class="ag-question-hint">Choose an answer or type another reply below.</c-hint>
+            </c-question>
           <% :status -> %>
-            <div data-ag-index={block_index} class="ag-status"><span class="ag-label">SUMMARY</span><div class="ag-status-text">{b.text}</div></div>
+            <c-summary kind={b.kind} data-ag-index={block_index} class="ag-status"><c-label class="ag-label">SUMMARY</c-label><c-group class="ag-status-text">{b.text}</c-group></c-summary>
           <% :meta -> %>
-            <div data-ag-index={block_index} class="ag-meta">{b.text}</div>
+            <c-info kind={b.kind} data-ag-index={block_index} class="ag-meta">{b.text}</c-info>
         <% end %>
       <% end %>
-    </div>
+    </c-transcript>
     """
   end
+
+  @impl true
+  def render(assigns), do: Compos.Ui.Representation.live(__MODULE__, assigns)
+
 end

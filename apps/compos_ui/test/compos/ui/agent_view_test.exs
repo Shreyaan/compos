@@ -103,6 +103,12 @@ defmodule Compos.Ui.AgentViewTest do
            )
 
     refute has_element?(view, ~s(.agent-view[phx-hook="AgentScroll"]))
+    assert has_element?(view, "c-user", "profile redisplay")
+    assert has_element?(view, "c-agent.ag-prose")
+    assert has_element?(view, "c-toolcall[call][name][state]")
+    assert has_element?(view, "c-summary.ag-status")
+    assert has_element?(view, "c-input.ag-input")
+    refute has_element?(view, "c-message")
     assert html =~ "ag-user"
     assert html =~ "profile redisplay"
     assert has_element?(view, ".ag-status .ag-label", "SUMMARY")
@@ -400,11 +406,11 @@ defmodule Compos.Ui.AgentViewTest do
 
     assert html =~ "api · test-model"
     # the name span carries click attributes now (modeline-expand)
-    assert count(html, ~s(>*agent: ml-test*</span>)) == 1
+    assert count(html, ~s(>*agent: ml-test*</c-buffer-name>)) == 1
 
-    view |> element(~s(span[phx-click="ui_cmd"][phx-value-buf])) |> render_click()
+    view |> element(~s(c-field[name="info"][phx-click="ui_cmd"][phx-value-buf])) |> render_click()
     # the command ran: the buffer now shows in two windows
-    assert count(render(view), ~s(>*agent: ml-test*</span>)) == 2
+    assert count(render(view), ~s(>*agent: ml-test*</c-buffer-name>)) == 2
   end
 
   # block offsets go stale when text before them is edited; a boundary that

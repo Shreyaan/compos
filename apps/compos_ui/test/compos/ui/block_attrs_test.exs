@@ -46,10 +46,10 @@ defmodule Compos.Ui.BlockAttrsTest do
     assert svg =~ ~s(viewBox="0 0 20 100")
     assert svg =~ ~r/<path[^>]*d="M0,100 L10,50"/
     refute svg =~ "onload"
-    [bar] = Regex.run(~r/<div[^>]*class="bar"[^>]*>/, html)
+    [bar] = Regex.run(~r/<c-group[^>]*class="bar"[^>]*>/, html)
     assert bar =~ ~s(style="width:40%")
     refute bar =~ "href"
     refute html =~ "<script>alert(2)"
-    assert html =~ ~r/<div[^>]*>alert\(2\)<\/div>/
+    assert html =~ ~r/<c-group[^>]*>alert\(2\)<\/c-group>/
   end
 end

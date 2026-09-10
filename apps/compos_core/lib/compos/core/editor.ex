@@ -3253,6 +3253,9 @@ defmodule Compos.Core.Editor do
       version: Buffer.version(buffer) || 0,
       agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
+      blocks_root: Map.get(locals, "render-root"),
+      text_root: Map.get(locals, "render-text-root"),
+      semantic_records: Map.get(locals, "render-records"),
       minor_modes: Map.get(locals, "minor-modes") || [],
       # the expanded modeline: a block tree pinned above the text,
       # rendered only while the buffer-local says so

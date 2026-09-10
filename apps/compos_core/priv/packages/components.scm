@@ -100,7 +100,7 @@
   '((text string required) (class string optional))
   '(text "ready" class "success")
   (lambda (p)
-    (list 'tag "span"
+    (list 'tag "c-status"
           'class (string-append "c-badge " (component--get p 'class ""))
           'text (component--get p 'text ""))))
 
@@ -109,15 +109,18 @@
   '((text string optional) (class string optional))
   '(text "nothing to show")
   (lambda (p)
-    (list 'tag "div" 'class (string-append "c-empty " (component--get p 'class ""))
+    (list 'tag "c-empty" 'class (string-append "c-empty " (component--get p 'class ""))
           'text (component--get p 'text "nothing to show"))))
 
 (defcomponent 'ui/section
   "A section heading with an optional count."
-  '((title string required) (count number optional) (class string optional))
+  '((title string required) (count number optional) (level number optional) (class string optional))
   '(title "Changes" count 3)
   (lambda (p)
-    (list 'tag "div" 'class (string-append "c-section " (component--get p 'class ""))
+    (list 'tag "c-headline" 'class (string-append "c-section " (component--get p 'class ""))
+          'attrs (list (list "role" "heading")
+                       (list "aria-level" (component--get p 'level 2))
+                       (list "level" (component--get p 'level 2)))
           'text (string-append
                   (component--get p 'title "")
                   (if (component--has? p 'count)
@@ -126,11 +129,11 @@
 
 (defcomponent 'ui/row
   "A selectable list row made from text or styled segments."
-  '((text string optional) (segs list optional) (click any optional)
+  '((tag string optional) (text string optional) (segs list optional) (click any optional)
     (class string optional) (lines list optional) (mark string optional))
   '(segs (("" "name") ("c-dim" "  detail")))
   (lambda (p)
-    (append (list 'tag "div"
+    (append (list 'tag (component--get p 'tag "c-row")
                   'class (string-append "c-row " (component--get p 'class "")))
             (if (component--has? p 'segs) (list 'segs (component--get p 'segs))
                 (list 'text (component--get p 'text "")))
@@ -143,11 +146,11 @@
   '((actions list required) (class string optional))
   '(actions (("refresh" "Refresh" "g") ("add" "Add" "+")))
   (lambda (p)
-    (list 'tag "div"
+    (list 'tag "c-toolbar"
           'class (string-append "c-actions " (component--get p 'class ""))
           'children
           (map (lambda (action)
-                 (list 'tag "div" 'class "c-action" 'click (car action)
+                 (list 'tag "c-action" 'class "c-action" 'click (car action)
                        'segs
                        (append
                          (if (> (length action) 2)
@@ -163,7 +166,8 @@
   '(title "Details" open? #t click "details")
   (lambda (p)
     (append
-      (list 'tag "div" 'class "c-fold-head"
+      (list 'tag "c-headline" 'class "c-fold-head"
+            'attrs (list (list "folded" (if (component--get p 'open? #f) "false" "true")))
             'segs (append
                     (list (list "c-caret" (if (component--get p 'open? #f) "▾" "▸"))
                           (list "c-fold-title" (component--get p 'title "")))
@@ -173,13 +177,13 @@
 
 (defcomponent 'ui/card
   "A bordered container with an optional heading and body."
-  '((title string optional) (open? boolean optional) (click any optional)
+  '((tag string optional) (title string optional) (open? boolean optional) (click any optional)
     (badge string optional) (body blocks optional) (class string optional)
     (lines list optional) (mark string optional))
   '(title "A card" open? #t body ((tag "div" text "hello")))
   (lambda (p)
     (append
-      (list 'tag "div"
+      (list 'tag (component--get p 'tag "c-card")
             'class (string-append "c-card " (component--get p 'class ""))
             'children
             (append
@@ -201,12 +205,14 @@
   '((pairs list required))
   '(pairs (("package" "components") ("effect" "pure")))
   (lambda (p)
-    (list 'tag "div" 'class "c-kv"
+    (list 'tag "c-properties" 'class "c-kv"
           'children
           (map (lambda (pair)
-                 (list 'tag "div" 'class "c-kv-row"
-                       'segs (list (list "c-kv-key" (car pair))
-                                   (list "c-kv-value" (cadr pair)))))
+                 (list 'tag "c-field" 'class "c-kv-row"
+                       'attrs (list (list "name" (car pair)))
+                       'children (list
+                         (list 'tag "c-label" 'class "c-kv-key" 'text (car pair))
+                         (list 'tag "c-value" 'class "c-kv-value" 'text (cadr pair)))))
                (component--get p 'pairs '())))))
 
 ;;; --- living gallery ----------------------------------------------------------
@@ -302,3 +308,18 @@
 (public! 'describe-component "(describe-component NAME) — show a component's props, example and owner")
 (public! 'apropos-components "(apropos-components QUERY [FILTERS...]) — the main apropos filtered to UI components")
 (public! 'on-block-click! "(on-block-click! NAME FN) — register a blocks mode's click handler; FN gets (BUF ID) and returns #t when the click was its own")
+
+(domain! 'ui)
+(effects! '(write display))
+
+;; Semantic lists use stable row keys, never a stale DOM row number.
+(on-block-click! 'semantic-list
+  (lambda (buf id)
+    (if (and (list-opt buf 'composml) (string-prefix? "list:" id))
+        (let ((i (list-index-of buf (list-entries buf) (substring id 5 (string-length id)))))
+          (when i
+            (list-goto-index! buf i)
+            (let ((click (list-opt buf 'on-click)))
+              (when click (click buf (nth i (list-entries buf))))))
+          #t)
+        #f)))

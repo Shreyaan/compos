@@ -54,4 +54,26 @@ defmodule Compos.DaemonTest do
 
     assert result == ~s{("http://localhost:4204" "/tmp/a1-home" 4204)}
   end
+  test "opening the running checkout claims an empty registry without provisioning" do
+    prior_registry = Application.get_env(:compos_core, :daemon_registry_path)
+    registry = Path.join(System.tmp_dir!(), "compos-owner-#{System.unique_integer([:positive])}.json")
+    Application.put_env(:compos_core, :daemon_registry_path, registry)
+    Application.put_env(:compos_core, :workspace_daemon_provisioner, fn _, _ ->
+      flunk("the running checkout must not start a second daemon")
+    end)
+
+    on_exit(fn ->
+      if prior_registry, do: Application.put_env(:compos_core, :daemon_registry_path, prior_registry),
+        else: Application.delete_env(:compos_core, :daemon_registry_path)
+      Application.delete_env(:compos_core, :workspace_daemon_provisioner)
+      File.rm(registry)
+    end)
+
+    assert {:ok, "#t"} = Session.eval(~S|
+      (equal? (worktree--daemon-owner! "*scratch*" "current" (daemon-source-root))
+              (editor-url))
+    |)
+    assert File.exists?(registry)
+  end
+
 end

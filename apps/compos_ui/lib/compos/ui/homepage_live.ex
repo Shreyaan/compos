@@ -1,5 +1,6 @@
 defmodule Compos.Ui.HomepageLive do
   use Phoenix.LiveView
+  import Compos.Ui.ComposML, only: [sigil_M: 2]
 
   @palettes ~w(ultraviolet phosphor ember monochrome)
   @motifs ~w(lambda swan)
@@ -58,9 +59,8 @@ defmodule Compos.Ui.HomepageLive do
     {:noreply, assign(socket, motif: motif)}
   end
 
-  @impl true
-  def render(assigns) do
-    ~H"""
+  def composml(assigns) do
+    ~M"""
     <main class={["operad-site", @brand.key == :compos && "compos-site", "palette-#{@palette}"]}>
       <style>
         body:has(.operad-site) {
@@ -112,7 +112,7 @@ defmodule Compos.Ui.HomepageLive do
         .operad-brand img { width: 38px; height: 38px; border-radius: 11px; }
         .operad-brand .emma-logo-image { width: 116px; height: auto; border-radius: 0; }
         .operad-brand .compos-logo-image { width: 42px; height: 42px; border-radius: 50%; }
-        .operad-brand span { font-size: 20px; font-weight: 500; letter-spacing: -0.04em; }
+        .operad-brand c-text { font-size: 20px; font-weight: 500; letter-spacing: -0.04em; }
         .operad-brand .compos-wordmark {
           color: #d8d5df;
           font: 500 17px/1 var(--font-mono);
@@ -178,7 +178,7 @@ defmodule Compos.Ui.HomepageLive do
           letter-spacing: -0.075em;
         }
 
-        .operad-hero h1 span {
+        .operad-hero h1 c-text {
           display: block;
           background: linear-gradient(100deg, #f5f2e9 12%, #9e99b8 92%);
           -webkit-background-clip: text;
@@ -381,7 +381,7 @@ defmodule Compos.Ui.HomepageLive do
           backdrop-filter: blur(14px);
         }
 
-        .motif-dock > span {
+        .motif-dock > c-text {
           padding: 0 8px 0 4px;
           color: #656471;
           font: 500 9px/1 var(--font-mono);
@@ -406,7 +406,7 @@ defmodule Compos.Ui.HomepageLive do
           color: var(--paper);
         }
 
-        .palette-dock > span {
+        .palette-dock > c-text {
           padding: 0 8px 0 4px;
           color: #656471;
           font: 500 9px/1 var(--font-mono);
@@ -494,7 +494,7 @@ defmodule Compos.Ui.HomepageLive do
           padding-bottom: 72px;
           border-bottom: 1px solid var(--hairline);
         }
-        .compos-essay-head span,
+        .compos-essay-head c-text,
         .essay-number {
           color: #777683;
           font: 500 10px/1.5 var(--font-mono);
@@ -643,7 +643,7 @@ defmodule Compos.Ui.HomepageLive do
         .source-row { display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--hairline); border-radius: 12px; background: #13141c; }
         .source-type { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 9px; background: rgba(151, 132, 255, 0.11); color: #b6aaff; font-size: 11px; }
         .source-row strong { display: block; color: #cac7d1; font-size: 12px; font-weight: 500; }
-        .source-row span { color: #6f6e7a; font-size: 10px; }
+        .source-row c-text { color: #6f6e7a; font-size: 10px; }
         .source-row em { color: #61cda9; font-size: 10px; font-style: normal; }
 
         .decision-list { margin-top: 32px; }
@@ -665,13 +665,13 @@ defmodule Compos.Ui.HomepageLive do
         .control-request strong { display: block; margin-bottom: 8px; color: #dbd8e1; font-size: 15px; }
         .control-request p { color: #81808c; font-size: 13px; }
         .control-files { display: flex; gap: 8px; margin: 18px 0; }
-        .control-files span { padding: 6px 9px; border-radius: 7px; background: rgba(255, 255, 255, 0.04); color: #898894; font: 500 10px/1 var(--font-mono); }
+        .control-files c-text { padding: 6px 9px; border-radius: 7px; background: rgba(255, 255, 255, 0.04); color: #898894; font: 500 10px/1 var(--font-mono); }
         .control-actions { display: flex; justify-content: flex-end; gap: 9px; }
         .control-principles { border-top: 1px solid var(--hairline); }
         .principle-row { display: grid; grid-template-columns: 28px 1fr; gap: 18px; padding: 24px 0; border-bottom: 1px solid var(--hairline); }
         .principle-row b { color: #8f83e9; font: 500 11px/1.5 var(--font-mono); }
         .principle-row strong { display: block; margin-bottom: 5px; color: #d8d5df; font-size: 16px; font-weight: 500; }
-        .principle-row span { color: #74737f; font-size: 13px; }
+        .principle-row c-text { color: #74737f; font-size: 13px; }
 
         .operad-final { padding: 150px 0 90px; text-align: center; }
         .operad-final img { width: 126px; height: 126px; margin-bottom: 28px; border-radius: 30px; }
@@ -753,11 +753,11 @@ defmodule Compos.Ui.HomepageLive do
         }
       </style>
 
-      <div class="operad-shell">
+      <c-group class="operad-shell">
         <nav class="operad-nav" aria-label="Primary navigation">
           <a class="operad-brand" href="#top" aria-label={"#{@brand.name} home"}>
             <img :if={@brand.key == :operad} src="/images/operad-fractal-512.png" alt="" />
-            <span :if={@brand.key == :operad}>operad</span>
+            <c-text :if={@brand.key == :operad}>operad</c-text>
             <img
               :if={@brand.key == :emma}
               class="emma-logo-image"
@@ -770,23 +770,23 @@ defmodule Compos.Ui.HomepageLive do
               src="/images/compos-emblem-v1.png"
               alt=""
             />
-            <span :if={@brand.key == :compos} class="compos-wordmark">compos</span>
+            <c-text :if={@brand.key == :compos} class="compos-wordmark">compos</c-text>
           </a>
-          <div class="operad-nav-links">
+          <c-group class="operad-nav-links">
             <a href="#read">Read</a>
             <a href="#write">Write</a>
             <a href="#communicate">Communicate</a>
             <a href="#monitor">Monitor</a>
             <a href="#fix">Fix</a>
-          </div>
+          </c-group>
         </nav>
 
         <section class="operad-hero" id="top">
-          <div class="operad-hero-copy">
-            <div class="operad-eyebrow">{@brand.eyebrow}</div>
-            <h1 :if={@brand.key != :compos}>The OS for <span>knowledge work.</span></h1>
+          <c-group class="operad-hero-copy">
+            <c-group class="operad-eyebrow">{@brand.eyebrow}</c-group>
+            <h1 :if={@brand.key != :compos}>The OS for <c-text>knowledge work.</c-text></h1>
             <h1 :if={@brand.key == :compos}>
-              The <span class="compos-aspect">Composable</span> OS for knowledge work.
+              The <c-text class="compos-aspect">Composable</c-text> OS for knowledge work.
             </h1>
             <p :if={@brand.key != :compos} class="operad-hero-lede">
               Bring your documents, conversations, research, tools, and AI into one connected workspace.
@@ -797,23 +797,23 @@ defmodule Compos.Ui.HomepageLive do
               <strong>the working context is explicit, inspectable, and composed by you.</strong>
               It is a quiet place for thinking, writing, coding, and sustained work.
             </p>
-            <div :if={@brand.key != :compos} class="operad-actions">
+            <c-group :if={@brand.key != :compos} class="operad-actions">
               <a class="operad-button primary" href="#access">Get early access</a>
               <a class="operad-button" href="#workspace">See how it works ↓</a>
-            </div>
-            <div :if={@brand.key == :compos} class="operad-actions">
+            </c-group>
+            <c-group :if={@brand.key == :compos} class="operad-actions">
               <a class="operad-button primary" href="#model">Read the system model ↓</a>
               <a class="operad-button" href="#workspace">Inspect the workspace ↓</a>
-            </div>
+            </c-group>
             <p :if={@brand.key != :compos} class="operad-hero-note">
               Not a chat window. {@brand.name} holds the live material of every app you work in.
             </p>
             <p :if={@brand.key == :compos} class="operad-hero-note">
               NO FEED · NO NOTIFICATIONS · EXPLICIT CONTEXT · INTERRUPTIBLE MACHINES
             </p>
-          </div>
-          <div class="operad-hero-art">
-            <div class="operad-orbit"></div>
+          </c-group>
+          <c-group class="operad-hero-art">
+            <c-group class="operad-orbit"></c-group>
             <img
               :if={@brand.key != :compos}
               class="operad-fractal"
@@ -1001,8 +1001,8 @@ defmodule Compos.Ui.HomepageLive do
                 fill="white"
               />
             </svg>
-            <div :if={false} class="motif-dock" aria-label="Compose output form">
-              <span>Form</span>
+            <c-group :if={false} class="motif-dock" aria-label="Compose output form">
+              <c-text>Form</c-text>
               <button
                 :for={{motif, label} <- [{"lambda", "λ"}, {"swan", "swan"}]}
                 type="button"
@@ -1015,9 +1015,9 @@ defmodule Compos.Ui.HomepageLive do
               >
                 {label}
               </button>
-            </div>
-            <div :if={false} class="palette-dock" aria-label="Compose color palette">
-              <span>Palette</span>
+            </c-group>
+            <c-group :if={false} class="palette-dock" aria-label="Compose color palette">
+              <c-text>Palette</c-text>
               <button
                 :for={{palette, color} <- [
                   {"ultraviolet", "#9784ff"},
@@ -1035,16 +1035,16 @@ defmodule Compos.Ui.HomepageLive do
                 aria-pressed={to_string(@palette == palette)}
               >
               </button>
-            </div>
-          </div>
+            </c-group>
+          </c-group>
         </section>
 
         <section :if={@brand.key == :compos} class="system-index" id="model" aria-label="Compos system model">
           <header>
             <strong>System model</strong>
-            <span>compos://workspace · six primary objects</span>
+            <c-text>compos://workspace · six primary objects</c-text>
           </header>
-          <div class="system-grid">
+          <c-group class="system-grid">
             <article class="system-object">
               <b>01 / BUFFER</b>
               <h3>Material with identity</h3>
@@ -1075,35 +1075,35 @@ defmodule Compos.Ui.HomepageLive do
               <h3>Objects retain their structure</h3>
               <p>Inputs stay independently navigable while their shared result becomes a new object.</p>
             </article>
-          </div>
+          </c-group>
           <footer>
-            <span>Execution: local process graph</span>
-            <span>Input: keyboard · RPC · agent</span>
-            <span>State: inspectable · persistent · undoable</span>
+            <c-text>Execution: local process graph</c-text>
+            <c-text>Input: keyboard · RPC · agent</c-text>
+            <c-text>State: inspectable · persistent · undoable</c-text>
           </footer>
         </section>
 
         <section class="operad-proof" aria-label={"#{@brand.name} product preview"}>
-          <div class="work-surface real-product">
+          <c-group class="work-surface real-product">
             <img
               class="product-screenshot"
               src="/images/operad-sentry-workspace.png"
               alt={"#{@brand.name} showing a Sentry issue list with its actions, stack trace, and details beside the work"}
             />
-          </div>
+          </c-group>
         </section>
-      </div>
+      </c-group>
 
       <section :if={@brand.key == :compos} class="compos-essay" id="workspace">
-        <div class="operad-shell">
+        <c-group class="operad-shell">
           <header class="compos-essay-head">
-            <span>Design notes / context and attention</span>
+            <c-text>Design notes / context and attention</c-text>
             <h2>Composing context is a first-class problem for knowledge workers.</h2>
           </header>
 
           <article class="essay-section">
-            <span class="essay-number">01 / THE CONDITION</span>
-            <div class="essay-prose">
+            <c-text class="essay-number">01 / THE CONDITION</c-text>
+            <c-group class="essay-prose">
               <h3>Our tools have mistaken access for understanding.</h3>
               <p>
                 A project is a graph of notes, sources, drafts, conversations, queries, programs, and
@@ -1125,12 +1125,12 @@ defmodule Compos.Ui.HomepageLive do
                 is temporary and its operation is opaque. The person is left to reconcile two incomplete
                 representations: the project as it exists and the project as the agent briefly understood it.
               </p>
-            </div>
+            </c-group>
           </article>
 
           <article class="essay-section">
-            <span class="essay-number">02 / THE SYSTEM</span>
-            <div class="essay-prose">
+            <c-text class="essay-number">02 / THE SYSTEM</c-text>
+            <c-group class="essay-prose">
               <h3>Compos makes the working context a first-class object.</h3>
               <p>
                 In Compos, a buffer can represent a note, document, query result, process, remote system, or
@@ -1154,14 +1154,14 @@ defmodule Compos.Ui.HomepageLive do
                 deliberately; arrival does not imply display, and display does not imply interruption. Quiet
                 is therefore not a visual theme. It is a property of the system.
               </p>
-            </div>
+            </c-group>
           </article>
 
           <p class="essay-coda">
             Compos is a quiet context graph with programmable views and local agents. It holds the project
             without requiring every part of the project to demand attention at once.
           </p>
-        </div>
+        </c-group>
       </section>
 
       <section :if={@brand.key != :compos} class="capability-band" aria-label={"#{@brand.name} capabilities"}>
@@ -1193,10 +1193,10 @@ defmodule Compos.Ui.HomepageLive do
       </section>
 
       <section :if={@brand.key != :compos} class="operad-section" id="why">
-        <div class="operad-shell">
-          <div class="section-intro">
-            <span class="section-number">01 — THE PROBLEM</span>
-            <div>
+        <c-group class="operad-shell">
+          <c-group class="section-intro">
+            <c-text class="section-number">01 — THE PROBLEM</c-text>
+            <c-group>
               <h2 :if={@brand.key != :compos}>Your work is scattered beyond reach.</h2>
               <h2 :if={@brand.key == :compos}>The network is noisy. Your workspace does not have to be.</h2>
               <p :if={@brand.key != :compos}>
@@ -1207,34 +1207,34 @@ defmodule Compos.Ui.HomepageLive do
                 Feeds, tabs, messages, and agents compete to decide what deserves attention. Compos admits
                 only the context you choose. Nothing arrives merely because it can.
               </p>
-            </div>
-          </div>
-          <div class="scattered-grid">
-            <div class="scattered-card">
-              <div class="card-icon">↗</div><strong>Every source</strong>
+            </c-group>
+          </c-group>
+          <c-group class="scattered-grid">
+            <c-group class="scattered-card">
+              <c-group class="card-icon">↗</c-group><strong>Every source</strong>
               <p>Open the evidence behind the current work with one command.</p>
-            </div>
-            <div class="scattered-card">
-              <div class="card-icon">◎</div><strong>Every tool</strong>
+            </c-group>
+            <c-group class="scattered-card">
+              <c-group class="card-icon">◎</c-group><strong>Every tool</strong>
               <p>Bring the systems you use into the same live workspace.</p>
-            </div>
-            <div class="scattered-card">
-              <div class="card-icon">Δ</div><strong>Every agent</strong>
+            </c-group>
+            <c-group class="scattered-card">
+              <c-group class="card-icon">Δ</c-group><strong>Every agent</strong>
               <p>Machine intelligence shares the material already in front of you.</p>
-            </div>
-            <div class="scattered-card">
-              <div class="card-icon">⌘</div><strong>Every action</strong>
+            </c-group>
+            <c-group class="scattered-card">
+              <c-group class="card-icon">⌘</c-group><strong>Every action</strong>
               <p>Inspect, run, or reverse the next step without leaving the work.</p>
-            </div>
-          </div>
-        </div>
+            </c-group>
+          </c-group>
+        </c-group>
       </section>
 
       <section :if={@brand.key != :compos} class="operad-section" id="workspace">
-        <div class="operad-shell">
-          <div class="section-intro">
-            <span class="section-number">02 — THE WORKSPACE</span>
-            <div>
+        <c-group class="operad-shell">
+          <c-group class="section-intro">
+            <c-text class="section-number">02 — THE WORKSPACE</c-text>
+            <c-group>
               <h2 :if={@brand.key != :compos}>The right thing appears beside the work.</h2>
               <h2 :if={@brand.key == :compos}>A place to think, write, code, and finish.</h2>
               <p :if={@brand.key != :compos}>
@@ -1244,53 +1244,53 @@ defmodule Compos.Ui.HomepageLive do
                 The internet becomes material instead of weather. Read a source, shape an argument, inspect
                 a system, or write a program without surrendering the workspace to incoming noise.
               </p>
-            </div>
-          </div>
-          <div class="workspace-grid">
-            <div class="workspace-card wide">
+            </c-group>
+          </c-group>
+          <c-group class="workspace-grid">
+            <c-group class="workspace-card wide">
               <h3>Every source becomes a place you can enter.</h3>
               <p>Browse the material behind an answer. Move between evidence and work without leaving the workspace.</p>
-              <div class="source-stack">
-                <div class="source-row">
-                  <div class="source-type">PDF</div><div><strong>Regional outlook 2026</strong><span>Market research · page 42</span></div><em>Relevant</em>
-                </div>
-                <div class="source-row">
-                  <div class="source-type">MTG</div><div><strong>Customer interview: Acme</strong><span>Conversation · 28 minutes</span></div><em>Quoted</em>
-                </div>
-                <div class="source-row">
-                  <div class="source-type">DOC</div><div><strong>Expansion assumptions</strong><span>Working draft · revised yesterday</span></div><em>Current</em>
-                </div>
-                <div class="source-row">
-                  <div class="source-type">WEB</div><div><strong>Local pricing benchmarks</strong><span>Research · 6 sources</span></div><em>Verified</em>
-                </div>
-              </div>
-            </div>
-            <div class="workspace-card">
+              <c-group class="source-stack">
+                <c-group class="source-row">
+                  <c-group class="source-type">PDF</c-group><c-group><strong>Regional outlook 2026</strong><c-text>Market research · page 42</c-text></c-group><em>Relevant</em>
+                </c-group>
+                <c-group class="source-row">
+                  <c-group class="source-type">MTG</c-group><c-group><strong>Customer interview: Acme</strong><c-text>Conversation · 28 minutes</c-text></c-group><em>Quoted</em>
+                </c-group>
+                <c-group class="source-row">
+                  <c-group class="source-type">DOC</c-group><c-group><strong>Expansion assumptions</strong><c-text>Working draft · revised yesterday</c-text></c-group><em>Current</em>
+                </c-group>
+                <c-group class="source-row">
+                  <c-group class="source-type">WEB</c-group><c-group><strong>Local pricing benchmarks</strong><c-text>Research · 6 sources</c-text></c-group><em>Verified</em>
+                </c-group>
+              </c-group>
+            </c-group>
+            <c-group class="workspace-card">
               <h3>The machine leaves a trail.</h3>
               <p>See what it read, what it changed, and which decisions shaped the result.</p>
-              <div class="decision-list">
-                <div class="decision-item"><b>01</b><span>Start with one regional market.</span></div>
-                <div class="decision-item"><b>02</b><span>Test pricing before hiring.</span></div>
-                <div class="decision-item"><b>03</b><span>Review the plan in September.</span></div>
-              </div>
-            </div>
-            <div class="workspace-card">
+              <c-group class="decision-list">
+                <c-group class="decision-item"><b>01</b><c-text>Start with one regional market.</c-text></c-group>
+                <c-group class="decision-item"><b>02</b><c-text>Test pricing before hiring.</c-text></c-group>
+                <c-group class="decision-item"><b>03</b><c-text>Review the plan in September.</c-text></c-group>
+              </c-group>
+            </c-group>
+            <c-group class="workspace-card">
               <h3>Thought becomes work in place.</h3>
               <p>Research becomes a brief, plan, or finished draft inside the same information space.</p>
-              <div class="task-preview">
+              <c-group class="task-preview">
                 <small>Next action</small>
                 <strong>Prepare the launch recommendation</strong>
-                <div class="task-line"></div><div class="task-line short"></div>
-              </div>
-            </div>
-          </div>
-        </div>
+                <c-group class="task-line"></c-group><c-group class="task-line short"></c-group>
+              </c-group>
+            </c-group>
+          </c-group>
+        </c-group>
       </section>
 
       <section :if={@brand.key != :compos} class="operad-section">
-        <div class="operad-shell control-band">
-          <div class="control-copy">
-            <span class="section-number">03 — YOUR CONTROL</span>
+        <c-group class="operad-shell control-band">
+          <c-group class="control-copy">
+            <c-text class="section-number">03 — YOUR CONTROL</c-text>
             <h2 :if={@brand.key != :compos} style="margin-top: 25px">Reach for a command, not another app.</h2>
             <h2 :if={@brand.key == :compos} style="margin-top: 25px">Quiet is a system property.</h2>
             <p :if={@brand.key != :compos}>
@@ -1301,23 +1301,23 @@ defmodule Compos.Ui.HomepageLive do
               Compos does not compete for attention. It waits. Agents work in view and can be paused.
               Context enters by command, not by feed. The workspace keeps your place.
             </p>
-          </div>
-          <div class="control-principles">
-            <div class="principle-row">
-              <b>01</b><div><strong>It reads in the open.</strong><span>Every source stays one command away.</span></div>
-            </div>
-            <div class="principle-row">
-              <b>02</b><div><strong>It writes in place.</strong><span>Changes appear where the work already lives.</span></div>
-            </div>
-            <div class="principle-row">
-              <b>03</b><div><strong>You can interrupt.</strong><span>Inspect, redirect, or take over at any moment.</span></div>
-            </div>
-          </div>
-        </div>
+          </c-group>
+          <c-group class="control-principles">
+            <c-group class="principle-row">
+              <b>01</b><c-group><strong>It reads in the open.</strong><c-text>Every source stays one command away.</c-text></c-group>
+            </c-group>
+            <c-group class="principle-row">
+              <b>02</b><c-group><strong>It writes in place.</strong><c-text>Changes appear where the work already lives.</c-text></c-group>
+            </c-group>
+            <c-group class="principle-row">
+              <b>03</b><c-group><strong>You can interrupt.</strong><c-text>Inspect, redirect, or take over at any moment.</c-text></c-group>
+            </c-group>
+          </c-group>
+        </c-group>
       </section>
 
       <section class="operad-final" id="access">
-        <div class="operad-shell">
+        <c-group class="operad-shell">
           <img :if={@brand.key == :operad} src="/images/operad-fractal-512.png" alt="Operad recursive emblem" />
           <img
             :if={@brand.key == :emma}
@@ -1334,18 +1334,22 @@ defmodule Compos.Ui.HomepageLive do
           <h2 :if={@brand.key == :compos}>A quiet computer for serious work.</h2>
           <p :if={@brand.key != :compos}>{@brand.tagline}.</p>
           <p :if={@brand.key == :compos}>Active development · local-first runtime · programmable in Scheme · rendered with LiveView.</p>
-          <div class="operad-actions">
+          <c-group class="operad-actions">
             <a class="operad-button primary" href={"mailto:#{@brand.email}?subject=#{@brand.name}%20development%20access"}>Request development access</a>
-          </div>
-        </div>
+          </c-group>
+        </c-group>
       </section>
 
       <footer class="operad-shell operad-footer">
-        <span><strong>{@brand.wordmark}</strong> · {@brand.tagline}</span>
-        <span :if={@brand.key != :compos}>© 2026 {@brand.name}</span>
-        <span :if={@brand.key == :compos}>compos.in · © 2026 Compos</span>
+        <c-text><strong>{@brand.wordmark}</strong> · {@brand.tagline}</c-text>
+        <c-text :if={@brand.key != :compos}>© 2026 {@brand.name}</c-text>
+        <c-text :if={@brand.key == :compos}>compos.in · © 2026 Compos</c-text>
       </footer>
     </main>
     """
   end
+
+  @impl true
+  def render(assigns), do: Compos.Ui.Representation.live(__MODULE__, assigns)
+
 end

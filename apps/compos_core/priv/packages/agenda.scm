@@ -348,34 +348,36 @@
     (let ((tags (plist-get e 'tags))) (if tags (string-append "  " tags) ""))
     "  — " (agenda--basename (plist-get e 'file))))
 
+(define (agenda--field tag face text) (list face text tag))
+
 (define (agenda--entry-row e line)
   (component 'ui/row
-    (list 'class (if (equal? (plist-get e 'todo) "DONE")
+    (list 'tag "agenda-entry" 'class (if (equal? (plist-get e 'todo) "DONE")
                      "agenda-row agenda-row-done" "agenda-row")
           'click (string-append "e-" (number->string line))
           'lines (list line line) 'mark "current"
           'segs
           (append
-            (list (list "agenda-time" (or (plist-get e 'time) "")))
+            (list (agenda--field "agenda-time" "agenda-time" (or (plist-get e 'time) "")))
             (let ((late (plist-get e 'late)) (kind (plist-get e 'kind)))
-              (cond (late (list (list "agenda-badge agenda-late"
+              (cond (late (list (agenda--field "agenda-deadline" "agenda-badge agenda-late"
                                       (string-append (agenda--badge-word kind) " "
                                                      (number->string late) "d"))))
                     ((equal? kind "deadline")
-                     (list (list "agenda-badge agenda-deadline" "DEADLINE")))
+                     (list (agenda--field "agenda-deadline" "agenda-badge agenda-deadline" "DEADLINE")))
                     ((equal? kind "scheduled")
-                     (list (list "agenda-badge agenda-scheduled" "SCHEDULED")))
+                     (list (agenda--field "agenda-scheduled" "agenda-badge agenda-scheduled" "SCHEDULED")))
                     (else '())))
             (let ((todo (plist-get e 'todo)))
               (cond ((equal? todo "TODO")
-                     (list (list "agenda-badge agenda-todo" "TODO")))
+                     (list (agenda--field "agenda-task-state" "agenda-badge agenda-todo" "TODO")))
                     ((equal? todo "DONE")
-                     (list (list "agenda-badge agenda-done" "DONE")))
+                     (list (agenda--field "agenda-task-state" "agenda-badge agenda-done" "DONE")))
                     (else '())))
-            (list (list "agenda-title" (or (plist-get e 'title) "")))
+            (list (agenda--field "agenda-title" "agenda-title" (or (plist-get e 'title) "")))
             (let ((tags (plist-get e 'tags)))
-              (if tags (list (list "agenda-tags" tags)) '()))
-            (list (list "agenda-file"
+              (if tags (list (agenda--field "agenda-tags" "agenda-tags" tags)) '()))
+            (list (agenda--field "agenda-source" "agenda-file"
                         (agenda--basename (plist-get e 'file))))))))
 
 (define (agenda--render! buf)
@@ -425,7 +427,7 @@
                       (cons (list eol (- dend 1)) folds)
                       folds)
                   (cons (component 'ui/card
-                          (list 'class (if today?
+                          (list 'tag "agenda-day" 'class (if today?
                                            "agenda-day agenda-today"
                                            "agenda-day")
                                 'title head-line
@@ -447,9 +449,10 @@
             (buffer-goto! buf (min p (buffer-size buf)))
             (buffer-set-local! buf 'agenda-index (reverse index))
             (buffer-set-local! buf 'agenda-day-lines (reverse dlines))
+            (buffer-set-local! buf 'render-root (list 'tag "morg-agenda"))
             (buffer-set-local! buf 'render-blocks
               (if (pair? files)
-                  (cons (list 'tag "div" 'class "agenda-header" 'text header)
+                  (cons (list 'tag "c-headerline" 'class "agenda-header" 'text header)
                         (reverse blocks))
                   (list (component 'ui/empty
                           (list 'text "no agenda files — set them with (customize-save! 'morg-agenda-files (list \"~/notes\"))"
@@ -582,7 +585,7 @@
       ;; locals (the closed days) and not the content or the projections
       (buffer-set-local! buf 'transient #t)
       (buffer-set-local! buf 'desktop-skip-locals
-        '(render-blocks agenda-index agenda-day-lines))
+        '(render-root render-blocks agenda-index agenda-day-lines))
       (buffer-set-local! buf 'render-mode "blocks")
       (agenda--render! buf))))
 
