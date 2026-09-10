@@ -1414,24 +1414,36 @@
                   (frame-group-label-refresh!)
                   (message (string-append "Pinned group " (group-name id))))))))))
 
+;; The group a buffer created now joins: the group of the buffer shown
+;; in the window that ran the command, and the frame's group only when
+;; that buffer has none. One rule decides every spawn; a package that
+;; makes a buffer by hand asks here instead of reading the frame's group.
+(define (group-spawn-target &optional buf)
+  (let ((here (current-buffer)))
+    (or (and here
+             (not (equal? here buf))
+             (buffer-known? here)
+             (buffer-group here))
+        (frame-group))))
+
+(public! 'group-spawn-target
+  "(group-spawn-target [BUF]) -> the group a new buffer joins: the group of the buffer in the window that made it, else the frame's group")
+(catalog-meta! 'function "group-spawn-target" 'domain 'buffers 'effects '(read))
+
 ;; Creation is the shared placement boundary. Commands do not each need to
 ;; remember this rule, and waking a dormant buffer does not run the hook.
-;; A new buffer joins the group the frame is in. That membership is
+;; A new buffer joins the group of the window that made it. That membership is
 ;; INHERITED: nobody asked for it, and a board or a listing sheds it
 ;; before it covers the group's pane. A membership a package asks for is
 ;; not inherited, and every explicit path below clears the mark.
 (on-buffer-created!
   (lambda (buf)
     ;; A new buffer lands where the work that opened it lives: the group
-    ;; of the buffer you are in, and the frame's group only when that
-    ;; buffer has none. An agent's chat is a current buffer like any
-    ;; other, so a file it opens joins the chat's group.
-    (let* ((here (current-buffer))
-           (group (or (and here
-                           (not (equal? here buf))
-                           (buffer-known? here)
-                           (buffer-group here))
-                      (frame-group))))
+    ;; of the buffer shown in the window that ran the command, and the
+    ;; frame's group only when that buffer has none. An agent's chat is a
+    ;; current buffer like any other, so a file it opens joins the chat's
+    ;; group.
+    (let ((group (group-spawn-target buf)))
       (when (and group (group-work-buffer? buf))
         (buffer-add-group! buf group)
         (buffer-set-local! buf 'group-inherited group)

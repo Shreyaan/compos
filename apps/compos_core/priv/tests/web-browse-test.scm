@@ -1,7 +1,7 @@
 ;;; web-browse-test.scm --- packages/web.scm, pages read as text, offline.
 ;;;
 ;;; The fetch seam is replaced, so no test reaches the network. Links
-;;; render as labels, a fresh page joins the group the frame stands in,
+;;; render as labels, a fresh page joins the group of the window that opened it,
 ;;; and the wake serves the copy it holds.
 ;;;
 ;;; Five tests stay in ExUnit. Three press TAB, RET and the M-arrows,
@@ -45,8 +45,9 @@
                 (buffer-kill! b)))
             (buffer-list)))
 
-;; A fresh tab's group is decided when it opens, by the frame's current
-;; group. Stand the frame in GROUP for the thunk and give the frame its
+;; A fresh tab's group is decided when it opens: the group of the buffer
+;; that opens it, and the frame's group only when that buffer has none.
+;; Stand the frame in GROUP for the thunk and give the frame its
 ;; own group back after; a throwaway group created here is removed when
 ;; the test ends. The frame is PINNED to GROUP too: a window change
 ;; recalculates the frame's group from what it shows, and only a pin
@@ -65,8 +66,8 @@
       (when (and id (not existing)) (group-record-delete! id))
       out)))
 
-(deftest 'a-page-opens-in-the-group-the-frame-stands-in-and-cycles-views
-  "a page opens in the current group and cycles both rendered types before source"
+(deftest 'a-page-opens-in-the-frame-group-when-the-window-has-none-and-cycles-views
+  "a page from an ungrouped window falls back to the frame group and cycles the views"
   (lambda ()
     ;; the type of a rendered page is a setting, so give it back
     (let ((before (preview-typography)))
@@ -106,6 +107,37 @@
                              "rendering returns without changing the Markdown"))))))
       (t--web-kill-tabs!)
       (preview-typography! before))))
+
+(deftest 'a-page-joins-the-group-of-the-window-that-opened-it
+  "the group of the window that opened the page wins over the frame's group"
+  (lambda ()
+    (let ((saved-current (frame-local 'current-group))
+          (saved-pinned (frame-local 'pinned-group))
+          (back (current-buffer)))
+      (t--web-with-fetch
+        (lambda (url want k) (k (list want (t--web-pages url) #f)))
+        (lambda ()
+          (let ((mine (or (group-resolve-id "zzweb-mine")
+                          (group-record-create! "zzweb-mine")))
+                (spawner "*zz-web-spawn*"))
+            (unless (buffer-known? spawner) (buffer-create spawner))
+            (buffer-add-group! spawner mine)
+            (set-frame-local! 'current-group mine)
+            (set-frame-local! 'pinned-group mine)
+            (switch-to-buffer! spawner)
+            (t--web-pin-group! "zzweb-other"
+              (lambda ()
+                (let ((buf (browse "https://site.test/index.html")))
+                  (check-equal! (group-name (buffer-group buf)) "zzweb-mine"
+                                "the page joins the window that opened it")
+                  (check-equal! (group-name (frame-group)) "zzweb-other"
+                                "and the frame keeps its own group"))))
+            (switch-to-buffer! back)
+            (buffer-kill! spawner)
+            (group-record-delete! mine))))
+      (set-frame-local! 'current-group saved-current)
+      (set-frame-local! 'pinned-group saved-pinned)
+      (t--web-kill-tabs!))))
 
 ;;; --- the page -----------------------------------------------------------------
 

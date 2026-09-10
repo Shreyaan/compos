@@ -1146,13 +1146,16 @@
       (group-ensure-record! "browse")
       "browse"))
 
-;; A fresh tab joins the group the frame stands in, the way find-file
-;; places a new file: the page opens where the reader is and belongs to
-;; that group. With no group current — a bare scratch frame — the
-;; dedicated browse group still gathers the tabs.
+;; A fresh tab joins the group of the window that opened it, the way any
+;; new buffer lands where the work that made it lives. The frame's group
+;; answers only when that window shows a buffer in no group; with no
+;; group anywhere — a bare scratch frame — the dedicated browse group
+;; still gathers the tabs.
 (define (web--tab-group!)
-  (or (and (boundp 'frame-group) (frame-group))
-      (web--browse-group!)))
+  (if (boundp 'group-spawn-target)
+      (or (group-spawn-target) (web--browse-group!))
+      (or (and (boundp 'frame-group) (frame-group))
+          (web--browse-group!))))
 
 (define (web--view-label view)
   (cond ((equal? view "mono") "rendered monospace")
@@ -1331,10 +1334,9 @@ the tabs. C-s searches to any link.")
 
 ;; browser-tab semantics: inside a browse buffer the URL navigates IN
 ;; PLACE; outside, the page's own tab comes up — the one that already
-;; shows it, or a fresh one joined to the frame's current group
-;; the page's own tab: the one that already shows it, or a fresh one.
-;; The tab is made and its fetch starts without a window move, so the
-;; caller decides where it shows.
+;; shows it, or a fresh one joined to the group of the window that
+;; opened it. The tab is made and its fetch starts without a window
+;; move, so the caller decides where it shows.
 (define (web--tab-for! url)
   (or (web--buffer-for url)
       (let ((name (string-append "*browse:" (web--slug url) "*")))
@@ -1345,7 +1347,7 @@ the tabs. C-s searches to any link.")
         name)))
 
 (define (web--open-tab! url)
-  ;; The frame stays in its group; a fresh tab belongs to it. The frame
+  ;; A fresh tab belongs to the window that opened it, so the frame
   ;; never leaves for a dedicated browse group.
   (let ((tab (web--tab-for! url)))
     (switch-to-buffer! tab)
