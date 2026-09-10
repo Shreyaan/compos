@@ -369,11 +369,20 @@
   (filter (lambda (s) s)
           (map (lambda (b) (buffer-local b 'agent-slug)) (buffer-list))))
 
+(define (agent-chat-buffer slug) (string-append "*chat:" slug "*"))
+
 (define (agent-next-slug)
+  ;; The collision check must name the buffer execute* actually creates.
+  ;; It used agent-buffer, which still answers "*agent: a1*" from the old
+  ;; naming, so a live "*chat:a1*" looked free: buffer-create reused it,
+  ;; re-stamped a chat header over the transcript, chat-attach-agent! handed
+  ;; back the FIRST chat's slug, and the new prompt was sent into a dead
+  ;; session and lost. Two spawns collapsed into one chat.
   (let ((claimed (agent-claimed-slugs)))
     (let loop ((n 1))
       (let ((slug (string-append "a" (number->string n))))
         (if (or (member slug (agent-list))
+                (buffer-exists? (agent-chat-buffer slug))
                 (buffer-exists? (agent-buffer slug))
                 (member slug claimed))
             (loop (+ n 1))
@@ -450,7 +459,7 @@
   ;; agent-next-slug only names the buffer now; the session slug is the
   ;; chat's durable id, assigned by chat-attach-agent!
   (let* ((name (agent-next-slug))
-         (buf (string-append "*chat:" name "*")))
+         (buf (agent-chat-buffer name)))
     (buffer-create buf)
     ;; Callers over RPC have no meaningful selected file buffer to inherit
     ;; from. An explicit directory is ordinary chat identity policy and wins

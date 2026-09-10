@@ -242,7 +242,15 @@
   (unless (window-showing (agent-buf slug))
     (agent-permission-deadline! slug permission-timeout-ms)))
 
-(define *permission-auto-modes* '("dontAsk" "acceptEdits" "bypassPermissions"))
+;; "dontAsk" is not an auto mode. Its own description is "Don't prompt for
+;; permissions, deny if not pre-approved" - a session in that mode refuses
+;; every tool compos has not pre-allowed, and never asks, so an auto chat
+;; became a chat that could not read a file. Auto must pick a mode that
+;; PERMITS. acceptEdits comes first: it silences the edit round-trips and
+;; still routes everything else through *permission-policy*, so the deny-list
+;; and the profile keep working. bypassPermissions is the fallback for a
+;; backend with no acceptEdits, and it takes compos out of the loop.
+(define *permission-auto-modes* '("acceptEdits" "bypassPermissions"))
 
 (define *permission-ask-modes* '("default"))
 
