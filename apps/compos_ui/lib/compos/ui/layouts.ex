@@ -2706,7 +2706,8 @@ defmodule Compos.Ui.Layouts do
                 }
                 return false;
               },
-              reconnected() { this.bootCheck(); },
+              disconnected() { this.clientErrorsConnected = false; },
+              reconnected() { this.clientErrorsConnected = true; this.bootCheck(); },
               updated() {
                 if (this.bootCheck()) return;
                 if (this.syncCursorFocus) this.syncCursorFocus();
@@ -3719,10 +3720,17 @@ defmodule Compos.Ui.Layouts do
                 // Any client's JS failure lands in *Messages*: a webview
                 // has no extension and often no open inspector, and an
                 // unreported error reads as "the editor ignored me".
+                this.clientErrorsConnected = true;
                 this.jsErrH = (e) => {
+                  if (!this.clientErrorsConnected) return;
                   const m = e.message || (e.reason && (e.reason.stack || e.reason.message)) || "unknown";
                   const at = e.filename ? ` @${e.filename}:${e.lineno}` : "";
-                  this.pushEvent("client_error", { m: `${m}${at}`.slice(0, 500) });
+                  // Reporting must never produce another unhandled error,
+                  // including a disconnect racing with this event.
+                  try {
+                    Promise.resolve(this.pushEvent("client_error", { m: `${m}${at}`.slice(0, 500) })).catch(() => {});
+                  } catch (_) {}
+
                 };
                 window.addEventListener("error", this.jsErrH);
                 window.addEventListener("unhandledrejection", this.jsErrH);
@@ -4013,6 +4021,9 @@ defmodule Compos.Ui.Layouts do
               },
               destroyed() {
                 Telem.detach(this);
+                this.clientErrorsConnected = false;
+                window.removeEventListener("error", this.jsErrH);
+                window.removeEventListener("unhandledrejection", this.jsErrH);
                 window.removeEventListener("keydown", this.handler);
                 window.removeEventListener("keyup", this.keyupH);
                 window.removeEventListener("resize", this.resizeH);
