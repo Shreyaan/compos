@@ -105,7 +105,7 @@
   (for-each (lambda (e) (apply set-face-attribute! (cons (car e) (cadr e))))
             *custom-set-faces*))
 
-(define custom--load-theme load-theme)
+(alias-once! 'custom--load-theme 'load-theme)
 (define (load-theme name)
   (custom--load-theme name)
   (custom-reapply-faces!))

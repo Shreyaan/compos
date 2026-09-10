@@ -3,6 +3,22 @@
 ;;; The Elixir core knows nothing about what keys mean or what commands do.
 ;;; Everything here is userland: redefine any of it from init.scm or M-:.
 
+;;; --- wrapping a function once -----------------------------------------------
+;;; The editor wraps a function by capturing it under a second name and then
+;;; shadowing the first name. The capture must happen ONE time. A whole-file
+;;; reload evaluates the capturing form again, and the first name then holds
+;;; the wrapper: a second capture points the wrapper at itself, and the next
+;;; call recurses until the heap bound stops it. On 2026-09-10 that broke
+;;; define-command--raw, so every command definition died at 1024 MB.
+;;;
+;;; So a capture keeps its first value, the way defvar keeps a variable.
+;;; `Scheme.rebind_primitives` keeps that first value current when Elixir
+;;; swaps the primitive module, so the capture never goes stale.
+
+(define (alias-once! name target)
+  (unless (boundp name) (set-symbol-value! name (symbol-value target)))
+  name)
+
 ;;; --- package context and the shared catalog ---------------------------------
 ;;; Scheme's callable globals deliberately stay flat.  These two stamps are
 ;;; metadata: the loader changes them while evaluating a file so every public
@@ -177,7 +193,7 @@
 
 ;; Commands are an Elixir registry underneath, but this wrapper gives every
 ;; declaration the same package/domain/effect metadata as Scheme APIs.
-(define define-command--raw define-command)
+(alias-once! 'define-command--raw 'define-command)
 
 ;;; --- interactive: how a command gets its arguments ----------------------------
 ;;; Emacs's (interactive "p"). A command may take arguments; the spec says
@@ -274,7 +290,7 @@
 ;; Emacs call-interactively: run NAME as a key would
 (define (call-interactively name) (run-command name))
 
-(define undefine-command--raw undefine-command)
+(alias-once! 'undefine-command--raw 'undefine-command)
 (define (undefine-command name)
   (undefine-command--raw name)
   (when (member name *command-names*)
@@ -2753,7 +2769,7 @@
 ;; A prompt that opens while another is up cancels the outer one first,
 ;; so its cancel handler restores what it displaced, instead of the
 ;; outer prompt vanishing with its closures.
-(define minibuffer-read*--raw minibuffer-read*)
+(alias-once! 'minibuffer-read*--raw 'minibuffer-read*)
 
 (define (minibuffer-active?) (if (minibuffer-state) #t #f))
 
@@ -5555,7 +5571,7 @@
 ;; default-directory is buffer-local and copied from the current buffer at
 ;; creation). Without this, every non-file buffer — chat, shell, agent
 ;; thread, listing — answers "~" and C-x C-f from it loses your place.
-(define raw-buffer-create buffer-create)
+(alias-once! 'raw-buffer-create 'buffer-create)
 
 ;; A buffer name that is a file on disk names that file. An empty buffer
 ;; under such a name holds a lie, and the first save turns the lie into
@@ -5997,7 +6013,7 @@
 
 ;; The host file primitive creates a buffer below the Scheme buffer-create
 ;; wrapper. Wrap it here so file buffers use the same creation event.
-(define raw-find-file find-file)
+(alias-once! 'raw-find-file 'find-file)
 (define (find-file path)
   (let* ((name (expand-path (normalize-file-input path)))
          (new (not (buffer-known? name)))
@@ -6180,13 +6196,13 @@
 ;; list-dir / file-stat / delete-file! / make-directory! grow a remote
 ;; branch under the same names and contracts — dired, file completion and
 ;; friends work on /ssh: paths without knowing it.
-(define local-list-dir list-dir)
+(alias-once! 'local-list-dir 'list-dir)
 (define (list-dir dir)
   (if (remote-path? dir)
       (map car (remote-ls! dir))
       (local-list-dir dir)))
 
-(define local-directory-entries directory-entries)
+(alias-once! 'local-directory-entries 'directory-entries)
 
 (define (remote-entry-type perms)
   (cond ((string-prefix? "d" perms) "directory")
@@ -6215,7 +6231,7 @@
             (map remote-entry-info entries)))
       (local-directory-entries dir)))
 
-(define local-file-stat file-stat)
+(alias-once! 'local-file-stat 'file-stat)
 (define (file-stat p0)
   (if (remote-path? p0)
       (let ((parts (path-split (remote-dir-key p0))))
@@ -6226,7 +6242,7 @@
             (if e (cadr e) (list "----------" "?" "?")))))
       (local-file-stat p0)))
 
-(define local-delete-file! delete-file!)
+(alias-once! 'local-delete-file! 'delete-file!)
 (define (delete-file! p)
   (if (remote-path? p)
       (let ((hp (remote-parse p)))
@@ -6238,14 +6254,14 @@
                            "; else rm -- " q "; fi"))))
       (local-delete-file! p)))
 
-(define local-make-directory! make-directory!)
+(alias-once! 'local-make-directory! 'make-directory!)
 (define (make-directory! p)
   (if (remote-path? p)
       (let ((hp (remote-parse p)))
         (remote-sh! (car hp) (string-append "mkdir -p -- " (sh-quote (cadr hp)))))
       (local-make-directory! p)))
 
-(define local-rename-file! rename-file!)
+(alias-once! 'local-rename-file! 'rename-file!)
 (define (rename-file! source destination)
   (cond
     ((and (remote-path? source) (remote-path? destination))
@@ -6264,7 +6280,7 @@
      #f)
     (else (local-rename-file! source destination))))
 
-(define local-copy-file! copy-file!)
+(alias-once! 'local-copy-file! 'copy-file!)
 (define (copy-file! source destination)
   (cond
     ((and (remote-path? source) (remote-path? destination))
@@ -6283,7 +6299,7 @@
      #f)
     (else (local-copy-file! source destination))))
 
-(define local-trash-file! trash-file!)
+(alias-once! 'local-trash-file! 'trash-file!)
 (define (trash-file! p)
   (if (remote-path? p)
       (let* ((hp (remote-parse p))
@@ -6296,7 +6312,7 @@
             "mv -- " q " \"$target\"")))
       (local-trash-file! p)))
 
-(define local-set-file-mode! set-file-mode!)
+(alias-once! 'local-set-file-mode! 'set-file-mode!)
 (define (set-file-mode! p mode)
   (if (remote-path? p)
       (let ((hp (remote-parse p)))
@@ -6304,14 +6320,14 @@
           (string-append "chmod -- " (sh-quote mode) " " (sh-quote (cadr hp)))))
       (local-set-file-mode! p mode)))
 
-(define local-touch-file! touch-file!)
+(alias-once! 'local-touch-file! 'touch-file!)
 (define (touch-file! p)
   (if (remote-path? p)
       (let ((hp (remote-parse p)))
         (remote-sh! (car hp) (string-append "touch -- " (sh-quote (cadr hp)))))
       (local-touch-file! p)))
 
-(define local-make-symlink! make-symlink!)
+(alias-once! 'local-make-symlink! 'make-symlink!)
 (define (make-symlink! target link)
   (cond
     ((and (remote-path? target) (remote-path? link))
@@ -11205,25 +11221,25 @@
 
 ;; the window mutators the keyboard reaches (C-x 1/2/3/0, popups) push
 ;; the arrangement they are about to destroy
-(define builtin-window-tree-set! window-tree-set!)
+(alias-once! 'builtin-window-tree-set! 'window-tree-set!)
 (define (window-tree-set! tree)
   (builtin-window-tree-set! tree)
   (window-state-changed!))
 
 ;; a look at an arrangement, the way window-preview-buffer! is a look at
 ;; a buffer: the windows change, the MRU ring does not
-(define builtin-window-tree-preview! window-tree-preview!)
+(alias-once! 'builtin-window-tree-preview! 'window-tree-preview!)
 (define (window-tree-preview! tree)
   (builtin-window-tree-preview! tree)
   (window-state-changed!))
 
-(define builtin-delete-other-windows! delete-other-windows!)
+(alias-once! 'builtin-delete-other-windows! 'delete-other-windows!)
 (define (delete-other-windows!)
   (winner-save!)
   (builtin-delete-other-windows!)
   (window-state-changed!))
 
-(define builtin-split-window! split-window!)
+(alias-once! 'builtin-split-window! 'split-window!)
 (define (split-window! dir &optional ratio)
   (winner-save!)
   (let ((result (if ratio
@@ -11232,14 +11248,14 @@
     (window-state-changed!)
     result))
 
-(define builtin-delete-window! delete-window!)
+(alias-once! 'builtin-delete-window! 'delete-window!)
 (define (delete-window!)
   (winner-save!)
   (let ((result (builtin-delete-window!)))
     (window-state-changed!)
     result))
 
-(define builtin-delete-window-id! delete-window-id!)
+(alias-once! 'builtin-delete-window-id! 'delete-window-id!)
 (define (delete-window-id! id)
   (let ((result (builtin-delete-window-id! id)))
     (window-state-changed!)

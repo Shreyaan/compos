@@ -218,3 +218,67 @@
           (check-equal! (string-contains? src (string-append "(define " var " ")) #f
             (string-append var " is not a bare define"))))
       t--reload-persisted)))
+
+;;; --- a reload must not point a wrapper at itself --------------------------
+;;;
+;;; The editor wraps a function by capturing it under a second name and then
+;;; shadowing the first name. A whole-file reload evaluates the capturing
+;;; form again, and the first name then holds the wrapper: a second capture
+;;; makes the wrapper call itself, and the next call recurses until the heap
+;;; bound stops it. On 2026-09-10 define-command--raw took that path, and
+;;; the daemon could define no command again. alias-once! keeps the first
+;;; capture, so a reload leaves the wrapper wrapping.
+
+(define (t--alias-target) 'wrapped)
+
+(deftest 'alias-once-keeps-the-first-capture
+  "a second capture does not point the wrapper at itself"
+  (lambda ()
+    (alias-once! 't--alias-raw 't--alias-target)
+    ;; the wrapper takes the name, the way editor.scm wraps a primitive
+    (set-symbol-value! 't--alias-target (lambda () (t--alias-raw)))
+    ;; this is what the reload does to the capturing form
+    (alias-once! 't--alias-raw 't--alias-target)
+    (check-equal! (t--alias-raw) 'wrapped
+      "the capture still names the wrapped function")
+    (unbind-global! 't--alias-raw)
+    (alias-once! 't--alias-raw 't--alias-target)
+    (check-equal! (procedure? t--alias-raw) #t
+      "a free name still takes the capture")
+    (unbind-global! 't--alias-raw)))
+
+(deftest 'a-reload-keeps-define-command-out-of-itself
+  "re-capturing define-command--raw leaves command definition working"
+  (lambda ()
+    ;; the poisoned capture recursed here until the heap bound stopped it
+    (alias-once! 'define-command--raw 'define-command)
+    (define-command "zz-alias-once-probe" "probe" (lambda () 42))
+    (check-equal! (command-call "zz-alias-once-probe") 42
+      "the command registry still answers after a re-capture")
+    (undefine-command "zz-alias-once-probe")))
+
+;; Every name editor.scm captures before it shadows the same name. A bare
+;; (define NAME TARGET) here is the bug above, so the source says alias-once!.
+(define t--captured-names
+  '("define-command--raw" "undefine-command--raw" "minibuffer-read*--raw"
+    "raw-buffer-create" "raw-find-file" "local-list-dir"
+    "local-directory-entries" "local-file-stat" "local-delete-file!"
+    "local-make-directory!" "local-rename-file!" "local-copy-file!"
+    "local-trash-file!" "local-set-file-mode!" "local-touch-file!"
+    "local-make-symlink!" "builtin-window-tree-set!"
+    "builtin-window-tree-preview!" "builtin-delete-other-windows!"
+    "builtin-split-window!" "builtin-delete-window!"
+    "builtin-delete-window-id!"))
+
+(deftest 'every-wrapped-primitive-uses-alias-once
+  "no capture in editor.scm is a bare define, which a reload re-runs"
+  (lambda ()
+    (let ((src (read-file (string-append (compos-priv-dir) "/editor.scm"))))
+      (check-equal! (string? src) #t "read editor.scm")
+      (for-each
+        (lambda (name)
+          (check-equal! (string-contains? src (string-append "(alias-once! '" name " ")) #t
+            (string-append name " uses alias-once!"))
+          (check-equal! (string-contains? src (string-append "(define " name " ")) #f
+            (string-append name " is not a bare define")))
+        t--captured-names))))
