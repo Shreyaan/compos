@@ -779,7 +779,10 @@
          (short-of (lambda (h)
                      (string-downcase (or (plist-get h 'name) (plist-get h 'task) ""))))
          (exact? (lambda (h) (or (equal? q (name-of h)) (equal? q (short-of h)))))
-         (recipe? (lambda (h) (equal? (plist-get h 'kind) "recipe")))
+         ;; a recipe whose task matched. One whose expression alone matched
+         ;; is a weaker hit than a name, and it waits with the rest.
+         (recipe? (lambda (h) (and (equal? (plist-get h 'kind) "recipe")
+                                   (not (equal? (plist-get h 'match) "expression")))))
          (prefix? (lambda (h)
                     (or (string-prefix? q (name-of h))
                         (string-prefix? q (short-of h)))))
@@ -823,7 +826,7 @@
   (let ((name (plist-get hit 'name))
         (package (plist-get hit 'package))
         (domain (plist-get hit 'domain)))
-    (cond ((member key '(note semantic-score)) #t)
+    (cond ((member key '(note semantic-score match)) #t)
           ;; a command's use line stays: agents are told to read it, and a
           ;; row that drops it asks every reader to know the shape by heart
           ((equal? key 'use) (equal? value (plist-get hit 'sig)))

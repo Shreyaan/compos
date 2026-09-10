@@ -56,7 +56,7 @@
     <!-- the queues as one line: each name, its count, and where you are -->
     <p>
       <xsl:for-each select=".//nav[contains(@class, 'app-tabstrip')]//a[contains(@class, 'app-tab')]">
-        <xsl:if test="position() &gt; 1"><xsl:text> | </xsl:text></xsl:if>
+        <xsl:if test="position() &gt; 1"><xsl:text> · </xsl:text></xsl:if>
         <a>
           <xsl:attribute name="href">
             <xsl:call-template name="abs">
@@ -129,11 +129,11 @@
 
     <p>
       <xsl:for-each select="$meta">
-        <xsl:if test="position() &gt; 1"><xsl:text> | </xsl:text></xsl:if>
+        <xsl:if test="position() &gt; 1"><xsl:text> · </xsl:text></xsl:if>
         <xsl:value-of select="normalize-space(.)"/>
       </xsl:for-each>
       <xsl:if test="$candidate">
-        <xsl:if test="$meta"><xsl:text> | </xsl:text></xsl:if>
+        <xsl:if test="$meta"><xsl:text> · </xsl:text></xsl:if>
         <a>
           <xsl:attribute name="href">
             <xsl:call-template name="abs">
@@ -160,9 +160,9 @@
             </xsl:otherwise>
           </xsl:choose>
           <xsl:if test=".//span[contains(@class, 'abtn-kbd')]">
-            <xsl:text> [</xsl:text>
+            <xsl:text> (</xsl:text>
             <xsl:value-of select="normalize-space((.//span[contains(@class, 'abtn-kbd')])[1])"/>
-            <xsl:text>]</xsl:text>
+            <xsl:text>)</xsl:text>
           </xsl:if>
         </xsl:for-each>
       </p>
@@ -186,6 +186,23 @@
   </xsl:template>
 
   <xsl:template match="script|style|noscript|svg|template" mode="body"/>
+  <!-- an icon link loses its icon here, so its title has to name it -->
+  <xsl:template match="a[not(normalize-space())]" mode="body">
+    <xsl:if test="@title or @aria-label">
+      <a>
+        <xsl:attribute name="href">
+          <xsl:call-template name="abs">
+            <xsl:with-param name="href" select="@href"/>
+          </xsl:call-template>
+        </xsl:attribute>
+        <xsl:choose>
+          <xsl:when test="@title"><xsl:value-of select="normalize-space(@title)"/></xsl:when>
+          <xsl:otherwise><xsl:value-of select="normalize-space(@aria-label)"/></xsl:otherwise>
+        </xsl:choose>
+      </a>
+    </xsl:if>
+  </xsl:template>
+
   <xsl:template match="img[contains(@class, 'candidate-avatar')]" mode="body"/>
 
   <!-- the reconnect toasts are on every page and say nothing about it -->

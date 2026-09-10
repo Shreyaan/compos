@@ -89,7 +89,8 @@
     ("https://html.duckduckgo.com" "duckduckgo.xsl" #f)
     ("https://news.ycombinator.com" "hackernews.xsl" #f)
     ("https://mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
-    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)))
+    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
+    ("https://svsrecruiting.com" "svsrecruiting.xsl" #f)))
 
 (define (web--site url)
   (let loop ((sites *web--sites*))
