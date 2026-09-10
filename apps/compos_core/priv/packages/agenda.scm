@@ -111,6 +111,15 @@
                          (substring-bytes s (cadr (car g))
                                           (string-byte-length s)))))))
 
+;; the trailing :tags: of a line -> (TEXT TAGS), the text trimmed and the
+;; tags #f when the line carries none
+(define (agenda--split-tags text)
+  (let ((tg (re-groups "[ \t]((:[A-Za-z0-9_@-]+)+:)[ \t]*$" text 0)))
+    (if tg
+        (list (string-trim (substring-bytes text 0 (car (car tg))))
+              (substring-bytes text (car (nth 1 tg)) (cadr (nth 1 tg))))
+        (list (string-trim text) #f))))
+
 ;; heading line -> (todo title tags): #s, the keyword, trailing :tags:
 ;; and timestamps all stripped from the title
 (define (agenda--heading-parts line)
@@ -120,10 +129,8 @@
          (kw (re-groups "^(TODO|DONE)[ \t]+" bare 0))
          (todo (and kw (substring-bytes bare (car (nth 1 kw)) (cadr (nth 1 kw)))))
          (rest (if kw (substring-bytes bare (cadr (car kw)) (len bare)) bare))
-         (tg (re-groups "[ \t]((:[A-Za-z0-9_@-]+)+:)[ \t]*$" rest 0))
-         (tags (and tg (substring-bytes rest (car (nth 1 tg)) (cadr (nth 1 tg)))))
-         (body (if tg (substring-bytes rest 0 (car (car tg))) rest)))
-    (list todo (string-trim (agenda--strip-stamps body)) tags)))
+         (parts (agenda--split-tags rest)))
+    (list todo (string-trim (agenda--strip-stamps (car parts))) (cadr parts))))
 
 ;; -> "scheduled" | "deadline" | #f
 (define (agenda--planning-kind line)
@@ -238,10 +245,29 @@
                 (if (equal? (car parts) "TODO")
                     (cons (list 'title (cadr parts)
                                 'tags (caddr parts)
+                                'who #f
                                 'file path
                                 'pos pos)
                           entries)
                     entries))))
+            ;; a checkbox item is a TODO too: every state but done is
+            ;; unfinished, the writer's own statuses among them. A
+            ;; "[@:NAME]" marker says who has it, so the row can show them.
+            ((morg-checkbox-at line)
+             (let* ((box (morg-checkbox-at line))
+                    (parts (agenda--split-tags
+                             (substring-bytes line (nth 3 box)
+                                              (string-byte-length line)))))
+               (loop
+                (cdr lines) next #f
+                (if (equal? (cadr box) "x")
+                    entries
+                    (cons (list 'title (car parts)
+                                'tags (cadr parts)
+                                'who (morg-checkbox-name (cadr box))
+                                'file path
+                                'pos pos)
+                          entries)))))
             (else
              (loop (cdr lines) next #f entries)))))))
 
@@ -265,6 +291,7 @@
 
 (define (morg-todos--cells buf row)
   (list (plist-get row 'title)
+        (or (plist-get row 'who) "")
         (or (plist-get row 'tags) "")
         (agenda--basename (plist-get row 'file))))
 
@@ -629,6 +656,7 @@
     'buffer *morg-todos-buffer*
     'columns (lambda (buf)
                (list (list "TODO" #f)
+                     (list "WHO" 10)
                      (list "TAGS" 18)
                      (list "FILE" 24)))
     'cells morg-todos--cells
@@ -641,7 +669,7 @@
     'keys '(("RET" "morg-todos-visit")
             ("g" "morg-todos-refresh")
             ("q" "quit-window"))
-    'doc "All unfinished TODO headings from morg-agenda-files."))
+    'doc "Every unfinished TODO heading and checkbox item from morg-agenda-files."))
 
 (define-command "morg-todos" "Show all unfinished TODOs from your Morg files"
   (lambda ()

@@ -571,42 +571,142 @@
       (when (and (>= p start) (<= p (+ start old-len)))
         (buffer-goto! buf (min p (+ start (string-byte-length new))))))))
 
-;; Cycle the heading at POS through none, TODO, and DONE.
-;; Return the new state string, or #f when POS is not on a heading.
-(define (morg-toggle-todo-at! buf pos)
-  (let* ((e (morg-entry-at (morg-scan buf) pos)))
-    (if (not (and e (equal? (morg-kind e) 'heading)))
-        #f
-        (let* ((start (car e))
-               (line (cadr e))
-               (g (re-groups "^(#{1,6}[ \t]+)(TODO[ \t]+|DONE[ \t]+)?" line 0))
-               (pre (nth 1 g))
-               (kw (nth 2 g))
-               (head (substring-bytes line 0 (cadr pre)))
-               (rest (substring-bytes line (if kw (cadr kw) (cadr pre))
-                                      (string-byte-length line)))
-               (cur (if kw
-                        (substring-bytes line (car kw) (+ (car kw) 4))
-                        ""))
-               (next (cond ((equal? cur "") "TODO")
-                           ((equal? cur "TODO") "DONE")
-                           (else "NONE")))
-               (new (string-append head
-                      (cond ((equal? next "TODO") "TODO ")
-                            ((equal? next "DONE") "DONE ")
-                            (else ""))
-                      rest)))
-          (morg-replace-line! buf start line new)
-          (when (equal? (buffer-local buf 'mode-name) "morg-mode")
-            (morg-refontify! buf))
-          next))))
+;;; A checkbox item is a line whose first content, after an optional list
+;;; bullet at any depth, is a marker in brackets: "[ ]" is open, "[@]" is
+;;; in progress, "[x]" is done, and "[@:NAME]" is in progress with the
+;;; person who has it. Any other single character is a status of the
+;;; writer's own: it is displayed, and the cycle leaves it alone.
 
-(define-command "morg-todo" "Cycle the TODO state of the heading at point"
+(define morg--checkbox-pattern "^[ \t]*(?:[-*+][ \t]+)?[[]([^]\n]+)[]]")
+
+;; A marker is one character, or "@:" and a name. Anything longer is
+;; prose: "[see below] ..." opens no task.
+(define (morg-checkbox-marker? m)
+  (or (= (string-length m) 1)
+      (and (string-prefix? "@:" m) (> (string-byte-length m) 2))))
+
+;; the person a "[@:NAME]" marker hands the item to, or #f
+(define (morg-checkbox-name marker)
+  (and (string-prefix? "@:" marker)
+       (let ((n (substring-bytes marker 2 (string-byte-length marker))))
+         (and (not (equal? n "")) n))))
+
+;; "[@]" and "[@:NAME]" are one state: in progress
+(define (morg-checkbox-doing? marker)
+  (and (or (equal? marker "@") (morg-checkbox-name marker)) #t))
+
+;; -> (OPEN MARKER CLOSE TEXT-START) in bytes, else #f. The marker must be
+;; followed by a space or the line end, so "[a](url)" stays a link.
+(define (morg-checkbox-at line)
+  (let ((g (re-groups morg--checkbox-pattern line 0)))
+    (and g
+         (let* ((r (nth 1 g))
+                (len (string-byte-length line))
+                (close (cadr r))
+                (marker (substring-bytes line (car r) close))
+                (space? (lambda (i)
+                          (and (< i len)
+                               (member (substring-bytes line i (+ i 1))
+                                       '(" " "\t"))
+                               #t))))
+           (and (morg-checkbox-marker? marker)
+                (or (= (+ close 1) len) (space? (+ close 1)))
+                (list (- (car r) 1)
+                      marker
+                      close
+                      (let skip ((i (+ close 1)))
+                        (if (space? i) (skip (+ i 1)) i))))))))
+
+;; the marker the cycle moves to, or #f for a freeform status. Cycling
+;; INTO doing gives a plain "@": a name is the user's to type, never the
+;; toggle's to invent.
+(define (morg-checkbox-next marker)
+  (cond ((equal? marker " ") "@")
+        ((morg-checkbox-doing? marker) "x")
+        ((equal? marker "x") " ")
+        (else #f)))
+
+;; the state a marker names
+(define (morg-checkbox-state marker)
+  (cond ((equal? marker " ") "TODO")
+        ((morg-checkbox-doing? marker) "DOING")
+        ((equal? marker "x") "DONE")
+        (else #f)))
+
+;; (MARKER-FACE TEXT-FACE) — a freeform status reads as metadata, and the
+;; text beside it stays plain prose
+(define (morg-checkbox-faces marker)
+  (cond ((equal? marker " ") '("morg-task-open" "morg-task-open-text"))
+        ((morg-checkbox-doing? marker) '("morg-task-doing" "morg-task-doing-text"))
+        ((equal? marker "x") '("morg-task-done" "morg-task-done-text"))
+        (else '("org-meta" #f))))
+
+(define (morg--todo-line! buf start line new)
+  (morg-replace-line! buf start line new)
+  (when (equal? (buffer-local buf 'mode-name) "morg-mode")
+    (morg-refontify! buf)))
+
+;; the heading cycle: none, TODO, DONE
+(define (morg--cycle-heading! buf e)
+  (let* ((start (car e))
+         (line (cadr e))
+         (g (re-groups "^(#{1,6}[ \t]+)(TODO[ \t]+|DONE[ \t]+)?" line 0))
+         (pre (nth 1 g))
+         (kw (nth 2 g))
+         (head (substring-bytes line 0 (cadr pre)))
+         (rest (substring-bytes line (if kw (cadr kw) (cadr pre))
+                                (string-byte-length line)))
+         (cur (if kw
+                  (substring-bytes line (car kw) (+ (car kw) 4))
+                  ""))
+         (next (cond ((equal? cur "") "TODO")
+                     ((equal? cur "TODO") "DONE")
+                     (else "NONE")))
+         (new (string-append head
+                (cond ((equal? next "TODO") "TODO ")
+                      ((equal? next "DONE") "DONE ")
+                      (else ""))
+                rest)))
+    (morg--todo-line! buf start line new)
+    next))
+
+;; the checkbox cycle: [ ], [@], [x]. The indentation and the bullet are
+;; the line's own, so only the one marker character is rewritten.
+(define (morg--cycle-checkbox! buf e)
+  (let* ((start (car e))
+         (line (cadr e))
+         (box (morg-checkbox-at line)))
+    (cond
+      ((not box) #f)
+      ((not (morg-checkbox-next (cadr box))) 'freeform)
+      (else
+        (let* ((next (morg-checkbox-next (cadr box)))
+               (new (string-append (substring-bytes line 0 (+ (car box) 1))
+                                   next
+                                   (substring-bytes line (caddr box)
+                                                    (string-byte-length line)))))
+          (morg--todo-line! buf start line new)
+          (morg-checkbox-state next))))))
+
+;; Cycle the heading at POS through none, TODO and DONE, or the checkbox
+;; item at POS through open, in progress and done. Return the new state
+;; string, 'freeform when the marker is the writer's own, or #f when POS
+;; is on neither.
+(define (morg-toggle-todo-at! buf pos)
+  (let ((e (morg-entry-at (morg-scan buf) pos)))
+    (cond ((not e) #f)
+          ((equal? (morg-kind e) 'heading) (morg--cycle-heading! buf e))
+          ((equal? (morg-kind e) 'text) (morg--cycle-checkbox! buf e))
+          (else #f))))
+
+(define-command "morg-todo" "Cycle the TODO state of the heading or checkbox at point"
   (lambda ()
     (let ((state (morg-toggle-todo-at! (current-buffer) (point))))
-      (if state
-          (message (if (equal? state "NONE") "TODO state cleared" state))
-          (message "Point is not on a heading")))))
+      (cond ((equal? state 'freeform)
+             (message "Freeform checkbox status — left alone"))
+            ((equal? state "NONE") (message "TODO state cleared"))
+            (state (message state))
+            (else (message "Point is not on a heading or a checkbox"))))))
 
 ;;; --- fontification -----------------------------------------------------------
 
@@ -615,7 +715,15 @@
   'family "'IBM Plex Mono',ui-monospace,Menlo,monospace")
 (defface! 'morg-bold 'weight "700")
 (defface! 'morg-italic 'style "italic")
-(defface! 'morg-result 'fg "#8a857a")
+(defface! 'morg-result 'fg "#8a857a");; Each checkbox state carries its own marker face and its own text face,
+;; so open, in progress and done read apart at a glance. The colours are
+;; morg's own defaults; a theme that names these faces wins over them.
+(defface! 'morg-task-open 'fg "#a03020" 'weight "700")
+(defface! 'morg-task-open-text 'weight "500")
+(defface! 'morg-task-doing 'fg "#7a5a1a" 'weight "700")
+(defface! 'morg-task-doing-text 'fg "#7a5a1a" 'style "italic")
+(defface! 'morg-task-done 'fg "#3d6b4f" 'weight "700")
+(defface! 'morg-task-done-text 'fg "#8a857a" 'decoration "line-through")
 
 ;; markdown info string -> loaded tree-sitter language, or #f.
 ;; The fence-kind registry (morg-kinds.scm) owns the mapping.
@@ -659,6 +767,22 @@
       ((equal? k 'code)
        (let ((f (fence-kind-line-face (morg-info e) line fence-args)))
          (if f (list (list start (+ start len) f)) '())))
+      ;; a checkbox line: the marker takes its state's face and the text
+      ;; after it takes the state's text face. Like a heading's keyword,
+      ;; these spans REPLACE rather than stack, so the prose markers are
+      ;; not painted over the item's own state.
+      ((and (equal? k 'text) (morg-checkbox-at line))
+       (let* ((box (morg-checkbox-at line))
+              (open (car box))
+              (close (caddr box))
+              (text-start (nth 3 box))
+              (faces (morg-checkbox-faces (cadr box))))
+         (append
+           (if (> open 0) (list (list start (+ start open) "org-meta")) '())
+           (list (list (+ start open) (+ start close 1) (car faces)))
+           (if (and (cadr faces) (< text-start len))
+               (list (list (+ start text-start) (+ start len) (cadr faces)))
+               '()))))
       (else
        (append
          (map (lambda (r) (append (abs r) '("morg-code")))
