@@ -423,3 +423,59 @@
                     (string-append (mode-icon "scheme-mode") " zz-name-render")
                     "and the plain reading of them keeps no asterisk")
       (buffer-kill! buf))))
+
+;;; The modes card of the C-x ? panel. The chips of one labelled row, as
+;;; texts, and the value of one keyed row.
+(define (t--dash-chiprow card key)
+  (let loop ((kids (plist-get card 'children)))
+    (cond ((null? kids) #f)
+          ((and (equal? (plist-get (car kids) 'class) "dash-chiprow")
+                (equal? (plist-get (car (plist-get (car kids) 'children)) 'text) key))
+           (map (lambda (c) (plist-get c 'text))
+                (cdr (plist-get (car kids) 'children))))
+          (else (loop (cdr kids))))))
+
+(define (t--dash-row-value card key)
+  (let loop ((kids (plist-get card 'children)))
+    (cond ((null? kids) #f)
+          ((and (equal? (plist-get (car kids) 'class) "dash-row")
+                (equal? (cadr (car (plist-get (car kids) 'segs))) key))
+           (cadr (nth 2 (plist-get (car kids) 'segs))))
+          (else (loop (cdr kids))))))
+
+(deftest 'the-modes-card-names-the-maps-that-answer-and-not-only-the-shown-modes
+  "cua-mode and the editing state answer in a buffer you are editing, and the modeline names neither"
+  (lambda ()
+    (let ((buf "*zz-modeline-modes*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "text-mode")
+      (editing-state-off! buf)
+      (check-equal! (t--dash-chiprow (dash--modes buf) "hidden") #f
+                    "a buffer you have just landed on hides nothing")
+      (check-equal! (t--dash-row-value (dash--modes buf) "state") "focus"
+                    "and it answers the arrows with the window focus")
+      (editing-state-on! buf)
+      (let ((hidden (t--dash-chiprow (dash--modes buf) "hidden")))
+        (check-true! (if (member "editing-state" hidden) #t #f)
+                     "the editing state's own map shows as a hidden mode")
+        (check-true! (if (member "cua" hidden) #t #f)
+                     "and so does cua-mode, which no modeline names"))
+      (check-equal! (t--dash-row-value (dash--modes buf) "state") "editing"
+                    "and the state says so")
+      (editing-state-off! buf)
+      (buffer-kill! buf))))
+
+(deftest 'the-headline-says-which-state-the-buffer-is-in
+  "focus gives the Cmd-arrows to the window, editing gives them to the caret"
+  (lambda ()
+    (let ((buf "*zz-modeline-state*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "text-mode")
+      (editing-state-off! buf)
+      (check-equal! (t--dseg-value (dashboard-line-blocks buf) "state") "focus"
+                    "a landing answers the arrows with the window focus")
+      (editing-state-on! buf)
+      (check-equal! (t--dseg-value (dashboard-line-blocks buf) "state") "editing"
+                    "a buffer you are editing keeps them for the caret")
+      (editing-state-off! buf)
+      (buffer-kill! buf))))

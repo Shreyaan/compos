@@ -11289,13 +11289,11 @@
 .dash-chip { padding: 2px 8px; border-radius: 6px; background: var(--window-bg, #fdfcf8);
              border: 1px solid var(--border, #e2dbc9); font-family: var(--font-mono);
              font-size: 10.5px; color: var(--dim-fg, #57534a); }
-.dash-spark { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
-.dash-bar { flex: 1; border-radius: 1px; background: var(--accent-fg, #26356b);
-            min-width: 3px; }
-.dash-bar.hot { background: var(--diff-hunk-fg, #7a5a1a); }
-.dash-bar.h1 { height: 4px; } .dash-bar.h2 { height: 9px; } .dash-bar.h3 { height: 14px; }
-.dash-bar.h4 { height: 19px; } .dash-bar.h5 { height: 24px; } .dash-bar.h6 { height: 29px; }
-.dash-bar.h7 { height: 34px; } .dash-bar.h8 { height: 39px; } .dash-bar.h9 { height: 44px; }
+.dash-chip.dim { color: var(--faint-fg, #b3ac9c); border-style: dashed; }
+.dash-chiprow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; }
+.dash-chipkey { flex: 0 0 auto; font-family: var(--font-mono); font-size: 9.5px;
+                letter-spacing: .14em; text-transform: uppercase;
+                color: var(--dim-fg, #8a857a); }
 .dash-persistent { display: flex; align-items: center; gap: 20px; min-width: 0;
                    overflow: hidden;
                    padding: 7px 18px 8px; border-bottom: 2px solid var(--buffer-group-color, var(--accent-fg, #26356b));
@@ -11355,6 +11353,52 @@
                   (list (dash--pill
                           (string-append (number->string (buffer-size buf)) " B") #f)))))))
 
+(define (dash--chip-row key chips)
+  (list 'tag "div" 'class "dash-chiprow"
+        'children (cons (list 'tag "div" 'class "dash-chipkey" 'text key) chips)))
+
+;; A keymap is read as the mode of the same name: "cua-mode-map" is
+;; cua-mode. The buffer's own map wears the buffer's name, and the global
+;; map is nobody's mode.
+(define (dash--map-mode name)
+  (if (string-suffix? "-map" name)
+      (substring name 0 (- (string-length name) 4))
+      name))
+
+;; Every mode that answers here. The modeline shows the major mode and the
+;; buffer's minor modes; other maps answer with nothing said -- cua-mode's,
+;; the editing state's, a global minor map -- and the card names those as
+;; the hidden ones. The state is the last fact: the movement state gives
+;; the Cmd-arrows to the window focus, the editing state to the caret.
+(define (dash--modes buf)
+  (let* ((major (or (buffer-local buf 'mode-name) "Fundamental"))
+         (minors (or (buffer-local buf 'minor-modes) '()))
+         (shown (cons major minors))
+         (maps (append (or (buffer-minor-maps buf) '())
+                       (or (buffer-keymaps buf) '())
+                       (or (global-minor-maps) '())))
+         (hidden (dedupe-names
+                   (filter (lambda (m)
+                             (and (not (member m shown))
+                                  (not (equal? m buf))
+                                  (not (equal? m "global"))))
+                           (map dash--map-mode maps)))))
+    (dash--section "modes"
+      (append
+        (list (list 'tag "div" 'class "dash-big" 'text (dashboard--mode-name major)))
+        (list (dash--chip-row "shown"
+                (if (pair? minors)
+                    (map (lambda (m) (dash--chip (dashboard--mode-name m))) minors)
+                    (list (dash--chip "none")))))
+        (if (pair? hidden)
+            (list (dash--chip-row "hidden"
+                    (map (lambda (m)
+                           (list 'tag "span" 'class "dash-chip dim"
+                                 'text (dashboard--mode-name m)))
+                         hidden)))
+            '())
+        (list (dash--row "state" (dash--state buf)))))))
+
 (define (dash--group buf)
   (let* ((ids (if (chat-buffer? buf)
                   (let ((g (chat-group-id buf))) (if g (list g) '()))
@@ -11378,19 +11422,17 @@
                                  (cons current
                                        (remove (lambda (g) (equal? g current)) ids))
                                  ids))))
-            ;; every member shows, as wrapping chips — one truncating
-            ;; row hid the companion chat behind an ellipsis
-            (list (list 'tag "div" 'class "dash-chips"
-                        'children
-                        (map (lambda (m) (dash--chip (buffer-short-label m)))
-                             (group-buffers-mru primary)))
+            ;; the members are the group list's work (M-x group-members),
+            ;; not this panel's: the panel says where HERE stands
+            (list (dash--row "members"
+                             (number->string (length (group-buffers-mru primary))))
                   (dash--row "companion" (group-noise primary))
                   (dash--row "layout" (if (group-layout primary) "saved" "default")))
             (let ((m (group-meta primary)))
               (if m (list (dash--row "about" m)) '())))))))
 
-;; the ledger, folded two ways: cost per day (the sparkline) and the
-;; model that took the most of it
+;; the ledger, folded by day: today's cost and the total come from the
+;; same rows
 (define (dash--day-costs rows)
   (let loop ((rs rows) (acc '()))
     (if (null? rs)
@@ -11404,26 +11446,6 @@
                     (cons (list day (+ (cadr hit) cost))
                           (remove (lambda (e) (equal? (car e) day)) acc))
                     (cons (list day cost) acc)))))))
-
-;; a share of the biggest day maps to one of nine bar heights — a
-;; cond ladder, because this dialect has no floor
-(define (dash--lvl share)
-  (cond ((> share 0.875) 9) ((> share 0.75) 8) ((> share 0.625) 7)
-        ((> share 0.5) 6) ((> share 0.375) 5) ((> share 0.25) 4)
-        ((> share 0.125) 3) ((> share 0.05) 2) (else 1)))
-
-(define (dash--spark days)
-  (let* ((mx (fold (lambda (m d) (if (> (cadr d) m) (cadr d) m)) 0 days))
-         (mxi (if (> mx 0) mx 1)))
-    (list 'tag "div" 'class "dash-spark"
-          'children
-          (map (lambda (d)
-                 (let ((lvl (dash--lvl (/ (cadr d) mxi)))
-                       (hot (>= (cadr d) mx)))
-                   (list 'tag "span"
-                         'class (string-append "dash-bar h" (number->string lvl)
-                                               (if hot " hot" "")))))
-               days))))
 
 ;; The chat that speaks for HERE: this buffer when it is one, else its
 ;; group's chat. The cost, the presets and the tool surface all live on
@@ -11549,7 +11571,6 @@
 (define (dash--llm buf)
   (let* ((rows (llm-cost-report))
          (days (sort-by-car (dash--day-costs rows)))
-         (last14 (last-n days 14))
          (total (fold (lambda (a d) (+ a (cadr d))) 0 days))
          (today (if (pair? days) (car (reverse days)) #f))
          (here (dash--here-cost buf)))
@@ -11557,7 +11578,6 @@
       (append
         (list (list 'tag "div" 'class "dash-big" 'text (dash--model buf))
               (dash--row "lane" (dash--lane buf)))
-        (if (pair? last14) (list (dash--spark last14)) '())
         (if here (list (dash--row "this chat" (format-usd here))) '())
         (list (dash--row "today, all" (if today (format-usd (cadr today)) "$0") #f)
               (dash--row "total, all" (format-usd total))
@@ -11600,6 +11620,7 @@
 ;; ledger. post-command! keeps those honest.
 (define (dashboard-blocks buf)
   (list (dash--head buf)
+        (dash--modes buf)
         (dash--group buf)
         (dash--tools buf)
         (dash--llm buf)))
@@ -11630,6 +11651,7 @@
                      (string-join (map group-label ids) " · ")
                      "none")))
     (string-append "mode " mode-text
+                   "   state " (dash--state buf)
                    "   groups " groups
                    (if preset
                        (string-append "   preset " preset)
@@ -11704,6 +11726,12 @@
 (define (dash--vcs buf)
   (and (boundp 'jj-modeline-line) (jj-modeline-line buf)))
 
+;; The two states of an editable buffer, in one word. The movement state
+;; is "focus": the Cmd-arrows move the window focus there. The editing
+;; state gives them to the caret. A read-only buffer never leaves focus.
+(define (dash--state buf)
+  (if (editing-state? buf) "editing" "focus"))
+
 (define (dash--preset buf)
   (and (boundp (quote llm-config-preset-name))
        (llm-config-preset-name buf)))
@@ -11775,6 +11803,10 @@
            (append
              (list
                (list 'mode (dash--seg "mode" (dash--mode-segs buf) 'left))
+               ;; which keys the buffer answers: focus moves the window,
+               ;; editing moves the caret
+               (list 'state (dash--seg "state"
+                              (list (list "dseg-strong" (dash--state buf))) 'left))
                (list 'group (dash--seg "group" (dash--group-segs buf) 'left))
                ;; the preset names the whole setup, so it stands alone: the model
                ;; and the lane are what it chose, and repeating them says nothing
@@ -12030,6 +12062,9 @@
   (let ((chat (dash--here-chat buf)))
     (list (buffer-local buf 'mode-name)
           (buffer-local buf 'minor-modes)
+          ;; the modes card names every map that answers here, and the
+          ;; editing state adds and drops maps as you type
+          (buffer-minor-maps buf)
           (dashboard--group-ids buf)
           (frame-local 'current-group)
           (buffer-local buf 'agent-model)
