@@ -63,7 +63,7 @@
   (with-current-buffer t--cua-buf (lambda () (editing--after-command! cmd))))
 
 (deftest 'a-landing-buffer-keeps-the-plain-shift-chords
-  "until a key says you are editing here, S-<left> walks buffers and M-S-<left> moves a group"
+  "until a key says you are editing here, the Shift chords walk buffers and move between groups"
   (lambda ()
     (t--cua! "alpha bravo charlie\n" 0)
     (editing-state-off! t--cua-buf)
@@ -71,9 +71,7 @@
     (check-equal! (t--cua-select-key) "" "so no key selects there")
     (editing-state-on! t--cua-buf)
     (check-true! (t--cua-in-force? "cua-mode-map") "a buffer you are editing has them")
-    (check-equal! (t--cua-select-key) "S-<left>" "and Shift-Left extends the region")
-    (check-equal! (key-for-command "group-tab-left" t--cua-buf) "M-S-<left>"
-                  "and the group move holds in a buffer you are editing")
+    (check-false! (equal? (t--cua-select-key) "") "and a chord extends the region there")
     (buffer-kill! t--cua-buf)))
 
 (deftest 'any-key-but-a-cua-chord-arms-the-buffer
@@ -82,9 +80,9 @@
     (t--cua! "alpha bravo charlie\n" 0)
     (editing-state-off! t--cua-buf)
     (t--cua-after! "previous-buffer")
-    (check-false! (editing-state? t--cua-buf) "S-<left> leaves the buffer as it found it")
+    (check-false! (editing-state? t--cua-buf) "the buffer walk leaves the buffer as it found it")
     (t--cua-after! "group-tab-left")
-    (check-false! (editing-state? t--cua-buf) "and so does M-S-<left>")
+    (check-false! (editing-state? t--cua-buf) "and so does the group move")
     (t--cua-after! "cua-select-forward")
     (check-false! (editing-state? t--cua-buf) "a selection is no evidence either")
     (t--cua-after! "forward-char")

@@ -61,6 +61,9 @@
     ("S-<end>" "cua-select-line-end")
     ("C-S-<left>" "cua-select-backward-word")
     ("C-S-<right>" "cua-select-forward-word")
+    ;; the macOS shape of the same word selection
+    ("M-S-<left>" "cua-select-backward-word")
+    ("M-S-<right>" "cua-select-forward-word")
     ("C-S-<home>" "cua-select-buffer-start")
     ("C-S-<end>" "cua-select-buffer-end")
     ("S-<prior>" "cua-select-page-up")
@@ -80,13 +83,16 @@
 ;; with it: the state installs this map beside its own, and takes both
 ;; away at the next landing.
 (define-keymap! "cua-mode-map")
-;; Cmd-Shift-arrows move views between panes and Alt-Shift-arrows move
-;; between groups (groups.scm binds those two in this map, so the move
-;; answers in a buffer you are editing as well). Neither chord is cua's:
-;; a word selection is C-S-<left>/<right>. The unset drops the old
-;; bindings on a reload; Shift-Home/End retain line selection.
+;; Cmd-Shift-arrows move views between panes: that chord is not cua's, and
+;; the global binding answers it. Alt-Shift-<left>/<right> IS cua's here.
+;; The chord moves between groups where you are not editing, and extends
+;; the selection one word where you are: the macOS shape of the word
+;; selection, beside the C-S-<left>/<right> shape. The unset drops the
+;; bindings a reload left, groups.scm's old group move among them;
+;; Shift-Home/End retain line selection.
 (for-each (lambda (k) (keymap-unset! "cua-mode-map" k))
-          '("s-S-<left>" "s-S-<right>" "s-S-<up>" "s-S-<down>"))
+          '("s-S-<left>" "s-S-<right>" "s-S-<up>" "s-S-<down>"
+            "M-S-<left>" "M-S-<right>"))
 (for-each (lambda (k) (define-key "cua-mode-map" (car k) (cadr k))) cua--keys)
 
 (define (cua--others)

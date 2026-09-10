@@ -1674,12 +1674,12 @@
 (global-set-key "M-S-<left>" "group-tab-left")
 (global-set-key "M-S-<right>" "group-tab-right")
 
-;; The chord is a group move in a buffer you are editing too: cua-mode's
-;; map is the one that answers there, ahead of a mode that wants the same
-;; chord, so the move is bound in it as well. The chord never arms a
-;; buffer it lands on.
-(define-key "cua-mode-map" "M-S-<left>" "group-tab-left")
-(define-key "cua-mode-map" "M-S-<right>" "group-tab-right")
+;; The chord moves between groups where you are not editing. In a buffer
+;; you ARE editing it extends the selection one word, which is what the
+;; chord means on macOS, and cua-mode's map answers it there (cua.scm).
+;; The chord never arms a buffer it lands on, so a landing still moves
+;; between groups. Press ESC to leave the editing state, or use the group
+;; prefix, to move between groups from an armed buffer.
 (editing-neutral-commands! '("group-tab-left" "group-tab-right"))
 
 ;; A group name renders like a buffer name: the same grammar, so *chat:mail*
