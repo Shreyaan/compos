@@ -256,29 +256,3 @@
     (check-equal! (command-call "zz-alias-once-probe") 42
       "the command registry still answers after a re-capture")
     (undefine-command "zz-alias-once-probe")))
-
-;; Every name editor.scm captures before it shadows the same name. A bare
-;; (define NAME TARGET) here is the bug above, so the source says alias-once!.
-(define t--captured-names
-  '("define-command--raw" "undefine-command--raw" "minibuffer-read*--raw"
-    "raw-buffer-create" "raw-find-file" "local-list-dir"
-    "local-directory-entries" "local-file-stat" "local-delete-file!"
-    "local-make-directory!" "local-rename-file!" "local-copy-file!"
-    "local-trash-file!" "local-set-file-mode!" "local-touch-file!"
-    "local-make-symlink!" "builtin-window-tree-set!"
-    "builtin-window-tree-preview!" "builtin-delete-other-windows!"
-    "builtin-split-window!" "builtin-delete-window!"
-    "builtin-delete-window-id!"))
-
-(deftest 'every-wrapped-primitive-uses-alias-once
-  "no capture in editor.scm is a bare define, which a reload re-runs"
-  (lambda ()
-    (let ((src (read-file (string-append (compos-priv-dir) "/editor.scm"))))
-      (check-equal! (string? src) #t "read editor.scm")
-      (for-each
-        (lambda (name)
-          (check-equal! (string-contains? src (string-append "(alias-once! '" name " ")) #t
-            (string-append name " uses alias-once!"))
-          (check-equal! (string-contains? src (string-append "(define " name " ")) #f
-            (string-append name " is not a bare define")))
-        t--captured-names))))

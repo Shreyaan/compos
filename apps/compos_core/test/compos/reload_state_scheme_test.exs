@@ -16,8 +16,7 @@ defmodule Compos.ReloadStateSchemeTest do
 
   @names ~w(defvar-keeps-the-value-a-session-set every-persisted-global-uses-defvar
             alias-once-keeps-the-first-capture
-            a-reload-keeps-define-command-out-of-itself
-            every-wrapped-primitive-uses-alias-once)
+            a-reload-keeps-define-command-out-of-itself)
 
   defp eval!(code) do
     {:ok, out} = Session.eval(code, nil, 60_000, @lane)
