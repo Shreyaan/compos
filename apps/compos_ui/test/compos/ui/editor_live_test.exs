@@ -363,7 +363,7 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, view, _} = live(conn, "/")
     html = render(view)
 
-    assert html =~ ~s(<span class="f-morg-code">group-add</span>)
+    assert html =~ ~r{<span[^>]* class="f-morg-code">group-add</span>}
     assert html =~ ~s(--morg-code-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;)
     assert html =~ "font-family:var(--morg-code-family);"
   end
@@ -765,7 +765,7 @@ defmodule Compos.Ui.EditorLiveTest do
 
     {:ok, view, _} = live(conn, "/")
     html = render(view)
-    assert html =~ ~s(<img src="#{url}" class="img-embed img-avatar")
+    assert html =~ ~r{<img[^>]* src="#{Regex.escape(url)}" class="img-embed img-avatar"}
     assert html =~ "align-items: flex-end"
     refute html =~ "#compos-avatar"
     assert html =~ "Alice · Aug 3"

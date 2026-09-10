@@ -22,6 +22,10 @@
   "An event with this duration is slow."
   'group 'telemetry 'type 'number)
 
+(defcustom 'telemetry-draw-ms 2000
+  "The shortest gap between two redraws of a shown *Telemetry*. Every redraw is one patch to the browser."
+  'group 'telemetry 'type 'number)
+
 (define (telemetry-events &optional limit)
   (telemetry-snapshot (max 1 (min 1000 (or limit telemetry-event-limit)))))
 
@@ -318,10 +322,23 @@
 ;;; rows, and a lane job named after this package; those never refresh it,
 ;;; so a quiet editor draws nothing.
 
+;; the rows a redraw makes by itself: the buffer write lands as an
+;; "apply" on the owning lane and the coalescing timer as a "debounce",
+;; and every row the telemetry code itself asks for names it. None of
+;; them is a reason to draw again — counting them fed the list its own
+;; output, and it redrew for as long as it was open.
+(define (telemetry--plumbing? row)
+  (let ((label (or (plist-get row 'label) ""))
+        (owner (or (telemetry--owner row) "")))
+    (or (equal? label "apply")
+        (equal? label "debounce")
+        (string-contains? label "telemetry")
+        (string-contains? owner *telemetry-buffer*))))
+
 (define (telemetry--cause? row)
   (or (not (equal? (telemetry--trace row) ""))
       (and (equal? (telemetry--layer row) "scheme")
-           (not (string-contains? (or (plist-get row 'label) "") "telemetry")))))
+           (not (telemetry--plumbing? row)))))
 
 ;; the time of the newest row the user caused; ROWS arrive newest first
 (define (telemetry--newest-cause rows)
@@ -337,16 +354,24 @@
 (define (telemetry-refresh!)
   (when (buffer-exists? *telemetry-buffer*)
     (telemetry--mark-seen! *telemetry-buffer*)
-    (list-refresh! *telemetry-buffer*)))
+    ;; the newest row is the first row, so a reader who has not moved off
+    ;; it stays on it. Tracking the row under point instead walked the
+    ;; point down one row per arriving event until the window sat at the
+    ;; end of the list and scrolled there on every draw.
+    (let ((head? (equal? 0 (list-index *telemetry-buffer*))))
+      (list-refresh! *telemetry-buffer*)
+      (when head? (list-goto-index! *telemetry-buffer* 0)))))
 
-;; the collector's notice (Compos.Core.Telemetry): refresh the list when
-;; it shows and a row the user caused arrived since the last draw
+;; the collector's notice (Compos.Core.Telemetry), once a second. The
+;; list draws when it shows and rows the user caused have arrived since
+;; the last draw — and no sooner than telemetry-draw-ms after it, so a
+;; busy editor costs one patch per interval instead of one per second.
 (define (telemetry-arrived!)
   (let ((buf *telemetry-buffer*))
     (when (and (buffer-exists? buf) (window-showing buf))
       (let ((newest (telemetry--newest-cause (telemetry-events 50)))
             (seen (or (buffer-local buf 'telemetry-seen) 0)))
-        (when (> newest seen)
+        (when (> newest (+ seen telemetry-draw-ms))
           (telemetry-refresh!))))))
 
 (define-command "telemetry-refresh" "Refresh the telemetry list"

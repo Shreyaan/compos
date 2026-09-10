@@ -1995,7 +1995,14 @@ defmodule Compos.Ui.EditorLive do
           data-s={ln.start}
         >
           <span class="linenum" contenteditable="false">{ln.num}</span>
-          <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} base={@node.buffer} win={@node.id} /><br
+          <span class="line-content"><.seg
+            :for={{{txt, cls}, sx} <- Enum.with_index(ln.segs)}
+            id={"sg-#{@node.id}-#{ln.num}-#{sx}"}
+            txt={txt}
+            cls={cls}
+            base={@node.buffer}
+            win={@node.id}
+          /><br
               :if={ln.segs == []}
               class="empty-row"
             /><span
@@ -2175,6 +2182,11 @@ defmodule Compos.Ui.EditorLive do
   # (contenteditable=false): an image, an X card, or a YouTube card.
   # data-len says how many source bytes it stands for, so the
   # client's byte mapping walks over it.
+  # the id keys the node for the DOM patcher: without one, LiveView
+  # stamps a fresh magic id on every render of this comprehension and
+  # morphdom tears the span down and builds it again instead of writing
+  # the new text into it
+  attr(:id, :string, required: true)
   attr(:txt, :string, required: true)
   attr(:cls, :string, required: true)
   attr(:base, :string, default: nil)
@@ -2196,6 +2208,7 @@ defmodule Compos.Ui.EditorLive do
 
         ~H"""
         <span
+          id={@id}
           class={@cls}
           contenteditable="false"
           data-len="0"
@@ -2215,13 +2228,13 @@ defmodule Compos.Ui.EditorLive do
             image_class: if(avatar?, do: "img-embed img-avatar", else: "img-embed")
           )
 
-        ~H|<img src={@src} class={@image_class} loading="lazy" contenteditable="false" data-len={@len} />|
+        ~H|<img id={@id} src={@src} class={@image_class} loading="lazy" contenteditable="false" data-len={@len} />|
 
       cls =~ "x-embed" ->
         assigns = assign(assigns, len: byte_size(txt), card: Compos.Ui.Oembed.card(txt))
 
         ~H"""
-        <span class="x-card" contenteditable="false" data-len={@len}><%= case @card do %><% {:ok, html} -> %>{Phoenix.HTML.raw(html)}<% _ -> %><span class="x-pending">{@txt}</span><% end %></span>
+        <span id={@id} class="x-card" contenteditable="false" data-len={@len}><%= case @card do %><% {:ok, html} -> %>{Phoenix.HTML.raw(html)}<% _ -> %><span class="x-pending">{@txt}</span><% end %></span>
         """
 
       cls =~ "youtube-embed" and youtube_id(txt) ->
@@ -2234,11 +2247,11 @@ defmodule Compos.Ui.EditorLive do
           )
 
         ~H"""
-        <a class="youtube-card youtube-island" href={@txt} target="_blank" rel="noopener noreferrer" contenteditable="false" data-len={@len} aria-label="Watch this video on YouTube"><img src={@thumbnail} alt="YouTube video thumbnail" loading="lazy" /><span class="youtube-play" aria-hidden="true">▶</span></a>
+        <a id={@id} class="youtube-card youtube-island" href={@txt} target="_blank" rel="noopener noreferrer" contenteditable="false" data-len={@len} aria-label="Watch this video on YouTube"><img src={@thumbnail} alt="YouTube video thumbnail" loading="lazy" /><span class="youtube-play" aria-hidden="true">▶</span></a>
         """
 
       true ->
-        ~H|<span class={@cls} data-href={@href}>{@txt}</span>|
+        ~H|<span id={@id} class={@cls} data-href={@href}>{@txt}</span>|
     end
   end
 

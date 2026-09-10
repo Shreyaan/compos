@@ -33,7 +33,7 @@ defmodule Compos.Ui.IslandTest do
     Session.eval(~s{(overlay-set! "#{buf}" 'markdown '((4 29 "img-embed")))})
     {:ok, view, _} = live(conn, "/")
     html = render(view)
-    assert html =~ ~s(<img src="https://example.org/p.png" class="img-embed")
+    assert html =~ ~r{<img id="sg-[^"]+" src="https://example.org/p.png" class="img-embed"}
     assert html =~ ~s(contenteditable="false" data-len="25")
   end
 
@@ -44,7 +44,7 @@ defmodule Compos.Ui.IslandTest do
     Session.eval(~s{(overlay-set! "#{buf}" 'markdown '((7 14 "img-embed")))})
     {:ok, view, _} = live(conn, "/")
     html = render(view)
-    assert html =~ ~s(<img src="/local-image/)
+    assert html =~ ~r{<img id="sg-[^"]+" src="/local-image/}
     assert html =~ ~s(data-len="7")
   end
 
@@ -63,8 +63,8 @@ defmodule Compos.Ui.IslandTest do
     html = render(view)
     assert html =~ ~s(data-ws="true")
     # the test renderer collapses whitespace-only text; the class is the fact
-    assert html =~ ~r{<span class="f-ws-space">\s*</span><span class="">b}
-    assert html =~ ~r{<span class="f-ws-tab">\s*</span><span class="">c}
+    assert html =~ ~r{<span[^>]* class="f-ws-space">\s*</span><span[^>]* class="">b}
+    assert html =~ ~r{<span[^>]* class="f-ws-tab">\s*</span><span[^>]* class="">c}
     Buffer.set_local(buf, "whitespace-mode", false)
   end
 
@@ -110,10 +110,10 @@ defmodule Compos.Ui.IslandTest do
     html = render(view)
 
     assert html =~
-             ~s(<span class="chrome-seg zz-badge" contenteditable="false" data-len="0">chip</span>)
+             ~r{<span id="sg-[^"]+" class="chrome-seg zz-badge" contenteditable="false" data-len="0">chip</span>}
 
     # behind byte 3: after "abc", on the first line
-    assert html =~ ~r{>abc</span><span class="chrome-seg zz-badge"}
+    assert html =~ ~r{>abc</span><span id="sg-[^"]+" class="chrome-seg zz-badge"}
   end
 
   test "a before attachment splits the seg it lands inside", %{conn: conn} do
@@ -122,8 +122,8 @@ defmodule Compos.Ui.IslandTest do
     {:ok, view, _} = live(conn, "/")
     html = render(view)
 
-    assert html =~ ~r{>abc</span><span class="chrome-seg zz-mark"[^>]*>HERE</span>}
-    assert html =~ ~r{data-len="0"[^>]*>HERE</span><span class="">def}
+    assert html =~ ~r{>abc</span><span id="sg-[^"]+" class="chrome-seg zz-mark"[^>]*>HERE</span>}
+    assert html =~ ~r{data-len="0"[^>]*>HERE</span><span[^>]* class="">def}
   end
 
   test "a chrome click routes through the block-click registry", %{conn: conn} do
