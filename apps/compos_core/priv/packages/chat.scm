@@ -1156,6 +1156,10 @@
   "How long a chat's title may be. The name is a label, not a sentence."
   'group 'chat 'type 'integer)
 
+(defcustom 'chat-title-max-words 6
+  "How many words a chat's title may hold. The card writer answers with a factual title of three to eight words; a chat shows a label."
+  'group 'chat 'type 'integer)
+
 ;; one line, because the .chat header is one line
 ;; N bytes at most, cut at the last word inside the budget so the line
 ;; ends on a word and not mid-syllable
@@ -1167,6 +1171,15 @@
         (string-trim (if (and sp (> sp (quotient n 2)))
                          (substring-bytes head 0 sp)
                          head)))))
+
+;; A chat's title is a label, not a sentence. The card writer was
+;; fine-tuned on a prompt that asks for three to eight words, so the
+;; editor clips its title to the words it shows instead of changing the
+;; prompt the model was trained on.
+(define (chat-title--short s)
+  (let ((words (filter (lambda (w) (not (equal? w "")))
+                       (string-split (string-trim s) " "))))
+    (string-join (chat-take words chat-title-max-words) " ")))
 
 ;; The bar and the buffer name hold one line, and the card writer answers
 ;; in one sentence or two: the first names the work, the second elaborates.
