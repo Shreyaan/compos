@@ -130,11 +130,10 @@
        (agent-thought-forget! slug)
        (agent-show-waiting! slug)
        (chat-activity! buf "waiting…")
-       ;; the chat's first instruction seeds its running summary right
-       ;; away, so a chat that never runs a tool still gets a label
-       (when (and (boundp (quote chat-summary-refresh!))
-                  (not (buffer-local buf 'chat-summary)))
-         (chat-summary-refresh! buf)))
+       ;; chat.scm listens: the first prompt names the chat, from the
+       ;; prompt itself. It runs once and the name never moves again.
+       (when (boundp (quote chat-title-first-prompt!))
+         (chat-title-first-prompt! buf)))
 
       ((equal? type 'chunk)
        ;; the assistant's prose accumulates across the turn; turn-end
@@ -163,10 +162,6 @@
          (code-agent-note-tool! buf (agent-tool-title e)
                                 (or (plist-get e 'kind) "")
                                 (agent-tool-input-text e)))
-       ;; chat.scm listens too: every tool call nudges the running summary
-       ;; (debounced, so a burst becomes one cheap-model completion)
-       (when (boundp (quote chat-summary-note-tool!))
-         (chat-summary-note-tool! buf))
        (let ((title (agent-tool-title e)))
          (let ((start (agent-render! slug
                         (string-append "\n▸ " (plist-get e 'kind) " · " title "\n")
@@ -207,9 +202,7 @@
            (agent-card-set-open! buf (plist-get e 'id) #f)
            ;; the gathered call and its result reach the record together
            (agent-tool-record! buf (plist-get e 'id)
-                               (equal? (plist-get e 'status) "failed"))
-           (when (boundp (quote chat-summary-note-tool!))
-             (chat-summary-note-tool! buf)))))
+                               (equal? (plist-get e 'status) "failed")))))
 
       ((equal? type 'plan)
        (let ((start (agent-render! slug
@@ -360,11 +353,10 @@
        ;; turns, so the restart cannot kill the turn that triggered it
        (when (boundp (quote code-agent-apply-pending!))
          (code-agent-apply-pending! buf))
-       ;; chat.scm listens too: every turn end nudges the running summary,
-       ;; same debounce as a tool-call burst (chat-summary-refresh! itself
-       ;; skips the write when the label comes back unchanged)
-       (when (boundp (quote chat-summary-note-tool!))
-         (chat-summary-note-tool! buf))
+       ;; chat.scm listens too: a finished turn says what the agent just
+       ;; did, one line, from the on-device card writer
+       (when (boundp (quote chat-summary-turn!))
+         (chat-summary-turn! buf))
        ;; the chat log: every completed turn writes the conversation to
        ;; <compos-home>/chats (chat.scm loads after this file)
        (when (boundp (quote chat-log-save!))

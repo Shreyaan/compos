@@ -316,6 +316,7 @@ defmodule Compos.Scheme.Builtins do
       "re-replace" => fn [pat, s, repl] -> Regex.replace(re!(pat), s, repl, global: false) end,
       "re-replace-all" => fn [pat, s, repl] -> Regex.replace(re!(pat), s, repl) end,
       "current-time" => fn [] -> System.os_time(:second) end,
+      "monotonic-ms" => fn [] -> System.monotonic_time(:millisecond) end,
       "time->parts" => fn [secs] ->
         {{y, mo, d}, {h, mi, _s}} = :calendar.system_time_to_local_time(trunc(secs), :second)
         [y, mo, d, h, mi, :calendar.day_of_the_week({y, mo, d})]
@@ -428,6 +429,7 @@ defmodule Compos.Scheme.Builtins do
       "re-replace" => "(re-replace PAT S REPL) — replace the first match of PAT in S with REPL.",
       "re-replace-all" => "(re-replace-all PAT S REPL) — replace every match of PAT in S with REPL.",
       "current-time" => "(current-time) — return the current time as unix seconds.",
+      "monotonic-ms" => "(monotonic-ms) — return a monotonic millisecond count, for timing one span.",
       "time->parts" => "(time->parts SECS) — return local [YEAR MONTH DAY HOUR MINUTE WEEKDAY]; Monday is 1.",
       "parts->time" => "(parts->time Y MO D H MI) — convert local date parts to unix seconds.",
       "format-time" => "(format-time SECS FMT) — format SECS as local time with the strftime pattern FMT.",

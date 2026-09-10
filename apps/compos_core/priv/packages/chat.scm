@@ -1148,8 +1148,8 @@
 (define *chat-summary-debounce-ms* 10000)
 (define *chat-summary-tail-lines* 60)
 
-(defcustom 'chat-summary-max-bytes 120
-  "How long a chat's running summary may be. A longer answer is cut at a word."
+(defcustom 'chat-summary-max-bytes 180
+  "How long a chat's running summary may be. A longer answer is cut at a word. One sentence of a turn summary usually fits inside it."
   'group 'chat 'type 'integer)
 
 (defcustom 'chat-title-max-bytes 56
@@ -1198,6 +1198,166 @@
           (loop (cdr ls) (- extra 1))
           (string-join ls "\n")))))
 
+;; The passage a card writer is asked to name. The transcript is the wrong
+;; passage: it is mostly tool output, greps and source, so a model that
+;; names a passage faithfully names that -- one chat came out
+;; "Explanation of a specific term", which is a fair title for a slab of
+;; Elixir and tells you nothing about the chat. A chat's subject is in what
+;; the person asked for. So the passage is the user's own turns: the first,
+;; which says what the chat is for, and the most recent, which say what it
+;; is on now.
+(define *chat-summary-brief-bytes* 1200)
+
+(define (chat-summary--recent-asks asks budget)
+  ;; walked newest-first so the newest asks are the ones that survive the
+  ;; budget, and consed back into the order they were said in
+  (let loop ((rev (reverse asks)) (left budget) (kept '()))
+    (if (or (null? rev) (<= left 0))
+        kept
+        (let* ((a (string-trim (car rev)))
+               (n (+ 1 (string-length a))))
+          (if (equal? a "")
+              (loop (cdr rev) left kept)
+              (loop (cdr rev) (- left n) (cons a kept)))))))
+
+(define (chat-summary--brief buf)
+  ;; the record is newest-first; a passage reads in the order it was said
+  (let* ((turns (reverse (chat-record-turns (chat-model-record buf))))
+         (asks (map (lambda (p) (car (cdr p)))
+                    (filter (lambda (p) (equal? (car p) "user")) turns))))
+    (if (null? asks)
+        (chat-summary--tail buf)
+        (let* ((recent (chat-summary--recent-asks asks *chat-summary-brief-bytes*))
+               (opening (string-trim (car asks)))
+               (lines (if (or (null? recent) (equal? opening (car recent)))
+                          recent
+                          (cons opening recent)))
+               (text (string-join lines "\n")))
+          (if (equal? (string-trim text) "") (chat-summary--tail buf) text)))))
+
+;;; --- the two moments ------------------------------------------------------
+;;; A chat learns two things about itself, at two moments, from the same
+;;; on-device card writer.
+;;;
+;;; The first prompt names it. The passage is that prompt: it is what the
+;;; person came to do, and a name that moves under you is worse than a
+;;; plain one, so this runs once and never again.
+;;;
+;;; Every finished turn says what the agent just did. The passage is that
+;;; turn alone -- the ask, the reply, and the tools it ran -- so the line
+;;; is about the work that just happened and not about the chat, which
+;;; the title already names. One line per turn, kept in the summary log.
+
+(defcustom 'chat-summary-turn-bytes 1400
+  "How much of a finished turn the card writer reads when it says what the agent did."
+  'group 'chat 'type 'integer)
+
+(define (chat-summary--first-ask buf)
+  ;; the record is newest-first, so the first ask is at the far end
+  (let loop ((ts (reverse (chat-record buf))))
+    (cond ((null? ts) #f)
+          ((and (equal? (plist-get (car ts) 'role) "user")
+                (not (equal? (string-trim (chat-turn-display (car ts))) "")))
+           (string-trim (chat-turn-display (car ts))))
+          (else (loop (cdr ts))))))
+
+;; the newest turn of work: every turn back to the ask that started it,
+;; put back in the order it happened
+(define (chat-summary--last-turns buf)
+  (let loop ((ts (chat-record buf)) (acc '()))
+    (cond ((null? ts) acc)
+          ((equal? (plist-get (car ts) 'role) "user") (cons (car ts) acc))
+          (else (loop (cdr ts) (cons (car ts) acc))))))
+
+(define (chat-summary--uniq l)
+  (let loop ((l l) (seen '()))
+    (cond ((null? l) (reverse seen))
+          ((member (car l) seen) (loop (cdr l) seen))
+          (else (loop (cdr l) (cons (car l) seen))))))
+
+(define (chat-summary--blocks-fold turns kind f init)
+  (fold (lambda (acc t)
+          (fold (lambda (a b) (if (equal? (car b) kind) (f a b) a))
+                acc (or (plist-get t 'blocks) '())))
+        init turns))
+
+;; A passage, not a dump. The tool names go in as one sentence of prose:
+;; the card writer names passages of text, and a block of raw arguments
+;; and results is a passage about Elixir, which is how a chat once came
+;; out called "Explanation of a specific term".
+(define (chat-summary--turn-passage buf)
+  (let* ((ts (chat-summary--last-turns buf))
+         (asked (and (pair? ts) (equal? (plist-get (car ts) 'role) "user")))
+         (ask (if asked (string-trim (chat-turn-display (car ts))) ""))
+         ;; assistant turns only: a landed summary is recorded as status,
+         ;; and feeding a summary back in is how a line eats itself
+         (work (filter (lambda (t) (equal? (plist-get t 'role) "assistant"))
+                       (if asked (cdr ts) ts)))
+         (prose (string-trim
+                  (chat-summary--blocks-fold work "text"
+                    (lambda (a b) (string-append a (car (cdr b)) "\n")) "")))
+         (tools (chat-summary--uniq
+                  (chat-summary--blocks-fold work "tool-use"
+                    (lambda (a b) (append a (list (nth 2 b)))) '()))))
+    (string-trim
+      (string-append
+        (if (equal? ask "")
+            ""
+            (string-append "The person asked: " (chat-summary--clip ask 400) "\n\n"))
+        (chat-summary--clip prose chat-summary-turn-bytes)
+        (if (null? tools)
+            ""
+            (string-append "\n\nThe assistant ran " (string-join tools ", ") "."))))))
+
+(define (chat-title--card-ready?)
+  (and (boundp 'title-card) (title-ready?)))
+
+(public! 'chat-title-first-prompt!
+  "(chat-title-first-prompt! BUF [FORCE?]) -- name a chat from its first prompt, once")
+(define (chat-title-first-prompt! buf &optional force?)
+  (and (buffer-known? buf)
+       (or force? (not (string? (buffer-local buf 'chat-title))))
+       (chat-title--card-ready?)
+       ;; the passage is every ask the chat has made, which at the first
+       ;; prompt is that prompt and nothing else -- so this is one door,
+       ;; not a special case. It matters when chat-retitle forces it: a
+       ;; chat's subject is the whole run of asks, and the opening line
+       ;; alone named this one "Desertant integration testing summary"
+       ;; where the full brief named it "Desertant title and chat summary
+       ;; integration".
+       (let ((ask (chat-summary--brief buf)))
+         (and (string? ask) (not (equal? (string-trim ask) ""))
+              (begin
+                (title-card ask
+                  (lambda (card)
+                    (when (and (pair? card) (buffer-known? buf)
+                               (or force? (not (string? (buffer-local buf 'chat-title)))))
+                      (chat-title buf (chat-summary--clip
+                                        (chat-summary--flatten (car card))
+                                        chat-title-max-bytes)))))
+                #t)))))
+
+(public! 'chat-summary-turn!
+  "(chat-summary-turn! BUF) -- land a one-line summary of the turn that just finished")
+(define (chat-summary-turn! buf)
+  (and (buffer-known? buf)
+       (chat-title--card-ready?)
+       (let ((passage (chat-summary--turn-passage buf)))
+         (and (not (equal? passage ""))
+              (begin
+                (title-card passage
+                  (lambda (card)
+                    (when (and (pair? card) (buffer-known? buf))
+                      (let* ((desc (and (pair? (cdr card)) (car (cdr card))))
+                             (text (if (and (string? desc)
+                                            (not (equal? (string-trim desc) "")))
+                                       desc
+                                       (car card))))
+                        (chat-summary-land! buf
+                          (chat-summary--flatten
+                            (chat-summary--first-sentence text)))))))
+                #t)))))
+
 (define (chat-summary-refresh! buf &optional force?)
   (when (buffer-known? buf)
     (let* ((titled (string? (buffer-local buf 'chat-title)))
@@ -1234,8 +1394,8 @@
                    " changed. One sentence, plain text, no markdown, five or six words."
                    " Answer with the sentence only.\n\nCurrent label:\n"
                    (or (buffer-local buf 'chat-summary) "(none yet)")
-                   "\n\nLatest transcript:\n"
-                   (chat-summary--tail buf))
+                   "\n\nWhat the person has asked for, oldest first:\n"
+                   (chat-summary--brief buf))
                  chat-summary-model
                  (lambda (text)
                    (let ((b (if force? (retitle buf text) buf)))
@@ -1245,7 +1405,7 @@
       ;; does move. The rename comes first, so the summary lands in the
       ;; buffer that now wears the name.
       (if (and (boundp 'title-card) (title-ready?))
-          (title-card (chat-summary--tail buf)
+          (title-card (chat-summary--brief buf)
             (lambda (card)
               (cond ((not (buffer-known? buf)) #f)
                     ((pair? card)
@@ -1374,4 +1534,9 @@
           (message "not a chat buffer")
           (begin
             (message "chat-retitle: asking the model")
-            (chat-summary-refresh! buf #t))))))
+            ;; the same two moments, both forced: the name comes from the
+            ;; first prompt again and the line from the newest turn. Only
+            ;; when the card writer is away does the hosted model answer.
+            (or (and (chat-title-first-prompt! buf #t)
+                     (chat-summary-turn! buf))
+                (chat-summary-refresh! buf #t)))))))

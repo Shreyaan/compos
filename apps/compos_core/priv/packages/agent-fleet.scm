@@ -39,9 +39,19 @@
            (loop (cdr bs) (cons (car bs) acc)))
           (else (loop (cdr bs) acc)))))
 
+;; the ibuffer row kind asks this three times for one row (dot, label,
+;; face), and a read from a chat buffer's own process is far slower than
+;; from a plain one. The second and third ask of the same row reuse the
+;; first's answer instead of paying its cost again.
+(define *chat-row-status-memo* (list #f #f))
+
 (define (chat-row-status b)
-  (let ((slug (buffer-local b 'agent-slug)))
-    (if slug (agent-status slug) 'api)))
+  (if (equal? (car *chat-row-status-memo*) b)
+      (cadr *chat-row-status-memo*)
+      (let* ((slug (buffer-local b 'agent-slug))
+             (status (if slug (agent-status slug) 'api)))
+        (set! *chat-row-status-memo* (list b status))
+        status)))
 
 (define (agents-sorted &optional bufs)
   (let ((bs (or bufs (chat-list-bufs))))

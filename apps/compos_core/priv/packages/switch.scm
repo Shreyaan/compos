@@ -853,21 +853,29 @@
             (if (member here bufs) (list here) '())
             (map car (switch-recent-rows)))))
 
+;; the wall time of the last C-x b, key dispatch to a usable minibuffer:
+;; (ibuffer-prompt-last-ms) reads it back for a measurement outside eval
+(define *ibuffer-prompt-last-ms* #f)
+
 ;; C-x b in the editor: the ibuffer table in the minibuffer form. The
 ;; candidate prompt below stays for the surfaces that draw only a prompt.
 (define-command "ibuffer-prompt"
   "Switch to a buffer from the table"
   (lambda ()
-    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
-           (my-group (or (buffer-group here) (frame-local 'current-group)))
-           (_ (group-layout-save-if-shown! my-group))
-           (rows (switch-prompt-buffers here my-group (active-window))))
-      (if (null? (filter (lambda (b) (not (equal? b here))) rows))
-          (message "No other buffer available")
-          (ibuffer-prompt! rows *ibuffer-prompt-buffer* "ibuffer-mode" "Switch to: "
-            (lambda (row close!)
-              (ibuffer-pick! row close!)
-              (group-current-recalculate!)))))))
+    (let ((t0 (monotonic-ms)))
+      (let* ((here (or (window-buffer (active-window)) (current-buffer)))
+             (my-group (or (buffer-group here) (frame-local 'current-group)))
+             (_ (group-layout-save-if-shown! my-group))
+             (rows (switch-prompt-buffers here my-group (active-window))))
+        (if (null? (filter (lambda (b) (not (equal? b here))) rows))
+            (message "No other buffer available")
+            (ibuffer-prompt! rows *ibuffer-prompt-buffer* "ibuffer-mode" "Switch to: "
+              (lambda (row close!)
+                (ibuffer-pick! row close!)
+                (group-current-recalculate!)))))
+      (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) t0)))))
+
+(define (ibuffer-prompt-last-ms) *ibuffer-prompt-last-ms*)
 
 (global-set-key "C-x b" "ibuffer-prompt")
 

@@ -11553,10 +11553,6 @@
                     (buffer-local buf 'chat-title))))
          (and (string? s) (not (equal? s "")) s))))
 
-(define (dash--preset buf)
-  (and (boundp (quote llm-config-preset-name))
-       (llm-config-preset-name buf)))
-
 ;;; What a mode's headline keeps when its window is narrow. Where narrow
 ;;; starts is narrow-cols, the system's answer; a mode declares only WHICH
 ;;; of the segments survive it. The names are mode, group, llm and wide. A

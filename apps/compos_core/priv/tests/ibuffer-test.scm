@@ -465,3 +465,11 @@
       (check-false! (and (window-showing row) #t) "q took the preview away")
       (check-equal! (current-buffer) "*ibuffer*" "and left the table"))
     (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-mode-declares-a-page-size
+  "a workspace can hold hundreds of buffers; the table draws one page of them"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (check-true! (number? (list-page-size "*ibuffer*"))
+                 "the registered mode carries the page-size option, not #f")
+    (ibuffer-test-reset!)))

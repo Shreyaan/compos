@@ -891,25 +891,41 @@
 (domain! 'buffers)
 (effects! '(read))
 
+;; the wall time of the last ibuffer-open!, one span per step: setup
+;; (create/clear), display (display-buffer and the window pick), set-mode,
+;; refresh (the fetch and the draw), goto-first
+(define *ibuffer-open-timings* '())
+
 ;; open (or re-open) a view on SCOPE: *ibuffer* in ibuffer-mode unless a
 ;; view and its mode are named
 (define (ibuffer-open! scope &optional view mode)
-  (let ((from (active-window))
-        (buf (or view *ibuffer-buffer*)))
-    (buffer-create buf)
-    (buffer-set-local! buf 'ibuffer-scope scope)
-    ;; Typed narrowing is temporary. Keep any mode-specific filters.
-    (list-clear-query! buf)
-    (display-buffer buf)
-    (let ((w (window-showing-other buf from)))
-      (if w (select-window! w) (switch-to-buffer! buf)))
-    ;; the mode goes on the VIEW, whatever buffer is current: a prompt
-    ;; can be current here, and a floated switch leaves the work buffer
-    ;; current. A set-mode! in the current buffer once turned a chat
-    ;; into a read-only table.
-    (with-current-buffer buf (lambda () (set-mode! (or mode "ibuffer-mode"))))
-    (ibuffer-refresh! buf)
-    (list-goto-first-entry buf)))
+  (let* ((from (active-window))
+         (buf (or view *ibuffer-buffer*))
+         (t0 (monotonic-ms))
+         (_a (buffer-create buf))
+         (_b (buffer-set-local! buf 'ibuffer-scope scope))
+         ;; Typed narrowing is temporary. Keep any mode-specific filters.
+         (_c (list-clear-query! buf))
+         (t1 (monotonic-ms))
+         (_d (display-buffer buf))
+         (_e (let ((w (window-showing-other buf from)))
+               (if w (select-window! w) (switch-to-buffer! buf))))
+         (t2 (monotonic-ms))
+         ;; the mode goes on the VIEW, whatever buffer is current: a prompt
+         ;; can be current here, and a floated switch leaves the work buffer
+         ;; current. A set-mode! in the current buffer once turned a chat
+         ;; into a read-only table.
+         (_f (with-current-buffer buf (lambda () (set-mode! (or mode "ibuffer-mode")))))
+         (t3 (monotonic-ms))
+         (_g (ibuffer-refresh! buf))
+         (t4 (monotonic-ms))
+         (_h (list-goto-first-entry buf))
+         (t5 (monotonic-ms)))
+    (set! *ibuffer-open-timings*
+      (list 'setup (- t1 t0) 'display (- t2 t1) 'set-mode (- t3 t2)
+            'refresh (- t4 t3) 'goto-first (- t5 t4)))))
+
+(define (ibuffer-open-timings) *ibuffer-open-timings*)
 
 (define (ibuffer-open-buffers! buffers)
   (ibuffer-open! (dedupe-names (filter buffer-known? buffers)))
@@ -949,10 +965,15 @@
   (when (and (popup-open?) (equal? (window-buffer (popup-window)) view))
     (popup-dismiss!)))
 
+;; the wall time of the last ibuffer-prompt-line!, the minibuffer setup
+;; alone: (ibuffer-prompt-line-ms) reads it back
+(define *ibuffer-prompt-line-ms* #f)
+
 ;; the filter line in front of VIEW, whose RET calls (PICK ROW CLOSE!):
 ;; CLOSE! puts the table away, and PICK says when
 (define (ibuffer-prompt-line! view label pick)
-  (let* ((narrow (lambda (q)
+  (let* ((t0 (monotonic-ms))
+         (narrow (lambda (q)
                    (list-set-query! view q)
                    (list-goto-first-entry view)
                    (ibuffer-preview! view)))
@@ -979,7 +1000,10 @@
                     (list-set-query! view "")
                     (ibuffer-prompt-close! view)))
             (list 'legend *ibuffer-prompt-legend*)
-            (list 'style "filter")))))
+            (list 'style "filter")))
+    (set! *ibuffer-prompt-line-ms* (- (monotonic-ms) t0))))
+
+(define (ibuffer-prompt-line-ms) *ibuffer-prompt-line-ms*)
 
 ;; open VIEW on SCOPE in MODE as a popup, then its prompt line. The
 ;; classes and the line numbers go on before the display rule floats the
@@ -1308,6 +1332,7 @@
     'meta (lambda (buf) (ibuffer-meta buf))
     'total (lambda (buf) (ibuffer-total buf))
     'compact #t
+    'page-size 60
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
                          (and (string? b)
