@@ -647,6 +647,11 @@
         (lambda ()
           (set-mode! "chat-mode")
           (end-of-buffer!)))
+      ;; the spawner in scope, if there is one: the chat that owns this
+      ;; eval. With no parent in scope nothing is recorded and the spawn
+      ;; is what it always was.
+      (let ((parent (subagent-spawner)))
+        (when parent (subagent-record! parent slug)))
       (unless (equal? prompt "")
         (llm-session-send! slug prompt))
       slug)))
