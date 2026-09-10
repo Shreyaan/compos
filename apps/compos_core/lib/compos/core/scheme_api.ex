@@ -423,6 +423,8 @@ defmodule Compos.Core.SchemeAPI do
         "(buffer-windows-follow-point! BUF) — every window that shows BUF drops its scroll pin and follows point again; call it after a page replaces its text and places point.",
       "file-mtime" =>
         "(file-mtime PATH) — return the file's mtime in posix seconds, or 0 if it is gone.",
+      "file-size" =>
+        "(file-size PATH) — return the file's size in bytes, or 0 if it is gone or remote.",
       "git-root" =>
         "(git-root DIR [CB]) — return the absolute work-tree root of DIR, or (error MSG).",
       "git-prefix" =>
@@ -1274,6 +1276,17 @@ defmodule Compos.Core.SchemeAPI do
       "file-mtime" => fn [p] ->
         case File.stat(Path.expand(p), time: :posix) do
           {:ok, stat} -> stat.mtime
+          {:error, _} -> 0
+        end
+      end,
+      # a comparable byte count, for the same reason file-mtime exists:
+      # file-stat formats a size for display ("17.3M") and cannot be
+      # compared. Local paths only, like file-mtime — a remote path fails
+      # the stat and answers 0, so a caller sizing a file to decide how
+      # much work to do treats a remote file as it did before.
+      "file-size" => fn [p] ->
+        case File.stat(Path.expand(p)) do
+          {:ok, stat} -> stat.size
           {:error, _} -> 0
         end
       end,
