@@ -30,3 +30,6 @@ burrito_out/
 
 # python bytecode from the bin/ scripts
 __pycache__/
+
+# Local Compos state
+/.compos/
