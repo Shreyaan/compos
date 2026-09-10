@@ -517,7 +517,7 @@
 ;;; that never came, so every novel agent question lost the semantic pass.
 
 (deftest 'a-waiting-caller-buys-the-query-vector-now
-  "'wait #t embeds a cold query on the spot instead of warming it for later"
+  "a cold query embeds on the spot instead of warming for an ask that never comes"
   (lambda ()
     (let ((old-search *apropos--embedding-search*)
           (old-key llm-key)
@@ -540,7 +540,7 @@
         (check-true! (> network-asks 0) "and it paid for the vector")))))
 
 (deftest 'a-typing-caller-never-waits-for-the-network
-  "without 'wait a cold query warms off-lane and answers from the catalog"
+  "'wait #f warms a cold query off-lane and answers from the catalog"
   (lambda ()
     (let ((old-search *apropos--embedding-search*)
           (old-key llm-key)
@@ -551,24 +551,19 @@
           (if cached-only
               #f
               (begin (set! network-asks (+ network-asks 1)) (list (list 0 0.94))))))
-      (let ((hits (apropos--semantic-hits "zz cold query" (apropos--rows-cached) '())))
+      (let ((hits (apropos--semantic-hits "zz cold query" (apropos--rows-cached) '() #f)))
         (set! *apropos--embedding-search* old-search)
         (set! llm-key old-key)
         (check-equal! hits '() "the catalog answers alone")
         (check-equal! network-asks 0 "and nothing waited for OpenAI")))))
 
-(deftest 'the-apropos-tool-asks-the-search-to-wait
-  "the tool lane carries 'wait, because it reads the answer once"
+(deftest 'waiting-is-the-default-and-a-caller-can-refuse-it
+  "a search waits unless it says otherwise; plist-get cannot say #f out loud"
   (lambda ()
-    (let ((old-search apropos--search)
-          (seen #f))
-      (set! apropos--search
-        (lambda (query filters index rows)
-          (set! seen filters)
-          '()))
-      (llm-tool-call "apropos" '(query "open a file"))
-      (set! apropos--search old-search)
-      (check-equal! (plist-get seen 'wait) #t "the tool waits for a cold query"))))
+    (check-equal! (apropos--flag '() 'wait #t) #t "an absent flag reads the default")
+    (check-equal! (apropos--flag '(wait #f) 'wait #t) #f "a stated #f is not an absence")
+    (check-equal! (apropos--flag '(kind "command" wait #f) 'wait #t) #f
+                  "and it reads past the other filters")))
 
 ;;; Seven graphql recipes led the answer for "string": every one of them
 ;;; writes (string->symbol ...), and a recipe led the ranking whatever it
