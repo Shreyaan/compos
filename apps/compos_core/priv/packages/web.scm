@@ -89,8 +89,23 @@
     ("https://html.duckduckgo.com" "duckduckgo.xsl" #f)
     ("https://news.ycombinator.com" "hackernews.xsl" #f)
     ("https://mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
-    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
-    ("https://svsrecruiting.com" "svsrecruiting.xsl" #f)))
+    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)))
+
+;; A bundled parser is a bare file name under web/parsers. A user package
+;; keeps its stylesheet beside its own source, so an absolute path is taken
+;; as written -- that is what lets a site parser live outside this tree.
+(define (web--parser-path sheet)
+  (if (string-prefix? "/" sheet)
+      sheet
+      (string-append (compos-priv-dir) "/packages/web/parsers/" sheet)))
+
+;; The one door a user package registers through: same triple as
+;; *web--sites*, replacing any earlier entry for the same base.
+(define (web-register-site! base sheet render?)
+  (set! *web--sites*
+        (cons (list base sheet render?)
+              (filter (lambda (s) (not (equal? (car s) base))) *web--sites*)))
+  base)
 
 (define (web--site url)
   (let loop ((sites *web--sites*))
@@ -125,8 +140,7 @@
       (if sheet
           (string-append
             "xsltproc --html "
-            (web--shell-quote
-              (string-append (compos-priv-dir) "/packages/web/parsers/" sheet))
+            (web--shell-quote (web--parser-path sheet))
             " ")
           (string-append "readable --base " (web--shell-quote url) " "))
       (web--shell-quote file) " 2>/dev/null" *web--pandoc*)))
