@@ -1332,9 +1332,10 @@
                   (lambda (card)
                     (when (and (pair? card) (buffer-known? buf)
                                (or force? (not (string? (buffer-local buf 'chat-title)))))
-                      (chat-title buf (chat-summary--clip
-                                        (chat-summary--flatten (car card))
-                                        chat-title-max-bytes)))))
+                      (chat-title buf (chat-title--short
+                                        (chat-summary--clip
+                                          (chat-summary--flatten (car card))
+                                          chat-title-max-bytes))))))
                 #t)))))
 
 (public! 'chat-summary-turn!
