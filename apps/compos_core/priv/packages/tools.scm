@@ -867,14 +867,25 @@
 ;; network on every call. A surface that searches while the user types
 ;; must ask for the literal catalog.
 ;;
-;; 'wait #t asks the opposite: a query nobody embedded before must be
-;; embedded now, and the caller waits for it. A tool call asks each
-;; question once, so an answer that arrives after the call is no answer.
+;; 'wait #f asks for the vectors already bought. A query nobody embedded
+;; before is embedded at ask time and the caller waits, because a caller
+;; asks its question once and an answer that arrives after the call is no
+;; answer. One short query embeds in well under a second. A surface that
+;; searches on every keystroke wants 'lexical #t instead.
 ;;
 ;; Both are instructions to the search, not catalog fields. Remove them
 ;; before the filters reach the match test, which reads the catalog
 ;; fields only.
 (define *apropos--search-flags* '(lexical wait))
+
+;; KEY's value, or DEFAULT when the filters do not name it. plist-get
+;; cannot tell an absent key from one whose value is #f, and the whole
+;; point of 'wait #f is to say #f out loud.
+(define (apropos--flag filters key default)
+  (let loop ((in filters))
+    (cond ((or (null? in) (null? (cdr in))) default)
+          ((equal? (car in) key) (nth 1 in))
+          (else (loop (cdr (cdr in)))))))
 
 (define (apropos--without-lexical filters)
   (let loop ((in filters) (out '()))
@@ -885,7 +896,7 @@
 
 (define (apropos--search query filters0 index rows)
   (let* ((lexical? (plist-get filters0 'lexical))
-         (wait? (plist-get filters0 'wait))
+         (wait? (apropos--flag filters0 'wait #t))
          (filters (apropos--without-lexical filters0))
          (words (apropos--words query))
          (recipes (if (boundp (quote recipe-search)) (recipe-search query) '()))
@@ -983,8 +994,7 @@
           (include-display (custom--plist-get args 'include-display))
           (scope (or (custom--plist-get args 'scope) "public")))
       (let ((filters
-              (append (list 'wait #t)
-                      (if kind (list 'kind kind) '())
+              (append (if kind (list 'kind kind) '())
                       (if package (list 'package package) '())
                       (if namespace (list 'namespace namespace) '())
                       (if (or domain cat) (list 'domain (or domain cat)) '())

@@ -486,10 +486,13 @@
                   (or (plist-get opts 'connector) *default-connector*)
                   (plist-get opts 'model)
                   opts)))
-      (pop-to-buffer buf)
-      (when (equal? (current-buffer) buf)
-        (set-mode! "chat-mode")
-        (end-of-buffer!))
+      ;; a spawn is quiet: the child gets its mode on its own buffer, and no
+      ;; window, point or focus of the spawner's moves. Interactive callers
+      ;; display it themselves.
+      (with-current-buffer buf
+        (lambda ()
+          (set-mode! "chat-mode")
+          (end-of-buffer!)))
       (unless (equal? prompt "")
         (llm-session-send! slug prompt))
       slug)))
@@ -497,4 +500,9 @@
 (define-command "agent-open" "Prompt for a task and spawn a new agent thread"
   (lambda ()
     (minibuffer-read "Task (empty for blank thread): " '()
-      (lambda (task) (execute task)))))
+      (lambda (task)
+        ;; execute is quiet, so the interactive caller is the one that shows
+        ;; the new thread — in the other window, never stealing focus
+        (let ((slug (execute task)))
+          (display-buffer-other-window! (agent-buf slug))
+          slug)))))

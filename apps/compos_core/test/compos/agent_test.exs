@@ -673,6 +673,21 @@ defmodule Compos.AgentTest do
     _ = agent
   end
 
+  test "execute* is quiet: a spawn opens no window and moves none" do
+    windows = fn -> Session.eval(~s[(json-encode (window-list-all))]) end
+    before = windows.()
+
+    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
+    assert_receive {:transport_open, _agent}, 1_000
+
+    # the child never displays itself: same windows, same buffers, same order
+    assert windows.() == before
+
+    # ...and it still ends up a chat, on its own buffer
+    assert "*chat:a1*" in Compos.Core.list_buffers()
+    assert Buffer.get_local("*chat:a1*", "mode-name") == "chat-mode"
+  end
+
   test "chunks stream in order across a tool-call interleave; body folds on completion" do
     {slug, buf, agent} = boot("")
 
