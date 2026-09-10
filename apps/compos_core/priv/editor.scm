@@ -10863,17 +10863,22 @@
 ;; asks after every command. A group whose chat never reached the MRU
 ;; answers with its primary chat.
 (define (llm-config-session buf)
-  (cond ((or (chat-buffer? buf) (minor-mode-on? buf "llm-mode")) buf)
-        ((and (boundp (quote buffer-group)) (buffer-group buf))
-         (let* ((g (buffer-group buf))
-                (chats (filter (lambda (b)
-                                 (and (chat-buffer? b)
-                                      (equal? (chat-group-id b) g)))
-                               (buffer-list-mru))))
-           (cond ((pair? chats) (car chats))
-                 ((and (boundp (quote group-primary-chat)) (group-primary-chat g)))
-                 (else buf))))
-        (else buf)))
+  ;; No buffer means the caller had no scope: M-x runs a config command
+  ;; outside the transient, and the answer must still be this buffer's
+  ;; session rather than #f, which reads as "the defaults" everywhere
+  ;; downstream and reports a stance the chat does not have.
+  (let ((buf (or buf (current-buffer))))
+    (cond ((or (chat-buffer? buf) (minor-mode-on? buf "llm-mode")) buf)
+          ((and (boundp (quote buffer-group)) (buffer-group buf))
+           (let* ((g (buffer-group buf))
+                  (chats (filter (lambda (b)
+                                   (and (chat-buffer? b)
+                                        (equal? (chat-group-id b) g)))
+                                 (buffer-list-mru))))
+             (cond ((pair? chats) (car chats))
+                   ((and (boundp (quote group-primary-chat)) (group-primary-chat g)))
+                   (else buf))))
+          (else buf))))
 
 (define (llm-config-permission buf)
   (if (boundp (quote chat-permission-mode)) (chat-permission-mode buf) 'auto))
