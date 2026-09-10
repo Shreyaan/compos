@@ -111,15 +111,40 @@
 (set-face-attribute! 'chrome 'anim (animation-css ui-animation))
 
 ;; The size of buffer text is the default face's size. 13px was the
-;; design size; the reading size stands two steps up the same 1.2 ladder
-;; (13 x 1.44). A defface! default survives a theme load, because no
-;; theme names a size on the default face.
+;; design size; the reading size is larger. A defface! default survives a
+;; theme load, because no theme names a size on the default face.
 (defcustom 'default-font-size "20.8px"
   "The size of buffer text: the default face's size, as CSS. Two steps up the 1.2 ladder from 13px."
   'group 'appearance
   'set (lambda (size) (defface! 'default 'size size)))
 
 (defface! 'default 'size default-font-size)
+
+;; The application has three font slots: mono, sans, and serif. Each slot
+;; is the family attribute of a face, and the page reads that face
+;; variable as the fallback of --font-mono, --font-sans and --font-serif.
+;; An empty value writes no variable, so the page keeps its own stack.
+;; Buffer text follows the mono slot, because the default face names no
+;; family of its own.
+(defcustom 'mono-font-family ""
+  "The monospace font of the application, as a CSS font stack. Empty means the built-in stack."
+  'group 'appearance
+  'set (lambda (stack) (defface! 'mono 'family stack)))
+
+(defcustom 'sans-font-family ""
+  "The sans-serif font of the application, as a CSS font stack. Empty means the built-in stack."
+  'group 'appearance
+  'set (lambda (stack) (defface! 'sans 'family stack)))
+
+(defcustom 'serif-font-family ""
+  "The serif font of the application, as a CSS font stack. Empty means the built-in stack."
+  'group 'appearance
+  'set (lambda (stack) (defface! 'serif 'family stack)))
+
+;; the face must say the saved value again on load and after a restart
+(defface! 'mono 'family mono-font-family)
+(defface! 'sans 'family sans-font-family)
+(defface! 'serif 'family serif-font-family)
 
 (define (ui-scale-apply! n0)
   (let ((n (scale-clamp n0)))

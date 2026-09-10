@@ -44,8 +44,8 @@
     (load-theme "tt-theme-a")
     (check-equal! (theme-test-face-attr 'default 'size) default-font-size
                   "a theme load keeps the size: no theme names one")
-    (check-equal! default-font-size "18.7px"
-                  "the stock size is two steps up the 1.2 ladder from 13px")
+    (check-equal! default-font-size "20.8px"
+                  "the stock size is the reading size")
     (theme-test-restore!)))
 
 (deftest 'an-empty-size-remap-reads-at-the-default-face
@@ -109,3 +109,17 @@
     (check-equal! (theme-test-face-attr 'font-lock-keyword-face 'inherit) "ts-keyword" "keyword")
     (check-equal! (theme-test-face-attr 'success 'inherit) "ok" "success")
     (check-equal! (theme-test-face-attr 'mode-line 'inherit) "modeline" "mode-line")))
+
+(deftest 'a-font-slot-is-a-setting-on-a-face
+  "mono-font-family names the family of the 'mono face, which the page reads as --font-mono"
+  (lambda ()
+    (let ((stock mono-font-family))
+      (check-equal! stock "" "the stock slot is empty, so the page keeps its own stack")
+      (customize-set! 'mono-font-family "'Fira Code', ui-monospace, monospace")
+      (check-equal! (theme-test-face-attr 'mono 'family) "'Fira Code', ui-monospace, monospace"
+                    "the setting reaches the face")
+      (load-theme "tt-theme-a")
+      (check-equal! (theme-test-face-attr 'mono 'family) "'Fira Code', ui-monospace, monospace"
+                    "a theme load keeps the font: no theme names a family here")
+      (customize-set! 'mono-font-family stock)
+      (theme-test-restore!))))

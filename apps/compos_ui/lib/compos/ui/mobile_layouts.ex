@@ -42,8 +42,8 @@ defmodule Compos.Ui.MobileLayouts do
         />
         <style>
           :root {
-            --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
-            --font-serif: Spectral, Georgia, serif;
+            --font-mono: var(--mono-family, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+            --font-serif: var(--serif-family, Spectral, Georgia, serif);
           }
           /* the design's tokens, each one a face variable the daemon sends */
           .hh {

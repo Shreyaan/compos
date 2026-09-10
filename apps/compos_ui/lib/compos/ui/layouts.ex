@@ -42,11 +42,16 @@ defmodule Compos.Ui.Layouts do
             /* Plex draws the text; the Nerd Font draws the mode icons, which
                live in the private-use area Plex leaves empty. Both are
                monospace, so one icon still spends one cell. */
-            --font-mono: 'IBM Plex Mono', 'Symbols Nerd Font Mono',
+            /* Each stack is the fallback of a face variable, so the
+               'mono, 'sans and 'serif faces choose the font from Scheme
+               (appearance.scm: mono-font-family and friends). A face that
+               names no family leaves the stack below. */
+            --font-mono: var(--mono-family,
+                         'IBM Plex Mono', 'Symbols Nerd Font Mono',
                          'JetBrainsMonoNL Nerd Font Mono', 'JetBrainsMono Nerd Font Mono',
-                         'Hack Nerd Font Mono', ui-monospace, Menlo, monospace;
-            --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
-            --font-serif: Spectral, Georgia, serif;
+                         'Hack Nerd Font Mono', ui-monospace, Menlo, monospace);
+            --font-sans: var(--sans-family, 'IBM Plex Sans', system-ui, sans-serif);
+            --font-serif: var(--serif-family, Spectral, Georgia, serif);
           }
           * { margin: 0; padding: 0; box-sizing: border-box; }
           html, body { height: 100%; }
