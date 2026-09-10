@@ -122,6 +122,36 @@
       (set! *magic-mode-alist* saved))
     (buffer-kill! "zz-mode-test-script")))
 
+(define-mode "zz-auto-mode-count"
+  (lambda () (mode-test-log! 'auto-setup)))
+
+(deftest 'auto-mode-does-not-re-run-the-setup-of-the-mode-a-buffer-already-wears
+  "auto-mode decides a new buffer's mode; it never re-parses a buffer that has one"
+  (lambda ()
+    (let ((saved *auto-mode-alist*))
+      (set! *auto-mode-alist*
+        (cons '(".zz-auto-count" "zz-auto-mode-count") *auto-mode-alist*))
+      (test-buffer! "zz-mode-test-count.zz-auto-count" "x")
+      (mode-test-reset!)
+      (with-current-buffer "zz-mode-test-count.zz-auto-count"
+        (lambda ()
+          (auto-mode "zz-mode-test-count.zz-auto-count")
+          (check-equal! (reverse *mode-test-log*) '(auto-setup)
+                        "the first call gives the buffer its mode")
+          (auto-mode "zz-mode-test-count.zz-auto-count")
+          (auto-mode "zz-mode-test-count.zz-auto-count")
+          (check-equal! (reverse *mode-test-log*) '(auto-setup)
+                        "a buffer that already wears the mode pays nothing")
+          (check-equal! (buffer-local (current-buffer) 'mode-name) "zz-auto-mode-count"
+                        "and it keeps the mode")
+          ;; set-mode! stays the door a reload and a desktop restore use:
+          ;; it re-runs the setup fn on purpose, mode unchanged or not.
+          (set-mode! "zz-auto-mode-count")
+          (check-equal! (reverse *mode-test-log*) '(auto-setup auto-setup)
+                        "set-mode! by name still re-runs the setup")))
+      (buffer-kill! "zz-mode-test-count.zz-auto-count")
+      (set! *auto-mode-alist* saved))))
+
 (deftest 'kill-all-local-variables-keeps-the-permanent-ones
   "a plain local goes, a permanent one stays"
   (lambda ()

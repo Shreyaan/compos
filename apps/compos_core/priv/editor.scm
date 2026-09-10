@@ -4501,9 +4501,16 @@
         (auto-mode--interpreter line)
         (auto-mode-for (or name buf)))))
 
+;; A buffer that already wears the mode its name implies is done: the
+;; setup fn ran when the buffer opened. Re-running it re-parses the whole
+;; buffer, and a preview calls auto-mode on every step. One 18 MB file
+;; under the point cost 950 ms per keystroke before this guard.
+;; A caller that WANTS the setup fn again (a reload, a desktop restore)
+;; calls set-mode! by name; auto-mode only decides a new buffer's mode.
 (define (auto-mode path)
   (let ((m (auto-mode-for-buffer (current-buffer) path)))
-    (when m (set-mode! m))))
+    (when (and m (not (equal? m (buffer-local (current-buffer) 'mode-name))))
+      (set-mode! m))))
 
 ;; The directory the file candidates come from. A candidate is a bare
 ;; name, so the annotator cannot stat it on its own; the file prompt sets
