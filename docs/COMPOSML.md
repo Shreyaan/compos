@@ -27,11 +27,11 @@ engine. It validates core semantic names and rejects generic div/span template
 elements. Native document, form, and SVG tags remain available. Existing Markdown,
 preview documents, and embedded applications retain their HTML content boundary.
 
-The bundled `composml` grammar includes generated parser source, corpus tests,
-semantic queries, and language-injection queries. `.composml` files select
-`composml-mode` during normal package loading. Elixir clients can use the supplied
-`elixir-injections.scm` query to identify `~M` bodies; this migration does not add a
-generic nested-language injection engine to Compos's highlighter.
+ComposML introduces vocabulary, not syntax. Materialized `.composml` files use
+`composml-mode` backed by the built-in HTML parser. Semantic queries live under
+`priv/queries/composml`. The optional Elixir injection query maps `~M` bodies to
+HEEx in clients that support injections and have that grammar installed. Phoenix
+compiles the templates; no separate ComposML parser is shipped or compiled.
 
 The base stylesheet gives semantic elements normal display defaults. Existing
 theme variables, class styles, and new `face` attribute selectors coexist.
@@ -301,16 +301,10 @@ templates and rendered markup without inferring it from `dseg-*` classes.
 
 ## Parsing and tooling contract
 
-Ship a tree-sitter grammar, generated parser, query files, and corpus tests with
-the implementation. It must parse ComposML source directly, without rendering,
-executing Elixir/Scheme, or consulting CSS. The grammar must expose named nodes
-and fields for elements, opening/closing tags, semantic names, attributes, values,
-directives, components, slots, text, comments, expressions, and EEx boundaries.
-
-Provide highlights and injections for embedded Elixir, CSS, and JavaScript.
-Semantic queries must distinguish Compos domain names from ordinary document
-names and neutral grouping. Node names and fields are a tooling API: changing
-them requires corresponding query and corpus updates.
+Reuse existing syntax parsers: HTML for browser markup, XML for canonical XML
+exports, and HEEx for templates. Semantic queries match ordinary tag names;
+new domain vocabulary does not require parser changes. Vocabulary validation
+belongs to the ComposML compiler, not a separate syntax grammar.
 
 Expressions must handle nested delimiters, quoted strings containing delimiters,
 and multiline bodies. CSS/JavaScript bodies must not be mistaken for ComposML
@@ -369,8 +363,7 @@ Processor resource access and extension functions belong to the registered
 runtime contract, not to privileges granted by an imported stylesheet.
 
 Grammar tooling must cover XML/XHTML, XSLT, XPath, ComposML, and CSS, with
-appropriate embedded-language queries. The first migration ships the ComposML
-grammar; a complete external-application transformation feature requires the
+appropriate embedded-language queries. ComposML reuses existing HTML/HEEx parsing; a complete external-application transformation feature requires the
 remaining grammars and runtime contracts rather than claiming syntax highlighting
 alone provides that feature.
 
@@ -547,7 +540,7 @@ contract described above.
 
 Semantic-list validation: the final focused run passed 19 core and 16 UI tests;
 the final message-renderer adjustment passed 15 core and four list UI tests.
-The grammar corpus passes all 63 cases. The complete isolated UI suite now has
+The earlier duplicate grammar passed 63 corpus cases; it has since been removed in favor of existing parsers. The complete isolated UI suite now has
 271 tests, with 267 passing and the same four baseline failures documented above.
 The broader list/Notmuch run has 41 core tests with one previously observed
 bulk-tag selection failure. A fresh repository-wide partitioned run completed

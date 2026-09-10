@@ -22,7 +22,7 @@ marks. Keep this distinction in every subsequent migration.
   domain record wrappers: Dired, ibuffer and ichat retain their text geometry.
   All other shared text lists default to c-list/c-item with mode and record
   identity. Individual column semantics and specialized domain names remain pending.
-- Tree-sitter grammar, queries, mode, CSS defaults, and face selectors exist.
+- Existing HTML parsing, semantic queries, ComposML mode, CSS defaults, and face selectors are used. No separate parser is shipped.
 - Agent transcript outer messages/tool calls/status already have semantic names.
 
 ## Ordered passes

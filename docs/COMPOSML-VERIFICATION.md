@@ -59,3 +59,9 @@ listed above; new semantic renderer tests passed. Focused agenda, ibuffer and
 imenu checks passed, as did all 63 Tree-sitter corpus cases. The restarted
 port-4024 browser displayed compact Dired columns and the chat pane successfully.
 Specialized internals still using generic text are not claimed as fully modeled.
+
+## Parser simplification
+
+The duplicate ComposML parser and its corpus were removed. Earlier 63-case
+results above describe the superseded parser. Current checks exercise the
+built-in HTML parser, semantic queries, ComposML mode, and Phoenix compiler.

@@ -3,4 +3,4 @@
   (sigil_name) @_sigil
   (quoted_content) @injection.content)
  (#eq? @_sigil "M")
- (#set! injection.language "composml"))
+ (#set! injection.language "heex"))
