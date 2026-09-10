@@ -36,6 +36,13 @@ config :compos_core, daemon_registry_path: Path.expand("~/.compos/daemons.json")
 # of the machine. Zero disables the bound.
 config :compos_core, scheme_heap_limit_mb: 1024
 
+# The nesting one Scheme program may reach. The evaluator reads the process
+# stack, which a tail call does not grow, so this bounds real recursion and
+# never an iteration count. It stops a function that calls itself with no
+# base case in about 100 ms, before the heap bound above can see it. Zero
+# disables the bound.
+config :compos_scheme, max_recursion_depth: 100_000
+
 config :phoenix, :json_library, Jason
 
 if config_env() == :dev do

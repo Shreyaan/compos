@@ -10,11 +10,96 @@ defmodule Compos.Scheme.Eval do
             `(args, store -> {value, store})` for store-aware primitives.
   """
 
+  import Bitwise
+
   alias Compos.Scheme.Env
 
   defmodule Error do
     defexception [:message]
   end
+
+  # --- runaway recursion ------------------------------------------------------
+  # Emacs stops a function that calls itself with no base case through
+  # `max-lisp-eval-depth`. Without a bound here, such a function grew the
+  # heap until `max_heap_size` killed the process: seconds of work, several
+  # hundred megabytes of RSS on a daemon meant to run for weeks, and an
+  # error that named the heap instead of the recursion.
+  #
+  # The BEAM's own stack is the measure. One nested Scheme call costs six
+  # words of it, and a TAIL call costs nothing: a 1,000,000-iteration tail
+  # loop leaves the stack at 134 words, because every tail position in this
+  # evaluator is a direct recursive call. So reading the process stack counts
+  # real nesting, and never charges a loop for iterating.
+  #
+  # Reading it on every application would pay a BIF per call, so a counter in
+  # the process dictionary samples: one read every 1024 applications bounds
+  # the overshoot at 1024 frames and costs about 2% of an application.
+  @words_per_frame 6
+  @stack_floor_words 140
+  @sample_mask 0x3FF
+  @default_depth 100_000
+  @applies :compos_scheme_applies
+
+  @doc """
+  The nesting a Scheme program may reach before `Error` stops it.
+
+  `config :compos_scheme, max_recursion_depth: 0` turns the bound off.
+  """
+  def max_recursion_depth,
+    do: Application.get_env(:compos_scheme, :max_recursion_depth, @default_depth)
+
+  defp stack_limit_words do
+    case max_recursion_depth() do
+      depth when is_integer(depth) and depth > 0 ->
+        @stack_floor_words + depth * @words_per_frame
+
+      _ ->
+        nil
+    end
+  end
+
+  # Called before a closure body runs, from the one place nesting deepens.
+  # It must stay a separate statement: the body's evaluation is a tail call,
+  # and wrapping it would cost the evaluator its proper tail calls.
+  defp count_nesting!(body) do
+    n = Process.get(@applies, 0) + 1
+    Process.put(@applies, n)
+
+    if band(n, @sample_mask) == 0, do: check_nesting!(body)
+
+    :ok
+  end
+
+  defp check_nesting!(body) do
+    limit = stack_limit_words()
+    {:stack_size, words} = Process.info(self(), :stack_size)
+
+    if limit && words > limit do
+      Process.put(@applies, 0)
+
+      # Error, not a type of its own: every path that reports a Scheme error
+      # already rescues it, so the echo area says this instead of the lane
+      # reporting a dead job.
+      raise Error,
+        message:
+          "recursion is too deep: more than #{max_recursion_depth()} nested calls in " <>
+            source_hint(body) <>
+            " — a tail call costs no nesting here, so this is a function that " <>
+            "calls itself with no base case"
+    end
+
+    :ok
+  end
+
+  # The closure that recursed has no name of its own, so name it by the
+  # first line of its body. That is what identifies it in a source file.
+  defp source_hint([form | _]) do
+    text = Compos.Scheme.Printer.print(form)
+
+    if String.length(text) > 120, do: String.slice(text, 0, 120) <> "...", else: text
+  end
+
+  defp source_hint(_), do: "a closure with an empty body"
 
   @doc "Evaluate one form. Returns {value, store}."
   def eval(expr, env, store)
@@ -127,6 +212,7 @@ defmodule Compos.Scheme.Eval do
   end
 
   def apply_fn({:closure, {req, opt, rest}, body, closure_env}, args, store) do
+    count_nesting!(body)
     vars = bind_params!(req, opt, rest, args)
     {frame, store} = Env.new_frame(store, closure_env, vars)
     eval_seq(body, frame, store)
