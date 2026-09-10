@@ -34,7 +34,7 @@ defmodule Compos.EditingStateTest do
       (editing--check-landing!)
       (global-set-key "<f9> e" "forward-char")
       (global-set-key "<f9> q" "keyboard-quit")
-      (global-set-key "<f9> w" "windmove-up")
+      (global-set-key "<f9> w" "focus-up")
       (define-command "zz-es-quit-by-proxy" "Run keyboard-quit from inside another command"
         (lambda () (run-command "keyboard-quit")))
       (global-set-key "<f9> g" "zz-es-quit-by-proxy")
@@ -82,7 +82,7 @@ defmodule Compos.EditingStateTest do
     Editor.delete_other_windows()
   end
 
-  test "a windmove command after a landing keeps the movement state" do
+  test "a focus command after a landing keeps the movement state" do
     press(["<f9>", "w"])
     refute editing?()
   end

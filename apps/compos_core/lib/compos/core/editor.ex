@@ -2966,7 +2966,7 @@ defmodule Compos.Core.Editor do
   defp leaf_ids_buffers(%{type: :split, children: c}),
     do: Enum.flat_map(c, &leaf_ids_buffers/1)
 
-  # normalized frame geometry per leaf — windmove's map of the screen
+  # normalized frame geometry per leaf: the arrow commands' map of the screen
   defp leaf_rects(%{type: :leaf, id: id, buffer: b}, {x, y, w, h}),
     do: [[id, b, x, y, w, h]]
 

@@ -96,7 +96,7 @@ otherwise. Both update the same point.
 
 An editable surface has a movement state and an editing state. Neither is a
 mode. The user lands on a window in the movement state: the four Cmd-arrows
-travel as keys, so the windmove chords move the focus past the buffer. The
+travel as keys, so the focus chords move past the buffer. The
 first key that is not ESC or C-g enters the editing state, where the browser
 keeps the Cmd-arrows as line start and end and document start and end. ESC
 or C-g returns to the movement state; ESC runs `keyboard-quit`. A change of
@@ -106,7 +106,7 @@ in the movement state.
 The state lives in two places that agree. Scheme owns it for every buffer
 (`editing-state-on!`, `editing-state-off!`, `editing-state?` in `editor.scm`):
 the post-command hook enters the editing state after any command except
-`keyboard-quit`, `windmove-*` and the neutral commands, the landing check
+`keyboard-quit`, the directional arrow commands and the neutral commands, the landing check
 leaves it, and the keymap `editing-state-map` is in force only in the editing
 state. A neutral command is one a Shift chord runs (`editing-neutral-commands!`
 in `editor.scm`, called by `cua.scm` and `groups.scm`): pressing S-<left> or

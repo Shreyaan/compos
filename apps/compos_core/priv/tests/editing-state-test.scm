@@ -1,7 +1,7 @@
 ;;; editing-state-test.scm --- the movement state and the editing state of a buffer.
 ;;;
 ;;; A landing starts in the movement state. A command enters the editing
-;;; state; keyboard-quit and windmove do not. A read-only buffer never
+;;; state; keyboard-quit and the directional commands do not. A read-only buffer never
 ;;; enters it. The tests call the hook functions with a command name and
 ;;; read the state; no test names a key.
 
@@ -35,12 +35,12 @@
     (check-equal! (if (member "editing-state-map" (buffer-minor-maps t--es-a)) #t #f) #f
                   "editing-state-map is gone")))
 
-(deftest 'windmove-keeps-the-movement-state
-  "a windmove command after a landing does not enter the editing state"
+(deftest 'focus-keeps-the-movement-state
+  "a focus command after a landing does not enter the editing state"
   (lambda ()
     (t--es-setup!)
-    (editing--after-command! "windmove-up")
-    (check-equal! (editing-state? t--es-a) #f "windmove changes no state")))
+    (editing--after-command! "focus-up")
+    (check-equal! (editing-state? t--es-a) #f "focus changes no state")))
 
 ;; C-x 3 then a Cmd-arrow must move the focus: a window command is a
 ;; landing. The catalog domain says which commands are window commands.

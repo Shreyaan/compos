@@ -1604,7 +1604,7 @@ defmodule Compos.Ui.Layouts do
                                  "Home", "End"];
           // An editable buffer has two states, and neither is a mode. The
           // user lands on it in the movement state: the Cmd-arrows travel
-          // as keys, so the windmove chords move the focus past it. The
+          // as keys, so the focus chords move past it. The
           // first key that is not ESC or C-g puts it in the editing state:
           // the Cmd-arrows are then the platform's line start and end and
           // document start and end, native, because a server round trip
