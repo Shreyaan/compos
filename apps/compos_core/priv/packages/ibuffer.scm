@@ -914,8 +914,12 @@
          ;; the mode goes on the VIEW, whatever buffer is current: a prompt
          ;; can be current here, and a floated switch leaves the work buffer
          ;; current. A set-mode! in the current buffer once turned a chat
-         ;; into a read-only table.
-         (_f (with-current-buffer buf (lambda () (set-mode! (or mode "ibuffer-mode")))))
+         ;; into a read-only table. The refresh right below draws the
+         ;; table; entering the mode must not draw it a first time.
+         (_f (with-current-buffer buf
+               (lambda ()
+                 (with-list-mode-skip-render
+                   (lambda () (set-mode! (or mode "ibuffer-mode")))))))
          (t3 (monotonic-ms))
          (_g (ibuffer-refresh! buf))
          (t4 (monotonic-ms))

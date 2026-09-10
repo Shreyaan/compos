@@ -64,3 +64,30 @@
     (list-mode-show! "zz-page-mode")
     (check-equal! (list-shown-count *zz-page-buffer*) 50 "one page on the open")
     (buffer-kill! *zz-page-buffer*)))
+
+(deftest 'skip-render-suppresses-the-entry-draw-once-and-only-once
+  "a caller that refreshes right after entering a mode skips the draw the entry would have done"
+  (lambda ()
+    (list-mode-show! "zz-page-mode")
+    (let ((buf *zz-page-buffer*))
+      (check-true! (string-contains? (buffer-text buf) "row 0") "a plain entry draws")
+      (buffer-set-locals! buf (list 'list-entries '() 'list-source-entries '()))
+      (with-current-buffer buf
+        (lambda () (with-list-mode-skip-render (lambda () (set-mode! "zz-page-mode")))))
+      (check-equal! (list-entries buf) '()
+                    "the entry never rendered, so the entries stayed cleared")
+      (check-true! (string-contains? (buffer-text buf) "row 0")
+                   "the text is untouched: the earlier draw's rows are still there")
+      (check-false! *list-mode-skip-render*
+                    "the flag is off again once the caller's thunk returns")
+      (list-refresh! buf)
+      (check-true! (pair? (list-entries buf))
+                   "the caller's own refresh renders it")
+      ;; the flag must not leak into an unrelated entry after an error or
+      ;; an early return inside the caller's own thunk
+      (with-current-buffer buf
+        (lambda () (with-list-mode-skip-render (lambda () #t))))
+      (list-mode-show! "zz-page-mode")
+      (check-true! (string-contains? (buffer-text buf) "row 0")
+                   "a later plain entry still draws"))
+    (buffer-kill! *zz-page-buffer*)))

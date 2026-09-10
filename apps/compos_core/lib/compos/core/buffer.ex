@@ -270,7 +270,12 @@ defmodule Compos.Core.Buffer do
   """
   def set_locals(name, %{} = locals), do: GenServer.call(via(name), {:set_locals, locals})
 
-  def get_local(name, key), do: Map.get(locals(name), key)
+  def get_local(name, key) do
+    case BufferView.local(name, key) do
+      {:ok, value} -> value
+      :error -> Map.get(locals(name), key)
+    end
+  end
 
   def locals(name) do
     viewed(name, :locals, fn ->

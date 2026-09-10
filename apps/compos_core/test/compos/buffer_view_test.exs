@@ -302,4 +302,32 @@ defmodule Compos.BufferViewTest do
       assert BufferView.field(name, :no_such_field) == :error
     end
   end
+
+  describe "a local read" do
+    test "copies the one local, not the whole locals map", %{name: name} do
+      Buffer.set_local(name, "chat-block-index", Enum.map(1..2000, &[&1, &1 + 1, "tool"]))
+      Buffer.set_local(name, "mode-name", "chat-mode")
+
+      assert {:ok, "chat-mode"} = BufferView.local(name, "mode-name")
+      assert Buffer.get_local(name, "mode-name") == "chat-mode"
+
+      big = :erts_debug.flat_size(elem(BufferView.field(name, :locals), 1))
+      small = :erts_debug.flat_size(elem(BufferView.local(name, "mode-name"), 1))
+      assert big > 10 * small
+    end
+
+    test "a name without a row reads as :error" do
+      assert BufferView.local("*no-such-view-#{System.unique_integer()}*", "mode-name") == :error
+      assert BufferView.local(:not_a_name, "mode-name") == :error
+    end
+
+    test "a local the row lacks reads as :error", %{name: name} do
+      assert BufferView.local(name, "no-such-local") == :error
+    end
+
+    test "a buffer with no locals set at all reads as :error", %{name: name} do
+      assert BufferView.local(name, "mode-name") == :error
+      assert Buffer.get_local(name, "mode-name") == nil
+    end
+  end
 end

@@ -136,6 +136,38 @@ defmodule Compos.Core.BufferView do
   def field(_, _), do: :error
 
   @doc """
+  One key of a buffer's `locals` map, projected inside ETS: a read of one
+  small local from a buffer whose locals map holds a large value under
+  another key (a chat's block index, a list-mode's row cache) must not
+  copy that other value to find this one.
+  """
+  def local(%Ref{id: id}, key) do
+    case lookup({:id, id}) do
+      [{_, name}] -> local(name, key)
+      [] -> :error
+    end
+  end
+
+  def local(name, key) when is_binary(name) do
+    spec = [
+      {{name, :"$1"},
+       [
+         {:andalso, {:is_map_key, :locals, :"$1"},
+          {:is_map_key, key, {:map_get, :locals, :"$1"}}}
+       ], [{:map_get, key, {:map_get, :locals, :"$1"}}]}
+    ]
+
+    case :ets.select(@table, spec) do
+      [value] -> {:ok, value}
+      [] -> :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  def local(_, _), do: :error
+
+  @doc """
   The buffer text. The writer's flattened copy when it published one,
   otherwise flattened here, in the calling process.
   """

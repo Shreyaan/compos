@@ -2114,6 +2114,18 @@
 (define (cache-wake! buf)
   (when (cache-stale? buf) (cache-refresh! buf)))
 
+;; a caller that refreshes right after entering the mode (ibuffer-open!)
+;; must not have list-mode-init! draw first: that draw is thrown away
+;; unread, and on a table of hundreds of rows it is not cheap to throw away
+(define *list-mode-skip-render* #f)
+
+(define (with-list-mode-skip-render thunk)
+  (let ((was *list-mode-skip-render*))
+    (set! *list-mode-skip-render* #t)
+    (let ((r (thunk)))
+      (set! *list-mode-skip-render* was)
+      r)))
+
 ;; Everything a list buffer needs to BE one, applied to an explicit
 ;; buffer. The mode setup calls it with (current-buffer); opening a list
 ;; calls it with the buffer it just made, so neither has to select first.
@@ -2169,7 +2181,8 @@
     ;; open the list on a query it no longer holds: the filters read
     ;; empty and the rows stay narrow, for good. A dired listing that
     ;; matched one file kept showing that file every time it re-opened.
-    (list-render! buf (if widened #t 'cached))
+    (unless *list-mode-skip-render*
+      (list-render! buf (if widened #t 'cached)))
     ;; list-render! restores the selected row by key. It moves a new list to
     ;; its first row, but it does not reset an existing list during reload.
     ;; a list that declares an off-lane source refreshes through the
