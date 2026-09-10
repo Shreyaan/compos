@@ -26,7 +26,8 @@ defmodule Compos.Ui.ComposMLTextListTest do
     assert has_element?(view, "buffers.buf > buffer[record-id].line")
     assert has_element?(view, "buffers.buf c-headline .line")
     assert has_element?(view, "buffer.line-content", "zz-semantic-buffer")
-    refute has_element?(view, "buffers > buffer c-line, buffers > buffer c-text")
+    refute has_element?(view, "buffers > buffer c-line, buffers > buffer > c-text")
+    refute has_element?(view, ~s(buffer[record-id="*zz-semantic-buffer*"] c-text))
     assert has_element?(view, "buffers > buffer > buffer-name", "zz-semantic-buffer")
     html = view |> element(~s(buffer[record-id="*zz-semantic-buffer*"])) |> render()
     assert html =~ ">*zz-semantic-buffer*</buffer-name>"
