@@ -949,7 +949,9 @@ defmodule Compos.Core.Session do
   One-line doc string for every primitive that `session_primitives/1`
   registers. Format: a call signature, then " — ", then one sentence.
   """
-  def docs do
+  def docs, do: Compos.Core.SchemeRawNames.add_docs(own_docs())
+
+  defp own_docs do
     %{
       "primitive-doc" =>
         "(primitive-doc NAME) — return the one-line doc for an Elixir primitive, or #f.",
@@ -2785,6 +2787,7 @@ defmodule Compos.Core.Session do
         :void
       end
     }
+    |> Compos.Core.SchemeRawNames.add()
   end
 
   # on_complete prompts (find-file): the input is the path being built.

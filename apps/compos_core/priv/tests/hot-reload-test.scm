@@ -247,12 +247,22 @@
       "a free name still takes the capture")
     (unbind-global! 't--alias-raw)))
 
-(deftest 'a-reload-keeps-define-command-out-of-itself
-  "re-capturing define-command--raw leaves command definition working"
+(deftest 'elixir-owns-the-raw-command-primitive
+  "editor.scm captures no primitive, so no reload can point one at itself"
   (lambda ()
-    ;; the poisoned capture recursed here until the heap bound stopped it
-    (alias-once! 'define-command--raw 'define-command)
-    (define-command "zz-alias-once-probe" "probe" (lambda () 42))
-    (check-equal! (command-call "zz-alias-once-probe") 42
-      "the command registry still answers after a re-capture")
-    (undefine-command "zz-alias-once-probe")))
+    ;; Compos.Core.SchemeRawNames registers this name, so it has a
+    ;; primitive doc; a Scheme capture would have none.
+    (check-equal! (string? (primitive-doc "define-command--raw")) #t
+      "define-command--raw is not an Elixir primitive")
+    ;; the raw name skips the Scheme wrapper, so it registers no doc
+    (define-command--raw "zz-raw-probe" (lambda () 1))
+    (check-equal! (command-doc "zz-raw-probe") ""
+      "the raw name went through the Scheme wrapper")
+    (undefine-command--raw "zz-raw-probe")
+    ;; and the wrapper still wraps: it registers the doc and the catalog
+    (define-command "zz-wrapped-probe" "probe" (lambda () 42))
+    (check-equal! (command-doc "zz-wrapped-probe") "probe"
+      "the wrapper lost its doc")
+    (check-equal! (command-call "zz-wrapped-probe") 42
+      "the command registry does not answer")
+    (undefine-command "zz-wrapped-probe")))

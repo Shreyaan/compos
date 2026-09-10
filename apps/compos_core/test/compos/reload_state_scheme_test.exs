@@ -16,7 +16,7 @@ defmodule Compos.ReloadStateSchemeTest do
 
   @names ~w(defvar-keeps-the-value-a-session-set every-persisted-global-uses-defvar
             alias-once-keeps-the-first-capture
-            a-reload-keeps-define-command-out-of-itself)
+            elixir-owns-the-raw-command-primitive)
 
   defp eval!(code) do
     {:ok, out} = Session.eval(code, nil, 60_000, @lane)

@@ -30,6 +30,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(irc_primitives())
     |> Map.merge(google_primitives())
     |> Map.merge(http_primitives())
+    |> Compos.Core.SchemeRawNames.add()
   end
 
   defp google_primitives do
@@ -322,7 +323,9 @@ defmodule Compos.Core.SchemeAPI do
   defp http_async_limit, do: Application.get_env(:compos_core, :http_async_timeout_ms, 120_000)
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
-  def docs do
+  def docs, do: Compos.Core.SchemeRawNames.add_docs(own_docs())
+
+  defp own_docs do
     %{
       "google-accounts" =>
         "(google-accounts) — connected account subjects, emails, and scopes; never tokens.",
