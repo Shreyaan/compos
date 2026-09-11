@@ -210,6 +210,22 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
 
   # --- the turn (runs in a supervised task) -----------------------------------
 
+  # the pasted attachments ride as image content. The text already names
+  # their paths, so a file we cannot read costs the turn nothing.
+  defp user_message(text, []), do: %{role: "user", content: text}
+
+  defp user_message(text, images) do
+    parts =
+      for %{mime: mime, path: path} <- images,
+          {:ok, bytes} <- [File.read(path)],
+          do: %{type: "image", data: Base.encode64(bytes), mime: mime}
+
+    case parts do
+      [] -> %{role: "user", content: text}
+      parts -> %{role: "user", content: [%{type: "text", text: text} | parts]}
+    end
+  end
+
   defp run_turn(backend, slug, model, effort, text, ctx) do
     ev = fn kvs -> GenServer.cast(backend, {:turn_event, kvs}) end
     display = Map.get(ctx, :display, text)
@@ -222,7 +238,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
     record(slug, "user", [["text", display]], if(text == display, do: false, else: text))
 
     LLM.run_tool_loop(
-      messages ++ [%{role: "user", content: text}],
+      messages ++ [user_message(text, Map.get(ctx, :images) || [])],
       ctx.system,
       ctx.tools,
       ctx.dispatcher,

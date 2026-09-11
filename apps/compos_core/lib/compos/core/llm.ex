@@ -664,6 +664,10 @@ defmodule Compos.Core.LLM do
       %{type: "text", text: text} when is_binary(text) ->
         ReqLLM.Context.user(text)
 
+      # a pasted attachment: base64 bytes with their media type
+      %{type: "image", data: data, mime: mime} ->
+        ReqLLM.Context.user([ReqLLM.Message.ContentPart.image(data, mime)])
+
       %{"type" => "text", "text" => text} when is_binary(text) ->
         ReqLLM.Context.user(text)
 

@@ -2460,6 +2460,11 @@ defmodule Compos.Ui.EditorLive do
   defp ag_block([s, e, "status" | _], text, _open),
     do: %{kind: :status, text: String.trim(safe_slice(text, s, e))}
 
+  # a pasted attachment: the bytes are a file, the block names it, and the
+  # transcript shows the picture rather than the path
+  defp ag_block([_s, _e, "image", path | _], _text, _open),
+    do: %{kind: :image, src: Compos.Ui.LocalImage.url(path), name: Path.basename(path)}
+
   defp ag_block([s, e, "meta" | _], text, _open),
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
 

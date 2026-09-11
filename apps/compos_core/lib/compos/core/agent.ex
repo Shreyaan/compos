@@ -52,9 +52,12 @@ defmodule Compos.Core.Agent do
   @doc """
   Send or queue a user message. Returns :sent | :queued. `display` is what
   the transcript shows and records as the user turn when it differs from the
-  wire text (seed prompts carry context the user never typed).
+  wire text (seed prompts carry context the user never typed). `images` are
+  attachments the user pasted, `[%{mime: _, path: _}]`; they ride with THIS
+  message and no other, so a queued one keeps its own.
   """
-  def prompt(slug, text, display \\ nil), do: call(slug, {:prompt, text, display})
+  def prompt(slug, text, display \\ nil, images \\ []),
+    do: call(slug, {:prompt, text, display, images})
 
   @doc """
   Drain prompts explicitly promoted into the RUNNING turn. A boundary-steering
@@ -239,14 +242,14 @@ defmodule Compos.Core.Agent do
   end
 
   @impl true
-  def handle_call({:prompt, text, display}, _from, state) do
+  def handle_call({:prompt, text, display, images}, _from, state) do
     case state.pending_question do
       %{id: id} ->
         answer = display || text
         {:reply, :answered, resolve_question(state, id, answer)}
 
       nil ->
-        prompt_call(text, display, state)
+        prompt_call(text, display, images, state)
     end
   end
 
@@ -272,18 +275,20 @@ defmodule Compos.Core.Agent do
   def handle_call(:take_steering, _from, %{steering_queue: [_ | _] = queue, status: s} = state)
       when s in [:running, :needs_attention] do
     state =
-      Enum.reduce(queue, state, fn {text, display}, acc ->
+      Enum.reduce(queue, state, fn {text, display, _images}, acc ->
         enqueue(acc, Backend.plist(type: :"user-msg", text: display || text))
       end)
 
-    {:reply, queue, %{state | steering_queue: []}}
+    # steering joins a turn already in flight, where only text can land.
+    # An attachment's path rides in that text, so nothing is lost silently.
+    {:reply, for({t, d, _} <- queue, do: {t, d}), %{state | steering_queue: []}}
   end
 
   def handle_call(:take_steering, _from, state), do: {:reply, [], state}
 
   def handle_call(:steer_next, _from, state) do
     case {state.status, state.steering, state.prompt_queue} do
-      {s, :push, [{text, display} | rest]} when s in [:running, :needs_attention] ->
+      {s, :push, [{text, display, _images} | rest]} when s in [:running, :needs_attention] ->
         token = state.next_steer_id
 
         case state.backend.steer(state.handle, token, text, display, state.epoch) do
@@ -319,7 +324,7 @@ defmodule Compos.Core.Agent do
   end
 
   def handle_call({:dequeue, text}, _from, state) do
-    case Enum.split_while(state.prompt_queue, fn {t, d} -> (d || t) != text end) do
+    case Enum.split_while(state.prompt_queue, fn {t, d, _} -> (d || t) != text end) do
       {_, []} -> {:reply, {:error, :not_found}, state}
       {before, [_ | rest]} -> {:reply, :ok, %{state | prompt_queue: before ++ rest}}
     end
@@ -530,13 +535,13 @@ defmodule Compos.Core.Agent do
      }, state}
   end
 
-  defp prompt_call(text, display, state) do
+  defp prompt_call(text, display, images, state) do
     case state.status do
       :idle ->
-        {:reply, :sent, send_prompt(state, text, display)}
+        {:reply, :sent, send_prompt(state, text, display, images)}
 
       s when s in [:starting, :running, :needs_attention] ->
-        {:reply, :queued, queue_prompt(state, text, display)}
+        {:reply, :queued, queue_prompt(state, text, display, images)}
 
       :dead ->
         {:reply, {:error, :dead}, state}
@@ -567,12 +572,13 @@ defmodule Compos.Core.Agent do
   end
 
   # the context for a turn that is still the current one
-  def handle_info({:context, epoch, text, display, result}, %{epoch: epoch} = state) do
+  def handle_info({:context, epoch, text, display, images, result}, %{epoch: epoch} = state) do
     state = %{state | context_pending: false}
 
     case result do
       {:ok, context} ->
-        state.backend.prompt(state.handle, text, Map.put(context, :display, display))
+        context = context |> Map.put(:display, display) |> Map.put(:images, images)
+        state.backend.prompt(state.handle, text, context)
         {:noreply, state}
 
       {:error, why} ->
@@ -587,7 +593,8 @@ defmodule Compos.Core.Agent do
   end
 
   # ...and for one that was cancelled while we were fetching it
-  def handle_info({:context, _epoch, _text, _display, _result}, state), do: {:noreply, state}
+  def handle_info({:context, _epoch, _text, _display, _images, _result}, state),
+    do: {:noreply, state}
 
   # nobody is looking at this chat and nobody answered — deny and say so,
   # rather than leaving the turn wedged forever
@@ -812,8 +819,8 @@ defmodule Compos.Core.Agent do
 
   # --- lifecycle helpers ------------------------------------------------------
 
-  defp queue_prompt(state, text, display),
-    do: %{state | prompt_queue: state.prompt_queue ++ [{text, display}]}
+  defp queue_prompt(state, text, display, images),
+    do: %{state | prompt_queue: state.prompt_queue ++ [{text, display, images}]}
 
   defp steering_accepted(state, event) do
     settle_steering(state, event, :accepted)
@@ -866,7 +873,7 @@ defmodule Compos.Core.Agent do
           state
           | pending_steers: Map.delete(state.pending_steers, token),
             pending_steer_order: rest,
-            steering_fallbacks: state.steering_fallbacks ++ [{text, display}]
+            steering_fallbacks: state.steering_fallbacks ++ [{text, display, []}]
         }
         |> drain_settled_steering()
 
@@ -924,7 +931,7 @@ defmodule Compos.Core.Agent do
     }
   end
 
-  defp send_prompt(state, text, display) do
+  defp send_prompt(state, text, display, images) do
     state =
       state
       # echo the user turn into the transcript via the ordered event channel —
@@ -954,14 +961,14 @@ defmodule Compos.Core.Agent do
     display = display || text
 
     Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-      send(me, {:context, epoch, text, display, Backend.context(slug, display)})
+      send(me, {:context, epoch, text, display, images, Backend.context(slug, display)})
     end)
 
     %{state | epoch: epoch, context_pending: true}
   end
 
-  defp pop_prompt_queue(%{prompt_queue: [{next, display} | rest], status: :idle} = state),
-    do: send_prompt(%{state | prompt_queue: rest}, next, display)
+  defp pop_prompt_queue(%{prompt_queue: [{next, display, images} | rest], status: :idle} = state),
+    do: send_prompt(%{state | prompt_queue: rest}, next, display, images)
 
   defp pop_prompt_queue(state), do: state
 

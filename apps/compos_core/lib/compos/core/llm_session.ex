@@ -30,7 +30,8 @@ defmodule Compos.Core.LLMSession do
     end
   end
 
-  def send(id, text, display \\ nil), do: Agent.prompt(id, text, display)
+  def send(id, text, display \\ nil, images \\ []),
+    do: Agent.prompt(id, text, display, images)
   def steer_next(id), do: Agent.steer_next(id)
   def dequeue(id, text), do: Agent.dequeue(id, text)
   def cancel(id), do: Agent.cancel(id)

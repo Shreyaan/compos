@@ -1125,7 +1125,7 @@ defmodule Compos.Core.Session do
       "llm-session-open!" =>
         "(llm-session-open! ID CONFIG [CONTEXT EVENTS RECORD PERMISSION]) — open a backend-neutral LLM session.",
       "llm-session-send!" =>
-        "(llm-session-send! ID TEXT [DISPLAY]) — send or queue a message on an LLM session.",
+        "(llm-session-send! ID TEXT [DISPLAY IMAGES]) — send or queue a message on an LLM session; IMAGES is ((MIME PATH) ...).",
       "llm-session-cancel!" => "(llm-session-cancel! ID) — cancel an LLM session's current turn.",
       "llm-session-close!" => "(llm-session-close! ID) — close an LLM session.",
       "llm-session-set-model!" =>
@@ -2044,11 +2044,23 @@ defmodule Compos.Core.Session do
       "llm-session-send!" => fn [id, text | rest] ->
         display =
           case rest do
-            [d] when is_binary(d) -> d
+            [d | _] when is_binary(d) -> d
             _ -> nil
           end
 
-        case Compos.Core.LLMSession.send(s(id), to_string(text), display) do
+        # attachments the user pasted: ((MIME PATH) ...). The bytes are
+        # already a file on disk — only the path travels.
+        images =
+          case rest do
+            [_, list | _] when is_list(list) ->
+              for [mime, path] <- list, is_binary(mime), is_binary(path),
+                  do: %{mime: mime, path: path}
+
+            _ ->
+              []
+          end
+
+        case Compos.Core.LLMSession.send(s(id), to_string(text), display, images) do
           :sent -> {:sym, "sent"}
           :queued -> {:sym, "queued"}
           {:error, r} -> raise_scheme("llm-session-send!: #{inspect(r)}")

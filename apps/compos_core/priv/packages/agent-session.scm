@@ -72,16 +72,54 @@
   (or (and (boundp 'chat-model-flatten) (chat-model-flatten buf))
       (agent-conversation-text buf)))
 
+;;; --- pasted images ------------------------------------------------------------
+;;;
+;;; A pasted image is a FILE from the moment it lands. The bytes go to
+;;; <compos-home>/attachments, the transcript shows the picture, and the
+;;; next message carries it. No base64 sits in a buffer-local and none
+;;; rides in the message text: a lane that takes image content gets image
+;;; content, and every other lane gets a path it can open.
+
+(define (chat-image-extension mime)
+  (cond ((equal? mime "image/jpeg") ".jpg")
+        ((equal? mime "image/gif") ".gif")
+        ((equal? mime "image/webp") ".webp")
+        ((equal? mime "image/svg+xml") ".svg")
+        (else ".png")))
+
+(define (chat-attachment-path buf mime)
+  (let ((dir (string-append (compos-home) "/attachments"))
+        (n (length (or (buffer-local buf 'chat-pending-images) '()))))
+    (unless (file-directory? dir) (make-directory! dir))
+    (string-append dir "/"
+                   (or (agent-slug-of buf) "chat") "-"
+                   (format-time (current-time) "%Y%m%d-%H%M%S") "-"
+                   (number->string n)
+                   (chat-image-extension mime))))
+
+;; the image joins the transcript at once, above the input: you see what
+;; you pasted before you send it. The block names the file; the renderer
+;; shows the picture.
+(define (chat-image-show! buf path mime)
+  (let ((label (string-append "[image " (cadr (path-split path)) "]\n"))
+        (start (chat-mark buf)))
+    (buffer-insert-at-local! buf 'agent-saved-mark label)
+    (agent-block-push! buf start (+ start (string-byte-length label))
+                       "image" (list path mime))))
+
 (define (chat-image-paste! kind data mime)
   ;; The hook only runs in chat-mode, so the mode needs no second test here.
-  (if (and (equal? kind "image") (string-prefix? "image/" mime))
-      (begin
-        (buffer-set-local! (current-buffer) 'chat-pending-images
-          (append (or (buffer-local (current-buffer) 'chat-pending-images) '())
-                  (list (list mime data))))
-        (message "image attached, send it with RET")
-        #t)
-      #f))
+  (if (not (and (equal? kind "image") (string-prefix? "image/" mime)))
+      #f
+      (let* ((buf (current-buffer))
+             (path (chat-attachment-path buf mime)))
+        (write-file! path (base64-decode data))
+        (buffer-set-local! buf 'chat-pending-images
+          (append (or (buffer-local buf 'chat-pending-images) '())
+                  (list (list mime path))))
+        (chat-image-show! buf path mime)
+        (message "image attached - it rides with your next message")
+        #t)))
 
 (add-paste-hook! "chat-mode" 'chat-image chat-image-paste!)
 
@@ -92,15 +130,18 @@
          (once (or (buffer-local buf 'chat-note-once) ""))
          ;; images the user pasted since the last send ride once, then clear
          (images (or (buffer-local buf 'chat-pending-images) '()))
-         (image-wire (apply string-append
+         ;; the path rides in the text as well as on the image lane. A
+         ;; backend that cannot take image content can still open the file,
+         ;; and a path is a few bytes where the picture is megabytes.
+         (image-note (apply string-append
                        (map (lambda (im)
-                              (string-append "\n[compos-image " (car im) " " (cadr im) "]"))
+                              (string-append "\n[attached image " (cadr im) "]"))
                             images)))
          ;; What the user sees rides as a small navigation hint. Document text
          ;; never rides in the message. The agent reads current context itself.
          (msg (string-append
                 (if (equal? once "") "" (string-append once "\n\n"))
-                (editor-context-preamble buf) raw image-wire)))
+                (editor-context-preamble buf) raw image-note)))
     (buffer-set-local! buf 'chat-note-once #f)
     (buffer-set-local! buf 'chat-pending-images '())
     (if (buffer-local buf 'agent-seed-context)
@@ -120,8 +161,8 @@
               " user's editor (possibly with a different model). The"
               " conversation so far:\n\n" (agent-seed-transcript buf)
               "\n\nContinue naturally from there. New message:\n" msg)
-            raw))
-        (llm-session-send! slug msg raw))))
+            raw images))
+        (llm-session-send! slug msg raw images))))
 
 (define (agent-continue! thread text)
   (let ((buf (if (buffer-exists? thread) thread (agent-buf thread))))

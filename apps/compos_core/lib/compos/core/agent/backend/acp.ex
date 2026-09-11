@@ -20,7 +20,8 @@ defmodule Compos.Core.Agent.Backend.ACP do
   def start(config, owner), do: GenServer.start_link(__MODULE__, {config, owner})
 
   @impl Backend
-  def prompt(pid, text, _context), do: GenServer.call(pid, {:prompt, text})
+  def prompt(pid, text, context),
+    do: GenServer.call(pid, {:prompt, text, Map.get(context, :images) || []})
 
   @impl Backend
   def steer(pid, token, text, _display, epoch),
@@ -100,14 +101,24 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   @impl GenServer
-  def handle_call({:prompt, text}, _from, state) do
+  def handle_call({:prompt, text, images}, _from, state) do
     {state, text} = with_system_preamble(state, text)
 
     {:reply, :ok,
      request(state, "session/prompt", %{
        "sessionId" => state.session_id,
-       "prompt" => [%{"type" => "text", "text" => text}]
+       "prompt" => [%{"type" => "text", "text" => text} | image_blocks(images)]
      })}
+  end
+
+  # ACP carries an image as content, not as a path: the bytes go base64 in
+  # their own prompt block. A file we cannot read is skipped rather than
+  # failing the turn — the message text names the path either way.
+  defp image_blocks(images) do
+    for %{mime: mime, path: path} <- images,
+        {:ok, bytes} <- [File.read(path)] do
+      %{"type" => "image", "mimeType" => mime, "data" => Base.encode64(bytes)}
+    end
   end
 
   def handle_call({:steer, token, text, epoch}, _from, %{session_id: sid} = state)
