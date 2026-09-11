@@ -2211,6 +2211,91 @@
       (cond ((not back) (message "No previous group"))
             ((equal? back (frame-group)) (message "Already in that group"))
             (else (switch-to-group! back))))))
+(domain! 'groups)
+(effects! '(write display))
+
+;;; --- Alt-Tab inside a group -----------------------------------------------
+;;; A group is chats and the buffers you work in, and a frame usually holds
+;;; one of each side by side. The walk keeps those two apart: in a chat it
+;;; offers the group's chats, and in anything else the group's other buffers.
+;;; So the key means the same thing in either pane, and neither pane can pull
+;;; the other's kind in.
+;;;
+;;; The buffer arrives in the window you are in. The walk never selects
+;;; another window and never moves the frame to another group: a chat you can
+;;; already see stays where it is, and your focus stays where you put it.
+;;;
+;;; The first press lands on the buffer you came from; each further press,
+;;; with no other command between, goes one deeper. Any other command ends
+;;; the walk, so the next press starts again from where you now are. Two
+;;; buffers and the key flips between them, the way Alt-Tab flips between two
+;;; windows.
+
+(define *group-cycle-ring* '())
+(define *group-cycle-pos* 0)
+
+;; a group holds two kinds of buffer, and the walk stays within one of them
+(define (group-cycle-kind b) (if (chat-buffer? b) 'chat 'work))
+
+;; the group we walk: the frame says which one, and a buffer that is not the
+;; frame's own falls back to its first membership
+(define (group-cycle-group)
+  (let ((here (frame-group)))
+    (if (and here (buffer-in-group? (current-buffer) here))
+        here
+        (buffer-group (current-buffer)))))
+
+;; a buffer with no group walks the other buffers with no group
+(define (group-cycle-member? b gid)
+  (if gid (buffer-in-group? b gid) (not (buffer-group b))))
+
+;; the walk order: this buffer first, then the rest of its kind in the group,
+;; most recently used first. Open buffers only: a dormant buffer and an
+;; archived .chat file stay known but are not places the walk stops.
+(define (group-cycle-ring)
+  (let ((open (buffer-list))
+        (gid (group-cycle-group))
+        (kind (group-cycle-kind (current-buffer))))
+    (cons (current-buffer)
+          (filter (lambda (b)
+                    (and (eq? (group-cycle-kind b) kind)
+                         (member b open)
+                         (group-cycle-member? b gid)
+                         (not (string-prefix? " " b))
+                         (not (buffer-context-only? b))
+                         (not (equal? b (current-buffer)))))
+                  (buffer-list-mru)))))
+
+(define (group-cycle! dir)
+  (unless (member (last-command) '("group-next-buffer" "group-previous-buffer"))
+    (set! *group-cycle-ring* (group-cycle-ring))
+    (set! *group-cycle-pos* 0))
+  ;; a buffer killed mid-walk leaves the ring, and the place holds
+  (let ((live (filter buffer-known? *group-cycle-ring*)))
+    (unless (= (length live) (length *group-cycle-ring*))
+      (set! *group-cycle-ring* live)
+      (when (>= *group-cycle-pos* (length live))
+        (set! *group-cycle-pos* 0))))
+  (let ((n (length *group-cycle-ring*)))
+    (if (< n 2)
+        (message (if (eq? (group-cycle-kind (current-buffer)) 'chat)
+                     "No other chat in this group"
+                     "No other buffer in this group"))
+        (begin
+          (set! *group-cycle-pos* (modulo (+ *group-cycle-pos* dir) n))
+          (switch-to-buffer! (list-ref *group-cycle-ring* *group-cycle-pos*))))))
+
+(define-command "group-next-buffer"
+  "Walk this group's buffers of the kind you are in, most recently used first"
+  (lambda () (group-cycle! 1)))
+
+(define-command "group-previous-buffer"
+  "Walk this group's buffers of the kind you are in, the other way"
+  (lambda () (group-cycle! -1)))
+
+;; the key is chat-mode's own, so it shadows the global popup toggle only
+;; while you are in a chat
+(mode-keys! "chat-mode" '(("C-`" "group-next-buffer")))
 
 ;; a verb here acts on every marked group, or on the row at point when
 ;; nothing is marked — the rule every list follows. The marks go when the
