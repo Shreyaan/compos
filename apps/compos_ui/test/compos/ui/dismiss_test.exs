@@ -23,8 +23,10 @@ defmodule Compos.Ui.DismissTest do
   } do
     assert {:ok, _} = Session.eval(~s{(buffer-set-read-only! "#{name}" #t)})
     {:ok, view, _} = live(conn, "/")
+    # the q is the whole cue: no Reading title, no Back label, no row
     assert has_element?(view, ".window.dismissible .dismiss-action kbd", "q")
-    assert has_element?(view, ".dismiss-title", "Reading")
+    refute has_element?(view, ".dismiss-title")
+    refute has_element?(view, ".dismiss-bar")
     refute has_element?(view, ".window.active .buf .cursor")
     refute has_element?(view, ".window.active .buf[contenteditable]")
     assert {:ok, _} = Session.eval("(run-command \"caret-browsing-mode\")")

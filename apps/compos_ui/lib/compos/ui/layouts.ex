@@ -193,6 +193,7 @@ defmodule Compos.Ui.Layouts do
             box-shadow: var(--chrome-shadow, inset -1px -1px 0 0 var(--border-bg, #d5cdb9));
             overflow: hidden;
             min-width: 0; min-height: 0;
+            position: relative;
 
           }
           .window.active { background: var(--window-bg, #fdfcf8); }
@@ -217,18 +218,14 @@ defmodule Compos.Ui.Layouts do
             pointer-events: none;
           }
           .buffer-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
             flex: 0 0 auto;
-            padding: 5px 14px;
+            padding: 7px 14px;
             border-bottom: 1px solid var(--border-bg, #cbc4b1);
             background: var(--modeline-active-bg, #e7e9f1);
             color: var(--modeline-active-fg, #1b1a17);
             font: 650 11px/1.3 var(--font-mono);
             letter-spacing: 0.015em;
           }
-          .buffer-header-text { flex: 1 1 auto; min-width: 0; }
           .buffer-footer {
             flex: 0 0 auto;
             padding: 6px 14px;
@@ -504,14 +501,12 @@ defmodule Compos.Ui.Layouts do
             border-radius: 1px;
           }
           .window.dismissible { outline: 1px solid color-mix(in srgb, var(--cursor-bg, #26356b) 25%, transparent); outline-offset: -1px; }
-          /* the bar lives inside the header line now, so it carries no
-             background, no border and no row of its own: it is the right end
-             of the header, sized to the header's own text. */
-          .dismiss-bar { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-left: auto; }
-          .dismiss-title { font: 600 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
-          .dismiss-action { display: inline-flex; align-items: center; gap: 5px; padding: 0 6px 0 2px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 5px; background: var(--window-bg, #fdfcf8); color: inherit; cursor: pointer; font: 600 10px var(--font-mono); }
+          /* one key, one corner. The chip floats over the top right of the
+             window, so a dismissible buffer spends no row on saying so. */
+          .dismiss-action { position: absolute; top: 3px; right: 5px; z-index: 4; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; opacity: .6; }
           .dismiss-action kbd { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 3px; background: var(--cursor-bg, #26356b); color: var(--cursor-fg, #fff); font: 700 11px var(--font-mono); }
-          .dismiss-action:hover, .dismiss-action:focus-visible { outline: 2px solid var(--cursor-bg, #26356b); outline-offset: 2px; }
+          .dismiss-action:hover, .dismiss-action:focus-visible { opacity: 1; outline: none; }
+          .dismiss-action:focus-visible kbd { outline: 2px solid var(--cursor-bg, #26356b); outline-offset: 2px; }
           .window.active .cursor { }
           .window.inactive .cursor {
             background: transparent;
