@@ -310,8 +310,44 @@
     (if (and win fallback)
         (begin
           (switch-to-buffer-here! fallback)
-          (buffer-sleep! buf))
-        #f)))
+          (buffer-sleep! buf)
+          #t)
+        (not win))))
+
+(define (chat-dismiss--close! buf slug ok?)
+  (if ok?
+      (begin
+        (when (and slug (not (equal? (agent-status slug) 'dead)))
+          (llm-session-close! slug))
+        (message "chat dismissed"))
+      (message "chat run ended unsuccessfully; chat remains dismissed")))
+
+(on-agent-turn-end! 'chat-dismiss
+  (lambda (slug stop-reason ok?)
+    (let ((buf (agent-buf slug)))
+      (when (buffer-local buf 'chat-dismiss-pending)
+        (buffer-set-local! buf 'chat-dismiss-pending #f)
+        (chat-dismiss--close! buf slug ok?)))))
+
+(define-command "chat-dismiss"
+  "Hide this chat, optionally send a final instruction, and dismiss after the current run"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (slug (agent-slug-of buf))
+           (input (string-trim (chat-input-text buf)))
+           (running (and slug (member (agent-status slug) '(running starting)))))
+      (if (not (chat-dismiss--hide! buf))
+          (message "could not hide chat: no other buffer is available")
+          (begin
+            (when (and slug (not (equal? input "")))
+              (chat-clear-input! buf)
+              (agent-send-msg! slug input))
+            (if running
+                (buffer-set-local! buf 'chat-dismiss-pending #t)
+                (chat-dismiss--close! buf slug #t))
+            (message (if running
+                         "chat hidden; dismissing after the current run"
+                         "chat dismissed")))))))
 
 (define (chat-dismiss--finish! state)
   (let ((buf (car state))
