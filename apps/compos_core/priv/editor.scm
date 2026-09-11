@@ -11531,6 +11531,16 @@
           color: var(--faint-fg, #b3ac9c); white-space: nowrap; }
 .dseg-v { font-size: 14px; color: var(--default-fg, #1b1a17); white-space: nowrap; }
 .dseg-strong { font-weight: 600; }
+/* The window you are in says which keys it answers by the colour of its
+   headline: focus, where the arrows move the window, wears the group's
+   colour; editing, where they move the caret, stays plain. Only the
+   selected window is tinted, because only it answers the arrows. */
+.window.active .dash-persistent:has(.dash-state-focus) {
+  background: color-mix(in srgb,
+                        var(--buffer-group-color, var(--accent-fg, #26356b)) 10%,
+                        var(--window-bg, #fdfcf8)); }
+.window.active .dash-persistent:has(.dash-state-focus) .dash-state-focus .dseg-v {
+  color: var(--buffer-group-color, var(--accent-fg, #26356b)); }
 .dseg-group-current { color: var(--buffer-group-color, var(--default-fg, #1b1a17)); }
 .dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
              background: var(--border-bg, #cbc4b1); opacity: .5; }
@@ -12030,8 +12040,12 @@
                (list 'mode (dash--seg "mode" (dash--mode-segs buf) 'left))
                ;; which keys the buffer answers: focus moves the window,
                ;; editing moves the caret
-               (list 'state (dash--seg "state"
-                              (list (list "dseg-strong" (dash--state buf))) 'left))
+               ;; the state also names itself as a class, so the headline
+               ;; of the window you are in can wear the colour of the state
+               (list 'state (let ((state (dash--state buf)))
+                              (dash--seg "state"
+                                (list (list "dseg-strong" state)) 'left
+                                (string-append "dash-state-" state))))
                (list 'group (dash--seg "group" (dash--group-segs buf) 'left))
                ;; the preset names the whole setup, so it stands alone: the model
                ;; and the lane are what it chose, and repeating them says nothing
