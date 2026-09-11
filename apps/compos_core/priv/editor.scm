@@ -13920,9 +13920,9 @@
 (global-set-key "C-x o" "other-window")
 (global-set-key "C-x l" "window-layout")
 (global-set-key "C-c p" "popup-buffer")
-;; Cmd-arrows move the focus; Cmd-Shift-arrows carry the buffer over
+;; Cmd-arrows move the focus; Cmd-Shift-arrows swap the two panes
 (focus-default-keybindings 'super)
-(buffer-default-keybindings '(shift super))
+(window-default-keybindings '(shift super))
 (global-set-key "S-<left>" "previous-buffer")
 (global-set-key "S-<right>" "next-buffer")
 (global-set-key "C-x <left>" "previous-buffer")
