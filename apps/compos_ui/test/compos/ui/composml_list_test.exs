@@ -46,6 +46,19 @@ defmodule Compos.Ui.ComposMLListTest do
     %{buf: buf}
   end
 
+  test "semantic mail scales through buffer-local text scale commands", %{buf: buf} do
+    {:ok, view, _} = live(build_conn(), "/")
+    Editor.local_bind_key(buf, ["<f9>"], "text-scale-increase")
+    KeyDispatch.handle_key("<f9>")
+    assert Buffer.get_local(buf, "text-scale") == 1
+    assert has_element?(view, ~s(mailbox.blocks-view[style*="--text-scale-factor:1.2"] mail-subject))
+
+    Editor.local_bind_key(buf, ["<f9>"], "text-scale-reset")
+    KeyDispatch.handle_key("<f9>")
+    assert Buffer.get_local(buf, "text-scale") == 0
+    refute has_element?(view, ~s(mailbox.blocks-view[style*="--text-scale-factor:1.2"]))
+  end
+
   test "two visual lines become one semantic record with shared field roles", %{buf: buf} do
     {:ok, view, html} = live(build_conn(), "/")
     assert has_element?(view, ~s(mailbox[source="test"][query="tag:inbox"][phx-hook="BlockScroll"] mail-threads))

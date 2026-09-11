@@ -1880,7 +1880,7 @@ defmodule Compos.Ui.EditorLive do
         ></c-group>
       <% else %>
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
-        <.dynamic_tag tag_name={@node.blk_root.tag} class="blocks-view" id={"blocks-#{@node.id}"} phx-hook="BlockScroll" {@node.blk_root.attrs}>
+        <.dynamic_tag tag_name={@node.blk_root.tag} class="blocks-view" style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" {@node.blk_root.attrs}>
           <c-buffer class="blocks-scroll">
             <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
           </c-buffer>

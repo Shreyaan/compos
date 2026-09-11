@@ -579,7 +579,11 @@ defmodule Compos.Ui.Layouts do
           /* --- block views -------------------------------------------------- */
           /* only the container: a mode composes blocks and ships its own
              stylesheet via define-style! (diff-mode.scm is the precedent) */
-          .blocks-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+          .blocks-view {
+            flex: 1; display: flex; flex-direction: column; min-height: 0;
+            font-family: var(--default-family, var(--font-mono));
+            font-size: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
+          }
           .blocks-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 8px; }
           /* --- agent transcript (the Modern Emacs agent-chat design) ------- */
           .agent-view {
