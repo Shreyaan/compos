@@ -64,6 +64,19 @@
            (cadr (car (plist-get (cadr (plist-get (car bs) 'children)) 'segs))))
           (else (loop (cdr bs))))))
 
+;; the class of the segment a key names, so a test can read the hook the
+;; headline's own CSS keys off
+(define (t--dseg-class blocks key)
+  (let loop ((bs blocks))
+    (cond ((null? bs) #f)
+          ((and (pair? (car bs))
+                (member (plist-get (car bs) 'tag) '("c-field" "c-action"))
+                (let ((kids (plist-get (car bs) 'children)))
+                  (and (pair? kids)
+                       (equal? (plist-get (car kids) 'text) key))))
+           (plist-get (car bs) 'class))
+          (else (loop (cdr bs))))))
+
 (deftest 'a-chat-shows-its-running-summary-in-the-dashboard-line
   "the summary segment carries the chat-summary local; a chat without one shows no segment"
   (lambda ()
@@ -498,9 +511,17 @@
       (editing-state-off! buf)
       (check-equal! (t--dseg-value (dashboard-line-blocks buf) "state") "focus"
                     "a landing answers the arrows with the window focus")
+      ;; the segment also names the state as a class, so the headline of
+      ;; the window you are in can wear the colour of the state
+      (check-equal! (t--dseg-class (dashboard-line-blocks buf) "state")
+                    "dseg dash-state-focus"
+                    "and the headline can colour itself from it")
       (editing-state-on! buf)
       (check-equal! (t--dseg-value (dashboard-line-blocks buf) "state") "editing"
                     "a buffer you are editing keeps them for the caret")
+      (check-equal! (t--dseg-class (dashboard-line-blocks buf) "state")
+                    "dseg dash-state-editing"
+                    "and the editing state leaves the headline plain")
       (editing-state-off! buf)
       (buffer-kill! buf))))
 

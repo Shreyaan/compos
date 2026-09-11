@@ -11537,7 +11537,7 @@
    selected window is tinted, because only it answers the arrows. */
 .window.active .dash-persistent:has(.dash-state-focus) {
   background: color-mix(in srgb,
-                        var(--buffer-group-color, var(--accent-fg, #26356b)) 10%,
+                        var(--buffer-group-color, var(--accent-fg, #26356b)) 16%,
                         var(--window-bg, #fdfcf8)); }
 .window.active .dash-persistent:has(.dash-state-focus) .dash-state-focus .dseg-v {
   color: var(--buffer-group-color, var(--accent-fg, #26356b)); }
