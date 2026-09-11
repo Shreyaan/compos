@@ -38,6 +38,8 @@ the component through props.
 - `ui/fold-head` — disclosure caret, title, optional badge and click id
 - `ui/section` — section title with optional count
 - `ui/row` — selectable text or segmented row
+- `ui/tabs` — one row of choices over the same view, current one marked
+- `ui/actions` — a row of clickable actions with their keys
 - `ui/kv` — compact key/value details
 - `ui/empty` — empty-state notice
 - `ui/badge` — short status chip

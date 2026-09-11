@@ -159,6 +159,27 @@
                          (list (list "c-action-label" (cadr action))))))
                (component--get p 'actions '())))))
 
+(defcomponent 'ui/tabs
+  "One row of choices over the same view, with the current one marked."
+  '((tabs list required) (class string optional))
+  '(tabs (("history" "history" #t "1") ("job" "job" #f "2")))
+  (lambda (p)
+    (list 'tag "c-tabs"
+          'class (string-append "c-tabs " (component--get p 'class ""))
+          'children
+          (map (lambda (tab)
+                 (let ((id (car tab))
+                       (label (cadr tab))
+                       (current? (and (> (length tab) 2) (nth 2 tab)))
+                       (key (and (> (length tab) 3) (nth 3 tab))))
+                   (list 'tag "c-tab"
+                         'class (if current? "c-tab c-tab-on" "c-tab")
+                         'click id
+                         'attrs (list (list "current" (if current? "true" "false")))
+                         'segs (append (if key (list (list "c-tab-key" key)) '())
+                                       (list (list "c-tab-label" label))))))
+               (component--get p 'tabs '())))))
+
 (defcomponent 'ui/fold-head
   "A clickable heading with a disclosure caret."
   '((title string required) (open? boolean required) (click any optional)
@@ -292,6 +313,11 @@
 .c-row { padding: 4px 10px; font-family: var(--font-mono); }
 .c-row.current { background: var(--hl-line-bg); }
 .c-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px; }
+.c-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 0; margin: 0 0 10px; border-bottom: 1px solid var(--border-bg); }
+.c-tab { display: inline-flex; gap: 6px; align-items: center; padding: 3px 10px; border: 1px solid transparent; border-bottom: none; border-radius: 5px 5px 0 0; cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg); }
+.c-tab:hover { background: var(--hl-line-bg); color: var(--fg); }
+.c-tab-on { color: var(--fg); border-color: var(--border-bg); background: var(--hl-line-bg); }
+.c-tab-key { color: var(--accent-fg); font-weight: 600; }
 .c-action { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px solid var(--border-bg); border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
 .c-action:hover { background: var(--hl-line-bg); border-color: var(--dim-fg); }
 .c-action-key { color: var(--accent-fg); font-weight: 600; }
