@@ -1,6 +1,6 @@
-defmodule Compos.ChatCycleSchemeTest do
+defmodule Compos.GroupCycleSchemeTest do
   @moduledoc """
-  Runs priv/tests/chat-cycle-test.scm alone: C-` in a chat walks the chats
+  Runs priv/tests/group-cycle-test.scm alone: one key walks a group
   alone, most recently used first, and flips between the last two.
   """
 
@@ -8,7 +8,7 @@ defmodule Compos.ChatCycleSchemeTest do
 
   alias Compos.Core.Session
 
-  @file_ Path.join([:code.priv_dir(:compos_core), "tests", "chat-cycle-test.scm"])
+  @file_ Path.join([:code.priv_dir(:compos_core), "tests", "group-cycle-test.scm"])
   @lane {:scheme_suite, __MODULE__}
 
   defp eval!(code) do
@@ -22,7 +22,7 @@ defmodule Compos.ChatCycleSchemeTest do
   end
 
   @tag timeout: 120_000
-  test "chat-cycle-test.scm passes" do
+  test "group-cycle-test.scm passes" do
     eval!(~s{(load "#{@file_}")})
     names = names()
     assert names != [], "the file declares no test"

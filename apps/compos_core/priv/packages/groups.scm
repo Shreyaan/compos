@@ -2214,16 +2214,19 @@
 (domain! 'groups)
 (effects! '(write display))
 
+
+
 ;;; --- Alt-Tab inside a group -----------------------------------------------
-;;; A group is chats and the buffers you work in, and a frame usually holds
-;;; one of each side by side. The walk keeps those two apart: in a chat it
-;;; offers the group's chats, and in anything else the group's other buffers.
-;;; So the key means the same thing in either pane, and neither pane can pull
-;;; the other's kind in.
+;;; A pane has a cycle kind, and for now a kind is a mode name. Name a mode
+;;; and the pane walks that mode's buffers; name none and it walks every
+;;; buffer of the group that is not a chat. A pane already showing a chat
+;;; names chat-mode by itself, so a chat pane walks the chats before you set
+;;; anything. A frame with a chat beside your work therefore gives one key
+;;; one meaning in either pane, and neither pane can pull the other's kind in.
 ;;;
 ;;; The buffer arrives in the window you are in. The walk never selects
-;;; another window and never moves the frame to another group: a chat you can
-;;; already see stays where it is, and your focus stays where you put it.
+;;; another window and never moves the frame to another group: a buffer you
+;;; can already see stays where it is, and your focus stays where you put it.
 ;;;
 ;;; The first press lands on the buffer you came from; each further press,
 ;;; with no other command between, goes one deeper. Any other command ends
@@ -2231,11 +2234,30 @@
 ;;; buffers and the key flips between them, the way Alt-Tab flips between two
 ;;; windows.
 
+(define *window-cycle-modes* '())
 (define *group-cycle-ring* '())
 (define *group-cycle-pos* 0)
 
-;; a group holds two kinds of buffer, and the walk stays within one of them
-(define (group-cycle-kind b) (if (chat-buffer? b) 'chat 'work))
+(define (window-cycle-mode id)
+  (let ((hit (assoc id *window-cycle-modes*)))
+    (and hit (cadr hit))))
+
+;; #f takes the naming away, and the pane is back to every buffer that is
+;; not a chat
+(define (window-cycle-mode! id mode)
+  (set! *window-cycle-modes*
+        (filter (lambda (r) (not (equal? (car r) id))) *window-cycle-modes*))
+  (when mode
+    (set! *window-cycle-modes* (cons (list id mode) *window-cycle-modes*)))
+  mode)
+
+;; the mode this pane walks, or #f for every buffer that is not a chat
+(define (group-cycle-mode)
+  (or (window-cycle-mode (active-window))
+      (and (chat-buffer? (current-buffer)) "chat-mode")))
+
+(define (group-cycle-kind? b mode)
+  (if mode (buffer-derived-mode? b mode) (not (chat-buffer? b))))
 
 ;; the group we walk: the frame says which one, and a buffer that is not the
 ;; frame's own falls back to its first membership
@@ -2249,16 +2271,16 @@
 (define (group-cycle-member? b gid)
   (if gid (buffer-in-group? b gid) (not (buffer-group b))))
 
-;; the walk order: this buffer first, then the rest of its kind in the group,
-;; most recently used first. Open buffers only: a dormant buffer and an
-;; archived .chat file stay known but are not places the walk stops.
+;; the walk order: this buffer first, then the rest of the pane's kind in the
+;; group, most recently used first. Open buffers only: a dormant buffer and
+;; an archived .chat file stay known but are not places the walk stops.
 (define (group-cycle-ring)
   (let ((open (buffer-list))
         (gid (group-cycle-group))
-        (kind (group-cycle-kind (current-buffer))))
+        (mode (group-cycle-mode)))
     (cons (current-buffer)
           (filter (lambda (b)
-                    (and (eq? (group-cycle-kind b) kind)
+                    (and (group-cycle-kind? b mode)
                          (member b open)
                          (group-cycle-member? b gid)
                          (not (string-prefix? " " b))
@@ -2278,20 +2300,31 @@
         (set! *group-cycle-pos* 0))))
   (let ((n (length *group-cycle-ring*)))
     (if (< n 2)
-        (message (if (eq? (group-cycle-kind (current-buffer)) 'chat)
-                     "No other chat in this group"
-                     "No other buffer in this group"))
+        (message "No other buffer to cycle in this group")
         (begin
           (set! *group-cycle-pos* (modulo (+ *group-cycle-pos* dir) n))
           (switch-to-buffer! (list-ref *group-cycle-ring* *group-cycle-pos*))))))
 
 (define-command "group-next-buffer"
-  "Walk this group's buffers of the kind you are in, most recently used first"
+  "Walk this pane's kind of buffer in this group, most recently used first"
   (lambda () (group-cycle! 1)))
 
 (define-command "group-previous-buffer"
-  "Walk this group's buffers of the kind you are in, the other way"
+  "Walk this pane's kind of buffer in this group, the other way"
   (lambda () (group-cycle! -1)))
+
+;; naming a mode is how a pane says what its cycle key walks; an empty answer
+;; takes the naming away, and the pane walks every buffer that is not a chat
+(define-command "window-cycle-mode" "Set the mode this pane's cycle key walks"
+  (lambda ()
+    (let ((id (active-window)))
+      (minibuffer-read "Cycle mode (empty for every non-chat buffer): " '()
+        (lambda (name)
+          (let ((mode (if (equal? (string-trim name) "") #f (string-trim name))))
+            (window-cycle-mode! id mode)
+            (message (if mode
+                         (string-append "This pane cycles " mode)
+                         "This pane cycles every buffer that is not a chat"))))))))
 
 ;; the key is chat-mode's own, so it shadows the global popup toggle only
 ;; while you are in a chat
