@@ -257,13 +257,16 @@
     (message "fetching feeds…")
     (cache-refresh! *feeds-buffer*)))
 
-(define-command "feeds-open" "Read the item on this row in the browse reader"
+(define-command "feeds-open" "Read the item on this row beside the list"
   (lambda ()
     (let ((e (list-current *feeds-buffer*)))
       (when e
         (feeds--mark-read! (feeds--item-link e))
         (list-redraw! *feeds-buffer*)
-        (browse (feeds--item-link e))))))
+        ;; the list is the place you read from: the item shows in the
+        ;; other window and the list keeps the point. RET again on the
+        ;; same row keeps the item and goes there.
+        (browse-other-window (feeds--item-link e))))))
 
 (define-command "feeds-open-external" "Open the item on this row in the real browser"
   (lambda ()
@@ -304,8 +307,9 @@
   (list
     'doc (string-append
            "Items from your subscribed RSS and Atom feeds, newest first. "
-           "RET reads the item as text in the browse reader. `o` opens it "
-           "in the real browser. `a` subscribes a feed, `d` unsubscribes, "
+           "RET reads the item as text in the other window, and RET again "
+           "on the same row keeps it and goes there. `o` opens it in the "
+           "real browser. `a` subscribes a feed, `d` unsubscribes, "
            "`g` refetches, `/` filters.")
     'buffer *feeds-buffer*
     'rows (lambda (buf) (list-entries buf))
@@ -331,7 +335,7 @@
 (category! 'web)
 
 (public! 'feeds
-  "M-x feeds — list the items of every subscribed RSS/Atom feed, newest first; RET reads one as text")
+  "M-x feeds — list the items of every subscribed RSS/Atom feed, newest first; RET reads one as text in the other window")
 (public! 'feeds-subscribe
   "M-x feeds-subscribe — subscribe a feed URL, or a page URL whose feed link the subscribe finds")
 

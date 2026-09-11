@@ -366,15 +366,22 @@
 
 ;; the reader's fetch, THROUGH the browser: the user's cookies and
 ;; Chrome's http cache ride along, so a page that knows them logged in
-;; reads logged in. K gets the html, or #f — no browser, or no page.
+;; reads logged in. K gets (TYPE TEXT BASE64) — a text body as text, a
+;; body of bytes base64 encoded, never both — or #f for no browser and
+;; no page. Bytes that came back as text would be bytes no longer: a PDF
+;; read as text loses every byte that is not UTF-8.
 ;; browser-call directly: this is a user surface, not an agent tool,
 ;; and its caller falls back to curl instead of erroring.
 (define (browser-fetch url k)
   (if (browser-connected?)
       (browser-call "fetch" (list 'url url)
         (lambda (reply)
-          (k (let ((h (chrome--get reply 'html)))
-               (and (string? h) (not (equal? h "")) h)))))
+          (k (let ((type (chrome--get reply 'type))
+                   (html (chrome--get reply 'html))
+                   (body (chrome--get reply 'body)))
+               (cond ((and (string? html) (not (equal? html ""))) (list type html #f))
+                     ((and (string? body) (not (equal? body ""))) (list type #f body))
+                     (else #f))))))
       (k #f)))
 
 ;; the AUTHENTICATED read: a real background tab loads the page — the
@@ -503,7 +510,7 @@
 (public! 'tab-type "(tab-type TAB TEXT) — type into the tab for real (trusted input, via CDP)")
 (public! 'tab-click "(tab-click TAB X Y) — a real click at viewport coordinates")
 (public! 'tab-open "(tab-open URL &optional WINDOW) — open a new tab, in this frame's browser window unless WINDOW says otherwise")
-(public! 'browser-fetch "(browser-fetch URL K) — fetch URL through the browser, cookies and cache included; K gets the html, or #f")
+(public! 'browser-fetch "(browser-fetch URL K) — fetch URL through the browser, cookies and cache included; K gets (TYPE TEXT BASE64) — TEXT for a text body, BASE64 for bytes, never both — or #f")
 (public! 'browser-snapshot "(browser-snapshot URL K) — load URL in a background tab and answer the RENDERED html; sessions and scripts run; K gets html or #f")
 (public! 'tab-activate "(tab-activate TAB) — bring a tab to the front")
 (public! 'tab-close "(tab-close TAB) — close a tab")

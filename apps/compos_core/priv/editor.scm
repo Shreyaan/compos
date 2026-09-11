@@ -2212,7 +2212,10 @@
            (buffer-set-local! buf 'cache-inflight #f)
            (when data
              ((plist-get spec 'render) buf data)
-             (cache-stamp! buf))))))))
+             ;; a render may retire its own buffer — browse hands a PDF to
+             ;; the file's own mode and kills the tab — so the stamp asks
+             ;; again whether there is still a buffer to stamp
+             (when (buffer-known? buf) (cache-stamp! buf)))))))))
 
 ;; the wake rule: show the cache, and fetch only past the TTL
 (define (cache-wake! buf)

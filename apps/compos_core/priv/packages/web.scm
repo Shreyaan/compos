@@ -167,11 +167,19 @@
 ;; read each other's page.
 (define *web--read-seq* 0)
 
-(define (web--write-html! html)
+(define (web--body-file! extension)
   (set! *web--read-seq* (+ *web--read-seq* 1))
-  (let ((file (string-append (compos-home) "/browse-fetch-"
-                             (number->string *web--read-seq*) ".html")))
+  (string-append (compos-home) "/browse-fetch-"
+                 (number->string *web--read-seq*) "." extension))
+
+(define (web--write-html! html)
+  (let ((file (web--body-file! "html")))
     (write-file! file html)
+    file))
+
+(define (web--write-body! text)
+  (let ((file (web--body-file! "body")))
+    (write-file! file (or text ""))
     file))
 
 ;; FILE of html -> markdown for one READING. K gets the markdown, or #f.
@@ -192,6 +200,142 @@
            (lambda (flat) (k (if (web--thin? flat) #f flat)))))
         ((web--thin? md) (k #f))
         (else (k md))))))
+
+;;; --- content types --------------------------------------------------------------
+;;; A page is not always html. The fetch names the body's content type
+;;; and the type picks the reading: pandoc reads markup, pdftotext reads
+;;; a PDF, plain text needs no reader at all, and bytes nothing here can
+;;; read say so in one line instead of spilling into the buffer.
+;;;
+;;; Bytes never travel as a string. A PDF decoded as text loses every
+;;; byte that is not UTF-8 — that is how one arrived as half a megabyte
+;;; of replacement characters — so a body that is not text lands in a
+;;; file and its reader reads the file.
+
+;; a DOCUMENT is what a fetch answers: (TYPE TEXT FILE). TEXT holds a
+;; text body, FILE holds bytes on disk, and never both.
+(define (web--document type text file)
+  (list (web--content-type type) text file))
+
+(define (web--doc-type d) (nth 0 d))
+(define (web--doc-text d) (nth 1 d))
+(define (web--doc-file d) (nth 2 d))
+
+;; "application/pdf; charset=binary" -> "application/pdf"
+(define (web--content-type raw)
+  (if (string? raw)
+      (string-downcase (string-trim (car (string-split raw ";"))))
+      ""))
+
+;; a server that says nothing, says everything, or says "bytes" has said
+;; nothing: the bytes themselves answer instead.
+(define (web--vague-type? type)
+  (or (equal? type "")
+      (equal? type "*/*")
+      (string-contains? type "octet-stream")))
+
+;; what the html reading takes: markup, and a type nobody named
+(define (web--markup-type? type)
+  (or (web--vague-type? type)
+      (string-contains? type "html")
+      (string-contains? type "xml")))
+
+;; VIEWER TYPES — (TYPE EXTENSION): a body the editor already opens as
+;; a file of its own. There is no reading to make here — the file's own
+;; mode shows it, so a PDF renders as pages in pdf-reader-mode instead
+;; of the flat text pdftotext can lift out of it.
+(define *web--mime-files*
+  (list
+    (list "application/pdf" "pdf")))
+
+;; the one door another package registers a viewer type through
+(define (web-register-mime-file! type extension)
+  (set! *web--mime-files* (cons (list type extension) *web--mime-files*)))
+
+(define (web--mime-file-extension type)
+  (let loop ((rows *web--mime-files*))
+    (cond ((null? rows) #f)
+          ((string-prefix? (car (car rows)) type) (nth 1 (car rows)))
+          (else (loop (cdr rows))))))
+
+;; the fetched body under a name a person recognises, in a directory
+;; browse owns. The same URL lands on the same path, so reading a page
+;; twice leaves one file behind and not a pile.
+(define (web--keep-file! file url extension)
+  (let* ((dir (string-append (compos-home) "/browse-files"))
+         (name (web--download-name url))
+         (suffix (string-append "." extension))
+         (path (string-append dir "/"
+                              (if (string-suffix? suffix (string-downcase name))
+                                  name
+                                  (string-append name suffix)))))
+    (make-directory! dir)
+    (rename-file! file path)
+    path))
+
+;; MIME READERS — (TYPE READER): TYPE matches the head of the content
+;; type, so "image/" covers every image. READER takes the body's file
+;; and its URL and answers a shell command that writes markdown. The
+;; first match wins; a type with no reader gets the note below.
+(define *web--mime-readers*
+  (list
+    (list "application/pdf"
+          (lambda (file url)
+            (string-append "pdftotext -layout -nopgbrk "
+                           (web--shell-quote file) " - 2>/dev/null")))
+    (list "text/csv" (lambda (file url) (web--pandoc-command file "csv")))
+    (list "text/tab-separated-values" (lambda (file url) (web--pandoc-command file "tsv")))
+    (list "application/json" (lambda (file url) (web--fence-command file "json")))
+    (list "image/" (lambda (file url) (web--image-command url)))
+    (list "text/" (lambda (file url) (string-append "cat " (web--shell-quote file))))))
+
+;; the one door another package registers a reader through
+(define (web-register-mime! type reader)
+  (set! *web--mime-readers* (cons (list type reader) *web--mime-readers*)))
+
+(define (web--mime-reader type)
+  (let loop ((rows *web--mime-readers*))
+    (cond ((null? rows) #f)
+          ((string-prefix? (car (car rows)) type) (nth 1 (car rows)))
+          (else (loop (cdr rows))))))
+
+(define (web--pandoc-command file from)
+  (string-append "pandoc --wrap=none -f " from " -t gfm "
+                 (web--shell-quote file) " 2>/dev/null"))
+
+;; a body that is not prose reads as code: the fence keeps the reader
+;; from taking any of it for markdown
+(define (web--fence-command file language)
+  (string-append "printf '```" language "\\n'; cat " (web--shell-quote file)
+                 "; printf '\\n```\\n'"))
+
+;; an image is one line of markdown: the page renders it
+(define (web--image-command url)
+  (string-append "printf '%s\\n' "
+                 (web--shell-quote (string-append "![](" url ")"))))
+
+;; the reader wrote nothing: the type is the whole answer
+(define (web--mime-markdown url type out file)
+  (if (or (not (string? out)) (equal? (string-trim out) ""))
+      (web--mime-note url type file)
+      (string-append "# " (web--download-name url) "\n\n"
+                     (string-trim out) "\n")))
+
+;; nothing here reads this type: name it, size it, and leave the bytes
+;; alone. `d` saves the page and `o` opens it in the real browser.
+(define (web--mime-note url type file)
+  (string-append "# " (web--download-name url) "\n\n"
+                 "`" (if (equal? type "") "unknown type" type) "`, "
+                 (web--size-label (file-size file)) "\n\n"
+                 "No reader for this type. Press `d` to save it, "
+                 "or `o` to open it in the browser.\n"))
+
+;; bytes -> "512 B", "8 KB", "1 MB"
+(define (web--size-label bytes)
+  (let ((n (or bytes 0)))
+    (cond ((< n 1024) (string-append (number->string n) " B"))
+          ((< n 1048576) (string-append (number->string (quotient n 1024)) " KB"))
+          (else (string-append (number->string (quotient n 1048576)) " MB")))))
 
 ;;; --- fetching -------------------------------------------------------------------
 ;;; The browser fetches, not curl: the user's cookies and Chrome's http
@@ -218,30 +362,93 @@
                  "_compos_refresh="
                  (number->string *web--hard-refresh-seq*)))
 
-;; URL -> the raw html. Tests replace this seam. REVALIDATE? sends the
+;; URL -> a document. Tests replace this seam. REVALIDATE? sends the
 ;; page's saved ETag (curl --etag-compare): an unchanged page answers
 ;; 304 with no body — headers only — and the caller serves its copy.
-(define (web--curl-html url k revalidate?)
-  (let ((u (web--shell-quote url))
-        (dir (web--shell-quote (string-append (compos-home) "/web-etags"))))
+;; The body lands in a file; stdout is the type the server named and,
+;; under it, the type the bytes look like.
+(define (web--curl-fetch url k revalidate?)
+  (let* ((file (web--body-file! "body"))
+         (u (web--shell-quote url))
+         (f (web--shell-quote file))
+         (dir (web--shell-quote (string-append (compos-home) "/web-etags"))))
     (shell-command->string
       (string-append
         "mkdir -p " dir "; "
         "e=" dir "/$(printf %s " u " | cksum | cut -d' ' -f1); "
-        "t=$(mktemp); "
         "curl -sL --max-time 20 --etag-save \"$e.new\" "
         (if revalidate? "--etag-compare \"$e\" " "")
-        u " -o \"$t\"; "
-        "if [ -s \"$t\" ]; then mv -f \"$e.new\" \"$e\"; cat \"$t\"; fi; "
-        "rm -f \"$t\" \"$e.new\"")
-      (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
+        "-w '%{content_type}\\n' " u " -o " f "; "
+        "if [ -s " f " ]; then mv -f \"$e.new\" \"$e\"; fi; "
+        "file --mime-type -b " f " 2>/dev/null")
+      (lambda (out) (k (web--curl-document out file))))))
+
+;; the two type lines curl and file wrote, and the body they name. An
+;; empty body is a 304 or a failure: no document, and the caller serves
+;; the copy it holds.
+(define (web--curl-document out file)
+  (let* ((lines (string-split (string-trim (or out "")) "\n"))
+         (sent (web--content-type (if (pair? lines) (car lines) "")))
+         (sniffed (web--content-type (if (and (pair? lines) (pair? (cdr lines)))
+                                         (nth 1 lines)
+                                         "")))
+         (type (if (web--vague-type? sent) sniffed sent)))
+    (cond ((not (> (or (file-size file) 0) 0))
+           (delete-file! file)
+           #f)
+          ((web--markup-type? type) (web--text-document type file))
+          (else (web--document type #f file)))))
+
+;; markup reads on as the string the rest of the pipeline already holds
+(define (web--text-document type file)
+  (let ((text (read-file file)))
+    (delete-file! file)
+    (and (string? text) (web--document type text #f))))
+
+;; U+FFFD, the mark a lossy decode leaves behind. Written as base64 so
+;; this file stays plain ASCII.
+(define *web--replacement-char* (base64-decode "77+9"))
+
+;; A tab hands back whatever the response held. Bytes that came back as
+;; text are not a document: no markup in the first bytes, or the
+;; replacement character a lossy decode left in them.
+(define (web--markup? text)
+  (and (string? text)
+       (not (equal? text ""))
+       (let ((head (substring text 0 (min 1024 (string-length text)))))
+         (and (string-contains? head "<")
+              (not (string-contains? head *web--replacement-char*))))))
+
+;; the browser's answer as a document: (TYPE TEXT BASE64) from the fetch
+;; op, a bare html string from a snapshot. #f sends the page to curl.
+(define (web--browser-document reply)
+  (cond ((not reply) #f)
+        ((string? reply) (and (web--markup? reply) (web--document "text/html" reply #f)))
+        ((not (pair? reply)) #f)
+        (else
+          (let ((type (web--content-type (nth 0 reply)))
+                (text (nth 1 reply))
+                (bytes (nth 2 reply)))
+            (cond ((and (string? text) (not (equal? text "")))
+                   (and (or (not (web--markup-type? type)) (web--markup? text))
+                        (web--document type text #f)))
+                  ((and (string? bytes) (not (equal? bytes "")))
+                   (web--document type #f (web--bytes-file! bytes)))
+                  (else #f))))))
+
+(define (web--bytes-file! encoded)
+  (let ((file (web--body-file! "body")))
+    (write-file! file (base64-decode encoded))
+    file))
 
 ;; RENDER? asks for the rendered document, from a real tab. With no
-;; browser at all, curl answers either way.
+;; browser at all, curl answers either way, and so does a browser that
+;; could not hand the body back as a document.
 (define (web--html-pipeline url k &optional revalidate? render?)
   ((if render? browser-snapshot browser-fetch) url
-    (lambda (html)
-      (if html (k html) (web--curl-html url k revalidate?)))))
+    (lambda (reply)
+      (let ((doc (web--browser-document reply)))
+        (if doc (k doc) (web--curl-fetch url k revalidate?))))))
 
 (define *web-fetch-html* web--html-pipeline)
 
@@ -252,30 +459,65 @@
 (define (web--pipeline url want k)
   (web--attempt url (web--reading want) (web--site-render? url) k))
 
-;; Fetch, then read. RENDERED? says this html came from a real tab, so
-;; an empty answer stops instead of asking for a tab again.
+;; Fetch, then read. RENDERED? says this document came from a real tab,
+;; so an empty answer stops instead of asking for a tab again.
 (define (web--attempt url want rendered? k)
   (*web-fetch-html* url
-    (lambda (html)
-      (if (not html)
-          (k (list #f #f #f))
-          (let ((file (web--write-html! html)))
-            (web--read url file want
-              (lambda (md)
-                (cond
-                  (md (web--answer file (list want md html) k))
-                  ;; Calm found no article. That is an answer, not a
-                  ;; failure: an index page IS its links, so read it
-                  ;; whole. Full finding nothing is the real failure.
-                  ((equal? want "calm")
-                   (web--read url file "full"
-                     (lambda (full)
-                       (if full
-                           (web--answer file (list "full" full html) k)
-                           (web--retry url want file rendered? k)))))
-                  (else (web--retry url want file rendered? k))))))))
+    (lambda (fetched)
+      (let ((doc (web--as-document fetched)))
+        (cond
+          ((not doc) (k (list #f #f #f)))
+          ;; a body html cannot read has a reader of its own
+          ((not (web--markup-type? (web--doc-type doc)))
+           (web--read-mime url want doc k))
+          ((not (string? (web--doc-text doc))) (k (list #f #f #f)))
+          (else
+            (let* ((html (web--doc-text doc))
+                   (file (web--write-html! html)))
+              (web--read url file want
+                (lambda (md)
+                  (cond
+                    (md (web--answer file (list want md html) k))
+                    ;; Calm found no article. That is an answer, not a
+                    ;; failure: an index page IS its links, so read it
+                    ;; whole. Full finding nothing is the real failure.
+                    ((equal? want "calm")
+                     (web--read url file "full"
+                       (lambda (full)
+                         (if full
+                             (web--answer file (list "full" full html) k)
+                             (web--retry url want file rendered? k)))))
+                    (else (web--retry url want file rendered? k))))))))))
     *web--revalidate*
     rendered?))
+
+;; a seam a test replaced may still answer with a bare html string
+(define (web--as-document fetched)
+  (cond ((not fetched) #f)
+        ((string? fetched) (web--document "text/html" fetched #f))
+        ((pair? fetched) fetched)
+        (else #f)))
+
+;; A body html cannot read: its own reader turns it into markdown, and a
+;; type with no reader says what it is. Either way the bytes go when the
+;; answer does.
+(define (web--read-mime url want doc k)
+  (let* ((type (web--doc-type doc))
+         (file (or (web--doc-file doc) (web--write-body! (web--doc-text doc))))
+         (extension (web--mime-file-extension type))
+         (reader (web--mime-reader type)))
+    (cond
+      ;; the editor opens this kind of file itself: keep the bytes, and
+      ;; the reading is the file
+      (extension (k (list "file" (web--keep-file! file url extension) #f)))
+      ((not reader)
+       (web--answer file (list want (web--mime-note url type file) #f) k))
+      (else
+        (shell-command->string (reader file url)
+          (lambda (out)
+            (web--answer file
+                         (list want (web--mime-markdown url type out file) #f)
+                         k)))))))
 
 (define (web--answer file result k)
   (delete-file! file)
@@ -618,6 +860,26 @@
                                 url)
                           out)))))))
 
+;; A browse tab holds a reading, and a document the editor opens itself
+;; has none: the file buffer takes the tab's window, joins its group,
+;; and the tab is killed. The page still enters the history, because it
+;; is still a page you read.
+(define (web--show-file! buf path)
+  (let ((url (buffer-local buf 'browse-url))
+        (win (window-showing buf))
+        (group (buffer-group buf))
+        (file-buf (find-file path)))
+    (with-current-buffer file-buf (lambda () (auto-mode path)))
+    (when group (buffer-add-group! file-buf group))
+    (if win
+        (window-set-buffer! win file-buf)
+        (display-buffer-other-window! file-buf))
+    (when url (web--remember-visit! url (web--download-name url)))
+    ;; a fetch answers on a callback, so the caller that asked for the
+    ;; page is long gone and the tab can go now
+    (buffer-kill! buf)
+    file-buf))
+
 (define (web--render! buf md)
   (let ((links (web--markdown-links md)))
     (buffer-set-read-only! buf #f)
@@ -734,10 +996,15 @@
             (md (nth 1 found))
             (html (nth 2 found)))
         (buffer-set-local! b 'web-hard-refresh #f)
-        (buffer-set-local! b 'browse-reading reading)
-        (buffer-set-local! b 'browse-html html)
-        (web--page-remember! b (buffer-local b 'browse-url) reading md)
-        (web--render! b md)))
+        (if (equal? reading "file")
+            ;; the page is a document the editor opens itself: it takes
+            ;; this tab's window, and the tab goes with it
+            (web--show-file! b md)
+            (begin
+              (buffer-set-local! b 'browse-reading reading)
+              (buffer-set-local! b 'browse-html html)
+              (web--page-remember! b (buffer-local b 'browse-url) reading md)
+              (web--render! b md)))))
     *web-cache-ttl*))
 
 ;;; --- navigation -----------------------------------------------------------------
@@ -1568,3 +1835,23 @@ the tabs. C-s searches to any link.")
 
 (public! 'url-resolve
   "(url-resolve URL BASE) — resolve a link target against the page it came from: absolute stays, //host takes the scheme, /path takes the origin, the rest appends to the page's directory")
+
+(public! 'web-register-mime!
+  "(web-register-mime! TYPE READER) — teach browse a content type: TYPE matches the head of the type, READER takes (FILE URL) and answers a shell command that writes markdown")
+
+(public! 'web-register-mime-file!
+  "(web-register-mime-file! TYPE EXTENSION) — say browse should keep this type as a file and let the file's own mode show it, the way a PDF opens in pdf-reader-mode")
+
+(catalog-register! 'note 'browse-content-types
+  (string-append
+    "browse reads by content type, not by extension. "
+    "A fetch answers a DOCUMENT (TYPE TEXT FILE): text bodies travel as text, and bytes land in a file. "
+    "Markup reads through readable and pandoc; every other type takes a reader from *web--mime-readers*. "
+    "A reader is (TYPE READER) where READER takes (FILE URL) and answers a shell command that writes markdown to stdout. "
+    "A type in *web--mime-files* is not read at all: the body is saved under ~/.compos/browse-files and its own mode shows it, which is how a PDF opens in pdf-reader-mode. "
+    "Bundled readers: csv and tsv through pandoc, JSON as a fenced block, images as one markdown image, the rest of text/* as it is, and pdftotext for a PDF where no viewer claims the type. "
+    "A type with no reader shows its name and size, and d saves it. "
+    "Never pass bytes through a string: a PDF decoded as text loses every byte that is not UTF-8.")
+  'domain 'web
+  'effects '(pure)
+  'use "(web-register-mime! \"application/epub+zip\" (lambda (file url) (string-append \"pandoc -f epub -t gfm \" file)))")

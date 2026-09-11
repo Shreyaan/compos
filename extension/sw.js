@@ -223,6 +223,23 @@ async function readerWindow() {
   return w.id;
 }
 
+// what travels as text; everything else travels as bytes
+const TEXT_TYPE = /^text\/|xml|json|javascript|x-sh$/;
+
+// one fetch reply carries at most this many bytes
+const MAX_BYTES = 16 * 1024 * 1024;
+
+// bytes -> base64, in chunks: one apply() over a megabyte overflows the
+// argument stack
+function base64(buf) {
+  const bytes = new Uint8Array(buf);
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+}
+
 const OPS = {
   // Run Chrome's built-in Gemini Nano Prompt API in the active page. The
   // model is local to Chrome, so this connector needs no network credential.
@@ -257,13 +274,23 @@ const OPS = {
 
   // The editor's reader fetches THROUGH the browser: the user's cookies
   // and Chrome's HTTP cache ride along, so a page that knows them logged
-  // in reads logged in. The reply is the response body as text.
+  // in reads logged in. The reply names the content TYPE, because the
+  // editor reads by type: text comes back as text, and anything else
+  // comes back as bytes. A PDF read as text is not a PDF any more --
+  // every byte that is not UTF-8 becomes a replacement character.
   async fetch(msg) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 20000);
     try {
       const r = await fetch(msg.url, { credentials: "include", signal: ctl.signal });
-      return { status: r.status, html: await r.text() };
+      const type = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (!type || TEXT_TYPE.test(type)) {
+        return { status: r.status, type, html: await r.text() };
+      }
+      const buf = await r.arrayBuffer();
+      // a body too big for one frame is a download, not a reading
+      if (buf.byteLength > MAX_BYTES) return { status: r.status, type, bytes: buf.byteLength };
+      return { status: r.status, type, body: base64(buf), bytes: buf.byteLength };
     } finally {
       clearTimeout(timer);
     }

@@ -677,3 +677,102 @@
                 (check-contains! (buffer-text tab) "Front page" "fetched again")
                 (check-equal! (buffer-point tab) 7 "at the saved point")))))))
     (t--web-kill-tabs!)))
+
+;;; --- content types --------------------------------------------------------------
+
+(effects! '(pure))
+
+(deftest 'a-content-type-picks-the-reader
+  "the type decides the reading; html and its neighbours stay on the html path"
+  (lambda ()
+    (check-equal! (web--content-type "Application/PDF; charset=binary") "application/pdf"
+                  "the type drops its parameters")
+    (check-true! (web--markup-type? "text/html") "html reads as markup")
+    (check-true! (web--markup-type? "application/rss+xml") "and so does xml")
+    (check-false! (web--markup-type? "application/pdf") "a PDF does not")
+    (check-true! (web--vague-type? "application/octet-stream")
+                 "a server that says bytes has said nothing")
+    (check-contains! ((web--mime-reader "application/pdf") "/tmp/zz.pdf" "https://h.test/a.pdf")
+                     "pdftotext" "a PDF reads through pdftotext")
+    (check-contains! ((web--mime-reader "text/plain") "/tmp/zz.txt" "https://h.test/a.txt")
+                     "cat" "plain text reads as it is")
+    (check-false! (web--mime-reader "application/zip") "and nothing reads an archive")))
+
+(deftest 'text-that-lost-its-bytes-is-not-a-document
+  "a PDF decoded as text is not markup, whatever the browser called it"
+  (lambda ()
+    (check-true! (web--markup? "<html><body>hi</body></html>") "markup is markup")
+    (check-false! (web--markup? "plain words, no tags") "prose is not")
+    (check-false! (web--markup? (string-append "<html>" *web--replacement-char* "junk"))
+                  "and neither is a lossy decode")))
+
+(effects! '(write))
+
+(deftest 'a-body-that-is-not-markup-reads-through-its-own-reader
+  "text reads as text, and a type with no reader says what it is"
+  (lambda ()
+    (let ((answer #f))
+      (web--read-mime "https://h.test/notes.txt" "calm"
+                      (web--document "text/plain" "plain words here\n" #f)
+                      (lambda (found) (set! answer found)))
+      (check-true! (wait-until (lambda () (and answer #t)) 5000 20) "the reading answered")
+      (check-contains! (nth 1 answer) "# notes.txt" "the page is titled by its name")
+      (check-contains! (nth 1 answer) "plain words here" "and holds the text")
+      (check-false! (nth 2 answer) "a body that is not html has no source to show"))
+    (let* ((file (web--write-body! "zzzz"))
+           (found (web--mime-note "https://h.test/bundle.zip" "application/zip" file)))
+      (delete-file! file)
+      (check-contains! found "# bundle.zip" "the note names the file")
+      (check-contains! found "application/zip" "and its type")
+      (check-contains! found "4 B" "and its size"))))
+
+(deftest 'browser-bytes-land-in-a-file-byte-for-byte
+  "the fetch op hands bytes back base64; nothing decodes them as text"
+  (lambda ()
+    (let* ((doc (web--browser-document (list "application/pdf" #f "JVBERi0xLjQK")))
+           (file (web--doc-file doc)))
+      (check-equal! (web--doc-type doc) "application/pdf" "the type the browser named")
+      (check-false! (web--doc-text doc) "no text, because bytes are not text")
+      (check-equal! (read-file file) "%PDF-1.4\n" "and the bytes are whole")
+      (delete-file! file))
+    (check-false! (web--browser-document (list "text/html" "" #f))
+                  "an empty answer is no document")))
+
+(deftest 'a-viewer-type-is-kept-as-a-file-and-not-read-as-text
+  "the type decides: a PDF is saved and opened, not flattened into text"
+  (lambda ()
+    (check-equal! (web--mime-file-extension "application/pdf") "pdf" "a PDF has a viewer")
+    (check-false! (web--mime-file-extension "text/csv") "a table does not")
+    (let ((answer #f))
+      (web--read-mime "https://h.test/papers/report.pdf" "calm"
+                      (web--document "application/pdf" #f (web--write-body! "%PDF-1.4\n"))
+                      (lambda (found) (set! answer found)))
+      (check-true! (wait-until (lambda () (and answer #t)) 5000 20) "the reading answered")
+      (check-equal! (nth 0 answer) "file" "the answer is a file, not a reading")
+      (check-equal! (nth 1 answer) (string-append (compos-home) "/browse-files/report.pdf")
+                    "kept under the name the URL gave it")
+      (check-equal! (read-file (nth 1 answer)) "%PDF-1.4\n" "with its bytes")
+      (delete-file! (nth 1 answer)))))
+
+(deftest 'a-document-the-editor-opens-itself-takes-the-tabs-window
+  "a PDF is not a reading: the file buffer replaces the browse tab"
+  (lambda ()
+    (run-command "delete-other-windows")
+    (let ((path (string-append (compos-home) "/browse-files/zz-web-viewer.pdf")))
+      (make-directory! (string-append (compos-home) "/browse-files"))
+      (write-file! path "%PDF-1.4\n")
+      (t--web-with-fetch
+        ;; the real pipeline always answers on a callback, and the tab is
+        ;; retired there: a stub that answers inline would be killing the
+        ;; buffer under the caller that just asked for it
+        (lambda (url want k)
+          (shell-command->string "true" (lambda (out) (k (list "file" path #f)))))
+        (lambda ()
+          (let ((tab (browse "https://site.test/zz-web-viewer.pdf")))
+            (check-true! (wait-until (lambda () (not (buffer-known? tab))) 5000 25)
+                         "the tab is gone")
+            (check-true! (and (window-showing path) #t) "and the file has its window"))))
+      (when (buffer-known? path) (buffer-kill! path))
+      (delete-file! path))
+    (t--web-kill-tabs!)
+    (run-command "delete-other-windows")))

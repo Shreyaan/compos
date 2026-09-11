@@ -87,9 +87,10 @@
       (check-contains! text "2026-08-19" "the older date"))
     (t--feeds-teardown!)))
 
-(deftest 'the-row-command-reads-the-item-in-the-browse-reader-and-marks-it-read
+(deftest 'the-row-command-reads-the-item-beside-the-list-and-marks-it-read
   "RET names feeds-open, and feeds-open is what the behaviour is"
   (lambda ()
+    (run-command "delete-other-windows")
     (t--feeds-setup!)
     (check-true! (t--feeds-show!) "the rows arrive")
     (check-equal! (cadr (assoc "RET" (plist-get (list-mode-opts "feeds-mode") 'keys)))
@@ -102,10 +103,16 @@
                                       (string-contains? (buffer-text buf) "An article")))
                                5000 25)
                    "the reader shows the item")
-      (check-equal! (buffer-local buf 'browse-url) "https://site.test/b" "under its own url"))
+      (check-equal! (buffer-local buf 'browse-url) "https://site.test/b" "under its own url")
+      ;; the item shows beside the list, and the list keeps the point
+      (check-equal! (current-buffer) *feeds-buffer* "the reader stays in the list")
+      (check-true! (and (window-showing buf) #t) "the item has a window")
+      (check-false! (equal? (window-showing buf) (active-window))
+                    "which is not the selected one"))
     (check-true! (feeds--read? "https://site.test/b") "the item is marked read")
     (check-false! (feeds--read? "https://site.test/a") "and the one below it is not")
-    (t--feeds-teardown!)))
+    (t--feeds-teardown!)
+    (run-command "delete-other-windows")))
 
 (deftest 'subscribe-finds-a-pages-feed-link-and-unsubscribe-removes-the-line
   "a person subscribes to a page; the discover seam finds the feed"
