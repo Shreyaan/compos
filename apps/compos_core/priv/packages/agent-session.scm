@@ -711,12 +711,108 @@
           ((buffer-local buf 'subagent-turn-end) #t)
           (else #f))))
 
+(effects! '(write))
+
+;;; --- waiting ------------------------------------------------------------------
+;;;
+;;; Non-blocking, the way every other slow thing here is: the caller hands
+;;; over a continuation and gets its lane back. A caller that wants the
+;;; answer inside ONE eval wraps it in the async lane we already have:
+;;;
+;;;   (let ((token (eval-defer!)))
+;;;     (subagent-wait (subagent-children (agent-slug-of (current-buffer)))
+;;;       (lambda (results) (eval-resolve! token (value->string results)))))
+
+(define *subagent-waiters* '())   ; ((pending all k) ...)
+
+(define (subagent-waiters-note! slug)
+  (let loop ((ws *subagent-waiters*) (keep '()) (fire '()))
+    (if (null? ws)
+        (begin
+          (set! *subagent-waiters* (reverse keep))
+          (for-each
+            (lambda (w)
+              (unless (ignore-errors
+                        (lambda () ((nth 2 w) (subagent-collect (nth 1 w))) #t))
+                (message "a subagent-wait callback failed")))
+            (reverse fire)))
+        (let* ((w (car ws))
+               (pending (remove (lambda (s) (equal? s slug)) (nth 0 w))))
+          (if (null? pending)
+              (loop (cdr ws) keep (cons w fire))
+              (loop (cdr ws) (cons (list pending (nth 1 w) (nth 2 w)) keep) fire))))))
+
+;; call K with (subagent-collect CHATS) once every one of them has reached a
+;; turn end. Answers at once when they all have. -> 'done or 'waiting.
+(define (subagent-wait chats k)
+  (let* ((all (map subagent-slug (if (pair? chats) chats (list chats))))
+         (pending (filter (lambda (s) (not (subagent-done? s))) all)))
+    (if (null? pending)
+        (begin (k (subagent-collect all)) 'done)
+        (begin
+          (set! *subagent-waiters* (cons (list pending all k) *subagent-waiters*))
+          'waiting))))
+
+;;; --- the wake -----------------------------------------------------------------
+
+(define (subagent-wake-text slug ok? stop-reason)
+  (let* ((said (or (subagent-last-assistant slug) ""))
+         (long? (> (string-byte-length said) *subagent-wake-limit*))
+         (body (if long? (substring-bytes said 0 *subagent-wake-limit*) said)))
+    (string-append
+      "[subagent " slug
+      (if ok? " finished its turn" (string-append " ended with " stop-reason))
+      "]\n"
+      (if (equal? (string-trim body) "")
+          ""
+          (string-append body (if long? "\n[...]" "") "\n"))
+      "The whole result is "
+      (string-append "(subagent-result " (value->string slug) ")"))))
+
+(define (subagent-notify-parent! slug ok? stop-reason)
+  (let* ((buf (subagent-live-buffer slug))
+         (wanted (and buf (buffer-local buf 'subagent-notify)))
+         (parent (and wanted (subagent-parent slug)))
+         (pbuf (and parent (subagent-live-buffer parent))))
+    (when pbuf
+      (agent-continue! pbuf (subagent-wake-text slug ok? stop-reason)))))
+
+;; One listener for the whole subsystem. EVERY chat records its own last
+;; turn end, not only a child: a waiter has to be able to ask about a chat
+;; nobody spawned.
+(define (subagent-turn-end! slug stop-reason ok?)
+  (let ((buf (subagent-live-buffer slug)))
+    (when buf
+      (buffer-set-local! buf 'subagent-turn-end (list stop-reason ok?))))
+  (subagent-notify-parent! slug ok? stop-reason)
+  (subagent-waiters-note! slug))
+
+(on-agent-turn-end! "subagents" subagent-turn-end!)
+
+(category! 'chat)
+
+(public! 'subagent-result
+  "(subagent-result CHAT) -> a plist of 'slug 'buffer 'status 'stop-reason 'text, read from CHAT's own transcript; it costs the reader no LLM turn")
+(public! 'subagent-collect
+  "(subagent-collect CHATS) -> one subagent-result per chat, in the order given; CHATS is one chat or a list")
+(public! 'subagent-wait
+  "(subagent-wait CHATS K) - call K with (subagent-collect CHATS) once every one of them has reached a turn end; returns 'done or 'waiting and never blocks")
+(public! 'subagent-done?
+  "(subagent-done? CHAT) -> #t when CHAT has finished a turn or is gone")
+(public! 'subagent-last-assistant
+  "(subagent-last-assistant CHAT) -> the text of CHAT's last assistant message, or #f")
+(catalog-meta! 'function "subagent-result" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-collect" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-wait" 'domain 'chat 'effects '(write))
+(catalog-meta! 'function "subagent-done?" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-last-assistant" 'domain 'chat 'effects '(read))
+
 
 (category! 'chat)
 
 (public! 'execute "(execute \"task\") — spawn a task chat on an ACP backend; returns its slug")
 
-(public! 'execute* "(execute* \"task\" '(connector \"codex\" model \"...\" directory \"/repo/\")) — spawn with config")
+(public! 'execute* "(execute* \"task\" '(connector \"codex\" model \"...\" directory \"/repo/\" notify #t)) — spawn with config; notify #t wakes the spawning chat when a turn of the new one ends")
 
 (define (execute prompt) (execute* prompt '()))
 
@@ -746,6 +842,12 @@
     ;; starts with the right extra servers and loses them at first revive.
     (let ((ps (plist-get opts 'presets)))
       (when ps (buffer-set-local! buf 'chat-presets ps)))
+    ;; 'notify #t opts into a free-text wake: every turn this chat finishes
+    ;; sends a message to the chat that spawned it, which costs that parent
+    ;; a turn. The default is silence — the parent reads the child's result
+    ;; with (subagent-result SLUG) and spends nothing.
+    (when (plist-get opts 'notify)
+      (buffer-set-local! buf 'subagent-notify #t))
     (chat-task-init! buf name)
     (let ((slug (chat-attach-agent! buf
                   (or (plist-get opts 'connector) *default-connector*)
