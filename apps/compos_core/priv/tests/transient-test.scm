@@ -228,6 +228,33 @@
       (set-frame-local! 'llm-config-base #f)
       (buffer-kill! buf))))
 
+(deftest 'llm-default-bundle-seeds-a-new-chat
+  "The bundle named in custom.scm lands on a chat that has no session yet"
+  (lambda ()
+    (let ((saved *llm-bundles*)
+          (default llm-default-bundle)
+          (buf (test-buffer! "zz-llm-default" "")))
+      (set! *llm-bundles* '())
+      (llm-bundle-save! "zz-coding" '(connector "api" model "m9" effort "high"))
+      (set! llm-default-bundle "zz-coding")
+      (check-true! (and (llm-default-bundle-apply! buf) #t)
+                   "the named default applies")
+      (check-equal! (buffer-local buf 'agent-connector) "api"
+                    "the connector comes from the bundle")
+      (check-equal! (buffer-local buf 'agent-model) "m9"
+                    "the model comes from the bundle")
+      (check-equal! (buffer-local buf 'agent-effort) "high"
+                    "the effort comes from the bundle")
+      (check-equal! ((plist-get (car (llm-config--bundle-items buf)) 'value-fn) buf)
+                    "default"
+                    "and the menu row says which bundle new chats start with")
+      (set! llm-default-bundle "")
+      (check-false! (llm-default-bundle-apply! buf)
+                    "no name, nothing to apply")
+      (set! llm-default-bundle default)
+      (set! *llm-bundles* saved)
+      (buffer-kill! buf))))
+
 (deftest 'llm-fine-tune-measures-drift-against-the-base
   "Level two compares the live setup with the base bundle; u puts it back"
   (lambda ()
