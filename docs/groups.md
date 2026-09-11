@@ -462,7 +462,7 @@ A switch to a buffer outside G does not take a pane. The buffer shows in the pop
 
 The mechanism is one display rule: a display of a buffer outside G is a display of category `foreign`, and the stock rule `((category foreign) popup)` sends it to the popup (docs/DISPLAY-BUFFER.md). A rule of your own for the category routes it elsewhere; a pane that shows it then takes the frame out of G as before.
 
-To keep the buffer, add it to G. `popup-bufferize` (`` C-M-` ``) adds the buffer to G first and then settles the popup into the layout, so the pane it becomes is a member's pane. `group-add` adds it and leaves the popup where it is.
+To keep the buffer, add it to G. `popup-bufferize` (`` C-M-` ``, or `s-RET` while the popup has the focus) adds the buffer to G first and then settles the popup into the layout, so the pane it becomes is a member's pane. `group-add` adds it and leaves the popup where it is.
 
 A pinned frame shows a foreign buffer in the selected window: the pin keeps G through window changes, so nothing floats.
 
@@ -620,7 +620,9 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 17. Agent context: files and focus from the chat's frame, else from the chat's groups.
 18. The current group derives from the work windows: two windows in one group put the frame in it; a window on an ungrouped buffer takes it out.
 19. A popup over the group changes nothing: open, and closed again, the frame's group is the same.
-19a. A switch to a buffer outside the group floats it in the popup; the panes and the group stay. `popup-bufferize` adds the buffer to the group before it becomes a pane.
+19a. A switch to a buffer outside the group floats it in the popup; the panes and the group stay. `popup-bufferize` adds the buffer to the group before it becomes a pane. A chat is the exception (19b).
+
+19b. A chat never floats. A chat belongs to exactly one group, so a switch to a chat outside this frame's group enters the chat's group first and opens the chat as an ordinary buffer there. The panes stay sealed: the frame follows the chat home instead of the chat hanging over another group's windows.
 20. A kill from outside any command (the Elixir path) that drops a window onto a group's buffer puts the frame back in that group.
 21. `ibuffer` lists the frame's group first, and a mark does not reorder the rows.
 22. A layout fills its panes from the pool: in a group, three columns come from the members and never from another group; a peek and the popup's buffer fill no window.

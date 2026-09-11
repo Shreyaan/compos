@@ -4490,6 +4490,16 @@
              (not (agent-edit-author? (current-edit-author))))
     (buffer-promote! buf))
   (cond ((buffer-context?) (switch-to-buffer-here! buf))
+        ;; A chat never floats. It owns exactly one group, so a switch to it
+        ;; enters that group and the chat opens as an ordinary buffer there.
+        ;; The panes stay sealed: the frame follows the chat home, the chat
+        ;; does not hang over another group's windows.
+        ((and (display-foreign? buf) (chat-buffer? buf)
+              (boundp 'switch-to-buffer-in-group!) (boundp 'group-home-of)
+              (let ((home (group-home-of buf)))
+                (and home (not (equal? home (frame-group))))))
+         (switch-to-buffer-in-group! buf)
+         buf)
         ((display-foreign? buf)
          (pop-to-buffer buf)
          (message (string-append buf " is not in this group. It floats in the popup."))
@@ -7043,12 +7053,14 @@
 ;; that edge. The keys are the popup's, not the buffer's: they go in
 ;; when the buffer floats and out when it stops, and the mode setup then
 ;; gives the buffer its own keys back.
-(define *popup-move-keys*
+(define *popup-keys*
   '(("M-<left>" "popup-move-left") ("M-<right>" "popup-move-right")
-    ("M-<up>" "popup-move-up") ("M-<down>" "popup-move-down")))
+    ("M-<up>" "popup-move-up") ("M-<down>" "popup-move-down")
+    ;; Cmd-RET keeps what floats: the popup becomes an ordinary window.
+    ("s-RET" "popup-bufferize")))
 
 (register-minor-mode! "popup-mode" (lambda (buf) #t) (lambda (buf) #t))
-(minor-mode-keys! "popup-mode" *popup-move-keys*)
+(minor-mode-keys! "popup-mode" *popup-keys*)
 
 (define (popup-keys! name floating?)
   (if floating?
