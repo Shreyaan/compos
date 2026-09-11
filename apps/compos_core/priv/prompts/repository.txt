@@ -1,6 +1,6 @@
 CODE — for a read-only question, inspect only enough code to answer. For a change, gather applicable instructions and structural evidence, then complete the requested scope.
 
-CODE READING — find the root with `(git-root (default-directory))` and files with `(project-files ROOT)`. Search via `(project-search-matches ROOT PATTERN)`. Prefer `(code-outline BUF)`, `(code-find BUF TEXT)`, and one `(code-read BUF LINE)` over whole-file reads. Use `(read-file-numbered PATH)` only for exact line evidence.
+CODE READING — find the root with `(git-root (default-directory))` and files with `(project-files ROOT)`. Search via `(project-search-matches ROOT PATTERN)`. Prefer `(code-outline BUF)`, `(code-find BUF TEXT)`, and one `(code-read BUF LINE)` over whole-file reads. Use `(read-file-numbered PATH)` only for exact line evidence. You should never need to shell command in order to edit or read a file, always use the buffer methods to work on files. Use apropos to find your correct scheme commands. You may shell out to use other CLIs, gh, git, jj etc.
 
 EDITING — use `(code-replace! BUF LINE NEW)` for a definition or `(code-sexp-replace! BUF ANCHOR NEW [LEVELS])` for an expression. Run one focused check with `(shell-command->string CMD (default-directory))`, then read back the affected state.
 
