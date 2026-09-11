@@ -2665,7 +2665,16 @@ defmodule Compos.Ui.EditorLive do
     end)
     stop = case List.last(segments) do nil -> assigns.start; {_, b, _, _} -> b end
     fields = Enum.filter(assigns.fields, fn {a, b, _} -> a < stop and b > assigns.start end)
-    boundaries = ([assigns.start, stop] ++ Enum.flat_map(fields, fn {a, b, _} -> [max(a, assigns.start), min(b, stop)] end)) |> Enum.uniq() |> Enum.sort()
+    # A field range is bytes, and it can end inside a multi-byte character:
+    # a list row draws box characters, and the column the block declares
+    # lands on the second byte of one. The binary_part below then cuts a
+    # segment that is not valid UTF-8, and Jason kills the LiveView socket
+    # when it encodes the reply. Snap every boundary down to a character
+    # boundary first. The tiling holds, because floor_utf8 keeps
+    # assigns.start and stop fixed.
+    line = Enum.map_join(segments, &elem(&1, 2))
+    snap = fn at -> assigns.start + Text.floor_utf8(line, at - assigns.start) end
+    boundaries = ([assigns.start, stop] ++ Enum.flat_map(fields, fn {a, b, _} -> [max(a, assigns.start), min(b, stop)] end)) |> Enum.map(snap) |> Enum.uniq() |> Enum.sort()
     pieces = for [a, b] <- Enum.chunk_every(boundaries, 2, 1, :discard), a < b do
       field = Enum.find_value(fields, fn {x, y, field} -> if x <= a and b <= y, do: field end)
       segs = for {x, y, txt, cls} <- segments, x < b and y > a, do: {binary_part(txt, max(x, a) - x, min(y, b) - max(x, a)), cls}
