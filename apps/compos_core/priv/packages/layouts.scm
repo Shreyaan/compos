@@ -24,6 +24,11 @@
   "The largest file a look opens. A peek or a ripgrep preview of a bigger file shows nothing and says the size; RET still opens it. 0 removes the cap."
   'group 'windows 'type 'number)
 
+;; visit and visit-quietly (editor.scm) read this one.
+(defcustom 'large-file-warning-threshold 10485760
+  "The largest file a visit opens without asking (Emacs large-file-warning-threshold). A visit of a bigger file refuses and says the size; M-x find-file asks, and a yes opens it for this session only. 0 removes the cap."
+  'group 'files 'type 'number)
+
 ;; The display-buffer chain (editor.scm) reads these. They are plain
 ;; defines there, because editor.scm loads before custom.scm.
 (defcustom 'split-height-threshold 80

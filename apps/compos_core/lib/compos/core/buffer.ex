@@ -217,6 +217,18 @@ defmodule Compos.Core.Buffer do
   def point(name), do: viewed(name, :point, fn -> dormant_read(name, :point, :point) end)
 
   @doc """
+  Whether this buffer writes a checkpoint and comes back at the next boot.
+
+  A file over `large-file-warning-threshold` opens as `false`: it holds the
+  file for this session and costs no later boot anything.
+  """
+  def persistent?(name) do
+    GenServer.call(via(name), :persistent?)
+  catch
+    :exit, _ -> false
+  end
+
+  @doc """
   Where the caret stands, as the buffer's own fact: the byte offset, and
   the 1-based line and byte column it falls on. Answers nil when the buffer
   shows no caret.
@@ -1007,6 +1019,8 @@ defmodule Compos.Core.Buffer do
   # not there. wp_get and every setter clamp; so does this, and so does the
   # published row, which is where nearly every reader now takes it from.
   defp on_call(:point, _from, state), do: {:reply, clamp(state.point, state), state}
+  defp on_call(:persistent?, _from, state), do: {:reply, state.persistent, state}
+
   defp on_call(:checkpoint_now, _from, state), do: {:reply, :ok, write_checkpoint(state)}
 
   defp on_call(:eviction_info, _from, state),

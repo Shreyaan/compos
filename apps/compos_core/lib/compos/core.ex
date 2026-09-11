@@ -103,10 +103,17 @@ defmodule Compos.Core do
     if Buffer.exists?(name), do: {:ok, name}, else: create_buffer(name)
   end
 
-  @doc "Open a file into a buffer named after its path."
-  def open_file(path) do
+  @doc """
+  Open a file into a buffer named after its path.
+
+  `persistent: false` opens it for this session only: no checkpoint on
+  disk, and no work at the next boot. A file over
+  `large-file-warning-threshold` opens that way, because its text becomes
+  a rope, a checkpoint, and a restore that every later boot pays for.
+  """
+  def open_file(path, opts \\ []) do
     path = Path.expand(path)
-    create_buffer(path, path: path)
+    create_buffer(path, Keyword.merge([path: path], opts))
   end
 
   def list_buffers do

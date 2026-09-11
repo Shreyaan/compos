@@ -6148,10 +6148,10 @@
 
 ;; The host file primitive creates a buffer below the Scheme buffer-create
 ;; wrapper. Wrap it here so file buffers use the same creation event.
-(define (find-file path)
+(define (find-file path &optional session-only?)
   (let* ((name (expand-path (normalize-file-input path)))
          (new (not (buffer-known? name)))
-         (buf (raw-find-file name)))
+         (buf (raw-find-file name (not session-only?))))
     (when new
       (buffer-created! buf)
       ;; find-file is the quiet loading boundary used by agent read/edit
@@ -6510,6 +6510,60 @@
         (buffer-add-group! buf group)
         (buffer-move-to-group! buf group))))
 
+;;; A file too big to open
+;;;
+;;; Emacs asks before it visits a large file (large-file-warning-threshold,
+;;; 10 MB). Here the read is the small half of the cost. The text becomes a
+;;; rope, the rope becomes a checkpoint on disk, the checkpoint restores at
+;;; every boot, and the renderer builds segments for every line. A 189 MB
+;;; screen recording opened by accident wrote a 361 MB checkpoint, pinned
+;;; the Editor for seven seconds on each boot, and through that took the
+;;; desktop's own globals down with it.
+;;;
+;;; So a visit REFUSES, and the reader who means it answers a question. The
+;;; refusal is the mechanism, the question is the policy, and a caller that
+;;; cannot ask one — an agent, a restore, a peek — gets the refusal.
+;;;
+;;; layouts.scm makes the variable customizable.
+
+(define large-file-warning-threshold 10485760)
+
+;; #t when opening PATH would cost more than a file should. A path with a
+;; buffer already answers #f: the work is paid. A directory and a remote
+;; path answer #f, because file-size reads local files only.
+(define (file-too-big? path)
+  (and (> large-file-warning-threshold 0)
+       (string? path)
+       (let ((p (normalize-file-input path)))
+         (and (not (buffer-known? p))
+              (not (remote-path? p))
+              (not (file-directory? p))
+              (> (file-size p) large-file-warning-threshold)))))
+
+;; Say the size, and say the way in. The reader reaches the file through
+;; the question, so the message names the command that asks it.
+(define (file-too-big-message path)
+  (let ((p (normalize-file-input path)))
+    (string-append (cadr (path-split p)) " is " (cadr (file-stat p))
+                   ", over large-file-warning-threshold. "
+                   "M-x find-file asks before it opens it.")))
+
+;; The way in. The buffer is not persistent: it holds the file for this
+;; session, writes no checkpoint, and is not there at the next boot. That
+;; is the whole point — one yes must not cost every later boot.
+(define (visit-anyway path0 &optional group)
+  (let* ((path (normalize-file-input path0))
+         (existing (buffer-known? path))
+         ;; session-only: no checkpoint, and no work at the next boot
+         (file-buffer (find-file path #t)))
+    (visit-apply-group! file-buffer group existing)
+    (switch-to-buffer! file-buffer)
+    (auto-mode path)
+    (run-hooks 'find-file-hook)
+    (message (string-append (cadr (path-split path))
+                            " is open for this session only; it is not saved across a restart."))
+    (current-buffer)))
+
 (define (visit path0 &optional group)
   (let* ((path (normalize-file-input path0))
          ;; A directory answers to one buffer name whatever the prompt
@@ -6526,6 +6580,7 @@
            (cond
              ((remote-path? path) (remote-visit path))
              ((file-directory? path) (dired-open path))
+             ((file-too-big? path) (message (file-too-big-message path)) #f)
              (else
                (let ((file-buffer (find-file path)))
                  ;; An explicit destination joins before display. The derived
@@ -6555,13 +6610,15 @@
          (existing (buffer-known? path)))
     (if (or (remote-path? path) (file-directory? path))
         (visit path group)
+      (if (file-too-big? path)
+          (begin (message (file-too-big-message path)) #f)
         (let ((file-buffer (find-file path)))
           (visit-apply-group! file-buffer group existing)
           (with-current-buffer file-buffer
             (lambda ()
               (auto-mode path)
               (run-hooks 'find-file-hook)))
-          file-buffer))))
+          file-buffer)))))
 
 ;; Compatibility name for packages and user config.
 (define (visit-in-group path group) (visit path group))
@@ -6575,7 +6632,15 @@
     (lambda (path)
       (let* ((normalized (normalize-file-input path))
              (existing (buffer-known? normalized)))
-        (visit normalized (if existing #f group))))))
+        (if (file-too-big? normalized)
+            ;; the reader is here, so the reader can answer
+            (y-or-n-p
+              (string-append (cadr (path-split normalized)) " is "
+                             (cadr (file-stat normalized))
+                             ". Open it for this session only?")
+              (lambda (yes)
+                (when yes (visit-anyway normalized (if existing #f group)))))
+            (visit normalized (if existing #f group)))))))
 
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda ()

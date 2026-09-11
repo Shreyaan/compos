@@ -358,6 +358,8 @@ defmodule Compos.Core.SchemeAPI do
       "buffer-size" => "(buffer-size BUF) — return the buffer's size in bytes.",
       "buffer-modified?" =>
         "(buffer-modified? BUF) — return #t if the buffer changed after its last save.",
+      "buffer-persistent?" =>
+        "(buffer-persistent? BUF) — return #t if the buffer writes a checkpoint and comes back at the next boot.",
       "buffer-path" => "(buffer-path BUF) — return the buffer's file path, or #f if it has none.",
       "buffer-append!" =>
         "(buffer-append! BUF TEXT) — append TEXT to the buffer's end; ignores read-only.",
@@ -489,7 +491,7 @@ defmodule Compos.Core.SchemeAPI do
         "(remote-write HOST PATH TEXT [CALLBACK]) — write TEXT to a remote file; return #t or (error MSG). With CALLBACK, run in a Task and hand it the value.",
       "buffer-mark-saved!" => "(buffer-mark-saved! BUF) — clear the buffer's modified flag.",
       "find-file" =>
-        "(find-file PATH) — open the file PATH in a buffer and return the buffer name.",
+        "(find-file PATH [PERSISTENT?]) — open the file PATH in a buffer and return the buffer name. PERSISTENT? #f opens it for this session only: no checkpoint, and no restore at the next boot.",
       "list-dir" =>
         "(list-dir DIR) — return sorted entry names; directories carry a trailing slash.",
       "directory-entries" =>
@@ -957,6 +959,7 @@ defmodule Compos.Core.SchemeAPI do
       "buffer-text" => fn [name] -> Buffer.text(name) end,
       "buffer-size" => fn [name] -> Buffer.byte_size(name) end,
       "buffer-modified?" => fn [name] -> Buffer.modified?(name) end,
+      "buffer-persistent?" => fn [name] -> Buffer.persistent?(name) end,
       "buffer-path" => fn [name] -> Buffer.path(name) || false end,
       # named buffer ops are programmatic (:editor source) — they bypass
       # read-only, like Emacs' inhibit-read-only
@@ -1220,11 +1223,14 @@ defmodule Compos.Core.SchemeAPI do
         Buffer.mark_saved(name)
         :void
       end,
-      "find-file" => fn [path] ->
-        case Core.open_file(path) do
-          {:ok, name} -> name
-          {:error, :already_exists} -> Path.expand(path)
-        end
+      "find-file" => fn
+        [path] ->
+          find_file(path, [])
+
+        # A second argument of #f opens the file for this session only.
+        # Scheme decides that: see large-file-warning-threshold.
+        [path, persistent?] ->
+          find_file(path, persistent: persistent? != false)
       end,
       # directory listing: names only, directories marked with trailing "/"
       "list-dir" => fn [dir] ->
@@ -3039,6 +3045,13 @@ defmodule Compos.Core.SchemeAPI do
   end
 
   defp transient_detail(_), do: nil
+
+  defp find_file(path, opts) do
+    case Core.open_file(path, opts) do
+      {:ok, name} -> name
+      {:error, :already_exists} -> Path.expand(path)
+    end
+  end
 
   # the desktop's tuple spec for a window tree — what restore_tree accepts
   defp tree_buffers({:leaf, b, _, _, _, _, _}), do: [b]
