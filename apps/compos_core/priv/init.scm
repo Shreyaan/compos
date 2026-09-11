@@ -55,6 +55,8 @@
 (load-bundled-package "ibuffer.scm")
 ;; the chats table is the ibuffer template over the chats: it loads after it
 (load-bundled-package "agent-fleet.scm")
+;; the spawn edges are the chats table's other view: it loads after it
+(load-bundled-package "subagents.scm")
 (load-bundled-package "jj.scm")
 (load-bundled-package "keys.scm")
 (load-bundled-package "layouts.scm")
