@@ -349,15 +349,7 @@
                          "chat hidden; dismissing after the current run"
                          "chat dismissed")))))))
 
-(define (chat-dismiss--finish! state)
-  (let ((buf (car state))
-        (slug (cadr state)))
-    (if (equal? (agent-status slug) 'idle)
-        (begin
-          (llm-session-close! slug)
-          (message "chat dismissed after final instruction"))
-        (debounce! (string-append "chat-dismiss:" slug) 250
-          'chat-dismiss--finish! state))))
+
 
 (define-command "chat-dismiss"
   "Hide this chat, send its input as a final instruction, and close it when answered"
