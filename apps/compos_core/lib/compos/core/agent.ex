@@ -1037,6 +1037,7 @@ defmodule Compos.Core.Agent do
             # the agent's own lane: rendering serializes with this agent's
             # other Scheme and never queues a keystroke behind it
             Session.apply_callback(handler, [slug, batch], nil, lane(slug))
+            notify_turn_end(slug, batch)
           after
             GenServer.cast(me, :batch_done)
           end
@@ -1044,6 +1045,32 @@ defmodule Compos.Core.Agent do
 
         %{state | events: [], in_flight: true}
     end
+  end
+
+  # The turn-end fan-out. The batch above belongs to the transcript: it
+  # renders on this agent's own lane and lands the assistant's turn in the
+  # record. This second dispatch is for everybody ELSE — a parent chat
+  # waiting on a subagent, a fleet view — so it fires AFTER that batch has
+  # run, and on the :ui lane, because such a listener reads a FINISHED
+  # transcript and touches buffers that are not this agent's.
+  #
+  # It carries the slug and the stop reason; Scheme decides what counts as
+  # a normal end and what counts as an error.
+  defp notify_turn_end(slug, batch) do
+    handler =
+      case :ets.whereis(@escaped) != :undefined && :ets.lookup(@escaped, {:agent_turn_end}) do
+        [{_, callback}] -> callback
+        _ -> nil
+      end
+
+    if handler do
+      for event <- batch, Backend.event_type(event) == "turn-end" do
+        stop = Backend.plist_get(event, "stop-reason") || "end_turn"
+        Session.apply_callback(handler, [slug, to_string(stop)], nil, :ui)
+      end
+    end
+
+    :ok
   end
 
   # adjacent chunks melt into one append

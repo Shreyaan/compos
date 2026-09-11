@@ -1142,6 +1142,8 @@ defmodule Compos.Core.Session do
         "(agent-steer! SLUG) — send the oldest queued message into the running turn; return #t when sent.",
       "agent-on-event!" =>
         "(agent-on-event! HANDLER) — set the global agent event handler: (HANDLER SLUG EVENTS).",
+      "agent-on-turn-end!" =>
+        "(agent-on-turn-end! HANDLER) — set the turn-end handler: (HANDLER SLUG STOP-REASON), called on the :ui lane after the turn has rendered.",
       "agent-context-fn!" =>
         "(agent-context-fn! HANDLER) — set the direct lane's context provider for each turn.",
       "agent-record-fn!" =>
@@ -2233,6 +2235,14 @@ defmodule Compos.Core.Session do
       # It escapes into the Agent GenServers as an opaque fun — root it.
       "agent-on-event!" => fn [handler] ->
         :ets.insert(@escaped, {{:agent_handler}, handler})
+        :void
+      end,
+      # the turn-end fan-out: (lambda (slug stop-reason) ...). The Agent
+      # dispatches it once per completed turn, AFTER the batch carrying that
+      # turn-end has rendered, and on the :ui lane — a listener reads a
+      # finished transcript and touches buffers that are not the agent's.
+      "agent-on-turn-end!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_turn_end}, handler})
         :void
       end,
       # the direct lane's context provider: (lambda (slug display-text) ...)

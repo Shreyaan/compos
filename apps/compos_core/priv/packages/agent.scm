@@ -410,6 +410,51 @@
       ;; needs you, and the list settles once the burst stops
       (agents-note-event! slug))))
 
+;;; --- the turn-end hook --------------------------------------------------------
+;;;
+;;; agent-on-turn-end! is a single slot, the way lsp-on-event! is: this
+;;; package owns it and fans out to named listeners. The Agent dispatches it
+;;; once per completed turn, after the batch carrying that turn-end has
+;;; rendered, on the :ui lane. A listener therefore reads a FINISHED
+;;; transcript and may touch buffers that are not this agent's — which is
+;;; the whole point: the chat that WAITS on a turn is somebody else.
+;;;
+;;; A listener takes (SLUG STOP-REASON OK?). OK? says the turn ended
+;;; normally; a cancel, an error and a dead backend are all not normal.
+
+(define *agent-turn-end-handlers* '())   ; ((name fn) ...), newest first
+
+(define (on-agent-turn-end! name fn)
+  (set! *agent-turn-end-handlers*
+    (cons (list name fn)
+          (remove (lambda (e) (equal? (car e) name)) *agent-turn-end-handlers*)))
+  name)
+
+(define (agent-turn-end-normal? stop-reason)
+  (if (member stop-reason '("end_turn" "max_tokens" "completed" "stop")) #t #f))
+
+(agent-on-turn-end!
+  (lambda (slug stop-reason)
+    (let ((ok? (agent-turn-end-normal? stop-reason)))
+      ;; one bad listener must not eat the ones behind it, for the same
+      ;; reason one bad event must not eat its batch
+      (for-each
+        (lambda (e)
+          (unless (ignore-errors (lambda () ((cadr e) slug stop-reason ok?) #t))
+            (message (string-append "turn-end listener " (car e)
+                                    " failed on " slug))))
+        *agent-turn-end-handlers*))))
+
+(category! 'chat)
+(domain! 'chat)
+(effects! '(write))
+(public! 'on-agent-turn-end!
+  "(on-agent-turn-end! NAME FN) — add a named listener called (FN SLUG STOP-REASON OK?) when a chat's turn ends; the same NAME replaces")
+(public! 'agent-turn-end-normal?
+  "(agent-turn-end-normal? STOP-REASON) — #t when that stop reason is an ordinary end of turn, not a cancel or an error")
+(catalog-meta! 'function "on-agent-turn-end!" 'domain 'chat 'effects '(write))
+(catalog-meta! 'function "agent-turn-end-normal?" 'domain 'chat 'effects '(pure))
+
 ;; Branching questions are not permission requests. Their answer goes back
 ;; to the model as the result of its `ask` tool call.
 (define (agent-answer-question! slug id answer)
