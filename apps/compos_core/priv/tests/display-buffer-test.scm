@@ -60,7 +60,8 @@
         (check-equal! (display-buffer-actions-for "*zz-db-none*")
                       '(reuse-window pop-up-window use-some-window same-window)
                       "the fallback")
-        (check-equal! (car (display-buffer-actions-for "*Messages*")) 'popup
+        (add-display-rule! "*zz-db-ruled*" 'same-window)
+        (check-equal! (car (display-buffer-actions-for "*zz-db-ruled*")) 'same-window
                       "a name rule first")
         (check-equal! (car (display-buffer-actions-for "*zz-db-none*" '(category preview)))
                       'reuse-window "the preview category first")
@@ -69,7 +70,7 @@
                       "with no rule the base action comes first")
         (check-equal! (cadr (display-buffer-actions-for "*zz-db-none*")) 'reuse-window
                       "and the fallback after it")
-        (check-equal! (car (display-buffer-actions-for "*Messages*")) 'popup
+        (check-equal! (car (display-buffer-actions-for "*zz-db-ruled*")) 'same-window
                       "a rule still comes before the base action")))))
 
 (deftest 'pop-up-window-splits-beside-and-selects-nothing
@@ -220,20 +221,20 @@
             (check-equal! (window-buffer me) "*scratch*" "this one still shows scratch")
             (check-equal! (active-window) me "and is still selected")))))))
 
-(deftest 'a-name-rule-for-the-popup-still-wins
-  "the side window rule is a rule like any other, first in the chain"
+(deftest 'an-old-popup-rule-takes-an-ordinary-window
+  "nothing floats: a rule written for the popup goes through the window chain"
   (lambda ()
     (t--db-with t--db-wide
       (lambda ()
         (buffer-create "*zz-db-side*")
         (add-display-rule! "*zz-db-side*" 'popup)
-        (display-buffer "*zz-db-side*")
-        (check-true! (popup-open?) "the popup opened")
-        (check-equal! (popup-buffer) "*zz-db-side*" "with the buffer")
-        (popup-close!)))))
+        (let ((win (display-buffer "*zz-db-side*")))
+          (check-false! (popup-open?) "no popup opened")
+          (check-equal! (window-buffer win) "*zz-db-side*"
+                        "an ordinary window shows it"))))))
 
 (deftest 'a-peek-follows-the-preview-rule
-  "by the stock rule a peek goes through the window chain; a rule of your own sends it to the popup"
+  "a peek goes through the window chain"
   (lambda ()
     (t--db-with t--db-wide
       (lambda ()
@@ -254,11 +255,4 @@
             (check-equal! (active-window) me "point still stays"))
           (peek-dismiss!)
           (check-equal! (length (window-list)) 1 "dismissed: the window the peek made is gone")
-          (check-false! (buffer-exists? b) "and the peek with it")
-          ;; a rule of your own puts the look back in the popup
-          (add-display-rule! '(category preview) 'popup)
-          (peek-file! a)
-          (check-true! (popup-open?) "the rule: the popup")
-          (check-equal! (popup-buffer) a "showing the file")
-          (peek-dismiss!)
-          (check-false! (popup-open?) "dismissed"))))))
+          (check-false! (buffer-exists? b) "and the peek with it"))))))

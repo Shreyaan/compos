@@ -29,15 +29,6 @@
     (run-command "delete-other-windows")
     out))
 
-;; The stock rule sends no look to the popup. A rule of your own still
-;; can, and the tests of that path hold the rule while they run.
-(define (t--peek-in-popup thunk)
-  (let ((saved *display-buffer-alist*))
-    (add-display-rule! '(category preview) 'popup)
-    (let ((out (thunk)))
-      (set! *display-buffer-alist* saved)
-      out)))
-
 (deftest 'a-peek-shows-in-another-window-and-the-selected-window-stays
   "the file is beside the reader, marked, read-only, and the reader did not move"
   (lambda ()
@@ -390,50 +381,6 @@
           (popup-close!)
           (buffer-kill! "*zz-plain-popup*"))))))
 
-(deftest 'the-peek-floats-on-the-side-away-from-the-listing
-  "with a rule that sends a look to the popup: asked from the right it floats left; from the left, right"
-  (lambda ()
-    (t--peek-with
-      (lambda ()
-        (t--peek-in-popup
-          (lambda ()
-            (let ((a (t--peek-file "a.txt" "alpha\n"))
-                  (left (active-window)))
-              (split-window! 'h 0.5)
-              (other-window!)
-              (peek-file! a)
-              (check-equal! (buffer-local a 'window-class) "popup popup-left"
-                            "from the right window the popup floats left")
-              (popup-close!)
-              (select-window! left)
-              (peek-file! a)
-              (check-equal! (buffer-local a 'window-class) "popup popup-right"
-                            "from the left window it floats right"))))))))
-
-(deftest 'a-left-peek-leaves-the-listing-where-it-was
-  "a popup look floats; the window it covers keeps its id and its place"
-  (lambda ()
-    (t--peek-with
-      (lambda ()
-        (t--peek-in-popup
-          (lambda ()
-            (let ((a (t--peek-file "a.txt" "alpha\n")))
-              (split-window! 'h 0.5)
-              (other-window!)
-              (let* ((me (active-window))
-                     (before (assoc me (window-rects))))
-                (peek-file! a)
-                (check-equal! (buffer-local a 'window-class) "popup popup-left" "it floats left")
-                (check-equal! (active-window) me "the reader's window is the same window")
-                (check-equal! (window-buffer me) "*scratch*" "and still shows the listing")
-                (check-equal! (nth 2 (assoc me (window-rects))) (nth 2 before)
-                              "and starts where it started")
-                ;; a second peek keeps the side, wherever it is asked from
-                (let ((b (t--peek-file "b.txt" "beta\n")))
-                  (peek-file! b)
-                  (check-equal! (buffer-local b 'window-class) "popup popup-left"
-                                "the side is chosen once"))))))))))
-
 (deftest 'a-rested-look-fires-only-where-it-was-scheduled
   "the reader moved on: the look does nothing"
   (lambda ()
@@ -449,28 +396,6 @@
           (dired--peek-now! (list a #f me "*scratch*"))
           (check-true! (peek-buffer? a) "back where it was scheduled, the look fires"))))))
 
-(deftest 'an-opened-peek-over-a-waiting-popup-stops-floating
-  "messages under a popup look: open the look, and it is a plain window while the popup shows messages"
-  (lambda ()
-    (t--peek-with
-      (lambda ()
-        (t--peek-in-popup
-          (lambda ()
-            (let ((a (t--peek-file "a.txt" "alpha\n")))
-              (buffer-create "*zz-under*")
-              (popup-show "*zz-under*")
-              (select-window! (car (car (window-list))))
-              (switch-to-buffer! "*scratch*")
-              (peek-file! a)
-              (check-equal! (popup-stack) (list "*zz-under*") "the popup buffer waits under the peek")
-              (peek-open! a (lambda () a))
-              (check-equal! (buffer-local a 'window-class) #f "opened, the buffer does not float")
-              (check-equal! (popup-buffer) "*zz-under*" "the popup shows what waited")
-              (check-equal! (length (filter (lambda (w) (popup--class? (cadr w))) (window-list))) 1
-                            "one floating window, not more")
-              (check-equal! (current-buffer) a "the reader is in the opened buffer")
-              (popup-close!)
-              (buffer-kill! "*zz-under*"))))))))
 (deftest 'a-peek-takes-no-focus
   "showing and replacing a peek moves the selection nowhere; other-window passes the peek by"
   (lambda ()

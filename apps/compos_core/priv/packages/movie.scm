@@ -229,7 +229,7 @@
   (buffer-create *movie-stream-buffer*)
   (buffer-set-local! *movie-stream-buffer* 'mode-name "movie-stream-mode")
   (list-mode-init! *movie-stream-buffer* "movie-stream-mode")
-  (display-buffer-popup! *movie-stream-buffer* 'right 0.34)
+  (display-buffer-other-window! *movie-stream-buffer*)
   (movie-select-stream-row! index))
 
 (define-command "buffer-movie" "Play this buffer's Provenance as a frame-wide movie"

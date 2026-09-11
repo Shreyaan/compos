@@ -894,8 +894,6 @@
 (mode-doc! "bookmark-bmenu-mode"
   "A persistent bookmark table with filtering, marks, annotations, and batch deletion.")
 
-(add-display-rule! *bookmark-list-buffer* 'popup)
-(add-display-rule! *bookmark-annotation-buffer* 'popup '(side bottom size 0.32))
 
 (define-command "list-bookmarks" "Show the bookmark management table"
   (lambda () (list-mode-show! "bookmark-bmenu-mode")))

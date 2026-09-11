@@ -18,7 +18,6 @@
 (effects! '(write external))
 
 (define *worktrees-buffer* "*worktrees*")
-(add-display-rule! *worktrees-buffer* 'popup)
 
 ;;; --- mechanism: git worktree via the shell -----------------------------------
 

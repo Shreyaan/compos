@@ -374,7 +374,6 @@
       (lambda () #f))))
 
 ;; the report never covers the chat that asked for it
-(add-display-rule! "*permissions*" 'popup)
 
 (define-command "llm-config-permission-report"
   "Show everything this session's permission policy does"

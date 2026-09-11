@@ -601,7 +601,6 @@
 
 ;; a report is context, not a destination: it must never cover the chat
 ;; that asked for it (display-buffer honors this rule)
-(add-display-rule! "*chat tools*" 'popup)
 
 (define-command "chat-tool-list" "List the tools this chat's model holds"
   (lambda ()

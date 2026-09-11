@@ -23,8 +23,6 @@
 ;;; chrome extension. One rows fn, one act fn, two surfaces.
 
 (define *switch-buffer* "*switch*")
-;; a modal in the center of the screen — the palette's geometry, as a window
-(add-display-rule! *switch-buffer* 'popup (list 'side 'center 'size 0.5))
 
 ;; the seam's pick fn from the last rows fetch — a closure, so it lives
 ;; here and not in a buffer-local
@@ -379,9 +377,9 @@
             ((buffer-known? "*scratch*") (window-preview-buffer! "*scratch*" w))))))
 
 ;; close the popup and settle dormancy; KEEP stays awake (#f keeps none)
-;; a pick from outside the group floats in the popup (docs/groups.md,
+;; a pick from outside the group takes another window (docs/groups.md,
 ;; sealed groups): the home window takes back what it showed, and the
-;; switch that follows finds the buffer off screen and floats it
+;; switch that follows finds the buffer off screen
 (define (switch-close! buf keep)
   (switch-sleep-woken! buf keep)
   (when (and keep (display-foreign? keep)) (switch-restore-home! buf))

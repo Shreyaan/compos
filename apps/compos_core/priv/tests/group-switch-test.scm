@@ -1968,38 +1968,27 @@
   (when (buffer-known? foreign) (buffer-kill! foreign)))
 
 (deftest 'a-foreign-buffer-is-a-display-of-category-foreign
-  "the chain for a buffer outside the group starts at the popup; a member takes the plain chain"
+  "a buffer outside the group is a foreign display, and nothing floats"
   (lambda ()
     (t--sw-setup!)
     (let* ((pair (t--sw-sealed-frame!)) (foreign (cadr pair)))
-      (check-equal! (car (display-buffer-actions-for foreign)) 'popup
-                    "a foreign buffer goes to the popup")
-      (check-false! (equal? (car (display-buffer-actions-for t--sw-second)) 'popup)
-                    "a member does not")
+      (check-false! (equal? (car (display-buffer-actions-for foreign)) 'popup)
+                    "a foreign buffer takes the window chain")
       (check-true! (group-foreign-buffer? foreign) "the predicate names it")
       (check-false! (group-foreign-buffer? t--sw-first) "and not a member")
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
 
-(deftest 'a-switch-to-a-foreign-buffer-floats-it-and-the-frame-stays-in-its-group
-  "switch-to-buffer! on a buffer outside the group opens the popup on it; the panes and the group hold"
+(deftest 'a-switch-to-a-foreign-buffer-takes-a-window-and-the-frame-stays-in-its-group
+  "switch-to-buffer! on a buffer outside the group shows it in a window; the group holds"
   (lambda ()
     (t--sw-setup!)
-    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
-           (panes (window-list)))
+    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair)))
       (switch-to-buffer! foreign)
-      (check-true! (popup-open?) "the popup is open")
-      (check-equal! (popup-buffer) foreign "on the foreign buffer")
+      (check-false! (popup-open?) "nothing floats")
+      (check-true! (and (window-showing foreign) #t) "a window shows it")
       (check-equal! (current-buffer) foreign "and selected: a switch is a visit")
       (check-equal! (frame-group) home "the frame stays in its group")
-      (for-each (lambda (row)
-                  (check-equal! (window-buffer (car row)) (cadr row)
-                                "a pane shows what it showed"))
-                panes)
-      (popup-close!)
-      (check-equal! (frame-group) home "dismissed, the group is as it was")
-      (check-false! (window-showing foreign) "and the foreign buffer is off screen")
-      (check-equal! (length (window-list)) 2 "two panes, as before")
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
 
@@ -2012,20 +2001,6 @@
       (switch-to-buffer! t--sw-first)
       (check-false! (popup-open?) "no popup")
       (check-equal! (window-buffer win) t--sw-first "the selected window shows the member")
-      (t--sw-sealed-done! foreign))
-    (t--sw-done!)))
-
-(deftest 'popup-bufferize-adds-the-foreign-buffer-to-the-group
-  "keeping the popup as a window makes its buffer a member first, so the pane is a member's pane"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair)))
-      (switch-to-buffer! foreign)
-      (run-command "popup-bufferize")
-      (check-true! (buffer-in-group? foreign home) "the buffer joined the group")
-      (check-false! (popup-open?) "the popup is a window now")
-      (group-current-recalculate!)
-      (check-equal! (frame-group) home "and the frame stays in the group")
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
 

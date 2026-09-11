@@ -19,11 +19,8 @@
 ;;;   M-x describe-buffer-locals — this buffer's own variables and their values
 
 (define *help-buffer* "*Help*")
-;; A help page is a popup: it floats over the right of the frame instead
-;; of taking the work's space. `<down>` and `C-v` scroll the page when it
-;; has focus, `M-<down>` scrolls it from the other window, and `C-M-\``
-;; turns it into an ordinary window when you want to keep it.
-(add-display-rule! *help-buffer* 'popup)
+;; A help page is an ordinary window. `<down>` and `C-v` scroll the page
+;; when it has focus, and `M-<down>` scrolls it from the other window.
 
 ;;; --- the mechanism -------------------------------------------------------------
 

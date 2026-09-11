@@ -312,7 +312,6 @@
             ("g" "lsp-diag-refresh")
             ("q" "quit-window"))))
 
-(add-display-rule! *lsp-diag-buffer* 'popup '(side bottom size 0.32))
 
 (define-command "lsp-diag-visit" "Visit the diagnostic on this row"
   (lambda ()
@@ -456,7 +455,6 @@
     'keys '(("RET" "lsp-ref-visit")
             ("q" "quit-window"))))
 
-(add-display-rule! *lsp-ref-buffer* 'popup '(side bottom size 0.32))
 
 (define-command "lsp-ref-visit" "Visit the reference on this row"
   (lambda ()

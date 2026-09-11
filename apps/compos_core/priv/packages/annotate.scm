@@ -732,9 +732,6 @@
 
 (mode-doc! "annotations-mode" *annotations-doc*)
 
-;; the design's bottom sheet: the list floats against the bottom edge
-(add-display-rule! *ann-buffer* 'popup '(side bottom size 0.32))
-
 (define-command "annotate-list" "Show this buffer's annotations as a list"
   (lambda ()
     (let ((source (current-buffer)))

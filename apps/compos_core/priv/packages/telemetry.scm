@@ -442,7 +442,6 @@
 ;;; the bottom edge. One chord opens it with current rows and closes it
 ;;; again.
 
-(add-display-rule! "*Telemetry*" 'popup '(side right))
 
 (define (telemetry-popup-open?)
   (and (popup-open?) (equal? (popup-buffer) *telemetry-buffer*)))

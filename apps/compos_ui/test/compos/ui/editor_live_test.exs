@@ -685,7 +685,7 @@ defmodule Compos.Ui.EditorLiveTest do
       (begin
         (tile-windows! 'columns (list "#{base}" "#{other}"))
         (select-window! (window-showing "#{base}"))
-        (display-buffer-popup! "#{popup}" 'right (/ 1 3)))
+        (popup-show-on "#{popup}" 'right (/ 1 3)))
       """)
 
     assert {:ok, "#f"} =

@@ -1,10 +1,11 @@
-;;; window-config-test.scm --- the frame's group follows its windows, not its popups.
+;;; window-config-test.scm --- the frame's group follows its windows, not
+;;; the shaped surfaces that float over them.
 
 (domain! 'testing)
 (effects! '(read write display))
 
-(deftest 'a-popup-does-not-change-the-frame-group
-  "a listing floating over the group's panes is a visit, not a place"
+(deftest 'a-floating-surface-does-not-change-the-frame-group
+  "a prompt floating over the group's panes is a visit, not a place"
   (lambda ()
     (let ((id (group-record-create! "zz-popup-group"))
           (a "*zz-popup-member*")
@@ -15,8 +16,8 @@
       (delete-other-windows!)
       (switch-to-buffer! a)
       (check-equal! (frame-group) id "the frame stands in the member's group")
-      (display-buffer-popup! w)
-      (check-equal! (frame-group) id "the popup changes nothing")
+      (popup-show w)
+      (check-equal! (frame-group) id "the floating surface changes nothing")
       (check-equal! (group-current-recalculate!) id "and a recalculation agrees")
       (popup-close!)
       (check-equal! (frame-group) id "closing it changes nothing")

@@ -53,7 +53,7 @@
   'group 'windows 'type 'choice)
 
 (defcustom '*display-buffer-base-action* '()
-  "Display actions tried after the rule for a buffer and before the fallback: a list of popup, pop-up-window, reuse-window, use-some-window, same-window."
+  "Display actions tried after the rule for a buffer and before the fallback: a list of pop-up-window, reuse-window, use-some-window, same-window."
   'group 'windows 'type 'list)
 
 (defcustom '*display-buffer-fallback-action*

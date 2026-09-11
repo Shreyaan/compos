@@ -4525,7 +4525,7 @@
          buf)
         ((display-foreign? buf)
          (pop-to-buffer buf)
-         (message (string-append buf " is not in this group. It floats in the popup."))
+         (message (string-append buf " is not in this group."))
          buf)
         ((and (not *layout-busy*) (layout-target)
               (not (popup--class? (window-buffer (active-window))))
@@ -6880,18 +6880,16 @@
 (define popup-default-side (lambda () 'right))
 
 (define *display-buffer-alist*
-  (list (list "*shell*" 'popup '())
-        (list "*opencode" 'popup '())
-        (list "*Messages*" 'popup '())
-        (list "*llm*" 'popup '())
-        ;; a preview takes another window, never the popup: a popup moves
-        ;; the layout and hides the work under it, and buffer replacement
-        ;; puts the window back. A buffer from outside the frame's group
-        ;; still floats: the group's panes stay sealed (docs/groups.md).
+  ;; nothing floats. No stock rule names the popup, so a listing, the
+  ;; messages, a shell take the window chain like any other buffer
+  (list
+        ;; a preview takes another window, and buffer replacement puts
+        ;; the window back. A buffer from outside the frame's group
+        ;; takes a window the same way.
         ;; Last, so a rule for a name wins, and a rule of your own
         ;; (add-display-rule! conses in front) wins too
         (list '(category preview) '(reuse-window use-some-window pop-up-window) '())
-        (list '(category foreign) 'popup '())))
+        (list '(category foreign) '(reuse-window use-some-window pop-up-window) '())))
 
 ;; A buffer from outside the frame's group. groups.scm answers; with no
 ;; groups, no buffer is foreign. A display of a foreign buffer that names
@@ -7345,13 +7343,11 @@
         (popup-default-side))
     (display-param name 'size)))
 
-;; Force any buffer into the popup without adding a durable display rule.
-;; Agents use this when a result is temporary. The popup toggle dismisses it.
+;; Nothing floats any more. The old popup door is kept so an older
+;; caller still works, and it shows the buffer in an ordinary window.
+;; SIDE and SIZE say nothing.
 (define (display-buffer-popup! name &optional side size)
-  (group-layout-save-before-cover! name)
-  (popup-show-on name
-    (or side (popup-default-side))
-    (or size (plist-get *display-buffer-defaults* 'size))))
+  (display-buffer name))
 
 ;;; --- display-buffer actions (Emacs window.el) ---------------------------------
 ;;; display-buffer shows NAME somewhere and returns the window. It selects
@@ -7693,8 +7689,11 @@
   (window-state-changed!)
   win)
 
+;; the popup action is kept for a rule written before popups went away,
+;; and it takes the ordinary window chain
 (define-display-action! 'popup
-  (lambda (name alist) (popup-show name)))
+  (lambda (name alist)
+    (display-buffer-run-actions name alist *display-buffer-fallback-action*)))
 
 ;; Where a shaped surface goes: the dock when it is a minibuffer, the
 ;; popup window when it is a panel or a modal. A buffer says which with
@@ -7913,14 +7912,11 @@
 ;; 'popup)) puts it back in the popup, and the popup path below answers.
 (define (peek-show! name)
   (let* ((me (active-window))
-         (actions (display-buffer-actions-for name '(category preview)))
          ;; a look leaves the MRU ring where it was: the reader looked,
-         ;; the reader did not switch
+         ;; the reader did not switch. A peek is always a window beside
+         ;; the reader: nothing floats.
          (win (with-display-preview
-                (lambda ()
-                  (if (equal? (car actions) 'popup)
-                      (peek-show-in-popup! name me)
-                      (peek-show-in-window! name me))))))
+                (lambda () (peek-show-in-window! name me)))))
     (set-frame-local! 'peek-window win)
     ;; what the look put on screen, by name: a buffer that existed
     ;; before wears no mode, and q must still take it away
@@ -8719,10 +8715,10 @@
             (popup-show (popup-buffer))
             (message "No popup buffer yet")))))
 
-(define-command "popup-buffer" "Show any buffer in the floating popup"
+(define-command "popup-buffer" "Show any buffer in another window"
   (lambda ()
-    (minibuffer-read "Popup buffer: " (buffer-candidates)
-      (lambda (name) (display-buffer-popup! name)))))
+    (minibuffer-read "Show buffer: " (buffer-candidates)
+      (lambda (name) (display-buffer name)))))
 (catalog-meta! 'command "popup-buffer" 'domain 'windows 'effects '(write display))
 
 ;; popper-toggle-type: the popup you want to keep stops floating and
@@ -12494,10 +12490,7 @@
 
 ;; C-c q : ask from anywhere. In a grouped buffer (its chat included) the
 ;; prompt becomes a turn in the group's one chat; ungrouped, it goes to
-;; the global *chat* popup — follow-ups with C-c RET, C-` dismisses.
-(add-display-rule! "*chat*" 'popup)
-(add-display-rule! "*llm:" 'popup)
-(add-display-rule! "*llm-costs*" 'popup)
+;; the global *chat* buffer -- follow-ups with C-c RET.
 
 ;;; --- llm cost inspection -----------------------------------------------------
 ;;; Every request is priced (models.dev catalog, cached in ~/.compos/llmdb.json,
@@ -13959,7 +13952,7 @@
 (effects! '(read))
 (public! 'current-buffer "Name of the buffer point is in")
 (effects! '(write display))
-(public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window; a buffer outside the frame's group floats in the popup (category foreign)")
+(public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window; a buffer outside the frame's group takes another window (category foreign)")
 (public! 'switch-to-buffer-here! "(switch-to-buffer-here! NAME) — show in the active window whatever the group: the mechanism a layout, a swap, or a restore uses")
 (public! 'display-foreign? "(display-foreign? NAME) — #t when a pane on NAME would take the frame out of its group; groups.scm answers")
 (public! 'visit "(visit PATH [GROUP]) — open a file; GROUP joins it to that context; /ssh:HOST:/PATH opens over ssh")
@@ -14047,7 +14040,7 @@
 (public! 'window-quit-restore!
   "(window-quit-restore! WIN) — undo what a display did to WIN: delete the window it made, or put back the buffer it replaced")
 (public! 'display-buffer-popup!
-  "(display-buffer-popup! NAME [SIDE SIZE]) — force NAME into a temporary one-third popup; compact frames use the bottom")
+  "(display-buffer-popup! NAME [SIDE SIZE]) — kept for an older caller: shows NAME in an ordinary window, because nothing floats. SIDE and SIZE say nothing")
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window: the display chain with the selected window kept out of it")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
 (public! 'tile-windows!
@@ -14065,7 +14058,7 @@
     "tile-windows!" "tile-visible-windows!" "window-eat!"))
 (effects! '(write))
 (public! 'add-display-rule!
-  "(add-display-rule! PATTERN ACTION [PARAMS]) — set display policy without showing a buffer. PATTERN is a name substring or (category KIND); ACTION is one action name or a list: popup, pop-up-window, reuse-window, use-some-window, same-window")
+  "(add-display-rule! PATTERN ACTION [PARAMS]) — set display policy without showing a buffer. PATTERN is a name substring or (category KIND); ACTION is one action name or a list: pop-up-window, reuse-window, use-some-window, same-window")
 (public! 'define-mode-layout!
   "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — set a mode layout without applying it")
 (public! 'define-mode-headline!
