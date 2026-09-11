@@ -1891,7 +1891,11 @@ when a message has no text/plain part." 'group 'notmuch)
     (nm--html-escape subject)
     "</title><style>mail-thread,mail-message,mail-body,mail-attachments,mail-attachment{display:block}"
     "mail-message>header{border-top:1px solid #d0c8b8;margin-top:14px;padding:6px 0;font:12px system-ui;color:#666}"
-    "mail-from{font-weight:bold}mail-subject{display:block;font:600 15px system-ui}</style></head>"
+    "mail-from{font-weight:bold}"
+    ;; the title of the thread, and it reads as one: bold, full contrast,
+    ;; and clear of the first message's header rule
+    "mail-subject{display:block;font:700 21px/1.3 system-ui;"
+    "color:var(--default-fg,#141310);margin:0 0 6px}</style></head>"
     "<body style=\"margin:14px;font-family:system-ui\"><mail-thread>"
     "<mail-subject>" (nm--html-escape subject) "</mail-subject>"
     (fold (lambda (acc m) (string-append acc (nm--msg-html m))) "" msgs)

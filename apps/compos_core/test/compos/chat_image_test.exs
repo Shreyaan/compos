@@ -24,7 +24,7 @@ defmodule Compos.ChatImageTest do
   @moduledoc """
   A pasted image is a file, a block, and a content block on the wire: the
   bytes land in <compos-home>/attachments, the transcript names the file
-  above the input, and the next message carries both the path (in the text)
+  above the input, and the next message carries both the path (in its text)
   and the picture itself (as an ACP image block).
   """
 
@@ -34,6 +34,7 @@ defmodule Compos.ChatImageTest do
 
   # a 1x1 transparent PNG
   @png "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+  @buf "*zz-ichat*"
 
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
@@ -57,6 +58,8 @@ defmodule Compos.ChatImageTest do
     inject(agent, %{jsonrpc: "2.0", id: sid, result: %{sessionId: "s1"}})
   end
 
+  defp pending, do: Buffer.get_local(@buf, "chat-pending-images") || []
+
   setup do
     :persistent_term.put(:agent_test_pid, self())
     Application.put_env(:compos_core, :acp_transport, Compos.ChatImageTest.FakeTransport)
@@ -64,61 +67,57 @@ defmodule Compos.ChatImageTest do
     on_exit(fn ->
       Application.delete_env(:compos_core, :acp_transport)
       Enum.each(Agent.list(), &Agent.kill/1)
-      Compos.Core.kill_buffer("*zz-ichat*")
+      Compos.Core.kill_buffer(@buf)
     end)
 
     :ok
   end
 
   test "a pasted image becomes a file, a transcript block, and an image block on the wire" do
-    eval!(~s{(buffer-create "*zz-ichat*")})
-    slug = String.trim(eval!(~s{(chat-attach-agent! "*zz-ichat*" "claude-code")}), "\"")
+    eval!("(buffer-create " <> inspect(@buf) <> ")")
+    slug = String.trim(eval!("(chat-attach-agent! " <> inspect(@buf) <> " \"claude-code\")"), "\"")
 
     assert_receive {:transport_open, agent}, 2_000
     handshake(agent)
     wait_until(fn -> Agent.info(slug).status == :idle end)
 
-    # the paste itself, through the hook's own function
-    assert eval!(~s{(with-current-buffer "*zz-ichat*"
-                      (lambda () (chat-image-paste! "image" "#{@png}" "image/png")))}) == "#t"
+    # the paste itself, through the very function the paste hook calls
+    paste =
+      "(with-current-buffer " <>
+        inspect(@buf) <>
+        " (lambda () (chat-image-paste! \"image\" " <> inspect(@png) <> " \"image/png\")))"
 
-    [[mime, path]] = pending("*zz-ichat*")
-    assert mime == "image/png"
+    assert eval!(paste) == "#t"
+
+    assert [["image/png", path]] = pending()
     assert File.exists?(path)
     assert File.read!(path) == Base.decode64!(@png)
 
     # the transcript names it, above the input, as its own block
-    assert Buffer.text("*zz-ichat*") =~ "[image \#{Path.basename(path)}]"
+    assert Buffer.text(@buf) =~ "[image " <> Path.basename(path) <> "]"
 
-    assert Enum.any?(Buffer.get_local("*zz-ichat*", "agent-blocks") || [], fn
+    assert Enum.any?(Buffer.get_local(@buf, "agent-blocks") || [], fn
              [_, _, "image", p, m] -> p == path and m == "image/png"
              _ -> false
            end)
 
-    # ...and it rides with the next message, once
-    eval!(~s{(agent-send-msg! "\#{slug}" "what is this")})
+    # ...and it rides with the next message
+    eval!("(agent-send-msg! " <> inspect(slug) <> " \"what is this\")")
 
     assert_receive {:frame, %{"method" => "session/prompt", "params" => p}}, 2_000
     [text_block | rest] = p["prompt"]
 
     assert text_block["type"] == "text"
     assert text_block["text"] =~ "what is this"
-    # the path rides in the text too: a backend without image content can
-    # still open the file
+    # the path rides in the text as well: a lane that cannot take image
+    # content can still open the file
     assert text_block["text"] =~ path
 
     assert rest == [%{"type" => "image", "mimeType" => "image/png", "data" => @png}]
 
-    # the attachment is spent: the next message carries no image
-    assert pending("*zz-ichat*") == []
+    # the attachment is spent: it rides once and no further
+    assert pending() == []
 
     File.rm(path)
-  end
-
-  defp pending(buf) do
-    case Buffer.get_local(buf, "chat-pending-images") do
-      nil -> []
-      list -> list
-    end
   end
 end
