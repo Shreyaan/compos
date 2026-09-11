@@ -2214,8 +2214,6 @@
 (domain! 'groups)
 (effects! '(write display))
 
-
-
 ;;; --- Alt-Tab inside a group -----------------------------------------------
 ;;; A pane has a cycle kind, and for now a kind is a mode name. Name a mode
 ;;; and the pane walks that mode's buffers; name none and it walks every

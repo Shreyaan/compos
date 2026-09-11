@@ -4,8 +4,8 @@
 ;;; buffer that is not a chat, and a pane showing a chat walks the chats.
 ;;; The walk never leaves the group and never leaves the window.
 ;;;
-;;; No test presses a key: the binding is read from the map as data, and the
-;;; walk is driven by its command.
+;;; No test presses a key. The commands drive the walk, and no test names a
+;;; binding: a binding is a preference.
 
 (domain! 'testing)
 (effects! '(write))
