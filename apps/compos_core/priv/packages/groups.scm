@@ -2965,6 +2965,9 @@
               (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
               (when (boundp (quote workspace-chat-inherit!))
                 (workspace-chat-inherit! buf (group-name id)))
+              ;; last, so the named default wins over what the workspace hands down
+              (when (boundp (quote llm-default-bundle-apply!))
+                (llm-default-bundle-apply! buf))
               buf))
           (else #f))))
 
@@ -2987,6 +2990,9 @@
           (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
           (when (boundp (quote workspace-chat-inherit!))
             (workspace-chat-inherit! buf (group-name id)))
+          ;; last, so the named default wins over what the workspace hands down
+          (when (boundp (quote llm-default-bundle-apply!))
+            (llm-default-bundle-apply! buf))
           (switch-to-buffer-here! buf)
           (window-quit-restore-forget! (active-window))
           (end-of-buffer!)

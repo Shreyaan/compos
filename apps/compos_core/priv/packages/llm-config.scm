@@ -512,6 +512,66 @@
               (message (string-append "bundle " name " forgotten"))))
           (lambda () #f)))))
 
+;;; The bundle a new chat starts with. It is a setting like any other, so it
+;;; lands in custom.scm, survives a restart, and can be edited by hand. ""
+;;; means no default: a new chat keeps whatever it inherits.
+(defgroup 'llm "The language model a chat talks to.")
+
+(defcustom 'llm-default-bundle ""
+  "The saved bundle every new chat starts with. Empty means no default."
+  'group 'llm 'type 'string)
+
+(define (llm-default-bundle-record)
+  (and (string? llm-default-bundle)
+       (not (equal? llm-default-bundle ""))
+       (llm-bundle-named llm-default-bundle)))
+
+;;; A new chat has no agent session yet, so its locals are the whole setup:
+;;; the session reads them when it attaches on the first send. Going through
+;;; llm-bundle-apply! here would attach the connector at once, and every new
+;;; chat would start a process before the user had typed anything.
+(define (llm-default--seed! buf b)
+  (buffer-set-local! buf 'agent-connector (llm-bundle-connector b))
+  (let ((m (llm-bundle-model b)))
+    (buffer-set-local! buf 'agent-model (if (equal? m "default") #f m)))
+  (let ((e (llm-bundle-effort b)))
+    (buffer-set-local! buf 'agent-effort (if (equal? e "default") #f e)))
+  (let ((k (llm-bundle-permission b)))
+    (when (and k (boundp 'chat-permission-mode-set!))
+      (chat-permission-mode-set! buf (string->symbol k))))
+  (let ((p (llm-bundle-presets b)))
+    (when (and p (boundp 'chat-presets-set!))
+      (chat-presets-set! buf p)))
+  (let ((off (llm-bundle-prompt-disabled b)))
+    (when (and off (boundp 'chat-prompt-sections-set!))
+      (chat-prompt-sections-set! buf off)))
+  (let ((mode (llm-bundle-agent-mode b)))
+    (when (and mode (not (equal? mode "")) (boundp 'agent-mode-set!))
+      (agent-mode-set! buf mode)))
+  (when (boundp 'agent-update-modeline!) (agent-update-modeline! buf))
+  b)
+
+(define (llm-default-bundle-apply! buf)
+  (let ((b (llm-default-bundle-record)))
+    (cond ((not b) #f)
+          ((buffer-local buf 'agent-slug) (llm-bundle-apply! buf b))
+          (else (llm-default--seed! buf b)))))
+
+(public! 'llm-default-bundle-apply!
+  "(llm-default-bundle-apply! BUF) — put llm-default-bundle's setup on a new chat; #f when no default is named")
+
+(define-command "llm-config-save-default" "Make this bundle the default for new chats"
+  (lambda ()
+    (let* ((buf (transient-scope))
+           (b (or (llm-config--pending-bundle) (llm-config--base buf)))
+           (name (and b (llm-bundle-name b))))
+      (if (not name)
+          (message "no saved bundle here — save one first with s")
+          (begin
+            (customize-save! 'llm-default-bundle name)
+            (llm-config--refresh!)
+            (message (string-append "new chats start with " name)))))))
+
 (define (llm-config--history-key index)
   (if (= index 10) "0" (number->string index)))
 
@@ -545,13 +605,23 @@
                     (lambda () (llm-config--choose-bundle! buf b))
                     'transient 'stay 'bundle b
                     'value-fn (lambda (scope)
-                                (cond ((llm-config--pending-bundle)
-                                       (if (equal? (llm-config--pending-bundle) b)
-                                           "selected" ""))
-                                      ((llm-config--bundle-active? scope b) "active")
-                                      (else ""))))
+                                (llm-config--bundle-value scope b)))
                   items)
                 items))))))
+
+;;; Two facts share one cell: what this bundle is to the session at hand,
+;;; and whether it is the one new chats start with.
+(define (llm-config--bundle-value scope b)
+  (let ((state (cond ((llm-config--pending-bundle)
+                      (if (equal? (llm-config--pending-bundle) b)
+                          "selected" ""))
+                     ((llm-config--bundle-active? scope b) "active")
+                     (else "")))
+        (default (if (equal? (llm-bundle-name b) llm-default-bundle)
+                     "default" "")))
+    (cond ((equal? state "") default)
+          ((equal? default "") state)
+          (else (string-append state " · " default)))))
 
 ;;; --- two levels ------------------------------------------------------------
 ;;; Picking a bundle and tuning one field are two different acts, so they
@@ -734,7 +804,9 @@
     (append
       (if bundles (list (list bundles "bundle")) '())
       (if recent (list (list recent "recent")) '())
-      (list (list "." "fine-tune") (list "s" "save") (list "RET" "select")
+      (list (list "." "fine-tune") (list "s" "save"))
+      (if (null? *llm-bundles*) '() (list (list "D" "default")))
+      (list (list "RET" "select")
             (list "↑↓ ←→" "move")
             (if (llm-config--pending-bundle)
                 (list "ESC" "apply and close")
@@ -756,7 +828,9 @@
               'transient 'stay))
           (if (null? *llm-bundles*)
               '()
-              (list (transient-suffix "u" "use by name" "llm-config-use-bundle"
+              (list (transient-suffix "D" "default for new chats"
+                      "llm-config-save-default" 'transient 'stay)
+                    (transient-suffix "u" "use by name" "llm-config-use-bundle"
                       'transient 'stay)
                     (transient-suffix "x" "forget" "llm-config-forget-bundle"
                       'transient 'stay)))))
