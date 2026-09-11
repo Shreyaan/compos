@@ -345,6 +345,27 @@ defmodule Compos.Core.Session do
 
   @impl true
   def init(_opts) do
+    # A published handle means a previous incarnation died. Unpublish it
+    # FIRST, before anything else in this init can take time: every caller
+    # then queues on :await_boot, which is exactly what it does at a cold
+    # boot, instead of evaluating against a world that is being replaced.
+    # Left published, that world answers for the ~2.5s this load takes, and
+    # every define, set! and buffer local it writes dies with the inherited
+    # environment table 30 seconds later. The registry tables below are
+    # already empty by then too, so an M-x during the window finds no
+    # command at all.
+    restart? = :persistent_term.get(@pt, nil) != nil
+
+    if restart? do
+      :persistent_term.erase(@pt)
+      :persistent_term.erase(@pt_stamp)
+
+      Logger.error(
+        "scheme: the Session is restarting. Its interpreter is unpublished until " <>
+          "this load ends, so no caller runs against the dead one."
+      )
+    end
+
     # The tables belong to Compos.Core.SchemeTables, which runs no Scheme and
     # so cannot die of it. Empty them rather than create them: their identity
     # then survives a crash here, and no lane worker holding the published
@@ -401,6 +422,12 @@ defmodule Compos.Core.Session do
     :persistent_term.put(@pt, interp)
     :persistent_term.put(@pt_stamp, primitive_stamp())
     Process.send_after(self(), :gc_tick, @gc_interval)
+
+    # A restart is a boot of the Scheme world, so the Scheme world's durable
+    # state has to come back the way a boot brings it back. Compos.Core.Desktop
+    # holds it and does the work; it is told here as well as by its own
+    # monitor, so a Desktop that restarted at the same moment still hears.
+    if restart?, do: send(Process.whereis(Compos.Core.Desktop) || self(), :scheme_rebooted)
 
     {:ok,
      %{

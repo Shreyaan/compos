@@ -40,46 +40,65 @@ defmodule Compos.Core.Desktop do
 
   # --- server ----------------------------------------------------------------
 
+  @initial %{timer: nil, globals: [], session: nil, scheme_stale?: false}
+
   @impl true
   def init(_opts) do
     Process.flag(:trap_exit, true)
     Events.subscribe_editor()
     send(self(), :watch_session)
     if Application.get_env(:compos_core, :desktop_autorestore, true), do: send(self(), :restore)
-    {:ok, %{timer: nil, globals: [], session: nil, scheme_stale?: false}}
+    {:ok, @initial}
+  end
+
+  # Compos.Core.Hotload swaps a recompiled module into the running VM, so a
+  # release upgrade's code_change/3 never runs and this process keeps the
+  # state map the OLD module built. A new key would then raise on the first
+  # update — the reload the editor promises would break the desktop instead
+  # of improving it. Fill the missing keys in on the way through.
+  # The first message after the swap also arms what the old module never
+  # had: without this the monitor waits for a restart of this process, and
+  # the reload has to be trusted to reach a running editor.
+  defp upgrade(state) do
+    unless Map.has_key?(state, :session), do: send(self(), :watch_session)
+    Map.merge(@initial, state)
   end
 
   @impl true
-  def handle_call(:save, _from, state) do
+  def handle_call(msg, from, state), do: on_call(msg, from, upgrade(state))
+
+  @impl true
+  def handle_info(msg, state), do: on_info(msg, upgrade(state))
+
+  defp on_call(:save, _from, state) do
     {result, state} = do_save(state)
     {:reply, result, state}
   end
 
-  def handle_call(:restore, _from, state) do
+  defp on_call(:restore, _from, state) do
     {result, state} = do_restore(state)
     {:reply, result, state}
   end
 
-  @impl true
-  def handle_info({:editor_change, _}, state) do
+  defp on_info({:editor_change, _}, state) do
     if state.timer, do: Process.cancel_timer(state.timer)
     {:noreply, %{state | timer: Process.send_after(self(), :flush, @debounce)}}
   end
 
-  def handle_info(:flush, state) do
+  defp on_info(:flush, state) do
     {_result, state} = do_save(state)
     {:noreply, %{state | timer: nil}}
   end
 
-  def handle_info(:restore, state) do
+  defp on_info(:restore, state) do
     {_result, state} = do_restore(state)
     {:noreply, state}
   end
 
-  def handle_info(:watch_session, state),
-    do: {:noreply, %{state | session: watch_session()}}
+  defp on_info(:watch_session, state),
+    do: {:noreply, %{state | session: watch_session(state)}}
 
-  def handle_info({:DOWN, ref, :process, _dead, reason}, %{session: {_watched, ref}} = state) do
+  defp on_info({:DOWN, ref, :process, _dead, reason}, %{session: {_watched, ref}} = state) do
     Logger.error(
       "desktop: the Session stopped (#{inspect(reason)}). Its replacement boots a new " <>
         "interpreter that holds the defvar defaults, so this process holds the only " <>
@@ -90,7 +109,22 @@ defmodule Compos.Core.Desktop do
     {:noreply, %{state | session: nil, scheme_stale?: true}}
   end
 
-  def handle_info(:reseed, state) do
+  # The new Session says so itself, in case this process restarted at the
+  # same moment and never held the monitor that would have told it. When the
+  # monitor did its work already, this arrives second and must do nothing:
+  # holding the monitor on the Session that is up, with nothing stale, is
+  # exactly the state a finished recovery leaves. Without the check both
+  # paths recovered, and the second one rebuilt every buffer again.
+  defp on_info(:scheme_rebooted, state) do
+    if state.scheme_stale? or watching_current?(state) do
+      {:noreply, state}
+    else
+      send(self(), :reseed)
+      {:noreply, %{state | scheme_stale?: true}}
+    end
+  end
+
+  defp on_info(:reseed, state) do
     if is_nil(Process.whereis(Session)) do
       Process.send_after(self(), :reseed, @reseed_retry)
       {:noreply, state}
@@ -99,11 +133,11 @@ defmodule Compos.Core.Desktop do
     end
   end
 
-  def handle_info(_other, state), do: {:noreply, state}
+  defp on_info(_other, state), do: {:noreply, state}
 
   @impl true
   def terminate(_reason, state) do
-    do_save(state)
+    do_save(upgrade(state))
     :ok
   end
 
@@ -251,7 +285,15 @@ defmodule Compos.Core.Desktop do
   # when a replacement boots, and hold every save to the last good set in
   # the meantime.
 
-  defp watch_session do
+  # Always through the previous monitor, never beside it: a reseed retries
+  # on a timer, and a second monitor on the same Session means a second
+  # :DOWN and a second recovery for one death.
+  defp watch_session(state) do
+    case state.session do
+      {_pid, ref} -> Process.demonitor(ref, [:flush])
+      nil -> :ok
+    end
+
     case Process.whereis(Session) do
       nil ->
         Process.send_after(self(), :watch_session, 200)
@@ -262,11 +304,18 @@ defmodule Compos.Core.Desktop do
     end
   end
 
+  # For a save: only a Session this process KNOWS it did not seed makes the
+  # read untrustworthy. No monitor yet (boot) is not that case.
   defp same_session?(%{session: {pid, _ref}}), do: Process.whereis(Session) == pid
   defp same_session?(_state), do: true
 
+  # For a recovery: nothing to do only when this process holds the monitor
+  # on the Session that is up. No monitor means the recovery has not run.
+  defp watching_current?(%{session: {pid, _ref}}), do: Process.whereis(Session) == pid
+  defp watching_current?(_state), do: false
+
   defp reseed(state) do
-    state = %{state | session: watch_session()}
+    state = %{state | session: watch_session(state)}
 
     cond do
       not await_session() ->
@@ -278,7 +327,7 @@ defmodule Compos.Core.Desktop do
           "desktop: put #{length(state.globals)} globals back into the new interpreter"
         )
 
-        restore_window_runtime()
+        rebuild_scheme_runtime(length(state.globals))
         %{state | scheme_stale?: false}
 
       true ->
@@ -314,14 +363,46 @@ defmodule Compos.Core.Desktop do
       false
   end
 
-  # Mode setup, keymaps and overlays are Scheme too, so a new interpreter
-  # leaves every on-screen buffer without them. This is the same rebuild a
-  # restore runs, over the buffers a window shows.
+  # A boot wakes only the buffers a window shows; the rest stay dormant and
+  # rebuild when something wakes them.
   defp restore_window_runtime do
     Editor.list_windows_all()
     |> Enum.map(fn {_win, name, _frame} -> name end)
     |> Enum.uniq()
     |> Enum.each(&Compos.Core.restore_runtime/1)
+  end
+
+  # A Session restart is not a boot: every buffer is already awake, and its
+  # mode setup, minor modes and derived state went with the old interpreter.
+  # So rebuild all of them, not only the ones a window shows, or a buffer
+  # nobody is looking at comes back half-built and stays that way.
+  #
+  # An open prompt goes first. Its on_confirm and on_change are closures in
+  # the dead environment, which Compos.Core.SchemeTables drops thirty
+  # seconds later: pressing RET on that prompt then raises. A boot has no
+  # prompt open, so neither does a restart.
+  #
+  # The sweep runs off this process: each buffer restores on its own lane,
+  # and the desktop must stay free to answer a save while they do.
+  defp rebuild_scheme_runtime(globals) do
+    Enum.each(Editor.frame_list(), &Editor.minibuffer_close/1)
+
+    buffers = Compos.Core.list_buffers()
+
+    Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+      Enum.each(buffers, &Compos.Core.restore_runtime/1)
+
+      # *Messages* is the editor's log, and a restart the reader did not ask
+      # for belongs in it: the groups, the histories and every buffer's mode
+      # just went away and came back.
+      Session.message(
+        "The Scheme world restarted. Restored #{length(buffers)} buffers and " <>
+          "#{globals} globals.",
+        "warn"
+      )
+
+      Logger.info("desktop: rebuilt the Scheme runtime of #{length(buffers)} buffers")
+    end)
   end
 
   # --- restore ---------------------------------------------------------------
