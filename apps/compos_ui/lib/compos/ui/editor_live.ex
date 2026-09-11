@@ -1810,15 +1810,20 @@ defmodule Compos.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
-      <c-group :if={@dismissible?} class="dismiss-bar">
-        <c-text class="dismiss-title">Reading</c-text>
-        <button type="button" class="dismiss-action" phx-click="ui_cmd"
-          phx-value-win={@node.id} phx-value-cmd="dismiss-buffer"
-          aria-label="Dismiss child or go back (q)">
-          <kbd>q</kbd><c-text>Back</c-text>
-        </button>
-      </c-group>
-      <c-headerline :if={@node.header_line} class="buffer-header">{@node.header_line}</c-headerline>
+      <%!-- Reading and its q ride the right end of the header line. A window
+             is short enough already; the dismissal cue does not earn a row of
+             its own when the header's right side is empty. --%>
+      <c-headerline :if={@node.header_line || @dismissible?} class="buffer-header">
+        <c-text class="buffer-header-text">{@node.header_line}</c-text>
+        <c-group :if={@dismissible?} class="dismiss-bar">
+          <c-text class="dismiss-title">Reading</c-text>
+          <button type="button" class="dismiss-action" phx-click="ui_cmd"
+            phx-value-win={@node.id} phx-value-cmd="dismiss-buffer"
+            aria-label="Dismiss child or go back (q)">
+            <kbd>q</kbd><c-text>Back</c-text>
+          </button>
+        </c-group>
+      </c-headerline>
       <c-group :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
         <c-headerline
           :if={@node.dashboard_line_blocks}
