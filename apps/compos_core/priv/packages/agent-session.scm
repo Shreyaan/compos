@@ -673,6 +673,52 @@
         #t
         #f)))
 
+;; the child's last assistant message, from the conversation of record --
+;; not from the rendered transcript, which carries tool cards and meta
+;; lines the parent has no use for.
+(define (subagent-last-assistant chat)
+  (let ((buf (subagent-live-buffer chat)))
+    (and buf
+         (let loop ((ts (reverse (chat-turns buf))))
+           (cond ((null? ts) #f)
+                 ((equal? (car (car ts)) "assistant") (nth 1 (car ts)))
+                 (else (loop (cdr ts))))))))
+
+;; THE reply shape. A plist, because one caller reads one field and a list
+;; view reads another:
+;;   'slug        the child's durable id
+;;   'buffer      its chat buffer, or #f when the chat is gone
+;;   'status      running | done | failed | idle | gone
+;;   'stop-reason the backend's own word for how the last turn ended
+;;   'text        the child's last assistant message, empty when it said nothing
+(define (subagent-result chat)
+  (let* ((slug (subagent-slug chat))
+         (buf (subagent-live-buffer chat))
+         (ended (and buf (buffer-local buf 'subagent-turn-end))))
+    (list 'slug slug
+          'buffer buf
+          'status (cond ((not buf) 'gone)
+                        ((subagent-running? slug) 'running)
+                        ((not ended) 'idle)
+                        ((nth 1 ended) 'done)
+                        (else 'failed))
+          'stop-reason (and ended (nth 0 ended))
+          'text (or (subagent-last-assistant chat) ""))))
+
+;; CHATS is one chat or a list of them; the answers come back in that order.
+(define (subagent-collect chats)
+  (map subagent-result (if (pair? chats) chats (list chats))))
+
+;; #t when CHAT will not reach another turn end on its own: it finished one,
+;; or it is gone. A chat that never ran a turn is NOT done -- nothing has
+;; happened to it yet.
+(define (subagent-done? chat)
+  (let ((buf (subagent-live-buffer chat)))
+    (cond ((not buf) #t)
+          ((subagent-running? chat) #f)
+          ((buffer-local buf 'subagent-turn-end) #t)
+          (else #f))))
+
 
 (category! 'chat)
 
