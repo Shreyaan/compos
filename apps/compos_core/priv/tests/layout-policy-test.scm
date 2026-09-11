@@ -389,3 +389,21 @@
       (check-true! (and (member "zz-lp-b" (lp-buffers)) #t) "and so did the second")
       (check-equal! (current-buffer) chat "the chat takes the focus")
       (buffer-kill! chat))))
+
+(deftest 'a-group-chat-arranges-by-the-frames-chosen-layout
+  "a C-x l pick survives a pane opening: the width decides only for a frame that never chose"
+  (lambda ()
+    (lp-start!) (lp-buffer! "b")
+    (tile-windows! 'rows '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'rows)
+    (let ((chat (group-chat (frame-group))))
+      (group-chat-buffer-show! chat)
+      (lp-snapshot! 'chat-opened)
+      (check-equal! (layout-target) 'rows "the frame keeps the layout it was given")
+      (check-equal! (length (lp-buffers)) 3 "and the chat is a third pane")
+      ;; three full-width bands, which is not what the width would pick
+      (lp-rect! "zz-lp-a" 0 0 1 (/ 1 3))
+      (lp-rect! "zz-lp-b" 0 (/ 1 3) 1 (/ 1 3))
+      (lp-rect! chat 0 (/ 2 3) 1 (/ 1 3))
+      (buffer-kill! chat)
+      (layout-target-set! #f))))

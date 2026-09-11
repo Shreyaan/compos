@@ -22,6 +22,8 @@ defmodule Compos.NotmuchSceneTest do
       (define *zz-notmuch-old-run* nm--run)
       (define *zz-notmuch-old-search* nm--search-json)
       (define *zz-notmuch-old-auto-preview* notmuch-auto-preview)
+      (define *zz-notmuch-old-preview-delay* notmuch-preview-delay)
+      (set! notmuch-preview-delay 0)
       (define *zz-notmuch-calls* '())
       (set! notmuch-auto-preview #t)
       (set! nm--run
@@ -48,6 +50,7 @@ defmodule Compos.NotmuchSceneTest do
         (set! nm--run *zz-notmuch-old-run*)
         (set! nm--search-json *zz-notmuch-old-search*)
         (set! notmuch-auto-preview *zz-notmuch-old-auto-preview*)
+        (set! notmuch-preview-delay *zz-notmuch-old-preview-delay*)
         (let ((id (group-resolve-id "zz-notmuch-scene")))
           (when id (group-dissolve! id)))
         (set! *scenes*

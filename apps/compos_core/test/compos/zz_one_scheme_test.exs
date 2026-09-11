@@ -8,7 +8,6 @@ defmodule Compos.ZzOneSchemeTest do
   @tag timeout: 300_000
   test "notmuch scheme tests in file order" do
     {:ok, _} = Session.eval("(load-tests-once!)", nil, 60_000, @lane)
-    {:ok, _} = Session.eval("(remove-hook! (quote window-configuration-change-hook) (quote nm--landed-preview!))", nil, 60_000, @lane)
 
     failures =
       for name <- @names,

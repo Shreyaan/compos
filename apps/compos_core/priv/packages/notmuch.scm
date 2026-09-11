@@ -853,8 +853,21 @@ when a message has no text/plain part." 'group 'notmuch)
             (buffer-set-local! *notmuch-show-buffer* 'special #t)
             (buffer-append! *notmuch-show-buffer* "No message selected.\n"))))))
 
+;; The row the highlight RESTS on is the one worth fetching. A move
+;; schedules the fetch and the next move cancels it, so holding n costs
+;; one round trip instead of one per row.
+(define (nm--preview-now! buf)
+  (when (and (buffer-exists? buf)
+             (equal? (window-buffer (active-window)) buf))
+    (nm--preview! buf)))
+
+(define (nm--preview-soon! buf)
+  (if (and (number? notmuch-preview-delay) (> notmuch-preview-delay 0))
+      (debounce! "notmuch-preview" notmuch-preview-delay nm--preview-now! buf)
+      (nm--preview! buf)))
+
 (define (nm--maybe-preview! buf)
-  (when notmuch-auto-preview (nm--preview! buf)))
+  (when notmuch-auto-preview (nm--preview-soon! buf)))
 
 ;; #t when the mail pane already holds the thread at point. A focus change
 ;; fires the configuration hook often, and a preview is an ssh round trip,
@@ -884,7 +897,9 @@ when a message has no text/plain part." 'group 'notmuch)
                          (not (buffer-exists? *notmuch-show-buffer*))))
                (equal? (window-buffer (active-window)) buf)
                (not (nm--pane-at-point? buf)))
-      (nm--preview! buf))))
+      ;; the hook fires on every configuration change; a landing that is
+      ;; on its way somewhere else should not cost a fetch either
+      (nm--preview-soon! buf))))
 
 (add-hook! 'window-configuration-change-hook 'nm--landed-preview!)
 

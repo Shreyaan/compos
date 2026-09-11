@@ -44,6 +44,9 @@
   (shell-command->string (string-append "chmod +x " t--nm-program))
   (set! notmuch-program t--nm-program)
   (set! notmuch-auto-preview #f)
+  ;; a test asserts what a preview DOES, not when: no rest timer between
+  ;; the move and the assertion
+  (set! notmuch-preview-delay 0)
   (set! notmuch-html-renderer "cat")
   (switch-to-buffer! "*scratch*")
   (for-each (lambda (b)
@@ -724,5 +727,26 @@
       (nm--landed-preview!)
       (check-false! (buffer-known? "*mail*")
                     "a dismissed pane stays dismissed")
+      (set! notmuch-auto-preview saved))
+    (t--nm-done!)))
+
+(deftest 'a-move-rests-before-the-mail-pane-fetches
+  "a fetch is a round trip to the mail host, so only the row the highlight rests on costs one"
+  (lambda ()
+    (t--nm-setup!)
+    (let ((saved notmuch-auto-preview))
+      (set! notmuch-auto-preview #t)
+      (run-command "notmuch-inbox")
+      ;; the open fetched the first thread; from here a move must wait
+      (set! notmuch-preview-delay 500)
+      (let ((before (t--nm-calls)))
+        (t--nm-run! "notmuch-next")
+        (check-equal! (t--nm-calls) before
+                      "a move schedules the fetch and calls nothing yet"))
+      ;; and with the rest turned off the same move fetches at once
+      (set! notmuch-preview-delay 0)
+      (t--nm-run! "notmuch-prev")
+      (check-contains! (t--nm-calls) "thread:0001"
+                       "0 means every move fetches")
       (set! notmuch-auto-preview saved))
     (t--nm-done!)))

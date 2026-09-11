@@ -3028,8 +3028,15 @@
           ;; frame that shows one thing: a three-pane scene -- a mail index
           ;; and its preview -- lost the preview every time its chat opened,
           ;; and the group then had two buffers to tile instead of three.
-          (tile-adaptive-windows!
-            (append (layout-target-visible-buffers) (list buf)))
+          ;;
+          ;; The frame's chosen layout is the frame's to keep: a C-x l pick
+          ;; survives a pane opening, so the chat arranges by that name and
+          ;; the width decides only for a frame that never chose.
+          (let ((panes (append (layout-target-visible-buffers) (list buf)))
+                (chosen (layout-target)))
+            (if chosen
+                (tile-windows! chosen panes)
+                (tile-adaptive-windows! panes)))
           (let ((chat-window (window-showing buf)))
             (when chat-window (select-window! chat-window)))
           (switch-to-buffer! buf))))
