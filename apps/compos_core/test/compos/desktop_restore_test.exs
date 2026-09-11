@@ -40,10 +40,91 @@ defmodule Compos.DesktopRestoreTest do
     assert eventually(fn -> not Buffer.exists?(name) end)
   end
 
+  # a fresh process, exactly as the supervisor starts one after a crash
+  defp restart_desktop do
+    pid = Process.whereis(Desktop)
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    receive do: ({:DOWN, ^ref, :process, ^pid, _} -> :ok), after: (5_000 -> :timeout)
+    assert eventually(fn -> is_pid(Process.whereis(Desktop)) end)
+    Process.sleep(60)
+    :ok
+  end
+
   setup do
     Editor.minibuffer_close()
     Editor.delete_other_windows()
     :ok
+  end
+
+  # The loss this guards: a boot restores the frames, then an Editor call
+  # inside the restore gives up and takes the Desktop process with it. The
+  # supervisor starts a fresh one holding no globals, the first ordinary
+  # change asks it to save, and the empty Scheme defaults land on top of a
+  # file that held every group record. The groups are then gone for good.
+  #
+  # A process that still owes a restore holds nothing the file wants.
+  test "a Desktop that could not restore refuses to save over the file" do
+    n = System.unique_integer([:positive])
+    file = Path.join(System.tmp_dir!(), "desktop-guard-#{n}.etf")
+    previous = Application.get_env(:compos_core, :desktop_path)
+    autorestore = Application.get_env(:compos_core, :desktop_autorestore, true)
+
+    on_exit(fn ->
+      File.rm(file)
+      Application.put_env(:compos_core, :desktop_autorestore, autorestore)
+
+      if previous,
+        do: Application.put_env(:compos_core, :desktop_path, previous),
+        else: Application.delete_env(:compos_core, :desktop_path)
+
+      restart_desktop()
+    end)
+
+    # the file the editor cannot read: the restore fails and stays owed
+    File.write!(file, "this is not a desktop")
+    Application.put_env(:compos_core, :desktop_path, file)
+    Application.put_env(:compos_core, :desktop_autorestore, true)
+    restart_desktop()
+
+    assert :error = Desktop.save_now()
+    assert File.read!(file) == "this is not a desktop"
+
+    # and it saves again the moment a restore gives it something to hold
+    File.rm!(file)
+    assert :ok = Desktop.restore_now()
+    assert :ok = Desktop.save_now()
+    assert File.exists?(file)
+  end
+
+  # The way back when a boot did lose them: one file, globals only, the
+  # windows left where they are.
+  test "desktop-read-globals installs a file's globals and leaves the windows" do
+    n = System.unique_integer([:positive])
+    file = Path.join(System.tmp_dir!(), "desktop-globals-#{n}.etf")
+    previous = Application.get_env(:compos_core, :desktop_path)
+
+    on_exit(fn ->
+      File.rm(file)
+      eval!("(set! *minibuffer-history* '())")
+
+      if previous,
+        do: Application.put_env(:compos_core, :desktop_path, previous),
+        else: Application.delete_env(:compos_core, :desktop_path)
+    end)
+
+    Application.put_env(:compos_core, :desktop_path, file)
+    eval!(~s{(set! *minibuffer-history* '("zz-guard-one" "zz-guard-two"))})
+    assert :ok = Desktop.save_now()
+
+    # the interpreter loses them, the way a failed install leaves it
+    eval!("(set! *minibuffer-history* '())")
+    assert eval!("(length *minibuffer-history*)") == "0"
+
+    before = Editor.list_windows_all()
+    assert eval!(~s{(begin (desktop-globals! (desktop-file-globals "#{file}")) #t)}) == "#t"
+    assert eval!("(length *minibuffer-history*)") == "2"
+    assert Editor.list_windows_all() == before
   end
 
   test "desktop-clear saves modified files and removes the cleared desktop" do

@@ -563,6 +563,8 @@ defmodule Compos.Core.SchemeAPI do
       "redraw!" => "(redraw!) — tell every connected client to re-render every frame; return #t.",
       "desktop-dirty!" =>
         "(desktop-dirty!) — schedule persistence after Scheme-owned desktop state changes; return #t.",
+      "desktop-file-globals" =>
+        "(desktop-file-globals FILE) — return the globals a desktop file holds, as ((KEY VALUE) ...); the editor is not touched.",
       "daemon-provision-workspace!" =>
         "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT).",
       "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
@@ -1598,6 +1600,19 @@ defmodule Compos.Core.SchemeAPI do
       "desktop-dirty!" => fn [] ->
         Compos.Core.Events.broadcast_editor(:scheme_state)
         true
+      end,
+      # The way back from a boot that brought the windows back and lost the
+      # groups. This only reads the file: desktop-globals! installs them,
+      # because installing runs Scheme and the caller is already in it.
+      "desktop-file-globals" => fn [file] ->
+        case Compos.Core.Desktop.file_globals(file) do
+          {:ok, globals} ->
+            globals
+
+          {:error, reason} ->
+            raise Compos.Scheme.Eval.Error,
+              message: "desktop globals not read from #{file}: #{inspect(reason)}"
+        end
       end,
       # The incremental form reloader, which lives in the Session. Scheme
       # cannot reach it otherwise: the diff is over read forms, and the

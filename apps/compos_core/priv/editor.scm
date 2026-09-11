@@ -3886,6 +3886,23 @@
                     members)))
       (desktop-clear--ask-save dirty '() members))))
 
+;; The way back from a boot that brought the windows back and lost the
+;; groups. It reads one desktop file and installs only the globals: the
+;; group records, the graveyard, the histories. The windows do not move.
+;; ~/.compos/desktop-backups holds a copy every ten minutes.
+(define-command "desktop-read-globals"
+  "Install the globals of a desktop file, leaving the windows alone"
+  (lambda ()
+    (read-file-name "Desktop file: "
+      (lambda (file)
+        (let ((globals (desktop-file-globals file)))
+          (desktop-globals! globals)
+          (desktop-dirty!)
+          (message (string-append "Read " (number->string (length globals))
+                                  " globals from " file)))))))
+
+(catalog-meta! 'command "desktop-read-globals" 'domain 'desktop 'effects '(read write))
+
 (domain! 'unknown)
 (effects! '(unknown))
 

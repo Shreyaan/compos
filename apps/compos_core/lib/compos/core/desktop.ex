@@ -38,17 +38,38 @@ defmodule Compos.Core.Desktop do
   @doc "Restore from disk over the current editor state."
   def restore_now, do: GenServer.call(__MODULE__, :restore, 30_000)
 
+  @doc """
+  The globals a desktop file holds, without touching the editor.
+
+  Scheme installs them itself (`M-x desktop-read-globals`): this process
+  must not, because installing calls into the Session, and the Scheme
+  caller is already inside it.
+  """
+  def file_globals(file) do
+    with {:ok, bin} <- File.read(file),
+         %{} = desktop <- :erlang.binary_to_term(bin),
+         globals when is_list(globals) <- desktop[:globals] || [] do
+      {:ok, globals}
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :not_a_desktop_file}
+    end
+  end
+
   # --- server ----------------------------------------------------------------
 
-  @initial %{timer: nil, globals: [], session: nil, scheme_stale?: false}
+  @initial %{timer: nil, globals: [], session: nil, scheme_stale?: false, restore_pending?: false}
 
   @impl true
   def init(_opts) do
     Process.flag(:trap_exit, true)
     Events.subscribe_editor()
     send(self(), :watch_session)
-    if Application.get_env(:compos_core, :desktop_autorestore, true), do: send(self(), :restore)
-    {:ok, @initial}
+    # A restore is owed from here until one finishes. While it is owed this
+    # process knows less than the file does, so it may not write over it.
+    restore? = Application.get_env(:compos_core, :desktop_autorestore, true)
+    if restore?, do: send(self(), :restore)
+    {:ok, %{@initial | restore_pending?: restore?}}
   end
 
   # Compos.Core.Hotload swaps a recompiled module into the running VM, so a
@@ -61,7 +82,12 @@ defmodule Compos.Core.Desktop do
   # the reload has to be trusted to reach a running editor.
   defp upgrade(state) do
     unless Map.has_key?(state, :session), do: send(self(), :watch_session)
-    Map.merge(@initial, state)
+    # The old module's state has no restore_pending? key, and that process
+    # was already serving this editor. Only a process that starts fresh
+    # owes a restore before it may write the file.
+    swapped? = not Map.has_key?(state, :restore_pending?)
+    state = Map.merge(@initial, state)
+    if swapped?, do: %{state | restore_pending?: false}, else: state
   end
 
   @impl true
@@ -145,6 +171,20 @@ defmodule Compos.Core.Desktop do
 
   # Presentation only. Each buffer owns its durable state and writes its own
   # checkpoint on a debounce after a change, so the desktop sweeps nothing.
+  # A restore that fails leaves this process holding nothing: no globals,
+  # and no frames it put on screen. The editor still runs, so an ordinary
+  # change still asks for a save, and that save used to write the empty
+  # Scheme defaults over a good file. Every group the user had went with
+  # it. A process that never restored holds no opinion the file needs.
+  defp do_save(%{restore_pending?: true} = state) do
+    Logger.warning(
+      "desktop: refused to save. This process never restored, so the file on " <>
+        "disk holds more than it does."
+    )
+
+    {:error, state}
+  end
+
   defp do_save(state) do
     # v2: every frame's layout, in frame-MRU order (head = most recent).
     # desktop_view is read-only (S15): saving must not run the render
@@ -415,37 +455,60 @@ defmodule Compos.Core.Desktop do
       # here even when the install below never happens.
       state = %{state | globals: desktop[:globals] || []}
 
-      restore_frames(desktop)
-
-      # Runtime setup reads persisted policy. Group modelines, for example,
-      # validate buffer membership against the durable group record table.
-      # Restore globals before setup so valid IDs are not treated as dangling
-      # and written back as empty buffer locals.
-      #
-      # An install that fails leaves the Scheme world empty, so mark it and
-      # retry: a save must not copy that emptiness to disk.
-      state = %{state | scheme_stale?: not install_globals(state.globals)}
-      if state.scheme_stale?, do: Process.send_after(self(), :reseed, @reseed_retry)
-
-      # Waking installs literal buffer state. Runtime-only mode machinery is
-      # rebuilt only after the Editor call has returned, avoiding a
-      # Session -> Editor deadlock during tree construction.
-      restore_window_runtime()
-
-      # Faces are not restored. themes.scm persists the theme NAME and
-      # derives the faces at boot, so a theme edit applies on restart.
-      # Replaying the saved face table put the previous session's colours
-      # over the freshly derived theme.
-
-      Session.message("Desktop restored")
-      {:ok, state}
+      restore_world(desktop, state)
     else
-      {:error, :enoent} -> {:ok, state}
+      {:error, :enoent} -> {:ok, %{state | restore_pending?: false}}
       _ -> {:error, state}
     end
   rescue
     e ->
       Logger.warning("desktop restore failed: #{Exception.message(e)}")
+      {:error, state}
+  end
+
+  # Everything here talks to the Editor and to the Session, and a boot that
+  # wakes many buffers keeps both busy for longer than a call waits. A call
+  # that gives up exits, an exit is not an exception, and the exit used to
+  # take this process down with the globals it had just read still in a
+  # local. The supervisor then started a process holding nothing, and the
+  # next ordinary save wrote that nothing to disk.
+  #
+  # So catch the exit, keep the globals, and ask for the whole restore
+  # again. The restore stays owed until one run finishes, and do_save
+  # refuses to write while it is owed, so the file keeps the real state.
+  defp restore_world(desktop, state) do
+    restore_frames(desktop)
+
+    # Runtime setup reads persisted policy. Group modelines, for example,
+    # validate buffer membership against the durable group record table.
+    # Restore globals before setup so valid IDs are not treated as dangling
+    # and written back as empty buffer locals.
+    #
+    # An install that fails leaves the Scheme world empty, so mark it and
+    # retry: a save must not copy that emptiness to disk.
+    state = %{state | scheme_stale?: not install_globals(state.globals)}
+    if state.scheme_stale?, do: Process.send_after(self(), :reseed, @reseed_retry)
+
+    # Waking installs literal buffer state. Runtime-only mode machinery is
+    # rebuilt only after the Editor call has returned, avoiding a
+    # Session -> Editor deadlock during tree construction.
+    restore_window_runtime()
+
+    # Faces are not restored. themes.scm persists the theme NAME and
+    # derives the faces at boot, so a theme edit applies on restart.
+    # Replaying the saved face table put the previous session's colours
+    # over the freshly derived theme.
+
+    Session.message("Desktop restored")
+    {:ok, %{state | restore_pending?: false}}
+  catch
+    :exit, reason ->
+      Logger.warning(
+        "desktop restore: the editor did not answer (#{inspect(reason)}). " <>
+          "Holding the file's globals and trying again; nothing saves until it works."
+      )
+
+      Process.send_after(self(), :restore, @reseed_retry)
       {:error, state}
   end
 
