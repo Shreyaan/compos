@@ -277,7 +277,7 @@ defmodule Compos.GoogleSceneTest do
   test "Google directories stay in one window and q q pops history without killing them" do
     eval!(~S[(buffer-create "*Google origin*")])
     eval!(~S[(switch-to-buffer-here! "*Google origin*")])
-    eval!(~S[(window-history-set! (active-window) '())])
+    eval!(~S[(set-window-prev-buffers! (active-window) '())])
     window = eval!("(active-window)")
     windows = eval!("(length (window-list))")
     eval!(~S[(google-open "alpha" "drive")])

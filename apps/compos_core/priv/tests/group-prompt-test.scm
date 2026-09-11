@@ -7,7 +7,7 @@
   "the switch prompt's new row seeds a work buffer, never a transient listing"
   (lambda ()
     (buffer-create "*zz-transient-listing*")
-    (buffer-set-local! "*zz-transient-listing*" 'transient #t)
+    (buffer-set-local! "*zz-transient-listing*" 'special #t)
     (buffer-create "*zz-work*")
     (check-false! (group-seed-buffer? "*zz-transient-listing*") "a transient buffer seeds nothing")
     (check-true! (group-seed-buffer? "*zz-work*") "a work buffer seeds")

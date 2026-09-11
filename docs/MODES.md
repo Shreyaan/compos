@@ -18,7 +18,7 @@ click is the toggle.
 
 `define-derived-mode` makes NAME a child of PARENT: `NAME-map` falls
 back to `PARENT-map`, the setup runs PARENT's setup first, and
-`set-mode!` runs `PARENT-hook` before `NAME-hook`. `buffer-mode-is?`
+`set-mode!` runs `PARENT-hook` before `NAME-hook`. `buffer-derived-mode?`
 answers true for the parent's name in the child's buffers.
 
 `set-mode!` does this, in order:

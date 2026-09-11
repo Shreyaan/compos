@@ -142,7 +142,7 @@
   (buffer-set-local! buf 'preview-rows #f)
   (when (boundp 'markdown-paint-off!) (markdown-paint-off! buf))
   ;; the plain faces come back: morg skipped its paint while the rows drew
-  (when (and (boundp 'morg-refontify!) (buffer-mode-is? buf "morg-mode"))
+  (when (and (boundp 'morg-refontify!) (buffer-derived-mode? buf "morg-mode"))
     (morg-refontify! buf))
   (let ((saved (buffer-local buf 'preview-rows-saved)))
     (when saved
@@ -176,7 +176,7 @@
           (r r)
           ;; the mode is the truth, not the name: a scratch or any other
           ;; unnamed morg buffer previews as rows like a .md file does
-          ((buffer-mode-is? name "morg-mode") "rows")
+          ((buffer-derived-mode? name "morg-mode") "rows")
           (else #f))))
 
 ;; A buffer whose rows disagree with its mode list heals: rows without the
@@ -193,7 +193,7 @@
            (preview--rows-on! buf))
           ((and (not rows) (equal? (buffer-local buf 'markdown-paint) #t))
            (when (boundp 'markdown-paint-off!) (markdown-paint-off! buf))
-           (when (and (boundp 'morg-refontify!) (buffer-mode-is? buf "morg-mode"))
+           (when (and (boundp 'morg-refontify!) (buffer-derived-mode? buf "morg-mode"))
              (morg-refontify! buf)))
           (else #f))))
 (public! 'preview-heal! "(preview-heal! BUF) — make BUF's drawn rows agree with its preview-mode")

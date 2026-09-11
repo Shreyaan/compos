@@ -797,13 +797,13 @@
     (unless (peek-dismiss!)
       (let* ((win (active-window)) (cur (current-buffer))
              (history (filter (lambda (buf) (and (buffer-exists? buf) (not (equal? buf cur))))
-                             (window-buffer-history win))))
+                             (window-prev-buffers win))))
         (if (pair? history)
             (begin
               (switch-to-buffer-here! (car history))
               ;; Switching normally pushes CUR; popping must consume that entry
               ;; so q q walks back instead of toggling between two directories.
-              (window-history-set! win (cdr history)))
+              (set-window-prev-buffers! win (cdr history)))
             (run-command "quit-window"))))))
 
 (define-command "dired-open" "Open the file on this line as your own, here: a peek is kept"

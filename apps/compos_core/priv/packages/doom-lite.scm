@@ -563,7 +563,7 @@
 
 (define (doom-lite--playing? buf)
   (and (buffer-exists? buf)
-       (buffer-mode-is? buf "doom-lite-mode")
+       (buffer-derived-mode? buf "doom-lite-mode")
        (not (buffer-local buf 'doom-lite-over))))
 
 ;; Move along X and along Y one at a time, so a player who walks into a
@@ -768,7 +768,7 @@
   (debounce! (string-append "doom-lite-tick:" buf) ms doom-lite--tick buf))
 
 (define (doom-lite--tick buf)
-  (when (and (buffer-exists? buf) (buffer-mode-is? buf "doom-lite-mode"))
+  (when (and (buffer-exists? buf) (buffer-derived-mode? buf "doom-lite-mode"))
     (if (and (window-showing buf) (not (buffer-local buf 'doom-lite-over)))
         (begin
           (buffer-set-local! buf 'doom-lite-tick (+ (or (buffer-local buf 'doom-lite-tick) 0) 1))
@@ -835,7 +835,7 @@
   (lambda ()
     (buffer-create *doom-lite-buffer*)
     (switch-to-buffer! *doom-lite-buffer*)
-    (unless (buffer-mode-is? *doom-lite-buffer* "doom-lite-mode")
+    (unless (buffer-derived-mode? *doom-lite-buffer* "doom-lite-mode")
       (set-mode! "doom-lite-mode"))))
 
 (define-command "doom-lite-forward" "Walk forward"
@@ -862,7 +862,7 @@
 (define-command "doom-lite-restart" "Start the level again"
   (lambda ()
     (let ((buf (current-buffer)))
-      (when (buffer-mode-is? buf "doom-lite-mode")
+      (when (buffer-derived-mode? buf "doom-lite-mode")
         (doom-lite--new-game! buf)
         (doom-lite--render! buf)
         (doom-lite--arm! buf 0)))))

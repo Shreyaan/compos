@@ -1425,7 +1425,7 @@
 ;; -> (LINE KIND NAME DOC) rows, the outline contract
 (define (imenu-rows buf)
   (if (and (boundp 'morg-scan)
-           (buffer-mode-is? buf "morg-mode"))
+           (buffer-derived-mode? buf "morg-mode"))
       (map (lambda (e)
              (list (line-number-at-pos (car e)) "heading"
                    (string-trim (cadr e)) ""))

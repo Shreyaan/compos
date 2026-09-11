@@ -19,6 +19,14 @@ defmodule Compos.Core.Desktop do
   # read them writes the last values it read.
   @globals_timeout 2_000
 
+  # Putting the globals back is not on a keystroke path, so it waits as long
+  # as a restore does.
+  @install_timeout 30_000
+
+  # How long to wait before asking a replacement Session for its attention
+  # again. The new one loads the whole stdlib before it answers.
+  @reseed_retry 1_000
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def path,
@@ -36,8 +44,9 @@ defmodule Compos.Core.Desktop do
   def init(_opts) do
     Process.flag(:trap_exit, true)
     Events.subscribe_editor()
+    send(self(), :watch_session)
     if Application.get_env(:compos_core, :desktop_autorestore, true), do: send(self(), :restore)
-    {:ok, %{timer: nil, globals: []}}
+    {:ok, %{timer: nil, globals: [], session: nil, scheme_stale?: false}}
   end
 
   @impl true
@@ -47,7 +56,8 @@ defmodule Compos.Core.Desktop do
   end
 
   def handle_call(:restore, _from, state) do
-    {:reply, do_restore(), state}
+    {result, state} = do_restore(state)
+    {:reply, result, state}
   end
 
   @impl true
@@ -62,12 +72,32 @@ defmodule Compos.Core.Desktop do
   end
 
   def handle_info(:restore, state) do
-    do_restore()
+    {_result, state} = do_restore(state)
     {:noreply, state}
   end
 
-  def handle_info({:seed_globals, globals}, state),
-    do: {:noreply, %{state | globals: globals}}
+  def handle_info(:watch_session, state),
+    do: {:noreply, %{state | session: watch_session()}}
+
+  def handle_info({:DOWN, ref, :process, _dead, reason}, %{session: {_watched, ref}} = state) do
+    Logger.error(
+      "desktop: the Session stopped (#{inspect(reason)}). Its replacement boots a new " <>
+        "interpreter that holds the defvar defaults, so this process holds the only " <>
+        "copy of the persisted globals until it takes them back."
+    )
+
+    send(self(), :reseed)
+    {:noreply, %{state | session: nil, scheme_stale?: true}}
+  end
+
+  def handle_info(:reseed, state) do
+    if is_nil(Process.whereis(Session)) do
+      Process.send_after(self(), :reseed, @reseed_retry)
+      {:noreply, state}
+    else
+      {:noreply, reseed(state)}
+    end
+  end
 
   def handle_info(_other, state), do: {:noreply, state}
 
@@ -92,7 +122,7 @@ defmodule Compos.Core.Desktop do
         %{id: fid, tree: serialize(view.tree), active_buffer: view.active_buffer}
       end
 
-    globals = scheme_globals(state.globals)
+    {globals, state} = scheme_globals(state)
 
     desktop = %{
       version: 3,
@@ -103,7 +133,7 @@ defmodule Compos.Core.Desktop do
     file = path()
     rotate_backup(file)
     Compos.Core.BufferStore.atomic_write(file, :erlang.term_to_binary(desktop))
-    {:ok, %{state | globals: globals}}
+    {:ok, state}
   rescue
     e ->
       Logger.warning("desktop save failed: #{Exception.message(e)}")
@@ -174,61 +204,168 @@ defmodule Compos.Core.Desktop do
   # along (persist-global!) and hands them over as one list. Filtered the
   # same way locals are — a global holding a pid or a fun is dropped, not
   # written.
-  defp scheme_globals(last) do
+  #
+  # The read happens only against the interpreter this process seeded. A
+  # Session that died and came back answers every one of these with its
+  # defvar default, and a save that believes that answer writes the empty
+  # set over the good file: on 2026-09-11 that lost 35 groups, the group
+  # graveyard, both connector catalogs and every history in one autosave.
+  # Until the replacement takes the globals back, a save writes the set
+  # this process already holds.
+  defp scheme_globals(%{scheme_stale?: true} = state) do
+    Logger.warning("desktop: the Scheme world has not taken the globals back; saved the last set")
+    {state.globals, state}
+  end
+
+  defp scheme_globals(state) do
+    if same_session?(state) do
+      read_globals(state)
+    else
+      Logger.error("desktop: the Session changed under this process; saved the last globals")
+      send(self(), :reseed)
+      {state.globals, %{state | session: nil, scheme_stale?: true}}
+    end
+  end
+
+  defp read_globals(state) do
     case Session.call_named("desktop-globals", [], nil, @globals_timeout) do
-      {:ok, globals} when is_list(globals) -> Enum.filter(globals, &serializable?/1)
-      _ -> last
+      {:ok, globals} when is_list(globals) ->
+        globals = Enum.filter(globals, &serializable?/1)
+        {globals, %{state | globals: globals}}
+
+      _ ->
+        {state.globals, state}
     end
   catch
     :exit, _ ->
       Logger.warning("desktop: Session busy, saved the previous globals")
-      last
+      {state.globals, state}
+  end
+
+  # --- the Scheme world's copy ------------------------------------------------
+  #
+  # Every persisted global lives in a Scheme variable, and the Session owns
+  # the interpreter those variables live in. A Session restart therefore
+  # empties all of them at once while the frames, buffers and windows on the
+  # Elixir side carry on unchanged. Watch the Session, put the values back
+  # when a replacement boots, and hold every save to the last good set in
+  # the meantime.
+
+  defp watch_session do
+    case Process.whereis(Session) do
+      nil ->
+        Process.send_after(self(), :watch_session, 200)
+        nil
+
+      pid ->
+        {pid, Process.monitor(pid)}
+    end
+  end
+
+  defp same_session?(%{session: {pid, _ref}}), do: Process.whereis(Session) == pid
+  defp same_session?(_state), do: true
+
+  defp reseed(state) do
+    state = %{state | session: watch_session()}
+
+    cond do
+      not await_session() ->
+        Process.send_after(self(), :reseed, @reseed_retry)
+        state
+
+      install_globals(state.globals) ->
+        Logger.info(
+          "desktop: put #{length(state.globals)} globals back into the new interpreter"
+        )
+
+        restore_window_runtime()
+        %{state | scheme_stale?: false}
+
+      true ->
+        Process.send_after(self(), :reseed, @reseed_retry)
+        state
+    end
+  end
+
+  # A replacement Session registers its name before init/1 loads the stdlib,
+  # and the published interpreter handle is still the dead one until that
+  # load ends. Ask the process itself, which answers only once it is booted.
+  defp await_session do
+    GenServer.call(Session, :await_boot, 60_000)
+    true
+  catch
+    :exit, _ -> false
+  end
+
+  defp install_globals([]), do: true
+
+  defp install_globals(globals) do
+    case Session.call_named("desktop-globals!", [globals], nil, @install_timeout) do
+      {:ok, _} ->
+        true
+
+      other ->
+        Logger.warning("desktop: the globals did not install: #{inspect(other)}")
+        false
+    end
+  catch
+    :exit, reason ->
+      Logger.warning("desktop: the globals did not install: #{inspect(reason)}")
+      false
+  end
+
+  # Mode setup, keymaps and overlays are Scheme too, so a new interpreter
+  # leaves every on-screen buffer without them. This is the same rebuild a
+  # restore runs, over the buffers a window shows.
+  defp restore_window_runtime do
+    Editor.list_windows_all()
+    |> Enum.map(fn {_win, name, _frame} -> name end)
+    |> Enum.uniq()
+    |> Enum.each(&Compos.Core.restore_runtime/1)
   end
 
   # --- restore ---------------------------------------------------------------
 
-  defp do_restore do
+  defp do_restore(state) do
     with {:ok, bin} <- File.read(path()),
          %{} = desktop <- :erlang.binary_to_term(bin) do
+      # Hold the file's globals before anything else can fail. A save that
+      # runs next writes what this process holds, so the values must be
+      # here even when the install below never happens.
+      state = %{state | globals: desktop[:globals] || []}
+
       restore_frames(desktop)
 
       # Runtime setup reads persisted policy. Group modelines, for example,
       # validate buffer membership against the durable group record table.
       # Restore globals before setup so valid IDs are not treated as dangling
       # and written back as empty buffer locals.
-      case desktop[:globals] do
-        nil -> :ok
-        [] -> :ok
-        globals -> Session.call_named("desktop-globals!", [globals])
-      end
+      #
+      # An install that fails leaves the Scheme world empty, so mark it and
+      # retry: a save must not copy that emptiness to disk.
+      state = %{state | scheme_stale?: not install_globals(state.globals)}
+      if state.scheme_stale?, do: Process.send_after(self(), :reseed, @reseed_retry)
 
       # Waking installs literal buffer state. Runtime-only mode machinery is
       # rebuilt only after the Editor call has returned, avoiding a
       # Session -> Editor deadlock during tree construction.
-      Editor.list_windows_all()
-      |> Enum.map(fn {_win, name, _frame} -> name end)
-      |> Enum.uniq()
-      |> Enum.each(&Compos.Core.restore_runtime/1)
+      restore_window_runtime()
 
       # Faces are not restored. themes.scm persists the theme NAME and
       # derives the faces at boot, so a theme edit applies on restart.
       # Replaying the saved face table put the previous session's colours
       # over the freshly derived theme.
 
-      # Seed the cache: a save that runs before the Session is free again
-      # writes these back, not an empty list.
-      send(self(), {:seed_globals, desktop[:globals] || []})
-
       Session.message("Desktop restored")
-      :ok
+      {:ok, state}
     else
-      {:error, :enoent} -> :ok
-      _ -> :error
+      {:error, :enoent} -> {:ok, state}
+      _ -> {:error, state}
     end
   rescue
     e ->
       Logger.warning("desktop restore failed: #{Exception.message(e)}")
-      :error
+      {:error, state}
   end
 
   # v2: recreate every saved frame and lay its tree back; reversed so the

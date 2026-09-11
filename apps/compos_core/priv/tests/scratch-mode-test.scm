@@ -35,12 +35,12 @@
 (deftest 'scratch-mode-descends-from-morg-mode
   "one question answers for both, so a derived mode keeps morg's behavior"
   (lambda ()
-    (check-true! (mode-is? "scratch-mode" "morg-mode") "scratch is a morg")
-    (check-false! (mode-is? "morg-mode" "scratch-mode") "and not the other way")
-    (check-false! (mode-is? "text-mode" "morg-mode") "an unrelated mode is not")
+    (check-true! (derived-mode? "scratch-mode" "morg-mode") "scratch is a morg")
+    (check-false! (derived-mode? "morg-mode" "scratch-mode") "and not the other way")
+    (check-false! (derived-mode? "text-mode" "morg-mode") "an unrelated mode is not")
     (t--sm!)
     (with-current-buffer t--sm-buf (lambda () (set-mode! "scratch-mode")))
-    (check-true! (buffer-mode-is? t--sm-buf "morg-mode")
+    (check-true! (buffer-derived-mode? t--sm-buf "morg-mode")
                  "the buffer answers the same way, which is what preview and the paste hooks ask")
     (t--sm-done!)))
 

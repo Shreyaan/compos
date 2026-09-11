@@ -780,7 +780,7 @@
   (when (and (buffer-exists? *perf-buffer*)
              (window-showing *perf-buffer*)
              (not (buffer-local *perf-buffer* 'perf-paused))
-             (buffer-mode-is? *perf-buffer* "perf-mode"))
+             (buffer-derived-mode? *perf-buffer* "perf-mode"))
     (perf--arm! *perf-buffer* 0)))
 
 (add-hook! 'window-configuration-change-hook 'perf--shown-hook!)
@@ -825,7 +825,7 @@
 
 (on-block-click! 'perf
   (lambda (buf id)
-    (and (buffer-mode-is? buf "perf-mode")
+    (and (buffer-derived-mode? buf "perf-mode")
          (cond ((string-prefix? "perf:row:" id)
                 (let ((line (string->number (substring id 9 (string-length id)))))
                   (when (number? line)
@@ -852,7 +852,7 @@
   (lambda ()
     (buffer-create *perf-buffer*)
     (switch-to-buffer! *perf-buffer*)
-    (unless (buffer-mode-is? *perf-buffer* "perf-mode")
+    (unless (buffer-derived-mode? *perf-buffer* "perf-mode")
       (set-mode! "perf-mode"))))
 
 (define-command "perf-refresh" "Sample the VM now"

@@ -845,12 +845,12 @@
 ;; open
 (mode-icon! "diff-show" "")
 
+(mode-parent! "diff-show" "special-mode")
 (define-mode "diff-show"
   (lambda ()
     (let ((buf (current-buffer)))
       (diff--install-keys!)
       (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'transient #t)
       (buffer-set-local! buf 'desktop-skip-locals
         '(render-blocks diff-card-cache diff-layout-cache))
       (buffer-set-local! buf 'render-mode "blocks")
@@ -995,6 +995,7 @@
 
 (mode-icon! "diff-mode" "")
 
+(mode-parent! "diff-mode" "special-mode")
 (define-mode "diff-mode"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -1003,7 +1004,6 @@
       ;; the text regenerates from the backend, so the desktop saves the
       ;; locals and not the content — and not the drawn projection either:
       ;; diff-refresh below rebuilds render-blocks from git on restore
-      (buffer-set-local! buf 'transient #t)
       (buffer-set-local! buf 'desktop-skip-locals
         '(render-blocks diff-card-cache diff-layout-cache))
       (buffer-set-local! buf 'render-mode "blocks")

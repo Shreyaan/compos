@@ -3362,7 +3362,7 @@ defmodule Compos.EditorTest do
     {:ok, _} =
       Compos.Core.Session.eval("""
       (begin (buffer-create "#{board}")
-             (buffer-set-local! "#{board}" 'transient #t)
+             (buffer-set-local! "#{board}" 'special #t)
              (display-buffer "#{board}"))
       """)
 
@@ -3720,7 +3720,7 @@ defmodule Compos.EditorTest do
 
     assert {:ok, history} =
              Compos.Core.Session.eval(
-               "(let ((layout (window-tree))) (window-tree-set! layout) (window-buffer-history))"
+               "(let ((layout (window-tree))) (window-tree-set! layout) (window-prev-buffers))"
              )
 
     assert history =~ ~r/\A\("#{last}" "#{first}"/

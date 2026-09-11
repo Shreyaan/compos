@@ -168,7 +168,7 @@ defmodule Compos.GitDiffTest do
     assert Buffer.read_only?(buf)
     assert Buffer.get_local(buf, "render-mode") == "blocks"
     assert Buffer.get_local(buf, "diff-root") == ctx.root
-    assert Buffer.get_local(buf, "transient")
+    assert Buffer.get_local(buf, "mode-name") == "diff-mode"
 
     # the mode composed the block tree; the payload carries it whole. The
     # first block is the section heading, chosen by the mode, not the view.

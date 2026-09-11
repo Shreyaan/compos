@@ -118,7 +118,7 @@
 
 ;;; A local workspace opens instantly. Its rows never fetch remote data.
 (define-list-mode! "google-mode"
-  (list 'buffer "*Google*" 'transient #f
+  (list 'buffer "*Google*" 'special #f
     'doc "Google Workspace. RET opens a service. a selects an account. c connects another account."
     'rows (lambda (buf) google--services)
     'columns (lambda (buf) '(("Application" 16) ("Work" #f)))
@@ -238,7 +238,7 @@
                           (google--mail-rows account rows finish) (finish rows)))))))))))
 
 (define-list-mode! "google-service-mode"
-  (list 'transient #f
+  (list 'special #f
     'doc "Account-owned Google list. RET reads an item. s searches. ] requests the next page. x creates an operation draft."
     'rows (lambda (buf) (list-entries buf)) 'cache-fetch google--fetch 'cache-ttl 120
     'columns (lambda (buf) '(("Name" #f) ("Details" 40)))
@@ -258,7 +258,7 @@
 (define (google--file-targets buf)
   (filter (lambda (row) (not (google--get row 'google-up))) (list-targets buf)))
 (define-list-mode! "google-drive-mode"
-  (list 'transient #f
+  (list 'special #f
     'doc "Google file index. RET opens, ^ goes up, C copies, R renames or moves, + creates a folder. m marks, u unmarks, d flags, x trashes. s sorts and / filters."
     'rows (lambda (buf) (cons google--up-row (filter (lambda (row) (not (google--get row 'google-up))) (list-entries buf))))
     'markable? (lambda (buf row) (not (google--get row 'google-up))) 'cache-fetch google--fetch 'cache-ttl 120

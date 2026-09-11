@@ -107,7 +107,7 @@ defmodule Compos.NotmuchSceneTest do
     assert eval!(~S|(list-index "*notmuch*")|) == index
     assert eval!(~S|(buffer-known? "*notmuch*")|) == "#t"
     KeyDispatch.handle_key("q")
-    assert eval!(~S|(buffer-mode-is? (current-buffer) "notmuch-hello-mode")|) == "#t"
+    assert eval!(~S|(buffer-derived-mode? (current-buffer) "notmuch-hello-mode")|) == "#t"
   end
 
   test "dismissal from a selected thread preserves the search" do

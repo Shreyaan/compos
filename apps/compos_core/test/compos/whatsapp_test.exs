@@ -73,8 +73,8 @@ defmodule Compos.WhatsappTest do
 
   test "WhatsApp app buffers remain eligible for group layouts" do
     open_chat()
-    assert eval!(~S|(buffer-local "*WhatsApp*" 'transient)|) == "#f"
-    assert eval!(~S|(buffer-local "*WhatsApp conversation*" 'transient)|) == "#f"
+    assert eval!(~S|(buffer-special? "*WhatsApp*")|) == "#f"
+    assert eval!(~S|(buffer-special? "*WhatsApp conversation*")|) == "#f"
     assert eval!(~S|(fill-candidate? "*WhatsApp*")|) == "#t"
   end
 

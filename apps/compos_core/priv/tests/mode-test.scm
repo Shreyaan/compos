@@ -30,7 +30,7 @@
     (with-current-buffer "zz-mode-test-buf" (lambda () (set-mode! "zz-mode-test-child")))
     (check-equal! (reverse *mode-test-log*) '(parent-setup child-setup parent-hook child-hook)
                   "the order Emacs's define-derived-mode gives")
-    (check-true! (buffer-mode-is? "zz-mode-test-buf" "zz-mode-test-parent")
+    (check-true! (buffer-derived-mode? "zz-mode-test-buf" "zz-mode-test-parent")
                  "the child is one of the parent's buffers")
     (check-equal! (keymap-parent (mode-keymap "zz-mode-test-child")) (mode-keymap "zz-mode-test-parent")
                   "the child's map falls back to the parent's")

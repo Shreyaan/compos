@@ -1261,7 +1261,7 @@
 (define (group-context-memberships buf)
   (cond ((chat-buffer? buf)
          (let ((id (chat-group-id buf))) (if id (list id) '())))
-        ((buffer-local buf 'transient) #f)
+        ((buffer-special? buf) #f)
         ((group-work-buffer? buf) (buffer-group-ids buf))
         (else #f)))
 
@@ -1475,16 +1475,22 @@
   (when (and (group-visible-homogeneous? g) (group-uncovered? g))
     (group-layout-save! g)))
 
-;; a group is UNCOVERED when no window shows a transient surface from
-;; outside it — a board, a listing. Its own members are transient too
-;; (a mail view, a dired listing), and they are part of the group's
-;; arrangement, not a cover on it.
+;; a group is UNCOVERED when no window is holding another buffer's place
+;; for it. Its own members may be special surfaces too (a mail view, a
+;; dired listing), and those are part of the group's arrangement rather
+;; than a cover on it.
 (define (group-uncovered? g)
+  ;; Emacs asks the WINDOW, not the buffer. quit-restore records what a
+  ;; display did: 'other means it took a window that was showing something
+  ;; else, which is exactly what a cover is, and quit-window is waiting to
+  ;; put the old buffer back. A pane that belongs to g is not covering g.
   (let loop ((windows (window-list)))
     (cond ((null? windows) #t)
-          ((let ((b (car (cdr (car windows)))))
-             (and (buffer-local b 'transient)
-                  (not (buffer-in-group? b g))))
+          ((let* ((row (car windows))
+                  (rec (window-quit-restore (car row))))
+             (and rec
+                  (equal? (cadr rec) 'other)
+                  (not (buffer-in-group? (cadr row) g))))
            #f)
           (else (loop (cdr windows))))))
 
@@ -1495,17 +1501,14 @@
 ;; snapshot — displaying a buffer must not create a chat.
 (define (group-layout-save-before-cover! name)
   (let ((id (frame-group)))
-    ;; Creation runs before a board declares itself transient. Remove the
-    ;; membership creation handed it, and only that one: doppler, sentry
-    ;; and browse each name their own group, and a board that sheds a
-    ;; declared membership leaves those buffers in no group at all.
-    (when (buffer-local name 'transient)
-      (let ((inherited (buffer-local name 'group-inherited)))
-        (when inherited
-          (for-each (lambda (group)
-                      (when (equal? group (group-resolve-id inherited))
-                        (buffer-remove-group! name group)))
-                    (buffer-group-ids name)))))
+    ;; A buffer keeps the group that created it, board or not (user ruling,
+    ;; 2026-09-11). Creation runs before a board declares itself transient,
+    ;; and this used to take that one membership back again, which left
+    ;; every list pane out of its own group's section of the switcher and
+    ;; down in the ungrouped tail. 'special now says only that the
+    ;; content is derived, never that the pane belongs nowhere.
+    ;; A board still covers a group it is NOT a member of, so the layout is
+    ;; still checkpointed before a foreign pane covers it.
     (when (and id
                (not (buffer-in-group? name id))
                (group-visible-homogeneous? id)
@@ -1780,12 +1783,12 @@
         (append (filter (lambda (id) (member id mine)) recent)
                 (filter (lambda (id) (not (member id mine))) recent)))))
 
-;; a seed buffer is a work buffer of yours: a transient listing (the
+;; a seed buffer is a work buffer of yours: a special listing (the
 ;; telemetry, ibuffer) seeds nothing. The switcher's new-group action
 ;; asks this; group-new never seeds itself from the current buffer.
 (define (group-seed-buffer? buf)
   (and (group-work-buffer? buf)
-       (not (buffer-local buf 'transient))))
+       (not (buffer-special? buf))))
 
 (define (group-switch-new-action)
   (let ((buf (current-buffer))
@@ -2592,7 +2595,7 @@
                                    (not (equal? (car row) win))))
                             (window-list-all)))))
     (let loop ((bs (dedupe-names
-                    (append (window-buffer-history win) (group-fill-buffers group)))))
+                    (append (window-prev-buffers win) (group-fill-buffers group)))))
       (cond ((null? bs) #f)
             ((and (not (equal? (car bs) name))
                   (not (member (car bs) elsewhere))
@@ -3193,7 +3196,7 @@
 (define (buffer-family--eligible? name)
   (and (buffer-known? name)
        (group-work-buffer? name)
-       (not (buffer-local name 'transient))))
+       (not (buffer-special? name))))
 
 ;; A grouped scratch belongs to its group. A chat or that scratch therefore
 ;; resolves through the group's work buffers. An ordinary work buffer keeps a
@@ -3225,8 +3228,8 @@
                                '())
                            (if (equal? owner buf) '() (list buf)))))))
     ;; The buffer named by the command is always the explicit subject, even
-    ;; when its mode marks the listing transient. Attached companions still
-    ;; have to pass the ordinary eligibility gate: a transient companion must
+    ;; when its mode marks the listing special. Attached companions still
+    ;; have to pass the ordinary eligibility gate: a special companion must
     ;; not travel with its owner.
     (dedupe-names
       (filter (lambda (name)

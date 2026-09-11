@@ -68,13 +68,13 @@ Explicit layout selection and preview use one order: existing pane buffers
 first, then the group's other eligible buffers in MRU order, with ordinary
 work before companions. The picker captures this order once; highlighting
 another layout or accepting it distributes the same sequence over its slots.
-Existing panes keep their buffers, including Dired, other transient lists,
+Existing panes keep their buffers, including Dired, other special lists,
 visible non-members and deliberate duplicate views. A layout change never
 substitutes hidden work for an already occupied slot. Floating popup windows
 are excluded from the base arrangement.
 
 Only hidden fillers are subject to eligibility: no peeks, floating popups,
-transient buffers, context-only buffers or foreign group members. Existing
+special buffers, context-only buffers or foreign group members. Existing
 group chats and scratch buffers are eligible fillers. Fixed targets cap the
 sequence at their capacity. With no group, flexible layouts use visible panes
 and fixed layouts fill from the eligible global MRU. Missing capacity creates
@@ -152,5 +152,5 @@ Cmd-Shift-arrows move the active view onto the neighboring pane's history,
 revealing the source pane's previous group buffer. Focus and point follow the
 view; split geometry stays fixed. With no neighbor or no eligible previous
 buffer, nothing moves. The named `window-*` commands still swap.
-List modes may specify `'transient #f` for persistent app buffers such as
-WhatsApp; generated lists otherwise retain their transient default.
+List modes may specify `'special #f` for persistent app buffers such as
+WhatsApp; generated lists otherwise keep the special default.

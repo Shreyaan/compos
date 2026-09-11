@@ -45,9 +45,9 @@
     (t--wh-setup!)
     (tile-windows! 'columns (list t--wh-b t--wh-d))
     (check-equal! (length (window-list)) 2 "two panes")
-    (check-equal! (car (window-buffer-history (window-showing t--wh-b))) t--wh-a
+    (check-equal! (car (window-prev-buffers (window-showing t--wh-b))) t--wh-a
                   "the pane on b remembers a")
-    (check-equal! (car (window-buffer-history (window-showing t--wh-d))) t--wh-c
+    (check-equal! (car (window-prev-buffers (window-showing t--wh-d))) t--wh-c
                   "the pane on d remembers c, not the survivor's past")
     (t--wh-done!)))
 
@@ -77,7 +77,7 @@
     ;; the right window: d after a, so its past is (a b ...) and a is on the left
     (switch-to-buffer! t--wh-d)
     (let ((win (active-window)))
-      (check-equal! (car (window-buffer-history win)) t--wh-a "the pane's past leads with a")
+      (check-equal! (car (window-prev-buffers win)) t--wh-a "the pane's past leads with a")
       (buffer-kill! t--wh-d)
       (check-equal! (length (window-list)) 2 "the window stays")
       (check-equal! (window-buffer win) t--wh-b "a is on the left already, so b takes the place")
@@ -89,7 +89,7 @@
   (lambda ()
     (t--wh-setup!)
     (tile-windows! 'columns (list t--wh-b t--wh-e))
-    (let ((past (window-buffer-history (window-showing t--wh-e))))
+    (let ((past (window-prev-buffers (window-showing t--wh-e))))
       (check-equal! (car past) t--wh-d "the pane that went away showed d")
       (check-equal! (cadr past) t--wh-c "and remembered c"))
     (t--wh-done!)))

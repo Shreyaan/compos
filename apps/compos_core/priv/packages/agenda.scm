@@ -603,6 +603,7 @@
 
 (mode-icon! "morg-agenda-mode" "")
 
+(mode-parent! "morg-agenda-mode" "special-mode")
 (define-mode "morg-agenda-mode"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -610,7 +611,6 @@
       (buffer-set-read-only! buf #t)
       ;; the text regenerates from the files, so the desktop keeps the
       ;; locals (the closed days) and not the content or the projections
-      (buffer-set-local! buf 'transient #t)
       (buffer-set-local! buf 'desktop-skip-locals
         '(render-root render-blocks agenda-index agenda-day-lines))
       (buffer-set-local! buf 'render-mode "blocks")

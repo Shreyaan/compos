@@ -840,7 +840,8 @@ when a message has no text/plain part." 'group 'notmuch)
           ;; only sometimes makes its buffer is not an ensure command.
           (unless (buffer-exists? *notmuch-show-buffer*)
             (buffer-create *notmuch-show-buffer*)
-            (buffer-set-local! *notmuch-show-buffer* 'transient #t)
+            ;; no mode yet: the empty pane says for itself that it is a view
+            (buffer-set-local! *notmuch-show-buffer* 'special #t)
             (buffer-append! *notmuch-show-buffer* "No message selected.\n"))))))
 
 (define (nm--maybe-preview! buf)
@@ -1249,7 +1250,7 @@ when a message has no text/plain part." 'group 'notmuch)
   "Trash every message in the mailbox from this thread's sender (works on a *notmuch* list row or an open notmuch-show buffer)"
   (lambda ()
     (let* ((buf (current-buffer))
-           (thread-id (if (buffer-mode-is? buf "notmuch-show-mode")
+           (thread-id (if (buffer-derived-mode? buf "notmuch-show-mode")
                           (buffer-local buf 'notmuch-thread)
                           (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
       (if (not thread-id)
@@ -1361,7 +1362,7 @@ when a message has no text/plain part." 'group 'notmuch)
   "Trash every message from this thread's sender and try to unsubscribe: RFC 8058 one-click POST when offered, else a plain GET, else a best-effort scan of the body (works on a *notmuch* list row or an open notmuch-show buffer)"
   (lambda ()
     (let* ((buf (current-buffer))
-           (thread-id (if (buffer-mode-is? buf "notmuch-show-mode")
+           (thread-id (if (buffer-derived-mode? buf "notmuch-show-mode")
                           (buffer-local buf 'notmuch-thread)
                           (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
       (if (not thread-id)
@@ -1392,7 +1393,7 @@ when a message has no text/plain part." 'group 'notmuch)
   "Try to unsubscribe from this thread's sender without deleting anything: RFC 8058 one-click POST when offered, else a plain GET, else a best-effort scan of the body (works on a *notmuch* list row or an open notmuch-show buffer)"
   (lambda ()
     (let* ((buf (current-buffer))
-           (thread-id (if (buffer-mode-is? buf "notmuch-show-mode")
+           (thread-id (if (buffer-derived-mode? buf "notmuch-show-mode")
                           (buffer-local buf 'notmuch-thread)
                           (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
       (if (not thread-id)
@@ -1422,7 +1423,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let ((buf (current-buffer)))
       (cond
-        ((buffer-mode-is? buf "notmuch-show-mode")
+        ((buffer-derived-mode? buf "notmuch-show-mode")
          (let ((th (buffer-local buf 'notmuch-thread)))
            (if (not th)
                (message "No thread here")
@@ -1842,6 +1843,7 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (mode-icon! "notmuch-show-mode" "")
 
+(mode-parent! "notmuch-show-mode" "special-mode")
 (define-mode "notmuch-show-mode"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -1898,8 +1900,8 @@ when a message has no text/plain part." 'group 'notmuch)
     ("q" "quit-window")))
 
 ;; ONE show buffer, reused — it is a view, not a document. The subject
-;; lives in the modeline; 'transient keeps its derived content out of the
-;; desktop file (the mode re-renders from 'notmuch-thread on restore).
+;; lives in the modeline; 'special says so (the mode re-renders from
+;; 'notmuch-thread on restore).
 (define *notmuch-show-buffer* "*mail*")
 
 (define (nm--open-thread! thread-id subject &rest opts)
@@ -1907,7 +1909,6 @@ when a message has no text/plain part." 'group 'notmuch)
     (unless (buffer-exists? buf) (buffer-create buf))
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
-    (buffer-set-local! buf 'transient #t)
     ;; a view inherits its index's groups, so a grouped mail scene keeps
     ;; the open message inside the group (group-docs, chat read-doc, ⊞).
     ;; Membership is 'group-ids and joining is buffer-add-group!: writing

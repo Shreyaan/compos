@@ -845,7 +845,6 @@
              (not (buffer-local buf 'pdf-path))
              (*pdf-file-exists?* buf))
     (buffer-set-local! buf 'pdf-path buf))
-  (buffer-set-local! buf 'transient #t)
   (buffer-set-local! buf 'preview-renderer "html")
   (buffer-set-local! buf 'render-mode "html")
   ;; Let the preview layer apply the active editor palette. The PDF page is
@@ -860,6 +859,7 @@
 
 (mode-icon! "pdf-reader-mode" "")
 
+(mode-parent! "pdf-reader-mode" "special-mode")
 (define-mode "pdf-reader-mode"
   (lambda () (pdf-reader-setup! (current-buffer))))
 
@@ -893,6 +893,7 @@
 
 (mode-icon! "pdf-edit-mode" "")
 
+(mode-parent! "pdf-edit-mode" "special-mode")
 (define-mode "pdf-edit-mode"
   (lambda () (pdf-edit-setup! (current-buffer))))
 

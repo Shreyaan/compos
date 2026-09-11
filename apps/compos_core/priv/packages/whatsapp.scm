@@ -141,7 +141,7 @@
           (else (loop (cdr rs) (car rs))))))
 
 (define (whatsapp--current-message buf)
-  (and (buffer-mode-is? buf "whatsapp-chat-mode")
+  (and (buffer-derived-mode? buf "whatsapp-chat-mode")
        (whatsapp--message-at (whatsapp--messages buf)
                              (buffer-point buf))))
 
@@ -363,7 +363,7 @@
 
 (define (whatsapp--send! buf text)
   (let* ((chat
-           (and (buffer-mode-is? buf "whatsapp-mode")
+           (and (buffer-derived-mode? buf "whatsapp-mode")
                 (list-current *whatsapp-buffer*)))
          (jid
            (if chat
@@ -436,7 +436,7 @@
       ;; question for the grammar
       (buffer-set-local! buf 'ts-lang "whatsapp")
       (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'transient #f)
+      (buffer-set-local! buf 'special #f)
       (buffer-set-local! buf 'desktop-skip-locals
         '(render-blocks whatsapp-notice whatsapp-messages-jid))
       (buffer-set-local! buf 'render-mode "blocks")
@@ -472,7 +472,7 @@
            "Recent WhatsApp chats. RET reads the selected conversation. "
            "Use r to reply, g to refresh, / to filter, and q to quit.")
     'buffer *whatsapp-buffer*
-    'transient #f
+    'special #f
     'rows (lambda (buf)
             (whatsapp--join-group! buf)
             (list-entries buf))

@@ -1098,7 +1098,7 @@
 
 (define (morg--post-command-point-map!)
   (let ((buf (current-buffer)))
-    (when (buffer-mode-is? buf "morg-mode") (morg-point-map! buf))))
+    (when (buffer-derived-mode? buf "morg-mode") (morg-point-map! buf))))
 
 (add-hook! 'post-command-hook 'morg--post-command-point-map!)
 

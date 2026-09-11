@@ -141,7 +141,7 @@
                 (let* ((win (car row)) (rec (window-quit-restore win))
                        (past (filter (lambda (b) (and (buffer-known? b)
                                                      (not (equal? b child))))
-                                     (window-buffer-history win))))
+                                     (window-prev-buffers win))))
                   (cond
                     ((and (popup-open?) (equal? win (popup-window))) (popup-dismiss!))
                     ((and rec (equal? (cadr rec) 'window) (> (length (window-list)) 1))
@@ -149,7 +149,7 @@
                     (else
                       (window-set-buffer! win
                         (if (pair? past) (car past) (or parent "*scratch*")))
-                      (window-history-set! win (if (pair? past) (cdr past) '()))))
+                      (set-window-prev-buffers! win (if (pair? past) (cdr past) '()))))
                   (window-quit-restore-forget! win))))
             (window-list))
           ;; A child displayed in another frame remains that frame's view.

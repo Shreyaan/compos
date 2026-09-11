@@ -246,7 +246,7 @@
             (buffer-provenance-stop! movie "mode:movie" "derived playback" "mode")
             (buffer-set-locals! movie
               (list 'movie-source source 'movie-frames frames
-                    'movie-index 0 'movie-playing #f 'transient #t))
+                    'movie-index 0 'movie-playing #f 'special #t))
             (with-current-buffer movie
               (lambda ()
                 (when source-mode (set-mode! source-mode))

@@ -62,7 +62,7 @@
     (let ((buf (perf-test--buffer)))
       (buffer-create buf)
       (with-current-buffer buf (lambda () (set-mode! "perf-mode")))
-      (check-true! (buffer-mode-is? buf "perf-mode") "the mode is on")
+      (check-true! (buffer-derived-mode? buf "perf-mode") "the mode is on")
       (check-equal! (buffer-local buf 'render-mode) "blocks" "the buffer renders blocks")
       (check-true! (pair? (buffer-local buf 'render-blocks)) "the blocks exist")
       (check-true! (string-prefix? "*perf*" (buffer-text buf)) "the text starts with the summary")

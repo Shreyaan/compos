@@ -2242,10 +2242,10 @@
     (buffer-set-local! buf 'list-mode name)
     (desktop-skip! buf 'list-layout-cache)
     (buffer-set-local! buf 'list-layout-cache #f)
-    ;; derived content (S15): the refresh below re-renders it from
-    ;; rows-fn, so the desktop saves mode + locals, not the rows
-    (buffer-set-local! buf 'transient
-      (if (member 'transient opts) (plist-get opts 'transient) #t))
+    ;; whether this list is a view is the MODE's answer now (its parent is
+    ;; special-mode unless the list declared 'special #f), so nothing is
+    ;; written here. What the desktop keeps is a separate question,
+    ;; answered by desktop-skip! above.
     ;; the stamp names the rows of one render — a restart draws new ones
     (desktop-skip! buf 'list-stamp)
     ;; A list opens WIDE. The typed narrowing answers a question you asked
@@ -2316,6 +2316,12 @@
   ;; a real mode: a restored list buffer gets its keys and its read-only
   ;; flag back from here, not from whatever command first opened it
   (define-mode name (lambda () (list-mode-init! (current-buffer) name)))
+  ;; Emacs derives tabulated-list-mode from special-mode. A generated list
+  ;; is a view unless it says otherwise, and it says so once, here, as its
+  ;; parent -- not as a local on every buffer the mode makes.
+  (mode-parent! name (if (if (member 'special opts) (plist-get opts 'special) #t)
+                         "special-mode"
+                         "list-mode"))
   ;; the list's keys: its own on its map, every list's under it
   (keymap-parent! (mode-keymap name) "list-mode-map")
   (mode-keys! name (or (plist-get opts 'keys) '()))
@@ -3561,7 +3567,7 @@
 
 ;; A mode can say which mode it is built from. Emacs writes that into
 ;; define-derived-mode; here the parent is a fact about the name, so a test
-;; asks mode-is? instead of comparing one string and missing every child.
+;; asks derived-mode? instead of comparing one string and missing every child.
 (define *mode-parents* '())
 
 (define (mode-parent! name parent)
@@ -3591,15 +3597,15 @@
 
 ;; #t when MODE is NAME, or descends from it. The walk carries what it has
 ;; seen, so a parent loop ends instead of hanging the editor.
-(define (mode-is? mode name)
+(define (derived-mode? mode name)
   (let loop ((m mode) (seen '()))
     (cond ((not m) #f)
           ((equal? m name) #t)
           ((member m seen) #f)
           (else (loop (mode-parent m) (cons m seen))))))
 
-(define (buffer-mode-is? buf name)
-  (mode-is? (buffer-local buf 'mode-name) name))
+(define (buffer-derived-mode? buf name)
+  (derived-mode? (buffer-local buf 'mode-name) name))
 
 ;; Run another mode's setup. A derived mode inherits the behavior instead
 ;; of copying it, so the two cannot drift apart.
@@ -4694,7 +4700,7 @@
     ("DEL" "minibuffer-delete-backward")))
 
 (define (minibuffer-buffer? buf)
-  (if (and buf (buffer-known? buf) (buffer-mode-is? buf "minibuffer-mode")) #t #f))
+  (if (and buf (buffer-known? buf) (buffer-derived-mode? buf "minibuffer-mode")) #t #f))
 
 ;; Every frame makes its own prompt buffer, on its first prompt. The mode
 ;; goes on there rather than at load: a frame opened later is a prompt too.
@@ -5320,7 +5326,7 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (run-command
-        (if (buffer-mode-is? buf "morg-mode") "morg-narrow" "narrow-to-region"))
+        (if (buffer-derived-mode? buf "morg-mode") "morg-narrow" "narrow-to-region"))
       (let ((range (llm-context-use-narrowing! buf)))
         (when range
           (message (string-append "Narrowed view and LLM context to "
@@ -8057,8 +8063,10 @@
   "(window-fill-buffers) — the buffers a window in this frame may be filled with, most recent first: the frame's context, never the raw MRU ring")
 (public! 'window-fill-blank
   "(window-fill-blank) — context scratch fallback, or #f; fixed target layouts leave spare capacity empty")
+(public! 'buffer-special?
+  "(buffer-special? NAME) — a view of something else (a listing, a diff, a mail thread), not a place you work: Emacs special-mode")
 (public! 'fill-candidate?
-  "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, transient, context-only, popup or peek")
+  "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, special, context-only, popup or peek")
 (public! 'peek!
   "(peek! KNOWN OPEN) — show the buffer OPEN returns beside the selected window as a peek; KNOWN is its name, so a buffer that already existed is only shown and never killed; the next peek replaces it")
 (public! 'peek-or-keep!
@@ -8202,7 +8210,7 @@
 ;;; kill there falls back to what the frame lost (Emacs prev-buffers).
 (define (layout--capture-histories)
   (map (lambda (row)
-         (list (cadr row) (window-buffer-history (car row))
+         (list (cadr row) (window-prev-buffers (car row))
                (window-point (car row)) (window-quit-restore (car row))))
        (window-list)))
 
@@ -8222,12 +8230,12 @@
                (record (or own (and (pair? gone) (car gone)))))
           (window-quit-restore-forget! win)
           (cond (own
-                 (window-history-set! win (cadr own))
+                 (set-window-prev-buffers! win (cadr own))
                  (when (number? (caddr own)) (window-set-point! win (caddr own)))
                  (let ((quit (nth 3 own)))
                    (when quit (window-quit-restore-note! win (cadr quit) (caddr quit)))))
-                (record (window-history-set! win (cons (car record) (cadr record))))
-                (else (window-history-set! win '())))
+                (record (set-window-prev-buffers! win (cons (car record) (cadr record))))
+                (else (set-window-prev-buffers! win '())))
           (loop (cdr rows) (if record (layout--drop-record record remaining) remaining)))))))
 
 ;; The engine runs one arrangement at a time. switch-to-buffer! wakes a dormant
@@ -8305,11 +8313,40 @@
 
 ;; a buffer a window may be filled with: known, not hidden, not floating
 ;; as the popup, not a peek (a look, not a place)
+;;; --- special-mode (after Emacs) -------------------------------------------
+;;; The parent of every view: a listing, a diff, a mail thread. Deriving
+;;; from it is how a MODE says "this is not a place you work", which fill,
+;;; group seeding and group context all ask through buffer-special?. A
+;;; mode answers once; a buffer-local had to be written onto every buffer
+;;; and could be stripped again, which is exactly what happened.
+;;; It carries NO keys. Emacs' special-mode also forces read-only and binds
+;;; q and g; here that is the child's business, and giving the parent a q
+;;; broke a writable buffer that owns a child (dismiss-test: "writable
+;;; buffers keep typing q"). Classification is what this mode is for.
+(define-mode "special-mode" (lambda () #t))
+;; Emacs' special-mode: a buffer that is a VIEW of something else -- a
+;; listing, a diff, the telemetry, a mail thread -- and not a place you
+;; work. Read-only, g re-renders it, q buries it. Nothing fills a window
+;; with one, no group is seeded from one, and one never tells the frame
+;; which group it stands in. It says NOTHING about persistence: what a
+;; view rebuilds from is its mode's business (desktop-skip!), and it was
+;; called 'transient until the day that name made four other things true.
+;;
+;; The MODE answers: a mode that derives from special-mode is a view. The
+;; buffer-local stays as an explicit override for a buffer whose mode does
+;; not say -- a hand-written view mode, or a test standing one up.
+(define (buffer-special? b)
+  (and (string? b)
+       (or (derived-mode? (buffer-local b 'mode-name) "special-mode")
+           (and (buffer-local b 'special) #t))))
+
+;; a buffer a window may be filled with: known, not hidden, not floating
+;; as the popup, not a peek (a look, not a place)
 (define (fill-candidate? b)
   (and (string? b) (buffer-known? b)
        (not (string-prefix? " " b))
        (not (buffer-local b 'context-only))
-       (not (buffer-local b 'transient))
+       (not (buffer-special? b))
        (not (popup--class? b))
        (not (and (boundp 'peek-buffer?) (peek-buffer? b)))))
 
@@ -9066,8 +9103,8 @@
 
 ;;; --- tail (follow a growing file) ------------------------------------------
 ;;; tail -F under the comint layer — local or /ssh: remote. The buffer is
-;;; 'transient: the desktop saves its mode + tail-path but not content, and
-;;; tail-mode's setup restarts the tail on restore. end-of-buffer! puts
+;;; 'special: a view of a file, not the file. desktop-skip! decides what
+;;; is saved; tail-mode's setup restarts the tail on restore. end-of-buffer! puts
 ;;; point at the end, where process appends keep pushing it — follow for free.
 
 (define (sh-quote s)
@@ -9081,12 +9118,12 @@
                        (sh-quote (string-append "tail -n 200 -F " (sh-quote (cadr hp))))))
       (string-append "exec tail -n 200 -F " (sh-quote path))))
 
+(mode-parent! "tail-mode" "special-mode")
 (define-mode "tail-mode"
   (lambda ()
     (let ((buf (current-buffer)))
       (let ((path (buffer-local buf 'tail-path)))
         (buffer-set-read-only! buf #t)
-        (buffer-set-local! buf 'transient #t)
         (when (and path (not (process-running? buf)))
           (start-process! buf (tail-command path)))))))
 (mode-keys! "tail-mode" '(("q" "quit-window")))
@@ -13009,7 +13046,7 @@
          (neighbor (window-in-direction dir))
          (buf (window-buffer source))
          (point (window-point source))
-         (past (window-buffer-history source))
+         (past (window-prev-buffers source))
          (eligible (filter (lambda (b)
                             (and (not (equal? b buf))
                                  (buffer-known? b) (not (buffer-context-only? b))
@@ -13024,7 +13061,7 @@
           ((null? eligible) (message "No previous buffer to reveal"))
           (else
             (switch-to-buffer-here! (car eligible))
-            (window-history-set! source
+            (set-window-prev-buffers! source
               (filter (lambda (b) (not (equal? b buf))) past))
             (window-quit-restore-forget! source)
             (select-window! (car neighbor))
@@ -13222,7 +13259,7 @@
 (define (editing--maps-for buf)
   (let ((off '()))
     (for-each (lambda (e)
-                (when (buffer-mode-is? buf (car e))
+                (when (buffer-derived-mode? buf (car e))
                   (set! off (append off (cadr e)))))
               *editing-state-maps-off*)
     (if (null? off)
@@ -13526,7 +13563,7 @@
 
 (define (paste-mode-active? buf mode)
   ;; a derived major mode keeps the hooks of the mode it is built from
-  (or (buffer-mode-is? buf mode)
+  (or (buffer-derived-mode? buf mode)
       (minor-mode-on? buf mode)))
 
 (define (run-paste-hooks! kind data mime)
@@ -14009,8 +14046,8 @@
 (public! 'local-remap*! "(local-remap*! BUF FROM-COMMAND TO-COMMAND) — remap in an explicit buffer")
 (public! 'define-mode "(define-mode NAME SETUP) — major mode; SETUP must rebuild from locals")
 (public! 'mode-parent! "(mode-parent! NAME PARENT) — record that NAME is built from PARENT")
-(public! 'mode-is? "(mode-is? MODE NAME) — #t when MODE is NAME or descends from it")
-(public! 'buffer-mode-is? "(buffer-mode-is? BUF NAME) — #t when the buffer's major mode is NAME or descends from it")
+(public! 'derived-mode? "(derived-mode? MODE NAME) — #t when MODE is NAME or descends from it")
+(public! 'buffer-derived-mode? "(buffer-derived-mode? BUF NAME) — #t when the buffer's major mode is NAME or descends from it")
 (public! 'mode-setup! "(mode-setup! NAME) — run NAME's setup in the current buffer, the way a derived mode inherits it")
 (public! 'define-list-mode!
   "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Set transient to #f for persistent app buffers (default #t). Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."

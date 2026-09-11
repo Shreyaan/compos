@@ -226,7 +226,6 @@
 (define (telemetry--detail-setup! buf)
   (desktop-skip! buf 'render-blocks)
   (desktop-skip! buf 'telemetry-detail-row)
-  (buffer-set-local! buf 'transient #t)
   (buffer-set-read-only! buf #t)
   (buffer-set-local! buf 'render-mode "blocks")
   (buffer-set-local! buf 'render-blocks
@@ -235,6 +234,7 @@
 
 (mode-icon! "telemetry-detail-mode" "")
 
+(mode-parent! "telemetry-detail-mode" "special-mode")
 (define-mode "telemetry-detail-mode"
   (lambda () (telemetry--detail-setup! (current-buffer))))
 

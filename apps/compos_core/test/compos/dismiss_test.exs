@@ -20,7 +20,7 @@ defmodule Compos.DismissTest do
                   (buffer-set-read-only! b #t))
                 '("zz-dismiss-parent" "zz-dismiss-child" "zz-dismiss-grandchild" "zz-dismiss-hidden" "zz-dismiss-under"))
       (switch-to-buffer-here! "zz-dismiss-parent")
-      (window-history-set! (active-window) '())
+      (set-window-prev-buffers! (active-window) '())
       (define-command "zz-dismiss-parent-back"
         (lambda () (buffer-set-local! "zz-dismiss-parent" 'back-called #t)))
       (local-set-key "q" "zz-dismiss-parent-back")
@@ -93,7 +93,7 @@ defmodule Compos.DismissTest do
   test "dismissal restores a transient predecessor already visible elsewhere", %{frame: f} do
     eval!(
       """
-      (buffer-set-local! "zz-dismiss-parent" 'transient #t)
+      (buffer-set-local! "zz-dismiss-parent" 'special #t)
       (split-window! 'h 0.5) (other-window!)
       (switch-to-buffer! "zz-dismiss-child")
       (buffer-child! "zz-dismiss-parent" "zz-dismiss-child")

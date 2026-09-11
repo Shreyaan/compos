@@ -226,7 +226,7 @@ defmodule Compos.RemoteTest do
     assert Buffer.exists?(buf)
     assert Proc.running?(buf)
     assert Buffer.read_only?(buf)
-    assert Buffer.get_local(buf, "transient")
+    assert Buffer.get_local(buf, "mode-name") == "tail-mode"
     assert wait_until(fn -> Buffer.text(buf) =~ "one" end)
 
     File.write!(file, "two\n", [:append])

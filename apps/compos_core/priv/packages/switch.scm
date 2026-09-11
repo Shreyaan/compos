@@ -101,7 +101,7 @@
                         (car source)))
          (pool (filter (lambda (c) (not (self? c))) cands))
          (self (filter self? cands))
-         (mine (if (and win (window-exists? win)) (window-buffer-history win) '()))
+         (mine (if (and win (window-exists? win)) (window-prev-buffers win) '()))
          ;; one pass over the history picks its rows in history order;
          ;; a sort over the rows cost seconds at four hundred rows
          (led (let loop ((names mine) (out '()))
@@ -846,7 +846,7 @@
                               (not (buffer-context-only? b))
                               (not (peek-buffer? b))))
                        (buffer-list-mru)))
-         (mine (if (and win (window-exists? win)) (window-buffer-history win) '()))
+         (mine (if (and win (window-exists? win)) (window-prev-buffers win) '()))
          (led (filter (lambda (n) (and (member n bufs) (not (equal? n here)))) mine))
          (rest (filter (lambda (b) (and (not (member b led)) (not (equal? b here)))) bufs)))
     (append led rest

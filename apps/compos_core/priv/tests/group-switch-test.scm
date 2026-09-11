@@ -30,7 +30,7 @@
       (buffer-set-local! b 'scratch-buffer #f)
       (buffer-set-local! b 'scratch-owner #f)
       (buffer-set-local! b 'scratch-from #f)
-      (buffer-set-local! b 'transient #f))
+      (buffer-set-local! b 'special #f))
     (list t--sw-first t--sw-second t--sw-third))
   (set! *group-records* '())
   (set! *group-next-id* 0)
@@ -250,11 +250,11 @@
   "group-new from a transient buffer seeds nothing (docs/groups.md: the empty seed)"
   (lambda ()
     (t--sw-setup!)
-    (buffer-set-local! t--sw-first 'transient #t)
+    (buffer-set-local! t--sw-first 'special #t)
     (run-command "group-new")
     (t--sw-type! "zzsw-empty-context")
     (t--sw-key! "confirm")
-    (buffer-set-local! t--sw-first 'transient #f)
+    (buffer-set-local! t--sw-first 'special #f)
     (let ((id (group-resolve-id "zzsw-empty-context")))
       (check-true! id "the group record exists")
       (check-equal! (filter group-work-buffer? (group-buffers id)) '()
@@ -277,11 +277,11 @@
     (t--sw-type! "zzsw-active-two")
     (t--sw-key! "confirm")
     ;; an empty group: group-new seeds nothing from a transient buffer
-    (buffer-set-local! t--sw-second 'transient #t)
+    (buffer-set-local! t--sw-second 'special #t)
     (run-command "group-new")
     (t--sw-type! "zzsw-active-empty")
     (t--sw-key! "confirm")
-    (buffer-set-local! t--sw-second 'transient #f)
+    (buffer-set-local! t--sw-second 'special #f)
     (let ((one (group-resolve-id "zzsw-active-one"))
           (two (group-resolve-id "zzsw-active-two"))
           (empty (group-resolve-id "zzsw-active-empty")))
@@ -367,7 +367,7 @@
       (buffer-add-group! t--sw-third id)
       (switch-to-buffer! t--sw-third)
       (switch-to-buffer! t--sw-second)
-      (check-equal! (car (window-buffer-history win)) t--sw-third "the window showed third before")
+      (check-equal! (car (window-prev-buffers win)) t--sw-third "the window showed third before")
       (buffer-kill! t--sw-second)
       (check-equal! (length (window-list)) 2 "the window stays")
       (check-true! (window-exists? win) "the same window")
@@ -385,7 +385,7 @@
            (chat (group-chat id))
            (win (active-window)))
       (check-equal! (window-buffer win) t--sw-second "the window shows the victim")
-      (check-equal! (car (window-buffer-history win)) t--sw-first
+      (check-equal! (car (window-prev-buffers win)) t--sw-first
                     "its past leads with first, which the left window shows")
       (buffer-kill! t--sw-second)
       (check-equal! (length (window-list)) 2 "the window stays")
@@ -841,7 +841,7 @@
           (destination (group-record-create! "zzsw-transient-destination")))
       ;; Dired listings are transient for current-group derivation, but the
       ;; listing itself is still the explicit buffer the move command names.
-      (buffer-set-local! t--sw-first 'transient #t)
+      (buffer-set-local! t--sw-first 'special #t)
       (buffer-add-group! t--sw-first source)
       (switch-to-buffer! t--sw-first)
       (run-command "group-move")
@@ -1033,7 +1033,7 @@
     (t--sw-setup!)
     (buffer-set-local! t--sw-first 'scratch-buffer t--sw-second)
     (buffer-set-local! t--sw-second 'scratch-owner t--sw-first)
-    (buffer-set-local! t--sw-second 'transient #t)
+    (buffer-set-local! t--sw-second 'special #t)
     (check-equal! (buffer-family t--sw-first) (list t--sw-first)
                   "the transient companion is ineligible")
     (let ((destination (group-record-create! "zzsw-incompatible-family")))
@@ -1448,13 +1448,13 @@
       (check-equal! (frame-group) second "the existing common group remains current"))
     (t--sw-done!)))
 
-(deftest 'transient-buffers-do-not-change-current-group
-  "a transient interface pane does not participate in homogeneity"
+(deftest 'special-buffers-do-not-change-current-group
+  "a special interface pane does not participate in homogeneity"
   (lambda ()
     (t--sw-setup!)
     (let ((here (group-record-create! "zzsw-here")))
       (buffer-add-group! t--sw-first here)
-      (buffer-set-local! t--sw-second 'transient #t)
+      (buffer-set-local! t--sw-second 'special #t)
       (switch-to-buffer! t--sw-first)
       (split-window! 'h 0.5)
       (other-window!)
@@ -1871,7 +1871,7 @@
       (let ((foreign (test-buffer! "zz-sw-seal-foreign" "")))
         ;; a work buffer in no group: creation joined the destination, so
         ;; take it out; a transient pane would say nothing
-        (buffer-set-local! foreign 'transient #f)
+        (buffer-set-local! foreign 'special #f)
         (for-each (lambda (id) (buffer-remove-group! foreign id))
                   (buffer-group-ids foreign))
         ;; a switch would float it in the popup (the tests below); a pane
@@ -1913,7 +1913,7 @@
     (switch-to-buffer! t--sw-second)
     (group-current-recalculate!)
     (let ((foreign (test-buffer! "zz-sw-float-foreign" "")))
-      (buffer-set-local! foreign 'transient #f)
+      (buffer-set-local! foreign 'special #f)
       (for-each (lambda (id) (buffer-remove-group! foreign id))
                 (buffer-group-ids foreign))
       (list home foreign))))

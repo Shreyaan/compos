@@ -75,7 +75,7 @@ defmodule Compos.LayoutPolicyTest do
                       (equal? (layout-target) 'two-pane)
                       (equal? lp-chat-geometry
                         (map (lambda (r) (cons (car r) (cddr r))) (window-rects)))
-                      (equal? (car (window-buffer-history lp-chat-window)) lp-chat-old)
+                      (equal? (car (window-prev-buffers lp-chat-window)) lp-chat-old)
                       (equal? (window-list)
                         (map (lambda (r) (if (equal? (car r) lp-chat-window)
                                              (list (car r) (current-buffer)) r)) lp-chat-windows)))
@@ -103,7 +103,7 @@ defmodule Compos.LayoutPolicyTest do
                """
                (lp-start!) (lp-buffer! "b") (lp-buffer! "app")
                (define-list-mode! "zz-lp-app-mode"
-               (list 'buffer "zz-lp-app" 'transient #f 'rows (lambda (buf) '())))
+               (list 'buffer "zz-lp-app" 'special #f 'rows (lambda (buf) '())))
                (list-mode-init! "zz-lp-app" "zz-lp-app-mode")
                (tile-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
                (layout-target-set! 'two-pane)
@@ -139,8 +139,8 @@ defmodule Compos.LayoutPolicyTest do
                (define lp-move-source (active-window))
                (define lp-move-dest (car (window-in-direction 'right)))
                (window-set-point! lp-move-source 7)
-               (window-history-set! lp-move-source '("zz-lp-b"))
-               (window-history-set! lp-move-dest '())
+               (set-window-prev-buffers! lp-move-source '("zz-lp-b"))
+               (set-window-prev-buffers! lp-move-dest '())
                (define lp-move-geometry (map (lambda (r) (cons (car r) (cddr r))) (window-rects)))
                """,
                frame
@@ -154,8 +154,8 @@ defmodule Compos.LayoutPolicyTest do
                (and (equal? (map cadr (window-list)) '("zz-lp-b" "zz-lp-a"))
                     (equal? (active-window) lp-move-dest)
                     (= (window-point lp-move-dest) 7)
-                    (equal? (window-buffer-history lp-move-source) '())
-                    (equal? (car (window-buffer-history lp-move-dest)) "zz-lp-c")
+                    (equal? (window-prev-buffers lp-move-source) '())
+                    (equal? (car (window-prev-buffers lp-move-dest)) "zz-lp-c")
                     (equal? lp-move-geometry (map (lambda (r) (cons (car r) (cddr r))) (window-rects)))
                     (equal? (layout-target) 'two-pane))
                """,
@@ -308,7 +308,7 @@ defmodule Compos.LayoutPolicyTest do
                """
                (lp-start!) (lp-buffer! "list") (group-chat (frame-group))
                (buffer-remove-group! "zz-lp-list" (frame-group))
-               (buffer-set-local! "zz-lp-list" 'transient #t)
+               (buffer-set-local! "zz-lp-list" 'special #t)
                (tile-windows! 'columns '("zz-lp-list" "zz-lp-a"))
                (layout-target-set! 'columns)
                """,
