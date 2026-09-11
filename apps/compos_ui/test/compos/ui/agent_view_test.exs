@@ -167,6 +167,34 @@ defmodule Compos.Ui.AgentViewTest do
     refute Buffer.text(buf) =~ "wait for me"
   end
 
+  # a pasted attachment: the block names a file, and the transcript shows
+  # the picture rather than the path
+  test "an image block renders the picture the paste saved", %{conn: conn} do
+    buf = "*agent: image-test*"
+    {:ok, _} = Compos.Core.create_buffer(buf)
+
+    path = Path.join(System.tmp_dir!(), "zz-agent-view.png")
+    File.write!(path, "not really a png")
+    label = "[image " <> Path.basename(path) <> "]\n"
+
+    Buffer.append(buf, label, source: :editor)
+    mark = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n>>> you: ", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-saved-mark", mark)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
+    Buffer.set_local(buf, "agent-blocks", [[0, byte_size(label), "image", path, "image/png"]])
+
+    Editor.set_window_buffer(buf)
+    {:ok, view, _html} = live(conn, "/")
+
+    assert has_element?(view, ~s(.ag-image img[alt=\"zz-agent-view.png\"]))
+    assert has_element?(view, ~s(img[src^=\"/local-image/\"]))
+
+    File.rm(path)
+  end
+
   test "agent render-mode applies the buffer text scale to all chat text", %{conn: conn} do
     buf = "*agent: scale-test*"
     {:ok, _} = Compos.Core.create_buffer(buf)

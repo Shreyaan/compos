@@ -609,6 +609,12 @@ defmodule Compos.Ui.Layouts do
             min-width: 0; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.92);
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
+          /* a pasted attachment is shown, not described. It is bounded so
+             one screenshot cannot own the whole transcript. */
+          .ag-image-img {
+            min-width: 0; max-width: 100%; max-height: 320px;
+            object-fit: contain; border-radius: 6px; display: block;
+          }
           /* The measure belongs to the text, not to the block: five table
              columns do not fit in 62ch. `overflow-wrap: anywhere` made it
              worse. `anywhere` counts every character as a wrap opportunity
