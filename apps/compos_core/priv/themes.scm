@@ -222,9 +222,10 @@
     (list 'org-meta 'fg "#8a857a")
     (list 'fold-marker 'fg "#8a857a")
     ;; the mail faces: the index columns and the show-view header
-    (list 'nm-date 'fg "#8a8a8a")
-    (list 'nm-author 'fg "#26356b")
-    (list 'nm-tags 'fg "#9a9a72")
+    (list 'nm-date 'fg "#676257")
+    (list 'nm-author 'fg "#515c86" 'weight "400" 'style "italic")
+    (list 'nm-tags 'fg "#64603a")
+    (list 'nm-subject 'fg "#4a4741")
     (list 'nm-marked 'fg "#a03020")
     (list 'nm-hdr 'fg "#26356b")
     (list 'nm-sep 'fg "#9a9a72")

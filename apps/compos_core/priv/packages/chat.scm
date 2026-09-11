@@ -839,6 +839,65 @@
 ;; own map beside C-c C-k and C-c C-v; M-x still reaches it from anywhere,
 ;; where the chat-buffer? guard turns it away.
 (mode-keys! "chat-mode" '(("C-c C-t" "chat-title")))
+(domain! 'chat)
+(effects! '(write display))
+
+;;; --- C-`: Alt-Tab between the chats ---------------------------------------
+;;; In a chat, C-` walks the chats alone, most recently used first. The first
+;;; press lands on the chat you came from; each further press, with no other
+;;; command between, goes one deeper. Any other command ends the walk, so the
+;;; next C-` starts again from the chat you are now in. Two chats and the key
+;;; flips between them, the way Alt-Tab flips between two windows. The walk
+;;; stays in this group: it never crosses into another group's chats, and it
+;;; never moves the frame to a group. Outside a chat C-` keeps its global
+;;; meaning, the popup toggle.
+
+(define *chat-cycle-ring* '())
+(define *chat-cycle-pos* 0)
+
+;; the walk order: this chat first, then every other chat, most recent first
+(define (chat-cycle-ring)
+  ;; this group's open chats only: the walk never leaves the group, and a
+  ;; dormant chat or an archived .chat file is not a place it stops
+  (let ((open (buffer-list))
+        (gid (buffer-group (current-buffer))))
+    (cons (current-buffer)
+          (filter (lambda (b)
+                    (and (chat-buffer? b)
+                         (member b open)
+                         (equal? (buffer-group b) gid)
+                         (not (string-prefix? " " b))
+                         (not (buffer-context-only? b))
+                         (not (equal? b (current-buffer)))))
+                  (buffer-list-mru)))))
+
+(define (chat-cycle! dir)
+  (unless (member (last-command) '("chat-cycle" "chat-cycle-back"))
+    (set! *chat-cycle-ring* (chat-cycle-ring))
+    (set! *chat-cycle-pos* 0))
+  ;; a chat killed mid-walk leaves the ring, and the place holds
+  (let ((live (filter buffer-known? *chat-cycle-ring*)))
+    (unless (= (length live) (length *chat-cycle-ring*))
+      (set! *chat-cycle-ring* live)
+      (when (>= *chat-cycle-pos* (length live))
+        (set! *chat-cycle-pos* 0))))
+  (let ((n (length *chat-cycle-ring*)))
+    (if (< n 2)
+        (message "No other chat")
+        (begin
+          (set! *chat-cycle-pos* (modulo (+ *chat-cycle-pos* dir) n))
+          (switch-to-buffer! (list-ref *chat-cycle-ring* *chat-cycle-pos*))))))
+
+(define-command "chat-cycle" "Walk the chats, most recently used first"
+  (lambda () (chat-cycle! 1)))
+
+(define-command "chat-cycle-back" "Walk the chats the other way"
+  (lambda () (chat-cycle! -1)))
+
+;; the key is chat-mode's own, so it shadows the global popup toggle only
+;; while you are in a chat
+(mode-keys! "chat-mode" '(("C-`" "chat-cycle")))
+
 
 ;;; --- the conversation is named for its group ------------------------------------
 ;;; A chat's name is DERIVED, never invented: *chat:<group>*, and a group

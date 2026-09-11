@@ -242,10 +242,17 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- search buffer ------------------------------------------------------------
 
-(defface! 'nm-date 'fg "#8a8a8a")
-(defface! 'nm-author 'fg "#26356b")
+;; The index rows are a character grid: every row is padded to the same column
+;; count, so the date and the tags right-align by counting characters. A face
+;; here may set colour and weight; it must not set size, because a segment at a
+;; different size breaks that alignment. The reading order is carried by
+;; contrast instead: unread subject, then read subject, then author, then date
+;; and tags. Each value below clears 4.5:1 on the paper background.
+(defface! 'nm-date 'fg "#676257")
+(defface! 'nm-author 'fg "#515c86" 'weight "400" 'style "italic")
 (defface! 'nm-unread 'weight "700")
-(defface! 'nm-tags 'fg "#9a9a72")
+(defface! 'nm-subject 'fg "color-mix(in srgb, var(--default-fg) 78%, var(--default-bg))")
+(defface! 'nm-tags 'fg "#64603a")
 (defface! 'nm-marked 'fg "#a03020" 'weight "700")
 (defface! 'nm-bar 'fg "#26356b")
 
