@@ -212,9 +212,9 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
 
   # the pasted attachments ride as image content. The text already names
   # their paths, so a file we cannot read costs the turn nothing.
-  defp user_message(text, []), do: %{role: "user", content: text}
+  defp prompt_message(text, []), do: %{role: "user", content: text}
 
-  defp user_message(text, images) do
+  defp prompt_message(text, images) do
     parts =
       for %{mime: mime, path: path} <- images,
           {:ok, bytes} <- [File.read(path)],
@@ -238,7 +238,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
     record(slug, "user", [["text", display]], if(text == display, do: false, else: text))
 
     LLM.run_tool_loop(
-      messages ++ [user_message(text, Map.get(ctx, :images) || [])],
+      messages ++ [prompt_message(text, Map.get(ctx, :images) || [])],
       ctx.system,
       ctx.tools,
       ctx.dispatcher,

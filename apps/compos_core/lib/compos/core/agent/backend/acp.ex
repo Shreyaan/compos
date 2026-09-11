@@ -111,16 +111,6 @@ defmodule Compos.Core.Agent.Backend.ACP do
      })}
   end
 
-  # ACP carries an image as content, not as a path: the bytes go base64 in
-  # their own prompt block. A file we cannot read is skipped rather than
-  # failing the turn — the message text names the path either way.
-  defp image_blocks(images) do
-    for %{mime: mime, path: path} <- images,
-        {:ok, bytes} <- [File.read(path)] do
-      %{"type" => "image", "mimeType" => mime, "data" => Base.encode64(bytes)}
-    end
-  end
-
   def handle_call({:steer, token, text, epoch}, _from, %{session_id: sid} = state)
       when is_binary(sid) do
     pending = {:steer, token, epoch}
@@ -212,6 +202,16 @@ defmodule Compos.Core.Agent.Backend.ACP do
   # drops protocol metadata (dsh) declares 'system-in-prompt, and its
   # sections lead the session's first user message: the head of the prefix
   # the provider caches, so the second turn pays for the new text alone.
+  # ACP carries an image as content, not as a path: the bytes go base64 in
+  # their own prompt block. A file we cannot read is skipped rather than
+  # failing the turn — the message text names the path either way.
+  defp image_blocks(images) do
+    for %{mime: mime, path: path} <- images,
+        {:ok, bytes} <- [File.read(path)] do
+      %{"type" => "image", "mimeType" => mime, "data" => Base.encode64(bytes)}
+    end
+  end
+
   defp with_system_preamble(%{system_sent: true} = state, text), do: {state, text}
 
   defp with_system_preamble(state, text) do

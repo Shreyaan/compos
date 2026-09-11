@@ -777,8 +777,49 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;; the preview helpers target the *next* window in cyclic order, so any
 ;; window arrangement works: put the index left of where you want mail
-;; shown and SPC/n/p keep filling that pane. Personal scenes (three-pane
-;; layouts, per-account profile commands, keybindings) belong in init.scm.
+;; shown and SPC/n/p keep filling that pane. Per-account profile commands
+;; and keybindings stay personal; the arrangement below does not.
+
+;;; --- the mail scene: index | message | chat -----------------------------------
+;;; Mail is not one buffer, so the package does not ship one. It ships the
+;;; whole arrangement, and it ships it as a DECLARATION: the editor puts the
+;;; panes where this says, in this order, every time. Kill any pane's buffer
+;;; and the next run makes it again.
+;;;
+;;; (ensure "NAME" "COMMAND") runs COMMAND when NAME is absent. group-chat is
+;;; this group's own chat. Every pane joins the group, so the index and the
+;;; open message are its documents and the chat beside them reads both
+;;; through the context providers above.
+;;;
+;;; A builder would not do this correctly. The index previews into a window
+;;; of its own while it opens, so a builder and the preview both split one
+;;; frame and the panes land in whatever order wins.
+
+(define notmuch-scene-name "mail")   ; the scene, and the group it lives in
+
+(define-scene! notmuch-scene-name
+  '(h 0.32 (as index (ensure "*notmuch*" "notmuch-inbox"))
+           (as show (ensure "*mail*" "notmuch-show-current"))
+           (as chat group-chat)))
+
+;; buffer-exists? is the wrong question: a *notmuch* survives a closed
+;; window, a crash and a desktop restore while no scene is on screen. The
+;; scene is up when this frame stands in its group and both panes show. Less
+;; than that is drift, and scene-open! rebuilds the declared arrangement out
+;; of whatever state the frame is in, so drift routes there and not to quit.
+(define (notmuch-scene-showing?)
+  (and (equal? (frame-local 'current-group) (group-resolve-id notmuch-scene-name))
+       (scene-window 'index)
+       (scene-window 'show)
+       #t))
+
+(define-command "mail" "Toggle the three-pane mail scene: index, message, chat"
+  (lambda ()
+    (if (notmuch-scene-showing?)
+        (run-command "notmuch-quit")
+        (scene-open! notmuch-scene-name))))
+(catalog-meta! 'command "mail" 'domain 'mail
+               'effects '(write display external execute))
 
 ;;; --- preview: thread in the other window, focus stays --------------------------
 
