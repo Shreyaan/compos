@@ -1404,6 +1404,16 @@ the tabs. C-s searches to any link.")
 (define (browse-other-window url)
   (web--show-tab-other-window! (web--target url)))
 
+;; the peek half of the same shape, for a list that previews as the
+;; highlight moves: a look that the next move replaces. Not
+;; browse-other-window, because its keep step takes the focus the moment
+;; the row already on screen is the row you are on.
+(define (browse-peek url)
+  (let* ((u (web--target url))
+         (name (web--buffer-for u)))
+    (peek! name (lambda () (web--tab-for! u)))
+    name))
+
 ;; one prompt for both commands: it completes over the history, a title
 ;; matches what you type, and a fresh URL still goes through as typed
 (define (web--read-url! prompt open)
@@ -1553,6 +1563,8 @@ the tabs. C-s searches to any link.")
 
 (public! 'browse-other-window
   "(browse-other-window URL) — read URL as text in its tab, shown in another window; the selected window and its point stay")
+(public! 'browse-peek
+  "(browse-peek URL) — peek URL's tab beside the selected window; the next peek replaces it and the focus never moves")
 
 (public! 'url-resolve
   "(url-resolve URL BASE) — resolve a link target against the page it came from: absolute stays, //host takes the scheme, /path takes the origin, the rest appends to the page's directory")
