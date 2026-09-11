@@ -601,6 +601,43 @@
 (catalog-meta! 'function "subagent-record!" 'domain 'chat 'effects '(write))
 (catalog-meta! 'function "subagent-cache-rebuild!" 'domain 'chat 'effects '(write))
 
+;;; --- the result ---------------------------------------------------------------
+;;;
+;;; A child reports STRUCTURALLY. (subagent-result CHAT) reads the child's
+;;; own transcript and costs the parent nothing at all: no turn, no tokens,
+;;; no context. A fan-out of ten children therefore costs ten turns, not
+;;; twenty, and the parent reads the answers when it wants them.
+;;;
+;;; A free-text wake is the exception, not the rule. 'notify #t on the spawn
+;;; asks for one: when a turn of that child ends, the parent is sent a
+;;; message with agent-continue!, which does cost the parent a turn.
+;;;
+;;; The turn-end hook (agent.scm) is what makes any of this work. It fires
+;;; on the :ui lane after the child's transcript has landed, so the last
+;;; assistant message a listener reads is the finished one.
+
+(domain! 'chat)
+(effects! '(read))
+
+;; how much of a child's own words ride in a free-text wake. Past this the
+;; parent is pointed at subagent-result instead of being flooded.
+(define *subagent-wake-limit* 4000)
+
+(define (subagent-live-buffer chat)
+  (let* ((slug (subagent-slug chat))
+         (buf (and slug (agent-buf slug))))
+    (and buf (buffer-exists? buf) buf)))
+
+;; a turn is in flight. A chat with no runtime at all is not running.
+(define (subagent-running? chat)
+  (let ((slug (subagent-slug chat)))
+    (if (and slug
+             (member slug (agent-list))
+             (member (agent-status slug) '(running starting needs_attention)))
+        #t
+        #f)))
+
+
 (category! 'chat)
 
 (public! 'execute "(execute \"task\") — spawn a task chat on an ACP backend; returns its slug")
