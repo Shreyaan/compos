@@ -44,6 +44,11 @@ defmodule Compos.SubagentResultTest do
 
   defp slug(out), do: String.trim(out, "\"")
 
+  # a chat's durable slug and its buffer name are two different things:
+  # execute* answers the slug, and the buffer is named from the short spawn
+  # name. Ask the editor rather than guessing one from the other.
+  defp chat_buf(s), do: slug(eval!(~s[(agent-buf "#{s}")]))
+
   defp eventually(fun, tries \\ 60) do
     cond do
       fun.() -> true
@@ -75,7 +80,7 @@ defmodule Compos.SubagentResultTest do
     assert eval!(~s[(plist-get (subagent-result "#{s}") 'text)]) == ~s["done."]
   end
 
-  test "a cancelled turn reaches the same hook, and says it did not end normally" do
+  test "a turn that died reaches the same hook, and says it did not end normally" do
     eval!("(define zz-turn-end-log '())")
 
     eval!("""
@@ -84,24 +89,20 @@ defmodule Compos.SubagentResultTest do
         (set! zz-turn-end-log (cons (list slug stop ok?) zz-turn-end-log))))
     """)
 
-    # the script parks on a permission nobody answers, so there is a turn
-    # in flight to cancel
-    s =
-      slug(
-        eval!("""
-        (execute* "go" '(permission-mode ask backend "stub" script
-          (((type permission rpc-id 7 title "Write foo.ex" kind "edit"
-                   options (("opt-allow" "Allow" "allow_once")
-                            ("opt-reject" "Reject" "reject_once")))))))
-        """)
-      )
+    # turn-failed is the backend saying the turn died with no result; the
+    # Agent turns it into a turn-end whose stop reason is "error"
+    s = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type turn-failed)))))]))
 
-    assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(s)) end)
-    eval!(~s[(llm-session-cancel! "#{s}")])
+    assert eventually(fn ->
+             eval!(~s[(if (member (list "#{s}" "error" #f) zz-turn-end-log) 1 0)]) == "1"
+           end),
+           "no failed turn end was reported: #{eval!("zz-turn-end-log")}"
 
-    assert eventually(fn -> eval!("(length zz-turn-end-log)") != "0" end)
-    assert eval!("(nth 1 (car zz-turn-end-log))") == ~s["cancelled"]
-    assert eval!("(nth 2 (car zz-turn-end-log))") == "#f"
+    # and the normality test is a plain function, so a caller can ask
+    # without waiting for anything
+    assert eval!(~s[(agent-turn-end-normal? "error")]) == "#f"
+    assert eval!(~s[(agent-turn-end-normal? "cancelled")]) == "#f"
+    assert eval!(~s[(agent-turn-end-normal? "end_turn")]) == "#t"
   end
 
   test "a child reports structurally, and the parent spends no turn reading it" do
@@ -123,12 +124,12 @@ defmodule Compos.SubagentResultTest do
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'status)]) == "done"
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'stop-reason)]) == ~s["end_turn"]
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'text)]) == ~s["the answer is 42."]
-    assert eval!(~s[(plist-get (subagent-result "#{c}") 'buffer)]) == ~s["*chat:#{c}*"]
+    assert eval!(~s[(plist-get (subagent-result "#{c}") 'buffer)]) == ~s["#{chat_buf(c)}"]
 
     # the whole point: reading the child cost the parent nothing. Its
     # conversation of record is still empty and its thread never ran.
-    assert eval!(~s[(length (chat-turns "*chat:#{p}*"))]) == "0"
-    refute Buffer.text("*chat:#{p}*") =~ ">>> you:"
+    assert eval!(~s[(length (chat-turns "#{chat_buf(p)}"))]) == "0"
+    refute Buffer.text(chat_buf(p)) =~ ">>> you:"
 
     # and a collect over the parent's children answers in spawn order
     assert eval!(~s[(map (lambda (r) (plist-get r 'text)) (subagent-collect (subagent-children "#{p}")))]) ==
@@ -159,10 +160,10 @@ defmodule Compos.SubagentResultTest do
         """)
       )
 
-    assert eventually(fn -> Buffer.text("*chat:#{p}*") =~ "[subagent #{c} finished its turn]" end),
-           "the parent was never woken: #{Buffer.text("*chat:#{p}*")}"
+    assert eventually(fn -> Buffer.text(chat_buf(p)) =~ "[subagent #{c} finished its turn]" end),
+           "the parent was never woken: #{Buffer.text(chat_buf(p))}"
 
-    parent_text = Buffer.text("*chat:#{p}*")
+    parent_text = Buffer.text(chat_buf(p))
     assert parent_text =~ "child says hi."
     assert parent_text =~ "(subagent-result \"#{c}\")"
   end
@@ -184,8 +185,8 @@ defmodule Compos.SubagentResultTest do
     assert eventually(fn -> eval!(~s[(subagent-done? "#{c}")]) == "#t" end)
     Process.sleep(200)
 
-    refute Buffer.text("*chat:#{p}*") =~ "[subagent"
-    assert eval!(~s[(length (chat-turns "*chat:#{p}*"))]) == "0"
+    refute Buffer.text(chat_buf(p)) =~ "[subagent"
+    assert eval!(~s[(length (chat-turns "#{chat_buf(p)}"))]) == "0"
   end
 
   test "subagent-wait answers once every child has reached a turn end" do
