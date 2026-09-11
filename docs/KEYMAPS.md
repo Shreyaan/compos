@@ -111,3 +111,24 @@ as one key.
 | `(key-binding KEYS)`, `(key-binding-source KEYS)` | what a key does here, and which map said so |
 | `(where-is-internal COMMAND [BUF])` | every key of a command |
 | `(global-set-key KEYS COMMAND)`, `(local-set-key KEYS COMMAND)` | the global map, the buffer's own map |
+
+
+## Keymap editor
+
+Run `M-x keys` or press `C-h B` to open the keymap editor. The editor
+starts with the bindings that apply to the source buffer. It shows the
+key, command, source keymap, and a short note.
+
+Press `RET` to describe a binding. Press `b` to move its command to
+another key. Press `d` to unbind it. Press `+` to bind an unbound
+command globally. Press `u` to revert your edit.
+
+The editor reads all keymaps. Press `k` to filter by one named keymap,
+or choose `all` to remove that filter. The list shows 60 rows per page.
+Press `SPC` or `n` for the next page. Press `/` to search by key
+sequence, command, keymap, or description.
+The editor marks shadowed bindings and your edits.
+
+The editor saves changes in `user-key-bindings` through customize.
+Each row has `(KEYMAP KEYS COMMAND WAS)`. A false `COMMAND` unbinds the
+key. `WAS` lets the editor restore the previous binding.

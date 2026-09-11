@@ -206,7 +206,7 @@
     (if (and (string? t) (buffer-known? t)) t (keys--other-buffer))))
 
 (define (keys--scope buf)
-  (or (buffer-local buf 'keys--scope) "buffer"))
+  (or (buffer-local buf 'keys--scope) "all"))
 
 (define (keys--unbound-rows maps)
   ;; a key you took away has no binding left to read, so the edit itself
@@ -218,12 +218,23 @@
                '()))
          user-key-bindings)))
 
+(define (keys--map-rows map)
+  (map (lambda (row)
+         (list (nth 0 row) (nth 1 row) map
+               (nth 2 row) (nth 3 row) ""))
+       (keys--expand map "" '())))
+
 (define (keys--rows buf)
-  (if (equal? (keys--scope buf) "all")
-      (keys--all-rows)
-      (let ((target (keys--target buf)))
-        (append (keys--ladder-rows target)
-                (keys--unbound-rows (buffer-keymaps target))))))
+  (let ((scope (keys--scope buf)))
+    (cond
+      ((equal? scope "all") (keys--all-rows))
+      ((equal? scope "buffer")
+       (let ((target (keys--target buf)))
+         (append (keys--ladder-rows target)
+                 (keys--unbound-rows (buffer-keymaps target)))))
+      (else
+       (filter (lambda (row) (equal? (keys--map row) scope))
+               (keys--all-rows))))))
 
 (define (keys--cells buf e)
   (list (keys--seq e)
@@ -233,12 +244,21 @@
               ((equal? (keys--state e) "shadowed") "shadowed")
               (else (keys--doc (keys--cmd e))))))
 
+(define (keys--match? buf e input)
+  (completion-match?
+    (string-append (keys--seq e) " " (keys--cmd e) " "
+                   (keys--map e) " " (keys--doc (keys--cmd e)))
+    input
+    'substring))
+
 (define (keys--meta buf)
   (string-append
     (number->string (length (list-entries buf))) " keys · "
-    (if (equal? (keys--scope buf) "all")
-        "every keymap"
-        (string-append "in " (keys--target buf)))
+    (cond
+      ((equal? (keys--scope buf) "all") "every keymap")
+      ((equal? (keys--scope buf) "buffer")
+       (string-append "in " (keys--target buf)))
+      (else (string-append "in " (keys--scope buf))))
     " · " (number->string (length user-key-bindings)) " yours"))
 
 (define (keys--current)
@@ -262,14 +282,17 @@
 (define-command "keys-refresh" "Read the keymaps again"
   (lambda () (keys--redraw!)))
 
-(define-command "keys-scope" "Switch between this buffer's keys and every keymap"
+(define-command "keys-scope" "Filter all bindings by keymap"
   (lambda ()
-    (buffer-set-local! *keys-buffer* 'keys--scope
-      (if (equal? (keys--scope *keys-buffer*) "all") "buffer" "all"))
-    (keys--redraw!)
-    (message (if (equal? (keys--scope *keys-buffer*) "all")
-                 "every keymap"
-                 (string-append "the keys of " (keys--target *keys-buffer*))))))
+    (completing-read "Keymap scope: "
+      (cons "all" (sort (keymap-names)))
+      (lambda (scope)
+        (when (and (string? scope) (not (equal? scope "")))
+          (buffer-set-local! *keys-buffer* 'keys--scope scope)
+          (list-filter-clear! *keys-buffer*)
+          (keys--redraw!)
+          (message (string-append "keys: " scope))))
+      'require-match #t)))
 
 (define-command "keys-describe" "Describe the key on this row"
   (lambda ()
@@ -371,12 +394,15 @@
            "answers first reads as shadowed, and your own edits read as "
            "yours. RET describes the key, `b` gives its command another "
            "key, `d` takes the key away, `+` binds a command that has no "
-           "key, `u` takes back an edit of yours, `s` widens the list to "
-           "every keymap in the editor, `/` filters and `g` reads the "
+           "key, `u` takes back an edit of yours, `k` filters the list by "
+           "keymap, `/` searches and `g` reads the "
            "keymaps again. An edit lasts: customize keeps it in "
            "custom.scm, and the next session binds it again.")
     'buffer *keys-buffer*
     'rows keys--rows
+    'local-filter #t
+    'match keys--match?
+    'page-size 60
     'columns (lambda (buf)
                (list (list "key" 18) (list "command" 30)
                      (list "keymap" 22) (list "note" #f)))
@@ -386,13 +412,16 @@
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
               '(("RET" "describe") ("b" "rebind") ("d" "unbind")
-                ("+" "bind") ("u" "revert") ("s" "scope")
+                ("+" "bind") ("u" "revert") ("k" "keymap filter")
                 ("/" "filter") ("g" "refresh") ("q" "quit")))
     'key (lambda (buf e) (string-append (keys--map e) " " (keys--seq e)))
     'keys '(("RET" "keys-describe") ("b" "keys-rebind")
             ("d" "keys-unbind") ("+" "keys-bind")
-            ("u" "keys-revert") ("s" "keys-scope")
+            ("u" "keys-revert") ("k" "keys-scope")
             ("g" "keys-refresh") ("q" "quit-window"))))
+
+;; Remove the old scope key when hotload rebuilds this mode.
+(keymap-unset! (mode-keymap "keys-mode") "s")
 
 ;; C-h b describes the bindings as a page; C-h B is the same keys as a
 ;; list you can edit.

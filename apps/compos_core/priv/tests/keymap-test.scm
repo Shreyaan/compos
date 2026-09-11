@@ -307,3 +307,84 @@
     (check-true! (wait-until (lambda () (keymap-test-fired? 'one)) 3000 20) "and pressing it runs the command")
     (check-true! (member '("<f9> z" "keymap-test-dummy-one") (global-keys)) "global-keys lists it under its prefix")
     (global-unset-key "<f9>")))
+
+
+;;; --- the keymap editor ----------------------------------------------------------
+
+(deftest 'the-keymap-editor-reads-the-source-buffer
+  "the editor reads the keymap ladder of its source buffer"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-keymap-editor-source" "x")))
+      (local-set-key* buf "<f9> a" "keymap-test-dummy-one")
+      (buffer-create "*keys*")
+      (buffer-set-local! "*keys*" 'keys--target buf)
+      (buffer-set-local! "*keys*" 'keys--scope "buffer")
+      (let ((rows (keys--rows "*keys*")))
+        (check-true!
+          (pair? (filter
+            (lambda (row)
+              (and (equal? (keys--seq row) "<f9> a")
+                   (equal? (keys--cmd row) "keymap-test-dummy-one")))
+            rows))
+          "the rows include the source buffer's local binding"))
+      (buffer-kill! "*keys*")
+      (buffer-kill! buf))))
+
+(deftest 'the-keymap-editor-walks-prefixes-and-records-the-owner
+  "a whole key names both its ladder map and the prefix map that owns it"
+  (lambda ()
+    (define-keymap! "zz-keymap-editor-prefix")
+    (bind-prefix! "zz-keymap-test-mode-map" "<f9>" "zz-keymap-editor-prefix")
+    (define-key "zz-keymap-editor-prefix" "z" "keymap-test-dummy-one")
+    (let ((row (car (keys--expand "zz-keymap-test-mode-map" "" '()))))
+      (check-equal! (nth 0 row) "<f9> z" "the row shows the whole key")
+      (check-equal! (nth 2 row) "zz-keymap-editor-prefix"
+                    "the row records the map that owns the binding")
+      (check-equal! (nth 3 row) "z" "the owner key excludes the prefix"))
+    (keymap-unset! "zz-keymap-test-mode-map" "<f9>")
+    (keymap-unset! "zz-keymap-editor-prefix" "z")))
+
+(deftest 'stored-keymap-edits-apply-to-a-named-map
+  "the custom setter applies a saved bind and a saved unbind"
+  (lambda ()
+    (define-keymap! "zz-keymap-editor-edits")
+    (define-key "zz-keymap-editor-edits" "<f9> a" "keymap-test-dummy-one")
+    (keys--apply!
+      '(("zz-keymap-editor-edits" "<f9> a" "keymap-test-dummy-two"
+         "keymap-test-dummy-one")))
+    (check-equal! (keymap-lookup "zz-keymap-editor-edits" "<f9> a")
+                  "keymap-test-dummy-two" "a saved bind applies")
+    (keys--apply!
+      '(("zz-keymap-editor-edits" "<f9> a" #f "keymap-test-dummy-one")))
+    (check-false! (keymap-lookup "zz-keymap-editor-edits" "<f9> a")
+                  "a saved unbind applies")))
+
+
+(deftest 'the-keymap-editor-filter-matches-a-whole-key
+  "the list filter finds a binding by its full key sequence"
+  (lambda ()
+    (let ((row '("C-x C-f" "find-file" "global" "ctl-x-map" "C-f" "")))
+      (check-true! (keys--match? "*keys*" row "C-x C-f")
+                   "a complete chord matches")
+      (check-true! (keys--match? "*keys*" row "C-f")
+                   "part of a chord matches")
+      (check-false! (keys--match? "*keys*" row "C-x C-s")
+                    "another chord does not match"))))
+
+
+(deftest 'the-keymap-picker-is-a-filter-over-all-keymaps
+  "a selected keymap narrows the full keymap source"
+  (lambda ()
+    (define-keymap! "zz-keymap-filter-map")
+    (define-key "zz-keymap-filter-map" "<f9> a" "keymap-test-dummy-one")
+    (buffer-create "*keys*")
+    (buffer-set-local! "*keys*" 'keys--scope "zz-keymap-filter-map")
+    (let ((rows (keys--rows "*keys*")))
+      (check-true! (pair? rows) "the selected keymap has rows")
+      (check-true!
+        (null? (filter
+          (lambda (row) (not (equal? (keys--map row) "zz-keymap-filter-map")))
+          rows))
+        "every shown row belongs to the selected keymap"))
+    (buffer-kill! "*keys*")
+    (keymap-unset! "zz-keymap-filter-map" "<f9> a")))
