@@ -15,6 +15,7 @@ defmodule Compos.FileViewTest do
           "json-mode-formats-compact-json-without-changing-json-literals",
           "json-mode-leaves-invalid-json-unchanged",
           "browser-file-mode-draws-common-images-with-the-browser-viewer",
+          "a-browser-file-is-bound-to-its-file-and-never-read",
           "file-view-modes-and-commands-are-discoverable-with-declared-effects"
         ] do
       assert eval!("(begin (load-tests-once!) (run-test '#{name}))") == "()", name

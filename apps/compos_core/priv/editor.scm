@@ -6148,10 +6148,14 @@
 
 ;; The host file primitive creates a buffer below the Scheme buffer-create
 ;; wrapper. Wrap it here so file buffers use the same creation event.
-(define (find-file path &optional session-only?)
+;;
+;; UNREAD? binds the buffer to the file without reading it. The file is
+;; shown from disk by its own viewer, so the buffer holds no bytes: see
+;; file-shown-from-disk? below and browser-file-mode.
+(define (find-file path &optional session-only? unread?)
   (let* ((name (expand-path (normalize-file-input path)))
          (new (not (buffer-known? name)))
-         (buf (raw-find-file name (not session-only?))))
+         (buf (raw-find-file name (not session-only?) (not unread?))))
     (when new
       (buffer-created! buf)
       ;; find-file is the quiet loading boundary used by agent read/edit
@@ -6528,12 +6532,32 @@
 
 (define large-file-warning-threshold 10485760)
 
+;; #t when PATH opens in a viewer that reads the file from disk itself: a
+;; picture, a sound, a video. The buffer is bound to the path and holds no
+;; bytes, so the size of the file costs the editor nothing and no cap here
+;; applies to it. file-view.scm answers which files those are.
+(define (file-shown-from-disk? path)
+  (and (string? path)
+       (boundp (quote browser-file-path?))
+       (browser-file-path? (normalize-file-input path))
+       #t))
+
+;; #t when the buffer was bound to its file and never read it. Nothing in
+;; it stands for the file: it must not be saved over it, and following the
+;; file would read the bytes the viewer exists to avoid.
+(define (buffer-unread-file? buf)
+  (and (buffer-known? buf)
+       (buffer-local buf 'unread-file)
+       #t))
+
 ;; #t when opening PATH would cost more than a file should. A path with a
 ;; buffer already answers #f: the work is paid. A directory and a remote
-;; path answer #f, because file-size reads local files only.
+;; path answer #f, because file-size reads local files only. A file shown
+;; from disk answers #f whatever its size: it is never read.
 (define (file-too-big? path)
   (and (> large-file-warning-threshold 0)
        (string? path)
+       (not (file-shown-from-disk? path))
        (let ((p (normalize-file-input path)))
          (and (not (buffer-known? p))
               (not (remote-path? p))
@@ -6582,7 +6606,7 @@
              ((file-directory? path) (dired-open path))
              ((file-too-big? path) (message (file-too-big-message path)) #f)
              (else
-               (let ((file-buffer (find-file path)))
+               (let ((file-buffer (find-file path #f (file-shown-from-disk? path))))
                  ;; An explicit destination joins before display. The derived
                  ;; current group therefore never sees a half-placed buffer.
                  (visit-apply-group! file-buffer group existing)
@@ -6612,7 +6636,7 @@
         (visit path group)
       (if (file-too-big? path)
           (begin (message (file-too-big-message path)) #f)
-        (let ((file-buffer (find-file path)))
+        (let ((file-buffer (find-file path #f (file-shown-from-disk? path))))
           (visit-apply-group! file-buffer group existing)
           (with-current-buffer file-buffer
             (lambda ()
@@ -7988,10 +8012,12 @@
 
 ;; #t when a look at PATH would open a file too big to look at. A path
 ;; with a buffer already, a directory, and a remote path all answer #f:
-;; file-size reads local files, and a remote stat answers 0.
+;; file-size reads local files, and a remote stat answers 0. So does a
+;; file shown from disk: a look at a video reads none of it.
 (define (peek-too-big? path)
   (and (> peek-max-file-size 0)
        (string? path)
+       (not (file-shown-from-disk? path))
        (let ((p (normalize-file-input path)))
          (and (not (buffer-known? p))
               (not (file-directory? p))
@@ -8165,6 +8191,10 @@
   "(peek-too-big? PATH) — #t when a look at PATH would open a file over peek-max-file-size; a path with a buffer already, a directory, and a remote path answer #f")
 (public! 'peek-say-too-big!
   "(peek-say-too-big! PATH) — say that PATH is too big to look at, and answer #f; the message names the size")
+(public! 'file-shown-from-disk?
+  "(file-shown-from-disk? PATH) — #t when PATH opens in a viewer that reads the file from disk: the buffer holds no bytes, and no size cap applies")
+(public! 'buffer-unread-file?
+  "(buffer-unread-file? BUF) — #t when BUF is bound to a file it never read; nothing in it stands for the file, so it is never saved over it")
 
 ;;; --- mode layouts -------------------------------------------------------------
 ;;; A display rule says where ONE buffer goes. A mode that owns the frame needs

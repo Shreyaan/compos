@@ -27,7 +27,24 @@ string escapes, and object key order. Invalid JSON stays unchanged.
 The mode is read-only and uses an inert iframe. The file route accepts only a
 signed absolute path and an image, audio, or video MIME type. It sends no CORS
 header and rejects structured text, archives, executables, and unknown types.
+It answers a byte range with 206, because a player does not read a video from
+the top: it reads the index at the end, then seeks. WebKit will not play a
+file at all from a server that answers the whole of it to a range request.
 
-Use `C-x C-q` to leave the browser viewer and expose the file bytes as text.
-This is useful for inspection, but ordinary editing cannot safely modify a
-binary file.
+## The buffer holds none of the file
+
+A visit binds the buffer to the path and never reads the bytes. The browser
+reads the file from disk through the signed route, so a 900 MB screen
+recording opens as fast as a thumbnail, writes an empty checkpoint, and costs
+no later boot anything. Reading one was how a 189 MB recording crashed the
+editor.
+
+Three things follow. `large-file-warning-threshold` and `peek-max-file-size`
+do not apply to these files, because neither of them is a cost here. Nothing
+in such a buffer can be written over the file: the `unread-file` write rule
+refuses it, and no answer sets that rule aside. And auto-revert leaves these
+buffers alone, because catching one up with its file would read the bytes the
+viewer exists to avoid.
+
+`file-shown-from-disk?` answers which paths open this way, and
+`buffer-unread-file?` which buffers hold no bytes of their file.

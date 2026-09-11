@@ -54,6 +54,12 @@
 ;;; Browsers already have good viewers for common image, audio, and video
 ;;; files. The UI serves only the signed path of the current file. Scheme owns
 ;;; this extension policy and can replace any entry with a more capable mode.
+;;;
+;;; The buffer holds none of the file. The browser reads it from disk through
+;;; the signed route, so a visit never reads the bytes: a 900 MB screen
+;;; recording opens as fast as a thumbnail, writes an empty checkpoint, and
+;;; costs no later boot anything. That is why no size cap applies to these
+;;; files, and why nothing in such a buffer may be written over one.
 
 (defgroup 'file-view "Browser-native file viewing.")
 
@@ -80,7 +86,18 @@
 
 (define-mode "browser-file-mode" browser-file-mode-setup)
 (mode-doc! "browser-file-mode"
-  "A read-only browser viewer for common images, audio, and video. Use `C-x C-q` to expose the file bytes as text.")
+  "A read-only browser viewer for common images, audio, and video. The buffer holds none of the file: the browser reads it from disk, so the size of the file costs the editor nothing. Nothing here can be written over the file.")
+
+;; The buffer never read the file, so nothing in it stands for the file.
+;; The rule is not confirmable: no answer makes an empty buffer the right
+;; contents for a video.
+(effects! '(pure))
+(defwrite-rule! 'unread-file
+  "this buffer never read the file, so saving it would replace the file with nothing"
+  #f
+  (lambda (path source)
+    (and source (buffer-unread-file? source))))
+(effects! '(write display))
 
 (define (browser-file-register-auto-modes!)
   (for-each

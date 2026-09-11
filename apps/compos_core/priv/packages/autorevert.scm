@@ -64,6 +64,9 @@
 
 (define (auto-revert-follows? buf)
   (and (not (auto-revert-serialized? buf))
+       ;; a buffer that never read its file has nothing to catch up, and
+       ;; reading the file to find that out is the cost its viewer avoids
+       (not (buffer-unread-file? buf))
        (auto-revert-any-frame?)
        (not (auto-revert-held? buf))))
 
@@ -193,7 +196,12 @@
 ;; holding unsaved work, and a guess there writes over it.
 (define (auto-revert-seed-base! buf)
   (let* ((path (buffer-path buf))
-         (disk (and path (not (auto-revert-base buf)) (read-file path))))
+         (disk (and path
+                    (not (auto-revert-base buf))
+                    ;; a file shown from disk is never read, not even to
+                    ;; seed a mark: the read is the whole cost avoided
+                    (not (buffer-unread-file? buf))
+                    (read-file path))))
     (when (and (string? disk) (equal? disk (buffer-text buf)))
       (auto-revert-base! buf disk))))
 

@@ -491,7 +491,7 @@ defmodule Compos.Core.SchemeAPI do
         "(remote-write HOST PATH TEXT [CALLBACK]) — write TEXT to a remote file; return #t or (error MSG). With CALLBACK, run in a Task and hand it the value.",
       "buffer-mark-saved!" => "(buffer-mark-saved! BUF) — clear the buffer's modified flag.",
       "find-file" =>
-        "(find-file PATH [PERSISTENT?]) — open the file PATH in a buffer and return the buffer name. PERSISTENT? #f opens it for this session only: no checkpoint, and no restore at the next boot.",
+        "(find-file PATH [PERSISTENT?] [READ?]) — open the file PATH in a buffer and return the buffer name. PERSISTENT? #f opens it for this session only: no checkpoint, and no restore at the next boot. READ? #f binds the buffer to the file without reading it, for a file whose viewer reads it from disk.",
       "list-dir" =>
         "(list-dir DIR) — return sorted entry names; directories carry a trailing slash.",
       "directory-entries" =>
@@ -1231,6 +1231,12 @@ defmodule Compos.Core.SchemeAPI do
         # Scheme decides that: see large-file-warning-threshold.
         [path, persistent?] ->
           find_file(path, persistent: persistent? != false)
+
+        # A third of #f never reads the file: the buffer is bound to the
+        # path and its viewer reads the bytes from disk. Scheme decides
+        # that too: see browser-file-mode.
+        [path, persistent?, read?] ->
+          find_file(path, persistent: persistent? != false, read: read? != false)
       end,
       # directory listing: names only, directories marked with trailing "/"
       "list-dir" => fn [dir] ->

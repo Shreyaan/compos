@@ -86,3 +86,18 @@
 
       (set! large-file-warning-threshold was)
       (t--lf-drop! p))))
+
+(deftest 'a-file-shown-from-disk-is-never-too-big
+  "the cap counts the cost of a read, and a viewer that reads the file itself pays none of it"
+  (lambda ()
+    (let ((p (t--lf-file "shown.mov" 4096))
+          (was large-file-warning-threshold))
+      (set! large-file-warning-threshold 1024)
+      (check-true! (file-shown-from-disk? p) "a video opens in the browser viewer")
+      (check-false! (file-too-big? p) "so the cap does not apply to it")
+      (check-equal! (visit p) p "and the visit opens it whatever its size")
+      (check-equal! (buffer-size p) 0 "the buffer holds none of the file")
+      (check-true! (buffer-unread-file? p) "and it knows it never read it")
+
+      (set! large-file-warning-threshold was)
+      (t--lf-drop! p))))

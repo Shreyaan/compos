@@ -110,6 +110,9 @@ defmodule Compos.Core do
   disk, and no work at the next boot. A file over
   `large-file-warning-threshold` opens that way, because its text becomes
   a rope, a checkpoint, and a restore that every later boot pays for.
+
+  `read: false` binds the buffer to the file without reading it, for a
+  file whose viewer reads it from disk. See browser-file-mode.
   """
   def open_file(path, opts \\ []) do
     path = Path.expand(path)

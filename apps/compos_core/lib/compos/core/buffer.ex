@@ -827,13 +827,25 @@ defmodule Compos.Core.Buffer do
       else
         path = Keyword.get(opts, :path)
 
+        # `read: false` binds the buffer to the file and never reads it. A
+        # viewer that reads the file itself asks for that: the browser plays
+        # a video from its own route, byte range by byte range, and a read
+        # here would cost the whole file in memory, again in a checkpoint,
+        # and again at every later boot. See browser-file-mode.
+        unread? = is_binary(path) and Keyword.get(opts, :read, true) == false
+
         {text, encoding} =
-          if path do
-            path
-            |> then(fn path -> if File.exists?(path), do: File.read!(path), else: "" end)
-            |> decode_file_bytes()
-          else
-            {Keyword.get(opts, :text, ""), :utf8}
+          cond do
+            unread? ->
+              {"", :utf8}
+
+            path ->
+              path
+              |> then(fn path -> if File.exists?(path), do: File.read!(path), else: "" end)
+              |> decode_file_bytes()
+
+            true ->
+              {Keyword.get(opts, :text, ""), :utf8}
           end
 
         binary_file? = encoding != :utf8
@@ -844,8 +856,13 @@ defmodule Compos.Core.Buffer do
           rope: Rope.new(text),
           path: path,
           encoding: encoding,
-          read_only: binary_file?,
-          locals: if(binary_file?, do: %{"binary-file" => true}, else: %{})
+          read_only: binary_file? or unread?,
+          locals:
+            cond do
+              unread? -> %{"unread-file" => true}
+              binary_file? -> %{"binary-file" => true}
+              true -> %{}
+            end
         }
       end
 

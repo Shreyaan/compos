@@ -47,3 +47,23 @@
                   "declared" "the viewer mode declares its effects")
     (check-equal! (plist-get (catalog-entry 'command "json-pretty-print-buffer") 'metadata-source)
                   "declared" "the format command declares its effects")))
+
+(deftest 'a-browser-file-is-bound-to-its-file-and-never-read
+  "the browser reads the file from disk, so the buffer holds none of it and may not be written to it"
+  (lambda ()
+    (let* ((dir (string-append (compos-home) "/file-view-test"))
+           (p (string-append dir "/zz-file-view.mov"))
+           (text "not a movie, but it is on disk"))
+      (make-directory! dir)
+      (write-file! p text)
+      (visit-quietly p)
+      (check-equal! (buffer-size p) 0 "a visit reads none of the file")
+      (check-true! (buffer-unread-file? p) "and the buffer knows it never read it")
+      (check-equal! (buffer-local p 'render-mode) "file" "the browser viewer draws it")
+      (check-true! (buffer-read-only? p) "nothing here is edited")
+      (check-contains! (or (write-refusal p p #f) "") "never read the file"
+                       "and a write from it is refused")
+      (check-equal! (file-size p) (string-length text) "so the file on disk is untouched")
+      (buffer-mark-saved! p)
+      (buffer-kill! p)
+      (delete-file! p))))
