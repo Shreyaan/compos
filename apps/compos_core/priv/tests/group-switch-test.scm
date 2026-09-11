@@ -759,6 +759,50 @@
                     "the destination becomes the only membership"))
     (t--sw-done!)))
 
+(deftest 'a-move-into-the-group-on-screen-keeps-the-layout
+  "the group adopts the panes as they stand: a move changes membership alone"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((home (group-record-create! "zzsw-layout-home")))
+      (buffer-add-group! t--sw-first home)
+      (buffer-add-group! t--sw-second home)
+      (switch-to-group! home)
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-first)
+      (split-window! 'h 0.5)
+      (other-window!)
+      (t--sw-show-here! t--sw-second)
+      (let ((older (window-tree)))
+        ;; the person makes a third column and works in it, on a buffer no
+        ;; group owns
+        (split-window! 'h 0.5)
+        (other-window!)
+        (t--sw-show-here! t--sw-third)
+        ;; the group remembers the two panes it had before the third column.
+        ;; A move must not answer from that memory: the screen is newer.
+        (group-layout-set! home older (layout-target))
+        (let ((before (window-tree))
+              (panes (length (window-list))))
+          (run-command "group-move")
+          (t--sw-type! "zzsw-layout-home")
+          (t--sw-key! "confirm")
+
+          (check-true! (buffer-in-group? t--sw-third home)
+                       "the moved buffer joins the group")
+          (check-equal! (length (window-list)) panes
+                        "the move keeps the number of panes")
+          (check-equal! (window-tree) before
+                        "the move keeps the arrangement the person made")
+          (for-each
+            (lambda (buf)
+              (check-true! (member buf (layout-visible-buffers))
+                           (string-append buf " left the screen")))
+            (list t--sw-first t--sw-second t--sw-third))
+          (check-equal! (group-layout home) before
+                        "and the group remembers the arrangement it adopted")
+          (check-equal! (frame-group) home "the frame stands in the group"))))
+    (t--sw-done!)))
+
 (deftest 'the-group-scratch-moves-and-removes-as-its-own-buffer
   "the group's shared scratch moves and removes like any work buffer"
   (lambda ()

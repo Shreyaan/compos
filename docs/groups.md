@@ -166,6 +166,17 @@ I want to start from a project or directory
 
 - All existing groups go. The destination is the only group.
 - Text, point, modified state, and undo survive.
+- The frame enters the destination, and the destination shows what moved.
+- **Command:** `move`.
+
+#### I want this buffer in the group I am already looking at
+
+- The screen is already the destination's own arrangement when every pane
+  shows a member of it, or a buffer that is joining it.
+- The move then changes membership alone. No pane moves, no pane closes,
+  and the destination keeps the arrangement on screen as its own.
+- A pane that carries no context - a popup, a special buffer, a buffer no
+  group holds - does not stop this. A pane of another group does.
 - **Command:** `move`.
 
 #### I want a fresh, empty group

@@ -371,3 +371,21 @@
     (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b") "relayout does not reverse panes")
     (lp-rect! "zz-lp-a" 0 0 (/ 2 3) 1)
     (lp-rect! "zz-lp-b" (/ 2 3) 0 (/ 1 3) 1)))
+
+(deftest 'a-group-chat-joins-the-frame-instead-of-collapsing-it
+  "opening a group's chat keeps the panes already on the frame and adds one"
+  (lambda ()
+    (lp-start!) (lp-buffer! "b")
+    (tile-windows! 'columns '("zz-lp-a" "zz-lp-b"))
+    (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b") "two panes before the chat")
+    (let ((chat (group-chat (frame-group))))
+      (group-chat-buffer-show! chat)
+      (lp-snapshot! 'chat-opened)
+      ;; the regression: this collapsed the frame to one window and split
+      ;; it, so the second pane -- a mail preview, a companion doc -- was
+      ;; gone and the group had two buffers to tile instead of three
+      (check-equal! (length (lp-buffers)) 3 "the chat is a third pane")
+      (check-true! (and (member "zz-lp-a" (lp-buffers)) #t) "the first pane stayed")
+      (check-true! (and (member "zz-lp-b" (lp-buffers)) #t) "and so did the second")
+      (check-equal! (current-buffer) chat "the chat takes the focus")
+      (buffer-kill! chat))))

@@ -3023,9 +3023,15 @@
     (if w
         (select-window! w)
         (begin
-          (delete-other-windows!)
-          (split-window! 'h 0.6)
-          (other-window!)
+          ;; The chat joins the frame beside the panes already on it. A
+          ;; collapse to one window and a split in two is only right for a
+          ;; frame that shows one thing: a three-pane scene -- a mail index
+          ;; and its preview -- lost the preview every time its chat opened,
+          ;; and the group then had two buffers to tile instead of three.
+          (tile-adaptive-windows!
+            (append (layout-target-visible-buffers) (list buf)))
+          (let ((chat-window (window-showing buf)))
+            (when chat-window (select-window! chat-window)))
           (switch-to-buffer! buf))))
   (set-mode! "chat-mode")
   (end-of-buffer!)
@@ -3432,6 +3438,83 @@
         (autolayout-apply! (car mine)))
       (group-layout-save! id))))
 
+;; The screen already IS the destination's arrangement when every pane
+;; shows a buffer of that group, or one of the buffers that is joining
+;; it, and at least one joining buffer is on screen. The move is then a
+;; membership change alone: the group adopts the windows as they stand,
+;; and the arrangement the user made stays. A pane that carries no
+;; context -- a popup, a special buffer, a buffer no group holds -- says
+;; nothing, so it does not stop the adoption. A pane of another group
+;; does: that screen belongs to a different context, and the move leaves
+;; it for the destination.
+(define (group-move-screen-is-destination? id eligible)
+  (let ((popup (popup-window)))
+    (let loop ((rows (window-list)) (moving #f))
+      (if (null? rows)
+          moving
+          (let* ((row (car rows))
+                 (win (car row))
+                 (buf (cadr row)))
+            (cond ((or (equal? win popup) (popup--class? buf))
+                   (loop (cdr rows) moving))
+                  ((member buf eligible) (loop (cdr rows) #t))
+                  ((buffer-in-group? buf id) (loop (cdr rows) moving))
+                  ((not (group-membership-buffer? buf)) (loop (cdr rows) moving))
+                  ((null? (group-context-memberships buf)) (loop (cdr rows) moving))
+                  (else #f)))))))
+
+;; Enter ID without touching one window. The frame already shows the
+;; group's own arrangement, so there is nothing to restore, and the
+;; arrangement on screen becomes the one the group remembers. A restore
+;; would rebuild the panes for the same picture and take the landing --
+;; the window the person works in -- with them.
+(define (group-enter-adopting! id)
+  (let ((from (frame-group)))
+    (when (and from (not (equal? from id)))
+      (set-frame-local! 'previous-group from)))
+  (set-frame-local! 'current-group id)
+  (when (group-pinned) (set-frame-local! 'pinned-group id))
+  (frame-group-label-refresh!)
+  (group-layout-save! id)
+  (mru-note-group! id)
+  (windows-shown-catchup!))
+
+;; The window half of a move, shared by both move paths: the selection
+;; move and the move of the buffer you stand on. MEMBERS join TO, and the
+;; frame enters TO. KEEP-WINDOWS? states that the screen already belongs
+;; to the destination; the screen itself can say the same.
+(define (group-move-into! members to &optional keep-windows?)
+  (let ((here (frame-group))
+        (adopt? (or keep-windows?
+                    (group-move-screen-is-destination? to members))))
+    (set! *group-current-inhibit* #t)
+    (for-each (lambda (member) (buffer-move-to-group! member to)) members)
+    ;; The old group repairs the panes the buffers left, unless the frame
+    ;; shows nothing but buffers of the destination and the buffers that
+    ;; are moving. The destination then adopts these windows as they are.
+    (unless adopt? (group-move-sweep! here to))
+    (set! *group-current-inhibit* #f)
+    ;; Moving is a context change as well as a membership change: after the
+    ;; buffers leave, enter the destination so the user is not left looking
+    ;; at the old group's repaired layout.
+    (if adopt?
+        (group-enter-adopting! to)
+        (begin
+          (switch-to-group! to)
+          ;; The destination's saved layout was made before these buffers
+          ;; joined it, so entering the group draws it as it was and the
+          ;; move looks like it did nothing. What moved is what you want
+          ;; to see.
+          (group-move-show! to members)))
+    ;; A headline names the buffer's groups relative to the group the frame
+    ;; stands in, and the frame entered another one. Re-derive it for every
+    ;; buffer that moved: post-command! syncs the current buffer alone.
+    (for-each (lambda (member)
+                (when (buffer-known? member) (buffer-group-display-refresh! member)))
+              members)
+    (group-current-recalculate!)
+    (run-hooks 'group-membership-hook)))
+
 (define (group-move-buffers-to! buffers destination &optional keep-windows?)
   (let ((id (group-ensure-record! destination)))
     (cond
@@ -3442,28 +3525,8 @@
                          (and (buffer-known? buf)
                               (group-membership-buffer? buf)
                               (not (group-scratch-buffer? buf))))
-                       buffers))
-              (here (frame-group)))
-          (set! *group-current-inhibit* #t)
-          (for-each (lambda (buf) (buffer-move-to-group! buf id)) eligible)
-          ;; When the frame shows nothing but the buffers that are moving,
-          ;; the move is a membership change alone: the destination adopts
-          ;; these windows, so entering it leaves the screen as it stands.
-          ;; Otherwise the old group repairs the panes the buffers left.
-          (if keep-windows?
-              (group-layout-save! id)
-              (group-move-sweep! here id))
-          (set! *group-current-inhibit* #f)
-          ;; Moving is a context change as well as a membership change: after
-          ;; the buffers leave, enter the destination so the user is not left
-          ;; looking at the old group's repaired layout.
-          (switch-to-group! id)
-          ;; The destination's saved layout was made before these buffers
-          ;; joined it, so entering the group draws it as it was and the move
-          ;; looks like it did nothing. What moved is what you want to see.
-          (unless keep-windows? (group-move-show! id eligible))
-          (group-current-recalculate!)
-          (run-hooks 'group-membership-hook)
+                       buffers)))
+          (group-move-into! eligible id keep-windows?)
           (message (string-append "Moved " (number->string (length eligible))
                                   " buffer"
                                   (if (= (length eligible) 1) "" "s")
@@ -3522,21 +3585,15 @@
     (cond ((not to) (message "No destination group"))
           ((null? family) (message "Nothing to move"))
           (else
-            (let ((here (frame-group)))
-              (set! *group-current-inhibit* #t)
-              (for-each (lambda (member) (buffer-move-to-group! member to)) family)
-              (group-move-sweep! here to)
-              (set! *group-current-inhibit* #f)
-              ;; A single-buffer move has the same context semantics as a
-              ;; selection move: the destination becomes current.
-              (switch-to-group! to)
-              (group-current-recalculate!)
-              (run-hooks 'group-membership-hook)
-              (message (string-append "Moved " (number->string (length family))
-                                      " buffer"
-                                      (if (= (length family) 1) "" "s")
-                                      " to " (group-name to)))
-              family)))))
+            ;; A single-buffer move has the same window semantics as a
+            ;; selection move: the destination becomes current, and it adopts
+            ;; the screen when the screen is already its own.
+            (group-move-into! family to)
+            (message (string-append "Moved " (number->string (length family))
+                                    " buffer"
+                                    (if (= (length family) 1) "" "s")
+                                    " to " (group-name to)))
+            family))))
 
 (define-command "group-add" "Put the selected buffers, else this buffer, in a group"
   (lambda ()

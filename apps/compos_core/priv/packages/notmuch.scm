@@ -68,6 +68,10 @@ when a message has no text/plain part." 'group 'notmuch)
   "n/p in the search buffer preview the thread in the other window."
   'group 'notmuch)
 
+(defcustom 'notmuch-preview-delay 500
+  "How long the highlight rests on a row before the mail pane fetches it, in milliseconds. A fetch is a round trip to the mail host, so a held n reaches the row you want before one call goes out. 0 fetches on every move."
+  'group 'notmuch 'type 'number)
+
 ;; (substring-of-From-or-filename  send-command) — first match wins,
 ;; "" is the fallback route. set! your accounts' routes in init.scm.
 (define notmuch-send-routes
@@ -803,6 +807,10 @@ when a message has no text/plain part." 'group 'notmuch)
             (display-buffer-other-window! buf)
             (window-showing buf)))))))
 
+;; #t once a thread has been shown for the live index. A pane that was
+;; shown and is gone was dismissed, and a dismissal stays dismissed.
+(define *notmuch-pane-shown* #f)
+
 (define (nm--preview! buf)
   (let ((th (nm--thread-at buf)))
     (when th
@@ -810,7 +818,8 @@ when a message has no text/plain part." 'group 'notmuch)
              (mail (nm--open-thread! (nm--th-id th) (nm--th-subject th) 'defer-read)))
         (window-set-buffer! origin buf)
         (select-window! origin)
-        (nm--show-pane! mail))
+        (nm--show-pane! mail)
+        (set! *notmuch-pane-shown* #t))
       ;; Keep the list focused before a database write can fail.
       (nm--run (string-append "tag -unread -- thread:" (nm--th-id th)))
       ;; opening marked it read — show that in the index right away
@@ -846,6 +855,38 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define (nm--maybe-preview! buf)
   (when notmuch-auto-preview (nm--preview! buf)))
+
+;; #t when the mail pane already holds the thread at point. A focus change
+;; fires the configuration hook often, and a preview is an ssh round trip,
+;; so only a pane that disagrees with point is worth refilling.
+(define (nm--pane-at-point? buf)
+  (let ((th (nm--thread-at buf))
+        (pane *notmuch-show-buffer*))
+    (or (not th)
+        (and (buffer-exists? pane)
+             (window-showing pane)
+             (equal? (buffer-local pane 'notmuch-thread) (nm--th-id th))))))
+
+;; Landing on the index is the same event as moving inside it: the mail
+;; pane shows the thread at point. A return from another buffer, a group
+;; switch or a restored scene left the pane stale, so the first n or SPC
+;; after every arrival was spent on catching the pane up.
+(define (nm--landed-preview!)
+  (let ((buf *notmuch-search-buffer*))
+    (when (and notmuch-auto-preview
+               (buffer-exists? buf)
+               (not (layout-arranging?))
+               (not (minibuffer-active?))
+               ;; q closed the pane. The kill changes the configuration, so
+               ;; without this the landing rule reopened what the reader
+               ;; just dismissed. n or SPC brings it back.
+               (not (and *notmuch-pane-shown*
+                         (not (buffer-exists? *notmuch-show-buffer*))))
+               (equal? (window-buffer (active-window)) buf)
+               (not (nm--pane-at-point? buf)))
+      (nm--preview! buf))))
+
+(add-hook! 'window-configuration-change-hook 'nm--landed-preview!)
 
 ;; the shown mail follows the highlight: every move previews, and opening
 ;; a thread marks it read (the open itself tags -unread)

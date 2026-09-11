@@ -699,3 +699,30 @@
         (check-contains! body "References: <m1>\n\n" "and a blank line divides them"))
       (set! notmuch-send-routes saved))
     (t--nm-done!)))
+
+(deftest 'landing-on-the-index-catches-the-mail-pane-up
+  "a return to the inbox is the same event as a move inside it: the pane follows point"
+  (lambda ()
+    (t--nm-setup!)
+    (let ((saved notmuch-auto-preview))
+      (set! notmuch-auto-preview #t)
+      (run-command "notmuch-inbox")
+      (t--nm-run! "notmuch-next")
+      (check-equal! (buffer-local "*mail*" 'notmuch-thread) "0002"
+                    "a move previews, so the pane holds the thread at point")
+      ;; the state a return lands in: point is on a row nothing previewed
+      (list-goto-first-entry "*notmuch*")
+      (check-false! (nm--pane-at-point? "*notmuch*")
+                    "point moved on its own, so the pane is stale")
+      (check-true! (and (member 'nm--landed-preview!
+                                (hook-functions 'window-configuration-change-hook))
+                        #t)
+                   "and landing is on the window-configuration hook, which fills it")
+      ;; q closes the pane, and the same hook fires on the kill. A landing
+      ;; rule that reopened it would make the dismissal unusable.
+      (buffer-kill! "*mail*")
+      (nm--landed-preview!)
+      (check-false! (buffer-known? "*mail*")
+                    "a dismissed pane stays dismissed")
+      (set! notmuch-auto-preview saved))
+    (t--nm-done!)))
