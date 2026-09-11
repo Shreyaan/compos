@@ -11531,16 +11531,18 @@
           color: var(--faint-fg, #b3ac9c); white-space: nowrap; }
 .dseg-v { font-size: 14px; color: var(--default-fg, #1b1a17); white-space: nowrap; }
 .dseg-strong { font-weight: 600; }
-/* The window you are in says which keys it answers by the colour of its
-   headline: focus, where the arrows move the window, wears the group's
-   colour; editing, where they move the caret, stays plain. Only the
-   selected window is tinted, because only it answers the arrows. */
+/* The window you are in says where the Cmd-arrows go. In focus, where
+   they move the window, the state reads as a filled badge in the group's
+   colour and a rule runs down the left edge of the headline; in editing,
+   where they move the caret, both are gone. The rule is an inset shadow,
+   so no segment moves when the state turns. Only the selected window is
+   marked, because only it answers the arrows. */
 .window.active .dash-persistent:has(.dash-state-focus) {
-  background: color-mix(in srgb,
-                        var(--buffer-group-color, var(--accent-fg, #26356b)) 16%,
-                        var(--window-bg, #fdfcf8)); }
-.window.active .dash-persistent:has(.dash-state-focus) .dash-state-focus .dseg-v {
-  color: var(--buffer-group-color, var(--accent-fg, #26356b)); }
+  box-shadow: inset 3px 0 0 var(--buffer-group-color, var(--accent-fg, #26356b)); }
+.window.active .dash-persistent .dash-state-focus .dseg-strong {
+  background: var(--buffer-group-color, var(--accent-fg, #26356b));
+  color: var(--window-bg, #fdfcf8);
+  border-radius: 999px; padding: 1px 9px 2px; font-size: 12.5px; }
 .dseg-group-current { color: var(--buffer-group-color, var(--default-fg, #1b1a17)); }
 .dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
              background: var(--border-bg, #cbc4b1); opacity: .5; }
@@ -11961,11 +11963,15 @@
 (define (dash--vcs buf)
   (and (boundp 'jj-modeline-line) (jj-modeline-line buf)))
 
-;; The two states of an editable buffer, in one word. The movement state
-;; is "focus": the Cmd-arrows move the window focus there. The editing
-;; state gives them to the caret. A read-only buffer never leaves focus.
+;; The two states of an editable buffer, in one word, and the word says
+;; where the Cmd-arrows go. "focus" gives them to the window; "editing"
+;; gives them to the caret. The caret map is the whole question, so the
+;; word reads that map and not the editing-state flag: a mode that refuses
+;; the caret map keeps the window chords in the editing state, and a chat
+;; is such a mode, so a chat says focus while you type in it. A read-only
+;; buffer never leaves focus.
 (define (dash--state buf)
-  (if (editing-state? buf) "editing" "focus"))
+  (if (member "editing-caret-map" (buffer-minor-maps buf)) "editing" "focus"))
 
 (define (dash--preset buf)
   (and (boundp (quote llm-config-preset-name))

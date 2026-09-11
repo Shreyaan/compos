@@ -525,6 +525,21 @@
       (editing-state-off! buf)
       (buffer-kill! buf))))
 
+;; A chat refuses the caret map, so the Cmd-arrows stay on the window
+;; there however much you type. The word follows the map and not the flag.
+(deftest 'a-chat-headline-says-focus-while-you-type-in-it
+  "chat-mode refuses editing-caret-map, so a chat never loses the window chords"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-state*"))
+      (test-buffer! buf "")
+      (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
+      (editing-state-on! buf)
+      (check-true! (editing-state? buf) "the chat is in the editing state")
+      (check-equal! (t--dseg-value (dashboard-line-blocks buf) "state") "focus"
+                    "and its headline still says focus")
+      (editing-state-off! buf)
+      (buffer-kill! buf))))
+
 (deftest 'dashboard-fields-preserve-composml-semantics
   "Dashboard metadata and summary actions declare their semantic structure."
   (lambda ()
