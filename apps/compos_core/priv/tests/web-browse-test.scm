@@ -305,6 +305,17 @@
     (check-true! (web--image-url? "https://c.test/logo.svg")
                  "SVG images draw too")))
 
+(deftest 'a-base64-picture-is-an-image-and-is-its-own-source
+  "a data URI carries the picture: it stays, and no page resolves it"
+  (lambda ()
+    (let ((u "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiLz4="))
+      (check-true! (web--image-url? u) "a data URI is an image")
+      (check-equal! (web--resolve u "https://h.test/x/y.html") u
+                    "and it resolves to itself")
+      (check-equal! (web--fix-empty-links (string-append "![](" u ")"))
+                    (string-append "[" u "](" u ")")
+                    "the label-less image keeps its source instead of going"))))
+
 (deftest 'apropos-documents-the-xslt-custom-site-parsers
   "the next person adds a parser without reading the package"
   (lambda ()

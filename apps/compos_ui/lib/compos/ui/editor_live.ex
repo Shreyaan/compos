@@ -2289,6 +2289,11 @@ defmodule Compos.Ui.EditorLive do
   # file and is served signed (LocalImage); a path with no file has no picture
   defp image_src(txt, base) do
     cond do
+      # a base64 picture is its own source: the bytes stand in the text,
+      # the browser decodes them, and nothing is fetched
+      String.starts_with?(txt, "data:image/") ->
+        String.trim_trailing(txt, "#compos-avatar")
+
       String.starts_with?(txt, "http") ->
         String.trim_trailing(txt, "#compos-avatar")
 

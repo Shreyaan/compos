@@ -650,7 +650,10 @@
   (or (string-contains? u ".png") (string-contains? u ".jpg")
       (string-contains? u ".jpeg") (string-contains? u ".gif")
       (string-contains? u ".webp") (string-contains? u ".avif")
-      (string-contains? u ".svg") (string-contains? u "/image/")))
+      (string-contains? u ".svg") (string-contains? u "/image/")
+      ;; a base64 picture carries its own bytes: the page never fetches
+      ;; it, and without this it read as a label-less link and was dropped
+      (string-prefix? "data:image/" u)))
 
 (define *web--empty-link-pattern* "!?\\[\\]\\(([^)\\s]*)\\)")
 
@@ -783,6 +786,9 @@
 (define (web--resolve raw base)
   (let ((url (web--unwrap raw)))
   (cond ((string-contains? url "://") url)
+        ;; A data URI holds the picture itself; there is no page to
+        ;; resolve it against.
+        ((string-prefix? "data:" url) url)
         ;; A rendered Markdown heading link stays on this page.
         ((string-prefix? "#" url)
          (let ((hash (string-index base "#")))
