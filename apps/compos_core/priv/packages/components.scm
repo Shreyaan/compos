@@ -143,10 +143,10 @@
 
 (defcomponent 'ui/actions
   "A row of clickable actions with optional keyboard hints."
-  '((actions list required) (class string optional))
+  '((tag string optional) (actions list required) (class string optional))
   '(actions (("refresh" "Refresh" "g") ("add" "Add" "+")))
   (lambda (p)
-    (list 'tag "c-toolbar"
+    (list 'tag (component--get p 'tag "c-toolbar")
           'class (string-append "c-actions " (component--get p 'class ""))
           'children
           (map (lambda (action)
