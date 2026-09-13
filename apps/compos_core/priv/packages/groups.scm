@@ -1074,8 +1074,13 @@
 ;; recreated the NAME; the content lives in the file.
 
 
+;; Answers #t when every pane it saw already belonged to the group, #f
+;; when it had to evict one. A caller that saves the layout back must ask:
+;; an eviction is a LOSS, and writing it over the saved tree makes one
+;; visit destroy the arrangement for good.
 (define (group-restore-sanitize! g)
   (let* ((id (group-resolve-id g))
+         (clean #t)
          (members (group-user-buffers-mru id))
          (pool (if (pair? members) members (list (group-chat id))))
          (shown
@@ -1086,6 +1091,7 @@
         (let ((win (car window))
               (buf (cadr window)))
           (unless (buffer-in-group? buf id)
+            (set! clean #f)
             (let ((hidden
                     (filter (lambda (candidate)
                               (not (member candidate shown)))
@@ -1104,7 +1110,8 @@
                        (delete-window-id! win))
                       (else
                        (window-set-buffer! win (car pool)))))))))
-      (window-list))))
+      (window-list))
+    clean))
 
 ;; Scheme owns both sides of the modeline's group context: the frame's current
 ;; group name and every buffer's membership names. The renderer only compacts
@@ -1293,9 +1300,14 @@
                 (begin
                   (group-revive-layout-files! saved)
                   (window-tree-set! saved)
-                  (group-restore-sanitize! id)
-                  (layout-target-set! (group-layout-target id))
-                  (group-layout-save! id))
+                  ;; only a restore that reproduced the saved tree may write
+                  ;; it back. A sanitized one dropped panes, and saving that
+                  ;; erases the arrangement instead of just hiding it: the
+                  ;; tree keeps naming the evicted buffer, so the layout
+                  ;; returns whole once the buffer belongs to the group again
+                  (let ((clean (group-restore-sanitize! id)))
+                    (layout-target-set! (group-layout-target id))
+                    (when clean (group-layout-save! id))))
                 (begin
                   (group-default-layout! id)
                   (group-layout-save! id))))

@@ -123,3 +123,36 @@
                     "a theme load keeps the font: no theme names a family here")
       (customize-set! 'mono-font-family stock)
       (theme-test-restore!))))
+
+(define (theme-test-channels hex)
+  (let* ((digits '(("0" 0) ("1" 1) ("2" 2) ("3" 3) ("4" 4) ("5" 5) ("6" 6) ("7" 7)
+                   ("8" 8) ("9" 9) ("a" 10) ("b" 11) ("c" 12) ("d" 13) ("e" 14) ("f" 15)))
+         (digit (lambda (s) (let ((hit (assoc (string-downcase s) digits)))
+                              (if hit (car (cdr hit)) 0))))
+         (byte (lambda (i) (+ (* 16 (digit (substring hex i (+ i 1))))
+                              (digit (substring hex (+ i 1) (+ i 2)))))))
+    (list (byte 1) (byte 3) (byte 5))))
+
+(define (theme-test-distance a b)
+  (let loop ((x (theme-test-channels a)) (y (theme-test-channels b)) (sum 0))
+    (if (null? x) sum
+        (loop (cdr x) (cdr y) (+ sum (abs (- (car x) (car y))))))))
+
+(deftest 'a-dark-theme-shows-the-row-under-point
+  "hl-line stands off the window background, and select and region stand off hl-line"
+  (lambda ()
+    (for-each
+      (lambda (theme)
+        (load-theme theme)
+        (let ((win (theme-test-face-attr 'window 'bg))
+              (hl (theme-test-face-attr 'hl-line 'bg))
+              (sel (theme-test-face-attr 'select 'bg))
+              (reg (theme-test-face-attr 'region 'bg)))
+          (check-true! (> (theme-test-distance win hl) 75)
+                       (string-append theme ": the row under point is visible on the window"))
+          (check-true! (> (theme-test-distance hl sel) 30)
+                       (string-append theme ": a search match is not the row under point"))
+          (check-true! (> (theme-test-distance hl reg) 30)
+                       (string-append theme ": a selection is not the row under point"))))
+      '("paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"))
+    (theme-test-restore!)))

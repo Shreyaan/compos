@@ -72,6 +72,10 @@ when a message has no text/plain part." 'group 'notmuch)
   "How long the highlight rests on a row before the mail pane fetches it, in milliseconds. A fetch is a round trip to the mail host, so a held n reaches the row you want before one call goes out. 0 fetches on every move."
   'group 'notmuch 'type 'number)
 
+(defcustom 'notmuch-group-name "*notmuch*"
+  "The group the mail app lives in. The mailboxes, the index and the thread view are one app, so they always open in this group and a layout holding them is saved and restored with it."
+  'group 'notmuch)
+
 ;; (substring-of-From-or-filename  send-command) — first match wins,
 ;; "" is the fallback route. set! your accounts' routes in init.scm.
 (define notmuch-send-routes
@@ -80,14 +84,36 @@ when a message has no text/plain part." 'group 'notmuch)
 (define *notmuch-search-buffer* "*notmuch*")
 
 ;; The mail views are singletons: one *mailboxes*, one *notmuch*, one
-;; *mail* for the whole editor. Opening mail inside a group therefore JOINS
-;; that group instead of moving house — membership is a list of ids, so one
-;; view belongs to every group that opened it. Without this the view stays a
-;; member of the first group only, is foreign to every other, and coming
-;; back to that group sanitizes its panes away.
+;; *mail* for the whole editor, and a buffer lives in ONE group. The three
+;; are one app, so they have one home group and never move house. They used
+;; to join whatever group the frame was in, which made the thread view
+;; ungrouped whenever the preview timer opened it with no frame group: an
+;; ungrouped pane reads as a cover, the group then refuses to save its
+;; layout on the way out, and coming back restores a tree from before mail
+;; was ever on screen.
+(define (nm-home-group!)
+  ;; The mail app has one home, not whichever group happened to be current
+  ;; when a key was pressed. Ensure the record so the first open founds it.
+  (and (boundp 'group-ensure-record!)
+       (string? notmuch-group-name)
+       (not (equal? notmuch-group-name ""))
+       (group-ensure-record! notmuch-group-name)))
+
+(define (nm--enter-group!)
+  ;; Opening mail enters the mail group, the way opening a project enters
+  ;; its own: the panes the app builds next are that group's layout, and
+  ;; the group you came from is checkpointed on the way out.
+  (let ((id (nm-home-group!)))
+    (when (and id (boundp 'switch-to-group!) (not (equal? (frame-group) id)))
+      (switch-to-group! id))
+    id))
+
 (define (nm--join-group! buf)
+  ;; The three views are one app, not three visitors: they join the mail
+  ;; group whatever frame opened them. A pane holding a member is a place,
+  ;; so the group saves the mail layout and restores it whole.
   (when (and (buffer-exists? buf) (boundp 'frame-group))
-    (let ((id (frame-group)))
+    (let ((id (or (nm-home-group!) (frame-group))))
       (when (and id (not (buffer-in-group? buf id)))
         (buffer-add-group! buf id)))))
 
@@ -721,6 +747,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let ((buf *notmuch-hello-buffer*))
       (unless (buffer-exists? buf) (buffer-create buf))
+      (nm--enter-group!)
       (nm--join-group! buf)
       (switch-to-buffer! buf)
       (set-mode! "notmuch-hello-mode")
@@ -2111,14 +2138,11 @@ when a message has no text/plain part." 'group 'notmuch)
     (unless (buffer-exists? buf) (buffer-create buf))
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
-    ;; a view inherits its index's groups, so a grouped mail scene keeps
-    ;; the open message inside the group (group-docs, chat read-doc, ⊞).
-    ;; Membership is 'group-ids and joining is buffer-add-group!: writing
-    ;; the legacy 'group local here left the view ungrouped, because the
-    ;; reader clears that local the moment a buffer has real memberships.
-    (when (buffer-exists? *notmuch-search-buffer*)
-      (for-each (lambda (id) (buffer-add-group! buf id))
-                (buffer-group-ids *notmuch-search-buffer*)))
+    ;; the thread view is the same app as the index, so it joins the same
+    ;; home group. Membership is 'group-ids and joining is buffer-add-group!:
+    ;; writing the legacy 'group local here left the view ungrouped, because
+    ;; the reader clears that local the moment a buffer has real memberships.
+    (nm--join-group! buf)
     ;; render into the buffer and into no window at all. Placement belongs
     ;; to the caller (nm--show-pane!): a switch here takes whichever window
     ;; happens to be current, which is the index's own window.
