@@ -495,6 +495,10 @@ Rule 1 is what returns a peek to the previous state. Nothing else is needed.
 
 The destination is per frame. Two frames can show two groups, or one group with two layouts. The `previous` slot is per frame.
 
+A frame is a workspace, and a group belongs to one of them. The frame that founds a group keeps it, so another frame's rail, tabs and switcher stay clear of work that was never done there. A group whose frame is gone belongs to no one: the next frame to enter it adopts it, so a closed window strands nothing.
+
+A group of another frame is still reachable. It is the last section of the switcher, marked "in another window", and the board lists every group whatever frame holds it. Picking one goes to the frame that holds it rather than pulling the group into this one: one group stands in one workspace, never two at once. A frame that lives in a browser tab is raised by its tab. Any other client says where the group is and moves nothing yet.
+
 ### Indicator
 
 A frame derives `current-group` from its visible non-transient buffers: the intersection of their groups. The modeline shows the name, or "mixed". The indicator decides nothing. It does not gate the layout save, it does not choose where new work goes, and it is not stored.
