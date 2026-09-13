@@ -477,6 +477,32 @@
     (check-equal! (list-index "*notmuch*") 1 "the inbox returns to the originating row")
     (t--nm-done!)))
 
+(deftest 'a-saved-position-names-a-thread-not-a-row-number
+  "filter to a sender, trash every mail they sent, come back: row 0 is a stranger"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (list-goto-index! "*notmuch*" 0)
+    (let ((pos (nm--position-of "*notmuch*"))
+          (saved nm--search-json))
+      (check-equal! (car pos) 0 "an index")
+      (check-equal! (cdr pos) '("0001" "0002") "and the threads from that row down")
+      ;; while the filter was on, 0001 was trashed and 0003 arrived. Row 0
+      ;; is now a thread the reader has never seen; 0002 is the one that
+      ;; followed the row they left.
+      (set! nm--search-json
+        (lambda (query limit)
+          (list (list 'thread "0003" 'subject "New arrival" 'authors "Dave"
+                      'date_relative "Now" 'tags '("inbox"))
+                (list 'thread "0002" 'subject "Quarterly report" 'authors "Bob"
+                      'date_relative "Yest. 23:04" 'tags '("inbox")))))
+      (nm--refresh! "*notmuch*")
+      (nm--goto-position! "*notmuch*" pos)
+      (check-equal! (nm--th-id (nm--thread-at "*notmuch*")) "0002"
+                    "it lands on the next thread that survived, not on row 0")
+      (set! nm--search-json saved))
+    (t--nm-done!)))
+
 (deftest 'replacement-filters-are-removed-in-order
   "by-sender and by-marked replace each other; backslash walks back"
   (lambda ()
@@ -703,8 +729,8 @@
       (set! notmuch-send-routes saved))
     (t--nm-done!)))
 
-(deftest 'landing-on-the-index-catches-the-mail-pane-up
-  "a return to the inbox is the same event as a move inside it: the pane follows point"
+(deftest 'one-rule-keeps-the-mail-pane-on-the-thread-at-point
+  "no verb says preview: the pane follows point after every command and every landing"
   (lambda ()
     (t--nm-setup!)
     (let ((saved notmuch-auto-preview))
@@ -717,14 +743,21 @@
       (list-goto-first-entry "*notmuch*")
       (check-false! (nm--pane-at-point? "*notmuch*")
                     "point moved on its own, so the pane is stale")
-      (check-true! (and (member 'nm--landed-preview!
+      (check-true! (and (member 'nm--follow-point!
+                                (hook-functions 'post-command-hook))
+                        #t)
+                   "the rule runs after every command")
+      (check-true! (and (member 'nm--follow-point!
                                 (hook-functions 'window-configuration-change-hook))
                         #t)
-                   "and landing is on the window-configuration hook, which fills it")
-      ;; q closes the pane, and the same hook fires on the kill. A landing
-      ;; rule that reopened it would make the dismissal unusable.
+                   "and on every landing, which is not a command")
+      (nm--follow-point!)
+      (check-equal! (buffer-local "*mail*" 'notmuch-thread) "0001"
+                    "and it fills the pane from point")
+      ;; q closes the pane, and the same hook fires on the kill. A rule
+      ;; that reopened it would make the dismissal unusable.
       (buffer-kill! "*mail*")
-      (nm--landed-preview!)
+      (nm--follow-point!)
       (check-false! (buffer-known? "*mail*")
                     "a dismissed pane stays dismissed")
       (set! notmuch-auto-preview saved))

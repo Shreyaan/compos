@@ -123,7 +123,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (buffer-set-local! buf 'notmuch-selection #f)
   (nm--query-base-of buf)
   (buffer-set-local! buf 'notmuch-query-positions
-    (cons (list-index buf)
+    (cons (nm--position-of buf)
           (or (buffer-local buf 'notmuch-query-positions) '())))
   (buffer-set-local! buf 'notmuch-query-filters
     (cons term (nm--query-filters-of buf))))
@@ -132,7 +132,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (buffer-set-local! buf 'notmuch-selection #f)
   (nm--query-base-of buf)
   (buffer-set-local! buf 'notmuch-query-positions
-    (cons (list-index buf)
+    (cons (nm--position-of buf)
           (or (buffer-local buf 'notmuch-query-positions) '())))
   (buffer-set-local! buf 'notmuch-query-filters
     (cons (list "only" term) (nm--query-filters-of buf))))
@@ -513,9 +513,9 @@ when a message has no text/plain part." 'group 'notmuch)
     ;; current rows for its new base query.
     (when cached? (nm--refresh! buf))
     (list-goto-first-entry buf)
-    ;; Opening selects a row just as n/p do. Populate its detail now.
-    ;; During scene construction, the declared show pane does this itself.
-    (unless (layout-arranging?) (nm--maybe-preview! buf))))
+    ;; a fresh index has shown no pane and dismissed nothing
+    (set! *notmuch-pane-shown* #f)
+    (set! *nm-dismissed* #f)))
 
 (define-command "notmuch-inbox" "Open the mail index on the default query"
   (lambda () (nm--open-index! notmuch-default-query)))
@@ -869,10 +869,16 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--preview! buf)
   (let ((th (nm--thread-at buf)))
     (when th
+      ;; The index re-asserts its own window only when it IS the selected one,
+      ;; because opening a thread can otherwise take that window. Called from
+      ;; anywhere else — a purge run from the mail view — the pane is filled
+      ;; and focus is left where the user put it.
       (let* ((origin (active-window))
+             (from-index? (equal? (window-buffer origin) buf))
              (mail (nm--open-thread! (nm--th-id th) (nm--th-subject th) 'defer-read)))
-        (window-set-buffer! origin buf)
-        (select-window! origin)
+        (when from-index?
+          (window-set-buffer! origin buf)
+          (select-window! origin))
         (nm--show-pane! mail buf)
         (set! *notmuch-pane-shown* #t))
       ;; Keep the list focused before a database write can fail.
@@ -912,8 +918,7 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; schedules the fetch and the next move cancels it, so holding n costs
 ;; one round trip instead of one per row.
 (define (nm--preview-now! buf)
-  (when (and (buffer-exists? buf)
-             (equal? (window-buffer (active-window)) buf))
+  (when (and (buffer-exists? buf) (nm--mail-window? buf))
     (nm--preview! buf)))
 
 (define (nm--preview-soon! buf)
@@ -935,28 +940,63 @@ when a message has no text/plain part." 'group 'notmuch)
              (window-showing pane)
              (equal? (buffer-local pane 'notmuch-thread) (nm--th-id th))))))
 
-;; Landing on the index is the same event as moving inside it: the mail
-;; pane shows the thread at point. A return from another buffer, a group
-;; switch or a restored scene left the pane stale, so the first n or SPC
-;; after every arrival was spent on catching the pane up.
-(define (nm--landed-preview!)
-  (let ((buf *notmuch-search-buffer*))
-    (when (and notmuch-auto-preview
-               (buffer-exists? buf)
-               (not (layout-arranging?))
-               (not (minibuffer-active?))
-               ;; q closed the pane. The kill changes the configuration, so
-               ;; without this the landing rule reopened what the reader
-               ;; just dismissed. n or SPC brings it back.
-               (not (and *notmuch-pane-shown*
-                         (not (buffer-exists? *notmuch-show-buffer*))))
-               (equal? (window-buffer (active-window)) buf)
-               (not (nm--pane-at-point? buf)))
-      ;; the hook fires on every configuration change; a landing that is
-      ;; on its way somewhere else should not cost a fetch either
-      (nm--preview-soon! buf))))
+;; ONE rule decides what the mail pane shows, and no verb states it.
+;; The pane holds the thread the list has at point; whenever it does not,
+;; it is refilled. Moving the highlight, archiving the row out from under
+;; it, purging a sender, popping a filter, landing back on the index from
+;; another buffer — all of them are the same event, and none of them has
+;; to say so.
+;;
+;; It runs after every command in every buffer, so the cheap tests come
+;; first: no index, or a window that is not the mail work, and it is two
+;; calls and out. The fetch itself is an ssh round trip, so a pane that
+;; already agrees with point costs nothing.
+;; The one write the rule must not answer: marking a thread unread. A
+;; fetch reads the thread, and reading it clears unread again. The verb
+;; says so once, here, and the next pass consumes it.
+(define *nm-skip-follow* #f)
+(define (nm--skip-follow!) (set! *nm-skip-follow* #t))
 
-(add-hook! 'window-configuration-change-hook 'nm--landed-preview!)
+;; the thread the reader dismissed the pane on, or #f
+(define *nm-dismissed* #f)
+
+(define (nm--follow-point!)
+  (let ((buf *notmuch-search-buffer*))
+    (cond
+      ;; one verb asked to be left alone this pass
+      (*nm-skip-follow* (set! *nm-skip-follow* #f))
+      ((not (and notmuch-auto-preview
+                 (buffer-exists? buf)
+                 (nm--mail-window? buf)
+                 (not (layout-arranging?))
+                 (not (minibuffer-active?))))
+       #f)
+      ;; q closed the pane. The first pass after the kill records WHICH
+      ;; thread was dismissed: while point stays on it nothing reopens,
+      ;; and a move to any other thread brings the pane back.
+      ((and *notmuch-pane-shown* (not (buffer-exists? *notmuch-show-buffer*)))
+       (let ((id (nm--id-at buf)))
+         (cond
+           ((not *nm-dismissed*) (set! *nm-dismissed* id))
+           ((equal? *nm-dismissed* id) #f)
+           (else (set! *nm-dismissed* #f)
+                 (nm--preview-soon! buf)))))
+      (else
+        (set! *nm-dismissed* #f)
+        ;; a highlight on its way somewhere else should not cost a fetch
+        (unless (nm--pane-at-point? buf) (nm--preview-soon! buf))))))
+
+(define (nm--id-at buf)
+  (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))
+
+;; A command run from the mail view — purge this sender, archive and back —
+;; changes the list too, so the pane follows from either window.
+(define (nm--mail-window? buf)
+  (let ((w (window-buffer (active-window))))
+    (or (equal? w buf) (equal? w *notmuch-show-buffer*))))
+
+(add-hook! 'post-command-hook 'nm--follow-point!)
+(add-hook! 'window-configuration-change-hook 'nm--follow-point!)
 
 ;; the shown mail follows the highlight: every move previews, and opening
 ;; a thread marks it read (the open itself tags -unread)
@@ -964,9 +1004,7 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; so every move here goes through the list and none of them counts
 ;; lines
 (define (nm--move! step)
-  (let ((buf (current-buffer)))
-    (list-move-in! buf step)
-    (nm--maybe-preview! buf)))
+  (list-move-in! (current-buffer) step))
 
 (define-command "notmuch-next" "Move down; the shown mail follows"
   (lambda () (nm--move! 1)))
@@ -975,19 +1013,18 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda () (nm--move! -1)))
 
 (define-command "notmuch-first-thread" "Jump to the newest thread"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (list-goto-first-entry buf)
-      (nm--maybe-preview! buf))))
+  (lambda () (list-goto-first-entry (current-buffer))))
 
 (define-command "notmuch-last-thread" "Jump to the oldest listed thread"
   (lambda ()
     (let* ((buf (current-buffer)) (n (length (list-entries buf))))
-      (when (> n 0) (list-goto-index! buf (- n 1)))
-      (nm--maybe-preview! buf))))
+      (when (> n 0) (list-goto-index! buf (- n 1))))))
 
 (define-command "notmuch-refresh" "Re-run the search and refresh the listing"
-  (lambda () (nm--refresh! (current-buffer)) (message "Refreshed")))
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (nm--after-change! buf)
+      (message "Refreshed"))))
 
 (define-command "notmuch-search" "Prompt for a notmuch query and show it"
   (lambda ()
@@ -1002,18 +1039,57 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define (nm--goto-index! buf i) (list-goto-index! buf i))
 
-;; tag, refresh, stay at the same list INDEX — when the change removes the
-;; row (archive/trash on an inbox view) that index IS the next thread —
-;; then the shown mail follows
-(define (nm--tag! buf changes &optional skip-preview)
-  (let ((th (nm--thread-at buf)) (i (nm--index-at buf)))
+;; A position is an index AND the thread ids from that row down. An index
+;; alone lies the moment the list under it changes: filter to a sender,
+;; trash every mail they ever sent, come back, and row 12 is a stranger.
+;; The ids say which thread the reader was on, and which ones follow it
+;; when that thread is one of the ones that went.
+(define (nm--position-of buf)
+  (let ((i (or (nm--index-at buf) 0))
+        (ids (map nm--th-id (list-entries buf))))
+    (cons i (nm--tail-from ids i))))
+
+;; list-tail throws past the end; a row count that shrank under us must not
+(define (nm--tail-from lst i)
+  (cond ((null? lst) '())
+        ((<= i 0) lst)
+        (else (nm--tail-from (cdr lst) (- i 1)))))
+
+;; the first remembered thread the list still has, else the same index
+(define (nm--goto-position! buf pos)
+  (let ((n (length (list-entries buf))))
+    (when (> n 0)
+      (let* ((ids (map nm--th-id (list-entries buf)))
+             (i (if (pair? pos) (car pos) (or pos 0)))
+             (wanted (if (pair? pos) (cdr pos) '()))
+             (hit (let loop ((w wanted))
+                    (cond ((null? w) #f)
+                          ((member (car w) ids) (nm--index-of ids (car w)))
+                          (else (loop (cdr w)))))))
+        (nm--goto-index! buf (or hit (min i (- n 1))))))))
+
+(define (nm--index-of lst x)
+  (let loop ((l lst) (i 0))
+    (cond ((null? l) #f)
+          ((equal? (car l) x) i)
+          (else (loop (cdr l) (+ i 1))))))
+
+;; Any command that changes the listing ends here: refresh, then land on
+;; the thread the reader was on, or on the first one still there below it.
+;; What the mail pane shows is not this function's business — nm--follow-point!
+;; settles that after every command.
+(define (nm--after-change! buf &optional pos)
+  (when (buffer-exists? buf)
+    (let ((p (or pos (nm--position-of buf))))
+      (nm--refresh! buf)
+      (nm--goto-position! buf p))))
+
+(define (nm--tag! buf changes)
+  (let ((th (nm--thread-at buf)) (pos (nm--position-of buf)))
     (if th
         (begin
           (nm--run (string-append "tag " changes " -- thread:" (nm--th-id th)))
-          (nm--refresh! buf)
-          (let ((n (length (list-entries buf))))
-            (when (and i (> n 0)) (nm--goto-index! buf (min i (- n 1)))))
-          (unless skip-preview (nm--maybe-preview! buf))
+          (nm--after-change! buf pos)
           (message
             (if (and (equal? changes "-inbox")
                      (member (nm--th-id th) (map nm--th-id (list-entries buf))))
@@ -1044,7 +1120,9 @@ when a message has no text/plain part." 'group 'notmuch)
       (if th
           ;; Reading a preview clears unread. An explicit toggle must
           ;; keep its new state instead of immediately reading it again.
-          (nm--tag! buf (if (member "unread" (nm--th-tags th)) "-unread" "+unread") #t)
+          (begin
+            (nm--skip-follow!)
+            (nm--tag! buf (if (member "unread" (nm--th-tags th)) "-unread" "+unread")))
           (message "No thread on this line")))))
 
 ;; on a plain tag:X search, u strips that tag from the thread — inbox zero
@@ -1316,14 +1394,11 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let* ((buf (current-buffer))
            (positions (or (buffer-local buf 'notmuch-query-positions) '()))
-           (i (if (null? positions) #f (car positions))))
+           (pos (if (null? positions) #f (car positions))))
       (if (not (nm--query-pop! buf))
           (message "No structured notmuch filters to remove")
           (begin
-            (nm--refresh! buf)
-            (let ((n (length (list-entries buf))))
-              (when (and i (> n 0))
-                (nm--goto-index! buf (min i (- n 1)))))
+            (nm--after-change! buf pos)
             (message "Removed last notmuch filter"))))))
 
 (define-command "notmuch-back" "Remove the last mail filter, or return to mailboxes"
@@ -1380,8 +1455,7 @@ when a message has no text/plain part." 'group 'notmuch)
                 (message "Could not extract the sender")
                 (let ((n (nm--count (string-append "from:" email))))
                   (nm--run (string-append "tag +trash -inbox -unread -- " (nm--quote (string-append "from:" email))))
-                  (when (buffer-exists? *notmuch-search-buffer*)
-                    (nm--refresh! *notmuch-search-buffer*))
+                  (nm--after-change! *notmuch-search-buffer*)
                   (message (string-append "trashed " (number->string n) " message"
                                           (if (= n 1) "" "s") " from " email)))))))))
 (catalog-meta! 'command "notmuch-delete-all-from-sender" 'domain 'mail 'effects '(destroy))
@@ -1494,8 +1568,7 @@ when a message has no text/plain part." 'group 'notmuch)
                        (msg-id (nm--newest-msg-id thread-id))
                        (verdict (nm--purge-unsubscribe! msg-id)))
                   (nm--run (string-append "tag +trash -inbox -unread -- " (nm--quote (string-append "from:" email))))
-                  (when (buffer-exists? *notmuch-search-buffer*)
-                    (nm--refresh! *notmuch-search-buffer*))
+                  (nm--after-change! *notmuch-search-buffer*)
                   (message (string-append "trashed " (number->string n) " message"
                                           (if (= n 1) "" "s") " from " email "; " verdict)))))))))
 (catalog-meta! 'command "notmuch-purge-sender" 'domain 'mail 'effects '(destroy external))
@@ -1609,7 +1682,7 @@ when a message has no text/plain part." 'group 'notmuch)
         (nm--run (string-append "tag " changes " -- " (nm--quote (nm--marked-query buf))))
         ;; Keep the local selection across the refresh. The selected thread IDs
         ;; remain valid even when their displayed tags change.
-        (nm--refresh! buf))))
+        (nm--after-change! buf))))
 
 (define (nm--toggle-selection! buf id)
   (let* ((s (nm--selection buf))
