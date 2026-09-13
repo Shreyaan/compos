@@ -19,6 +19,10 @@
   "The hosted model selected after OpenRouter setup."
   'group 'setup 'type 'string)
 
+(defcustom 'setup-default-connector ""
+  "The connector first-run setup chose. Empty leaves the built-in default."
+  'group 'setup)
+
 (define *setup-buffer* "*setup*")
 (define setup-openrouter-keys-url "https://openrouter.ai/settings/keys")
 
@@ -34,6 +38,50 @@
   (not (equal? (string-trim
                  (shell-command->string
                    (string-append "command -v " program " 2>/dev/null"))) "")))
+
+(define *setup-secret-probes*
+  ;; Readiness, not just installation. Every probe is local, non-interactive,
+  ;; and value-free: it must not unlock a vault, call the network, or print a
+  ;; secret. An empty answer, or "0", means the tool is there but not set up.
+  '(("Doppler" "test -f \"$HOME/.doppler/.doppler.yaml\" && echo configured")
+    ("1Password" "op account list --format=json")
+    ("GPG" "gpg --list-secret-keys --with-colons | grep -c '^sec'")
+    ("macOS Keychain" "security list-keychains")
+    ("Linux Secret Service" "printenv DBUS_SESSION_BUS_ADDRESS")))
+
+(define *setup-probe-empties* '("" "0" "[]" "{}" "null" "none"))
+
+(define (setup--probe-yes? cmd)
+  "#t when a readiness probe answers anything real. The output is tested and
+   discarded, never shown: a probe that printed a secret would put it in a
+   buffer and a transcript. An answer can be present and still mean no --
+   `grep -c` says 0, and `op account list --format=json` says [] when no
+   account is configured -- so emptiness is a set, not just the empty string."
+  (let ((out (string-trim (shell-command->string (string-append cmd " 2>/dev/null")))))
+    (not (member out *setup-probe-empties*))))
+
+(define (setup-secret-scan)
+  "Each known secret provider as (NAME INSTALLED? READY? HINT). INSTALLED? is
+   the program; READY? is whether it has been signed in to or configured. The
+   two differ, and the difference is the whole reason to probe: an installed
+   Doppler that was never logged in resolves every key to empty."
+  (map (lambda (entry)
+         (let* ((name (car entry))
+                (program (cadr entry))
+                (signin (caddr entry))
+                (installed? (setup--program-present? program))
+                (probe (assoc name *setup-secret-probes*))
+                (ready? (and installed? probe
+                             (setup--probe-yes? (cadr probe)))))
+           (list name installed? ready?
+                 (cond ((not installed?) (string-append "not installed: " program))
+                       (ready? "ready")
+                       (else (string-append "installed; run `" signin "`"))))))
+       *setup-secret-backends*))
+
+(define (setup-secrets-ready)
+  "The providers that are set up and can actually answer for a key."
+  (map car (filter (lambda (row) (list-ref row 2)) (setup-secret-scan))))
 
 (define (setup-secret-backends)
   "Return secret backends as (NAME PROGRAM AVAILABLE COMMAND), without values."
@@ -90,6 +138,96 @@
       (begin
         (message "Setup: Gemini Nano connector is not loaded")
         #f)))
+
+(define (setup--cmd-program cmd)
+  "The program a connector's cmd runs: the first word, before its arguments."
+  (if (or (not cmd) (equal? cmd "")) #f (car (string-split cmd " "))))
+
+(define (setup--cmd-available? cmd)
+  "#t when this machine can actually run the connector's command. The first
+   word must exist, and so must every absolute path it is given: an interpreter
+   like node is always present, so testing it alone calls a missing script
+   available. A flag value is not a path, so only /... tokens are tested."
+  (let ((program (setup--cmd-program cmd)))
+    (and program
+         (if (equal? (substring program 0 1) "/")
+             (file-exists? program)
+             (setup--program-present? program))
+         (let loop ((words (cdr (string-split cmd " "))))
+           (cond ((null? words) #t)
+                 ((and (> (string-length (car words)) 0)
+                       (equal? (substring (car words) 0 1) "/")
+                       (not (file-exists? (car words))))
+                  #f)
+                 (else (loop (cdr words))))))))
+
+(define *setup-llm-providers*
+  '("anthropic" "openai" "openrouter" "google" "deepseek" "groq" "xai"))
+
+(define (setup--any-llm-key?)
+  "#t when the key chain resolves a key for any provider the editor knows."
+  (and (boundp 'llm-key)
+       (let loop ((ps *setup-llm-providers*))
+         (cond ((null? ps) #f)
+               ((let ((k (llm-key (car ps)))) (and k (not (equal? k "")))) #t)
+               (else (loop (cdr ps)))))))
+
+(define *setup-interpreters* '("node" "python" "python3" "ruby" "bun" "deno" "env"))
+
+(define (setup--basename path)
+  (car (reverse (string-split path "/"))))
+
+(define (setup--cmd-label cmd)
+  "What to name when a command is missing. An interpreter is always installed,
+   so for `node /path/agent.js` the missing thing is the script, not node. For
+   anything else the program itself is the answer; a flag value is never it."
+  (let ((program (setup--cmd-program cmd)))
+    (cond
+      ((not program) "no command declared")
+      ((not (member (setup--basename program) *setup-interpreters*)) program)
+      (else
+       (let loop ((words (cdr (string-split cmd " "))))
+         (cond ((null? words) program)
+               ((and (> (string-length (car words)) 0)
+                     (not (equal? (substring (car words) 0 1) "-"))
+                     (string-contains? (car words) "/"))
+                (car words))
+               (else (loop (cdr words)))))))))
+
+(define (setup--acp-connector? name)
+  "An ACP connector is one the editor launches as a program."
+  (and (setup--cmd-program (plist-get (connector-config name) 'cmd)) #t))
+
+(define (setup-inference-scan)
+  "Every declared connector with what this machine can actually run it.
+   (NAME KIND AVAILABLE? DETAIL). Declaration is not availability: a connector
+   that is declared and cannot run is the thing a first run has to say out loud.
+   DETAIL carries the missing program, because that is the only case that asks
+   the user to do something."
+  (map (lambda (name)
+         (let* ((config (connector-config name))
+                (backend (plist-get config 'backend))
+                (cmd (plist-get config 'cmd)))
+           (cond
+             ((equal? backend "chrome-gemini-nano")
+              (let ((ready? (and (setup--connector-ready? name) #t)))
+                (list name "local" ready?
+                      (if ready? "in your browser; no key, no install"
+                          "needs a Chrome with the Prompt API"))))
+             ((equal? backend "req-llm")
+              (let ((key? (setup--any-llm-key?)))
+                (list name "hosted" key?
+                      (if key? "a key is registered" "needs an API key"))))
+             (else
+              (let ((ok? (setup--cmd-available? cmd)))
+                (list name "acp" ok?
+                      (if ok? "ready"
+                          (string-append "not installed: " (setup--cmd-label cmd)))))))))
+       (connector-names)))
+
+(define (setup-inference-available)
+  "The connector names this machine can run now."
+  (map car (filter (lambda (row) (car (cdr (cdr row)))) (setup-inference-scan))))
 
 (define (setup--replace-buffer! buf text)
   (buffer-create buf)
@@ -388,8 +526,157 @@
       "Scheme decides editor behavior. Elixir supplies mechanisms that Scheme cannot provide.\n"
       "This keeps the system open, inspectable, and teachable.\n"))))
 
+(define-command "setup-welcome" "Open the welcome page"
+  (lambda ()
+    (setup--show-document! "Welcome to Compos" (string-append
+      "# Welcome to Compos\n\n"
+      "Compos is a composable computer for knowledge work. It is an editor, a browser,\n"
+      "a mail client, and a home for agents, and all of it answers to the same small\n"
+      "set of keys.\n\n"
+      "You do not have to learn it all now. This page is the short version.\n\n"
+      "## One key to remember\n\n"
+      "`M-x` runs any command by name. If you forget everything else, press `M-x` and\n"
+      "type a word for what you want: `file`, `group`, `mail`, `browse`. The list\n"
+      "filters as you type, and it shows the shortcut beside each command, so you\n"
+      "learn the keys by using the names.\n\n"
+      "`C-g` cancels anything. Nothing you press is hard to undo.\n\n"
+      "## What you work in\n\n"
+      "- A **buffer** holds text: a file, a chat, a mail thread, a web page, the\n"
+      "  output of a command. Everything is a buffer.\n"
+      "- A **window** shows a buffer. Windows split, and they never lose your place.\n"
+      "- A **group** is the set of buffers for one task, with the arrangement you\n"
+      "  left them in. Switch to a group and the screen becomes that task again.\n\n"
+      "## The agent works inside, not beside\n\n"
+      "A chat is a buffer like any other, so it sits in the group with the work it is\n"
+      "about, and it reads the buffers you have open. You do not paste context into\n"
+      "it, and you do not leave your work to ask it something.\n\n"
+      "## Start here\n\n"
+      "- [Set up your inference](compos:setup/inference)\n\n"
+      "## Then\n\n"
+      "- [M-x and the editor philosophy](compos:setup/keys)\n"
+      "- [Writing code with an agent](compos:setup/code)\n"
+      "- [Setup status](compos:setup/report)\n\n"
+      "Press `C-x C-f` to open a file when you want to start working.\n"))))
+
+(define (setup--inference-rows)
+  (apply string-append
+    (map (lambda (row)
+           (let ((name (list-ref row 0))
+                 (kind (list-ref row 1))
+                 (found? (list-ref row 2))
+                 (detail (list-ref row 3)))
+             (string-append "- " (if found? "**here**" "missing")
+                            " `" name "` (" kind ") - " detail "\n")))
+         (setup-inference-scan))))
+
+(define (setup--inference-document)
+  (string-append
+    "# First, your inference\n\n"
+    "Hello. I am Gemini Nano.\n\n"
+    "I run inside your browser, so I need no key, no install, and no account.\n"
+    "That makes me the one model that is always here, and it is why I speak first.\n\n"
+    "I am also small. Let me look for bigger ones.\n\n"
+    "## What this machine has\n\n"
+    (setup--inference-rows)
+    "\n"
+    "An ACP agent is a coding agent the editor starts as a program and talks to\n"
+    "over the Agent Client Protocol: Codex, Claude Code, OpenCode, DeepSeek. The\n"
+    "editor supplies the tools and writes the prompt, so the agent edits your\n"
+    "buffers rather than files behind your back.\n\n"
+    "`missing` means the program is not installed here, not that it is unsupported.\n\n"
+    "## Choosing\n\n"
+    "Pick the one you want as the default for new chats. You can change it per\n"
+    "chat later with `M-x agent-switch`, and change the default with `C-c b`.\n\n"
+    "[Back to setup](compos:setup/report)\n"))
+
+(define (setup--choose-inference)
+  "Offer what this machine can run. With no coding agent and no key there is
+   nothing to choose yet, so the honest next step is secrets, not a menu of
+   connectors that cannot answer."
+  (let* ((available (setup-inference-available))
+         (agents (setup-inference-acp-available))
+         (secrets? (and (null? agents) (not (setup--any-llm-key?)))))
+    (minibuffer-read
+      (if secrets? "No agent and no key. Next: " "Default connector: ")
+      (if secrets?
+          (list "Set up secrets" "Keep Gemini Nano")
+          (append available (list "Decide later")))
+      (lambda (choice)
+        (cond
+          ((equal? choice "Set up secrets") (run-command "setup-secrets"))
+          ((member choice available)
+           (customize-save! 'setup-default-connector choice)
+           (set! *default-connector* choice)
+           (message (string-append "Setup: " choice " is the default connector")))
+          (else (setup-provider-bootstrap!)))))))
+
+(define-command "setup-inference" "Check this machine for models and pick a default"
+  (lambda ()
+    (setup--show-document! "Inference" (setup--inference-document))
+    (setup--choose-inference)))
+
+(define (setup-inference-acp-available)
+  "The coding agents this machine can actually start."
+  (map car (filter (lambda (row) (and (equal? (list-ref row 1) "acp")
+                                      (list-ref row 2)))
+                   (setup-inference-scan))))
+
+(define (setup--secrets-rows)
+  (apply string-append
+    (map (lambda (row)
+           (let ((name (list-ref row 0))
+                 (ready? (list-ref row 2))
+                 (hint (list-ref row 3)))
+             (string-append "- " (if ready? "**ready**" "not set up")
+                            " " name " - " hint "\n")))
+         (setup-secret-scan))))
+
+(define (setup--secrets-document)
+  (string-append
+    "# Your secrets\n\n"
+    "No coding agent is installed here, so inference has to come from a hosted\n"
+    "model, and a hosted model needs an API key.\n\n"
+    "A key does not belong in a config file. The editor reads keys through a\n"
+    "chain: config holds an `@NAME` reference, and the value is resolved from\n"
+    "your secret provider at the moment it is used. The value stays where you\n"
+    "put it, and nothing writes it into a buffer or a transcript.\n\n"
+    "## What this machine has\n\n"
+    (setup--secrets-rows)
+    "\n"
+    "`not set up` means the tool is installed but has no account or key yet.\n"
+    "That difference matters: a Doppler that was never logged in resolves\n"
+    "every reference to empty, and the failure looks like a broken key.\n\n"
+    "[Back to setup](compos:setup/report)\n"))
+
+(define (setup--choose-secrets)
+  (let ((names (map car (setup-secret-scan))))
+    (minibuffer-read "Set up which provider? "
+      (append names (list "Decide later"))
+      (lambda (choice)
+        (if (member choice names)
+            (setup--configure-secret-backend! choice)
+            (message "Setup: secrets can wait; M-x setup-secrets resumes"))))))
+
+(define-command "setup-secrets" "Probe the secret providers and set one up"
+  (lambda ()
+    (setup--show-document! "Secrets" (setup--secrets-document))
+    (setup--choose-secrets)))
+
+(define (setup-apply-default-connector!)
+  "Put the saved choice back. Custom values load after this package, and
+   *default-connector* is a plain global that a reload resets, so the choice
+   has to be applied once the user's custom.scm is in."
+  (if (and (not (equal? setup-default-connector ""))
+           (member setup-default-connector (connector-names)))
+      (set! *default-connector* setup-default-connector)))
+
+(add-hook! 'frame-attach-hook 'setup-apply-default-connector!)
+
 (define (setup--follow-link arg)
   (cond ((equal? arg "report") (run-command "setup-report"))
+        ((equal? arg "welcome") (run-command "setup-welcome"))
+        ((equal? arg "inference") (run-command "setup-inference"))
+        ((equal? arg "secrets") (run-command "setup-secrets"))
         ((equal? arg "keys") (run-command "setup-teach-keys"))
         ((equal? arg "code") (run-command "setup-teach-code"))
         (else (message (string-append "Unknown setup link: " arg)))))
