@@ -272,7 +272,7 @@
     (list 'diff-block 'fg "#d5ac66" 'style "italic")
     (list 'diff-block-source 'fg "#a79d8c" 'style "italic")
     (list 'dim 'fg "#a79d8c")
-    (list 'select 'bg "#445281")
+    (list 'select 'bg "#3a4468")
     (list 'hl-line 'bg "#464034")
     (list 'linenum 'fg "#4a443a")
     (list 'border 'bg "#39342b")
