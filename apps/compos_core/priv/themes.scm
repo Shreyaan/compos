@@ -546,6 +546,9 @@
 (defface! 'mode-line-inactive 'inherit 'modeline-inactive)
 (defface! 'header-line 'inherit 'modeline)
 (defface! 'line-number 'inherit 'linenum)
+;; The row under point. On a dark ground a 3-4 point lift off the window
+;; background reads as nothing, so every theme keeps a ladder against its
+;; own `window' bg: hl-line near 1.6:1, select above it, region above that.
 (defface! 'highlight 'inherit 'hl-line)
 (defface! 'shadow 'inherit 'dim)
 (defface! 'error 'inherit 'alert)
