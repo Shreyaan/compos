@@ -2411,9 +2411,9 @@
                          (string-append "This pane cycles " mode)
                          "This pane cycles every buffer that is not a chat"))))))))
 
-;; the key is chat-mode's own, so it shadows the global popup toggle only
-;; while you are in a chat
-(mode-keys! "chat-mode" '(("C-`" "group-next-buffer")))
+;; one key, one meaning in every pane: C-` walks the buffers this pane
+;; cycles, chat or not. The popup toggle keeps the family and sits on M-`.
+(global-set-key "C-`" "group-next-buffer")
 
 ;; a verb here acts on every marked group, or on the row at point when
 ;; nothing is marked — the rule every list follows. The marks go when the

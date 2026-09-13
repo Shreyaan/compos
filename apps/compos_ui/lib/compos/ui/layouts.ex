@@ -2020,7 +2020,7 @@ defmodule Compos.Ui.Layouts do
                   const editorOpen = !!document.querySelector(
                     ".mb-panel, .which-key, .transient-panel"
                   );
-                  const editorEntry = ["C-x", "M-x", "C-g", "C-`", "C-M-`", "s-p"].includes(spec);
+                  const editorEntry = ["C-x", "M-x", "C-g", "C-`", "M-`", "C-M-`", "s-p"].includes(spec);
                   if (spec && (this.editorSequence || editorOpen || editorEntry)) {
                     e.preventDefault();
                     this.editorSequence = true;

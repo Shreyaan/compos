@@ -2091,7 +2091,7 @@ defmodule Compos.EditorTest do
   end
 
   describe "display-buffer & popper" do
-    test "M-x shell opens as a right side popup; C-` toggles; q quits", %{buf: buf} do
+    test "M-x shell opens as a right side popup; M-` toggles; q quits", %{buf: buf} do
       press(["M-x"])
       type("shell")
       press(["RET"])
@@ -2109,13 +2109,13 @@ defmodule Compos.EditorTest do
       assert {:ok, ~s{"popup popup-right"}} =
                Compos.Core.Session.eval(~s{(buffer-local "*shell*" 'window-class)})
 
-      # C-` closes the popup, back to a single window on our buffer
-      press(["C-`"])
+      # M-` closes the popup, back to a single window on our buffer
+      press(["M-`"])
       assert %{type: :leaf} = Editor.render_state().tree
       assert Editor.current_buffer() == buf
 
-      # C-` reopens the same popup buffer
-      press(["C-`"])
+      # M-` reopens the same popup buffer
+      press(["M-`"])
       assert Editor.current_buffer() == "*shell*"
 
       # q (via quit-window) closes it too... shell is editable, use M-x
@@ -2191,7 +2191,7 @@ defmodule Compos.EditorTest do
       assert {:ok, ~s{"popup popup-right"}} =
                Compos.Core.Session.eval(~s{(buffer-local "#{target}" 'window-class)})
 
-      press(["C-`"])
+      press(["M-`"])
       assert Editor.current_buffer() == buf
       assert %{type: :leaf} = Editor.render_state().tree
       {:ok, _} = Compos.Core.Session.eval(~s{(buffer-kill! "#{target}")})
@@ -2214,7 +2214,7 @@ defmodule Compos.EditorTest do
       assert {:ok, ~s{"popup popup-bottom"}} =
                Compos.Core.Session.eval(~s{(buffer-local "#{target}" 'window-class)})
 
-      press(["C-`"])
+      press(["M-`"])
       assert Editor.current_buffer() == buf
       Editor.set_window_cols(%{})
       {:ok, _} = Compos.Core.Session.eval(~s{(buffer-kill! "#{target}")})
@@ -2274,14 +2274,14 @@ defmodule Compos.EditorTest do
       assert %{type: :split, children: [%{type: :leaf}, %{type: :leaf}]} =
                Editor.render_state().tree
 
-      press(["C-`"])
+      press(["M-`"])
       assert %{type: :leaf} = Editor.render_state().tree
       assert Editor.current_buffer() == buf
     end
 
     # popper's toggle from outside the popup dismisses it and leaves your
     # focus where it is — you never went in, so there is nothing to return
-    test "C-` from another window closes the popup without moving focus", %{buf: buf} do
+    test "M-` from another window closes the popup without moving focus", %{buf: buf} do
       press(["C-x", "3"])
       {:ok, from} = Compos.Core.Session.eval("(active-window)")
 
@@ -2289,7 +2289,7 @@ defmodule Compos.EditorTest do
       {:ok, _} = Compos.Core.Session.eval("(select-window! #{from})")
       assert Editor.current_buffer() == buf
 
-      press(["C-`"])
+      press(["M-`"])
       assert {:ok, ^from} = Compos.Core.Session.eval("(active-window)")
       assert Editor.current_buffer() == buf
       Editor.delete_other_windows()

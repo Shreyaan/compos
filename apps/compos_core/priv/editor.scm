@@ -13882,7 +13882,10 @@
 (global-set-key "C-c C-v" "preview-mode")
 (global-set-key "C-c C-a" "app-preview")
 (global-set-key "C-c C-r" "app-reload")
-(global-set-key "C-`" "popup-toggle")
+;; the backtick family reads as one hand: C-` walks this pane's own kind of
+;; buffer (groups.scm), M-` shows and hides the popup, C-M-` turns the popup
+;; into a real window.
+(global-set-key "M-`" "popup-toggle")
 (global-set-key "C-M-`" "popup-bufferize")
 (global-set-key "C-M-v" "scroll-other-window")
 ;; the other window, without leaving this one — the reference page beside
