@@ -678,8 +678,8 @@
     (t--nm-setup!)
     (let ((saved notmuch-auto-preview))
       (set! notmuch-auto-preview #t)
-      (run-command "notmuch-inbox")
-      (run-command "notmuch-next")
+      (t--nm-run! "notmuch-inbox")
+      (t--nm-run! "notmuch-next")
       (let ((log (t--nm-calls)))
         (check-contains! log "show --format=json --include-html thread:0002" "the second thread")
         (check-contains! log "tag -unread -- thread:0002" "and it was marked read"))
@@ -739,7 +739,7 @@
     (t--nm-setup!)
     (let ((saved notmuch-auto-preview))
       (set! notmuch-auto-preview #t)
-      (run-command "notmuch-inbox")
+      (t--nm-run! "notmuch-inbox")
       (t--nm-run! "notmuch-next")
       (check-equal! (buffer-local "*mail*" 'notmuch-thread) "0002"
                     "a move previews, so the pane holds the thread at point")
@@ -773,7 +773,7 @@
     (t--nm-setup!)
     (let ((saved notmuch-auto-preview))
       (set! notmuch-auto-preview #t)
-      (run-command "notmuch-inbox")
+      (t--nm-run! "notmuch-inbox")
       ;; the open fetched the first thread; from here a move must wait
       (set! notmuch-preview-delay 500)
       (let ((before (t--nm-calls)))
