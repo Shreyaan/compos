@@ -726,8 +726,8 @@
          (next (and (pair? rest)
                     (nth (min i (- (length rest) 1)) rest))))
     (when (and (pair? shown) next)
-      (display-buffer-other-window!
-        (sentry--ensure-detail! (sentry--get next 'id))))
+      (display-buffer-detail!
+        (sentry--ensure-detail! (sentry--get next 'id)) *sentry-buffer*))
     (for-each (lambda (b)
                 (when (and (buffer-exists? b)
                            (not (member b (map cadr (window-list)))))
@@ -850,7 +850,7 @@
           ;; window for the network round trip reads as a hang.
           (when (= (buffer-size buf) 0)
             (sentry--apply-detail! buf issue))
-          (display-buffer-other-window! buf)
+          (display-buffer-detail! buf *sentry-buffer*)
           (with-current-buffer
             buf
             (lambda ()

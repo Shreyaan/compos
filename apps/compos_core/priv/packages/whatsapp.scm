@@ -333,8 +333,10 @@
 
 (define (whatsapp--display-conversation! buf)
   ;; Show the conversation without selecting its window; the index keeps
-  ;; keyboard focus so moving up/down continues to preview chats.
-  (display-buffer-other-window! buf))
+  ;; keyboard focus so moving up/down continues to preview chats. Every
+  ;; chat lands in the index's one detail window, and C-` there walks the
+  ;; chats already opened (packages/detail.scm).
+  (display-buffer-detail! buf *whatsapp-buffer*))
 
 (define (whatsapp--open-chat! chat &optional display?)
   (let* ((jid (whatsapp--text (plist-get chat 'jid) ""))

@@ -2,6 +2,8 @@
 
 A peek is a look at a buffer without keeping it. `RET` on a row in dired or the switcher peeks. The rules live in `priv/editor.scm` (the peek section) and here.
 
+A row whose detail is a buffer you mean to keep is not a peek: that is the detail window (`packages/detail.scm`, docs/DISPLAY-BUFFER.md). It borrows the peek's discipline of one remembered window and nothing else.
+
 ## Rules
 
 1. A peek is a display of category `preview` (docs/DISPLAY-BUFFER.md). By the stock rule it goes through the window chain: it takes a window that is not the reader's, so it never covers the listing. The next peek takes that same window, and dismissing it puts the window back. A rule of your own, `(add-display-rule! '(category preview) 'popup)`, sends it to the popup instead, on the side away from the window it was asked from. A peek takes no focus: the buffer is set in the window in place, the selection moves nowhere, and `other-window` and the focus chords pass its window by (`M-<down>` scrolls it; `RET` on its row opens it, and only then is it a window you can enter).

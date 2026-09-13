@@ -83,6 +83,7 @@
 (load-bundled-package "recording.scm")
 (load-bundled-package "scheme-ide.scm")
 (load-bundled-package "peek.scm")
+(load-bundled-package "detail.scm")
 (load-bundled-package "scratch.scm")
 (load-bundled-package "sentry.scm")
 (load-bundled-package "setup.scm")

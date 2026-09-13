@@ -12,6 +12,9 @@ Where a buffer lands follows from what you did, not from what the buffer is.
   it takes the **other window**, the one the list was previewing it in. The
   list keeps its own window until it closes. That is the peek chain
   (docs/PEEK.md) and `show-in-other-work-window!`.
+- You opened a row whose detail is its own buffer — a Sentry issue, a
+  WhatsApp chat: it takes the list's **detail window**, and every later row
+  takes that same window. `display-buffer-detail!`, below.
 - A preview lands in the window the pick will land in. Look and open are
   the same window, always.
 
@@ -128,7 +131,7 @@ with a disposable-frame runner and keyboard-path test in
 
 The callers pass an alist, a plist:
 
-- `'category KIND`: the kind of display. A peek passes `preview`. The stock rule `((category preview) (reuse-window use-some-window pop-up-window))` is last in the alist, so a rule for a name wins over it.
+- `'category KIND`: the kind of display. A peek passes `preview`, a list's row detail passes `detail`. The stock rule `((category preview) (reuse-window use-some-window pop-up-window))` is last in the alist, so a rule for a name wins over it.
 - A display of a buffer from outside the frame's group that names no category is a display of category `foreign` (`display-foreign?`, answered by groups.scm). The stock rule `((category foreign) popup)` sends it to the popup, so a group's panes stay sealed (docs/groups.md). `switch-to-buffer!` obeys this rule (Emacs `switch-to-buffer-obey-display-actions`); a mechanism that fills a window it chose calls `switch-to-buffer-here!`. To route foreign buffers through the window chain instead: `(add-display-rule! '(category foreign) 'pop-up-window)`.
 - `'inhibit-same-window #t`: keep the selected window out of the chain. `display-buffer-other-window!` is `display-buffer` with this set.
 
@@ -141,6 +144,31 @@ A peek (docs/PEEK.md) is a display of category `preview`. By the stock rule it g
 ```
 
 Point stays in the listing either way.
+
+## Details are a rule and a memory
+
+A table whose rows are each their own buffer — Sentry issues, WhatsApp
+chats, MCP servers — opens them all into ONE window. `(display-buffer-detail!
+NAME [OWNER])` (`packages/detail.scm`) is how: the first row picks a window
+through the chain as category `detail`, and the window is remembered against
+the list, so every row after it retakes that window. Without the memory each
+row is a new buffer name, `reuse-window` never matches, and the layout grows
+a pane per row.
+
+This is the one place a window is remembered rather than chosen at display
+time, and it lapses on its own: when the window goes, when it holds the list
+itself, or when the list asks from it.
+
+A detail is not a peek. It is kept, it is writable, and it stays when the
+list goes. The list owns it (`buffer-child!`, `packages/dismiss.scm`), so `q` on the
+list takes the detail with it, and the details of one list are siblings:
+`C-\`` in the detail window walks them, most recent first, the way it walks
+chats in a chat pane.
+
+A list that rewrites ONE detail buffer per row (notmuch's `*mail*`, the
+telemetry event) needs none of this — `reuse-window` already finds the name.
+
+Tests: `priv/tests/detail-test.scm`, run by `test/compos/detail_test.exs`.
 
 ## quit-window
 

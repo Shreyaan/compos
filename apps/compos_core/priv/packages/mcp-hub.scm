@@ -300,7 +300,7 @@
         (buffer-set-local! buf 'mcp-hub-name name)
         (buffer-set-local! buf 'mode-name "mcp-detail-mode")
         (mcp-hub-detail-setup! buf)
-        (display-buffer buf))))
+        (display-buffer-detail! buf *mcp-hub-buffer*))))
 
 (define-command "mcp-hub-detail" "Show what the server on this line serves"
   (lambda () (mcp-hub-on-current mcp-hub-show-detail)))
