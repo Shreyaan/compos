@@ -289,6 +289,13 @@ I want to start from a project or directory
 - Two frames can show two groups, or one group with two layouts.
 - **Solution:** per-frame slots. No command.
 
+#### I want a window to show only the work I do in it
+
+- The group a window founds belongs to that window. Another window's rail, tabs and switcher never name it.
+- The work of another window is one marked section at the end of the switcher, and picking it goes to that window.
+- A window that closes leaves its groups free, and the next window to enter one takes it.
+- **Solution:** an owner frame on the group record. No command.
+
 ### Safety shared by every story
 
 - Showing or switching buffers never changes a buffer's groups.
@@ -507,7 +514,7 @@ The active groups are derived the same way: `(active-groups)` answers every grou
 
 ### Switch candidates
 
-`switch` completes over groups in frame-local MRU order. Every group is a candidate, the group you stand in too: it goes last in its section, so it is never the lead row and never the empty-input default. Groups with no MRU entry trail in creation order. The last row is `new`.
+`switch` completes over this frame's groups in frame-local MRU order, and then over the groups of other frames in one marked section at the end. Every group of this frame is a candidate, the group you stand in too: it goes last in its section, so it is never the lead row and never the empty-input default. Groups with no MRU entry trail in creation order. The last row is `new`.
 
 ### Candidate preview
 
@@ -591,6 +598,7 @@ These are not in this specification. The design leaves room for them.
 
 ### Frame slots
 
+- A group record stores the frame that owns it, under the `frame` setting. `group-here?` answers for the selected frame, `group-elsewhere-frame` names the other live frame that holds a group, and `group-ids-mru` answers this frame's groups where `group-ids-mru-all` answers every one.
 - `previous` and `pinned` are per-frame state. `switch`, `switch-last`, `new`, `dissolve`, `kill`, and `group-pin` write them.
 - `destination` (the current group) is derived. The stored frame-local is the last answer of the derivation, not a standing context. See "The current group".
 - A frame with no destination is the plain editor plus the project fallback.
