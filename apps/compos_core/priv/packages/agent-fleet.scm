@@ -793,13 +793,15 @@
       'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
       'doc (string-append
              "The chat list: one application, one state, one group. The rows "
-             "are the recent chats, most recently used first. Type to filter: "
-             "the filter reads the title first and the state second, and it "
-             "reads every chat, not only the recent ones. A word that nobody "
-             "put in a title is found in the text of every alive chat, and the "
-             "row shows the words around it. The row under the cursor shows "
-             "its chat in the preview pane. RET switches to the chat and the "
-             "application leaves; C-g leaves and changes nothing. ; cycles "
+             "are the recent chats, most recently used first. The list has the "
+             "focus, so n and p move and the row under the cursor shows its "
+             "chat in the preview pane. / opens the filter line: the filter "
+             "reads the title first and the state second, and it reads every "
+             "chat, not only the recent ones. A word that nobody put in a "
+             "title is found in the text of every alive chat, and the row "
+             "shows the words around it. C-g closes the filter and leaves the "
+             "list standing. RET enters the chat's own group and raises the "
+             "window that holds it; q leaves and changes nothing. ; cycles "
              "what a section is: none, group, state, model. , cycles the "
              "order inside a section.")
       'buffer *chat-list-buffer*
@@ -809,7 +811,9 @@
       'rows (lambda (buf) (chat-list-rows buf))
       ;; the picker acts on one chat, the one you pick: no marks, no flags
       'markable? (lambda (buf e) #f)
-      'keys '((";" "chat-list-regroup") ("," "chat-list-resort")))))
+      'keys '((";" "chat-list-regroup") ("," "chat-list-resort")
+              ("/" "chat-list-filter") ("RET" "chat-list-visit")
+              ("q" "chat-list-quit")))))
 (ibuffer-view! *chat-list-buffer* 'sort 'recent 'grouping 'none)
 
 ;; ---- the application
@@ -820,19 +824,32 @@
 ;; on the list. The application is always in its own group and never joins
 ;; the group you came from.
 (define (chat-list-arrive!)
-  (let ((from (frame-group)))
+  (let ((from (frame-group))
+        (held (or (group-pinned) 'none)))
     (buffer-create *chat-list-buffer*)
     (buffer-add-group! *chat-list-buffer* (chat-list-group))
     (switch-to-group! (chat-list-group))
+    ;; the preview pane shows a chat this group does not hold, and the
+    ;; frame's group is derived from the buffers its windows show: without
+    ;; a pin, looking at a row would move the frame into that chat's group
+    (set-frame-local! 'pinned-group (chat-list-group))
     (delete-other-windows!)
     (switch-to-buffer! *chat-list-buffer*)
     (split-window! 'h 0.67)
     (let ((preview (other-work-window-id (active-window))))
       (buffer-set-locals! *chat-list-buffer*
         (list 'chat-list-from-group from
+              'chat-list-from-pin held
               'chat-list-preview-window preview
               'line-numbers "off"))
       preview)))
+
+;; the pin is the application's, so it goes back the way it was found
+(define (chat-list-unpin!)
+  (let ((held (buffer-local *chat-list-buffer* 'chat-list-from-pin)))
+    (when (equal? (group-pinned) (chat-list-group))
+      (set-frame-local! 'pinned-group (if (or (not held) (equal? held 'none)) #f held)))
+    (buffer-set-local! *chat-list-buffer* 'chat-list-from-pin #f)))
 
 (define (chat-list-preview-window)
   (let ((w (buffer-local *chat-list-buffer* 'chat-list-preview-window)))
@@ -850,15 +867,57 @@
 ;; the application leaves the way it arrived: with one move. RET lands you
 ;; in the chat, in the chat's own group, because switching to a chat is
 ;; switching to where that chat lives. C-g puts the frame back.
-(define (chat-list-leave! keep)
+(define (chat-list-clear-search!)
   (chat-list-search-reset!)
   (when (buffer-known? *chat-list-buffer*)
     (buffer-set-local! *chat-list-buffer* 'chat-list-search #f)
-    (list-set-query! *chat-list-buffer* ""))
+    (list-set-query! *chat-list-buffer* "")))
+
+;; the list owns the focus, so every way back into it is the same move
+(define (chat-list-focus!)
+  (let ((w (window-showing *chat-list-buffer*)))
+    (when (and w (window-exists? w)) (select-window! w))))
+
+;; a chat is pinned to the pane its mode owns, so keeping one is never a
+;; switch in the window you are standing in: enter the chat's own group and
+;; raise the window that already holds it
+;; a chat is pinned to the pane its mode owns, so the window that already
+;; holds it comes first, then the group's own chat pane, and the active
+;; window only when the group shows no chat at all
+(define (chat-list-chat-window keep)
+  (or (window-showing keep)
+      (let loop ((ws (window-list)))
+        (cond ((null? ws) #f)
+              ((and (string? (cadr (car ws)))
+                    (not (equal? (cadr (car ws)) *chat-list-buffer*))
+                    (chat-buffer? (cadr (car ws))))
+               (car (car ws)))
+              (else (loop (cdr ws)))))))
+
+;; keeping a chat is never a switch in the window you are standing in:
+;; leave the application's pin behind, enter the chat's own group, and
+;; raise the window that holds it
+(define (chat-list-keep! keep)
+  (chat-list-clear-search!)
+  (chat-list-unpin!)
+  (let ((id (group-home-of keep)))
+    (when (and id (not (equal? id (frame-group)))) (switch-to-group! id)))
+  (let ((w (chat-list-chat-window keep)))
+    (if (and w (window-exists? w))
+        (begin
+          (select-window! w)
+          (unless (equal? (window-buffer w) keep) (switch-to-buffer-here! keep)))
+        (switch-to-buffer! keep)))
+  (when (equal? (window-buffer (active-window)) keep) (end-of-buffer!)))
+
+(define (chat-list-leave! keep)
   (if (and (string? keep) (buffer-known? keep))
-      (begin (switch-to-buffer-in-group! keep) (end-of-buffer!))
-      (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
-        (when from (switch-to-group! from)))))
+      (chat-list-keep! keep)
+      (begin
+        (chat-list-clear-search!)
+        (chat-list-unpin!)
+        (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
+          (when from (switch-to-group! from))))))
 
 ;; one filter line over one list: what you type reads the titles, and the
 ;; same words read the text of every alive chat
@@ -885,9 +944,20 @@
                     (unless (equal? q (list-query *chat-list-buffer*)) (narrow q))
                     (let ((row (list-current *chat-list-buffer*)))
                       (if (ibuffer-heading? row)
-                          (ibuffer-toggle-fold! (ibuffer-heading-key row) *chat-list-buffer*)
+                          (begin
+                            (ibuffer-toggle-fold! (ibuffer-heading-key row) *chat-list-buffer*)
+                            (chat-list-focus!))
                           (chat-list-leave! row)))))
-            (list 'cancel (lambda () (done) (chat-list-leave! #f)))
+            ;; the filter is one line over the list, not the life of the
+            ;; application: closing it hands the list back its focus
+            (list 'cancel
+                  (lambda ()
+                    (done)
+                    (chat-list-clear-search!)
+                    (ibuffer-refresh! *chat-list-buffer*)
+                    (list-goto-first-entry *chat-list-buffer*)
+                    (chat-list-preview!)
+                    (chat-list-focus!)))
             (list 'legend *ibuffer-prompt-legend*)
             (list 'style "filter")))))
 
@@ -901,7 +971,27 @@
     (ibuffer-refresh! *chat-list-buffer*)
     (list-goto-first-entry *chat-list-buffer*)
     (chat-list-preview!)
-    (chat-list-filter-line! standing)))
+    ;; the list stands on its own keys; a filter line only opens when you
+    ;; ask for one, by / or by arriving with words already typed
+    (if (and (string? standing) (not (equal? standing "")))
+        (chat-list-filter-line! standing)
+        (chat-list-focus!))))
+
+(define-command "chat-list-filter"
+  "Narrow the chat list by a word in a title or in a chat"
+  (lambda () (chat-list-filter-line!)))
+
+(define-command "chat-list-visit"
+  "Enter the chat at point in its own group; on a heading, open the section"
+  (lambda ()
+    (let ((row (list-current *chat-list-buffer*)))
+      (if (ibuffer-heading? row)
+          (ibuffer-toggle-fold! (ibuffer-heading-key row) *chat-list-buffer*)
+          (chat-list-leave! row)))))
+
+(define-command "chat-list-quit"
+  "Leave the chat list and change nothing"
+  (lambda () (chat-list-leave! #f)))
 
 (define-command "chat-list"
   "Switch to a chat, by its name or by a word somebody said in it"
@@ -932,6 +1022,9 @@
 
 (category! 'chat)
 (catalog-meta! 'command "chat-list" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-list-filter" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-list-visit" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-list-quit" 'domain 'chat 'effects '(write display))
 (catalog-meta! 'command "chat-where" 'domain 'chat 'effects '(write display))
 (public! 'chat-list-open!
   "(chat-list-open! [SEARCH]) — open the chat list application, with SEARCH standing")
