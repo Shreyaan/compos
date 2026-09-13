@@ -20,16 +20,28 @@
 
 ;; execute* with the backend replaced. AUTHOR is the edit author in scope:
 ;; a slug string spawns as that chat, #f spawns with no parent at all.
+;;
+;; chat-mode's setup sweeps the runtime locals of a chat whose runtime is
+;; gone, and 'agent-slug is one of them. The real chat-attach-agent! leaves
+;; a registered session behind, so the sweep spares the slug; a stub that
+;; only writes the local would lose it the moment execute* sets the mode.
+;; So the stub also answers for its own chats that the runtime is live.
 (define (t--sub-spawn author)
-  (let ((old chat-attach-agent!))
+  (let ((old-attach chat-attach-agent!)
+        (old-live? chat-live-runtime?))
     (set-symbol-value! 'chat-attach-agent!
       (lambda (buf connector &optional model opts)
         (let ((slug (string-append "zz-sub:" buf)))
           (buffer-set-local! buf 'agent-slug slug)
           slug)))
+    (set-symbol-value! 'chat-live-runtime?
+      (lambda (buf)
+        (let ((slug (buffer-local buf 'agent-slug)))
+          (and (string? slug) (string-prefix? "zz-sub:" slug) #t))))
     (let ((slug (with-edit-author (and author (string-append "agent:" author))
                   (lambda () (execute* "" '())))))
-      (set-symbol-value! 'chat-attach-agent! old)
+      (set-symbol-value! 'chat-attach-agent! old-attach)
+      (set-symbol-value! 'chat-live-runtime? old-live?)
       slug)))
 
 (define (t--sub-buf slug)
