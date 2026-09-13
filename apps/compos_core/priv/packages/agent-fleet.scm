@@ -442,7 +442,7 @@
 ;; the sort and the folds of *chats* stay what you set them to
 (define *ichat-prompt-buffer* " *chats*")
 (add-display-rule! *ichat-prompt-buffer* 'shaped '(side bottom size 0.4))
-(ibuffer-view! *ichat-prompt-buffer* 'sort 'recent)
+(ibuffer-view! *ichat-prompt-buffer* 'sort 'recent 'grouping 'none)
 
 (define-command "ichat-prompt"
   "Switch to a chat from the table"

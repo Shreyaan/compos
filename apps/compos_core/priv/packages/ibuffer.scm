@@ -49,14 +49,14 @@
   'group 'buffers 'type 'choice)
 
 (defcustom 'ibuffer-default-grouping 'group
-  "What a section is: 'group, 'mode, or 'directory."
+  "What a section is: 'group, 'mode, 'directory, or 'none for one flat list."
   'group 'buffers 'type 'choice)
 
 (define *ibuffer-buffer* "*ibuffer*")
 
 ;; the sort modes and the groupings, in the order the toggles cycle
 (define *ibuffer-sorts* '(name recent size))
-(define *ibuffer-groupings* '(group mode directory))
+(define *ibuffer-groupings* '(group mode directory none))
 
 ;; the tint under a marked row: a background alone, so the row's own
 ;; faces show through
@@ -524,6 +524,10 @@
     (ibuffer-note-kinds! rows)
     (cond ((equal? grouping 'mode) (ibuffer-mode-sections buf rows))
           ((equal? grouping 'directory) (ibuffer-directory-sections buf rows))
+          ;; 'none says the table is one list: no heading, no section, the
+          ;; rows in the view's own order. The switch prompts read this way
+          ;; -- what you want is the buffer you used last, not its group.
+          ((equal? grouping 'none) (ibuffer-sort-rows buf rows))
           (else (ibuffer-group-sections
                   buf rows (and (boundp 'frame-group) (frame-group)))))))
 
@@ -980,7 +984,7 @@
 
 (define *ibuffer-prompt-buffer* " *buffers*")
 (add-display-rule! *ibuffer-prompt-buffer* 'shaped '(side bottom size 0.4))
-(ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent)
+(ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent 'grouping 'none)
 
 (define-style! 'ibuffer-semantic-list "
 :is(buffers, chat-list) > .semantic-direct.line {
