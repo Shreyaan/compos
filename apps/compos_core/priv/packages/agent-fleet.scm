@@ -204,11 +204,15 @@
       (chats-title b)))
 
 (define (chats-match-text b)
+  ;; the name filter reads the title first and the state second; a chat the
+  ;; keyword search found carries its snippet here as well, so one filter
+  ;; line keeps both the chats named like this and the chats that say it
   (string-append (chats-title b) " "
                  (or (chats-summary b) "") " "
                  (chats-model b) " "
                  (chats-state-label (chat-row-status b)) " "
-                 (or (buffer-local b 'agent-slug) "")))
+                 (or (buffer-local b 'agent-slug) "") " "
+                 (or (chat-list-hit b) "")))
 
 (ibuffer-kind! 'chat
   (list 'when? (lambda (b) (and (buffer-known? b) (chat-buffer? b)))
@@ -217,11 +221,19 @@
                  (list (agent-status-glyph s) (chats-state-face s))))
         'name (lambda (b) (list "" (chats-alert-name b)))
         'size chats-tokens
-        'label (lambda (b) (chats-state-label (chat-row-status b)))
+        ;; a chat found by a word in its text says which word, in place of
+        ;; the state: you searched for the words, not for the state
+        'label (lambda (b)
+                 (let ((hit (chat-list-hit b)))
+                   (if hit
+                       (chat-prompt-clip hit)
+                       (chats-state-label (chat-row-status b)))))
         'last (lambda (b)
                 (let ((t (chats-activity-at b)))
                   (if t (chats-age-label t) (ibuffer-last-label b))))
-        'match chats-match-text
+        ;; by name, not by value: a reload redefines chats-match-text after
+        ;; this form runs, and a captured procedure would stay the old one
+        'match (lambda (b) (chats-match-text b))
         'face (lambda (b)
                 (if (equal? (chat-row-status b) 'needs_attention) "alert" "accent"))
         'modified? (lambda (b) #f)))
@@ -452,7 +464,7 @@
         (ibuffer-pick! row close!)
         (when (buffer-known? row) (end-of-buffer!))))))
 
-(define-command "chat-list" "List every chat: agent threads and API companions"
+(define-command "chat-table" "The chat management table: steer, allow, archive, retitle"
   (lambda () (ichat-open!)))
 
 (define-command "ichat" "List every chat in the ibuffer table"
@@ -651,14 +663,14 @@
 (define-key "agent-map" "n" "agent-open")
 
 ;; C-x C-b is the buffers in a window; C-x C-c is the chats in the same table
-(define-key "ctl-x-map" "C-c" "ichat")
+(define-key "ctl-x-map" "C-c" "chat-list")
 
 (define-key "agent-map" "a" "agent-goto-attention")
 
 ;; C-x b is the buffers; C-x c is the chats: the same table, the same
 ;; keys. chat-switch-prompt, the candidate prompt, stays for the surfaces
 ;; that draw only a prompt.
-(global-set-key "C-x c" "ichat-prompt")
+(global-set-key "C-x c" "chat-list")
 
 (category! 'chat)
 (catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))
@@ -666,3 +678,260 @@
   "(chats-note-activity! BUF) — stamp the time of the last event that reached the chat BUF")
 (public! 'chats-state-label
   "(chats-state-label STATUS) — the words a *chats* row shows for a runtime status")
+
+
+;;; ------------------------------------------------------------ the chat list
+;; The chat list is an application: one state, one buffer, one group, one
+;; arrival. You open it to switch to a chat whose name you half remember,
+;; and it leaves as soon as you pick one. docs/CHAT-LIST.md is the contract.
+(category! 'chat)
+(effects! '(write display))
+
+(define *chat-list-buffer* "*chat-list*")
+(define *chat-list-group-name* "chat-list")
+(define *chat-list-groupings* '(none group state model))
+
+(defcustom 'chat-list-recent-limit 40
+  "How many chats the chat list shows at rest. A search reads every chat.")
+
+(define (chat-list-query)
+  (if (buffer-known? *chat-list-buffer*)
+      (or (buffer-local *chat-list-buffer* 'chat-list-search) (list-query *chat-list-buffer*))
+      ""))
+
+;; at rest the list is the recent chats; the moment you type, the scope is
+;; every chat, so the limit bounds the resting list and never the search
+(define (chat-list-scope)
+  (let ((all (chat-list-bufs)))
+    (if (equal? (chat-list-query) "")
+        (take-n all chat-list-recent-limit)
+        all)))
+(ibuffer-scope! 'chat-list (lambda () (chat-list-scope)))
+
+;; A keyword search reads the text of every alive chat. Alive is every chat
+;; that is not archived: an awake one answers from its buffer and a sleeping
+;; one from its log file, so the search wakes nothing. Typing narrows, so a
+;; query that extends the last one searches only what the last one found.
+(define *chat-list-hits* '())        ; (QUERY (BUF SNIPPET) ...)
+(define *chat-list-text-cache* '())  ; (BUF TEXT), lowercase, one search burst
+
+(define (chat-list-text b)
+  (let ((memo (assoc b *chat-list-text-cache*)))
+    (if memo
+        (cadr memo)
+        (let* ((raw (if (buffer-exists? b)
+                        (buffer-text b)
+                        (let ((path (ignore-errors (lambda () (chat-log-path b)))))
+                          (and (string? path)
+                               (file-exists? path)
+                               (ignore-errors (lambda () (read-file path)))))))
+               (text (string-downcase (if (string? raw) raw ""))))
+          (set! *chat-list-text-cache* (cons (list b text) *chat-list-text-cache*))
+          text))))
+
+;; the row shows why it matched, so the words around the hit stand in for
+;; the line: a transcript holds no short lines to quote
+(define (chat-list-snippet text at)
+  ;; string-index answers in bytes, so the window is in bytes as well
+  (let* ((from (max 0 (- at 40)))
+         (to (min (string-byte-length text) (+ at 80))))
+    (string-join (string-split (substring-bytes text from to) "\n") " ")))
+
+(define (chat-list-search-hits q)
+  (let* ((q (string-downcase (string-trim q)))
+         (last (if (pair? *chat-list-hits*) (car *chat-list-hits*) ""))
+         ;; a longer query can only match where the shorter one did
+         (pool (if (and (not (equal? last ""))
+                        (string-prefix? last q))
+                   (map car (cdr *chat-list-hits*))
+                   (chat-list-bufs))))
+    (set! *chat-list-hits*
+      (cons q
+            (if (< (string-length q) 3)
+                '()
+                (fold (lambda (out b)
+                        (let* ((text (chat-list-text b))
+                               (at (string-index text q)))
+                          (if at
+                              (append out (list (list b (chat-list-snippet text at))))
+                              out)))
+                      '()
+                      pool))))
+    (cdr *chat-list-hits*)))
+
+(define (chat-list-hit b)
+  (let ((e (assoc b (if (pair? *chat-list-hits*) (cdr *chat-list-hits*) '()))))
+    (and e (cadr e))))
+
+(define (chat-list-search-reset!)
+  (set! *chat-list-hits* '())
+  (set! *chat-list-text-cache* '()))
+
+;; a section is a group, a state or a model, and none is the flat list in
+;; most recently used order: the order you last used a chat is the one the
+;; half-remembered name arrives in
+(define (chat-list-rows buf)
+  (let ((grouping (ibuffer-grouping buf)))
+    (if (member grouping '(state model))
+        (let ((rows (ibuffer-source buf)))
+          (ibuffer-note-kinds! rows)
+          (ibuffer-keyed-sections buf rows
+            (if (equal? grouping 'state)
+                (lambda (b) (chats-state-label (chat-row-status b)))
+                (lambda (b) (let ((m (chats-model b)))
+                              (if (equal? m "") "no model" m))))
+            (lambda (k) "faint")
+            #f))
+        (ibuffer-rows buf))))
+
+(mode-icon! "chat-list-mode" "")
+(define-list-mode! "chat-list-mode"
+  (ibuffer-mode-opts
+    (list
+      'transient #f
+      'composml-root (lambda (buf) (list 'tag "chat-list"))
+      'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
+      'doc (string-append
+             "The chat list: one application, one state, one group. The rows "
+             "are the recent chats, most recently used first. Type to filter: "
+             "the filter reads the title first and the state second, and it "
+             "reads every chat, not only the recent ones. A word that nobody "
+             "put in a title is found in the text of every alive chat, and the "
+             "row shows the words around it. The row under the cursor shows "
+             "its chat in the preview pane. RET switches to the chat and the "
+             "application leaves; C-g leaves and changes nothing. ; cycles "
+             "what a section is: none, group, state, model. , cycles the "
+             "order inside a section.")
+      'buffer *chat-list-buffer*
+      'category 'chat
+      'title (lambda (buf) "Chats")
+      'noun "chat"
+      'rows (lambda (buf) (chat-list-rows buf))
+      ;; the picker acts on one chat, the one you pick: no marks, no flags
+      'markable? (lambda (buf e) #f)
+      'keys '((";" "chat-list-regroup") ("," "chat-list-resort")))))
+(ibuffer-view! *chat-list-buffer* 'sort 'recent 'grouping 'none)
+
+;; ---- the application
+
+(define (chat-list-group) (group-ensure-record! *chat-list-group-name*))
+
+;; one arrival: the list at two thirds, the preview at one third, the focus
+;; on the list. The application is always in its own group and never joins
+;; the group you came from.
+(define (chat-list-arrive!)
+  (let ((from (frame-group)))
+    (buffer-create *chat-list-buffer*)
+    (buffer-add-group! *chat-list-buffer* (chat-list-group))
+    (switch-to-group! (chat-list-group))
+    (delete-other-windows!)
+    (switch-to-buffer! *chat-list-buffer*)
+    (split-window! 'h 0.67)
+    (let ((preview (other-work-window-id (active-window))))
+      (buffer-set-locals! *chat-list-buffer*
+        (list 'chat-list-from-group from
+              'chat-list-preview-window preview
+              'line-numbers "off"))
+      preview)))
+
+(define (chat-list-preview-window)
+  (let ((w (buffer-local *chat-list-buffer* 'chat-list-preview-window)))
+    (and w (window-exists? w) w)))
+
+;; looking costs nothing: the preview shows the transcript of a sleeping
+;; chat and never starts its runtime. Only the chat you pick wakes.
+(define (chat-list-preview!)
+  (let ((b (list-current *chat-list-buffer*))
+        (win (chat-list-preview-window)))
+    (when (and win (string? b) (buffer-known? b)
+               (not (equal? b *chat-list-buffer*)))
+      (window-preview-buffer! b win))))
+
+;; the application leaves the way it arrived: with one move. RET lands you
+;; in the chat, in the chat's own group, because switching to a chat is
+;; switching to where that chat lives. C-g puts the frame back.
+(define (chat-list-leave! keep)
+  (chat-list-search-reset!)
+  (when (buffer-known? *chat-list-buffer*)
+    (buffer-set-local! *chat-list-buffer* 'chat-list-search #f)
+    (list-set-query! *chat-list-buffer* ""))
+  (if (and (string? keep) (buffer-known? keep))
+      (begin (switch-to-buffer-in-group! keep) (end-of-buffer!))
+      (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
+        (when from (switch-to-group! from)))))
+
+;; one filter line over one list: what you type reads the titles, and the
+;; same words read the text of every alive chat
+(define (chat-list-filter-line! &optional standing)
+  (let* ((narrow (lambda (q)
+                   (chat-list-search-hits q)
+                   (list-set-query! *chat-list-buffer* q)
+                   ;; the scope widens the moment you type, so the rows are
+                   ;; built again and not only filtered
+                   (ibuffer-refresh! *chat-list-buffer*)
+                   (list-goto-first-entry *chat-list-buffer*)
+                   (chat-list-preview!)))
+         (done (lambda () (set! *mb-list-buffer* #f) (set! *mb-list-prompt* #f))))
+    (when (and (string? standing) (not (equal? standing "")))
+      (buffer-set-local! *chat-list-buffer* 'chat-list-search standing)
+      (narrow standing))
+    (set! *mb-list-buffer* *chat-list-buffer*)
+    (set! *mb-list-prompt* "Chat: ")
+    (minibuffer-read* "Chat: " '()
+      (list (list 'change narrow)
+            (list 'confirm
+                  (lambda (q)
+                    (done)
+                    (unless (equal? q (list-query *chat-list-buffer*)) (narrow q))
+                    (let ((row (list-current *chat-list-buffer*)))
+                      (if (ibuffer-heading? row)
+                          (ibuffer-toggle-fold! (ibuffer-heading-key row) *chat-list-buffer*)
+                          (chat-list-leave! row)))))
+            (list 'cancel (lambda () (done) (chat-list-leave! #f)))
+            (list 'legend *ibuffer-prompt-legend*)
+            (list 'style "filter")))))
+
+(define (chat-list-open! &optional standing)
+  (let ((preview (chat-list-arrive!)))
+    (buffer-set-local! *chat-list-buffer* 'ibuffer-scope 'chat-list)
+    (buffer-set-local! *chat-list-buffer* 'ibuffer-prompt-home-window preview)
+    (list-clear-query! *chat-list-buffer*)
+    (with-current-buffer *chat-list-buffer*
+      (lambda () (with-list-mode-skip-render (lambda () (set-mode! "chat-list-mode")))))
+    (ibuffer-refresh! *chat-list-buffer*)
+    (list-goto-first-entry *chat-list-buffer*)
+    (chat-list-preview!)
+    (chat-list-filter-line! standing)))
+
+(define-command "chat-list"
+  "Switch to a chat, by its name or by a word somebody said in it"
+  (lambda () (chat-list-open!)))
+
+;; the name is gone but the words are not: you remember what the chat said
+(define-command "chat-where"
+  "Switch to the chat where this was said"
+  (lambda ()
+    (minibuffer-read "Chat where: " '()
+      (lambda (words) (chat-list-open! (string-trim words))))))
+
+(define-command "chat-list-regroup"
+  "Cycle what a section of the chat list is: none, group, state, model"
+  (lambda ()
+    (let ((next (ibuffer-cycle-after (ibuffer-grouping *chat-list-buffer*)
+                                     *chat-list-groupings*)))
+      (ibuffer-set-grouping! next *chat-list-buffer*)
+      (message (string-append "grouped by " (symbol->string next))))))
+
+(define-command "chat-list-resort"
+  "Cycle the order inside a section: recent, name, size"
+  (lambda ()
+    (let ((next (ibuffer-cycle-after (ibuffer-sort *chat-list-buffer*)
+                                     '(recent name size))))
+      (ibuffer-set-sort! next *chat-list-buffer*)
+      (message (string-append "sorted by " (symbol->string next))))))
+
+(category! 'chat)
+(catalog-meta! 'command "chat-list" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-where" 'domain 'chat 'effects '(write display))
+(public! 'chat-list-open!
+  "(chat-list-open! [SEARCH]) — open the chat list application, with SEARCH standing")

@@ -486,9 +486,11 @@
        (if context?
            (buffer-context-switch! name)
            (begin
-             ;; the preview already put it in the home window — go there
-             (let ((w (window-showing name)))
-               (if w (select-window! w) (switch-to-buffer! name)))
+             ;; a switch of buffer is a switch of group: you go to where
+             ;; the buffer lives. The preview put it in the home window,
+             ;; and switch-to-buffer-in-group! keeps that window when the
+             ;; group does not change.
+             (switch-to-buffer-in-group! name)
              (group-current-recalculate!)
              (windows-shown-catchup!))))
       ((*switch-pick* name)
@@ -942,8 +944,9 @@
                            (when win (select-window! win)))
                          (group-current-recalculate!)
                          (windows-shown-catchup!))
-                       ;; A pick from outside the group floats: the window
-                       ;; takes back what it showed, and the switch floats it.
+                       ;; A pick from outside the group takes you there:
+                       ;; the window takes back what it showed, and the
+                       ;; switch enters the buffer's own group.
                        (switch-act! e view context?
                          (lambda (keep)
                            (when (and keep (display-foreign? keep))

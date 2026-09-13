@@ -32,8 +32,8 @@ Two panes:
 - The filter searches every chat, not only the recent ones. The recent
   limit bounds the resting list, not the search.
 - The row under the cursor shows its chat in the preview pane.
-- A sleeping chat wakes for the preview. Every chat that you do not pick
-  goes back to sleep.
+- Looking costs nothing. The preview shows the text of a sleeping chat
+  and never starts its runtime. Only the chat that you pick wakes.
 - RET switches to the chat. The application gives the focus back and
   leaves.
 - C-g leaves and changes nothing.
@@ -61,6 +61,17 @@ used order, and it is the default.
 - model
 
 The grouping is part of the one state.
+
+## A switch is a switch of group
+
+A buffer switch changes the group. You go to where the buffer lives, and
+the buffer does not come to where you are. This is the default for `C-x
+b`, `C-x c` and their control counterparts.
+
+## Switch to the chat where
+
+`M-x chat-where` reads the words first and opens the list already
+narrowed to the chats that say them.
 
 ## Settings
 
