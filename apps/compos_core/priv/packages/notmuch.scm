@@ -79,6 +79,18 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define *notmuch-search-buffer* "*notmuch*")
 
+;; The mail views are singletons: one *mailboxes*, one *notmuch*, one
+;; *mail* for the whole editor. Opening mail inside a group therefore JOINS
+;; that group instead of moving house — membership is a list of ids, so one
+;; view belongs to every group that opened it. Without this the view stays a
+;; member of the first group only, is foreign to every other, and coming
+;; back to that group sanitizes its panes away.
+(define (nm--join-group! buf)
+  (when (and (buffer-exists? buf) (boundp 'frame-group))
+    (let ((id (frame-group)))
+      (when (and id (not (buffer-in-group? buf id)))
+        (buffer-add-group! buf id)))))
+
 ;; A search has one base and a stack of added terms. Commands change only
 ;; these two locals. The effective query is derived, so no command can leave
 ;; the rows and the filter stack describing different searches.
@@ -506,6 +518,7 @@ when a message has no text/plain part." 'group 'notmuch)
          (cached? (and (buffer-exists? buf)
                        (pair? (buffer-local buf 'list-entries)))))
     (unless (buffer-exists? buf) (buffer-create buf))
+    (nm--join-group! buf)
     (nm--query-reset! buf query)
     (switch-to-buffer! buf)
     (set-mode! "notmuch-mode")
@@ -708,6 +721,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let ((buf *notmuch-hello-buffer*))
       (unless (buffer-exists? buf) (buffer-create buf))
+      (nm--join-group! buf)
       (switch-to-buffer! buf)
       (set-mode! "notmuch-hello-mode")
       (list-goto-first-entry buf))))
