@@ -284,6 +284,8 @@
                                  #f (and path? clean))))
               (set! *group-records* (append *group-records* (list record)))
               (when path? (group-assign-path-name! id clean))
+              ;; the frame that founds a group is the workspace that keeps it
+              (group-frame-own! id (selected-frame))
               (desktop-dirty!)
               id)))))
 
@@ -910,6 +912,63 @@
     id))
 
 
+;; --- Workspaces: a group belongs to one frame -----------------------------
+;; A frame is a workspace. The group a frame founds is that frame's own, so
+;; the rail, the tabs and the switcher of another frame stay clean of work
+;; you did somewhere else. A group whose frame is gone belongs to no one:
+;; the next frame to enter it adopts it, so a closed window strands nothing.
+
+(define (group-frame-owner g)
+  (group-setting g 'frame))
+
+(define (group-frame-alive? frame)
+  (and frame (member frame (frame-list)) #t))
+
+(define (group-frame-own! g frame)
+  (let ((id (group-resolve-id g)))
+    (when (and id frame) (group-setting-set! id 'frame frame))
+    id))
+
+(define (group-unowned? g)
+  ;; a group made before workspaces, or one whose frame has gone
+  (not (group-frame-alive? (group-frame-owner g))))
+
+(define (group-of-frame? g frame)
+  (let ((owner (group-frame-owner g)))
+    (or (equal? owner frame) (not (group-frame-alive? owner)))))
+
+(define (group-here? g)
+  (group-of-frame? g (selected-frame)))
+
+(define (group-elsewhere-frame g)
+  ;; the live frame that owns G, when that frame is not this one
+  (let ((owner (group-frame-owner g)))
+    (and (group-frame-alive? owner)
+         (not (equal? owner (selected-frame)))
+         owner)))
+
+(define (group-adopt-here! g)
+  ;; entering an unowned group makes it this workspace's own
+  (let ((id (group-resolve-id g)))
+    (when (and id (group-unowned? id)) (group-frame-own! id (selected-frame)))
+    id))
+
+(define (group-frame-raise! frame)
+  ;; a frame that lives in a browser tab comes to the front by its tab. No
+  ;; other client can be raised from here yet, so say so and move nothing.
+  (if (not (browser-connected?))
+      (begin (message "That group is open in another window") #f)
+      (begin
+        (browser-frames
+          (lambda (bound)
+            (let loop ((rest bound))
+              (cond ((null? rest)
+                     (message "That group is open in another window"))
+                    ((equal? (chrome--get (car rest) 'frame) frame)
+                     (tab-activate (chrome--get (car rest) 'tab)))
+                    (else (loop (cdr rest)))))))
+        #t)))
+
 (define (group-layout g)
   (let* ((record (and (group-resolve-id g)
                       (group-record-by-id (group-resolve-id g))))
@@ -1214,6 +1273,8 @@
     (if (not id)
         (message "No such group")
         (begin
+          ;; a group no live frame owns joins the workspace that enters it
+          (group-adopt-here! id)
           (winner-save!)
           (set! *winner-inhibit* #t)
           (set! *group-current-inhibit* #t)
@@ -1604,6 +1665,10 @@
 ;; Group navigation uses the same recency stream as buffer navigation.
 ;; Groups without a history entry trail in record order.
 (define (group-ids-mru)
+  ;; this workspace only: the frame's own groups, and the unowned ones
+  (filter group-here? (group-ids-mru-all)))
+
+(define (group-ids-mru-all)
   (let loop ((rows (mru-list)) (found '()))
     (if (null? rows)
         (let ((recent (reverse found)))
@@ -1861,6 +1926,11 @@
 ;; the rail for one group: its buffers as ibuffer draws them, small. The
 ;; third field is the buffer itself, which the frame carries untouched and
 ;; hands back on RET.
+(define (group-switch-away-candidate row)
+  ;; the same card, with the count replaced by where the group is: it lives
+  ;; in another workspace, so picking it goes there instead of switching here
+  (cons (car row) (cons "in another window" (cdr (cdr row)))))
+
 (define (group-switch-rail-rows index g)
   (map (lambda (b) (list (buffer-modeline-name b) (ibuffer-row-label b) b))
        (group-members-in index g)))
@@ -1878,6 +1948,9 @@
   ;; them: moving the highlight is then a lookup and no scan.
   (let* ((current (frame-group))
          (all (group-ids-mru))
+         ;; a group another live frame owns is still reachable: it comes
+         ;; last, marked, and picking it raises the frame that holds it
+         (away (filter group-elsewhere-frame (group-ids-mru-all)))
          ;; every group, the one you stand in included: you came to see
          ;; them all. It only never leads — it goes last in its section,
          ;; so the empty-input default is still a switch
@@ -1901,12 +1974,16 @@
                (set! seen (cons name seen))
                (set! rows (cons (list label g (group-switch-rail-rows index g)) rows))
                (group-switch-candidate-in index g label))))
-         (candidates
+         (here-candidates
            (if (group-visible-homogeneous? current)
                (append (map candidate recent) (list action-row))
                (let* ((first (map candidate mine-recent))
                       (rest (map candidate others)))
-                 (append first (list action-row) rest)))))
+                 (append first (list action-row) rest))))
+         (candidates
+           (append here-candidates
+                   (map (lambda (g) (group-switch-away-candidate (candidate g)))
+                        away))))
     (cons candidates (reverse rows))))
 
 (define (switch-to-group-candidates)
@@ -2095,8 +2172,14 @@
 (define-command "group-switch" "Switch to a group and restore its layout"
   (lambda ()
     (if (in-groups-board?)
-        (let ((g (groups--current)))
-          (when g (switch-to-group! g)))
+        ;; the board lists every group, this frame's and the rest. A row
+        ;; that belongs to another frame goes to that frame: one group
+        ;; stands in one workspace, never two at once.
+        (let* ((g (groups--current))
+               (away (and g (group-elsewhere-frame g))))
+          (cond ((not g) #f)
+                (away (group-frame-raise! away))
+                (else (switch-to-group! g))))
         (let* ((action (group-switch-new-action))
                (prompt-rows (group-switch-prompt-rows))
                (candidates (car prompt-rows))
@@ -2183,7 +2266,11 @@
                     ;; windows back before it looks: a preview is not the
                     ;; arrangement you were working in
                     (show-here!)
-                    (cond (id (switch-to-group! id))
+                    (cond ((and id (group-elsewhere-frame id))
+                           ;; the group is another frame's: go to that frame
+                           ;; rather than pull its windows into this one
+                           (group-frame-raise! (group-elsewhere-frame id)))
+                          (id (switch-to-group! id))
                           ((equal? name (car action))
                            (group-switch-run-new-action! action))
                           (else (message "No such group"))))
@@ -3981,7 +4068,13 @@
 (public! 'group-pinned "(group-pinned) -> the pinned frame group ID, or #f")
 (public! 'group-current-recalculate!
   "(group-current-recalculate!) -> derive the frame's current group from its visible buffers")
-(public! 'group-ids-mru "(group-ids-mru) -> all group IDs in most-recently-used order")
+(public! 'group-ids-mru "(group-ids-mru) -> this frame's group IDs in most-recently-used order")
+(public! 'group-ids-mru-all "(group-ids-mru-all) -> every group ID, every frame, most recent first")
+(public! 'group-frame-owner "(group-frame-owner G) -> the frame that keeps G, or #f")
+(public! 'group-frame-own! "(group-frame-own! G FRAME) — make G belong to FRAME")
+(public! 'group-here? "(group-here? G) -> #t when G belongs to this frame or to none")
+(public! 'group-elsewhere-frame "(group-elsewhere-frame G) -> the other live frame that keeps G, or #f")
+(public! 'group-adopt-here! "(group-adopt-here! G) — an unowned G joins this frame")
 (public! 'buffer-family
   "(buffer-family BUFFER) -> the group-relative work family, including its shared scratch companion")
 (public! 'buffer-add-group-as! "(buffer-add-group-as! BUFFER GROUP ROLE) — join GROUP with a semantic role")

@@ -26,6 +26,14 @@ defmodule Compos.Ui.FrameTabsTest do
 
   defp tab(id), do: ~s{.echo-bar .ml-tab[phx-value-id="#{id}"]}
 
+  # The rail is per frame: a group belongs to the frame that founds it, and
+  # setup founds these through Session.eval. Mount the view on that frame,
+  # the way a browser tab reattaches to the frame it remembers.
+  defp mount!(conn) do
+    frame = eval!("(selected-frame)") |> Jason.decode!()
+    conn |> put_connect_params(%{"frame" => frame}) |> live("/")
+  end
+
   defp rail do
     assert {:ok, [rows, more]} = Session.call_named("frame-tabs", [])
     {Enum.map(rows, fn [id, _label, _current | _segs] -> id end), more}
@@ -89,7 +97,7 @@ defmodule Compos.Ui.FrameTabsTest do
   test "the rail renders the groups, and a click stands in one", %{conn: conn, ids: ids} do
     [first | _] = ids
 
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, _html} = mount!(conn)
 
     assert has_element?(view, ".echo-bar .ml-tabs")
     for id <- Enum.take(ids, 3), do: assert(has_element?(view, tab(id)))
@@ -106,7 +114,7 @@ defmodule Compos.Ui.FrameTabsTest do
   test "a prompt does not take the rail away", %{conn: conn, ids: ids} do
     [first | _] = ids
 
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, _html} = mount!(conn)
     assert has_element?(view, tab(first))
 
     Editor.minibuffer_activate("Test: ", [], fn _ -> :ok end)
@@ -120,7 +128,7 @@ defmodule Compos.Ui.FrameTabsTest do
   test "the group the cut left out comes back to the rail once entered", %{conn: conn, ids: ids} do
     last = List.last(ids)
 
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, _html} = mount!(conn)
     refute has_element?(view, tab(last))
 
     eval!(~s{(switch-to-group! "#{last}")})

@@ -2018,3 +2018,58 @@
       (set-frame-local! 'pinned-group #f)
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
+
+;; --- workspaces: a group belongs to one frame ------------------------------
+
+(deftest 'a-group-belongs-to-the-frame-that-founds-it
+  "the frame that makes a group keeps it, so the group is that workspace's own"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((id (group-record-create! "zz-sw-own")))
+      (check-equal! (group-frame-owner id) (selected-frame) "the founding frame owns it")
+      (check-true! (group-here? id) "so it is a group of this workspace")
+      (check-false! (group-elsewhere-frame id) "and it is nowhere else")
+      (check-true! (member id (group-ids-mru)) "this frame lists it"))
+    (t--sw-done!)))
+
+(deftest 'another-frames-group-stays-out-of-this-frames-lists
+  "a workspace shows its own groups only, and reaches the rest through one marked row"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((id (group-record-create! "zz-sw-away"))
+           (home (selected-frame))
+           ;; a new frame becomes the selected one: come back to this
+           ;; workspace before asking what it shows
+           (other (make-frame!))
+           (back (select-frame! home)))
+      (check-equal! (selected-frame) home "the test is back in its own frame")
+      (group-frame-own! id other)
+      (check-equal! (group-elsewhere-frame id) other "the other frame keeps it")
+      (check-false! (group-here? id) "it is not a group of this workspace")
+      (check-false! (member id (group-ids-mru)) "so this frame does not list it")
+      (check-true! (member id (group-ids-mru-all)) "the whole-editor list still has it")
+      (check-false! (member id (active-groups)) "and it is not active here")
+      (let* ((rows (group-switch-prompt-rows))
+             (away (filter (lambda (c) (equal? (cadr c) "in another window"))
+                           (car rows))))
+        (check-equal! (map car away) (list "zz-sw-away")
+                      "the switcher offers it once, marked, under its own name"))
+      (delete-frame! other)
+      (check-true! (group-here? id) "a frame that goes leaves the group free"))
+    (t--sw-done!)))
+
+(deftest 'a-group-no-frame-owns-is-adopted-by-the-frame-that-enters-it
+  "nothing is stranded by a closed window: the next workspace to enter takes it"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((id (group-record-create! "zz-sw-orphan"))
+           (home (selected-frame))
+           (gone (make-frame!))
+           (back (select-frame! home)))
+      (group-frame-own! id gone)
+      (delete-frame! gone)
+      (check-true! (group-unowned? id) "the group belongs to no live frame")
+      (switch-to-group! id)
+      (check-equal! (group-frame-owner id) (selected-frame) "entering it adopts it")
+      (check-true! (member id (group-ids-mru)) "and this frame lists it now"))
+    (t--sw-done!)))
