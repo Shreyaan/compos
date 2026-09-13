@@ -73,7 +73,11 @@
 ;; The row verbs, by the command each key runs. NOT wrapped in
 ;; with-current-buffer: that restores the buffer when the thunk exits, and
 ;; half of these commands are meant to leave you somewhere else.
-(define (t--nm-run! cmd) (run-command cmd))
+;;
+;; A keystroke runs the command and then the post-command pass, which is
+;; where mail policy decides what the pane shows. Scheme's own run-command
+;; is only half of that, so this seam supplies the other half.
+(define (t--nm-run! cmd) (run-command cmd) (post-command!))
 
 ;;; --- the search listing --------------------------------------------------------
 
