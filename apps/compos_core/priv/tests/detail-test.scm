@@ -31,6 +31,7 @@
       (set! split-height-threshold h)
       (set! split-width-threshold w)
       (set! *detail-windows* '())
+      (layout-target-set! #f)
       (switch-to-buffer! "*scratch*")
       (run-command "delete-other-windows")
       out)))
@@ -119,3 +120,43 @@
               (check-true! (and second (not (equal? second (active-window))))
                            "a live window that is not the list's")
               (check-equal! (window-buffer second) "*zz-detail-b*" "showing the row"))))))))
+
+(deftest 'keeping-a-detail-frees-the-name-for-the-next-row
+  "M-RET on the detail: it takes a name of its own, so the next row is a new buffer"
+  (lambda ()
+    (t--dt-with
+      (lambda ()
+        (let* ((wins (t--dt-frame!))
+               (list-win (car wins))
+               (win (display-buffer-detail! "*zz-detail-a*" "*zz-detail-list*")))
+          (select-window! win)
+          (let ((kept (detail-keep!)))
+            (check-equal! kept "*zz-detail-a*<2>" "renamed out of the way")
+            (check-false! (buffer-known? "*zz-detail-a*") "the name is free for the next row")
+            (check-equal! (detail-owner kept) "*zz-detail-list*" "it still knows its list")
+            (check-false! (buffer-parent kept) "and the list's q leaves it alone")
+            (select-window! list-win)
+            (buffer-create "*zz-detail-a*")
+            (let ((again (display-buffer-detail! "*zz-detail-a*" "*zz-detail-list*")))
+              (check-equal! again win "the fresh row takes the same window")
+              (check-equal! (window-buffer win) "*zz-detail-a*" "showing the new buffer")
+              (select-window! win)
+              (check-true! (member kept (detail-ring)) "and the kept one is still in the walk"))))))))
+
+(deftest 'a-target-layout-still-gives-the-detail-a-window
+  "one window, a target that never splits, a buffer no layout will hold: it lands anyway"
+  (lambda ()
+    (t--dt-with
+      (lambda ()
+        (buffer-create "*zz-detail-list*")
+        (buffer-create "*zz-detail-a*")
+        (buffer-set-local! "*zz-detail-a*" 'special #t)
+        (switch-to-buffer-here! "*zz-detail-list*")
+        (run-command "delete-other-windows")
+        (layout-target-set! 'main-right)
+        (check-false! (fill-candidate? "*zz-detail-a*") "no layout will hold it")
+        (let ((me (active-window))
+              (win (display-buffer-detail! "*zz-detail-a*" "*zz-detail-list*")))
+          (check-true! (and win (not (equal? win me))) "a window of its own")
+          (check-equal! (window-buffer win) "*zz-detail-a*" "showing the detail")
+          (check-equal! (active-window) me "point stays in the list"))))))

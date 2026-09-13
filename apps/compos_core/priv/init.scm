@@ -23,6 +23,9 @@
 (load-bundled-package "tools.scm")
 (load-bundled-package "recipes.scm")
 (load-bundled-package "components.scm")
+; the detail window: an app registers how it names a kept detail at load,
+; so this comes before every app that opens rows into one
+(load-bundled-package "detail.scm")
 (load-bundled-package "preview.scm")
 (load-bundled-package "file-view.scm")
 (load-bundled-package "spreadsheet.scm")
@@ -83,7 +86,6 @@
 (load-bundled-package "recording.scm")
 (load-bundled-package "scheme-ide.scm")
 (load-bundled-package "peek.scm")
-(load-bundled-package "detail.scm")
 (load-bundled-package "scratch.scm")
 (load-bundled-package "sentry.scm")
 (load-bundled-package "setup.scm")

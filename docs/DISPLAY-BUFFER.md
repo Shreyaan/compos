@@ -165,8 +165,26 @@ list takes the detail with it, and the details of one list are siblings:
 `C-\`` in the detail window walks them, most recent first, the way it walks
 chats in a chat pane.
 
-A list that rewrites ONE detail buffer per row (notmuch's `*mail*`, the
-telemetry event) needs none of this — `reuse-window` already finds the name.
+When the chain has nowhere to put the first row — one window, or a target
+layout that refuses this buffer a slot and never splits on its own — the
+detail splits a window rather than go without one. That is what a special,
+foreign buffer like `*mail*` hits under a target.
+
+## Keeping one
+
+A list that rewrites ONE detail buffer per row — notmuch's `*mail*` — keeps a
+row with `M-RET` (`detail-keep`). The buffer takes a name of its own
+(`*mail: Your Sunday afternoon trip with Uber*`), and that frees the name the
+app writes to, so the next row renders into a fresh buffer with nothing to
+overwrite. Renaming is the whole mechanism: no app needs a flag for it.
+
+A kept detail stops being the list's child, so the list's `q` leaves it alone,
+and it stays in the walk, so `C-\`` still reaches it. It does not get a pane
+of its own — that is how a layout starts growing a pane per row again.
+
+`(detail-name! MODE FN)` is how a mode says what to call what it keeps; FN
+takes the buffer and answers a name. Without a rule the buffer's own name
+takes a number, as `rename-uniquely` does.
 
 Tests: `priv/tests/detail-test.scm`, run by `test/compos/detail_test.exs`.
 

@@ -829,7 +829,7 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; preview would then evict the chat and leave the frame a window short.
 ;; Only when no pane shows the mail view does this fall back to making
 ;; one, and it always puts focus back where it started.
-(define (nm--show-pane! buf)
+(define (nm--show-pane! buf &optional index)
   (cond
     ;; the layout engine is mid-build: it places every declared pane
     ;; itself, so the view is rendered and no window is touched. A split
@@ -837,23 +837,30 @@ when a message has no text/plain part." 'group 'notmuch)
     ;; neither arrangement, and a switch here takes the index's window.
     ((layout-arranging?) #f)
     (else
-      (let ((pane (or (scene-window 'show) (window-showing buf))))
-        (cond
-          ;; a scene names its mail pane, and a window already showing the
-          ;; mail view IS the pane: fill it, select nothing
-          (pane (window-set-buffer! pane buf) pane)
-          (else
-            ;; A one-window frame has no other window, and a frame target
-            ;; never splits on its own (display--keep-shape drops
-            ;; pop-up-window), so make the pane here. Without it the
-            ;; display chain runs out of actions and its last resort,
-            ;; same-window, hands the mail view the index's own window.
-            (when (null? (cdr (window-list))) (split-window! 'h 0.45))
-            ;; the chain places it in a window that is not this one and
-            ;; selects nothing, so focus and point stay where the user
-            ;; left them
-            (display-buffer-other-window! buf)
-            (window-showing buf)))))))
+      (let ((scene (scene-window 'show)))
+        (if scene
+            ;; a scene names its mail pane: fill it, select nothing
+            (begin (window-set-buffer! scene buf) scene)
+            ;; otherwise the index's one detail window (packages/detail.scm):
+            ;; the mail view lands beside the list and every later thread
+            ;; retakes that window, so the frame never grows a pane per
+            ;; thread. It selects nothing, so focus and point stay put, and
+            ;; it makes the window when a target layout would not.
+            (display-buffer-detail! buf (or index (current-buffer))))))))
+
+;; One mail view holds one thread at a time. M-RET keeps the one on screen:
+;; it takes the subject for a name, which frees *mail* for the next thread.
+(detail-name!
+  "notmuch-show-mode"
+  (lambda (buf)
+    (let ((subject (or (buffer-local buf 'notmuch-subject) "")))
+      (if (equal? subject "")
+          buf
+          (string-append "*mail: "
+            (if (> (string-length subject) 60)
+                (string-append (substring subject 0 60) "...")
+                subject)
+            "*")))))
 
 ;; #t once a thread has been shown for the live index. A pane that was
 ;; shown and is gone was dismissed, and a dismissal stays dismissed.
@@ -866,7 +873,7 @@ when a message has no text/plain part." 'group 'notmuch)
              (mail (nm--open-thread! (nm--th-id th) (nm--th-subject th) 'defer-read)))
         (window-set-buffer! origin buf)
         (select-window! origin)
-        (nm--show-pane! mail)
+        (nm--show-pane! mail buf)
         (set! *notmuch-pane-shown* #t))
       ;; Keep the list focused before a database write can fail.
       (nm--run (string-append "tag -unread -- thread:" (nm--th-id th)))

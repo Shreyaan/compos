@@ -86,11 +86,12 @@
 ;; the list owns what it opened, and what it opened knows the key that
 ;; walks its siblings
 (define (detail-adopt! owner name)
-  (when (and (boundp 'buffer-child!)
-             (buffer-known? owner) (buffer-known? name)
-             (not (equal? owner name))
-             (not (equal? (detail-owner name) owner)))
-    (buffer-child! owner name))
+  (when (and (buffer-known? owner) (buffer-known? name) (not (equal? owner name)))
+    (buffer-set-local! name 'detail-of owner)
+    (when (and (boundp 'buffer-child!)
+               (not (buffer-local name 'detail-kept))
+               (not (equal? (and (boundp 'buffer-parent) (buffer-parent name)) owner)))
+      (buffer-child! owner name)))
   (unless (minor-mode-on? name "detail-mode")
     (enable-minor-mode! name "detail-mode"))
   name)
@@ -100,17 +101,83 @@
 ;; the list, and defaults to the buffer that is asking.
 (define (display-buffer-detail! name &optional owner)
   (let* ((o (or owner (window-buffer (active-window))))
-         (shown (window-showing-other name (active-window)))
+         (me (active-window))
+         ;; already where you stand, or already in another window: a display
+         ;; never moves a buffer that is on screen
+         (shown (if (equal? (window-buffer me) name) me (window-showing-other name me)))
          (kept (and (not shown) (detail-window o)))
          (win (cond
                 (shown shown)
                 (kept (group-layout-save-before-cover! name)
                       (window-display! (lambda () (display-buffer-in-window! kept name))))
-                (else (display-buffer name '(category detail inhibit-same-window #t))))))
+                (else
+                  (or (display-buffer name '(category detail inhibit-same-window #t))
+                      ;; nowhere to go: one window, or a target layout that
+                      ;; refuses this buffer a slot and never splits on its
+                      ;; own. A detail still needs a window beside the list.
+                      (begin
+                        (split-window! 'h 0.5)
+                        (display-buffer name '(category detail inhibit-same-window #t))))))))
     (when win
       (detail-window-note! o win)
       (detail-adopt! o name))
     win))
+
+;;; --- keeping one ----------------------------------------------------------------
+;;; A list that rewrites ONE detail buffer per row can still keep a row. The
+;;; kept buffer takes a name of its own, and that frees the name the app
+;;; writes to, so the next row renders into a fresh buffer with nothing to
+;;; overwrite. No app needs a flag for it: renaming is the whole mechanism.
+;;;
+;;; A kept detail stops being the list's child, so the list's q leaves it
+;;; alone, and it stays in the walk, so C-` still reaches it.
+
+(define *detail-names* '())   ;; ((MODE FN) ...)
+
+;; MODE says what to call a detail it keeps; FN takes the buffer and answers
+;; a name. Without a rule the buffer's own name takes a number.
+(define (detail-name! mode fn)
+  (set! *detail-names*
+        (cons (list mode fn)
+              (filter (lambda (e) (not (equal? (car e) mode))) *detail-names*)))
+  mode)
+
+(define (detail--free-name name)
+  (if (not (buffer-known? name))
+      name
+      (let loop ((n 2))
+        (let ((try (string-append name "<" (number->string n) ">")))
+          (if (buffer-known? try) (loop (+ n 1)) try)))))
+
+(define (detail-kept-name buf)
+  (let* ((mode (buffer-local buf 'mode-name))
+         (hit (assoc mode *detail-names*))
+         (named (and hit ((cadr hit) buf))))
+    (detail--free-name
+      (if (and (string? named) (not (equal? named ""))) named buf))))
+
+;; keep the detail in this window: it takes its own name, and the next row
+;; opens a new one. It is nobody's child from here, and the walk keeps it.
+(define (detail-keep!)
+  (let* ((buf (current-buffer))
+         (owner (detail-owner buf)))
+    (cond
+      ((not owner) (message "This buffer is not a list's detail") #f)
+      ((buffer-local buf 'detail-kept) (message "This detail is already kept") #f)
+      (else
+        (let ((new (rename-buffer! buf (detail-kept-name buf))))
+          (cond
+            ((not new) (message "That name is taken") #f)
+            (else
+              (buffer-set-local! new 'detail-of owner)
+              (buffer-set-local! new 'detail-kept #t)
+              (when (boundp 'buffer-unchild!) (buffer-unchild! new))
+              (message (string-append "Kept as " new))
+              new)))))))
+
+(define-command "detail-keep"
+  "Keep this detail: it takes a name of its own, and the next row opens a new one"
+  (lambda () (detail-keep!)))
 
 ;;; --- the walk -------------------------------------------------------------------
 
@@ -146,9 +213,12 @@
 ;; the key is the detail's own, so it shadows the global popup toggle only
 ;; while you stand in a detail, the way chat-mode shadows it in a chat
 (register-minor-mode! "detail-mode" (lambda (buf) #t) (lambda (buf) #t))
-(minor-mode-keys! "detail-mode" '(("C-`" "detail-next") ("C-M-`" "detail-previous")))
+(minor-mode-keys! "detail-mode"
+  '(("C-`" "detail-next") ("C-M-`" "detail-previous") ("M-RET" "detail-keep")))
 
 (public! 'display-buffer-detail!
   "(display-buffer-detail! NAME [OWNER]) — show NAME in the one window the list OWNER opens its rows into, keep that window for the next row, and select nothing")
+(public! 'detail-name!
+  "(detail-name! MODE FN) — MODE says what to call a detail it keeps; FN takes the buffer and answers a name")
 (public! 'detail-window-forget!
   "(detail-window-forget! OWNER) — drop the window OWNER opens its rows into; the next row picks one again")
