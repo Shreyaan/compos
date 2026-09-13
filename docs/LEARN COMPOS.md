@@ -7,6 +7,7 @@
 - [Your first five minutes](#your-first-five-minutes)
 - [Commands and M-x](#commands-and-m-x)
 - [Buffers, files, and windows](#buffers-files-and-windows)
+- [Groups](#groups)
 - [Discovering what you can do](#discovering-what-you-can-do)
 - [Working with the companion](#working-with-the-companion)
 - [Configuration](#configuration)
@@ -74,6 +75,48 @@ One buffer can appear in more than one window, and some buffers do not belong to
 
 Closing a window does not delete its buffer or file.
 
+## Groups
+
+A **group** is a set of buffers with a name and a remembered layout. One group is one task: the files, the chat, and the arrangement you left them in.
+
+Groups work like the desktops of a tiling window manager. You switch to a group, the screen shows what you left there, and you switch back.
+
+Three rules hold the whole model.
+
+1. **Creation joins.** A buffer you make while you stand in a group joins that group. Opening a new file, jumping to a definition, starting a chat, an agent opening a file: they all join.
+2. **Display does not join.** Showing a buffer that already exists changes no membership.
+3. **You stand where your windows stand.** The editor reads your group from the buffers your windows show. Nothing is stored, so nothing goes stale.
+
+A group is a convenience, not a security boundary. When a membership is wrong, one command fixes it.
+
+### Your first group
+
+You do not start in a group, and that is fine. Open files and work. When the work becomes a task, run `M-x group-new` and give it a name. The files you open from then on belong to it.
+
+You can also start from what is already on screen: mark the buffers you want, then run `group-new`. The marked buffers become the first members.
+
+### Working inside a group
+
+- `C-x b` lists this group's buffers first, then the other open files of the same project, then everything else.
+- `RET` shows a buffer and changes no membership. `C-RET` shows it and adds it to this group.
+- `C-x g g` switches groups. Moving the highlight previews the whole arrangement you would land in.
+- `C-x g C-g` goes back to the group you just left.
+- `C-c g` adds the current buffer to a group.
+- `C-x g l` lists every group.
+
+### A buffer from somewhere else
+
+When you show a buffer that is not a member, it does not take a pane. It floats in a popup over your windows, and your arrangement stays as it was. Press `` C-M-` `` to keep it: the buffer joins the group, and the popup settles into the layout. Press `q` to let it go.
+
+### Cleaning up
+
+- `M-x remove-group-from-buffer` takes this buffer out of a group. The buffer stays open.
+- `M-x group-dissolve` drops the grouping and keeps every buffer.
+- `M-x group-kill` also kills the buffers that belong to this group alone.
+- `M-x group-revive` brings back a group you killed.
+
+Every group has its own scratch buffer, named `*scratch: NAME*`. It is a note page for that task, and its content survives a restart with the group.
+
 ## Discovering what you can do
 
 You are not expected to memorize every command.
@@ -122,6 +165,9 @@ If you know part of a setting's name, use `M-x customize-apropos` to search for 
 | Save | `C-x C-s` |
 | Find a file | `C-x C-f` |
 | Switch buffers | `C-x b` |
+| Switch groups | `C-x g g` |
+| Back to the last group | `C-x g C-g` |
+| Add this buffer to a group | `C-c g` |
 | Run a named command | `M-x` |
 | Describe a key | `C-h k` |
 | Describe the current mode | `C-h m` |
