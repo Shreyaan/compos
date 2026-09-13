@@ -3503,7 +3503,7 @@ defmodule Compos.Ui.Layouts do
                   // frame reports every row twice
                   else this.rowPx = this.lineHeight / this.zoomRatio();
                   const area = document.querySelector(".windows");
-                  if (area) this.pushEvent("viewport", { rows: Math.max(5, Math.floor(area.clientHeight / this.rowPx)) });
+                  if (area) this.pushEvent("viewport", { rows: Math.max(5, Math.floor(this.textHeight(area) / this.rowPx)) });
                   this.sendWinRows();
                   if (window.composRemeasure) window.composRemeasure();
                 };
@@ -3700,7 +3700,7 @@ defmodule Compos.Ui.Layouts do
                     if (!buf) return; // preview windows have no line grid
                     const ln = buf.querySelector(".line");
                     const h = this.rowHeight(ln);
-                    if (h > 0) rows[win.dataset.winId] = Math.max(3, Math.floor(buf.clientHeight / h));
+                    if (h > 0) rows[win.dataset.winId] = Math.max(3, Math.floor(this.textHeight(buf) / h));
                     // how many characters fit on one line: the probe wears
                     // the line's own font, and the gutter is not text
                     const content = ln && (ln.matches(".line-content") ? ln : ln.querySelector(".line-content"));
@@ -3994,7 +3994,12 @@ defmodule Compos.Ui.Layouts do
                   el._composScrollSeen = req;
                   const lines = parseInt(req.split(":")[1] || "0", 10);
                   if (!lines) return;
-                  el.scrollTop = Math.max(0, el.scrollTop + lines * this.rowHeight(el.querySelector(".line")));
+                  // round the distance down. A part-row left behind is an
+                  // overlap; a part-row skipped is a gap, and the reader
+                  // never learns what went by.
+                  const h = this.rowHeight(el.querySelector(".line"));
+                  const px = Math.sign(lines) * Math.floor(Math.abs(lines) * h);
+                  el.scrollTop = Math.max(0, el.scrollTop + px);
                 });
               },
               // One visual row, wearing the line's own font, in both of the
@@ -4019,6 +4024,16 @@ defmodule Compos.Ui.Layouts do
                 const layout = probe.offsetHeight / 20;
                 probe.remove();
                 return visual > 0 && layout > 0 ? { visual, layout } : null;
+              },
+              // The height that actually shows text. clientHeight is the
+              // padding box, and .buf pads 12px and 22px (a writing buffer
+              // far more) — counting that as a row and a half made a page
+              // advance past rows the reader never saw. getComputedStyle
+              // answers in layout px, the same space as clientHeight.
+              textHeight(el) {
+                const cs = getComputedStyle(el);
+                const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+                return Math.max(0, el.clientHeight - pad);
               },
               // What a rect is scaled by against the layout box: the CSS
               // zoom on .editor-root (ui-scale, and the browser's own).
