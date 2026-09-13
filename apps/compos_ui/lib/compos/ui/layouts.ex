@@ -3487,13 +3487,23 @@ defmodule Compos.Ui.Layouts do
 
                 // viewport geometry: overall estimate for split math, plus
                 // exact per-window rows (line height varies per buffer)
+                // lineHeight is a row as a rect reports it, for the wheel,
+                // whose deltaY arrives in that same space; rowPx is the same
+                // row in layout px, for anything divided into a clientHeight
+                // or added to a scrollTop. Under CSS zoom the two differ.
                 this.lineHeight = 22;
+                this.rowPx = 22;
                 this.lastWinRows = "";
                 this.lastWinCols = "";
                 this.sendViewport = () => {
-                  this.lineHeight = this.rowHeight(document.querySelector(".line"));
+                  const m = this.rowMetrics(document.querySelector(".line"));
+                  if (m) { this.lineHeight = m.visual; this.rowPx = m.layout; }
+                  // a frame of chat windows has no line grid to probe: carry
+                  // the default row into layout px anyway, or a zoomed-out
+                  // frame reports every row twice
+                  else this.rowPx = this.lineHeight / this.zoomRatio();
                   const area = document.querySelector(".windows");
-                  if (area) this.pushEvent("viewport", { rows: Math.max(5, Math.floor(area.clientHeight / this.lineHeight)) });
+                  if (area) this.pushEvent("viewport", { rows: Math.max(5, Math.floor(area.clientHeight / this.rowPx)) });
                   this.sendWinRows();
                   if (window.composRemeasure) window.composRemeasure();
                 };
@@ -3987,18 +3997,44 @@ defmodule Compos.Ui.Layouts do
                   el.scrollTop = Math.max(0, el.scrollTop + lines * this.rowHeight(el.querySelector(".line")));
                 });
               },
-              // One visual row's height. A .line box is a whole logical
-              // line and .line-content wraps, so a long first line measures
-              // many rows tall and made a page scroll several pages. The
-              // computed line-height is the row, wrapped or not.
+              // One visual row, wearing the line's own font, in both of the
+              // page's coordinate spaces. Two things make the row unreadable
+              // off a .line box: .line-content wraps, so one logical line can
+              // measure many rows tall, and the CSS zoom on .editor-root
+              // (ui-scale, and the browser's own zoom) scales what a rect
+              // reports while scrollTop, clientHeight and offsetHeight stay in
+              // layout px. A 20-row probe answers both at once, at any zoom
+              // and any per-buffer text scale, and offsetHeight's rounding
+              // divides away.
+              rowMetrics(line) {
+                const host =
+                  line && (line.matches(".line-content") ? line : line.querySelector(".line-content") || line);
+                if (!host) return null;
+                const probe = document.createElement("span");
+                probe.style.cssText =
+                  "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0";
+                probe.textContent = "0\n".repeat(20).slice(0, -1);
+                host.appendChild(probe);
+                const visual = probe.getBoundingClientRect().height / 20;
+                const layout = probe.offsetHeight / 20;
+                probe.remove();
+                return visual > 0 && layout > 0 ? { visual, layout } : null;
+              },
+              // What a rect is scaled by against the layout box: the CSS
+              // zoom on .editor-root (ui-scale, and the browser's own).
+              // Measured on the root, so it needs to know neither the zoom
+              // nor which engine draws it.
+              zoomRatio() {
+                const root = document.querySelector(".editor-root");
+                const h = root && root.offsetHeight;
+                if (!h) return 1;
+                const r = root.getBoundingClientRect().height / h;
+                return r > 0 ? r : 1;
+              },
+              // the row that scrollTop and clientHeight speak in
               rowHeight(line) {
-                if (line) {
-                  const h = parseFloat(getComputedStyle(line).lineHeight);
-                  if (h > 0) return h;
-                  const box = line.getBoundingClientRect().height;
-                  if (box > 0) return box;
-                }
-                return this.lineHeight || 22;
+                const m = this.rowMetrics(line);
+                return (m && m.layout) || this.rowPx || 22;
               },
               afterPatch() {
                 // the patch stamp: selChangeH compares it with the gesture
