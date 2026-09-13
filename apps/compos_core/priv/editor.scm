@@ -6907,6 +6907,10 @@
   ;; nothing floats. No stock rule names the popup, so a listing, the
   ;; messages, a shell take the window chain like any other buffer
   (list
+        ;; a detail a list opens from one of its rows takes another
+        ;; window and KEEPS it (display-buffer-detail! below): reuse a
+        ;; window before growing the layout by a pane per row
+        (list '(category detail) '(reuse-window use-some-window pop-up-window) '())
         ;; a preview takes another window, and buffer replacement puts
         ;; the window back. A buffer from outside the frame's group
         ;; takes a window the same way.
@@ -7797,6 +7801,56 @@
 ;; never changed. Nothing here selects a window, so point stays put.
 (define (display-buffer-other-window! name)
   (display-buffer name '(inhibit-same-window #t)))
+
+;;; --- the detail window ----------------------------------------------------------
+;;; A list opens its rows into ONE window and keeps it. Sentry issues,
+;;; WhatsApp chats, any table whose rows are each their own buffer: the
+;;; first row picks a window through the chain, and every row after it
+;;; retakes THAT window. Each row is a new buffer name, so reuse-window
+;;; never matches; without this the layout grows a pane per row, which is
+;;; why such a view had to be a peek to stay in one place.
+;;;
+;;; A detail is not a peek: it is kept, it is writable, and it stays when
+;;; the list goes. It is the second thing here that remembers a window, the
+;;; way a peek remembers its own (docs/PEEK.md). The memory is per list and
+;;; it lapses on its own: when the window is gone, when the window holds the
+;;; list itself, or when it is the window doing the asking.
+(define *detail-windows* '())   ;; ((OWNER WINDOW) ...)
+
+(define (detail-window-forget! owner)
+  (set! *detail-windows*
+        (filter (lambda (e) (not (equal? (car e) owner))) *detail-windows*)))
+
+(define (detail-window-note! owner win)
+  (detail-window-forget! owner)
+  (set! *detail-windows* (cons (list owner win) *detail-windows*))
+  win)
+
+;; the window OWNER opens its rows into, while it is still one to use
+(define (detail-window &optional owner)
+  (let* ((o (or owner (window-buffer (active-window))))
+         (e (assoc o *detail-windows*))
+         (win (and e (cadr e))))
+    (and win
+         (member win (display--work-windows))
+         (not (equal? win (active-window)))
+         (not (equal? (window-buffer win) o))
+         win)))
+
+;; show NAME in the window OWNER opens its rows into, keep that window for
+;; the next row, and select nothing. OWNER names the list, and defaults to
+;; the buffer that is asking.
+(define (display-buffer-detail! name &optional owner)
+  (let* ((o (or owner (window-buffer (active-window))))
+         (shown (window-showing-other name (active-window)))
+         (kept (and (not shown) (detail-window o))))
+    (cond (shown (detail-window-note! o shown))
+          (kept (group-layout-save-before-cover! name)
+                (window-display! (lambda () (display-buffer-in-window! kept name)))
+                (detail-window-note! o kept))
+          (else
+            (let ((win (display-buffer name '(category detail inhibit-same-window #t))))
+              (and win (detail-window-note! o win)))))))
 
 ;;; --- peek -----------------------------------------------------------------------
 ;;; A peek shows a buffer to look at it, without adopting it into the
@@ -14072,6 +14126,12 @@
 (public! 'display-buffer-popup!
   "(display-buffer-popup! NAME [SIDE SIZE]) — kept for an older caller: shows NAME in an ordinary window, because nothing floats. SIDE and SIZE say nothing")
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window: the display chain with the selected window kept out of it")
+(public! 'display-buffer-detail!
+  "(display-buffer-detail! NAME [OWNER]) — show NAME in the one window the list OWNER opens its rows into, and keep that window for the next row; selects nothing")
+(public! 'detail-window
+  "(detail-window [OWNER]) — the window the list OWNER opens its rows into, or #f")
+(public! 'detail-window-forget!
+  "(detail-window-forget! OWNER) — drop the window the list OWNER opens its rows into; the next row picks one again")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
 (public! 'tile-windows!
   "(tile-windows! ALGORITHM BUFFERS) — arrange names with two-pane, columns, rows, grid, main-right, main-left, main-bottom, or main-top")
