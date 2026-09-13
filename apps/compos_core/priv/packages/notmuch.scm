@@ -1473,33 +1473,47 @@ when a message has no text/plain part." 'group 'notmuch)
                   (list-goto-first-entry buf)
                   (message (string-append "from:" email)))))))))
 
-(define-command "notmuch-delete-all-from-sender"
-  "Trash every message in the mailbox from this thread's sender (works on a *notmuch* list row or an open notmuch-show buffer)"
+(define (nm--thread-here)
+  "The thread the command acts on: an open notmuch-show buffer names its thread, a list row carries one."
+  (let ((buf (current-buffer)))
+    (if (buffer-derived-mode? buf "notmuch-show-mode")
+        (buffer-local buf 'notmuch-thread)
+        (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
+
+(define (nm--thread-sender thread-id)
+  "The bare address of the thread's first message, or an empty string."
+  (let* ((msgs (nm--flatten-msgs
+                 (or (nm--json (string-append "show --format=json --body=false thread:" thread-id))
+                     '())))
+         (from (if (null? msgs)
+                   ""
+                   (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
+         (parts (string-split from "<")))
+    (if (null? (cdr parts))
+        (string-trim from)
+        (car (string-split (cadr parts) ">")))))
+
+(define (nm--trash-sender! email)
+  "Trash every message from EMAIL and refresh the index. Answers how many matched."
+  (let ((n (nm--count (string-append "from:" email))))
+    (nm--run (string-append "tag +trash -inbox -unread -- " (nm--quote (string-append "from:" email))))
+    (nm--after-change! *notmuch-search-buffer*)
+    n))
+
+(define (nm--trashed-label n email)
+  (string-append "trashed " (number->string n) " message" (if (= n 1) "" "s") " from " email))
+
+(define-command "notmuch-delete-sender"
+  "Trash every message in the mailbox from this thread's sender, with no unsubscribe attempt (works on a *notmuch* list row or an open notmuch-show buffer)"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (thread-id (if (buffer-derived-mode? buf "notmuch-show-mode")
-                          (buffer-local buf 'notmuch-thread)
-                          (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
+    (let ((thread-id (nm--thread-here)))
       (if (not thread-id)
           (message "No thread here")
-          (let* ((msgs (nm--flatten-msgs
-                         (or (nm--json (string-append "show --format=json --body=false thread:" thread-id))
-                             '())))
-                 (from (if (null? msgs)
-                           ""
-                           (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
-                 (email (let ((parts (string-split from "<")))
-                          (if (null? (cdr parts))
-                              (string-trim from)
-                              (car (string-split (cadr parts) ">"))))))
+          (let ((email (nm--thread-sender thread-id)))
             (if (equal? email "")
                 (message "Could not extract the sender")
-                (let ((n (nm--count (string-append "from:" email))))
-                  (nm--run (string-append "tag +trash -inbox -unread -- " (nm--quote (string-append "from:" email))))
-                  (nm--after-change! *notmuch-search-buffer*)
-                  (message (string-append "trashed " (number->string n) " message"
-                                          (if (= n 1) "" "s") " from " email)))))))))
-(catalog-meta! 'command "notmuch-delete-all-from-sender" 'domain 'mail 'effects '(destroy))
+                (message (nm--trashed-label (nm--trash-sender! email) email))))))))
+(catalog-meta! 'command "notmuch-delete-sender" 'domain 'mail 'effects '(destroy))
 
 (define (nm--contains? haystack needle)
   (> (length (string-split (string-downcase haystack) (string-downcase needle))) 1))
@@ -1587,31 +1601,16 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-purge-sender"
   "Trash every message from this thread's sender and try to unsubscribe: RFC 8058 one-click POST when offered, else a plain GET, else a best-effort scan of the body (works on a *notmuch* list row or an open notmuch-show buffer)"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (thread-id (if (buffer-derived-mode? buf "notmuch-show-mode")
-                          (buffer-local buf 'notmuch-thread)
-                          (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
+    (let ((thread-id (nm--thread-here)))
       (if (not thread-id)
           (message "No thread here")
-          (let* ((msgs (nm--flatten-msgs
-                         (or (nm--json (string-append "show --format=json --body=false thread:" thread-id))
-                             '())))
-                 (from (if (null? msgs)
-                           ""
-                           (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
-                 (email (let ((parts (string-split from "<")))
-                          (if (null? (cdr parts))
-                              (string-trim from)
-                              (car (string-split (cadr parts) ">"))))))
+          (let ((email (nm--thread-sender thread-id)))
             (if (equal? email "")
                 (message "Could not extract the sender")
-                (let* ((n (nm--count (string-append "from:" email)))
-                       (msg-id (nm--newest-msg-id thread-id))
-                       (verdict (nm--purge-unsubscribe! msg-id)))
-                  (nm--run (string-append "tag +trash -inbox -unread -- " (nm--quote (string-append "from:" email))))
-                  (nm--after-change! *notmuch-search-buffer*)
-                  (message (string-append "trashed " (number->string n) " message"
-                                          (if (= n 1) "" "s") " from " email "; " verdict)))))))))
+                (let* ((msg-id (nm--newest-msg-id thread-id))
+                       (verdict (nm--purge-unsubscribe! msg-id))
+                       (n (nm--trash-sender! email)))
+                  (message (string-append (nm--trashed-label n email) "; " verdict)))))))))
 (catalog-meta! 'command "notmuch-purge-sender" 'domain 'mail 'effects '(destroy external))
 
 (define-command "notmuch-unsubscribe"
