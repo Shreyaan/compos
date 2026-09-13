@@ -573,7 +573,9 @@ defmodule Compos.Core.Editor do
   # Cmd-C with no native selection: the active region (pushed onto the kill
   # ring, Emacs kill-ring-save) or, without one, the kill-ring top
   def user_acted(fid \\ nil), do: GenServer.call(__MODULE__, {:user_acted, fid(fid)})
-  def window_rows(fid \\ nil), do: GenServer.call(__MODULE__, {:window_rows, fid(fid)})
+  @doc "Text rows of WIN, or of the active window when WIN is nil."
+  def window_rows(win \\ nil, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:window_rows, win, fid(fid)})
 
   @doc "Columns of WIN, or of the active window when WIN is nil."
   def window_cols(win \\ nil, fid \\ nil),
@@ -1407,12 +1409,15 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  def handle_call({:window_rows, fid}, _from, state) do
-    f = frame(state, fid)
+  def handle_call({:window_rows, win, fid}, _from, state) do
+    # a window named explicitly may live in another frame: a page of it is
+    # its own rows, never the caller's
+    f = (win && find_window_frame(state, win)) || frame(state, fid)
+    id = win || f.active
 
     rows =
-      Map.get(f.win_rows, f.active) ||
-        rows_for(f.tree, f.active, f.total_rows) || f.total_rows
+      Map.get(f.win_rows, id) ||
+        rows_for(f.tree, id, f.total_rows) || f.total_rows
 
     {:reply, rows, state}
   end

@@ -9073,25 +9073,36 @@
         (scroll-window! target delta)
         (message "No other window"))))
 
+;; A page belongs to the window that scrolls, never to the window the key
+;; was pressed in: the two can differ in height and in line height.
+(define (window-page-rows win)
+  (max 1 (- (window-rows win) 2)))
+
+(define (scroll-other-window-page! sign)
+  (let ((target (scroll-other-window-target)))
+    (if target
+        (scroll-window! target (* sign (window-page-rows target)))
+        (message "No other window"))))
+
 ;; the popup by name, for a binding of your own; nothing else scrolls
 (define-command "scroll-popup" "Scroll the popup up nearly a full screen"
   (lambda ()
     (if (popup-open?)
-        (scroll-window! (popup-window) (- (window-rows) 2))
+        (scroll-window! (popup-window) (window-page-rows (popup-window)))
         (message "No popup"))))
 
 (define-command "scroll-popup-down" "Scroll the popup down nearly a full screen"
   (lambda ()
     (if (popup-open?)
-        (scroll-window! (popup-window) (- 2 (window-rows)))
+        (scroll-window! (popup-window) (- (window-page-rows (popup-window))))
         (message "No popup"))))
 
 (define-command "scroll-other-window" "Scroll the next window up nearly a full screen"
-  (lambda () (scroll-other-window-by! (- (window-rows) 2))))
+  (lambda () (scroll-other-window-page! 1)))
 
 (define-command "scroll-other-window-down"
   "Scroll the next window down nearly a full screen"
-  (lambda () (scroll-other-window-by! (- 2 (window-rows)))))
+  (lambda () (scroll-other-window-page! -1)))
 
 ;;; --- terminal and comint ---------------------------------------------------
 

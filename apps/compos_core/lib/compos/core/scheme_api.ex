@@ -797,7 +797,8 @@ defmodule Compos.Core.SchemeAPI do
         "(current-prefix-arg) — return this frame's raw one-shot prefix argument, or #f.",
       "set-prefix-arg!" =>
         "(set-prefix-arg! VALUE) — set this frame's raw one-shot prefix argument; #f clears it.",
-      "window-rows" => "(window-rows) — return the number of text rows in the active window.",
+      "window-rows" =>
+        "(window-rows [WIN]) — text rows of WIN, or of the active window when WIN is omitted.",
       "window-cols" =>
         "(window-cols [WIN]) — return the number of text columns in WIN, or in the active window.",
       "window-wrap-map" =>
@@ -2386,7 +2387,12 @@ defmodule Compos.Core.SchemeAPI do
         Editor.set_prefix_arg(arg)
         :void
       end,
-      "window-rows" => fn [] -> Editor.window_rows() end,
+      "window-rows" =>
+        fn
+          [] -> Editor.window_rows()
+          [win] when is_integer(win) -> Editor.window_rows(win)
+          _ -> Editor.window_rows()
+        end,
       # the client measures its own font and reports it; a window nobody
       # measured is worth the default
       "buffer-cols" => fn [name] -> Editor.buffer_cols(name) end,

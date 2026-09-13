@@ -3491,8 +3491,7 @@ defmodule Compos.Ui.Layouts do
                 this.lastWinRows = "";
                 this.lastWinCols = "";
                 this.sendViewport = () => {
-                  const line = document.querySelector(".line");
-                  if (line) this.lineHeight = line.getBoundingClientRect().height || 22;
+                  this.lineHeight = this.rowHeight(document.querySelector(".line"));
                   const area = document.querySelector(".windows");
                   if (area) this.pushEvent("viewport", { rows: Math.max(5, Math.floor(area.clientHeight / this.lineHeight)) });
                   this.sendWinRows();
@@ -3690,7 +3689,7 @@ defmodule Compos.Ui.Layouts do
                     const buf = win.querySelector(".buf");
                     if (!buf) return; // preview windows have no line grid
                     const ln = buf.querySelector(".line");
-                    const h = ln ? ln.getBoundingClientRect().height : this.lineHeight;
+                    const h = this.rowHeight(ln);
                     if (h > 0) rows[win.dataset.winId] = Math.max(3, Math.floor(buf.clientHeight / h));
                     // how many characters fit on one line: the probe wears
                     // the line's own font, and the gutter is not text
@@ -3975,7 +3974,7 @@ defmodule Compos.Ui.Layouts do
               // The server scrolls a client-scrolled window in lines
               // (scroll-other-window, scroll-window!): the leaf carries
               // data-scroll="GEN:LINES", and a new generation moves the
-              // container by that many of its own line heights. The scroll
+              // container by that many of its own visual rows. The scroll
               // event then mirrors the pixel offset back (cscroll).
               applyScrollRequests() {
                 document.querySelectorAll(".buf.client-scroll[data-scroll]").forEach((el) => {
@@ -3985,10 +3984,21 @@ defmodule Compos.Ui.Layouts do
                   el._composScrollSeen = req;
                   const lines = parseInt(req.split(":")[1] || "0", 10);
                   if (!lines) return;
-                  const line = el.querySelector(".line");
-                  const h = line ? line.getBoundingClientRect().height : 18;
-                  el.scrollTop = Math.max(0, el.scrollTop + lines * h);
+                  el.scrollTop = Math.max(0, el.scrollTop + lines * this.rowHeight(el.querySelector(".line")));
                 });
+              },
+              // One visual row's height. A .line box is a whole logical
+              // line and .line-content wraps, so a long first line measures
+              // many rows tall and made a page scroll several pages. The
+              // computed line-height is the row, wrapped or not.
+              rowHeight(line) {
+                if (line) {
+                  const h = parseFloat(getComputedStyle(line).lineHeight);
+                  if (h > 0) return h;
+                  const box = line.getBoundingClientRect().height;
+                  if (box > 0) return box;
+                }
+                return this.lineHeight || 22;
               },
               afterPatch() {
                 // the patch stamp: selChangeH compares it with the gesture
