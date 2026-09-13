@@ -9075,8 +9075,17 @@
 
 ;; A page belongs to the window that scrolls, never to the window the key
 ;; was pressed in: the two can differ in height and in line height.
+;;
+;; A page always overlaps and never gaps: the rows it keeps are the reader's
+;; thread back to where they were, and a row scrolled past unseen is gone.
+;; Every rounding on this path leans the same way. (Emacs
+;; next-screen-context-lines; defcustom in layouts.scm, a plain define here
+;; because editor.scm loads before custom.scm.)
+(define next-screen-context-lines 2)
+
 (define (window-page-rows win)
-  (max 1 (- (window-rows win) 2)))
+  (let ((context (max 1 (or next-screen-context-lines 2))))
+    (max 1 (- (window-rows win) context))))
 
 (define (scroll-other-window-page! sign)
   (let ((target (scroll-other-window-target)))

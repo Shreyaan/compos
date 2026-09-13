@@ -39,6 +39,10 @@
   "A window with this many columns splits beside for a pop-up window (Emacs split-width-threshold)."
   'group 'windows 'type 'number)
 
+(defcustom 'next-screen-context-lines 2
+  "Rows a page scroll keeps from the screen before it. A page overlaps by this much and never leaves a gap (Emacs next-screen-context-lines)."
+  'group 'windows 'type 'number)
+
 ;; The main layouts (editor.scm layout--main-stack!) read these two.
 (defcustom 'window-layout-main-ratio 0.62
   "The main pane's share of the frame in the main layouts: a fraction between 0.3 and 0.9."

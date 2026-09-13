@@ -70,6 +70,19 @@
   (dismiss--sync! child)
   child)
 
+;; The other half of buffer-child!: CHILD is its own from here, so the
+;; parent's q leaves it alone. A detail that was kept says this
+;; (packages/detail.scm).
+(define (buffer-unchild! child)
+  (let ((parent (buffer-parent child)))
+    (when parent
+      (buffer-set-local! parent 'dismiss-children
+        (remove (lambda (b) (equal? b child)) (buffer-children parent)))
+      (dismiss--sync! parent))
+    (buffer-set-local! child 'dismiss-parent #f)
+    (dismiss--sync! child)
+    child))
+
 ;; A reading surface hides its text cursor, but a mode that navigates by
 ;; point has to show where point stands: in browse-mode RET follows the
 ;; link at point, and n, p and TAB walk the links. Those modes get caret
@@ -223,6 +236,7 @@
 
 (public! 'dismiss-keep-caret! "(dismiss-keep-caret! MODE) — MODE's dismissible buffers show the text cursor, because they navigate by point")
 (public! 'buffer-child! "(buffer-child! PARENT CHILD) — register a child for child-first dismissal; reject ownership cycles")
+(public! 'buffer-unchild! "(buffer-unchild! CHILD) — release CHILD from its parent, so the parent's q leaves it alone")
 (public! 'dismiss-sync-visible! "(dismiss-sync-visible!) — rebuild dismissal cues and maps for visible buffers")
 
 (dismiss-sync-visible!)
