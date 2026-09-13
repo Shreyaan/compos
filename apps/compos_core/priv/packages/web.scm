@@ -1127,6 +1127,14 @@
 
 (effects! '(write external))
 
+;; A picture opens in the browser, which can show a fetched one but
+;; refuses a data: address. A base64 picture is already drawn here, so
+;; there is nothing to open.
+(define (web--open-image! url)
+  (if (string-prefix? "data:" url)
+      (message "the picture is already on the page")
+      (tab-open url)))
+
 (define-command "browse-follow" "Follow the link at point"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -1137,7 +1145,7 @@
                                    (or (buffer-local buf 'browse-url) ""))))
             ;; an image is not text: the browser renders it
             (if (web--image-url? url)
-                (tab-open url)
+                (web--open-image! url)
                 (web--goto-url! buf url #t)))))))
 
 ;; Cmd-RET, the browser reflex: the link at point opens as its own tab
@@ -1150,7 +1158,7 @@
           (let ((url (web--resolve (car (cdr (cdr l)))
                                    (or (buffer-local buf 'browse-url) ""))))
             (if (web--image-url? url)
-                (tab-open url)
+                (web--open-image! url)
                 (web--open-tab! url)))))))
 
 (define-command "browse-next-link" "Move point to the next link"
@@ -1304,7 +1312,7 @@
           (let ((url (web--resolve (car (cdr (cdr l)))
                                    (or (buffer-local buf 'browse-url) ""))))
             (if (web--image-url? url)
-                (tab-open url)
+                (web--open-image! url)
                 (web--show-tab-other-window! url)))))))
 
 ;; the link at point, else the page: eww's `w` does the same
