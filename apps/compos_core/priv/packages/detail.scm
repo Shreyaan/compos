@@ -44,23 +44,28 @@
          (not (equal? (window-buffer win) o))
          win)))
 
-;; the list this detail was opened from, or #f
+;; the list this detail was opened from, or #f. A kept detail is nobody's
+;; child any more, and still says which list it came from, so the walk keeps
+;; reaching it.
 (define (detail-owner &optional buf)
-  (let ((b (or buf (current-buffer))))
-    (and (boundp 'buffer-parent) (buffer-parent b))))
+  (let* ((b (or buf (current-buffer)))
+         (of (and (buffer-known? b) (buffer-local b 'detail-of))))
+    (or (and of (buffer-known? of) of)
+        (and (boundp 'buffer-parent) (buffer-parent b)))))
 
 ;; the walk order: this buffer, then the other details of the same list,
 ;; most recently used first. Open buffers only, exactly as a chat pane walks.
 (define (detail-ring)
   (let* ((buf (current-buffer))
          (owner (detail-owner buf))
-         (kin (if (and owner (boundp 'buffer-children)) (buffer-children owner) '()))
          (open (buffer-list)))
     (cons buf
-          (filter (lambda (b) (and (member b kin)
-                                   (member b open)
-                                   (not (equal? b buf))))
-                  (buffer-list-mru)))))
+          (if (not owner)
+              '()
+              (filter (lambda (b) (and (member b open)
+                                       (not (equal? b buf))
+                                       (equal? (buffer-local b 'detail-of) owner)))
+                      (buffer-list-mru))))))
 
 (public! 'detail-window
   "(detail-window [OWNER]) — the window the list OWNER opens its rows into, or #f")
