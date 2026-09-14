@@ -123,8 +123,29 @@
           cb)
         (cb '(error "this diff has no hunk to stage")))))
 
+;; The state of HEAD, the way magit leads with it: the branch you are on,
+;; or that you are on none. worktree-list already answers both, and the
+;; absence of a 'branch key IS the detached state, so nothing has to parse
+;; git's "fatal: ref HEAD is not a symbolic ref". Match the entry by path:
+;; the primary tree leads the list, but this buffer may be about a linked
+;; worktree.
+(define (git--head buf cb)
+  (let ((root (buffer-local buf 'diff-root)))
+    (if (not (string? root)) (cb #f)
+      (let* ((mine (filter (lambda (w) (equal? (diff--get w 'path) root))
+                           (worktree-list root)))
+             (entry (if (pair? mine) (car mine) '()))
+             (branch (diff--get entry 'branch))
+             (top (git-log root 1))
+             (commit (if (pair? top) (car top) '())))
+        (cb (list 'branch branch
+                  'detached? (not (string? branch))
+                  'sha (diff--get commit 'short-sha)
+                  'subject (diff--get commit 'subject)))))))
+
 (define-diff-backend "git"
   (list 'read git--read
+        'head git--head
         'resolve git--resolve
         'show git--show
         'stage-file git--stage-file
