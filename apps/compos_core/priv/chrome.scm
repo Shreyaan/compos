@@ -426,8 +426,40 @@
 ;; not answer by opening a tab on another: the frame knows its browser window,
 ;; so the open op names it. WINDOW overrides that for the rare cross-window
 ;; case; with neither, Chrome picks the window it focused last.
+;; A tab opens beside the frame that asked for it. A chat on one screen must
+;; not answer by opening a tab on another: the frame knows its browser window,
+;; so the open op names it. WINDOW overrides that for the rare cross-window
+;; case.
+;;
+;; The extension tells a frame its window when the editor page registers, but
+;; a frame shown by a client that never registered (or one that registered
+;; before this Session booted) has no local to read. Chrome then chose for
+;; itself and the tab landed in whatever window it focused last -- usually
+;; not the one the reader is in. So ask the browser instead: the frames op
+;; names the window each compos tab sits in. This frame's own tab is the
+;; answer; any compos tab is a better guess than none.
+(define (chrome--frames-sync)
+  (if (and (browser-connected?) (chrome--tool-allowed?))
+      (or (chrome--get (browser-call-sync "frames" '() 3000) 'frames) '())
+      '()))
+
+(define (chrome-window-resolve!)
+  (or (chrome-window)
+      (let* ((rows (chrome--frames-sync))
+             (here (selected-frame))
+             (mine (filter (lambda (e) (equal? (chrome--get e 'frame) here)) rows)))
+        (cond ((pair? mine)
+               ;; this frame's own tab: worth remembering
+               (let ((w (chrome--get (car mine) 'window)))
+                 (when w (set-frame-local! 'chrome-window w))
+                 w))
+              ;; another frame's editor tab: the reader's browser window, but
+              ;; not this frame's, so answer without claiming it
+              ((pair? rows) (chrome--get (car rows) 'window))
+              (else #f)))))
+
 (define (tab-open url &optional window)
-  (let ((w (or window (chrome-window))))
+  (let ((w (or window (chrome-window-resolve!))))
     (chrome-call "open"
       (if w (list 'url url 'window w) (list 'url url))
       chrome-ignore)))
@@ -521,6 +553,8 @@
 (domain! 'chrome)
 (effects! '(read))
 (public! 'chrome-window "(chrome-window) — the browser window this frame is displayed in, or #f")
+(public! 'chrome-window-resolve!
+  "(chrome-window-resolve!) — this frame's browser window, asking the browser when the extension has not said; remembers its own frame's answer")
 
 ;;; --- the editor page's own DOM ------------------------------------------------
 ;;; A UI change is verified on the page the user looks at, not on a mock.

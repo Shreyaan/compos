@@ -54,6 +54,77 @@
 
 (define (amz-clean s) (amz-replace (amz-replace s "\\|" "|") "  " " "))
 
+;; when it lands. The page writes "Sun, 20 Sept", "23 - 25 Sept" or
+;; "Tomorrow 6 am - 10 am", and never a year.
+(define *amz-months*
+  '(("Jan" 1) ("Feb" 2) ("Mar" 3) ("Apr" 4) ("May" 5) ("Jun" 6)
+    ("Jul" 7) ("Aug" 8) ("Sep" 9) ("Oct" 10) ("Nov" 11) ("Dec" 12)))
+
+(define (amz-day s)
+  (let ((n (string->number s)))
+    (and (number? n) (not (amz-has? s ".")) (equal? (number->string n) s)
+         (>= n 1) (<= n 31) n)))
+
+(define (amz-month tok)
+  (let loop ((ms *amz-months*))
+    (cond ((null? ms) #f)
+          ((and (>= (string-length tok) 3)
+                (equal? (substring tok 0 3) (car (car ms))))
+           (car (cdr (car ms))))
+          (else (loop (cdr ms))))))
+
+(define (amz-month-name n)
+  (let loop ((ms *amz-months*))
+    (cond ((null? ms) "")
+          ((equal? n (car (cdr (car ms)))) (car (car ms)))
+          (else (loop (cdr ms))))))
+
+(define (amz-today) (string->number (format-time (current-time) "%Y%m%d")))
+(define (amz-tomorrow) (string->number (format-time (+ (current-time) 86400) "%Y%m%d")))
+
+;; the day it lands as YYYYMMDD; a range counts from its first day and an
+;; unreadable line sorts last
+(define (amz-delivery-key text)
+  (if (not (string? text))
+      99999999
+      (let ((dated (let loop ((ts (string-split (amz-replace text "," " ") " ")) (day #f))
+                     (cond ((null? ts) #f)
+                           ((and day (amz-month (car ts))) (list day (amz-month (car ts))))
+                           ((and (not day) (amz-day (car ts))) (loop (cdr ts) (amz-day (car ts))))
+                           (else (loop (cdr ts) day))))))
+        (cond (dated
+               (let* ((mon (car (cdr dated)))
+                      (now (amz-today))
+                      (year (quotient now 10000)))
+                 ;; no year on the page, so a month behind us is next year's
+                 (+ (* 10000 (if (< mon (modulo (quotient now 100) 100)) (+ year 1) year))
+                    (* 100 mon) (car dated))))
+              ((amz-has? text "Tomorrow") (amz-tomorrow))
+              ((amz-has? text "Today") (amz-today))
+              (else 99999999)))))
+
+(define (amz-delivery-label text)
+  (let ((k (amz-delivery-key text)))
+    (cond ((>= k 99999999) "—")
+          ((equal? k (amz-today)) "today")
+          ((equal? k (amz-tomorrow)) "tomorrow")
+          (else (string-append (number->string (modulo k 100)) " "
+                               (amz-month-name (modulo (quotient k 100) 100)))))))
+
+;; soonest first, stable, so one day's products keep the order Amazon gave them
+(define (amz-sort-by-delivery rows)
+  (let* ((keyed (map (lambda (r) (list (amz-delivery-key (plist-get r 'delivery)) r)) rows))
+         (sorted (let ins-all ((ks keyed) (acc '()))
+                   (if (null? ks)
+                       acc
+                       (ins-all (cdr ks)
+                                (let place ((xs acc) (out '()))
+                                  (cond ((null? xs) (reverse (cons (car ks) out)))
+                                        ((< (car (car ks)) (car (car xs)))
+                                         (append (reverse out) (cons (car ks) xs)))
+                                        (else (place (cdr xs) (cons (car xs) out))))))))))
+    (map (lambda (p) (car (cdr p))) sorted)))
+
 ;; "Rs1,263.56Rs1,263.56excl. GST" -- the page prints every price twice
 (define (amz-rupees s)
   (let ((a (amz-after s "₹")))
@@ -243,12 +314,46 @@ td{padding:.42rem 0;border-top:1px solid var(--line);vertical-align:top}
 td:first-child{color:var(--dim);width:42%;white-space:nowrap}
 td:last-child{font-variant-numeric:tabular-nums}
 a{color:var(--accent);text-decoration:none}
+.note{margin:1.2rem 0 0;background:var(--chip);border-left:3px solid var(--accent);border-radius:.5rem;padding:.75rem .95rem;font-size:.9rem;white-space:pre-wrap}
+.note h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
 </style>")
 
 (define (amazon--row-field row key alt) (or (plist-get row key) alt))
 
 (define (amazon-in-cart? asin)
   (member asin (or (buffer-local *amazon-buffer* 'amazon-cart) '())))
+
+;; saved products and their notes live on the listing buffer, so they survive
+;; the next search and come back with the desktop
+(define (amazon-saved-list) (or (buffer-local *amazon-buffer* 'amazon-saved) '()))
+(define (amazon-saved? asin) (and (member asin (amazon-saved-list)) #t))
+
+(define (amazon-notes) (or (buffer-local *amazon-buffer* 'amazon-notes) '()))
+(define (amazon-note asin)
+  (let ((hit (assoc asin (amazon-notes)))) (and hit (car (cdr hit)))))
+
+;; redraw the row, and the product's own page when it is open
+(define (amazon-touch! asin)
+  (let ((row (amazon-row-by-asin asin)))
+    (when (and row (buffer-exists? (amazon-detail-buffer row)))
+      (amazon-render-detail! (amazon-detail-buffer row) row)))
+  (list-refresh! *amazon-buffer*))
+
+(define (amazon-save-toggle! asin)
+  (buffer-set-local! *amazon-buffer* 'amazon-saved
+                     (if (amazon-saved? asin)
+                         (filter (lambda (a) (not (equal? a asin))) (amazon-saved-list))
+                         (cons asin (amazon-saved-list))))
+  (amazon-touch! asin)
+  (amazon-saved? asin))
+
+(define (amazon-note-set! asin text)
+  (let ((rest (filter (lambda (n) (not (equal? (car n) asin))) (amazon-notes))))
+    (buffer-set-local! *amazon-buffer* 'amazon-notes
+                       (if (or (not (string? text)) (equal? text ""))
+                           rest
+                           (cons (list asin text) rest))))
+  (amazon-touch! asin))
 
 (define (amazon-detail-html row)
   (let* ((asin (plist-get row 'asin))
@@ -258,6 +363,8 @@ a{color:var(--accent);text-decoration:none}
          (rating (plist-get row 'rating))
          (revs (plist-get row 'reviews))
          (deliv (plist-get row 'delivery))
+         (note (amazon-note asin))
+         (kept? (amazon-saved? asin))
          (in? (amazon-in-cart? asin)))
     (string-append
      amazon-detail-css
@@ -271,10 +378,15 @@ a{color:var(--accent);text-decoration:none}
                                (if revs (string-append " · " revs) "") "</span>") "")
      (if incl (string-append "<span class='chip'>₹" incl " incl. GST</span>") "")
      (if (plist-get row 'sponsored) "<span class='chip'>sponsored</span>" "")
+     (if kept? "<span class='chip on'>saved</span>" "")
      (if in? "<span class='chip on'>in your cart</span>" "")
      "</div><div class='act'>"
      "<a class='btn" (if in? " done" "") "' href='compos:amazon-cart/" asin "'>"
      (if in? "✓ in cart · add another" "Add to cart") "</a>"
+     "<a class='btn ghost' href='compos:amazon-save/" asin "'>"
+     (if kept? "★ saved" "Save") "</a>"
+     "<a class='btn ghost' href='compos:amazon-note/" asin "'>"
+     (if note "Edit note" "Add a note") "</a>"
      "<a class='btn ghost' href='compos:amazon-open/" asin "'>Open in browser</a>"
      "</div></div></div><table>"
      "<tr><td>Price</td><td>₹" (amazon--row-field row 'biz "—") " excl. GST</td></tr>"
@@ -284,7 +396,9 @@ a{color:var(--accent);text-decoration:none}
                                (if revs (string-append " · " revs " ratings") "") "</td></tr>") "")
      (if deliv (string-append "<tr><td>Delivery</td><td>" deliv "</td></tr>") "")
      "<tr><td>ASIN</td><td>" asin "</td></tr>"
-     "</table></div>")))
+     "</table>"
+     (if note (string-append "<div class='note'><h2>Your note</h2>" note "</div>") "")
+     "</div>")))
 
 (define (amazon-detail-buffer row)
   (string-append "*amazon:" (plist-get row 'asin) "*"))
@@ -385,6 +499,8 @@ a{color:var(--accent);text-decoration:none}
 ;; the page's own buttons, pressed in Scheme
 (on-preview-link! "amazon-cart" (lambda (asin) (amazon-cart-add! asin)))
 (on-preview-link! "amazon-open" (lambda (asin) (amazon-open-external! asin)))
+(on-preview-link! "amazon-save" (lambda (asin) (amazon-save-toggle! asin)))
+(on-preview-link! "amazon-note" (lambda (asin) (amazon-ask-note! asin)))
 
 ;;; --- actions, on the listing and on the page -----------------------------
 ;;; The same verb under the same key in both places: the listing reads the
@@ -409,34 +525,80 @@ a{color:var(--accent);text-decoration:none}
       (when r (let ((u (amazon-product-url (plist-get r 'asin))))
                 (kill-new u) (message (string-append "Copied " u)))))))
 
+;; a note is one line you write about the product; an empty answer clears it
+(define (amazon-ask-note! asin)
+  (read-string (string-append "Note on " (amz-clip (amazon-name-of asin) 34) ": ")
+               (lambda (text)
+                 (amazon-note-set! asin text)
+                 (message (if (or (not (string? text)) (equal? text ""))
+                              "Note cleared"
+                              "Noted")))))
+
+(define-command "amazon-save" "Save this product, marking it in the listing"
+  (lambda ()
+    (let ((r (amazon-row-here)))
+      (when r
+        (let ((asin (plist-get r 'asin)))
+          (message (string-append (amz-clip (amazon-name-of asin) 34)
+                                  (if (amazon-save-toggle! asin) " saved" " no longer saved"))))))))
+
+(define-command "amazon-note" "Write a note on this product"
+  (lambda ()
+    (let ((r (amazon-row-here)))
+      (when r (amazon-ask-note! (plist-get r 'asin))))))
+
+(define-command "amazon-sort-delivery" "Order the listing by soonest delivery, or back to Amazon's order"
+  (lambda ()
+    (let ((on (not (equal? (buffer-local *amazon-buffer* 'amazon-sort) 'delivery))))
+      (buffer-set-local! *amazon-buffer* 'amazon-sort (if on 'delivery 'relevance))
+      (list-refresh! *amazon-buffer*)
+      (message (if on "Soonest delivery first" "Amazon's order")))))
+
 ;;; --- the listing ---------------------------------------------------------
 
 (define (amazon--cells buf row)
-  (list (if (amazon-in-cart? (plist-get row 'asin)) "✓" " ")
-        (amz-clip (plist-get row 'title) 52)
-        (or (plist-get row 'biz) "—")
-        (list (or (plist-get row 'incl) "") "dim")
-        (list (or (plist-get row 'rating) "") "dim")
-        (list (plist-get row 'asin) "dim")))
+  (let ((asin (plist-get row 'asin)))
+    (list (string-append (if (amazon-saved? asin) "★" " ")
+                         (if (amazon-note asin) "✎" " ")
+                         (if (amazon-in-cart? asin) "✓" " "))
+          (amz-clip (plist-get row 'title) 52)
+          (or (plist-get row 'biz) "—")
+          (list (or (plist-get row 'incl) "") "dim")
+          (list (or (plist-get row 'rating) "") "dim")
+          (list (amz-delivery-label (plist-get row 'delivery)) "dim")
+          (list asin "dim"))))
 
 (define-list-mode! "amazon-mode"
-  (list 'doc "Amazon Business search results, as the account sees them: the price is yours, excluding GST, with the retail price beside it. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, c adds it to the cart, o opens it in the real browser, w copies its link, s runs another search, g searches again, q quits."
+  (list 'doc "Amazon Business search results, as the account sees them: the price is yours, excluding GST, with the retail price beside it. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, n writes a note on it, c adds it to the cart, o opens it in the real browser, w copies its link, s runs another search, g searches again, q quits."
         'buffer *amazon-buffer*
         'transient #f
         'noun "product"
-        'rows (lambda (buf) (or (buffer-local buf 'amazon-rows) '()))
+        'rows (lambda (buf)
+                (let ((rows (or (buffer-local buf 'amazon-rows) '())))
+                  (if (equal? (buffer-local buf 'amazon-sort) 'delivery)
+                      (amz-sort-by-delivery rows)
+                      rows)))
         'key (lambda (buf row) (plist-get row 'asin))
         'columns (lambda (buf)
-                   (list (list "" 2) (list "product" 52) (list "₹" 10)
-                         (list "with gst" 9) (list "rating" 7) (list "asin" 12)))
+                   (list (list "" 3) (list "product" 52) (list "₹" 10)
+                         (list "with gst" 9) (list "rating" 7)
+                         (list "delivery" 9) (list "asin" 12)))
         'cells amazon--cells
         'title (lambda (buf) (or (buffer-local buf 'amazon-query) "Amazon"))
-        'meta (lambda (buf) (string-append amazon-host " · business price, excluding GST"))
+        'meta (lambda (buf)
+                (string-append amazon-host " · business price, excluding GST"
+                               (if (equal? (buffer-local buf 'amazon-sort) 'delivery)
+                                   " · soonest delivery first"
+                                   "")))
         'total (lambda (buf) (length (or (buffer-local buf 'amazon-rows) '())))
-        'footer (lambda (buf) (list (list "RET" "page") (list "c" "cart") (list "o" "browser")
-                                    (list "s" "search") (list "q" "quit")))
+        'footer (lambda (buf) (list (list "RET" "page") (list "m" "save") (list "n" "note")
+                                    (list "d" "by delivery") (list "c" "cart")
+                                    (list "o" "browser") (list "s" "search") (list "q" "quit")))
         'preview (lambda (buf row) (amazon-show-detail! row))
         'keys (list (list "RET" "amazon-detail")
+                    (list "m" "amazon-save")
+                    (list "n" "amazon-note")
+                    (list "d" "amazon-sort-delivery")
                     (list "c" "amazon-cart")
                     (list "o" "amazon-open")
                     (list "w" "amazon-copy-link")
@@ -453,9 +615,11 @@ a{color:var(--accent);text-decoration:none}
   (lambda () (buffer-set-read-only! (current-buffer) #t)))
 (mode-parent! "amazon-detail-mode" "special-mode")
 (mode-doc! "amazon-detail-mode"
-  "One product, as its own page. c adds it to the cart, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
+  "One product, as its own page. m saves it and marks it in the listing, n writes a note that stays on this page, c adds it to the cart, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
 (mode-keys! "amazon-detail-mode"
   (list (list "c" "amazon-cart")
+        (list "m" "amazon-save")
+        (list "n" "amazon-note")
         (list "o" "amazon-open")
         (list "w" "amazon-copy-link")
         (list "g" "amazon-refresh")
@@ -479,7 +643,9 @@ a{color:var(--accent);text-decoration:none}
          (chat (and id (boundp 'group-chat) (group-chat id)))
          (panes (filter (lambda (b) (and b (buffer-exists? b)))
                         (list chat *amazon-buffer* (amazon-current-detail)))))
-    (when (pair? (cdr panes)) (tile-adaptive-windows! panes))
+    ;; the app is always chat | listing | detail, side by side, whatever
+    ;; the frame width -- adaptive tiling stacked them on a narrow frame
+    (when (pair? (cdr panes)) (tile-windows! 'columns panes))
     panes))
 
 ;;; --- opening it ----------------------------------------------------------
@@ -533,7 +699,19 @@ a{color:var(--accent);text-decoration:none}
 (public! 'amz-parse
   "(amz-parse TEXT) — the search page the reader read, as product rows")
 
+(public! 'amz-delivery-key
+  "(amz-delivery-key TEXT) — the day a delivery line names, as YYYYMMDD; 99999999 when it names none")
+
+(public! 'amazon-save-toggle!
+  "(amazon-save-toggle! ASIN) — save or unsave a product; a saved one is marked ★ in the listing")
+
+(public! 'amazon-note-set!
+  "(amazon-note-set! ASIN TEXT) — write the note shown on the product's page; \"\" clears it")
+
 (catalog-meta! 'function "amazon-open!" 'domain 'web 'effects '(read write external display))
 (catalog-meta! 'function "amazon-cart-add!" 'domain 'web 'effects '(write external))
 (catalog-meta! 'function "amazon-show-detail!" 'domain 'web 'effects '(write display))
 (catalog-meta! 'function "amz-parse" 'domain 'web 'effects '(pure))
+(catalog-meta! 'function "amz-delivery-key" 'domain 'web 'effects '(read))
+(catalog-meta! 'function "amazon-save-toggle!" 'domain 'web 'effects '(write))
+(catalog-meta! 'function "amazon-note-set!" 'domain 'web 'effects '(write))
