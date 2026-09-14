@@ -25,6 +25,13 @@
       (list 'ibuffer-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '()))
     (list-filter-clear! *chat-list*)
     (buffer-kill! *chat-list*))
+  ;; the transcripts go before the buffers do: the path is read off the
+  ;; chat's own group, which a killed buffer no longer has
+  (for-each (lambda (b)
+              (let ((id (and (buffer-known? b) (buffer-local b 'chat-log-id))))
+                (when (string? id)
+                  (delete-file-path! (string-append (chat-log-dir-for b) "/" id ".chat") #t))))
+            *chats-test-bufs*)
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b))) *chats-test-bufs*)
   (chats-test-drop-group! "zz-chats-one")
   (chats-test-drop-group! "zz-chats-two")
@@ -35,6 +42,14 @@
   (test-buffer! name "")
   (buffer-set-local! name 'mode-name "chat-mode")
   (when group-id (buffer-set-local! name 'group-id group-id))
+  name)
+
+;; a chat's size is its transcript on disk, so a chat that needs a size
+;; needs a file: BYTES of one, under the group's own chats directory
+(define (chats-test-log! name id bytes)
+  (buffer-set-local! name 'chat-log-id id)
+  (write-file! (string-append (chat-log-dir-for name) "/" id ".chat")
+               (string-repeat "x" bytes))
   name)
 
 ;; a and b in group one, c in group two; answers (ONE TWO)
@@ -161,21 +176,20 @@
       (check-contains! (buffer-text *chat-list*) "idle" "a chat with no runtime is idle")
       (chats-test-reset!))))
 
-(deftest 'chats-size-is-the-context
-  "sorted by size, the fuller conversation comes first, and the heading adds the tokens up"
+(deftest 'chats-size-is-the-transcript
+  "sorted by size, the longer transcript comes first, and the heading adds the bytes up"
   (lambda ()
     (chats-test-open! 'group 'name)
-    (buffer-set-local! "*zz-chats-a*" 'chat-context-used 100)
-    (buffer-set-local! "*zz-chats-b*" 'chat-context-used 5000)
+    (chats-test-log! "*zz-chats-a*" "zz-chats-a" 100)
+    (chats-test-log! "*zz-chats-b*" "zz-chats-b" 5000)
     (ibuffer-set-sort! 'size *chat-list*)
-    (check-equal! (list (chats-tokens "*zz-chats-a*") (ibuffer-row-size "*zz-chats-a*")
-                        (ibuffer-row-kind "*zz-chats-a*") (buffer-local "*zz-chats-a*" 'chat-context-used))
-                  'probe "probe")
     (check-equal! (ibuffer-sort *chat-list*) 'size "the sort is on the list buffer")
+    (check-equal! (ibuffer-row-size "*zz-chats-b*") 5000 "the row reads the file's own bytes")
+    (check-equal! (ibuffer-size-label "*zz-chats-b*") "4.9k" "and writes them the way dired does")
     (check-equal! (ibuffer-heading-members (car (chats-test-headings)))
-                  '("*zz-chats-b*" "*zz-chats-a*") "b holds more")
+                  '("*zz-chats-b*" "*zz-chats-a*") "b's transcript is longer")
     (check-equal! (ibuffer-heading-bytes (car (chats-test-headings))) 5100 "the heading sums")
-    (check-equal! (ibuffer-row-size "*zz-chats-c*") #f "no context yet is no size")
+    (check-equal! (ibuffer-row-size "*zz-chats-c*") #f "no transcript yet is no size")
     (chats-test-reset!)))
 
 (deftest 'chats-fold-hides-a-section

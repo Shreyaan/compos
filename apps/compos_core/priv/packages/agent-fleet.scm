@@ -187,8 +187,12 @@
 ;; what the size sort reads, what a heading adds up. A chat that has
 ;; not written its file yet has no size to show
 (define (chats-filesize b)
-  (let ((p (ignore-errors (lambda () (chat-log-path b)))))
-    (and (string? p) (file-exists? p) (file-size p))))
+  ;; the id the chat already carries, never a fresh one: drawing a row
+  ;; must not name a file the chat has not asked for
+  (let ((id (buffer-local b 'chat-log-id)))
+    (and (string? id)
+         (let ((p (string-append (chat-log-dir-for b) "/" id ".chat")))
+           (and (file-exists? p) (file-size p))))))
 
 (define (chats-summary b)
   (let ((s (buffer-local b 'chat-summary)))
