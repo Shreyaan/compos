@@ -535,7 +535,8 @@
     (if (or (not id) (not (lsp--connection? id)))
         #f
         (let* ((e (point))
-               (s (let ((s (backward-word!))) (goto-char! e) (min s e))))
+               ;; read the word, never move point: see capf-word-start
+               (s (capf-word-start e)))
           (lsp-buffer-request id "textDocument/completion" buf e
             (lambda (ok result)
               (when (and ok (equal? (current-buffer) buf) (>= (point) s))

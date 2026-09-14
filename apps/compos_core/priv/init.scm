@@ -39,6 +39,7 @@
 (load-bundled-package "register.scm")
 (load-bundled-package "chat.scm")
 (load-bundled-package "code.scm")
+(load-bundled-package "completion.scm")
 (load-bundled-package "daemons.scm")
 (load-bundled-package "db.scm")
 (load-bundled-package "diff-mode.scm")

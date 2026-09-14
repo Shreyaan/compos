@@ -104,3 +104,62 @@
       (run-command "completion-accept")
       (check-equal! (buffer-text buf) "foobaz" "the whole word was replaced")
       (buffer-kill! buf))))
+
+;;; --- completion while you type -------------------------------------------------
+
+(deftest 'typing-offers-the-same-candidates-m-slash-would
+  "capf-auto-fire! shows the popup, and accept replaces the range"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-cr-auto-buf" "(display-buf")))
+      (delete-other-windows!)
+      (switch-to-buffer! buf)
+      (goto-char! (buffer-size buf))
+      (buffer-set-local! buf 'capf-sources
+        (list (lambda () (list 1 (point) '("display-buffer-other-window!")))))
+      (completion-dismiss!)
+      (capf-auto-fire! buf)
+      (run-command "completion-accept")
+      (check-equal! (buffer-text buf) "(display-buffer-other-window!"
+                    "typing offered it and accept took it")
+      (buffer-kill! buf))))
+
+(deftest 'typing-never-asks-for-a-buffer-the-frame-left
+  "completion-show! measures its range against the frame's buffer, so a popup for another buffer would cut the wrong file"
+  (lambda ()
+    (let ((away (test-buffer! "zz-cr-auto-away" "alphabet"))
+          (here (test-buffer! "zz-cr-auto-here" "here")))
+      (delete-other-windows!)
+      (buffer-set-local! away 'capf-sources
+        (list (lambda () (list 0 8 '("alphabetical")))))
+      (switch-to-buffer! here)
+      (completion-dismiss!)
+      (capf-auto-fire! away)
+      (check-false! (completion-accept!) "no popup for a buffer the frame left")
+      (buffer-kill! away)
+      (buffer-kill! here))))
+
+(deftest 'typing-waits-for-completion-auto-prefix
+  "one character is not an invitation"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-cr-auto-short" "a")))
+      (delete-other-windows!)
+      (switch-to-buffer! buf)
+      (goto-char! (buffer-size buf))
+      (buffer-set-local! buf 'capf-sources
+        (list (lambda () (list (- (point) 1) (point) '("alpha")))))
+      (completion-dismiss!)
+      (capf-auto-fire! buf)
+      (check-false! (completion-accept!) "one character is below completion-auto-prefix")
+      (buffer-kill! buf))))
+
+(deftest 'the-typing-watch-is-installed-once-per-buffer
+  "a mode may re-enter; the buffer keeps one rule"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-cr-auto-watch" "x")))
+      (capf-auto-watch! buf)
+      (let ((id (buffer-local buf 'capf-auto-watch)))
+        (check-true! (number? id) "the watch left its rule id")
+        (capf-auto-watch! buf)
+        (check-equal! (buffer-local buf 'capf-auto-watch) id "re-entry kept the same rule"))
+      (remove-on-change! (buffer-local buf 'capf-auto-watch))
+      (buffer-kill! buf))))

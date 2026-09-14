@@ -59,3 +59,38 @@ A capf source answers `(START END CANDIDATES)`, or the same with
 CANDIDATES is empty. END may lie past point: accept replaces
 START..END, so a source that completes over a suffix names the whole
 word. The popup's keys are the ` *completion*` keymap.
+
+## While you type
+
+The capf framework answers "what completes here". It never asks: `M-/`
+was the only caller. `completion.scm` is the asking. A mode opts in
+with `(capf-auto-watch! BUF)` from its mode hook, and from then on
+typing in that buffer offers what `M-/` would have offered. scheme-mode
+opts in; nothing else does yet.
+
+The watch is the `on-change!` plus `debounce!` pattern the checkers use,
+so a burst of keys costs one collect. Only a person typing forward
+asks: an agent edit, an undo and a delete leave the popup alone, since
+the popup's own `DEL` narrows it.
+
+| setting | default | meaning |
+| --- | --- | --- |
+| `completion-auto` | `#t` | offer completions while you type |
+| `completion-auto-delay` | `150` | milliseconds of quiet before asking |
+| `completion-auto-prefix` | `2` | fewest characters before point |
+
+Two rules bound it.
+
+The frame must already stand on the buffer. `completion-show!` measures
+the range it replaces against the frame's own buffer, not against a
+buffer a caller scoped with `with-current-buffer`. A popup raised for
+any other buffer carries a range that names the wrong file, and
+accepting it cuts that file. The guard also answers the question that
+matters anyway: a popup in a buffer nobody looks at is noise.
+
+The mode's sources must answer in the call. An asynchronous source
+returns `#f` and shows the popup later from its own callback, so the
+collect falls through to dabbrev, dabbrev paints, and the server's
+answer replaces it a moment later. `M-/` hides that; typing would show
+it on every key. lsp-mode therefore stays manual until a source can
+answer `'pending`.

@@ -124,6 +124,15 @@ defmodule Compos.Core.KeyDispatch do
 
   @completion_map " *completion*"
 
+  # SPC ends the word, so it ends the completion. It also has to leave by
+  # the ordinary key path: that is the one place that knows "SPC" spells a
+  # space. Falling through to the popup's own self-insert put the three
+  # letters S, P, C into the buffer.
+  defp completion_key("SPC", pending) do
+    Editor.completion_dismiss()
+    buffer_key("SPC", pending)
+  end
+
   defp completion_key(key, pending) do
     case Editor.lookup_keymap(@completion_map, [key]) do
       # a printable is bound to self-insert-command in the popup's map:

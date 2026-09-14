@@ -147,15 +147,27 @@
   (unless *scheme-ide-prims* (set! *scheme-ide-prims* (primitive-docs)))
   *scheme-ide-prims*)
 
+;; The special forms. The interpreter handles them, so they are in no
+;; primitive table and in no catalog: without this list "defi" offered
+;; every define-* there is and not `define' itself.
+(define *scheme-ide-syntax*
+  '("define" "define-syntax" "lambda" "let" "let*" "letrec" "named-lambda"
+    "if" "cond" "case" "when" "unless" "and" "or" "not"
+    "begin" "do" "quote" "quasiquote" "unquote" "set!"
+    "else" "delay" "force" "apply" "error"))
+
 (define (scheme-ide--complete prefix)
-  (let ((prims (filter (lambda (e) (string-prefix? prefix (car e)))
+  (let ((syn (filter (lambda (s) (string-prefix? prefix s)) *scheme-ide-syntax*))
+        (prims (filter (lambda (e) (string-prefix? prefix (car e)))
                        (scheme-ide--prims)))
         (cat (filter (lambda (e)
                        (string-prefix? prefix (catalog--get e 'name)))
                      (catalog))))
     (let ((prim-names (map car prims)))
       (append
-        (map (lambda (e) (list (car e) "primitive")) prims)
+        (map (lambda (s) (list s "syntax")) syn)
+        (map (lambda (e) (list (car e) "primitive"))
+             (filter (lambda (e) (not (member (car e) syn))) prims))
         (map (lambda (e) (list (catalog--get e 'name) (catalog--get e 'kind)))
              (filter (lambda (e) (not (member (catalog--get e 'name) prim-names)))
                      cat))))))
@@ -198,6 +210,8 @@
         (unless (member scheme-ide--capf cur)
           (buffer-set-local! buf 'capf-sources (cons scheme-ide--capf cur))))
       (desktop-skip! buf 'capf-sources)
+      ;; scheme-ide--capf answers in this call, so typing may ask it
+      (capf-auto-watch! buf)
       ;; squiggles follow edits, debounced like annotate's checker; the
       ;; watch survives mode re-entry because on-change! ids are per call
       (unless (buffer-local buf 'scheme-ide-watch)

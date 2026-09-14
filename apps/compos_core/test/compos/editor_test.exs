@@ -1966,6 +1966,18 @@ defmodule Compos.EditorTest do
     assert Editor.snapshot().completion == nil
   end
 
+  test "SPC ends the completion and inserts a space, not the key name", %{buf: buf} do
+    type("hello helper")
+    press(["RET"])
+    type("he")
+    press(["C-M-i"])
+    assert Editor.snapshot().completion != nil
+
+    press(["SPC"])
+    assert Editor.snapshot().completion == nil
+    assert Buffer.text(buf) == "hello helper\nhe "
+  end
+
   test "completion keys are Scheme policy: a userland rebind works", %{buf: buf} do
     # C-j is unbound in the popup map; one local-set-key* makes it move
     {:ok, _} =

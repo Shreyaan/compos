@@ -5107,20 +5107,37 @@
     (completion-requery!)))
 (local-set-key* " *completion*" "DEL" "completion-delete-backward")
 
+;; The word before point, found by reading the text. A source must never
+;; move point, not even to put it back: completion runs on a timer while
+;; the user types, and backward-word! followed by goto-char! restores a
+;; point the next keystroke has already moved on from. The caret jumps
+;; back and the characters land out of order.
+(define *capf-word-chars*
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+
+(define (capf-word-start e)
+  (let* ((lo (max 0 (- e 128)))
+         (chunk (buffer-substring lo e)))
+    (let loop ((i (- e lo)))
+      (if (and (> i 0)
+               (let ((c (substring-bytes chunk (- i 1) i)))
+                 (and (not (equal? c "")) (string-index *capf-word-chars* c))))
+          (loop (- i 1))
+          (+ lo i)))))
+
 ;; dabbrev: complete the word before point from words in this buffer
 (define (capf-dabbrev)
-  (let ((e (point)))
-    (let ((s (backward-word!)))
-      (goto-char! e)
-      (if (and (< s e) (> e s))
-          (let ((prefix (buffer-substring s e)))
-            (let ((words (buffer-words prefix)))
-              (if (null? words)
-                  #f
-                  (list s e (map (lambda (w) (list w "dabbrev")) words)))))
-          #f))))
+  (let* ((e (point))
+         (s (capf-word-start e)))
+    (if (>= s e)
+        #f
+        (let ((words (buffer-words (buffer-substring s e))))
+          (if (null? words)
+              #f
+              (list s e (map (lambda (w) (list w "dabbrev")) words)))))))
 
-(add-capf! capf-dabbrev)
+;; by name, not by value: a reload must reach the source the popup uses
+(add-capf! (lambda () (capf-dabbrev)))
 
 ;;; --- misc editing --------------------------------------------------------------
 
