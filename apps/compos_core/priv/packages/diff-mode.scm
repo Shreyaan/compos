@@ -492,6 +492,7 @@
 (define (diff--card-sig c open closed)
   (let ((key (diff--get c 'key)))
     (list (and (member key open) #t)
+          (diff--get c 'selection-active)
           (filter (lambda (hk) (string-prefix? (string-append key "|") hk)) closed)
           (diff--get c 'start)
           (diff--get c 'end))))
