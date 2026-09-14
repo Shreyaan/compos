@@ -1,7 +1,7 @@
 ;;; ibuffer.scm --- ONE table for lists of buffers: filter, mark, act.
 ;;;
-;;; C-x C-b and M-x ibuffer open *ibuffer*; C-x C-c and M-x ichat open
-;;; *chats*, the same table over the chat buffers. The table shows one
+;;; C-x C-b and M-x ibuffer open *ibuffer*; C-x c and C-x C-c open
+;;; *chat-list*, the same table over the chat buffers. The table shows one
 ;;; row per buffer under a heading per section. A section is a group, a
 ;;; mode, or a directory; `;` cycles the grouping. Inside a section the
 ;;; rows sort by name, by recency, or by size; `,` cycles the sort. TAB
@@ -1234,7 +1234,7 @@
 
 (for-each
   (lambda (mode) (register-target-provider! mode ibuffer-target-at))
-  '("ibuffer-mode" "ichat-mode"))
+  '("ibuffer-mode" "chat-list-mode"))
 
 ;; the buffers a C-. verb acts on: the table's targets in a table, else
 ;; the one row the menu named
@@ -1371,7 +1371,7 @@
 ;; calling a new heading fn was an arity error in the live editor.
 (define (ibuffer-composml-record buf entry)
   (if (ibuffer-heading? entry) (list 'tag "c-headline")
-    (list 'tag (if (equal? (list-mode-of buf) "ichat-mode") "chat-entry" "buffer") 'layout "columns"
+    (list 'tag (if (equal? (list-mode-of buf) "chat-list-mode") "chat-entry" "buffer") 'layout "columns"
           'attrs (append (list (list "name" entry)
                                (list "modified" (if (ibuffer-row-modified? entry) "true" "false"))
                                (list "marked" (if (assoc entry (list-marks buf)) "true" "false")))
@@ -1380,7 +1380,7 @@
                     (list "bytes" (buffer-size entry))) '())))))
 
 (define (ibuffer-composml-fields buf entry)
-  (let* ((chat? (equal? (list-mode-of buf) "ichat-mode"))
+  (let* ((chat? (equal? (list-mode-of buf) "chat-list-mode"))
          (layout (plist-get (list-active-layout buf) 'name))
          (all (cond ((equal? layout 'narrow) *ibuffer-narrow-fields*)
                     ((equal? layout 'compact) *ibuffer-compact-fields*)

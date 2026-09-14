@@ -76,7 +76,7 @@
 (effects! '(read))
 
 (defcustom 'chats-archived-limit 15
-  "How many saved chats the *chats* list shows below the live ones."
+  "How many saved chats the candidate prompt shows below the live ones."
   'group 'chat 'type 'integer)
 
 (define (chats-live-log-paths)
@@ -240,6 +240,17 @@
                 (if (equal? (chat-row-status b) 'needs_attention) "alert" "accent"))
         'modified? (lambda (b) #f)))
 
+;; a saved conversation is a file no buffer holds
+(ibuffer-kind! 'archived
+  (list 'when? (lambda (b) (and (not (buffer-known? b)) (string-suffix? ".chat" b)))
+        'dot (lambda (b) (list "." "faint"))
+        'name (lambda (b) (list "" (chats-archived-title b)))
+        'size (lambda (b) #f)
+        'label (lambda (b) "archived")
+        'match (lambda (b) (string-append (chats-archived-title b) " archived"))
+        'face (lambda (b) "dim")
+        'modified? (lambda (b) #f)))
+
 (effects! '(write))
 
 ;; A streaming turn hands the fleet an event batch many times a second,
@@ -261,6 +272,13 @@
 (define (agents-refresh!)
   (when (agents-buffer-shown?)
     (list-refresh! *chat-list-buffer*)))
+
+;; a verb ran on the chat at point, so the row it acted on is stale and so
+;; is the pane that previews it: the list draws again and looks again
+(define (agents-relist!)
+  (when (buffer-known? *chat-list-buffer*)
+    (list-refresh! *chat-list-buffer*)
+    (chat-list-preview!)))
 
 ;; the fleet's surfaces after an event batch: the modeline answers at
 ;; once, because a chat that needs you is news; the list settles.
@@ -296,13 +314,13 @@
             (lambda (name)
               (unless (equal? name "")
                 (chat-title b name)
-                (list-refresh! *chat-list-buffer*))))))))
+                (agents-relist!))))))))
 
 (define (agents-live-slug buf)
   (let ((slug (or (buffer-local buf 'agent-slug) (chat-ensure-runtime! buf))))
     (if (equal? (agent-status slug) 'dead) (agent-revive! slug) slug)))
 
-(define-command "agents-steer" "Send a steering message to the marked chats"
+(define-command "agents-steer" "Send a steering message to the chat at point"
   (lambda ()
     (let ((bs (agents-targets)))
       (if (null? bs)
@@ -315,7 +333,7 @@
             (lambda (msg)
               (unless (equal? msg "")
                 (for-each (lambda (b) (agent-send-msg! (agents-live-slug b) msg)) bs)
-                (agents-refresh!)
+                (agents-relist!)
                 (agents-report "steered" bs))))))))
 
 (define (agents-answer! exact prefix verb)
@@ -327,13 +345,13 @@
                       (agent-answer-permission! (buffer-local b 'agent-slug)
                                                 exact prefix))
                     bs)
-          (agents-refresh!)
+          (agents-relist!)
           (agents-report verb bs)))))
 
-(define-command "agents-allow" "Allow the pending permission for the marked chats"
+(define-command "agents-allow" "Allow the pending permission of the chat at point"
   (lambda () (agents-answer! "allow_once" "allow" "allowed")))
 
-(define-command "agents-deny" "Deny the pending permission for the marked chats"
+(define-command "agents-deny" "Deny the pending permission of the chat at point"
   (lambda () (agents-answer! "reject_once" "reject" "denied")))
 
 (define (agent-note-stopped! slug)
@@ -373,85 +391,30 @@
   (lambda () (agents-refresh!)))
 
 (define-command "chats-archive"
-  "Archive the marked chats, or the chat at point: the runtime stops, the buffer goes, the file stays"
+  "Archive the chat at point: the runtime stops, the buffer goes, the file stays"
   (lambda ()
     (let ((bs (agents-targets)))
       (if (null? bs)
           (message "no chat here")
           (begin
             (for-each agents-archive! bs)
-            (list-clear-marks! *chat-list-buffer*)
-            (list-refresh! *chat-list-buffer*)
+            (agents-relist!)
             (agents-report "archived" bs))))))
 
-(mode-icon! "ichat-mode" "")
-
-(define-list-mode! "ichat-mode"
-  (ibuffer-mode-opts
-    (list
-      'composml-root (lambda (buf) (list 'tag "chat-list"))
-      'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
-      'doc (string-append
-             "Every chat and agent thread in the ibuffer table, split by "
-             "group the way C-x b is. A section is a group, a state, or a "
-             "model-less mode; ; cycles the grouping. Rows inside a section "
-             "sort by name, recency, or context size; , cycles the sort. "
-             "TAB folds the section at point. A row shows the state glyph, "
-             "the title, and on the right the context tokens, the state, "
-             "and the age of the last event. m marks a chat, SPC toggles "
-             "the mark, u unmarks it and U drops every mark. s steers, y and "
-             "n answer a permission request for the marked chats, or for the "
-             "chat at point when nothing is marked. a archives now and r "
-             "sets a title. k flags a runtime to kill, d flags a whole chat "
-             "to archive, and x runs the flags. RET opens the chat at point. "
-             "The last section holds the newest saved conversations; RET on "
-             "one reads its file back and revives the chat.")
-      'buffer *chat-list-buffer*
-      'category 'chat
-      'title (lambda (buf) "Chats")
-      'noun "chat"
-      'rows (lambda (buf) (chats-rows buf))
-      ;; two flags, both destructive, neither irreversible: k stops a runtime
-      ;; and keeps the transcript, d drops the chat as well
-      'flags (list (list "k" "K" "kill runtime"
-                         (lambda (buf b)
-                           (and (buffer-exists? b) (agents-kill-runtime! b))))
-                   (list "d" "D" "archive"
-                         (lambda (buf b)
-                           (and (buffer-exists? b)
-                                (begin (agents-archive! b) #t)))))
-      ;; a heading is not a chat, and an archive row has no runtime, so no
-      ;; verb here can act on either
-      'markable? (lambda (buf e) (and (string? e) (buffer-known? e)))
-      'keys '(("s" "agents-steer") ("y" "agents-allow") ("n" "agents-deny")
-              ("a" "chats-archive") ("r" "chats-retitle")
-              ("+" "agent-open")))))
-
-(define (ichat-open!)
-  (ibuffer-open! 'chats *chat-list-buffer* "ichat-mode"))
-
-;; C-x c: the same table in the minibuffer form, with its own view so
-;; the sort and the folds of *chats* stay what you set them to
-(define *ichat-prompt-buffer* " *chats*")
-(add-display-rule! *ichat-prompt-buffer* 'shaped '(side bottom size 0.4))
-(ibuffer-view! *ichat-prompt-buffer* 'sort 'recent 'grouping 'none)
-
-(define-command "ichat-prompt"
-  "Switch to a chat from the table"
+;; k stops the runtime and keeps the transcript: the chat stays in the
+;; list, readable, and the next message you send revives it
+(define-command "chats-kill-runtime"
+  "Stop the runtime of the chat at point and keep its transcript"
   (lambda ()
-    (ibuffer-prompt! 'chats *ichat-prompt-buffer* "ichat-mode" "Chat: "
-      (lambda (row close!)
-        (ibuffer-pick! row close!)
-        (when (buffer-known? row) (end-of-buffer!))))))
+    (let ((bs (filter agents-kill-runtime! (agents-targets))))
+      (if (null? bs)
+          (message "no chat with a runtime here")
+          (begin (agents-relist!) (agents-report "stopped" bs))))))
 
-(define-command "chat-table" "The chat management table: steer, allow, archive, retitle"
-  (lambda () (ichat-open!)))
-
-(define-command "ichat" "List every chat in the ibuffer table"
-  (lambda () (ichat-open!)))
-
-;;; --- C-x c: the chats, as a prompt ----------------------------------------
-;;; C-x b, for chats alone. You know a chat by what it is about, so every
+;;; --- the chats, as a candidate prompt -------------------------------------
+;;; The chat list is the application; this is the same chats drawn as a
+;;; plain candidate prompt, for a surface that can only draw one.
+;;; You know a chat by what it is about, so every
 ;;; row leads with its title -- the name somebody gave it, or the sentence
 ;;; its running summary wrote -- and the title is what you type at. The
 ;;; buffer name and the status follow as the annotation, which tells two
@@ -642,22 +605,23 @@
 
 (define-key "agent-map" "n" "agent-open")
 
-;; C-x C-b is the buffers in a window; C-x C-c is the chats in the same table
+;; C-x C-b is the buffers in a window; C-x C-c is the chats. There is one
+;; chat list and one arrival, so both keys reach the same application.
 (define-key "ctl-x-map" "C-c" "chat-list")
 
 (define-key "agent-map" "a" "agent-goto-attention")
 
-;; C-x b is the buffers; C-x c is the chats: the same table, the same
-;; keys. chat-switch-prompt, the candidate prompt, stays for the surfaces
-;; that draw only a prompt.
+;; C-x b is the buffers; C-x c is the chats. chat-switch-prompt, the
+;; candidate prompt, stays for the surfaces that draw only a prompt.
 (global-set-key "C-x c" "chat-list")
 
 (category! 'chat)
 (catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chats-kill-runtime" 'domain 'chat 'effects '(destroy))
 (public! 'chats-note-activity!
   "(chats-note-activity! BUF) — stamp the time of the last event that reached the chat BUF")
 (public! 'chats-state-label
-  "(chats-state-label STATUS) — the words a *chats* row shows for a runtime status")
+  "(chats-state-label STATUS) — the words a chat list row shows for a runtime status")
 
 
 ;;; ------------------------------------------------------------ the chat list
@@ -752,17 +716,22 @@
 ;; half-remembered name arrives in
 (define (chat-list-rows buf)
   (let ((grouping (ibuffer-grouping buf)))
-    (if (member grouping '(state model))
-        (let ((rows (ibuffer-source buf)))
-          (ibuffer-note-kinds! rows)
-          (ibuffer-keyed-sections buf rows
-            (if (equal? grouping 'state)
-                (lambda (b) (chats-state-label (chat-row-status b)))
-                (lambda (b) (let ((m (chats-model b)))
-                              (if (equal? m "") "no model" m))))
-            (lambda (k) "faint")
-            #f))
-        (ibuffer-rows buf))))
+    (append
+      (if (member grouping '(state model))
+          (let ((rows (ibuffer-source buf)))
+            (ibuffer-note-kinds! rows)
+            (ibuffer-keyed-sections buf rows
+              (if (equal? grouping 'state)
+                  (lambda (b) (chats-state-label (chat-row-status b)))
+                  (lambda (b) (let ((m (chats-model b)))
+                                (if (equal? m "") "no model" m))))
+              (lambda (k) "faint")
+              #f))
+          (ibuffer-rows buf))
+      ;; a chat you archived is still a chat you switch to: the saved
+      ;; conversations come under the live ones, and RET on one reads its
+      ;; file back
+      (ibuffer-section buf "archived" "archived" (chats-archived-rows) "faint" #t))))
 
 (mode-icon! "chat-list-mode" "")
 (define-list-mode! "chat-list-mode"
@@ -783,17 +752,30 @@
              "list standing. RET enters the chat's own group and raises the "
              "window that holds it; q leaves and changes nothing. ; cycles "
              "what a section is: none, group, state, model. , cycles the "
-             "order inside a section.")
+             "order inside a section. The verbs act on the chat at point "
+             "and leave the list standing: s steers it, y and d answer the "
+             "permission it waits on, r gives it a title, k stops its "
+             "runtime and keeps the transcript, a archives it, g draws the "
+             "list again and + starts a new chat.")
       'buffer *chat-list-buffer*
       'category 'chat
       'title (lambda (buf) "Chats")
       'noun "chat"
       'rows (lambda (buf) (chat-list-rows buf))
-      ;; the picker acts on one chat, the one you pick: no marks, no flags
+      ;; the picker acts on one chat, the one at point: no marks, and no
+      ;; flag-then-run, which is a table's idea and not an application's
       'markable? (lambda (buf e) #f)
+      'flags '()
+      ;; n and p move, so the answer keys are y and d, and k stops a
+      ;; runtime without touching the transcript the way the table's k
+      ;; would kill the buffer outright
       'keys '((";" "chat-list-regroup") ("," "chat-list-resort")
               ("/" "chat-list-filter") ("RET" "chat-list-visit")
-              ("q" "chat-list-quit")))))
+              ("q" "chat-list-quit")
+              ("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
+              ("a" "chats-archive") ("r" "chats-retitle")
+              ("k" "chats-kill-runtime") ("g" "agents-refresh")
+              ("+" "agent-open")))))
 (ibuffer-view! *chat-list-buffer* 'sort 'recent 'grouping 'none)
 
 ;; ---- the application
