@@ -363,8 +363,16 @@
   (let ((rest (member item items)))
     (if (and rest (pair? (cdr rest))) (cadr rest) (car items))))
 
+;; A redraw leaves the highlight where the reader left it. The one
+;; exception is the top of the table: a list drawn from its first row
+;; opens on a row, never on the heading over it, because nothing has
+;; been chosen yet.
 (define (ibuffer-refresh! &optional buf)
-  (list-refresh! (or buf (ibuffer-view))))
+  (let ((buf (or buf (ibuffer-view))))
+    (list-refresh! buf)
+    (when (and (equal? (list-clamped-index buf) 0)
+               (ibuffer-heading? (list-current buf)))
+      (ibuffer-goto-first-row! buf))))
 
 (define (ibuffer-set-sort! mode &optional buf)
   (let ((buf (or buf (ibuffer-view))))
@@ -429,8 +437,15 @@
 (define (ibuffer-heading-members row) (nth 8 row))
 (define (ibuffer-heading-folded? row) (equal? (nth 2 row) "folded"))
 
+;; In a management table a heading is a row: it takes the highlight, and
+;; a verb on it reads every row under it. A picker is the other case --
+;; there you are choosing one buffer, a section name is not a choice,
+;; and the highlight steps over it. A view says which it is when it
+;; opens; nothing said means a picker.
 (define (ibuffer-separator? buf row)
-  (and (ibuffer-heading? row) (equal? (nth 2 row) "separator")))
+  (and (not (buffer-local buf 'ibuffer-heading-rows))
+       (ibuffer-heading? row)
+       (equal? (nth 2 row) "separator")))
 
 ;; a section: its heading, then its members in the view's order. AS-IS?
 ;; keeps the order the members came in: the saved chats come newest first
@@ -1083,9 +1098,12 @@
                  (with-list-mode-skip-render
                    (lambda () (set-mode! (or mode "ibuffer-mode")))))))
          (t3 (monotonic-ms))
+         ;; a management table's headings are rows; a picker's are not
+         (_i (buffer-set-local! buf 'ibuffer-heading-rows
+                                (equal? buf *ibuffer-buffer*)))
          (_g (ibuffer-refresh! buf))
          (t4 (monotonic-ms))
-         (_h (list-goto-first-entry buf))
+         (_h (ibuffer-goto-first-row! buf))
          (t5 (monotonic-ms)))
     (set! *ibuffer-open-timings*
       (list 'setup (- t1 t0) 'display (- t2 t1) 'set-mode (- t3 t2)
@@ -1124,12 +1142,27 @@
   grid-row: 1; grid-column: var(--field-column) / span var(--field-width);
   min-width: 0; white-space: pre; overflow: hidden;
 }
-:is(buffers, chat-list) > .semantic-direct[in-section=true] {
-  box-shadow: inset 1px 0 var(--c-faint-fg, #3a3a44);
+/* The rows of a section hang off its spine and sit in from the name
+   that opens them. The text stays flush -- the nesting is drawn, not
+   spelled -- so a copy of the table is still a table. */
+:is(buffers, chat-list) > .semantic-direct[level] {
+  padding-left: 1.6ch;
+  box-shadow: inset 1px 0 var(--faint-fg, #3a3a44);
 }
 :is(buffers, chat-list) > .semantic-direct[marked=true] {
   box-shadow: inset 3px 0 var(--accent-fg, #7aa2f7);
 }
+
+/* A heading leaves the grid: it is the line that opens a section, not a
+   row of it, so it can wear its own tracking and weight. The tracking
+   goes on the name alone -- the rule after it is drawn with box
+   characters, and letter-spacing would break the line into dashes. */
+:is(buffers, chat-list) > c-headline .line { padding-top: 7px; }
+:is(buffers, chat-list) > c-headline c-text.accent {
+  letter-spacing: 0.16em;
+  font-weight: 600;
+}
+:is(buffers, chat-list) > c-headline c-text.faint { opacity: 0.6; }
 ")
 
 (define-style! 'ibuffer-prompt "
@@ -1454,10 +1487,18 @@
                                       (+ killed (if killed? 1 0))
                                       (+ kept (if killed? 0 1)))))))))
 
-(define-command "ibuffer-kill" "Kill the marked buffers, or the row at point"
+;; k on a group row is the group's kill: every member, then the group
+;; itself. Killing the members one by one would leave the group behind,
+;; empty, which is not what the row you are on stands for.
+(define-command "ibuffer-kill" "Kill the marked buffers, the row at point, or the group at point"
   (lambda ()
-    (let ((view (current-buffer)))
-      (ibuffer-kill-targets! view (ibuffer-targets view) 0 0))))
+    (let* ((view (current-buffer))
+           (row (ibuffer-current view)))
+      (if (and (ibuffer-heading? row)
+               (string-prefix? "group:" (ibuffer-heading-key row))
+               (ibuffer-group-at view))
+          (run-command "ibuffer-group-kill")
+          (ibuffer-kill-targets! view (ibuffer-targets view) 0 0)))))
 
 ;; the group at point: under group sectioning, the section's group;
 ;; otherwise the group of the buffer on the row
@@ -1508,13 +1549,18 @@
   (or (not (equal? (ibuffer-grouping buf) 'none))
       (not (buffer-known? entry))))
 
+;; The renderer keeps a whitelist of attribute names, so a row says how
+;; deep it sits with 'level -- a name the whitelist already carries --
+;; and the style rules hang the spine and the indent off that.
 (define (ibuffer-composml-record buf entry)
   (if (ibuffer-heading? entry) (list 'tag "c-headline")
     (list 'tag (if (equal? (list-mode-of buf) "chat-list-mode") "chat-entry" "buffer") 'layout "columns"
           'attrs (append (list (list "name" entry)
                                (list "modified" (if (ibuffer-row-modified? entry) "true" "false"))
-                               (list "in-section" (if (ibuffer-row-in-section? buf entry) "true" "false"))
                                (list "marked" (if (assoc entry (list-marks buf)) "true" "false")))
+            ;; only a row that sits under a heading says so, so the style
+            ;; rules can ask for the attribute itself and never a value
+            (if (ibuffer-row-in-section? buf entry) (list (list "level" "1")) '())
             (if (buffer-exists? entry)
               (list (list "mode" (or (buffer-local entry 'mode-name) ""))
                     (list "bytes" (buffer-size entry))) '())))))

@@ -237,7 +237,7 @@ defmodule Compos.IbufferTest do
       (run-command "ibuffer")
       (list-filter-clear! "*ibuffer*")
       (ibuffer-filter-push! (list "match" "zz-ibuffer-b"))
-      (list-goto-first-entry "*ibuffer*"))})
+      (ibuffer-goto-first-row! "*ibuffer*"))})
 
     assert eval!("(ibuffer-current)") == ~s{"*zz-ibuffer-b*"}
     press("d")

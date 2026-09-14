@@ -773,11 +773,6 @@
       ;; what a section of chats is worth saying beyond how many: how
       ;; many of them are running right now
       'section-note (lambda (buf members) (chats-live-note members))
-      ;; A group row is a row: it takes the highlight like any other,
-      ;; and the verbs read it as every chat under it. k on a group
-      ;; stops the group; a on a group archives the group. Folding is
-      ;; still what RET means there.
-      'separator? (lambda (buf b) #f)
       'rows (lambda (buf) (chat-list-rows buf))
       ;; The table stamps itself with the buffer count and redraws after
       ;; any command that moved it, so a buffer opened anywhere -- by a
@@ -985,6 +980,9 @@
     (list-clear-query! *chat-list-buffer*)
     (with-current-buffer *chat-list-buffer*
       (lambda () (with-list-mode-skip-render (lambda () (set-mode! "chat-list-mode")))))
+    ;; the chat list is a table, not a picker: a group row takes the
+    ;; highlight and the verbs read it as every chat under it
+    (buffer-set-local! *chat-list-buffer* 'ibuffer-heading-rows #t)
     (ibuffer-refresh! *chat-list-buffer*)
     ;; the list keeps the row it was left on; only a list that holds no
     ;; row yet starts at the top
