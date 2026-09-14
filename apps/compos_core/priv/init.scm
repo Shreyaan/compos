@@ -32,6 +32,7 @@
 
 (load-bundled-package "agenda.scm")
 (load-bundled-package "agent.scm")
+(load-bundled-package "amazon.scm")
 (load-bundled-package "annotate.scm")
 (load-bundled-package "appearance.scm")
 (load-bundled-package "autorevert.scm")

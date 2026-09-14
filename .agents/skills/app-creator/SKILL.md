@@ -134,7 +134,7 @@ responsive tiler and the columns come out on their own:
 (define (amazon-layout!)
   (tile-adaptive-windows!
     (filter buffer-exists?
-            (list (group-chat-buffer (amazon-home-group!))
+            (list (group-chat (amazon-home-group!))
                   *amazon-buffer*
                   (amazon-current-detail)))))
 ```
