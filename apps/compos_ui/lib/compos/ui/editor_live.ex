@@ -1112,7 +1112,20 @@ defmodule Compos.Ui.EditorLive do
 
       nil ->
         Compos.Core.Buffer.request_fontification(leaf.buffer, leaf.version, start, stop)
-        []
+
+        # The buffer rebases provisional faces through every edit. Keep them
+        # visible until fresh faces arrive, including when an edit exposes a
+        # little more text than the previous viewport covered.
+        provisional =
+          leaf
+          |> Map.get(:fontification, [])
+          |> Enum.filter(fn {_, s, e, _} -> s <= stop and e >= start end)
+          |> Enum.max_by(fn {v, s, e, _} -> {min(e, stop) - max(s, start), v} end, fn -> nil end)
+
+        case provisional do
+          {_, _, _, spans} -> spans
+          nil -> []
+        end
     end
   end
 

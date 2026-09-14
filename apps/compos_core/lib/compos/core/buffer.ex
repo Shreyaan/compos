@@ -1059,7 +1059,9 @@ defmodule Compos.Core.Buffer do
             cache =
               [
                 {version, start, stop, spans}
-                | Enum.filter(state.fontify.cache, fn {v, _, _, _} -> v == version end)
+                | Enum.reject(state.fontify.cache, fn {_, s, e, _} ->
+                    start <= s and stop >= e
+                  end)
               ]
               |> Enum.take(8)
 
@@ -3282,7 +3284,30 @@ defmodule Compos.Core.Buffer do
     {oer, oec} = ts_point(old_rope, old_end)
     {ner, nec} = ts_point(state.rope, new_end)
     TS.ts_state_edit(ts.res, start, old_end, new_end, sr, sc, oer, oec, ner, nec)
-    %{state | ts: %{ts | spans: nil}}
+    # Keep provisional faces attached to their text while the worker catches
+    # up. Retain their old version so they cannot satisfy a fresh request.
+    shift = fn pos, edge ->
+      cond do
+        pos < start -> pos
+        pos > old_end -> pos + new_end - old_end
+        edge == :start -> start
+        true -> new_end
+      end
+    end
+
+    cache =
+      Enum.map(state.fontify.cache, fn {v, s, e, spans} ->
+        spans =
+          Enum.flat_map(spans, fn {a, b, scope} ->
+            a = shift.(a, :start)
+            b = shift.(b, :end)
+            if b > a, do: [{a, b, scope}], else: []
+          end)
+
+        {v, shift.(s, :start), shift.(e, :end), spans}
+      end)
+
+    %{state | ts: %{ts | spans: nil}, fontify: %{state.fontify | cache: cache}}
   end
 
   # undo (or any wholesale content swap): no edit to feed — drop the tree

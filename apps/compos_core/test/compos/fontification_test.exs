@@ -85,4 +85,24 @@ defmodule Compos.FontificationTest do
     Buffer.set_local(name, "ts-lang", false)
     assert BufferView.get(name, :fontification) == []
   end
+
+  test "provisional faces follow repeated byte edits without becoming fresh", %{name: name} do
+    v = Buffer.version(name)
+    Buffer.request_fontification(name, v, 100, 140)
+    original = faces(name, v, 100, 140)
+
+    Buffer.insert_at(name, 0, "λ\n")
+    assert [{^v, 103, 143, shifted}] = BufferView.get(name, :fontification)
+    assert shifted == Enum.map(original, fn {s, e, face} -> {s + 3, e + 3, face} end)
+    assert Buffer.version(name) > v
+
+    Buffer.delete_range(name, 0, 3)
+    assert [{^v, 100, 140, ^original}] = BufferView.get(name, :fontification)
+
+    # Completing another window must not erase this window's provisional faces.
+    current = Buffer.version(name)
+    Buffer.request_fontification(name, current, 0, 40)
+    faces(name, current, 0, 40)
+    assert {v, 100, 140, original} in BufferView.get(name, :fontification)
+  end
 end

@@ -263,15 +263,19 @@ The `[:compos, :ui, :text_display]` event reports visible, prepared, and reused
 row counts, with buffer name and text version.
 
 Fontification does not run inside redisplay. The renderer requests faces for
-the visible byte range and can display plain text immediately. A buffer
-coalesces requests for 25 milliseconds and runs one supervised task at a time.
+the visible byte range and can display text immediately. Existing faces are
+rebased through insertions and deletions and remain visible as provisional
+faces until the new result arrives. Their version stays old, so they cannot
+suppress a fresh request. This avoids a plain-text flash on every keystroke.
+A buffer coalesces requests for 25 milliseconds and runs one supervised task
+at a time.
 The task uses a fork of the incremental syntax tree. Its parser has a separate
 lock, so parsing cannot hold the edit path's parser lock. Queries cover only
 the requested range, but parsing retains full document context.
 
 Results name their text version and parser resource. The buffer discards
-results after an intervening edit or language change. It publishes accepted
-faces before sending a display notification. This notification is not a text
+worker results after an intervening edit or language change. It publishes
+accepted faces before sending a display notification. This notification is not a text
 change and does not invoke text-change rules. Up to eight recent display ranges
 are cached per buffer. Text and version always come from the same snapshot.
 

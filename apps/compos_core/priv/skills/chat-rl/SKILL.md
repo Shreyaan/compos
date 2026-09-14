@@ -1,5 +1,5 @@
 ---
-name: rl-benchmark
+name: chat-rl
 description: Run or revise compos reinforcement-learning benchmark and dogfood scenarios. Use for benchmark runs, scoring, reports, and scenario design. Do not use for repository unit or acceptance tests.
 ---
 

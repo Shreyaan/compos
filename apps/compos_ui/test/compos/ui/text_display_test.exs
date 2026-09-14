@@ -73,6 +73,44 @@ defmodule Compos.Ui.TextDisplayTest do
     assert_receive {:display_work, ^name, %{prepared: 1}}
   end
 
+  test "typing preserves faces while fontification is pending, then corrects them", %{
+    conn: conn,
+    name: name
+  } do
+    Buffer.insert_at(name, 0, "value = 42\nother = 100\n")
+    Buffer.goto(name, 0)
+    Buffer.set_local(name, "ts-lang", "elixir")
+    {:ok, view, html} = live(conn, "/")
+    fid = frame(html)
+    await_element(view, ".ts-number", "42")
+
+    # Hold the worker's timer so the intermediate render is deterministic.
+    [{pid, _}] = Registry.lookup(Compos.Core.BufferRegistry, name)
+    timer = Process.send_after(pid, :fontify, 60_000)
+    :sys.replace_state(pid, fn state -> put_in(state.fontify.timer, timer) end)
+    on_exit(fn -> Process.cancel_timer(timer) end)
+
+    Input.dispatch(fid, "#")
+    assert has_element?(view, ".line", "#value = 42")
+    assert has_element?(view, ".ts-number", "42")
+    assert has_element?(view, ".ts-number", "100")
+
+    send(pid, :fontify)
+    await_element(view, ".ts-comment", "#value = 42")
+    refute view |> element(".line", "#value = 42") |> render() =~ "ts-number"
+    assert has_element?(view, ".ts-number", "100")
+  end
+
+  defp await_element(view, selector, text, tries \\ 100)
+  defp await_element(_, _, _, 0), do: flunk("highlight did not arrive")
+
+  defp await_element(view, selector, text, tries) do
+    unless has_element?(view, selector, text) do
+      Process.sleep(20)
+      await_element(view, selector, text, tries - 1)
+    end
+  end
+
   test "narrowing selects source lines before preparing them", %{conn: conn, name: name} do
     text = Buffer.text(name)
     {start, _} = :binary.match(text, "row 4200 λ")

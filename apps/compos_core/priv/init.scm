@@ -66,6 +66,7 @@
 (load-bundled-package "keys.scm")
 (load-bundled-package "keymaps.scm")
 (load-bundled-package "layouts.scm")
+(load-bundled-package "linkedin.scm")
 (load-bundled-package "lsp.scm")
 (load-bundled-package "mcp-hub.scm")
 (load-bundled-package "mcp.scm")
