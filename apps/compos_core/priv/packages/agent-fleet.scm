@@ -964,8 +964,9 @@
                   (lambda ()
                     (done)
                     (chat-list-clear-search!)
+                    ;; the rows widen again under the same cursor: closing
+                    ;; the filter is not a move
                     (ibuffer-refresh! *chat-list-buffer*)
-                    (ibuffer-goto-first-row! *chat-list-buffer*)
                     (chat-list-preview!)
                     (chat-list-focus!)))
             (list 'legend *ibuffer-prompt-legend*)
@@ -979,7 +980,10 @@
     (with-current-buffer *chat-list-buffer*
       (lambda () (with-list-mode-skip-render (lambda () (set-mode! "chat-list-mode")))))
     (ibuffer-refresh! *chat-list-buffer*)
-    (ibuffer-goto-first-row! *chat-list-buffer*)
+    ;; the list keeps the row it was left on; only a list that holds no
+    ;; row yet starts at the top
+    (unless (list-current *chat-list-buffer*)
+      (ibuffer-goto-first-row! *chat-list-buffer*))
     (chat-list-preview!)
     ;; the list stands on its own keys; a filter line only opens when you
     ;; ask for one, by / or by arriving with words already typed
