@@ -499,13 +499,16 @@
 (define (diff--section-blocks buf layout)
   (let ((open (or (buffer-local buf 'diff-open-cards) '()))
         (closed (or (buffer-local buf 'diff-closed-hunks) '()))
-        (cache (or (buffer-local buf 'diff-card-cache) '())))
+        (cache (or (buffer-local buf 'diff-card-cache) '()))
+        (selection-active
+          (not (equal? (buffer-local buf 'diff-selection) 'none))))
     (let loop ((cs layout) (sec #f) (acc '()) (nc '()))
       (if (null? cs)
           (begin
             (buffer-set-local! buf 'diff-card-cache (reverse nc))
             (reverse acc))
-          (let* ((c (car cs))
+          (let* ((c (append (car cs)
+                           (list 'selection-active selection-active)))
                  (s (diff--get c 'section))
                  (key (diff--get c 'key))
                  (sig (diff--card-sig c open closed))
