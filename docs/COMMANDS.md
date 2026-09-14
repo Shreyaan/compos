@@ -33,6 +33,7 @@ A prompt is asynchronous, so the rest of the collection runs when the answer arr
 `C-u` starts it, digits and `-` extend it, `M-1` .. `M-9`, `M-0` and
 `M--` set it in one key. The motion, deletion, kill, scroll, newline and
 undo commands take it as a count. `prefix-numeric-value` turns the raw value into a number.
+Everything else reads it as a flip: see [C-u](C-U.md).
 
 ## this-command and last-command
 

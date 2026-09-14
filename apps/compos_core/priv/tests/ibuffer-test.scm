@@ -70,7 +70,7 @@
     (buffer-kill! "*zz-ib-seen*")))
 
 (deftest 'ibuffer-sections-by-mode
-  "grouped by mode, one heading per mode, by name, with the member count"
+  "grouped by mode, one heading per mode, by name, in its own register, with the member count"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (buffer-set-local! "*zz-ib-b*" 'mode-name "aa-other-mode")
