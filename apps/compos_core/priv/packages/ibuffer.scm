@@ -595,12 +595,12 @@
 ;; wider: a flexible name column pushed the fields to the window's edge
 ;; and left a desert between them and the rows. It still gives ground
 ;; first when the window is too narrow for every field.
-;; A heading asks the column for its name and its kind only. The tally
-;; rides in the space the column has left over, so it never widens the
-;; column that the rows have to live in.
+;; A heading asks the column for the whole line it has to draw: its
+;; name, its kind and its tally. The column still never takes room a
+;; field needs, so a heading widens it only into space that was empty.
 (define (ibuffer-row-line-name buf row)
   (if (ibuffer-heading? row)
-      (ibuffer-heading-name buf row)
+      (ibuffer-heading-plain buf row)
       (ibuffer-row-title row)))
 
 ;; The width the names ask for. A window with room to spare shows every
