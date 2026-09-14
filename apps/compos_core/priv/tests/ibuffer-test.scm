@@ -228,9 +228,6 @@
       (check-equal! (length (ibuffer-targets "*ibuffer*")) 2
                     "and a verb on it reads both members")
       (run-command "ibuffer-group-kill")
-      (check-equal! (list 'dump (buffer-path "*zz-ib-a*") (buffer-modified? "*zz-ib-a*")
-                          (window-showing "*zz-ib-a*") (buffer-groups "*zz-ib-a*"))
-                    'dump-me "dump")
       (check-false! (buffer-known? "*zz-ib-a*") "the first member is gone")
       (check-false! (buffer-known? "*zz-ib-b*") "the second member is gone")
       (check-false! (group-record-by-id g) "and the group record with them"))

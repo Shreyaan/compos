@@ -367,12 +367,12 @@
 ;; exception is the top of the table: a list drawn from its first row
 ;; opens on a row, never on the heading over it, because nothing has
 ;; been chosen yet.
+;; A redraw leaves the highlight where the reader left it. Landing it
+;; somewhere else would draw the row it lands on, and a row can name a
+;; buffer that has just been killed -- a refresh must not be the thing
+;; that brings one back. The open path picks the first row itself.
 (define (ibuffer-refresh! &optional buf)
-  (let ((buf (or buf (ibuffer-view))))
-    (list-refresh! buf)
-    (when (and (equal? (list-clamped-index buf) 0)
-               (ibuffer-heading? (list-current buf)))
-      (ibuffer-goto-first-row! buf))))
+  (list-refresh! (or buf (ibuffer-view))))
 
 (define (ibuffer-set-sort! mode &optional buf)
   (let ((buf (or buf (ibuffer-view))))
