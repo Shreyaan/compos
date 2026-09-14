@@ -1,23 +1,30 @@
-;;; chats-list-test.scm --- *chats* is the ibuffer table over the chats:
-;;; sections by group, the chat row kind, and the words a row shows.
+;;; chats-list-test.scm --- *chat-list* is the chat list application:
+;;; one arrival, sections by group, the chat row kind, and the words a
+;;; row shows.
 ;;;
-;;; Every test opens the table by command and narrows it to its own
+;;; Every test opens the application by command and narrows it to its own
 ;;; chats, then reads the entries and the text. No test names a key.
 
 (domain! 'testing)
 (effects! '(write))
+
+(tests-need-a-disposable-editor!
+  "the chat list is an application: it takes the frame, enters its own group, and holds the focus")
 
 (define *chats-test-bufs* '("*zz-chats-a*" "*zz-chats-b*" "*zz-chats-c*"))
 
 (define (chats-test-drop-group! name)
   (when (group-record-by-name name) (group-record-delete! name)))
 
+(define *chat-list* "*chat-list*")
+
 (define (chats-test-reset!)
-  (when (buffer-known? "*chats*")
-    (buffer-set-locals! "*chats*"
+  (when (buffer-known? *chat-list*)
+    (run-command "chat-list-quit")
+    (buffer-set-locals! *chat-list*
       (list 'ibuffer-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '()))
-    (list-filter-clear! "*chats*")
-    (buffer-kill! "*chats*"))
+    (list-filter-clear! *chat-list*)
+    (buffer-kill! *chat-list*))
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b))) *chats-test-bufs*)
   (chats-test-drop-group! "zz-chats-one")
   (chats-test-drop-group! "zz-chats-two")
@@ -39,17 +46,18 @@
     (chats-test-chat! "*zz-chats-b*" one)
     (chats-test-chat! "*zz-chats-c*" two)
     (run-command "chat-list")
-    (buffer-set-locals! "*chats*"
+    (buffer-set-locals! *chat-list*
       (list 'ibuffer-grouping grouping 'ibuffer-sort sort 'ibuffer-collapsed '()))
-    (list-set-filters! "*chats*" (list (list "match" "zz-chats-")))
-    (list-refresh! "*chats*")
+    (list-set-filters! *chat-list* (list (list "match" "zz-chats-")))
+    (list-refresh! *chat-list*)
+    (list-goto-first-entry *chat-list*)
     (list one two)))
 
 (define (chats-test-names)
-  (filter string? (list-entries "*chats*")))
+  (filter string? (list-entries *chat-list*)))
 
 (define (chats-test-headings)
-  (filter ibuffer-heading? (list-entries "*chats*")))
+  (filter ibuffer-heading? (list-entries *chat-list*)))
 
 (define (chats-test-heading-labels)
   (map ibuffer-heading-label (chats-test-headings)))
@@ -71,17 +79,68 @@
     (check-equal! (chats-age-label (chats-activity-at "*zz-chats-stamped*")) "now" "just stamped")
     (check-equal! (chats-age-label (chats-activity-at "*zz-chats-never*")) "" "never stamped")))
 
-(deftest 'chats-is-the-ibuffer-table
-  "*chats* wears the chat mode built from the ibuffer template, over the chat scope"
+(deftest 'the-chat-list-is-one-application
+  "*chat-list* wears the chat list mode built from the ibuffer template, over the chat scope"
   (lambda ()
     (chats-test-open! 'group 'name)
-    (check-equal! (buffer-local "*chats*" 'mode-name) "ichat-mode" "the mode")
-    (check-equal! (buffer-local "*chats*" 'ibuffer-scope) 'chats "the scope by name")
-    (check-true! (ibuffer-view? "*chats*") "a registered view")
+    (check-equal! (buffer-local *chat-list* 'mode-name) "chat-list-mode" "the mode")
+    (check-equal! (buffer-local *chat-list* 'ibuffer-scope) 'chat-list "the scope by name")
+    (check-true! (ibuffer-view? *chat-list*) "a registered view")
     (check-equal! (ibuffer-row-kind "*zz-chats-a*") 'chat "a chat row wears the chat kind")
-    (check-contains! (buffer-text "*chats*") "Chats" "the title")
-    (check-contains! (buffer-text "*chats*") "3 chats" "the noun is chat")
-    (check-equal! (list-key-lines "*chats*") '() "no key bar stands over the rows")
+    (check-contains! (buffer-text *chat-list*) "Chats" "the title")
+    (check-contains! (buffer-text *chat-list*) "3 chats" "the noun is chat")
+    (check-equal! (list-key-lines *chat-list*) '() "no key bar stands over the rows")
+    (chats-test-reset!)))
+
+(deftest 'the-application-arrives-in-its-own-group
+  "one arrival: the chat list's own group, two panes, and the focus on the list"
+  (lambda ()
+    (chats-test-open! 'group 'name)
+    (check-equal! (frame-group) (chat-list-group) "the frame stands in the chat list's group")
+    (check-true! (and (member (chat-list-group) (buffer-groups *chat-list*)) #t)
+                 "and the buffer belongs to it")
+    (check-equal! (group-pinned) (chat-list-group)
+                  "the group is pinned, so previewing a chat does not move the frame")
+    (check-equal! (length (window-list)) 2 "two panes: the list and the preview")
+    (check-equal! (window-buffer (active-window)) *chat-list*
+                  "the application holds the focus")
+    (check-true! (and (chat-list-preview-window) #t) "the preview pane is the other one")
+    (chats-test-reset!)))
+
+(deftest 'the-row-at-point-previews-its-chat
+  "looking is free: the row under the cursor shows in the preview pane"
+  (lambda ()
+    (chats-test-open! 'none 'name)
+    (chat-list-preview!)
+    (check-equal! (window-buffer (chat-list-preview-window)) (list-current *chat-list*)
+                  "the preview pane shows the row at point")
+    (chats-test-reset!)))
+
+(deftest 'the-resting-list-is-flat-and-most-recent-first
+  "no sections at rest: the order you last used a chat is the order it arrives in"
+  (lambda ()
+    (chats-test-reset!)
+    (chats-test-chat! "*zz-chats-a*" #f)
+    (chats-test-chat! "*zz-chats-b*" #f)
+    (chats-test-chat! "*zz-chats-c*" #f)
+    (run-command "chat-list")
+    (check-equal! (ibuffer-grouping *chat-list*) 'none "flat, every time")
+    (check-equal! (ibuffer-sort *chat-list*) 'recent "most recently used first")
+    (list-set-filters! *chat-list* (list (list "match" "zz-chats-")))
+    (list-refresh! *chat-list*)
+    (check-equal! (chats-test-heading-labels) '() "no section stands over the rows")
+    (check-equal! (length (chats-test-names)) 3 "every chat is a row of its own")
+    (chats-test-reset!)))
+
+(deftest 'the-application-leaves-the-way-it-arrived
+  "q puts the frame back where it stood and leaves the pin behind"
+  (lambda ()
+    (let ((from (frame-group)))
+      (chats-test-open! 'none 'name)
+      (run-command "chat-list-quit")
+      (check-equal! (frame-group) from "the frame is back in the group you came from")
+      (check-false! (group-pinned) "the application's pin is gone")
+      (check-false! (window-showing *chat-list*) "and the list is not left standing"))
     (chats-test-reset!)))
 
 (deftest 'chats-sections-by-group
@@ -98,8 +157,8 @@
                       "its members, by name"))
       (check-equal! (chats-test-names) '("*zz-chats-a*" "*zz-chats-b*" "*zz-chats-c*")
                     "the rows follow their headings")
-      (check-contains! (buffer-text "*chats*") "3 chats" "the meta counts the table's chats")
-      (check-contains! (buffer-text "*chats*") "idle" "a chat with no runtime is idle")
+      (check-contains! (buffer-text *chat-list*) "3 chats" "the meta counts the table's chats")
+      (check-contains! (buffer-text *chat-list*) "idle" "a chat with no runtime is idle")
       (chats-test-reset!))))
 
 (deftest 'chats-size-is-the-context
@@ -108,8 +167,8 @@
     (chats-test-open! 'group 'name)
     (buffer-set-local! "*zz-chats-a*" 'chat-context-used 100)
     (buffer-set-local! "*zz-chats-b*" 'chat-context-used 5000)
-    (ibuffer-set-sort! 'size "*chats*")
-    (check-equal! (ibuffer-sort "*chats*") 'size "the sort is on the list buffer")
+    (ibuffer-set-sort! 'size *chat-list*)
+    (check-equal! (ibuffer-sort *chat-list*) 'size "the sort is on the list buffer")
     (check-equal! (ibuffer-heading-members (car (chats-test-headings)))
                   '("*zz-chats-b*" "*zz-chats-a*") "b holds more")
     (check-equal! (ibuffer-heading-bytes (car (chats-test-headings))) 5100 "the heading sums")
@@ -120,29 +179,48 @@
   "a folded heading stands for its rows and stays a row of its own"
   (lambda ()
     (let ((ids (chats-test-open! 'group 'name)))
-      (ibuffer-toggle-fold! (string-append "group:" (car ids)) "*chats*")
+      (ibuffer-toggle-fold! (string-append "group:" (car ids)) *chat-list*)
       (check-equal! (chats-test-names) '("*zz-chats-c*") "group one's rows are gone")
       (let ((folded (car (chats-test-headings))))
         (check-true! (ibuffer-heading-folded? folded) "the heading is folded")
-        (check-true! (list-selectable? "*chats*" folded) "and selectable")
+        (check-true! (list-selectable? *chat-list* folded) "and selectable")
         (check-equal! (ibuffer-heading-count folded) 2 "it still counts its members"))
-      (ibuffer-toggle-fold! (string-append "group:" (car ids)) "*chats*")
+      (ibuffer-toggle-fold! (string-append "group:" (car ids)) *chat-list*)
       (check-equal! (length (chats-test-names)) 3 "unfolded, the rows return")
       (chats-test-reset!))))
 
 (deftest 'chats-sections-by-state
-  "grouped by mode, the chats with no runtime sit under idle; the command cycles the grouping"
+  "the grouping cycles none, group, state, model; a chat with no runtime sits under idle"
   (lambda ()
-    (chats-test-open! 'group 'name)
-    (run-command "ibuffer-toggle-grouping")
-    (check-equal! (ibuffer-grouping "*chats*") 'mode "group then mode")
+    (chats-test-open! 'none 'name)
+    (run-command "chat-list-regroup")
+    (check-equal! (ibuffer-grouping *chat-list*) 'group "none then group")
+    (run-command "chat-list-regroup")
+    (check-equal! (ibuffer-grouping *chat-list*) 'state "group then state")
     (check-equal! (chats-test-heading-labels) '("idle") "one section: idle")
     (check-equal! (length (chats-test-names)) 3 "every chat is idle")
-    (run-command "ibuffer-toggle-grouping")
-    (check-equal! (ibuffer-grouping "*chats*") 'directory "mode then directory")
-    (run-command "ibuffer-toggle-grouping")
-    (check-equal! (ibuffer-grouping "*chats*") 'group "directory then group")
+    (run-command "chat-list-regroup")
+    (check-equal! (ibuffer-grouping *chat-list*) 'model "state then model")
+    (check-equal! (chats-test-heading-labels) '("no model") "a chat with no model says so")
+    (run-command "chat-list-regroup")
+    (check-equal! (ibuffer-grouping *chat-list*) 'none "model then none, and round again")
     (check-equal! (ibuffer-grouping "*ibuffer*") 'group "the *ibuffer* view keeps its own")
+    (chats-test-reset!)))
+
+(deftest 'a-word-nobody-titled-finds-its-chat
+  "the filter line reads the text of every alive chat, and the row shows the words it found"
+  (lambda ()
+    (chats-test-open! 'none 'name)
+    (buffer-append! "*zz-chats-c*" "we settled on the zzhaystack budget in the end")
+    (run-command "chat-list-filter")
+    (minibuffer-change! "zzhaystack")
+    (check-equal! (filter (lambda (b) (string-prefix? "*zz-chats-" b)) (chats-test-names))
+                  '("*zz-chats-c*") "only the chat that says the word")
+    (check-contains! (chat-list-hit "*zz-chats-c*") "zzhaystack"
+                     "the row shows the words around the hit")
+    (minibuffer-cancel!)
+    (check-false! (chat-list-hit "*zz-chats-c*") "closing the filter forgets the search")
+    (check-equal! (list-query *chat-list*) "" "and the list stands unnarrowed")
     (chats-test-reset!)))
 
 (deftest 'chats-narrowing-reads-the-summary
@@ -150,11 +228,11 @@
   (lambda ()
     (chats-test-open! 'group 'name)
     (buffer-set-local! "*zz-chats-c*" 'chat-summary "Narrowed the retry budget to one lane.")
-    (list-set-filters! "*chats*" (list (list "match" "retry budget")))
-    (list-refresh! "*chats*")
+    (list-set-filters! *chat-list* (list (list "match" "retry budget")))
+    (list-refresh! *chat-list*)
     (check-equal! (chats-test-names) '("*zz-chats-c*") "only the chat whose summary matches")
     (check-equal! (chats-test-heading-labels) '("zz-chats-two") "under its group")
-    (check-contains! (buffer-text "*chats*") "Narrowed the retry budget" "the row leads with the sentence")
+    (check-contains! (buffer-text *chat-list*) "Narrowed the retry budget" "the row leads with the sentence")
     (chats-test-reset!)))
 
 (deftest 'chat-prompt-splits-by-group
