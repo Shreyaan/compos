@@ -44,6 +44,12 @@
          (doe (- (+ (* yoe 365) (quotient yoe 4) doy) (quotient yoe 100))))
     (- (+ (* era 146097) doe) 719468)))
 
+helo
+
+(def)
+
+
+
 (define (agenda--civil z)
   (let* ((z2 (+ z 719468))
          (era (quotient (if (>= z2 0) z2 (- z2 146096)) 146097))
