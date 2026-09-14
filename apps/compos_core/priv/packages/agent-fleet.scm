@@ -240,28 +240,6 @@
                 (if (equal? (chat-row-status b) 'needs_attention) "alert" "accent"))
         'modified? (lambda (b) #f)))
 
-;; a saved conversation is a file no buffer holds
-(ibuffer-kind! 'archived
-  (list 'when? (lambda (b) (and (not (buffer-known? b)) (string-suffix? ".chat" b)))
-        'dot (lambda (b) (list "." "faint"))
-        'name (lambda (b) (list "" (chats-archived-title b)))
-        'size (lambda (b) #f)
-        'label (lambda (b) "archived")
-        'match (lambda (b) (string-append (chats-archived-title b) " archived"))
-        'face (lambda (b) "dim")
-        'modified? (lambda (b) #f)))
-
-(ibuffer-scope! 'chats (lambda () (chat-list-bufs)))
-
-;; No key bar over the rows: ? shows every key with the mode's own
-;; words, the same as the buffers table.
-(ibuffer-view! *chat-list-buffer* 'sort 'recent)
-
-;; the table's rows, then the saved conversations as the last section
-(define (chats-rows buf)
-  (append (ibuffer-rows buf)
-          (ibuffer-section buf "archived" "archived" (chats-archived-rows) "faint" #t)))
-
 (effects! '(write))
 
 ;; A streaming turn hands the fleet an event batch many times a second,
