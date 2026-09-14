@@ -12,6 +12,7 @@
 ;;;
 ;;;   (define-diff-backend "git"
 ;;;     (list 'read    (lambda (buf cb) ...)     ; cb gets (SECTIONS COMMITS)
+;;;           'head    (lambda (buf cb) ...)     ; cb gets the HEAD plist
 ;;;           'resolve (lambda (buf file) ...)   ; absolute path, for RET
 ;;;           'show    (lambda (buf commit) ...))) ; open one revision
 ;;;
@@ -32,6 +33,7 @@
 ;;;   'diff-sections     the section labels of the last render
 ;;;   'diff-overrides    (KEY STATUS) the text cannot express ("untracked")
 ;;;   'diff-commits      (LINE SHA SHORT DATE AUTHOR SUBJECT) per commit row
+;;;   'diff-head         ('branch B|#f 'detached? BOOL 'sha S 'subject S)
 ;;;   'diff-seen         every card key already shown once
 ;;;   'diff-open-cards   the card keys whose card is open
 ;;;   'diff-closed-hunks the hunk keys the reader folded
@@ -434,6 +436,22 @@
   (or (buffer-local buf 'diff-tab)
       (if (and (null? visible) (pair? commits)) "history" "changes")))
 
+;; Magit leads with the state of HEAD, so this does too: the branch you are
+;; on and the commit you are at, or that you are on no branch at all. A
+;; detached head is the one thing a reader must not have to work out from
+;; silence, so it says so in words. Nothing shows until the backend answers.
+(define (diff--head-block buf)
+  (let ((h (buffer-local buf 'diff-head)))
+    (if (not (pair? h)) '()
+      (let* ((branch (diff--get h 'branch))
+             (sha (or (diff--get h 'sha) ""))
+             (subject (or (diff--get h 'subject) ""))
+             (where (if (string? branch) branch "detached"))
+             (at (string-trim (string-append sha " " subject))))
+        (list (component 'ui/kv
+                (list 'class "diff-head"
+                      'pairs (list (list "Head" (string-trim (string-append where "  " at))))))))))) 
+
 (define (diff--tabs-block active change-count commit-count)
   (component 'ui/tabs
     (list 'class "diff-tabs"
@@ -465,8 +483,9 @@
                      (list (component 'ui/empty '(text "no changes" class "diff-empty")))
                      (diff--section-blocks buf visible))))))
     (append
-      (list (diff--keymap-block)
-            (diff--tabs-block active (length visible) (length commits)))
+      (list (diff--keymap-block))
+      (diff--head-block buf)
+      (list (diff--tabs-block active (length visible) (length commits)))
       content)))
 
 ;; everything above the first card or section header: a revision's own
@@ -704,7 +723,15 @@
     (if (or (not p) (equal? p "")) #f p)))
 
 (define (diff-refresh buf)
-  (let ((read (diff--backend-fn buf 'read)))
+  (let ((read (diff--backend-fn buf 'read))
+        (head (diff--backend-fn buf 'head)))
+    ;; the head answers on its own schedule and draws on its own: it is one
+    ;; line about the repo, and it must not wait behind the whole diff
+    (when head
+      (head buf (lambda (h)
+                  (when (buffer-known? buf)
+                    (buffer-set-local! buf 'diff-head h)
+                    (diff--reblock! buf)))))
     (when read
       ;; never inline: the Session draws the editor, and the backend answers
       ;; in its own time
