@@ -7610,6 +7610,17 @@
         (cons (car (reverse visible)) (take-n visible (- (length visible) 1)))
         visible)))
 
+(define (layout-target-arrange! panes focus)
+  (let ((target (layout-target))
+        (token (if (equal? focus (window-buffer (active-window)))
+                   (layout-focus-token) (list focus 0))))
+    (when (pair? panes)
+      (if (equal? target 'adaptive)
+          (tile-adaptive-windows! panes)
+          (tile-windows! target panes))
+      (layout-focus-restore! token)
+      panes)))
+
 (define (layout-focus-token)
   (let ((name (window-buffer (active-window))))
     (let loop ((rows (window-list)) (occurrence 0))
