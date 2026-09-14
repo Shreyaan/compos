@@ -1982,10 +1982,10 @@
 ;; Optional semantic projection of the same selectable rows. Text offsets stay
 ;; authoritative for commands, search, marks, and per-window selection.
 ;; Field boundaries come from the same layout operation that wrote the text.
-(define (list-composml-fields buf row start)
-  (let ((fields (list-opt buf 'composml-fields)))
+(define (list-composml-fields buf row start &optional ctx fields)
+  (let ((fields (or fields (list-opt buf 'composml-fields))))
     (if (not fields) '()
-      (let* ((ctx (list-row-ctx buf))
+      (let* ((ctx (or ctx (list-row-ctx buf)))
              (prefix (+ (string-byte-length (if (list-ctx-marks? ctx) (list-mark-of buf row ctx) "")) 1))
              (laid (list-lay-out (car (list-row-cells buf row ctx))
                                 (car (list-ctx-column-lines ctx)) #t)))
@@ -2005,20 +2005,25 @@
     (unless (list-opt buf 'composml)
       (desktop-skip! buf 'render-text-root)
       (desktop-skip! buf 'render-records)
-      (list-set-locals! buf
-        (list 'render-text-root (root buf)
-              'render-records
-              (let loop ((rs rows) (offsets (list-offsets buf)) (out '()))
-                (if (or (null? rs) (null? offsets)) (reverse out)
-                  (let* ((row (car rs)) (start (car offsets))
-                         (size (fold (lambda (n ln) (+ n (string-byte-length (car ln)) 1))
-                                     0 (list-row-lines buf row)))
-                         (block (record buf row)))
-                    (loop (cdr rs) (cdr offsets)
-                      (cons (list start (+ start size)
-                              (append (list 'fields (list-composml-fields buf row start)
-                                            'attrs (append
-                                (list (list "record-id" (let ((key (list-key buf row)))
+      ;; the draw's own context and field fn, read once: a row that asked
+      ;; for them itself cost this pass twice its time (docs/LISTS.md).
+      (let* ((ctx (list-row-ctx buf))
+             (fields (list-opt buf 'composml-fields))
+             (key-of (list-ctx-key ctx)))
+        (list-set-locals! buf
+          (list 'render-text-root (root buf)
+                'render-records
+                (let loop ((rs rows) (offsets (list-offsets buf)) (out '()))
+                  (if (or (null? rs) (null? offsets)) (reverse out)
+                    (let* ((row (car rs)) (start (car offsets))
+                           (size (fold (lambda (n ln) (+ n (string-byte-length (car ln)) 1))
+                                       0 (list-row-lines buf row ctx)))
+                           (block (record buf row)))
+                      (loop (cdr rs) (cdr offsets)
+                        (cons (list start (+ start size)
+                                (append (list 'fields (if fields (list-composml-fields buf row start ctx fields) '())
+                                              'attrs (append
+                                (list (list "record-id" (let ((key (if key-of (key-of buf row) row)))
                                   (if (string? key) key (value->string key)))))
                                 (or (plist-get block 'attrs) '()))) block)) out))))))))))
 

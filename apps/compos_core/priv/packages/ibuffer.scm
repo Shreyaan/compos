@@ -471,9 +471,18 @@
                          (cond ((null? gs) #f)
                                ((member (car gs) ms) (car gs))
                                (else (loop (cdr gs))))))))
-         (owned (map (lambda (row) (list (owner-of row) row)) rows))
-         (of (lambda (id)
-               (map cadr (filter (lambda (o) (equal? (car o) id)) owned))))
+         ;; one pass fills every pail, in row order. A filter per group
+         ;; walked all the rows once per group: 50 groups over 300 rows on
+         ;; an open of the switcher.
+         (pails (let fill ((rs rows) (acc '()))
+                  (if (null? rs) acc
+                    (let* ((row (car rs)) (id (or (owner-of row) 'none))
+                           (e (assoc id acc)))
+                      (fill (cdr rs)
+                            (if e (begin (set-cdr! e (cons row (cdr e))) acc)
+                              (cons (cons id (list row)) acc)))))))
+         (of (lambda (id) (let ((e (assoc (or id 'none) pails)))
+                            (if e (reverse (cdr e)) '()))))
          (buckets (map (lambda (id)
                          (let ((ms (of id)))
                            (and (pair? ms)
