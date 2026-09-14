@@ -498,6 +498,8 @@
           'children
           (cons
             (list 'tag "div" 'class "diff-card-head" 'click key
+                  'lines (list (diff--get c 'start) (diff--get c 'start))
+                  'mark "current"
                   'segs (append
                           (list (list "diff-caret" (if open? "▾" "▸"))
                                 (list "diff-status" (diff--get c 'status))
@@ -1162,6 +1164,7 @@
 .diff-empty { font-family: var(--font-mono); font-size: 12px; padding: 12px; color: var(--dim-fg, #8a857a); }
 .diff-card { margin: 0 0 10px; border-radius: 7px; border: 1px solid var(--diff-file-fg, rgba(0,0,0,0.14)); overflow: hidden; }
 .diff-card.current { box-shadow: 0 0 0 2px var(--accent-fg, #26356b) inset; }
+.diff-card-head.current { background: var(--hl-line-bg, rgba(38,53,107,0.12)); box-shadow: inset 3px 0 0 var(--accent-fg, #26356b); color: var(--accent-fg, inherit); }
 .diff-card-head { display: flex; align-items: baseline; gap: 8px; cursor: pointer; padding: 6px 10px; user-select: none; font-family: var(--font-mono); font-size: 12px; background: var(--hl-line-bg, rgba(0,0,0,0.03)); }
 .diff-caret { color: var(--dim-fg, #8a857a); width: 1ch; }
 .diff-status { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim-fg, #8a857a); min-width: 8ch; }

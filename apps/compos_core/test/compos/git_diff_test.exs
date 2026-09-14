@@ -418,7 +418,18 @@ defmodule Compos.GitDiffTest do
 
     # n/p become file navigation when no hunk is visible.
     press("n")
-    assert line_of(buf, Buffer.point(buf)) == Enum.at(cs, 1).start
+    selected_card = Enum.at(cs, 1)
+    assert line_of(buf, Buffer.point(buf)) == selected_card.start
+
+    selected_block =
+      blocks(buf)
+      |> Enum.flat_map(&walk_blocks/1)
+      |> Enum.find(&(&1.anchor == "card-" <> selected_card.key))
+
+    selected_head = hd(selected_block.children)
+    assert selected_head.mark == "current"
+    assert selected_head.lines == [selected_card.start, selected_card.start]
+
     press("TAB")
     assert Enum.at(cs, 1).key in Buffer.get_local(buf, "diff-open-cards")
 
