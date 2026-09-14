@@ -33,6 +33,7 @@
       (buffer-set-local! b 'special #f))
     (list t--sw-first t--sw-second t--sw-third))
   (set! *group-records* '())
+  (set! *group-mru* '())
   (set! *group-next-id* 0)
   (layout-target-set! #f)
   (set-frame-local! 'current-group #f)
@@ -1408,9 +1409,9 @@
       (split-window! 'h 0.5)
       (other-window!)
       (switch-to-buffer! t--sw-second)
-      (mru-note-group! older)
-      (mru-note-group! recent)
-      (mru-note-group! here)
+      (group-mru-note! older)
+      (group-mru-note! recent)
+      (group-mru-note! here)
 
       (check-true! (group-visible-homogeneous? here) "the shared predicate sees one group")
       (run-command "group-switch")
@@ -1421,6 +1422,28 @@
                    "the group you stand in is a row too: the list shows them all")
       (check-true! (< (t--sw-at "zzsw-older") (t--sw-at "zzsw-here"))
                    "and it comes last: it never leads"))
+    (t--sw-done!)))
+
+(deftest 'group-mru-outranks-the-shared-history-ring
+  "groups keep their own recency cache, so buffer churn cannot evict them"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((older (group-record-create! "zzsw-cache-older"))
+          (recent (group-record-create! "zzsw-cache-recent")))
+      (group-mru-note! older)
+      (group-mru-note! recent)
+      (check-equal! (take-n (group-mru-ids) 2) (list recent older)
+                    "the cache holds group ids alone, newest first")
+      ;; the shared ring still reads (recent older). Only the cache says
+      ;; otherwise, and the cache is what the switcher must follow.
+      (set! *group-mru* (list older recent))
+      (check-equal! (filter (lambda (id) (member id (list older recent)))
+                            (group-ids-mru-all))
+                    (list older recent)
+                    "group-ids-mru-all follows the cache, not the ring")
+      (group-record-delete! older)
+      (check-false! (and (member older (group-mru-ids)) #t)
+                    "a deleted group leaves the cache"))
     (t--sw-done!)))
 
 (deftest 'group-switch-puts-the-current-buffers-groups-first-in-a-mixed-frame
@@ -1438,9 +1461,9 @@
       (split-window! 'h 0.5)
       (other-window!)
       (t--sw-show-here! t--sw-second)
-      (mru-note-group! target)
-      (mru-note-group! recent)
-      (mru-note-group! here)
+      (group-mru-note! target)
+      (group-mru-note! recent)
+      (group-mru-note! here)
 
       (check-false! (group-visible-homogeneous? here) "the shared predicate sees the detour")
       (run-command "group-switch")
@@ -1543,8 +1566,8 @@
       (t--sw-show-here! t--sw-second)
       (t--sw-show-here! t--sw-first)
       (set-frame-local! 'current-group here)
-      (mru-note-group! there)
-      (mru-note-group! here)
+      (group-mru-note! there)
+      (group-mru-note! here)
 
       (run-command "group-switch")
       (t--sw-type! "zzsw-peek-there")

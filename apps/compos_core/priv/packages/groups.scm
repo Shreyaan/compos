@@ -20,6 +20,14 @@
 
 
 (defvar '*group-records* '())
+
+;; Groups are first class, so they keep their own recency cache. The shared
+;; mru-list is one ring for buffers and groups together: the buffer visits
+;; between two group switches push every older group off the end, and the
+;; ring is rebuilt each boot from the buffer history, which carries no group
+;; marks at all. This list holds group ids only, and it persists.
+(defvar '*group-mru* '())
+(define *group-mru-max* 500)
 (defvar '*group-next-id* 0)
 (define *group-colors* 6)              ; how many slots the group scale has
 
@@ -339,6 +347,7 @@
   (let ((id (group-resolve-id value)))
     (when id
       (group-frame-context-remove-id! id)
+      (set! *group-mru* (remove (lambda (x) (equal? x id)) *group-mru*))
       (set! *group-records*
         (remove (lambda (record) (equal? (group-record-id record) id))
                 *group-records*))
@@ -504,6 +513,12 @@
                 (car (cdr entry))))
             entry))
       *frame-locals*)))
+
+;; Registered before groups-v2, so it restores after it: the records are
+;; already in place when the cache lands.
+(persist-global! 'group-mru
+  (lambda () *group-mru*)
+  (lambda (saved) (when (list? saved) (set! *group-mru* saved))))
 
 (persist-global! 'group-frame-contexts
   group-frame-context-state
@@ -1241,7 +1256,7 @@
                         (chat-set-group! buf id)
                         (buffer-add-group-as! buf id role)))))
               (cdr (cdr spec)))
-            (when id (mru-note-group! id))
+            (when id (group-mru-note! id))
             (windows-shown-catchup!)
             panes)))))
 
@@ -1314,7 +1329,7 @@
           (set! *group-current-inhibit* #f)
           (set! *winner-inhibit* #f)
           (group-current-recalculate!)
-          (mru-note-group! id)
+          (group-mru-note! id)
           (windows-shown-catchup!)
           (message (string-append "Switched to group " (group-name id)))))))
 
@@ -1680,13 +1695,26 @@
   ;; this workspace only: the frame's own groups, and the unowned ones
   (filter group-here? (group-ids-mru-all)))
 
-(define (group-ids-mru-all)
+(define (group-mru-note! value)
+  (let ((id (group-resolve-id value)))
+    (when id
+      (set! *group-mru*
+            (take-n (cons id (remove (lambda (x) (equal? x id)) *group-mru*))
+                    *group-mru-max*))
+      (desktop-dirty!)
+      (mru-note-group! id))
+    id))
+
+;; the cached order, minus the groups that have since been deleted
+(define (group-mru-ids)
+  (filter (lambda (id) (and (group-record-by-id id) #t)) *group-mru*))
+
+;; the group marks left in the shared buffer/group ring. A group switched
+;; to before this cache existed is only found here.
+(define (group-mru-history-ids)
   (let loop ((rows (mru-list)) (found '()))
     (if (null? rows)
-        (let ((recent (reverse found)))
-          (append recent
-                  (filter (lambda (id) (not (member id recent)))
-                          (group-ids))))
+        (reverse found)
         (let* ((row (car rows))
                (id (and (equal? (car row) "group")
                         (group-resolve-id (car (cdr row))))))
@@ -1694,6 +1722,14 @@
                 (if (and id (not (member id found)))
                     (cons id found)
                     found))))))
+
+(define (group-ids-mru-all)
+  (let* ((cached (group-mru-ids))
+         (stream (filter (lambda (id) (not (member id cached)))
+                         (group-mru-history-ids)))
+         (recent (append cached stream)))
+    (append recent
+            (filter (lambda (id) (not (member id recent))) (group-ids)))))
 
 ;; The active groups: every group with an open buffer, in the order the
 ;; MRU gives (most recent first, then creation order). Derived from the
@@ -3706,7 +3742,7 @@
   (when (group-pinned) (set-frame-local! 'pinned-group id))
   (frame-group-label-refresh!)
   (group-layout-save! id)
-  (mru-note-group! id)
+  (group-mru-note! id)
   (windows-shown-catchup!))
 
 ;; The window half of a move, shared by both move paths: the selection
