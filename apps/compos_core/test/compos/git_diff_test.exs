@@ -173,10 +173,16 @@ defmodule Compos.GitDiffTest do
     # the mode composed the block tree; the header leads the content.
     blocks = Buffer.get_local(buf, "render-blocks")
     assert is_list(blocks) and blocks != []
-    [keymap, tabs, first_section | _] = pl(blocks)
+    shown = pl(blocks)
+    [keymap | _] = shown
     assert keymap.class == "diff-keymap"
-    assert tabs.class =~ "diff-tabs"
-    assert first_section.class == "c-section diff-section"
+    # the state of HEAD leads the view, magit style; it arrives on its own
+    # schedule, so find it by class, never by position
+    head = Enum.find(shown, &(is_binary(&1.class) and &1.class =~ "diff-head"))
+    assert head.text =~ ~r/^Head:/
+    tabs = Enum.find(shown, &(is_binary(&1.class) and &1.class =~ "diff-tabs"))
+    assert tabs
+    first_section = Enum.find(shown, &(&1.class == "c-section diff-section"))
     assert first_section.text =~ "Unstaged changes"
 
     Editor.set_window_buffer(buf)
