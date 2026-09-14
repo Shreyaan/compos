@@ -132,3 +132,24 @@ The editor marks shadowed bindings and your edits.
 The editor saves changes in `user-key-bindings` through customize.
 Each row has `(KEYMAP KEYS COMMAND WAS)`. A false `COMMAND` unbinds the
 key. `WAS` lets the editor restore the previous binding.
+
+## Layout selection
+
+`C-x l` opens the layout prefix. The next key selects a layout:
+
+| Key | Layout |
+| --- | --- |
+| `l` | Preview chooser |
+| `a` | Adaptive |
+| `2` | Two panes |
+| `c` | Columns |
+| `r` | Rows |
+| `g` | Grid |
+| `←` | Main pane on the left |
+| `→` | Main pane on the right |
+| `↑` | Main pane above |
+| `↓` | Main pane below |
+| `f` | Free layout |
+
+Arrow keys name the main pane's position.
+The chooser remains available through `M-x window-layout`.

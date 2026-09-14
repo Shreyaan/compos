@@ -27,7 +27,11 @@
 ;; ring is rebuilt each boot from the buffer history, which carries no group
 ;; marks at all. This list holds group ids only, and it persists.
 (defvar '*group-mru* '())
-(define *group-mru-max* 500)
+
+(defcustom 'group-mru-limit 50
+  "How many groups the recency cache remembers. Past the limit the oldest
+is forgotten and that group falls back to creation order in the switcher."
+  'group 'groups 'type 'number)
 (defvar '*group-next-id* 0)
 (define *group-colors* 6)              ; how many slots the group scale has
 
@@ -518,7 +522,8 @@
 ;; already in place when the cache lands.
 (persist-global! 'group-mru
   (lambda () *group-mru*)
-  (lambda (saved) (when (list? saved) (set! *group-mru* saved))))
+  (lambda (saved)
+    (when (list? saved) (set! *group-mru* (take-n saved group-mru-limit)))))
 
 (persist-global! 'group-frame-contexts
   group-frame-context-state
@@ -1700,7 +1705,7 @@
     (when id
       (set! *group-mru*
             (take-n (cons id (remove (lambda (x) (equal? x id)) *group-mru*))
-                    *group-mru-max*))
+                    group-mru-limit))
       (desktop-dirty!)
       (mru-note-group! id))
     id))

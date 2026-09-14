@@ -261,6 +261,8 @@
     (when (tile-visible-adaptive!)
       (layout-target-set! 'adaptive))))
 
+(define-key "layout-map" "a" "window-layout-adaptive")
+
 ;;; --- autolayout: one main pane, the rest beside it ---------------------------
 ;;; The StumpWM shape. The selected window's buffer is the main pane on
 ;;; window-layout-main-side, with window-layout-main-ratio of the frame.

@@ -8822,6 +8822,10 @@
   (window-layout-command 'grid))
 (define-command "window-layout-main-right" "Show a main pane and the other buffers on the right"
   (window-layout-command 'main-right))
+(define-command "window-layout-main-left" "Show a main pane and the other buffers on the left"
+  (window-layout-command 'main-left))
+(define-command "window-layout-main-top" "Show a main pane and the other buffers above"
+  (window-layout-command 'main-top))
 (define-command "window-layout-main-bottom" "Show a main pane and the other buffers below"
   (window-layout-command 'main-bottom))
 
@@ -8874,7 +8878,8 @@
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("window-layout" "window-layout-free" "window-layout-two-pane"
     "window-layout-columns" "window-layout-rows"
-    "window-layout-grid" "window-layout-main-right" "window-layout-main-bottom"))
+    "window-layout-grid" "window-layout-main-right" "window-layout-main-bottom"
+    "window-layout-main-left" "window-layout-main-top"))
 
 ;; The engine's entry point: a mode turned on in BUF. Arrange the frame only
 ;; when BUF is the buffer the user is looking at.
@@ -14102,7 +14107,20 @@
 (global-set-key "C-x 1" "delete-other-windows")
 (global-set-key "C-x e" "window-eat")
 (global-set-key "C-x o" "other-window")
-(global-set-key "C-x l" "window-layout")
+;; Layout selection has its own prefix; l retains the preview chooser.
+(bind-prefix! "ctl-x-map" "l" "layout-map")
+(for-each
+  (lambda (binding) (define-key "layout-map" (car binding) (cadr binding)))
+  '(("l" "window-layout")
+    ("2" "window-layout-two-pane")
+    ("c" "window-layout-columns")
+    ("r" "window-layout-rows")
+    ("g" "window-layout-grid")
+    ("f" "window-layout-free")
+    ("<left>" "window-layout-main-right")
+    ("<right>" "window-layout-main-left")
+    ("<up>" "window-layout-main-bottom")
+    ("<down>" "window-layout-main-top")))
 (global-set-key "C-c p" "popup-buffer")
 ;; Cmd-arrows move the focus; Cmd-Shift-arrows swap the two panes
 (focus-default-keybindings 'super)

@@ -46,6 +46,33 @@ defmodule Compos.LayoutPolicyTest do
     end
   end
 
+  for target <- [
+        "two-pane",
+        "columns",
+        "rows",
+        "grid",
+        "main-left",
+        "main-right",
+        "main-top",
+        "main-bottom"
+      ] do
+    test "window-layout-#{target} selects its target through key dispatch", %{frame: frame} do
+      assert {:ok, _} =
+               Session.eval(
+                 """
+                 (lp-start!) (lp-buffer! "b")
+                 (local-set-key "<f9>" "window-layout-#{unquote(target)}")
+                 """,
+                 frame
+               )
+
+      KeyDispatch.handle_key(frame, "<f9>")
+      assert {:ok, unquote(target)} = Session.eval("(layout-target)", frame)
+      assert {:ok, "2"} = Session.eval("(length (window-list))", frame)
+      assert {:ok, "\"zz-lp-a\""} = Session.eval("(current-buffer)", frame)
+    end
+  end
+
   for side <- ["a", "b"] do
     test "new chat replaces selected #{side} pane without rebuilding windows", %{frame: frame} do
       assert {:ok, _} =
@@ -203,7 +230,8 @@ defmodule Compos.LayoutPolicyTest do
              )
 
     assert {:ok, before} = Session.eval("(map cdr (window-rects))", frame)
-    for key <- ["C-x", "l", "C-g"], do: KeyDispatch.handle_key(frame, key)
+    assert {:ok, _} = Session.eval(~s|(local-set-key "<f9>" "window-layout")|, frame)
+    for key <- ["<f9>", "C-g"], do: KeyDispatch.handle_key(frame, key)
     assert {:ok, ^before} = Session.eval("(map cdr (window-rects))", frame)
     assert {:ok, "rows"} = Session.eval("(layout-target)", frame)
   end
@@ -246,7 +274,8 @@ defmodule Compos.LayoutPolicyTest do
              )
 
     assert {:ok, before} = Session.eval("(map cdr (window-rects))", frame)
-    for key <- ["C-x", "l", "C-n"], do: KeyDispatch.handle_key(frame, key)
+    assert {:ok, _} = Session.eval(~s|(local-set-key "<f9>" "window-layout")|, frame)
+    for key <- ["<f9>", "C-n"], do: KeyDispatch.handle_key(frame, key)
     assert {:ok, "2"} = Session.eval("(length (window-list))", frame)
     KeyDispatch.handle_key(frame, "C-n")
     assert {:ok, "3"} = Session.eval("(length (window-list))", frame)
@@ -272,7 +301,8 @@ defmodule Compos.LayoutPolicyTest do
   test "hidden group chat previews in rows and fills a user split", %{frame: frame} do
     assert {:ok, _} = Session.eval("(lp-start!) (group-chat (frame-group))", frame)
     assert {:ok, before} = Session.eval("(map cdr (window-rects))", frame)
-    for key <- ["C-x", "l", "C-n", "C-n", "C-n"], do: KeyDispatch.handle_key(frame, key)
+    assert {:ok, _} = Session.eval(~s|(local-set-key "<f9>" "window-layout")|, frame)
+    for key <- ["<f9>", "C-n", "C-n", "C-n"], do: KeyDispatch.handle_key(frame, key)
 
     assert {:ok, "()"} =
              Session.eval(
@@ -316,7 +346,8 @@ defmodule Compos.LayoutPolicyTest do
              )
 
     assert {:ok, before} = Session.eval("(map cdr (window-rects))", frame)
-    for key <- ["C-x", "l", "C-n"], do: KeyDispatch.handle_key(frame, key)
+    assert {:ok, _} = Session.eval(~s|(local-set-key "<f9>" "window-layout")|, frame)
+    for key <- ["<f9>", "C-n"], do: KeyDispatch.handle_key(frame, key)
 
     assert {:ok, "()"} =
              Session.eval(
@@ -340,7 +371,8 @@ defmodule Compos.LayoutPolicyTest do
 
     KeyDispatch.handle_key(frame, "C-g")
     assert {:ok, ^before} = Session.eval("(map cdr (window-rects))", frame)
-    for key <- ["C-x", "l", "C-n", "RET"], do: KeyDispatch.handle_key(frame, key)
+    assert {:ok, _} = Session.eval(~s|(local-set-key "<f9>" "window-layout")|, frame)
+    for key <- ["<f9>", "C-n", "RET"], do: KeyDispatch.handle_key(frame, key)
 
     assert {:ok, "#t"} =
              Session.eval(
