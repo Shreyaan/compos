@@ -437,8 +437,20 @@ a{color:var(--accent);text-decoration:none}
      (if note (string-append "<div class='note'><h2>Your note</h2>" note "</div>") "")
      "</div>")))
 
+(define (amz-page-title row)
+  (let ((title (amz-clip (string-trim (amz-replace (or (plist-get row 'title) "") "*" "")) 48)))
+    (if (equal? title "") (string-append "amazon:" (plist-get row 'asin)) title)))
+
+;; two products can share the first 48 characters of a title; the second one
+;; keeps its ASIN, so no page is ever shown under another product's name
 (define (amazon-detail-buffer row)
-  (string-append "*amazon:" (plist-get row 'asin) "*"))
+  (let* ((base (string-append "*" (amz-page-title row) "*"))
+         (mine (plist-get row 'asin))
+         (held (let ((r (and (buffer-exists? base) (buffer-local base 'amazon-row))))
+                 (and r (plist-get r 'asin)))))
+    (if (or (not held) (equal? held mine))
+        base
+        (string-append "*" (amz-page-title row) " " mine "*"))))
 
 (define (amazon-render-detail! buf row)
   (unless (buffer-exists? buf) (buffer-create buf))
@@ -448,7 +460,7 @@ a{color:var(--accent);text-decoration:none}
         (buffer-replace! buf old new)
         (buffer-append! buf new)))
   (buffer-set-local! buf 'amazon-row row)
-  (buffer-set-local! buf 'amazon-title (amz-clip (plist-get row 'title) 40))
+  (buffer-set-local! buf 'amazon-title (amz-page-title row))
   (unless (buffer-derived-mode? buf "amazon-detail-mode")
     (with-current-buffer buf (lambda () (set-mode! "amazon-detail-mode"))))
   (buffer-set-local! buf 'preview-renderer "html")
@@ -784,6 +796,11 @@ a{color:var(--accent);text-decoration:none}
 ;; a kept page takes the product's name, not a number
 (detail-name! "amazon-detail-mode"
   (lambda (buf) (string-append "*" (or (buffer-local buf 'amazon-title) "amazon") "*")))
+
+;; the listing and every page it opens wear the Amazon mark
+(mode-icon! "amazon-mode" "")
+(mode-icon! "amazon-detail-mode" "")
+
 
 ;;; --- the layout ----------------------------------------------------------
 ;;; Three panes -- the group's chat, the listing, the page -- handed to the

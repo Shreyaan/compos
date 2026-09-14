@@ -404,10 +404,23 @@ a{color:var(--accent);text-decoration:none}
 
 (define (li-thread? row) (equal? (plist-get row 'kind) 'thread))
 
+(define (li-clip s n) (if (> (string-length s) n) (string-trim (substring s 0 n)) s))
+
+;; the page is named after what it shows, so the buffer reads as its title
+(define (li-page-title row)
+  (let ((name (li-clip (string-trim (li--replace (or (plist-get row 'name) "") "*" "")) 48)))
+    (if (equal? name "") (string-append "linkedin:" (li-key row)) name)))
+
+;; two rows can carry the same title; the second one keeps its key, so no
+;; page is ever shown under another row's name
 (define (linkedin-detail-buffer row)
-  (if (li-thread? row)
-      (string-append "*linkedin:msg:" (li-msg-slug (plist-get row 'id)) "*")
-      (string-append "*linkedin:" (plist-get row 'id) "*")))
+  (let* ((base (string-append "*" (li-page-title row) "*"))
+         (mine (li-key row))
+         (held (let ((r (and (buffer-exists? base) (buffer-local base 'linkedin-row))))
+                 (and r (li-key r)))))
+    (if (or (not held) (equal? held mine))
+        base
+        (string-append "*" (li-page-title row) " " mine "*"))))
 
 ;; the buttons route by the row's KEY, never its id: a conversation urn is
 ;; base64, and a preview link splits on the slash base64 may contain
@@ -481,7 +494,7 @@ a{color:var(--accent);text-decoration:none}
         (buffer-replace! buf old new)
         (buffer-append! buf new)))
   (buffer-set-local! buf 'linkedin-row row)
-  (buffer-set-local! buf 'linkedin-title (plist-get row 'name))
+  (buffer-set-local! buf 'linkedin-title (li-page-title row))
   (unless (buffer-derived-mode? buf "linkedin-detail-mode")
     (with-current-buffer buf (lambda () (set-mode! "linkedin-detail-mode"))))
   (buffer-set-local! buf 'preview-renderer "html")
@@ -783,6 +796,11 @@ a{color:var(--accent);text-decoration:none}
 ;; a kept page takes the project's or the person's name, not a number
 (detail-name! "linkedin-detail-mode"
   (lambda (buf) (string-append "*" (or (buffer-local buf 'linkedin-title) "linkedin") "*")))
+
+;; the listing and every page it opens wear the LinkedIn mark
+(mode-icon! "linkedin-mode" "")
+(mode-icon! "linkedin-detail-mode" "")
+
 
 ;;; --- the layout ----------------------------------------------------------
 ;;; Three panes -- the group's chat, the listing, the page -- handed to the
