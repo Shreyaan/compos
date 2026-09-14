@@ -262,6 +262,21 @@
 (define (amazon-search-url query)
   (string-append "https://" amazon-host "/s?k=" (url-encode query)))
 
+(define (amz-link-url line)
+  (let ((parts (string-split line "](")))
+    (and (> (length parts) 1)
+         (let ((u (car (string-split (car (reverse parts)) ")"))))
+           (and (> (string-length u) 3) (equal? (substring u 0 3) "/s?") u)))))
+
+(define (amazon-next-url text)
+  (let loop ((ls (string-split text "\n")))
+    (cond ((null? ls) #f)
+          ((and (string-contains? (car ls) "[Next")
+                (string-contains? (car ls) "ref=sr_pg_"))
+           (let ((u (amz-link-url (car ls))))
+             (and u (string-append "https://" amazon-host u))))
+          (else (loop (cdr ls))))))
+
 (define (amazon-product-url asin)
   (string-append "https://" amazon-host "/dp/" asin))
 
