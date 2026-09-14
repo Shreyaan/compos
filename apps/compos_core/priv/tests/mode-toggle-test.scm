@@ -63,3 +63,26 @@
     (check-contains! (t--mt-click! "text-mode") "text-mode off" "the report")
     (check-false! (buffer-local t--mt-buf 'mode-name) "and the mode is gone")
     (buffer-kill! t--mt-buf)))
+
+;; load-mode: the same toggle, reached by name from a prompt. The test
+;; calls the policy fn the prompt confirms into; the prompt itself is
+;; mechanism.
+(deftest 'load-mode-names-every-major-and-minor-mode-once
+  "the prompt offers one row per mode, and the row is the mode's name"
+  (lambda ()
+    (let ((names (mode-names)))
+      (check-true! (member "text-mode" names) "a major mode is offered")
+      (check-true! (member "visual-line-mode" names) "a minor mode is offered")
+      (check-equal! (length names) (length (dedupe-names names)) "each once"))))
+
+(deftest 'load-mode-enters-a-major-mode-and-flips-a-minor-one
+  "load-mode! is the modeline toggle by name"
+  (lambda ()
+    (test-buffer! t--mt-buf "<p>hi</p>\n")
+    (with-current-buffer t--mt-buf (lambda () (load-mode! "html-mode")))
+    (check-equal! (buffer-local t--mt-buf 'mode-name) "html-mode" "the major mode")
+    (with-current-buffer t--mt-buf (lambda () (load-mode! "visual-line-mode")))
+    (check-true! (minor-mode-on? t--mt-buf "visual-line-mode") "the minor mode is on")
+    (with-current-buffer t--mt-buf (lambda () (load-mode! "visual-line-mode")))
+    (check-false! (minor-mode-on? t--mt-buf "visual-line-mode") "and off again")
+    (buffer-kill! t--mt-buf)))
