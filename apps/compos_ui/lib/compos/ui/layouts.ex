@@ -2905,6 +2905,16 @@ defmodule Compos.Ui.Layouts do
                     document.activeElement.closest(".window.active .buf[contenteditable]");
                   if (onSurface) this._editing = editingAfterKey(e, this._editing);
                   const native = nativeTextKey(e, this._editing);
+                  // Typing is not a selection gesture. Finish an intentional
+                  // caret move before its following key, then disarm reports
+                  // caused by the DOM patch for that key.
+                  if (!native || !NATIVE_MOTION.includes(e.key)) {
+                    if (this._selPending && onSurface) this.sendSelection(onSurface,
+                      performance.now() - (this._motionAt || 0) < 1200);
+                    clearTimeout(this._selt);
+                    this._selPending = false;
+                    this._gestureAt = 0;
+                  }
                   // Cmd-C with no native selection: copy the editor region
                   // (with one, the browser's own copy handles it)
                   if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "c" &&
@@ -2935,6 +2945,7 @@ defmodule Compos.Ui.Layouts do
                     // so this timestamp is the only thing that can tell a
                     // caret move from a click down there.
                     this._motionAt = performance.now();
+                    if (native) this._gestureAt = this._motionAt;
                   }
                   if (native) return;
                   const spec = keySpec(e);
@@ -3203,6 +3214,11 @@ defmodule Compos.Ui.Layouts do
                     return;
                   }
                   e.preventDefault();
+                  if (this._selPending) this.sendSelection(buf,
+                    performance.now() - (this._motionAt || 0) < 1200);
+                  clearTimeout(this._selt);
+                  this._selPending = false;
+                  this._gestureAt = 0;
                   // With no selection, the intent acts at the server's point,
                   // whatever the DOM caret says: the DOM caret is one patch
                   // behind while you type, and a Backspace measured from it
@@ -3215,11 +3231,9 @@ defmodule Compos.Ui.Layouts do
                   const to = range ? domByte(range.endContainer, range.endOffset) : null;
                   let text = e.data;
                   if (text == null && e.dataTransfer) text = e.dataTransfer.getData("text/plain");
-                  // Where the reader's caret actually is, and the text it was
-                  // measured against. The server takes the byte only while the
-                  // version still matches: then this DOM is the text the server
-                  // holds, and the caret the reader is looking at is the one
-                  // that acts. A stale DOM keeps the old rule and acts at point.
+                  // Carry the measured caret for diagnostics. Collapsed
+                  // edits use the server's point: a matching text version
+                  // alone does not prove the native caret has caught up.
                   const caret =
                     domSel && domSel.focusNode && buf.contains(domSel.focusNode)
                       ? domByte(domSel.focusNode, domSel.focusOffset)
@@ -3334,12 +3348,12 @@ defmodule Compos.Ui.Layouts do
                 // composition in progress are not reports.
                 this.selChangeH = () => {
                   if (this._settingSel) return;
-                  // Point moves only when the user moves it. A key or a
-                  // pointer stamps the time; a selectionchange with no
+                  // Point moves only when the user moves it. A native motion
+                  // key or a pointer stamps the time; a selectionchange with no
                   // gesture behind it is the browser reacting to a patch
                   // (a text node under the caret replaced, a focus the
                   // page took) and is not a report.
-                  if (performance.now() - (this._gestureAt || 0) > 1500) return;
+                  if (!this._gestureAt || performance.now() - this._gestureAt > 1500) return;
                   // The last hand on the DOM decides. A patch that landed
                   // after the gesture (a chat writing above the caret)
                   // replaced the nodes under the caret, and the caret it
@@ -3361,9 +3375,11 @@ defmodule Compos.Ui.Layouts do
                   // starves the paint of the caret itself
                   clearTimeout(this._selt);
                   this._selPending = true;
+                  const gesture = this._gestureAt;
                   this._selt = setTimeout(() => {
                     this._selPending = false;
                     if (this._settingSel) return;
+                    if (this._gestureAt !== gesture || (this._patchAt || 0) > gesture) return;
                     // the surface that had the caret may have lost it since:
                     // a patch made the buffer read-only again, or another
                     // window went active. That caret is nobody's move.
@@ -3382,15 +3398,14 @@ defmodule Compos.Ui.Layouts do
                   }, 150);
                 };
                 document.addEventListener("selectionchange", this.selChangeH);
-                // the gesture stamp: a held key repeats keydown, a drag
-                // moves the pointer with a button down, a click ends on
+                // Pointer gestures: a drag moves with a button down, a click ends on
                 // pointerup. Capture phase, so a handler that stops the
                 // event still stamps it.
                 this.gestureH = (e) => {
                   if (e.type === "pointermove" && !e.buttons) return;
                   this._gestureAt = performance.now();
                 };
-                ["keydown", "pointerdown", "pointerup", "pointermove", "touchstart", "touchend"]
+                ["pointerdown", "pointerup", "pointermove", "touchstart", "touchend"]
                   .forEach((t) => window.addEventListener(t, this.gestureH, true));
                 this.syncEditable();
                 // the selection of the active editable surface, as bytes
@@ -3409,7 +3424,9 @@ defmodule Compos.Ui.Layouts do
                   // upstream = the caret is drawn on the row of the character
                   // before it; at a soft wrap that row is the upper one
                   this._affinity = wrapAffinity(sel);
-                  this.pushEvent("sel", { win: winIdOf(buf), point, mark, keep: !!keep });
+                  this.pushEvent("sel", { win: winIdOf(buf), point, mark, keep: !!keep,
+                    v: parseInt(buf.dataset.v, 10) });
+                  this._gestureAt = 0;
                   // syncEditable waits for the server to agree with this
                   this._reported = { point, mark, at: performance.now(), acked: false };
                   return true;
@@ -4107,6 +4124,9 @@ defmodule Compos.Ui.Layouts do
                 // the patch stamp: selChangeH compares it with the gesture
                 // stamp to tell a reader's caret move from a patch's
                 this._patchAt = performance.now();
+                clearTimeout(this._selt);
+                this._selPending = false;
+                this._gestureAt = 0;
                 this.applyWhichKeyFilter();
                 this.restoreClientScroll();
                 this.applyScrollRequests();

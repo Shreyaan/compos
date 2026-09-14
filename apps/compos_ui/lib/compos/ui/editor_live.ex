@@ -143,7 +143,8 @@ defmodule Compos.Ui.EditorLive do
       Input.run(socket.assigns.frame, fn ->
         buf = Compos.Core.Editor.current_buffer()
 
-        if Compos.Core.Buffer.exists?(buf) do
+        if Compos.Core.Buffer.exists?(buf) and
+             (not Map.has_key?(p, "v") or p["v"] == Compos.Core.Buffer.version(buf)) do
           mark = if is_integer(p["mark"]) and p["mark"] != point, do: p["mark"], else: nil
           # a keyboard motion keeps the mark (the region follows point, as
           # in Emacs); a click or a drag says what the mark is

@@ -485,32 +485,51 @@ a{color:var(--accent);text-decoration:none}
             ((amz-has? (or (plist-get (car ts) 'url) "") amazon-host) (k (plist-get (car ts) 'id)))
             (else (loop (cdr ts))))))))
 
+
+;;; Whether the add worked is not in the response text -- the asin echoes back
+;;; even on a sign-in page, and the cart page does not always name it. What
+;;; answers is the cart badge: read it before, read it in the reply, and the
+;;; add landed when the count moved. A sign-in title is its own answer.
 (define (amazon--cart-js asin)
   (string-append
    "(function(){window.__amzcart='pending';"
+   "var c0=document.querySelector('#nav-cart-count');"
+   "var before=c0?parseInt(c0.textContent.trim(),10):null;"
    "fetch('/gp/aws/cart/add.html?ASIN.1=" asin "&Quantity.1=1',{credentials:'include'})"
-   ".then(function(r){return r.text()})"
-   ".then(function(t){var d=new DOMParser().parseFromString(t,'text/html');"
+   ".then(function(r){return r.text().then(function(t){return {t:t,url:r.url||''}})})"
+   ".then(function(o){"
+   "var d=new DOMParser().parseFromString(o.t,'text/html');"
    "var n=d.querySelector('#nav-cart-count');"
-   "window.__amzcart=JSON.stringify({added:t.indexOf('" asin "')>-1,"
-   "count:n?n.textContent.trim():null,title:(d.title||'').slice(0,60)})})"
+   "var after=n?parseInt(n.textContent.trim(),10):null;"
+   "var title=(d.title||'').trim();"
+   "var signin=/sign ?in/i.test(title)||/\\/ap\\/signin/.test(o.url);"
+   "var cart=/cart/i.test(title);"
+   "var moved=(after!==null&&before!==null&&after>before);"
+   "window.__amzcart=JSON.stringify({added:(!signin&&(moved||(cart&&after!==null))),"
+   "signin:signin,before:before,after:after,title:title.slice(0,60)})})"
    ".catch(function(e){window.__amzcart='err:'+e.message});return 'started'})()"))
 
 (define (amazon--cart-done! asin answer)
-  (if (and (string? answer) (amz-has? answer "\"added\":true"))
-      (begin
-        (unless (amazon-in-cart? asin)
-          (buffer-set-local! *amazon-buffer* 'amazon-cart
-                             (cons asin (or (buffer-local *amazon-buffer* 'amazon-cart) '()))))
-        (amazon-log! (string-append asin " added -- " answer))
-        (message (string-append (amazon-name-of asin) " added to the cart"))
-        (let ((row (amazon-row-by-asin asin)))
-          (when (and row (buffer-exists? (amazon-detail-buffer row)))
-            (amazon-render-detail! (amazon-detail-buffer row) row)))
-        (list-refresh! *amazon-buffer*))
-      (begin
-        (amazon-log! (string-append asin " failed -- " (if (string? answer) answer "no answer")))
-        (message (string-append "Could not add " (amazon-name-of asin) " -- see " *amazon-log*)))))
+  (let* ((text (if (string? answer) answer ""))
+         (ok (amz-has? text "\"added\":true"))
+         (signin (amz-has? text "\"signin\":true")))
+    (cond
+     (ok
+      (unless (amazon-in-cart? asin)
+        (buffer-set-local! *amazon-buffer* 'amazon-cart
+                           (cons asin (or (buffer-local *amazon-buffer* 'amazon-cart) '()))))
+      (amazon-log! (string-append asin " added -- " text))
+      (message (string-append (amazon-name-of asin) " added to the cart"))
+      (let ((row (amazon-row-by-asin asin)))
+        (when (and row (buffer-exists? (amazon-detail-buffer row)))
+          (amazon-render-detail! (amazon-detail-buffer row) row)))
+      (list-refresh! *amazon-buffer*))
+     (signin
+      (amazon-log! (string-append asin " not added -- signed out -- " text))
+      (message (string-append "Sign in to " amazon-host " in your browser, then try again")))
+     (else
+      (amazon-log! (string-append asin " failed -- " (if (string? answer) answer "no answer")))
+      (message (string-append "Could not add " (amazon-name-of asin) " -- see " *amazon-log*))))))
 
 (define (amazon-cart-add! asin)
   (message (string-append "Adding " (amazon-name-of asin) " to the cart..."))
@@ -661,12 +680,11 @@ a{color:var(--accent);text-decoration:none}
                    (if (amazon-showing-hidden?)
                        (length all)
                        (length (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all)))))
-        'footer (lambda (buf) (list (list "RET" "page") (list "m" "save") (list "N" "note")
-                                    (list "n/p" "page")
-                                    (list "x" "hide")
+        'footer (lambda (buf) (list (list "RET" "open") (list "c" "cart") (list "m" "save")
+                                    (list "n/p" "page") (list "N" "note") (list "x" "hide")
+                                    (list "d" "sort") (list "o" "browser")
                                     (list "X" (if (amazon-showing-hidden?) "hide hidden" "show hidden"))
-                                    (list "d" "by delivery") (list "c" "cart")
-                                    (list "o" "browser") (list "s" "search") (list "q" "quit")))
+                                    (list "s" "search") (list "q" "quit")))
         'preview (lambda (buf row) (amazon-show-detail! row))
         'keys (list (list "RET" "amazon-detail")
                     (list "m" "amazon-save")

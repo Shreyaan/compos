@@ -81,6 +81,10 @@ Alt, plus function keys, Escape, and Tab. Plain printable keys never reach
 ### Selection
 
 The native selection is the region. `selectionchange` sends point and mark.
+Only native motion and pointer gestures authorize a selection report. Typing
+and DOM patches cancel delayed reports. Each report carries the buffer text
+version it measured; the server ignores reports for an older version, so a
+late caret update cannot move point backward between successive insertions.
 Mouse code (`posIn`, `mouse_sel`, `caretPositionFromPoint`) goes away.
 
 Motion commands that need layout call the browser's own layout:

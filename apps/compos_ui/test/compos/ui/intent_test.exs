@@ -65,6 +65,32 @@ defmodule Compos.Ui.IntentTest do
     assert Buffer.text(buf) == "a"
   end
 
+  test "delayed selections cannot reorder a burst of typed characters", %{conn: conn} do
+    buf = fresh_buffer("")
+    {:ok, view, _} = live(conn, "/")
+    win = Editor.render_state().tree.id
+
+    for letter <- String.graphemes("(define)") do
+      v = Buffer.version(buf)
+      point = Buffer.point(buf)
+      intent(view, "insertText", point, point, letter)
+      view |> element("#editor") |> render_hook("sel", %{
+        "win" => win, "point" => max(point - 1, 0), "mark" => 0, "v" => v
+      })
+    end
+
+    assert Buffer.text(buf) == "(define)"
+    assert Buffer.point(buf) == 8
+    assert Buffer.mark(buf) == nil
+
+    # A genuine caret move measured against the current text still applies.
+    view |> element("#editor") |> render_hook("sel", %{
+      "win" => win, "point" => 1, "mark" => nil, "v" => Buffer.version(buf)
+    })
+    intent(view, "insertText", 1, 1, "x")
+    assert Buffer.text(buf) == "(xdefine)"
+  end
+
   test "a ranged insertText replaces the range", %{conn: conn} do
     buf = fresh_buffer("hello world")
     {:ok, view, _} = live(conn, "/")
