@@ -295,8 +295,15 @@
                       (lambda (_) (amazon--land! buf (- tries 1) k))
                       #f)))))
 
+(define (amazon-page-url query page)
+  (let ((base (amazon-search-url query)))
+    (if (<= page 1) base (string-append base "&page=" (number->string page)))))
+
 (define (amazon-fetch! query k)
-  (amazon--land! (browse (amazon-search-url query)) amazon-fetch-tries k))
+  (amazon-fetch-page! query 1 k))
+
+(define (amazon-fetch-page! query page k)
+  (amazon--land! (browse (amazon-page-url query page)) amazon-fetch-tries k))
 
 ;;; --- the product page ----------------------------------------------------
 ;;; A detail is one buffer per row, named after the ASIN, so the details
@@ -617,7 +624,7 @@ a{color:var(--accent);text-decoration:none}
           (list asin "dim"))))
 
 (define-list-mode! "amazon-mode"
-  (list 'doc "Amazon Business search results, as the account sees them: the price is yours, excluding GST, with the retail price beside it. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, n writes a note on it, x takes it out of the listing and X shows the hidden ones again marked ⊘, c adds it to the cart, o opens it in the real browser, w copies its link, s runs another search, g searches again, q quits."
+  (list 'doc "Amazon Business search results, as the account sees them: the price is yours, excluding GST, with the retail price beside it. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, N writes a note on it, n and p walk to the next and previous page of results, x takes it out of the listing and X shows the hidden ones again marked ⊘, c adds it to the cart, o opens it in the real browser, w copies its link, s runs another search, g reads this page again, q quits."
         'buffer *amazon-buffer*
         'transient #f
         'noun "product"
@@ -638,6 +645,9 @@ a{color:var(--accent);text-decoration:none}
         'title (lambda (buf) (or (buffer-local buf 'amazon-query) "Amazon"))
         'meta (lambda (buf)
                 (string-append amazon-host " · business price, excluding GST"
+                               (let ((p (or (buffer-local buf 'amazon-page) 1)))
+                                 (if (> p 1) (string-append " · page " (number->string p)) ""))
+                               (if (buffer-local buf 'amazon-more) "" " · last page")
                                (if (equal? (buffer-local buf 'amazon-sort) 'delivery)
                                    " · soonest delivery first"
                                    "")
@@ -651,7 +661,8 @@ a{color:var(--accent);text-decoration:none}
                    (if (amazon-showing-hidden?)
                        (length all)
                        (length (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all)))))
-        'footer (lambda (buf) (list (list "RET" "page") (list "m" "save") (list "n" "note")
+        'footer (lambda (buf) (list (list "RET" "page") (list "m" "save") (list "N" "note")
+                                    (list "n/p" "page")
                                     (list "x" "hide")
                                     (list "X" (if (amazon-showing-hidden?) "hide hidden" "show hidden"))
                                     (list "d" "by delivery") (list "c" "cart")
@@ -659,7 +670,9 @@ a{color:var(--accent);text-decoration:none}
         'preview (lambda (buf row) (amazon-show-detail! row))
         'keys (list (list "RET" "amazon-detail")
                     (list "m" "amazon-save")
-                    (list "n" "amazon-note")
+                    (list "N" "amazon-note")
+                    (list "n" "amazon-next-page")
+                    (list "p" "amazon-prev-page")
                     (list "x" "amazon-hide")
                     (list "X" "amazon-hidden")
                     (list "d" "amazon-sort-delivery")
@@ -679,11 +692,13 @@ a{color:var(--accent);text-decoration:none}
   (lambda () (buffer-set-read-only! (current-buffer) #t)))
 (mode-parent! "amazon-detail-mode" "special-mode")
 (mode-doc! "amazon-detail-mode"
-  "One product, as its own page. m saves it and marks it in the listing, n writes a note that stays on this page, c adds it to the cart, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
+  "One product, as its own page. m saves it and marks it in the listing, N writes a note that stays on this page, n and p walk the listing's pages, c adds it to the cart, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
 (mode-keys! "amazon-detail-mode"
   (list (list "c" "amazon-cart")
         (list "m" "amazon-save")
-        (list "n" "amazon-note")
+        (list "N" "amazon-note")
+        (list "n" "amazon-next-page")
+        (list "p" "amazon-prev-page")
         (list "o" "amazon-open")
         (list "w" "amazon-copy-link")
         (list "g" "amazon-refresh")
@@ -715,25 +730,38 @@ a{color:var(--accent);text-decoration:none}
 ;;; --- opening it ----------------------------------------------------------
 
 (define (amazon-open! query)
+  (amazon-open-page! query 1 #t))
+
+;;; One page of a search. FIRST? opens the app around the listing -- the group,
+;;; the mode, the layout; paging with n and p only swaps the rows underneath.
+(define (amazon-open-page! query page first?)
   (unless (buffer-exists? *amazon-buffer*) (buffer-create *amazon-buffer*))
   (amazon-join-group! *amazon-buffer*)
   (buffer-set-local! *amazon-buffer* 'amazon-query query)
-  (message (string-append "Amazon: " query "..."))
-  (amazon-fetch! query
-    (lambda (rows)
-      (if (not rows)
-          (message "Amazon did not answer -- try again")
+  (message (string-append "Amazon: " query
+                          (if (> page 1) (string-append " page " (number->string page)) "")
+                          "..."))
+  (amazon-fetch-page! query page
+    (lambda (rows next)
+      (if (or (not rows) (null? rows))
+          (message (if rows
+                       (string-append "No results on page " (number->string page))
+                       "Amazon did not answer -- try again"))
           (begin
             (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
+            (buffer-set-local! *amazon-buffer* 'amazon-page page)
+            (buffer-set-local! *amazon-buffer* 'amazon-more (and next #t))
             (unless (buffer-derived-mode? *amazon-buffer* "amazon-mode")
               (with-current-buffer *amazon-buffer* (lambda () (set-mode! "amazon-mode"))))
             (list-refresh! *amazon-buffer*)
-            (switch-to-buffer! *amazon-buffer*)
+            (when first? (switch-to-buffer! *amazon-buffer*))
             (amazon-show-detail! (list-current *amazon-buffer*))
-            (amazon-layout!)
-            (let ((id (amazon-home-group!))) (when id (group-layout-save! id)))
+            (when first?
+              (amazon-layout!)
+              (let ((id (amazon-home-group!))) (when id (group-layout-save! id))))
             (message (string-append (number->string (length rows))
-                                    " results for " query)))))))
+                                    " results for " query
+                                    " · page " (number->string page))))))))
 
 (define-command "amazon" "Open the Amazon app"
   (lambda ()
@@ -750,12 +778,34 @@ a{color:var(--accent);text-decoration:none}
 
 (define-command "amazon-refresh" "Read the search again"
   (lambda ()
-    (amazon-open! (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query))))
+    (amazon-open-page! (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query)
+                       (amazon-page) #f)))
+
+(define (amazon-page) (or (buffer-local *amazon-buffer* 'amazon-page) 1))
+(define (amazon-more?) (buffer-local *amazon-buffer* 'amazon-more))
+
+(define-command "amazon-next-page" "Read the next page of results"
+  (lambda ()
+    (let ((query (buffer-local *amazon-buffer* 'amazon-query)))
+      (cond ((not query) (message "Nothing searched yet"))
+            ((not (amazon-more?)) (message "This is the last page"))
+            (else (amazon-open-page! query (+ (amazon-page) 1) #f))))))
+
+(define-command "amazon-prev-page" "Read the page before this one"
+  (lambda ()
+    (let ((query (buffer-local *amazon-buffer* 'amazon-query)))
+      (cond ((not query) (message "Nothing searched yet"))
+            ((<= (amazon-page) 1) (message "This is the first page"))
+            (else (amazon-open-page! query (- (amazon-page) 1) #f))))))
 
 ;;; --- the catalog ---------------------------------------------------------
 
 (public! 'amazon-open!
   "(amazon-open! QUERY) — search the storefront and fill the listing, in the app's own group")
+(public! 'amazon-open-page!
+  "(amazon-open-page! QUERY PAGE FIRST?) — fill the listing from one page of a search; FIRST? also opens the group and the layout")
+(public! 'amazon-next-url
+  "(amazon-next-url TEXT) — the search page's Next link, absolute, or #f on the last page")
 (public! 'amazon-cart-add!
   "(amazon-cart-add! ASIN) — add one of a product to the signed-in cart, through the reader's browser tab")
 (public! 'amazon-show-detail!
@@ -776,6 +826,8 @@ a{color:var(--accent);text-decoration:none}
   "(amazon-hide-toggle! ASIN) — take a product out of the listing, or put it back; a hidden one is marked ⊘ when X shows them")
 
 (catalog-meta! 'function "amazon-open!" 'domain 'web 'effects '(read write external display))
+(catalog-meta! 'function "amazon-open-page!" 'domain 'web 'effects '(read write external display))
+(catalog-meta! 'function "amazon-next-url" 'domain 'web 'effects '(pure))
 (catalog-meta! 'function "amazon-cart-add!" 'domain 'web 'effects '(write external))
 (catalog-meta! 'function "amazon-show-detail!" 'domain 'web 'effects '(write display))
 (catalog-meta! 'function "amz-parse" 'domain 'web 'effects '(pure))
