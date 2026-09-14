@@ -73,7 +73,10 @@ Nothing draws the list behind you. A streaming turn fires events many
 times a second, and a list that redrew on them would re-sort its rows
 and carry the cursor off the chat you were reading. So no event draws
 it: the modeline carries the news of a chat that needs you, and `g`
-draws the list again when you ask. A draw keeps the row you were on --
+draws the list again when you ask. The table's stamp is off here for
+the same reason: a table redraws when the buffer count moves, so a file
+opened by a chat you are not even reading rebuilt this list under the
+cursor. A draw keeps the row you were on --
 it finds that chat again wherever the new order puts it. Closing the
 filter is not a move either: the rows widen back under the same cursor.
 

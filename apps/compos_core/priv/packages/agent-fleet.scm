@@ -779,6 +779,12 @@
       ;; still what RET means there.
       'separator? (lambda (buf b) #f)
       'rows (lambda (buf) (chat-list-rows buf))
+      ;; The table stamps itself with the buffer count and redraws after
+      ;; any command that moved it, so a buffer opened anywhere -- by a
+      ;; chat you are not even reading -- rebuilt this list under the
+      ;; cursor. An application is not a table: it stands still, and g
+      ;; draws it again when you ask. No stamp, no redraw behind you.
+      'stamp #f
       ;; the picker acts on one chat, the one at point: no marks, and no
       ;; flag-then-run, which is a table's idea and not an application's
       'markable? (lambda (buf e) #f)
