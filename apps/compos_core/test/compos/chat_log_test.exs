@@ -155,20 +155,20 @@ defmodule Compos.ChatLogTest do
 
     eval!(~s[(run-command "chat-list")])
     # a heading row is a list; the chat rows are the strings
-    rows = Buffer.get_local("*chats*", "list-entries") |> Enum.filter(&is_binary/1)
+    rows = Buffer.get_local("*chat-list*", "list-entries") |> Enum.filter(&is_binary/1)
     assert path in rows
 
     # the archive rows sit under every live chat
     live = Enum.count(rows, &Buffer.exists?/1)
     assert Enum.all?(Enum.take(rows, live), &Buffer.exists?/1)
 
-    text = Buffer.text("*chats*")
+    text = Buffer.text("*chat-list*")
     assert text =~ "archived"
 
     # RET on the row reads the file back: the conversation returns
-    eval!(~s[(begin (switch-to-buffer! "*chats*") #t)])
+    eval!(~s[(begin (switch-to-buffer! "*chat-list*") #t)])
     row = Enum.find_index(rows, &(&1 == path))
-    eval!(~s[(list-goto-first-entry "*chats*")])
+    eval!(~s[(list-goto-first-entry "*chat-list*")])
     press(List.duplicate("C-n", row))
     press(["RET"])
 
@@ -179,7 +179,7 @@ defmodule Compos.ChatLogTest do
 
     # the revived chat is a live row now, so the archive does not repeat it
     eval!(~s[(run-command "chat-list")])
-    saved = Enum.filter(Buffer.get_local("*chats*", "list-entries"), &(&1 == path))
+    saved = Enum.filter(Buffer.get_local("*chat-list*", "list-entries"), &(&1 == path))
     assert length(saved) == 1
 
     Compos.Core.kill_buffer(path)

@@ -17,7 +17,7 @@
   (when (minibuffer-state) (minibuffer-cancel!))
   (when (popup-open?) (popup-close!))
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
-            (append *ibp-bufs* (list " *buffers*" " *chats*" "*zz-ibp-chat*")))
+            (append *ibp-bufs* (list " *buffers*" "*zz-ibp-chat*")))
   ;; a group founded here brings a chat and a scratch along: take them away
   (for-each (lambda (b)
               (when (or (string-prefix? "*chat:zz-ibp" b) (string-prefix? "*scratch:zz-ibp" b))
@@ -133,28 +133,6 @@
     (check-false! (minibuffer-state) "the prompt is closed")
     (check-false! (window-showing " *buffers*") "the table is closed, not left standing")
     (check-false! (buffer-known? " *buffers*") "and its buffer is gone, the way q's own close leaves it")
-    (ibp-reset!)))
-
-(deftest 'the-chat-prompt-is-the-same-table-over-the-chats
-  "C-x c opens the chats view in the same form, in ichat-mode, and RET switches to the chat"
-  (lambda ()
-    (ibp-setup!)
-    (test-buffer! "*zz-ibp-chat*" "")
-    (buffer-set-local! "*zz-ibp-chat*" 'mode-name "chat-mode")
-    (switch-to-buffer-here! "*zz-ibp-a*")
-    (run-command "ichat-prompt")
-    (check-true! (popup-open?) "the table is a popup")
-    (check-equal! (window-buffer (popup-window)) " *chats*" "the chats' own prompt view")
-    (check-equal! (buffer-local " *chats*" 'mode-name) "ichat-mode" "in ichat-mode")
-    (check-equal! (plist-get (minibuffer-state) 'prompt) "Chat: " "the prompt line")
-    (minibuffer-change! "zz-ibp-chat")
-    (check-equal! (ibp-names " *chats*") '("*zz-ibp-chat*") "the chat matches")
-    (check-equal! (window-buffer (buffer-local " *chats*" 'ibuffer-prompt-home-window)) "*zz-ibp-chat*"
-                  "C-x c previews the highlighted chat in the invoking window")
-    (run-command "minibuffer-confirm")
-    (check-false! (and (popup-open?) (equal? (window-buffer (popup-window)) " *chats*"))
-                  "the table is closed")
-    (check-equal! (current-buffer) "*zz-ibp-chat*" "the chat is current")
     (ibp-reset!)))
 
 (deftest 'the-prompt-popup-wears-no-chrome

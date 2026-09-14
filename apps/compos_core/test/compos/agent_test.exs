@@ -2112,13 +2112,13 @@ defmodule Compos.AgentTest do
     assert eventually(fn -> Editor.render_state().modeline_extra =~ "a2" end)
 
     {:ok, _} = Session.eval(~s[(run-command "chat-list")])
-    text = Buffer.text("*chats*")
+    text = Buffer.text("*chat-list*")
     assert text =~ "a2"
     assert text =~ "your turn"
 
     # point lands on the first table entry; answer through the real key path
-    focus("*chats*")
-    {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chats*")])
+    focus("*chat-list*")
+    {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chat-list*")])
     press(["y"])
 
     assert_receive {:frame, %{"id" => 91, "result" => %{"outcome" => outcome}}}, 1_000
@@ -2129,39 +2129,33 @@ defmodule Compos.AgentTest do
     _ = agent1
   end
 
-  test "k flags and x kills the runtime; d flags and x releases windows before archiving" do
+  test "k stops the runtime and keeps the chat; a archives it and releases its windows" do
     {_slug, buf, _agent} = boot("")
 
-    # show the thread in the main window, then open the fleet popup
+    # show the thread in the main window, then open the chat list
     focus(buf)
     {:ok, _} = Session.eval(~s[(run-command "chat-list")])
-    focus("*chats*")
+    focus("*chat-list*")
     goto_chat_row(buf)
 
-    # k only flags — the runtime stays up until x runs the flags
+    # the application acts on the chat at point: no flag, no x
     press(["k"])
-    assert Buffer.text("*chats*") =~ "K"
-    assert Agent.list() != []
-
-    press(["x"])
     assert eventually(fn -> Buffer.text(buf) =~ "[agent stopped]" end)
     assert eventually(fn -> Agent.list() == [] end)
-    assert Buffer.text("*chats*") =~ "stopped"
-    # the flag is gone with the runtime it killed
-    refute Buffer.get_local("*chats*", "list-marks") |> Enum.any?()
+    # the transcript stays: k took the runtime, not the chat
+    assert Buffer.exists?(buf)
 
     # the refresh re-sorted (dead ranks last) — find the row again
     goto_chat_row(buf)
 
-    press(["d"])
-    press(["x"])
+    press(["a"])
     assert eventually(fn -> not Buffer.exists?(buf) end)
     # no window points at the killed buffer (no empty-ghost resurrection)
     windows = Editor.list_windows()
     refute Enum.any?(windows, fn {_id, b} -> b == buf end)
   end
 
-  test "m marks; a verb acts on every marked chat, not the line at point" do
+  test "a verb acts on the chat at point, and on no other" do
     {_slug1, buf1, _a1} = boot("")
 
     # a second thread, the way every two-agent test here boots one
@@ -2175,38 +2169,31 @@ defmodule Compos.AgentTest do
     assert eventually(fn -> Buffer.exists?(buf2) end)
 
     {:ok, _} = Session.eval(~s[(run-command "chat-list")])
-    focus("*chats*")
+    focus("*chat-list*")
 
-    # mark both, then stand on neither: the flags still find them
-    goto_chat_row(buf1)
-    press(["m"])
-    goto_chat_row(buf2)
-    press(["m"])
-    assert length(Buffer.get_local("*chats*", "list-marks")) == 2
-
-    # U drops every mark
-    press(["U"])
-    assert Buffer.get_local("*chats*", "list-marks") == []
-
-    # flag both for the kill, then run the flags in one go
+    # stand on the first chat: k stops that runtime and leaves the other
     goto_chat_row(buf1)
     press(["k"])
+
+    assert eventually(fn -> Buffer.text(buf1) =~ "[agent stopped]" end)
+    refute Buffer.text(buf2) =~ "[agent stopped]"
+    assert Agent.list() != []
+
+    # then the other one, from its own row
     goto_chat_row(buf2)
     press(["k"])
-    press(["x"])
 
     assert eventually(fn -> Agent.list() == [] end)
-    assert Buffer.text(buf1) =~ "[agent stopped]"
     assert Buffer.text(buf2) =~ "[agent stopped]"
   end
 
-  # put point on BUF's row in the *chats* list
+  # put point on BUF's row in the chat list
   # a heading row is a list, and the mover skips it: count the chat rows only
   defp goto_chat_row(buf) do
-    rows = Buffer.get_local("*chats*", "list-entries") |> Enum.filter(&is_binary/1)
+    rows = Buffer.get_local("*chat-list*", "list-entries") |> Enum.filter(&is_binary/1)
     row = Enum.find_index(rows, &(&1 == buf))
     assert row, "chat #{buf} not listed in #{inspect(rows)}"
-    {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chats*")])
+    {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chat-list*")])
     press(List.duplicate("C-n", row))
     :ok
   end
