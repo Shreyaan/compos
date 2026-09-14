@@ -224,7 +224,7 @@
                (let ((s (chat-row-status b)))
                  (list (agent-status-glyph s) (chats-state-face s))))
         'name (lambda (b) (list "" (chats-alert-name b)))
-        'size chats-tokens
+        'size chats-filesize
         ;; a chat found by a word in its text says which word, in place of
         ;; the state: you searched for the words, not for the state
         'label (lambda (b)
@@ -873,6 +873,7 @@
 (define (chat-list-keep! keep)
   (chat-list-clear-search!)
   (chat-list-unpin!)
+  (chat-list-release-frame!)
   (let ((id (group-home-of keep)))
     (when (and id (not (equal? id (frame-group)))) (switch-to-group! id)))
   (let ((w (chat-list-chat-window keep)))
@@ -883,11 +884,25 @@
         (switch-to-buffer! keep)))
   (when (equal? (window-buffer (active-window)) keep) (end-of-buffer!)))
 
+;; the application took the whole frame on arrival, so it hands the whole
+;; frame back: the panes it made go, and the window it stood in shows what
+;; it showed before. A group that keeps its own layout has already put that
+;; back, and then no window shows the list and there is nothing to undo.
+(define (chat-list-release-frame!)
+  (let ((w (window-showing *chat-list-buffer*))
+        (was (buffer-local *chat-list-buffer* 'chat-list-from-buffer)))
+    (when (and w (window-exists? w))
+      (select-window! w)
+      (delete-other-windows!)
+      (switch-to-buffer-here!
+        (if (and (string? was) (buffer-known? was)) was "*scratch*")))))
+
 (define (chat-list-back!)
   (chat-list-clear-search!)
   (chat-list-unpin!)
   (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
-    (when from (switch-to-group! from))))
+    (when from (switch-to-group! from)))
+  (chat-list-release-frame!))
 
 ;; a saved conversation is a file and has no group of its own, so reading
 ;; it back lands it where you stood when you asked for it
