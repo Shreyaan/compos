@@ -1493,15 +1493,38 @@ when a message has no text/plain part." 'group 'notmuch)
         (string-trim from)
         (car (string-split (cadr parts) ">")))))
 
+(define *notmuch-blocked-file* "$HOME/.notmuch/blocked.txt")
+
+(define (nm--host-cmd script)
+  "SCRIPT as a command line that runs where the mail store lives: over ssh when
+notmuch-host names another machine, here when it is empty."
+  (if (equal? notmuch-host "")
+      script
+      (string-append notmuch-ssh-program " " (nm--quote notmuch-host) " " (nm--quote script))))
+
+(define (nm--host-sh script)
+  "Run SCRIPT where the mail store lives and answer its output."
+  (shell-command->string (nm--host-cmd script)))
+
+(define (nm--block-sender! email)
+  "Record EMAIL in the blocked-sender database the notmuch post-new hook reads."
+  (nm--host-sh
+   (string-append "mkdir -p \"$HOME/.notmuch\" && touch \"" *notmuch-blocked-file* "\" && "
+                  "grep -qxF " (nm--quote email) " \"" *notmuch-blocked-file* "\" || "
+                  "printf '%s\\n' " (nm--quote email) " >> \"" *notmuch-blocked-file* "\""))
+  email)
+
 (define (nm--trash-sender! email)
-  "Trash every message from EMAIL and refresh the index. Answers how many matched."
+  "Trash every message from EMAIL, block the address, and refresh the index. Answers how many matched."
   (let ((n (nm--count (string-append "from:" email))))
-    (nm--run (string-append "tag +trash -inbox -unread -- " (nm--quote (string-append "from:" email))))
+    (nm--run (string-append "tag +trash +blocked -inbox -unread -- " (nm--quote (string-append "from:" email))))
+    (nm--block-sender! email)
     (nm--after-change! *notmuch-search-buffer*)
     n))
 
 (define (nm--trashed-label n email)
-  (string-append "trashed " (number->string n) " message" (if (= n 1) "" "s") " from " email))
+  (string-append "trashed " (number->string n) " message" (if (= n 1) "" "s")
+                 " from " email "; blocked " email))
 
 (define-command "notmuch-delete-sender"
   "Trash every message in the mailbox from this thread's sender, with no unsubscribe attempt (works on a *notmuch* list row or an open notmuch-show buffer)"
@@ -2295,13 +2318,27 @@ when a message has no text/plain part." 'group 'notmuch)
                 (nm--compose-reply! id)
                 (message "No message found in thread")))))))
 
+(define (nm--from-header text)
+  "The From address of a composed message, read from the header block alone."
+  (let loop ((lines (string-split text "\n")))
+    (cond ((null? lines) "")
+          ((equal? (string-trim (car lines)) *mail-header-separator*) "")
+          ((equal? (string-trim (car lines)) "") "")
+          ((string-prefix? "From:" (car lines))
+           (string-trim (substring (car lines) 5 (string-length (car lines)))))
+          (else (loop (cdr lines))))))
+
 (define (nm--send-route text)
-  (let loop ((rs notmuch-send-routes))
-    (cond ((null? rs) #f)
-          ((or (equal? (car (car rs)) "")
-               (string-contains? text (car (car rs))))
-           (cadr (car rs)))
-          (else (loop (cdr rs))))))
+  "The send command for TEXT, matched against its From address only. A route
+key of \"\" matches anything, so it belongs last. Matching the whole message
+would let a word in the body pick the account the mail goes out from."
+  (let ((from (nm--from-header text)))
+    (let loop ((rs notmuch-send-routes))
+      (cond ((null? rs) #f)
+            ((or (equal? (car (car rs)) "")
+                 (string-contains? from (car (car rs))))
+             (cadr (car rs)))
+            (else (loop (cdr rs)))))))
 
 (define-command "mail-send" "Send this buffer as an email"
   (lambda ()
@@ -2318,8 +2355,8 @@ when a message has no text/plain part." 'group 'notmuch)
           (begin
             (write-file! tmp text)
             (let ((out (shell-command->string
-                         (string-append "cat " (nm--quote tmp) " | " route
-                                        " && echo SENT-OK"))))
+                         (string-append "cat " (nm--quote tmp) " | "
+                                        (nm--host-cmd (string-append route " && echo SENT-OK"))))))
               (if (string-contains? out "SENT-OK")
                   (begin (run-command "quit-window") (message "Sent"))
                   (message (string-append "Send failed: " (string-trim out))))))))))
