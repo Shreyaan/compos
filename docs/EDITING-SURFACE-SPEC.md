@@ -246,3 +246,36 @@ paste), row-level block styles and tables, `preview-mode` as rendered
 rows for Markdown (the iframe stays for now), C-c/C-x/C-v on an active
 region in `cua-mode`, and the wrap-map code that the markdown iframe
 still needs.
+
+## Implemented text redisplay
+
+The line renderer selects the viewport before preparing display segments.
+It reads source lines from the immutable rope in the render snapshot.
+The preparation bound is three window heights plus eight logical lines.
+A buffer that fits this bound retains native scrolling. Larger buffers use
+the existing server viewport. Folding and narrowing apply before selection.
+
+The window cache retains segments for its displayed rows. Keys contain line
+text and relative face, overlay, and chrome ranges. An edit above a row changes
+its absolute byte offset, but does not invalidate its segments. Changed overlays
+invalidate the affected rows. Cache entries outside the next viewport expire.
+The `[:compos, :ui, :text_display]` event reports visible, prepared, and reused
+row counts, with buffer name and text version.
+
+Fontification does not run inside redisplay. The renderer requests faces for
+the visible byte range and can display plain text immediately. A buffer
+coalesces requests for 25 milliseconds and runs one supervised task at a time.
+The task uses a fork of the incremental syntax tree. Its parser has a separate
+lock, so parsing cannot hold the edit path's parser lock. Queries cover only
+the requested range, but parsing retains full document context.
+
+Results name their text version and parser resource. The buffer discards
+results after an intervening edit or language change. It publishes accepted
+faces before sending a display notification. This notification is not a text
+change and does not invoke text-change rules. Up to eight recent display ranges
+are cached per buffer. Text and version always come from the same snapshot.
+
+This change does not replace the input or selection protocol. The editor
+still serializes commands and owns point. Snapshot text materialization and
+fold geometry can still involve the whole buffer; this bound applies to line
+preparation, face queries, and the line DOM, not every operation in redisplay.

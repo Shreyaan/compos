@@ -1,0 +1,88 @@
+defmodule Compos.Ui.TextDisplayTest do
+  use ExUnit.Case
+  import Phoenix.ConnTest
+  import Phoenix.LiveViewTest
+  alias Compos.Core.{Buffer, Editor, Input}
+  @endpoint Compos.Ui.Endpoint
+
+  setup do
+    Editor.minibuffer_close()
+    Editor.completion_dismiss()
+    Editor.set_pending([])
+    Editor.delete_other_windows()
+    Editor.set_total_rows(20)
+    name = "display-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(name)
+    Buffer.append(name, Enum.map_join(1..5000, "\n", &"row #{&1} λ"), source: :editor)
+    Buffer.goto(name, 0)
+    id = "display-test-#{name}"
+
+    :telemetry.attach(
+      id,
+      [:compos, :ui, :text_display],
+      fn _, m, meta, pid ->
+        send(pid, {:display_work, meta.buffer, m})
+      end,
+      self()
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+    {:ok, name: name, conn: build_conn()}
+  end
+
+  defp frame(html), do: Regex.run(~r/data-frame="([^"]+)"/, html) |> Enum.at(1)
+
+  test "prepares only the viewport, including after a deep scroll", %{conn: conn, name: name} do
+    {:ok, view, html} = live(conn, "/")
+    fid = frame(html)
+    assert_receive {:display_work, ^name, %{visible: count, prepared: prepared}}
+    assert count <= Editor.render_state(fid).tree.rows * 3 + 8
+    assert prepared == count
+    refute has_element?(view, ".buf.client-scroll")
+    refute has_element?(view, ".line", "row 5000 λ")
+    win = Editor.render_state(fid).tree.id
+    view |> element("#editor") |> render_hook("scroll", %{"win" => win, "lines" => 4000})
+    assert has_element?(view, ".line", "row 4001 λ")
+    assert_receive {:display_work, ^name, %{visible: deep_count}}
+    assert deep_count <= Editor.render_state(fid).tree.rows * 3 + 8
+  end
+
+  test "a key prepares one row and reuses the rest despite shifted offsets", %{
+    conn: conn,
+    name: name
+  } do
+    {:ok, view, html} = live(conn, "/")
+    fid = frame(html)
+    assert_receive {:display_work, ^name, %{visible: count}}
+    Input.dispatch(fid, "x")
+    assert has_element?(view, ".line", "xrow 1 λ")
+    assert String.starts_with?(Buffer.text(name), "xrow 1 λ")
+    assert_receive {:display_work, ^name, %{visible: ^count, prepared: 1, reused: reused}}
+    assert reused == count - 1
+
+    Editor.set_echo("unrelated frame display", fid)
+    render(view)
+    refute_receive {:display_work, ^name, _}, 50
+  end
+
+  test "faces change when an overlay changes without a text edit", %{conn: conn, name: name} do
+    {:ok, view, _} = live(conn, "/")
+    assert_receive {:display_work, ^name, _}
+    Buffer.set_overlays(name, "display-test", [{0, 3, "error"}])
+    assert has_element?(view, ".f-error", "row")
+    assert_receive {:display_work, ^name, %{prepared: 1}}
+  end
+
+  test "narrowing selects source lines before preparing them", %{conn: conn, name: name} do
+    text = Buffer.text(name)
+    {start, _} = :binary.match(text, "row 4200 λ")
+    {stop, _} = :binary.match(text, "row 4203 λ")
+    Buffer.narrow(name, start, stop)
+    Buffer.goto(name, start)
+    {:ok, view, _} = live(conn, "/")
+    assert has_element?(view, ".line", "row 4200 λ")
+    assert has_element?(view, ".line", "row 4202 λ")
+    refute has_element?(view, ".line", "row 4203 λ")
+    assert_receive {:display_work, ^name, %{visible: 3, prepared: 3}}
+  end
+end

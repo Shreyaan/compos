@@ -5,7 +5,7 @@
 
 use rustler::ResourceArc;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor};
 
@@ -388,7 +388,7 @@ struct TsState {
     // None when the grammar has no usable highlight query. The tree is
     // still worth holding: structural motion reads it, and a grammar with
     // no colors still has structure.
-    query: Option<Query>,
+    query: Option<Arc<Query>>,
     tree: Option<tree_sitter::Tree>,
 }
 
@@ -404,7 +404,7 @@ fn ts_state_new(lang_name: String) -> Option<ResourceArc<TsRes>> {
     let lang = language(&lang_name)?;
     let mut parser = Parser::new();
     parser.set_language(&lang).ok()?;
-    let query = highlights_query(&lang_name).and_then(|hq| Query::new(&lang, &hq).ok());
+    let query = highlights_query(&lang_name).and_then(|hq| Query::new(&lang, &hq).ok()).map(Arc::new);
     Some(ResourceArc::new(TsRes(Mutex::new(TsState {
         parser,
         query,
@@ -474,6 +474,44 @@ fn ts_state_highlight(res: ResourceArc<TsRes>, text: String) -> Vec<(usize, usiz
             .unwrap_or("")
             .to_string();
         out.push((cap.node.start_byte(), cap.node.end_byte(), scope));
+    }
+    out
+}
+
+/// Fork the incremental tree. The worker owns its parser, so fontification
+/// never holds the buffer's parser lock while parsing or querying.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_state_fork(res: ResourceArc<TsRes>, _lang: String) -> Option<ResourceArc<TsRes>> {
+    let st = res.0.lock().unwrap();
+    let mut parser = Parser::new();
+    let language = st.parser.language()?;
+    parser.set_language(&language).ok()?;
+    Some(ResourceArc::new(TsRes(Mutex::new(TsState {
+        parser, query: st.query.clone(), tree: st.tree.clone(),
+    }))))
+}
+
+/// Query only the display range. Parsing keeps the complete syntax context,
+/// so a multiline string or comment starting offscreen still has its face.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_state_highlight_range(res: ResourceArc<TsRes>, text: String, start: usize, end: usize) -> Vec<(usize, usize, String)> {
+    let mut guard = res.0.lock().unwrap();
+    let st = &mut *guard;
+    st.tree = st.parser.parse(&text, st.tree.as_ref());
+    let mut out = Vec::new();
+    let (Some(tree), Some(query)) = (st.tree.as_ref(), st.query.as_ref()) else { return out; };
+    let names = query.capture_names();
+    let mut cursor = QueryCursor::new();
+    cursor.set_byte_range(start..end);
+    let mut captures = cursor.captures(query, tree.root_node(), text.as_bytes());
+    while let Some((m, ix)) = captures.next() {
+        let cap = m.captures[*ix];
+        let s = cap.node.start_byte();
+        let e = cap.node.end_byte();
+        if s < end && e > start {
+            let scope = names[cap.index as usize].split('.').next().unwrap_or("").to_string();
+            out.push((s, e, scope));
+        }
     }
     out
 }

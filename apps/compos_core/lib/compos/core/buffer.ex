@@ -89,6 +89,7 @@ defmodule Compos.Core.Buffer do
             hidden: %{},
             narrow_range: nil,
             ts: nil,
+            fontify: %{task: nil, timer: nil, pending: [], cache: []},
             win_points: %{},
             authors: [],
             origins: %{},
@@ -722,6 +723,13 @@ defmodule Compos.Core.Buffer do
   Highlight spans from the buffer's incremental tree-sitter state ([] if the
   buffer has no ts-lang). Cached per version, shared by every client.
   """
+  @doc "Request display faces without waiting for the buffer or parser. Results are published by version."
+  def request_fontification(name, version, start, stop)
+      when is_integer(version) and is_integer(start) and is_integer(stop) and start >= 0 and
+             stop >= start do
+    GenServer.cast(via(name), {:fontify, version, start, stop})
+  end
+
   def ts_highlight(name), do: GenServer.call(via(name), :ts_highlight, 30_000)
 
   @doc """
@@ -912,7 +920,9 @@ defmodule Compos.Core.Buffer do
   # message that reads the field would stop the process. Every entry
   # point fills the field in first. Add a line here with the field.
   defp upgrade(state) do
-    Map.put_new(state, :narrow_range, Map.get(state, :display_range))
+    state
+    |> Map.put_new(:narrow_range, Map.get(state, :display_range))
+    |> Map.put_new(:fontify, %{task: nil, timer: nil, pending: [], cache: []})
   end
 
   defp published({:reply, reply, state}, before),
@@ -932,6 +942,10 @@ defmodule Compos.Core.Buffer do
   defp publish_and_notify(state, before) do
     state = publish(state, before)
 
+    if state.fontify.cache != before.fontify.cache do
+      Events.broadcast_display(state.name)
+    end
+
     if state.hidden != before.hidden do
       Events.broadcast_editor(:locals)
       broadcast(state, state.point, "", 0, :locals)
@@ -944,7 +958,7 @@ defmodule Compos.Core.Buffer do
   # message that only reads costs one pointer comparison each and writes
   # nothing.
   @view_fields ~w(name id rope bin version saved_version path read_only
-                  point mark locals overlays overlay_gen hidden narrow_range win_points)a
+                  point mark locals overlays overlay_gen hidden narrow_range win_points fontify)a
 
   defp publish(state, before) do
     if Enum.any?(@view_fields, &(Map.fetch!(state, &1) != Map.fetch!(before, &1))),
@@ -983,8 +997,30 @@ defmodule Compos.Core.Buffer do
       overlay_gen: state.overlay_gen,
       hidden: state.hidden,
       narrow_range: state.narrow_range,
-      win_points: state.win_points
+      win_points: state.win_points,
+      fontification: Map.get(state, :fontify, %{cache: []}).cache
     }
+  end
+
+  defp on_cast({:fontify, version, start, stop}, state) do
+    request = {version, start, stop}
+    f = state.fontify
+    cached? = Enum.any?(f.cache, fn {v, s, e, _} -> v == version and s <= start and e >= stop end)
+
+    running? =
+      case f.task do
+        {_ref, _pid, ^request, res} -> state.ts != nil and state.ts.res == res
+        _ -> false
+      end
+
+    if state.ts == nil or version != state.version or stop > Rope.byte_size(state.rope) or cached? or
+         running? or request in f.pending do
+      {:noreply, state}
+    else
+      pending = Enum.filter(f.pending, fn {v, _, _} -> v == version end) ++ [request]
+      timer = f.timer || Process.send_after(self(), :fontify, 25)
+      {:noreply, %{state | fontify: %{f | pending: pending, timer: timer}}}
+    end
   end
 
   defp on_cast(:touch, state), do: {:noreply, touch_state(state)}
@@ -1005,18 +1041,112 @@ defmodule Compos.Core.Buffer do
     {:noreply, state}
   end
 
+  defp on_info(:fontify, state) do
+    state = put_in(state.fontify.timer, nil)
+    {:noreply, start_fontification(state)}
+  end
+
+  defp on_info({ref, {:fontified, request, parsed, spans}}, state) do
+    case state.fontify.task do
+      {^ref, _pid, ^request, original} ->
+        Process.demonitor(ref, [:flush])
+        {version, start, stop} = request
+        state = put_in(state.fontify.task, nil)
+
+        state =
+          if version == state.version and parsed != nil and state.ts != nil and
+               state.ts.res == original do
+            cache =
+              [
+                {version, start, stop, spans}
+                | Enum.filter(state.fontify.cache, fn {v, _, _, _} -> v == version end)
+              ]
+              |> Enum.take(8)
+
+            state
+            |> put_in([Access.key(:fontify), :cache], cache)
+            |> put_in([Access.key(:ts), :res], parsed)
+          else
+            state
+          end
+
+        {:noreply, start_fontification(state)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  defp on_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    case state.fontify.task do
+      {^ref, _, _, _} ->
+        {:noreply, state |> put_in([Access.key(:fontify), :task], nil) |> start_fontification()}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  defp start_fontification(state) do
+    f = state.fontify
+    pending = Enum.filter(f.pending, fn {v, _, _} -> v == state.version end)
+
+    cond do
+      f.task != nil ->
+        state
+
+      state.ts == nil or pending == [] ->
+        put_in(state.fontify.pending, [])
+
+      true ->
+        [{version, start, stop} = request | rest] = pending
+        original = state.ts.res
+        lang = state.locals["ts-lang"]
+        rope = state.rope
+        parsed = TS.ts_state_fork(original, lang)
+
+        task =
+          Task.Supervisor.async_nolink(Compos.Core.TaskSupervisor, fn ->
+            spans =
+              if parsed,
+                do: TS.ts_state_highlight_range(parsed, Rope.to_binary(rope), start, stop),
+                else: []
+
+            {:fontified, request, parsed, spans}
+          end)
+
+        %{
+          state
+          | fontify: %{
+              f
+              | task: {task.ref, task.pid, {version, start, stop}, original},
+                pending: rest
+            }
+        }
+    end
+  end
+
   defp on_info(_, state), do: {:noreply, state}
 
   @impl true
   def terminate(_reason, %{discard: true} = state) do
+    cancel_fontification(state)
     BufferView.forget(state.name)
     flush_provenance(state)
     :ok
   end
 
   def terminate(_reason, state) do
+    cancel_fontification(state)
     BufferView.forget(state.name)
     write_checkpoint(state)
+  end
+
+  defp cancel_fontification(state) do
+    case Map.get(state, :fontify) do
+      %{task: {_ref, pid, _, _}} -> Process.exit(pid, :shutdown)
+      _ -> :ok
+    end
   end
 
   defp on_call(:text, _from, state) do
@@ -1646,6 +1776,8 @@ defmodule Compos.Core.Buffer do
     {:reply,
      %{
        text: text,
+       rope: state.rope,
+       fontification: state.fontify.cache,
        point: point,
        mark: mark,
        version: state.version,
@@ -3130,12 +3262,13 @@ defmodule Compos.Core.Buffer do
 
   # a mode that leaves clears 'ts-lang, and the local carries #f (false) to
   # say so. No language, no parser: false must drop the state, not hold it.
-  defp init_ts(state, lang) when lang in [nil, false], do: %{state | ts: nil}
+  defp init_ts(state, lang) when lang in [nil, false],
+    do: %{state | ts: nil, fontify: %{state.fontify | cache: []}}
 
   defp init_ts(state, lang) do
     case TS.ts_state_new(lang) do
-      nil -> %{state | ts: nil}
-      res -> %{state | ts: %{res: res, spans: nil}}
+      nil -> %{state | ts: nil, fontify: %{state.fontify | cache: []}}
+      res -> %{state | ts: %{res: res, spans: nil}, fontify: %{state.fontify | cache: []}}
     end
   end
 

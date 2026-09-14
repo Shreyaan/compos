@@ -3216,6 +3216,8 @@ defmodule Compos.Core.Editor do
         Map.get(locals, "dismissible") != true or
           "caret-browsing-mode" in (Map.get(locals, "minor-modes") || []),
       text: text,
+      rope: Map.get(snap, :rope),
+      fontification: Map.get(snap, :fontification, []),
       point: point,
       mark: snap.mark,
       version: snap.version,
@@ -3265,9 +3267,7 @@ defmodule Compos.Core.Editor do
       # hl-line-mode: the page highlights the current line unless the
       # buffer turned it off
       hl_line: Map.get(locals, "hl-line-mode") != "off",
-      # the page carries this so the wrap map it measures can name the
-      # text it measured
-      version: Buffer.version(buffer) || 0,
+      # Version and text come from the same immutable snapshot.
       agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
       blocks_root: Map.get(locals, "render-root"),

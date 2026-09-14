@@ -33,6 +33,21 @@ defmodule Compos.Core.Events do
     end)
   end
 
+  @doc "Subscribe to derived display data without subscribing to text changes."
+  def subscribe_display(name) do
+    {:ok, _} = Registry.register(@registry, {:buffer_display, name}, nil)
+    :ok
+  end
+
+  def unsubscribe_display(name), do: Registry.unregister(@registry, {:buffer_display, name})
+
+  @doc "Display data changed without a text edit. Only display subscribers consume this message."
+  def broadcast_display(name) do
+    Registry.dispatch(@registry, {:buffer_display, name}, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:buffer_display, name})
+    end)
+  end
+
   @doc "Editor-state (windows/minibuffer/echo/keymap) change notifications."
   def subscribe_editor do
     {:ok, _} = Registry.register(@registry, :editor, nil)

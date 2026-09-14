@@ -21,7 +21,7 @@ defmodule Compos.Ui.ScrollRequestTest do
     Editor.delete_other_windows()
     buf = "*scroll-request-#{System.unique_integer([:positive])}*"
     {:ok, _} = Compos.Core.create_buffer(buf)
-    Compos.Core.Buffer.append(buf, String.duplicate("line\n", 200), source: :editor)
+    Compos.Core.Buffer.append(buf, String.duplicate("line\n", 80), source: :editor)
     Editor.set_window_buffer(buf)
     on_exit(fn -> if Compos.Core.Buffer.exists?(buf), do: Compos.Core.kill_buffer(buf) end)
     {:ok, conn: build_conn()}

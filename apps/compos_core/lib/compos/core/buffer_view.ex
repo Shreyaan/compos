@@ -225,6 +225,8 @@ defmodule Compos.Core.BufferView do
 
     %{
       text: text(view),
+      rope: view.rope,
+      fontification: Map.get(view, :fontification, []),
       point: point,
       mark: mark,
       version: view.version,

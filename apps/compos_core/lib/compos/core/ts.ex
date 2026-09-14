@@ -44,6 +44,12 @@ defmodule Compos.Core.TS do
   @doc "Parse (incrementally if possible) and return highlight spans."
   def ts_state_highlight(_res, _text), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc "Fork the held tree for background fontification. The parser locks are independent."
+  def ts_state_fork(_res, _lang), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Parse with full context and return only captures intersecting START..STOP."
+  def ts_state_highlight_range(_res, _text, _start, _stop), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc "ts_node against the held tree — a walk, not a parse."
   def ts_state_node(_res, _text, _kind, _start, _stop, _op),
     do: :erlang.nif_error(:nif_not_loaded)

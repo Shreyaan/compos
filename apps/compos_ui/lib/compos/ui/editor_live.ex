@@ -11,7 +11,7 @@ defmodule Compos.Ui.EditorLive do
   use Phoenix.LiveView
   import Compos.Ui.ComposML, only: [sigil_M: 2]
 
-  alias Compos.Core.{Events, Input}
+  alias Compos.Core.{Events, Input, Rope}
   alias Compos.Scheme.Text
   alias Compos.Ui.{AppServer, LocalFile, LocalImage}
 
@@ -528,6 +528,7 @@ defmodule Compos.Ui.EditorLive do
   end
 
   def handle_info({:editor_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
+  def handle_info({:buffer_display, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:buffer_change, _, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
 
   # coalesce bursts: drain all queued change notifications, render once
@@ -536,6 +537,7 @@ defmodule Compos.Ui.EditorLive do
       {:frame_change, _} -> drain(socket)
       {:editor_change, _} -> drain(socket)
       {:buffer_change, _, _} -> drain(socket)
+      {:buffer_display, _} -> drain(socket)
     after
       0 -> socket
     end
@@ -648,11 +650,11 @@ defmodule Compos.Ui.EditorLive do
         # a buffer that left the window set stops feeding this client (S15)
         socket.assigns.subscribed
         |> MapSet.difference(visible)
-        |> Enum.each(&Events.unsubscribe/1)
+        |> Enum.each(fn name -> Events.unsubscribe(name); Events.unsubscribe_display(name) end)
 
         visible
         |> MapSet.difference(socket.assigns.subscribed)
-        |> Enum.each(&Events.subscribe/1)
+        |> Enum.each(fn name -> Events.subscribe(name); Events.subscribe_display(name) end)
 
         visible
       else
@@ -880,66 +882,33 @@ defmodule Compos.Ui.EditorLive do
      Map.put(cache, {:blocks, leaf.id}, {key, blocks})}
   end
 
-  # below this many lines, ship the whole buffer once and let the browser
-  # own scroll position natively — build_static already computes every
-  # line regardless of size, so this is purely a display decision, not
-  # new server work. Above it, keep the windowed/virtualized path: DOM
-  # node count and per-render diff cost both scale with what we ship.
-  @ship_all_threshold 3000
-
+  # Select source lines before fontification and segmentation. The rope in
+  # the snapshot is immutable, so line offsets and text share one version.
   defp decorate(%{type: :leaf} = leaf, cache, _faces, active) do
-    # the oembed generation moves when an X card lands: a line that drew
-    # the pending URL must draw the card
+    rope = Map.get(leaf, :rope) || Rope.new(leaf.text)
+    want = max(leaf.rows * 3 + 8, 1)
+    client_scroll? = leaf.total_lines <= want
+    whitespace = whitespace?(leaf)
+
     raw_key =
-      {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen, Compos.Ui.Oembed.generation(),
-       whitespace?(leaf)}
+      {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen, leaf.top, want,
+       leaf.hidden_lines, leaf.narrow_lines, whitespace, Compos.Ui.Oembed.generation(),
+       Map.get(leaf, :fontification, [])}
 
-    static =
+    {visible, row_cache} =
       case cache[leaf.id] do
-        {^raw_key, static} -> static
-        _ -> build_static(leaf)
-      end
+        {^raw_key, visible, row_cache} ->
+          {visible, row_cache}
 
-    # viewport: folded lines drop out, then (for large buffers) only the
-    # visible slice (+overscan) becomes DOM. leaf.top is in visible-line
-    # space.
-    hidden = leaf.hidden_lines
-    narrow_lines = Map.get(leaf, :narrow_lines)
-    size = tuple_size(static)
-    client_scroll? = size <= @ship_all_threshold
-    # 3x overscan: leaf.rows is measured against WRAPPED line height (so
-    # cursor-follow stays wrap-aware), but wrap factors vary per line —
-    # under-slicing leaves blank space below. Excess DOM is cheap and
-    # .buf{overflow:hidden} clips it. Only applies to the windowed path —
-    # a client-scrolled buffer ships everything, no slice to overscan.
-    want = leaf.rows * 3 + 8
+        old ->
+          previous =
+            case old do
+              {_, _, rows} -> rows
+              _ -> %{}
+            end
 
-    visible =
-      cond do
-        client_scroll? ->
-          static
-          |> Tuple.to_list()
-          |> restrict_lines(narrow_lines)
-          |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
-
-        MapSet.size(hidden) == 0 ->
-          # static is a tuple: elem/2 is O(1), so a deep scroll position
-          # costs the same as line 1 — Enum.slice on a list re-walks from
-          # element 0 every tick, so cost grows with leaf.top as you scroll
-          {range_first, range_last} = narrow_lines || {0, size - 1}
-          first = min(range_first + leaf.top, min(range_last + 1, size))
-          last = min(first + want - 1, min(range_last, size - 1))
-          if last < first, do: [], else: for(i <- first..last, do: elem(static, i))
-
-        true ->
-          # a fold can drop any line, so which raw index is the leaf.top-th
-          # VISIBLE one can't be found without walking the folded sequence —
-          # correctness over micro-perf here; folds are the uncommon case
-          static
-          |> Tuple.to_list()
-          |> restrict_lines(narrow_lines)
-          |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
-          |> Enum.slice(leaf.top, want)
+          source = viewport_lines(rope, leaf, want, client_scroll?)
+          build_static(leaf, source, previous, whitespace)
       end
 
     lines =
@@ -953,13 +922,13 @@ defmodule Compos.Ui.EditorLive do
       )
       |> Enum.map(fn ln ->
         # a visible line whose successor is folded gets a fold marker
-        if MapSet.member?(hidden, ln.num),
+        if MapSet.member?(leaf.hidden_lines, ln.num),
           do: %{ln | segs: ln.segs ++ [{" …", "f-fold-marker"}]},
           else: ln
       end)
 
     leaf = Map.put(leaf, :client_scroll?, client_scroll?)
-    {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
+    {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, visible, row_cache})}
   end
 
   defp csv_preview_file_key(_buffer, _text, rm) when rm != "markdown", do: nil
@@ -978,10 +947,42 @@ defmodule Compos.Ui.EditorLive do
     end)
   end
 
-  defp restrict_lines(lines, nil), do: lines
+  defp viewport_lines(rope, leaf, want, client_scroll?) do
+    size = Rope.line_count(rope)
+    {first, last} = leaf.narrow_lines || {0, size - 1}
+    top = if client_scroll?, do: 0, else: leaf.top
+    hidden = leaf.hidden_lines
 
-  defp restrict_lines(lines, {first, last}),
-    do: Enum.filter(lines, &(&1.num - 1 >= first and &1.num - 1 <= last))
+    indices =
+      cond do
+        last < first ->
+          []
+
+        MapSet.size(hidden) == 0 ->
+          lo = min(first + top, last + 1)
+          hi = min(lo + want - 1, last)
+          if hi < lo, do: [], else: Enum.to_list(lo..hi)
+
+        true ->
+          first..last
+          |> Stream.reject(&MapSet.member?(hidden, &1))
+          |> Stream.drop(top)
+          |> Enum.take(want)
+      end
+
+    Enum.map(indices, fn i ->
+      start = Rope.line_to_byte(rope, i)
+      stop = Rope.line_to_byte(rope, i + 1)
+      part = Rope.slice(rope, start, stop - start)
+
+      part =
+        if String.ends_with?(part, "\n"),
+          do: binary_part(part, 0, byte_size(part) - 1),
+          else: part
+
+      {{part, start}, i + 1}
+    end)
+  end
 
   defp block_open?([_s, _e, "tool", id | _], open_cards), do: id in open_cards
   defp block_open?(_, _), do: false
@@ -995,24 +996,13 @@ defmodule Compos.Ui.EditorLive do
   defp agent_block_cache_key(block, ag),
     do: {block, block_open?(block, ag.open_cards)}
 
-  # static per-version work: line split + font-lock spans + ts-only segs.
-  # Overlapping captures resolve last-wins (tree-sitter highlight semantics).
-  # Spans come from the buffer's incremental parser (cached per version,
-  # shared across clients); a racing edit between snapshot and highlight can
-  # skew one frame, which the edit's own broadcast then re-renders.
-  defp build_static(leaf) do
+  # Prepare only selected source lines. Faces arrive asynchronously and
+  # must match this snapshot. Text rendering never calls the parser.
+  defp build_static(leaf, lines, previous, whitespace) do
     spans =
-      case leaf.ts_lang do
-        # nil: no mode ever named a grammar. false: a mode left and took it.
-        lang when lang in [nil, false] ->
-          []
-
-        _lang ->
-          leaf.buffer
-          |> Compos.Core.Buffer.ts_highlight()
-          |> Enum.with_index()
-          |> Enum.map(fn {{s, e, scope}, i} -> {s, e, "ts-" <> scope, i} end)
-      end
+      display_spans(leaf, lines)
+      |> Enum.with_index()
+      |> Enum.map(fn {{s, e, scope}, i} -> {s, e, "ts-" <> scope, i} end)
 
     # A chrome attachment stands at one byte and holds zero bytes: text the
     # buffer does not hold, drawn beside the text it decorates. It rides the
@@ -1026,16 +1016,16 @@ defmodule Compos.Ui.EditorLive do
 
     ovs = Enum.map(plain_ov, fn {s, e, face} -> {s, e, "f-" <> face} end)
 
-    # whitespace-mode: a run of spaces and each tab wear a face the page
-    # marks; the newline mark is CSS on the row (see data-ws). The text
-    # keeps its own bytes.
+    # Whitespace decoration only scans the selected lines.
     ovs =
-      if whitespace?(leaf) do
+      if whitespace do
         ws =
-          Regex.scan(~r/ +|\t/, leaf.text, return: :index)
-          |> Enum.map(fn [{s, len}] ->
-            face = if binary_part(leaf.text, s, 1) == "\t", do: "f-ws-tab", else: "f-ws-space"
-            {s, s + len, face}
+          Enum.flat_map(lines, fn {{part, start}, _} ->
+            Regex.scan(~r/ +|\t/, part, return: :index)
+            |> Enum.map(fn [{s, len}] ->
+              face = if binary_part(part, s, 1) == "\t", do: "f-ws-tab", else: "f-ws-space"
+              {start + s, start + s + len, face}
+            end)
           end)
 
         ovs ++ ws
@@ -1043,38 +1033,78 @@ defmodule Compos.Ui.EditorLive do
         ovs
       end
 
-    # a tuple, not a list: decorate/3 slices this by scroll position on
-    # every render, and elem/2 is O(1) where Enum.slice on a list is
-    # O(top) — this is the buffer's full line count, walked once here,
-    # cached by {buffer, version, ts_lang, overlay_gen} until the next edit
-    lines =
-      leaf.text
-      |> String.split("\n")
-      |> Enum.map_reduce(0, fn part, start -> {{part, start}, start + byte_size(part) + 1} end)
-      |> elem(0)
-      |> Enum.with_index(1)
-
     ts_per_line = stab(spans, lines, fn {s, _, _, _} -> s end, fn {_, e, _, _} -> e end)
     ov_per_line = stab(ovs, lines, fn {s, _, _} -> s end, fn {_, e, _} -> e end)
-    chrome_per_line = chrome_lines(chrome, lines)
+    chrome_per_line = chrome_lines(chrome, lines, byte_size(leaf.text))
 
-    [lines, ts_per_line, ov_per_line, chrome_per_line]
-    |> Enum.zip_with(fn [{{part, start}, num}, line_ts, line_ov, line_chrome] ->
-      %{
-        part: part,
-        start: start,
-        num: num,
-        ts: line_ts,
-        ov: line_ov,
-        chrome: line_chrome,
-        selected: Enum.any?(line_ov, fn {_, _, face} -> face == "f-select" end),
-        # a row face (f-row-*) covering the line's start shapes the row:
-        # a list item, a quote, a rule, a code line
-        row: row_class(line_ov, start),
-        segs: line_segs(part, start, line_ts, line_ov, line_chrome)
-      }
-    end)
-    |> List.to_tuple()
+    {rows, {next, prepared}} =
+      [lines, ts_per_line, ov_per_line, chrome_per_line]
+      |> Enum.zip()
+      |> Enum.map_reduce({%{}, 0}, fn {{{part, start}, num}, line_ts, line_ov, line_chrome},
+                                      {next, prepared} ->
+        # Absolute offsets change after an edit above this line. Segment
+        # identity depends on relative ranges, not its document position.
+        ts = line_ts |> Enum.sort_by(&elem(&1, 3)) |> Enum.map(fn {s, e, cls, _} -> {s - start, e - start, cls} end)
+        ov = Enum.map(line_ov, fn {s, e, cls} -> {s - start, e - start, cls} end)
+
+        ch =
+          Enum.map(line_chrome, fn {p, side, cls, text, click} ->
+            {p - start, side, cls, text, click}
+          end)
+
+        key = {part, ts, ov, ch}
+
+        {segs, prepared} =
+          case Map.fetch(previous, key) do
+            {:ok, segs} -> {segs, prepared}
+            :error -> {line_segs(part, start, line_ts, line_ov, line_chrome), prepared + 1}
+          end
+
+        row = %{
+          part: part,
+          start: start,
+          num: num,
+          ts: line_ts,
+          ov: line_ov,
+          chrome: line_chrome,
+          selected: Enum.any?(line_ov, fn {_, _, face} -> face == "f-select" end),
+          row: row_class(line_ov, start),
+          segs: segs
+        }
+
+        {row, {Map.put(next, key, segs), prepared}}
+      end)
+
+    :telemetry.execute(
+      [:compos, :ui, :text_display],
+      %{visible: length(rows), prepared: prepared, reused: length(rows) - prepared},
+      %{buffer: leaf.buffer, version: leaf.version}
+    )
+
+    {rows, next}
+  end
+
+  defp display_spans(%{ts_lang: lang}, _) when lang in [nil, false], do: []
+  defp display_spans(_, []), do: []
+
+  defp display_spans(leaf, lines) do
+    {{_, start}, _} = hd(lines)
+    {{part, last}, _} = List.last(lines)
+    stop = last + byte_size(part)
+
+    found =
+      Enum.find(Map.get(leaf, :fontification, []), fn {v, s, e, _} ->
+        v == leaf.version and s <= start and e >= stop
+      end)
+
+    case found do
+      {_, _, _, spans} ->
+        spans
+
+      nil ->
+        Compos.Core.Buffer.request_fontification(leaf.buffer, leaf.version, start, stop)
+        []
+    end
   end
 
   # One chrome overlay -> {pos, side, class, text, click}. The face string
@@ -1098,21 +1128,17 @@ defmodule Compos.Ui.EditorLive do
   # a :before attachment belongs to what follows it, an :after attachment
   # to what precedes it; an empty line takes both, and the first and last
   # lines take what would otherwise fall off the ends.
-  defp chrome_lines([], lines), do: List.duplicate([], length(lines))
+  defp chrome_lines([], lines, _size), do: List.duplicate([], length(lines))
 
-  defp chrome_lines(chrome, lines) do
-    last = length(lines) - 1
-
-    lines
-    |> Enum.with_index()
-    |> Enum.map(fn {{{part, start}, _num}, i} ->
+  defp chrome_lines(chrome, lines, size) do
+    Enum.map(lines, fn {{part, start}, _num} ->
       le = start + byte_size(part)
 
       Enum.filter(chrome, fn {pos, side, _cls, _text, _click} ->
         pos >= start and pos <= le and
           case side do
-            :before -> pos < le or i == last or start == le
-            :after -> pos > start or i == 0 or start == le
+            :before -> pos < le or le == size or start == le
+            :after -> pos > start or start == 0 or start == le
           end
       end)
     end)
