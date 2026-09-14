@@ -999,6 +999,31 @@
           (else (loop (cdr es) (+ i 1))))))
 
 (define (ibuffer-current &optional buf) (list-current (or buf (ibuffer-view))))
+
+;; The rows a verb acts on. A heading is not one row among its members:
+;; it stands for all of them, so a verb on a heading is that verb on the
+;; whole section. A table whose headings are separators never hands one
+;; over, so this reads the same as list-targets there.
+(define (ibuffer-targets &optional buf)
+  (let ((buf (or buf (ibuffer-view))))
+    (fold (lambda (out row)
+            (append out (if (ibuffer-heading? row)
+                            (filter string? (ibuffer-heading-members row))
+                            (list row))))
+          '()
+          (list-targets buf))))
+
+;; the first row the list holds, never the heading over it: a table opens
+;; on something you can act on, and folding a section is not an opening
+;; act
+(define (ibuffer-goto-first-row! &optional buf)
+  (let* ((buf (or buf (ibuffer-view)))
+         (es (list-entries buf)))
+    (list-goto-first-entry buf)
+    (let loop ((i 0) (rest es))
+      (cond ((null? rest) #f)
+            ((string? (car rest)) (list-goto-index! buf i))
+            (else (loop (+ i 1) (cdr rest)))))))
 (define (ibuffer-filter-push! f &optional buf) (list-filter-push! (or buf (ibuffer-view)) f))
 
 ;; the heading of the section the highlight is in: the row itself when it
@@ -1337,7 +1362,7 @@
   (let ((buf (current-buffer)))
     (filter buffer-known?
             (if (ibuffer-view? buf)
-                (filter string? (list-targets buf))
+                (filter string? (ibuffer-targets buf))
                 (list id)))))
 
 (define (ibuffer-act-refresh!)
@@ -1419,9 +1444,8 @@
 
 (define-command "ibuffer-kill" "Kill the marked buffers, or the row at point"
   (lambda ()
-    (let ((view (current-buffer))
-          (targets (list-targets (current-buffer))))
-      (ibuffer-kill-targets! view targets 0 0))))
+    (let ((view (current-buffer)))
+      (ibuffer-kill-targets! view (ibuffer-targets view) 0 0))))
 
 ;; the group at point: under group sectioning, the section's group;
 ;; otherwise the group of the buffer on the row

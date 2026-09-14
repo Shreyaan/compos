@@ -539,12 +539,16 @@ defmodule Compos.GitDiffTest do
     buf = open_diff(ctx)
     Editor.set_window_buffer(buf)
 
-    [keymap, tabs | _] = blocks(buf)
+    shown = blocks(buf)
+    [keymap | _] = shown
     assert keymap.class == "diff-keymap"
     assert Enum.all?(keymap.children, &(&1.class == "diff-keymap-item"))
     assert Enum.any?(keymap.children, fn item ->
              Enum.any?(item.children, &(&1.text == "stage"))
            end)
+    head = Enum.find(shown, &(is_binary(&1.class) and &1.class =~ "diff-head"))
+    assert head.text =~ ~r/^Head:/
+    tabs = Enum.find(shown, &(is_binary(&1.class) and &1.class =~ "diff-tabs"))
     assert tabs.class =~ "diff-tabs"
     assert Enum.map(tabs.children, & &1.click) == ["diff-tab-changes", "diff-tab-history"]
 

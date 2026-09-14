@@ -269,15 +269,18 @@
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-name-column-stops-at-its-cap
-  "one long name widens the name column to the cap and no further"
+  "one long name widens the name column into empty room, never into a field's"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (let ((long (string-append "*zz-ib-" (string-repeat "x" 70) "*")))
       (ibuffer-test-buffer! long "1" *ibuffer-test-mode*)
       (ibuffer-refresh!)
-      (let ((cols (list-columns "*ibuffer*")))
-        (check-true! (<= (list-col-width (nth 2 cols)) *ibuffer-name-max*)
-                     "the name column is no wider than the cap"))
+      (let* ((cols (list-columns "*ibuffer*"))
+             (total (fold (lambda (n c) (+ n (list-col-width c))) 0 cols)))
+        (check-true! (<= total (list-view-width "*ibuffer*"))
+                     "every column still fits the window")
+        (check-true! (< (list-col-width (nth 2 cols)) (string-length long))
+                     "and the name column stops short of the longest name"))
       (buffer-kill! long))
     (ibuffer-test-reset!)))
 

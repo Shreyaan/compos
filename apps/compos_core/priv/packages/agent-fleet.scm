@@ -296,14 +296,18 @@
     (debounce! "agents-refresh" *agents-refresh-ms*
       (lambda (ignored) (agents-refresh!)) #f)))
 
-(define (agents-current-buf) (list-current *chat-list-buffer*))
+(define (agents-current-buf)
+  (let ((row (list-current *chat-list-buffer*)))
+    (and (string? row) row)))
 
 (define (agents-current-slug)
   (let ((b (agents-current-buf)))
     (and b (buffer-local b 'agent-slug))))
 
+;; the chats a verb acts on: the row at point, or every chat under it
+;; when that row is a group
 (define (agents-targets)
-  (filter (lambda (b) (buffer-exists? b)) (list-targets *chat-list-buffer*)))
+  (filter (lambda (b) (buffer-exists? b)) (ibuffer-targets *chat-list-buffer*)))
 
 (define (agents-report verb bs)
   (message (if (= (length bs) 1)
@@ -783,6 +787,11 @@
       ;; what a section of chats is worth saying beyond how many: how
       ;; many of them are running right now
       'section-note (lambda (buf members) (chats-live-note members))
+      ;; A group row is a row: it takes the highlight like any other,
+      ;; and the verbs read it as every chat under it. k on a group
+      ;; stops the group; a on a group archives the group. Folding is
+      ;; still what RET means there.
+      'separator? (lambda (buf b) #f)
       'rows (lambda (buf) (chat-list-rows buf))
       ;; the picker acts on one chat, the one at point: no marks, and no
       ;; flag-then-run, which is a table's idea and not an application's
@@ -943,7 +952,7 @@
                    ;; the scope widens the moment you type, so the rows are
                    ;; built again and not only filtered
                    (ibuffer-refresh! *chat-list-buffer*)
-                   (list-goto-first-entry *chat-list-buffer*)
+                   (ibuffer-goto-first-row! *chat-list-buffer*)
                    (chat-list-preview!)))
          (done (lambda () (set! *mb-list-buffer* #f) (set! *mb-list-prompt* #f))))
     (when (and (string? standing) (not (equal? standing "")))
@@ -970,7 +979,7 @@
                     (done)
                     (chat-list-clear-search!)
                     (ibuffer-refresh! *chat-list-buffer*)
-                    (list-goto-first-entry *chat-list-buffer*)
+                    (ibuffer-goto-first-row! *chat-list-buffer*)
                     (chat-list-preview!)
                     (chat-list-focus!)))
             (list 'legend *ibuffer-prompt-legend*)
@@ -984,7 +993,7 @@
     (with-current-buffer *chat-list-buffer*
       (lambda () (with-list-mode-skip-render (lambda () (set-mode! "chat-list-mode")))))
     (ibuffer-refresh! *chat-list-buffer*)
-    (list-goto-first-entry *chat-list-buffer*)
+    (ibuffer-goto-first-row! *chat-list-buffer*)
     (chat-list-preview!)
     ;; the list stands on its own keys; a filter line only opens when you
     ;; ask for one, by / or by arriving with words already typed
