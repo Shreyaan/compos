@@ -83,9 +83,14 @@
           ((not (equal? project "")) project)
           (else (or (plist-get row 'source) "")))))
 
+(define (messages--time row)
+  (let ((ms (plist-get row 'time-ms)))
+    (if (number? ms) (format-time (quotient ms 1000) "%H:%M:%S") "")))
+
 (define (messages--cells buf row)
   (let ((level (plist-get row 'level)))
     (list
+      (list (messages--time row) "dim")
       (list (messages--source row) "dim")
       (list (messages--one-line (plist-get row 'text))
             (messages--level-face level)))))
@@ -161,7 +166,8 @@
     'buffer *messages-buffer*
     'rows (lambda (buf) (messages-events))
     'columns (lambda (buf)
-               (list (list "source" 16 #f 'end)
+               (list (list "time" 8)
+                     (list "source" 16 #f 'end)
                      (list "message" #f)))
     'cells messages--cells
     'title (lambda (buf) "Messages")
