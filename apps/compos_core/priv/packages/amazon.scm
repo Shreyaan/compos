@@ -283,12 +283,13 @@
 (define (amazon--land! buf tries k)
   (let ((text (if (buffer-exists? buf) (buffer-text buf) "")))
     (cond ((> (string-length text) 4000)
-           (let ((rows (amz-parse text)))
+           (let ((rows (amz-parse text))
+                 (next (amazon-next-url text)))
              (buffer-kill! buf)
-             (k rows)))
+             (k rows next)))
           ((<= tries 0)
            (when (buffer-exists? buf) (buffer-kill! buf))
-           (k #f))
+           (k #f #f))
           (else
            (debounce! 'amazon-fetch 400
                       (lambda (_) (amazon--land! buf (- tries 1) k))
