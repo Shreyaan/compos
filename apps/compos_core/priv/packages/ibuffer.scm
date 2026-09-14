@@ -711,7 +711,7 @@
   (let ((fields (ibuffer-fields buf all)))
     (if (ibuffer-heading? b)
         (ibuffer-heading-cells buf b (length fields))
-        (append (ibuffer-cell-head b)
+        (append (ibuffer-cell-head buf b)
                 (map (lambda (f)
                        (list (ibuffer-field-fill
                                (ibuffer-field-cell b (ibuffer-field-tag f)))
@@ -722,7 +722,11 @@
 (define (ibuffer-compact-columns buf) (ibuffer-columns-for buf *ibuffer-compact-fields*))
 (define (ibuffer-wide-columns buf) (ibuffer-columns-for buf *ibuffer-wide-fields*))
 
-(define (ibuffer-cell-head b)
+;; A row keeps its own head: the state dot, its icon, its name. The
+;; spine that marks it as a member of the section above is drawn, not
+;; spelled -- the rendered row carries in-section, and the style rules
+;; put a hairline down its left edge.
+(define (ibuffer-cell-head buf b)
   (list (ibuffer-row-dot b)
         (list (ibuffer-row-icon b) "faint")
         (list (ibuffer-row-title b) (ibuffer-row-color b))))
@@ -785,21 +789,28 @@
          (tally (ibuffer-heading-details buf row))
          (cols (list-columns buf))
          (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
+         ;; the space between what the section is and what it holds is a
+         ;; rule, the way a heading is ruled off from its rows in print
          (set-out (lambda (head)
-                    (string-append (string-pad-right head (- width (string-length tally)))
-                                   tally))))
+                    (let ((gap (- width (string-length head) (string-length tally) 2)))
+                      (string-append head " "
+                                     (if (> gap 0) (string-repeat "─" gap) "")
+                                     " " tally)))))
     (cond ((not width) (ibuffer-heading-plain buf row))
-          ;; the name, its kind, and the tally at the far end
-          ((>= width (+ (string-length name) 2 (string-length tally))) (set-out name))
+          ;; the name, its kind, the rule, and the tally at the far end
+          ((>= width (+ (string-length name) 4 (string-length tally))) (set-out name))
           ;; too narrow for the kind: the tally outranks it
-          ((>= width (+ (string-length label) 2 (string-length tally))) (set-out label))
+          ((>= width (+ (string-length label) 4 (string-length tally))) (set-out label))
           ;; too narrow for both: a heading is its name before it is
           ;; anything else, and a name cut in half says nothing
           (else label))))
 
+;; The chevron stands at the left margin, where the rows show their
+;; state: a heading that starts to the right of everything it holds
+;; reads as one more row, indented.
 (define (ibuffer-heading-head buf row)
-  (list ""
-        (list (ibuffer-chevron row) (or (ibuffer-heading-face row) "dim"))
+  (list (list (ibuffer-chevron row) (or (ibuffer-heading-face row) "dim"))
+        ""
         (list (ibuffer-heading-text buf row) "accent")))
 
 ;; a heading says nothing in the field columns
@@ -829,10 +840,12 @@
 (define (ibuffer-band buf b off face)
   (list (list off (+ off (ibuffer-row-bytes buf b) -1) face)))
 
+;; A heading wears no band. A band was how a heading said it was not a
+;; row while it was set like one; now it says so in its own register --
+;; the name in upper case, the kind beside it, a rule out to the tally
+;; -- and a bar of colour on top of that only reads as a selection.
 (define (ibuffer-row-overlays buf b off)
-  (cond ((ibuffer-heading? b)
-         (append (ibuffer-band buf b off *list-section-row-face*)
-                 (ibuffer-count-overlay buf b off)))
+  (cond ((ibuffer-heading? b) (ibuffer-count-overlay buf b off))
         ((not (equal? (list-mark-of buf b) " "))
          (append (ibuffer-band buf b off "ibuffer-marked")
                  (ibuffer-dir-overlay buf b off)))
