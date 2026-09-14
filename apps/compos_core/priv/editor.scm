@@ -5729,8 +5729,49 @@
   #t)
 
 (define (buffer-created! name)
+  (when (string? name) (buffer-set-local! name 'created-at (current-time)))
   (run-hook-with-args 'buffer-created-hook name)
   name)
+
+;; A buffer carries the two times that say whether anyone still wants it:
+;; when it was made, and when the user last had it in front of them. Both
+;; are locals, so a checkpoint keeps them, and a local reads out of a
+;; dormant buffer without waking it. Nothing else can answer the question:
+;; the MRU ring holds names with no times, and it pads its tail with every
+;; other known buffer in alphabetical order.
+(define buffer-seen-coarse-seconds 60)
+(define *buffer-seen-stamps* '())
+
+(define (buffer-seen-memo b)
+  (let ((e (assoc b *buffer-seen-stamps*))) (and e (cadr e))))
+
+(define (buffer-seen-memo! b t)
+  (set! *buffer-seen-stamps*
+    (cons (list b t) (filter (lambda (e) (not (equal? (car e) b))) *buffer-seen-stamps*))))
+
+(define (buffer-note-seen! b)
+  ;; one write a minute per buffer. The hook behind this runs on every
+  ;; window configuration change, and a local write is a call into the
+  ;; buffer's own process.
+  (when (and (string? b) (buffer-known? b))
+    (let ((now (current-time)) (was (buffer-seen-memo b)))
+      (when (or (not (number? was)) (> (- now was) buffer-seen-coarse-seconds))
+        (buffer-seen-memo! b now)
+        (buffer-set-local! b 'last-seen now))))
+  b)
+
+(define (buffer-last-seen b)
+  ;; the memo answers a drawn list without touching the buffer; a miss
+  ;; reads the local once and keeps it, so a table pays this per boot.
+  (let ((memo (buffer-seen-memo b)))
+    (or memo
+        (and (buffer-known? b)
+             (let ((t (buffer-local b 'last-seen)))
+               (when (number? t) (buffer-seen-memo! b t))
+               (and (number? t) t))))))
+
+(define (buffer-created-at b)
+  (and (buffer-known? b) (let ((t (buffer-local b 'created-at))) (and (number? t) t))))
 
 ;; The other half. A dormant buffer is absent from (buffer-list), so a
 ;; pass over the open buffers cannot reach it while it sleeps, and it
