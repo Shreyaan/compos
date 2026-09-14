@@ -1557,3 +1557,83 @@
             (or (and (chat-title-first-prompt! buf #t)
                      (chat-summary-turn! buf))
                 (chat-summary-refresh! buf #t)))))))
+
+(domain! 'chat)
+(effects! '(write external execute))
+
+;;; --- where a chat works -------------------------------------------------------
+;;; ONE local says it: 'chat-directory. editor.scm stamps it at birth (the git
+;;; root of the buffer the chat was started from), buffer-directory answers from
+;;; it, and the modeline's context slot, relative paths and the project root all
+;;; move with it. The agent process is the other half: an ACP session is told its
+;;; cwd once, at session/new (agent-config-buffer-cwd, agent-connectors.scm), so
+;;; a live thread only moves by reconnecting. An idle thread reconnects at once;
+;;; a turn in flight is left alone and the move happens at its end, because
+;;; killing a running session to change a directory throws the reply away.
+
+(define (chat-cwd-of buf) (buffer-local buf 'chat-directory))
+
+(define (chat-cwd-set! buf dir)
+  (let ((slash (if (string-suffix? dir "/") dir (string-append dir "/"))))
+    ;; both locals: 'chat-directory is the chat's identity, 'default-directory is
+    ;; what a re-stamp would read if this buffer is ever set up again
+    (buffer-set-local! buf 'default-directory slash)
+    (buffer-set-local! buf 'chat-directory slash)
+    slash))
+
+(define (chat-cwd-move-runtime! buf)
+  (let ((slug (buffer-local buf 'agent-slug)))
+    (cond
+      ;; an isolated thread's cwd is its worktree and wins over the chat's
+      ;; directory — say so rather than pretend the agent moved
+      ((buffer-local buf 'workspace-root) 'workspace)
+      ((not (and slug (member slug (agent-list)))) 'none)
+      ((member (agent-status slug) '(running starting needs_attention))
+       (buffer-set-local! buf 'chat-cwd-pending #t)
+       'deferred)
+      (else
+        (buffer-set-local! buf 'chat-cwd-pending #f)
+        ;; a fresh session in the new directory; chat-attach! replays the
+        ;; transcript, so the conversation continues
+        (agent-reconnect! slug
+          (or (buffer-local buf 'agent-connector) *default-connector*)
+          (or (buffer-local buf 'agent-model) ""))
+        'moved))))
+
+(define (chat-cwd-note what dir)
+  (string-append "chat directory: " (abbreviate-file-name dir)
+    (cond ((equal? what 'moved) " — agent restarted there")
+          ((equal? what 'deferred) " — agent moves when this turn ends")
+          ((equal? what 'workspace) " — agent keeps its own workspace")
+          (else " — no agent attached"))))
+
+;; one listener, registered by name, so a reload replaces it instead of
+;; stacking a second one
+(when (boundp 'on-agent-turn-end!)
+  (on-agent-turn-end! "chat-cwd"
+    (lambda (slug stop-reason ok?)
+      (let ((buf (agent-buf slug)))
+        (when (and (string? buf) (buffer-exists? buf)
+                   (buffer-local buf 'chat-cwd-pending))
+          (message (chat-cwd-note (chat-cwd-move-runtime! buf)
+                                  (or (chat-cwd-of buf) (buffer-directory buf)))))))))
+
+(define-command "chat-cwd" "Set this chat's working directory, and move its agent there"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+          (message "not a chat buffer")
+          (read-file-name-initial "Chat working directory: " (buffer-directory buf)
+            (lambda (input)
+              (let ((dir (expand-path (normalize-file-input (string-trim input)))))
+                (if (not (file-directory? dir))
+                    (message (string-append "no such directory: " dir))
+                    (message (chat-cwd-note (begin (chat-cwd-set! buf dir)
+                                                   (chat-cwd-move-runtime! buf))
+                                            dir))))))))))
+
+(public! 'chat-cwd-of "(chat-cwd-of BUF) -> the directory this chat works in")
+(public! 'chat-cwd-set!
+  "(chat-cwd-set! BUF DIR) -> move it; the agent takes it at its next attach")
+(public! 'chat-cwd-move-runtime!
+  "(chat-cwd-move-runtime! BUF) -> reconnect the thread in the chat's directory: 'moved, 'deferred, 'workspace or 'none")

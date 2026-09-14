@@ -379,9 +379,23 @@
 (public! 'agent-system-prompt-parts
   "(agent-system-prompt-parts CONF) — named ACP system-prompt sections in session-start order")
 
+;; the buffer's own working directory, offered as a cwd for the thread it
+;; attaches: a chat answers with its 'chat-directory (buffer-directory follows
+;; that local), any other buffer with the directory it belongs to.
+(define (agent-config-buffer-cwd opts)
+  (let ((buf (plist-get opts 'buffer)))
+    (if (and (string? buf) (buffer-exists? buf))
+        (list 'cwd (buffer-directory buf))
+        '())))
+
 (define (agent-resolve-config* opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))
-         (conf (append opts (connector-config cname)))
+         ;; A thread works where its buffer works. The ACP and Codex lanes are
+         ;; told their cwd once, at session/new, and until now nobody told them
+         ;; at all: every session ran in the daemon's own directory. This says
+         ;; it LAST, so an explicit 'cwd in the attach opts (an isolated
+         ;; worktree) and a connector's own declared cwd both still win.
+         (conf (append opts (connector-config cname) (agent-config-buffer-cwd opts)))
          (m (or (plist-get conf 'model)
                 (and (member (llm-model) (connector-models cname)) (llm-model)))))
     (cond ((not m) conf)
