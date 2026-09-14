@@ -465,39 +465,42 @@
                            (filter (lambda (id) (not (equal? id current)))
                                    (group-ids)))))
          (ordered (append (if current (list current) '()) (map cadr named)))
-         (owner-of (lambda (row)
-                     (let ((ms (memberships-of row)))
-                       (let loop ((gs ordered))
-                         (cond ((null? gs) #f)
-                               ((member (car gs) ms) (car gs))
-                               (else (loop (cdr gs))))))))
-         ;; one pass fills every pail, in row order. A filter per group
-         ;; walked all the rows once per group: 50 groups over 300 rows on
-         ;; an open of the switcher.
-         (pails (let fill ((rs rows) (acc '()))
-                  (if (null? rs) acc
-                    (let* ((row (car rs)) (id (or (owner-of row) 'none))
-                           (e (assoc id acc)))
-                      (fill (cdr rs)
-                            (if e (begin (set-cdr! e (cons row (cdr e))) acc)
-                              (cons (cons id (list row)) acc)))))))
-         (of (lambda (id) (let ((e (assoc (or id 'none) pails)))
-                            (if e (reverse (cdr e)) '()))))
-         (buckets (map (lambda (id)
-                         (let ((ms (of id)))
-                           (and (pair? ms)
-                                ;; every section wears the name of its
-                                ;; group. The current one leads the table,
-                                ;; and that is what says it is current: a
-                                ;; row that answers "in this group" makes
-                                ;; the reader work out which group that is.
-                                (list (or (group-name id) id)
-                                      (string-append "group:" id)
-                                      ms
-                                      (group-color-face id)))))
-                       ordered))
-         (rest (of #f)))
-    (append (filter pair? buckets)
+         (last (length ordered))
+         (rank-of (lambda (row)
+                    (let ((ms (memberships-of row)))
+                      (let loop ((gs ordered) (i 0))
+                        (cond ((null? gs) last)
+                              ((member (car gs) ms) i)
+                              (else (loop (cdr gs) (+ i 1))))))))
+         ;; one sort by (section, arrival) puts every row where it belongs
+         ;; and keeps the order it came in. Filtering the rows once per
+         ;; group walked 300 rows 50 times on an open of the switcher.
+         (placed (sort (let mark ((rs rows) (i 0) (out '()))
+                         (if (null? rs) out
+                           (mark (cdr rs) (+ i 1)
+                                 (cons (list (rank-of (car rs)) i (car rs)) out))))))
+         (runs (let walk ((ps placed) (out '()))
+                 (if (null? ps) (reverse out)
+                   (let ((r (car (car ps))))
+                     (let take ((q ps) (acc '()))
+                       (if (or (null? q) (not (equal? (car (car q)) r)))
+                           (walk q (cons (list r (reverse acc)) out))
+                         (take (cdr q) (cons (nth 2 (car q)) acc))))))))
+         (buckets (map (lambda (run)
+                         (let ((id (nth (car run) ordered)))
+                           ;; every section wears the name of its group.
+                           ;; The current one leads the table, and that is
+                           ;; what says it is current: a row that answers
+                           ;; "in this group" makes the reader work out
+                           ;; which group that is.
+                           (list (or (group-name id) id)
+                                 (string-append "group:" id)
+                                 (cadr run)
+                                 (group-color-face id))))
+                       (filter (lambda (run) (< (car run) last)) runs)))
+         (rest (let ((tail (filter (lambda (run) (equal? (car run) last)) runs)))
+                 (if (pair? tail) (cadr (car tail)) '()))))
+    (append buckets
             (if (null? rest) '() (list (list "ungrouped" "group:" rest "faint"))))))
 
 (define (ibuffer-group-sections buf rows current)

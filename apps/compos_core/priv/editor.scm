@@ -2025,7 +2025,7 @@
                                               'attrs (append
                                 (list (list "record-id" (let ((key (if key-of (key-of buf row) row)))
                                   (if (string? key) key (value->string key)))))
-                                (or (plist-get block 'attrs) '()))) block)) out))))))))))
+                                (or (plist-get block 'attrs) '()))) block)) out)))))))))))
 
 (define (list-composml! buf rows head)
   (let ((render (list-opt buf 'composml))
