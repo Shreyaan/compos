@@ -789,6 +789,12 @@
 ;; the group you came from.
 (define (chat-list-arrive!)
   (let ((from (frame-group))
+        ;; what the frame showed before the application took it: leaving
+        ;; puts this back, so the list is never left standing
+        (was (let ((b (window-buffer (active-window))))
+               (if (equal? b *chat-list-buffer*)
+                   (buffer-local *chat-list-buffer* 'chat-list-from-buffer)
+                   b)))
         (held (or (group-pinned) 'none)))
     (buffer-create *chat-list-buffer*)
     (buffer-add-group! *chat-list-buffer* (chat-list-group))
@@ -803,6 +809,7 @@
     (let ((preview (other-work-window-id (active-window))))
       (buffer-set-locals! *chat-list-buffer*
         (list 'chat-list-from-group from
+              'chat-list-from-buffer was
               'chat-list-from-pin held
               'chat-list-preview-window preview
               'line-numbers "off"))
