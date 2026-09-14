@@ -328,6 +328,12 @@ a{color:var(--accent);text-decoration:none}
 (define (amazon-saved-list) (or (buffer-local *amazon-buffer* 'amazon-saved) '()))
 (define (amazon-saved? asin) (and (member asin (amazon-saved-list)) #t))
 
+;; a hidden product stays in the rows but out of the listing, so a search is
+;; never re-read to get it back; X shows the hidden ones again, marked ⊘
+(define (amazon-hidden-list) (or (buffer-local *amazon-buffer* 'amazon-hidden) '()))
+(define (amazon-hidden? asin) (and (member asin (amazon-hidden-list)) #t))
+(define (amazon-showing-hidden?) (and (buffer-local *amazon-buffer* 'amazon-show-hidden) #t))
+
 (define (amazon-notes) (or (buffer-local *amazon-buffer* 'amazon-notes) '()))
 (define (amazon-note asin)
   (let ((hit (assoc asin (amazon-notes)))) (and hit (car (cdr hit)))))
@@ -346,6 +352,14 @@ a{color:var(--accent);text-decoration:none}
                          (cons asin (amazon-saved-list))))
   (amazon-touch! asin)
   (amazon-saved? asin))
+
+(define (amazon-hide-toggle! asin)
+  (buffer-set-local! *amazon-buffer* 'amazon-hidden
+                     (if (amazon-hidden? asin)
+                         (filter (lambda (a) (not (equal? a asin))) (amazon-hidden-list))
+                         (cons asin (amazon-hidden-list))))
+  (amazon-touch! asin)
+  (amazon-hidden? asin))
 
 (define (amazon-note-set! asin text)
   (let ((rest (filter (lambda (n) (not (equal? (car n) asin))) (amazon-notes))))
@@ -554,11 +568,29 @@ a{color:var(--accent);text-decoration:none}
       (list-refresh! *amazon-buffer*)
       (message (if on "Soonest delivery first" "Amazon's order")))))
 
+(define-command "amazon-hide" "Take this product out of the listing"
+  (lambda ()
+    (let ((r (amazon-row-here)))
+      (when r
+        (let ((asin (plist-get r 'asin)))
+          (message (string-append (amz-clip (amazon-name-of asin) 34)
+                                  (if (amazon-hide-toggle! asin) " hidden" " back in the listing"))))))))
+
+(define-command "amazon-hidden" "Show the hidden products too, or put them away"
+  (lambda ()
+    (let ((on (not (amazon-showing-hidden?))))
+      (buffer-set-local! *amazon-buffer* 'amazon-show-hidden on)
+      (list-refresh! *amazon-buffer*)
+      (message (if on
+                   (string-append (number->string (length (amazon-hidden-list))) " hidden, shown")
+                   "Hidden products put away")))))
+
 ;;; --- the listing ---------------------------------------------------------
 
 (define (amazon--cells buf row)
   (let ((asin (plist-get row 'asin)))
-    (list (string-append (if (amazon-saved? asin) "★" " ")
+    (list (string-append (if (amazon-hidden? asin) "⊘" " ")
+                         (if (amazon-saved? asin) "★" " ")
                          (if (amazon-note asin) "✎" " ")
                          (if (amazon-in-cart? asin) "✓" " "))
           (amz-clip (plist-get row 'title) 52)
@@ -569,18 +601,21 @@ a{color:var(--accent);text-decoration:none}
           (list asin "dim"))))
 
 (define-list-mode! "amazon-mode"
-  (list 'doc "Amazon Business search results, as the account sees them: the price is yours, excluding GST, with the retail price beside it. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, n writes a note on it, c adds it to the cart, o opens it in the real browser, w copies its link, s runs another search, g searches again, q quits."
+  (list 'doc "Amazon Business search results, as the account sees them: the price is yours, excluding GST, with the retail price beside it. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, n writes a note on it, x takes it out of the listing and X shows the hidden ones again marked ⊘, c adds it to the cart, o opens it in the real browser, w copies its link, s runs another search, g searches again, q quits."
         'buffer *amazon-buffer*
         'transient #f
         'noun "product"
         'rows (lambda (buf)
-                (let ((rows (or (buffer-local buf 'amazon-rows) '())))
+                (let* ((all (or (buffer-local buf 'amazon-rows) '()))
+                       (rows (if (amazon-showing-hidden?)
+                                 all
+                                 (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all))))
                   (if (equal? (buffer-local buf 'amazon-sort) 'delivery)
                       (amz-sort-by-delivery rows)
                       rows)))
         'key (lambda (buf row) (plist-get row 'asin))
         'columns (lambda (buf)
-                   (list (list "" 3) (list "product" 52) (list "₹" 10)
+                   (list (list "" 4) (list "product" 52) (list "₹" 10)
                          (list "with gst" 9) (list "rating" 7)
                          (list "delivery" 9) (list "asin" 12)))
         'cells amazon--cells
@@ -589,15 +624,28 @@ a{color:var(--accent);text-decoration:none}
                 (string-append amazon-host " · business price, excluding GST"
                                (if (equal? (buffer-local buf 'amazon-sort) 'delivery)
                                    " · soonest delivery first"
-                                   "")))
-        'total (lambda (buf) (length (or (buffer-local buf 'amazon-rows) '())))
+                                   "")
+                               (let ((n (length (amazon-hidden-list))))
+                                 (cond ((= n 0) "")
+                                       ((amazon-showing-hidden?)
+                                        (string-append " · showing " (number->string n) " hidden"))
+                                       (else (string-append " · " (number->string n) " hidden"))))))
+        'total (lambda (buf)
+                 (let ((all (or (buffer-local buf 'amazon-rows) '())))
+                   (if (amazon-showing-hidden?)
+                       (length all)
+                       (length (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all)))))
         'footer (lambda (buf) (list (list "RET" "page") (list "m" "save") (list "n" "note")
+                                    (list "x" "hide")
+                                    (list "X" (if (amazon-showing-hidden?) "hide hidden" "show hidden"))
                                     (list "d" "by delivery") (list "c" "cart")
                                     (list "o" "browser") (list "s" "search") (list "q" "quit")))
         'preview (lambda (buf row) (amazon-show-detail! row))
         'keys (list (list "RET" "amazon-detail")
                     (list "m" "amazon-save")
                     (list "n" "amazon-note")
+                    (list "x" "amazon-hide")
+                    (list "X" "amazon-hidden")
                     (list "d" "amazon-sort-delivery")
                     (list "c" "amazon-cart")
                     (list "o" "amazon-open")
@@ -708,6 +756,9 @@ a{color:var(--accent);text-decoration:none}
 (public! 'amazon-note-set!
   "(amazon-note-set! ASIN TEXT) — write the note shown on the product's page; \"\" clears it")
 
+(public! 'amazon-hide-toggle!
+  "(amazon-hide-toggle! ASIN) — take a product out of the listing, or put it back; a hidden one is marked ⊘ when X shows them")
+
 (catalog-meta! 'function "amazon-open!" 'domain 'web 'effects '(read write external display))
 (catalog-meta! 'function "amazon-cart-add!" 'domain 'web 'effects '(write external))
 (catalog-meta! 'function "amazon-show-detail!" 'domain 'web 'effects '(write display))
@@ -715,3 +766,4 @@ a{color:var(--accent);text-decoration:none}
 (catalog-meta! 'function "amz-delivery-key" 'domain 'web 'effects '(read))
 (catalog-meta! 'function "amazon-save-toggle!" 'domain 'web 'effects '(write))
 (catalog-meta! 'function "amazon-note-set!" 'domain 'web 'effects '(write))
+(catalog-meta! 'function "amazon-hide-toggle!" 'domain 'web 'effects '(write))
