@@ -647,9 +647,6 @@ a{color:var(--accent);text-decoration:none}
 ;;; follow the theme rather than fighting it.
 
 (define li-css-title "padding:.7em .9em .1em;font-weight:700;font-size:1.06em;letter-spacing:-.01em")
-(define li-css-tabs "display:flex;gap:.4em;align-items:center;flex-wrap:wrap;padding:.25em .9em .5em")
-(define li-css-tab-on "border-radius:999px;padding:.16em .8em;background:var(--accent-fg,#0a66c2);color:var(--default-bg,#fff);font-weight:600;font-size:.84em")
-(define li-css-tab-off "border-radius:999px;padding:.16em .8em;border:1px solid var(--border-bg,#d8d4cb);color:var(--dim-fg,#8a857a);font-size:.84em")
 (define li-css-note "padding:0 .9em .55em;color:var(--dim-fg,#8a857a);font-size:.78em")
 (define li-css-rule "border-bottom:1px solid var(--border-bg,#e2ded4);margin:0 .5em")
 (define li-css-name "font-weight:600")
@@ -665,16 +662,18 @@ a{color:var(--accent);text-decoration:none}
                        (if css (list (list "style" css)) '()))
         'text (if (number? text) (number->string text) (or text ""))))
 
-;; a tab is a pill: the one you are on filled, the others outlined, each
-;; carrying what its reading holds
-(define (li--tab-pill buf tab at)
+;; a tab, as ui/tabs wants one: the id a click comes back under, the
+;; label with what that reading holds, and whether you are on it. The
+;; pill shape and its colours are the component's, so the tab bar here
+;; looks like every other tab bar in the editor.
+(define (li--tab-entry buf tab at)
   (let* ((rs (or (buffer-local buf (if (equal? tab 'messages) 'linkedin-threads 'linkedin-rows))
                  '()))
-         (label (string-append (symbol->string tab)
-                               (if (null? rs) "" (string-append "  " (number->string (length rs)))))))
-    (list 'tag "span"
-          'attrs (list (list "style" (if (equal? tab at) li-css-tab-on li-css-tab-off)))
-          'text label)))
+         (name (symbol->string tab))
+         (label (if (null? rs)
+                    name
+                    (string-append name " " (number->string (length rs))))))
+    (list (string-append "linkedin-tab-" name) label (equal? tab at))))
 
 ;; The head the cards stand under: the app, its tabs, and the keys. The
 ;; text head says the same thing in one line of chips; this one says it in
@@ -687,8 +686,9 @@ a{color:var(--accent);text-decoration:none}
                    (string-append "matching \"" q "\" · \\ widens"))))
     (list
       (li--block "div" "LinkedIn Recruiter" #f li-css-title)
-      (list 'tag "div" 'attrs (list (list "style" li-css-tabs))
-            'children (map (lambda (t) (li--tab-pill buf t at)) *linkedin-tabs*))
+      (component 'ui/tabs
+        (list 'class "linkedin-tabs"
+              'tabs (map (lambda (t) (li--tab-entry buf t at)) *linkedin-tabs*)))
       (li--block "div" note #f li-css-note)
       (li--block "div" "" #f li-css-rule))))
 
@@ -910,6 +910,19 @@ a{color:var(--accent);text-decoration:none}
   (let ((n (length *linkedin-tabs*)))
     (linkedin-set-tab! (nth (modulo (+ (linkedin--tab-index *linkedin-buffer*) d n) n)
                             *linkedin-tabs*))))
+
+;; A tab in the bar is clickable, and a click is the same move as
+;; <left>/<right>: the component hands back the id li--tab-entry gave it,
+;; and that id is the tab's own name. Anything else on the listing --
+;; a row -- is not ours, so it falls through to the list's own handler.
+(when (boundp 'on-block-click!)
+  (on-block-click! 'linkedin
+    (lambda (buf id)
+      (and (equal? buf *linkedin-buffer*)
+           (string-prefix? "linkedin-tab-" id)
+           (let ((tab (string->symbol (substring id 13 (string-length id)))))
+             (and (member tab *linkedin-tabs*)
+                  (begin (linkedin-set-tab! tab) #t)))))))
 
 (define-command "linkedin-tab-next" "Show the next LinkedIn tab"
   (lambda () (linkedin--step-tab! 1)))
