@@ -756,7 +756,9 @@
              "and leave the list standing: s steers it, y and d answer the "
              "permission it waits on, r gives it a title, k stops its "
              "runtime and keeps the transcript, a archives it, g draws the "
-             "list again and + starts a new chat.")
+             "list again and + starts a new chat. The last section holds "
+             "the newest saved conversations; RET on one reads its file "
+             "back and revives the chat.")
       'buffer *chat-list-buffer*
       'category 'chat
       'title (lambda (buf) "Chats")
@@ -872,14 +874,23 @@
         (switch-to-buffer! keep)))
   (when (equal? (window-buffer (active-window)) keep) (end-of-buffer!)))
 
+(define (chat-list-back!)
+  (chat-list-clear-search!)
+  (chat-list-unpin!)
+  (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
+    (when from (switch-to-group! from))))
+
+;; a saved conversation is a file and has no group of its own, so reading
+;; it back lands it where you stood when you asked for it
+(define (chat-list-revive! path)
+  (chat-list-back!)
+  (visit-in-group path (and (boundp 'group-here) (group-here)))
+  (end-of-buffer!))
+
 (define (chat-list-leave! keep)
-  (if (and (string? keep) (buffer-known? keep))
-      (chat-list-keep! keep)
-      (begin
-        (chat-list-clear-search!)
-        (chat-list-unpin!)
-        (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
-          (when from (switch-to-group! from))))))
+  (cond ((and (string? keep) (buffer-known? keep)) (chat-list-keep! keep))
+        ((and (string? keep) (file-exists? keep)) (chat-list-revive! keep))
+        (else (chat-list-back!))))
 
 ;; one filter line over one list: what you type reads the titles, and the
 ;; same words read the text of every alive chat
