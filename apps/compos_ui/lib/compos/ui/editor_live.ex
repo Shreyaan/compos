@@ -2017,7 +2017,7 @@ defmodule Compos.Ui.EditorLive do
           <.dynamic_tag :for={ln <- group.lines} tag_name={group.tag} {group.attrs}
             id={"ln-#{@node.id}-#{ln.num}"}
             class={"line line-content semantic-direct #{ln.row} #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
-            data-s={ln.start} data-line={ln.num} selected={to_string(ln.current)}><.semantic_line id_prefix={"sg-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={true} /><.cap_pop active?={@active?} completion={@completion} ln={ln} text={@node.text} /></.dynamic_tag>
+            data-s={ln.start} data-line={ln.num} selected={to_string(ln.current)}><.semantic_line id_prefix={"sg-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={true} /></.dynamic_tag>
         <% else %>
         <.dynamic_tag tag_name={group.tag} class="semantic-record" style="display: contents" {group.attrs}>
         <c-line
@@ -2030,7 +2030,14 @@ defmodule Compos.Ui.EditorLive do
           <c-text class="line-content"><.semantic_line id_prefix={"sg-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} /><br
               :if={ln.segs == []}
               class="empty-row"
-            /><.cap_pop active?={@active?} completion={@completion} ln={ln} text={@node.text} /></c-text>
+            /><%= if @active? && @completion && ln.at_point do %><c-text
+              class="cap-pop"
+              contenteditable="false"
+              style={"left: #{pop_col(@node.text, ln.start, @completion.start)}ch"}
+            ><c-text class="cap-title">completion-at-point · {@completion.total}</c-text><c-text
+              :for={c <- @completion.candidates}
+              class={"cap-row #{if c.selected, do: "selected"}"}
+            ><c-text class="cap-label">{c.label}</c-text><c-text class="cap-kind">{c.hint}</c-text></c-text></c-text><% end %></c-text>
         </c-line>
         </.dynamic_tag>
         <% end %>
@@ -2094,21 +2101,6 @@ defmodule Compos.Ui.EditorLive do
   # The focused editable surface draws no cursor and no region of its own.
   # The browser owns the caret and selection there. An inactive editable
   # surface draws the server marker, so its window still shows point.
-  # The completion card. It hangs off the line point is on, in whichever
-  # window is active, and both line shapes draw it the same way.
-  defp cap_pop(assigns) do
-    ~M"""
-    <%= if @active? && @completion && @ln.at_point do %><c-text
-        class="cap-pop"
-        contenteditable="false"
-        style={"left: #{pop_col(@text, @ln.start, @completion.start)}ch"}
-      ><c-text class="cap-title">completion-at-point · {@completion.total}</c-text><c-text
-        :for={c <- @completion.candidates}
-        class={"cap-row #{if c.selected, do: "selected"}"}
-      ><c-text class="cap-label">{c.label}</c-text><c-text class="cap-kind">{c.hint}</c-text></c-text></c-text><% end %>
-    """
-  end
-
   defp render_pass(static, text, point, mark, native_caret?, show_cursor?) do
     {rs, re} =
       case mark do

@@ -3282,7 +3282,13 @@ defmodule Compos.Ui.Layouts do
                   const rep = this._reported;
                   if (rep && !rep.acked) {
                     if (rep.point === pt && (rep.mark === null ? pt : rep.mark) === wantAnchor) rep.acked = true;
-                    else if (performance.now() - rep.at < 3000) { markCurrentRow(buf); return; }
+                    // A key struck after the report makes the report obsolete:
+                    // the server is moving point BECAUSE of that key. The
+                    // server answers in ~12ms and the report rests for 150ms,
+                    // so while you type every report is stale on arrival and
+                    // defending it held the caret still for the full three
+                    // seconds, once per keystroke.
+                    else if (performance.now() - rep.at < 3000 && !(this._gestureAt > rep.at)) { markCurrentRow(buf); return; }
                   }
                   this._settingSel = true;
                   try {

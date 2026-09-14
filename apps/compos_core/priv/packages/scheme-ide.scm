@@ -210,8 +210,6 @@
         (unless (member scheme-ide--capf cur)
           (buffer-set-local! buf 'capf-sources (cons scheme-ide--capf cur))))
       (desktop-skip! buf 'capf-sources)
-      ;; scheme-ide--capf answers in this call, so typing may ask it
-      (capf-auto-watch! buf)
       ;; squiggles follow edits, debounced like annotate's checker; the
       ;; watch survives mode re-entry because on-change! ids are per call
       (unless (buffer-local buf 'scheme-ide-watch)
