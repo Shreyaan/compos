@@ -10,7 +10,7 @@
         '()
         (let loop ((lines (string-split text "\n")) (out '()))
           (if (null? lines)
-              (reverse out)
+              (map cadr (sort (map (lambda (row) (list (or (plist-get row 'mono_us) 0) row)) out)))
               (let ((row (json-parse (car lines))))
                 (loop (cdr lines) (if row (cons row out) out))))))))
 
@@ -63,6 +63,3 @@
             (unless (buffer-exists? *chat-perf-buffer*) (buffer-create *chat-perf-buffer*))
             (buffer-set-local! *chat-perf-buffer* 'chat-perf-path path)
             (list-mode-show! "chat-perf-mode"))))))
-
-(public! 'chat-perf--events
-  "(chat-perf--events PATH) — parse the append-only JSON trace and skip incomplete lines")
