@@ -42,8 +42,9 @@ This is a simple line-based comparison. It does not calculate a general edit scr
 
 `diff-block-ours-text`, `diff-block-theirs-text`, and `diff-block-all-text` build the three fence representations. `diff-block--render` selects one representation from the current state.
 
-The fence line includes the state name and the keys for accepting, rejecting, and cycling. The code reads these keys from the buffer keymap when it lands the block. The displayed help therefore follows the active bindings.
+Every representation is a `diff` fence. The fence registry maps both `diff` and `patch` blocks to the bundled tree-sitter `diff` grammar, so inline editor blocks and full diff-mode buffers share syntax structure and highlighting.
 
+The fence line includes the state name and the keys for accepting, rejecting, and cycling. The code reads these keys from the buffer keymap when it lands the block. The displayed help therefore follows the active bindings.
 ## Tracking and faces
 
 The block uses overlays for the original source range and the inserted diff block. The overlays track edits above the block. The block can therefore find its current byte ranges after other edits move it.

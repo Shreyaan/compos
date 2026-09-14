@@ -23,6 +23,7 @@ fn language(name: &str) -> Option<Language> {
         "json" => Some(tree_sitter_json::LANGUAGE.into()),
         "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
         "html" => Some(tree_sitter_html::LANGUAGE.into()),
+        "diff" => Some(tree_sitter_diff::LANGUAGE.into()),
         _ => dynamic().lock().unwrap().get(name).map(|(l, _)| l.clone()),
     }
 }
@@ -33,6 +34,7 @@ fn highlights_query(name: &str) -> Option<String> {
         "json" => Some(tree_sitter_json::HIGHLIGHTS_QUERY.to_string()),
         "rust" => Some(tree_sitter_rust::HIGHLIGHTS_QUERY.to_string()),
         "html" => Some(tree_sitter_html::HIGHLIGHTS_QUERY.to_string()),
+        "diff" => Some(tree_sitter_diff::HIGHLIGHTS_QUERY.to_string()),
         _ => dynamic().lock().unwrap().get(name).map(|(_, q)| q.clone()),
     }
 }

@@ -438,12 +438,69 @@ defmodule Compos.GitDiffTest do
     assert Buffer.hidden(buf, "diff") == []
   end
 
+  test "diff-stage stages the file at its header", ctx do
+    buf = open_diff(ctx)
+    Editor.set_window_buffer(buf)
+
+    a = Enum.find(cards(buf), &(&1.file == "a.txt" and &1.section == "Unstaged changes"))
+    goto_line(buf, a.start)
+    press("s")
+
+    assert wait_for(fn ->
+             case Git.diff(ctx.dir, staged: true) do
+               {:ok, files} -> Enum.any?(files, &(&1.file_b == "a.txt"))
+               _ -> false
+             end
+           end)
+  end
+
+  test "diff-stage stages only the hunk at point", ctx do
+    File.write!(
+      Path.join(ctx.dir, "a.txt"),
+      @twelve |> String.replace("line 2\n", "LINE TWO\n") |> String.replace("line 11\n", "LINE ELEVEN\n")
+    )
+
+    buf = open_diff(ctx)
+    Editor.set_window_buffer(buf)
+    a = Enum.find(cards(buf), &(&1.file == "a.txt" and &1.section == "Unstaged changes"))
+    assert length(a.hunks) == 2
+
+    goto_line(buf, Enum.at(a.hunks, 1).line + 1)
+    press("s")
+
+    assert wait_for(fn ->
+             case Git.diff(ctx.dir, staged: true) do
+               {:ok, [%{hunks: [h]}]} -> h.new_start == Enum.at(a.hunks, 1).new_start
+               _ -> false
+             end
+           end)
+
+    assert {:ok, [%{hunks: [_]}]} = Git.diff(ctx.dir, base: nil)
+  end
+
+  test "diff-explain sends changes without commit history", ctx do
+    buf = open_diff(ctx)
+
+    {:ok, changes} = Session.eval(~s{(diff--changes-text "#{buf}")})
+    assert changes =~ "diff --git a/a.txt b/a.txt"
+    refute changes =~ hd(commits(buf)).subject
+
+    {:ok, prompt} = Session.eval(~s{(diff--explanation-prompt (diff--changes-text "#{buf}"))})
+    assert prompt =~ "Explain this unified diff"
+    assert prompt =~ "```diff"
+    refute prompt =~ hd(commits(buf)).subject
+  end
+
   test "the keymap and changes-history tabs lead the view", ctx do
     buf = open_diff(ctx)
     Editor.set_window_buffer(buf)
 
     [keymap, tabs | _] = blocks(buf)
     assert keymap.class == "diff-keymap"
+    assert Enum.all?(keymap.children, &(&1.class == "diff-keymap-item"))
+    assert Enum.any?(keymap.children, fn item ->
+             Enum.any?(item.children, &(&1.text == "stage"))
+           end)
     assert tabs.class =~ "diff-tabs"
     assert Enum.map(tabs.children, & &1.click) == ["diff-tab-changes", "diff-tab-history"]
 

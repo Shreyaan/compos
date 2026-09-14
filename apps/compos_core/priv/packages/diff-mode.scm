@@ -193,26 +193,52 @@
         (buffer-set-local! buf 'diff-layout-cache l)
         l)))
 
+(define (diff--section-before-line buf target)
+  (let loop ((ls (split-lines (buffer-text buf))) (line 1) (section ""))
+    (if (or (null? ls) (>= line target))
+        section
+        (let ((next (diff--section-line? buf (car ls))))
+          (loop (cdr ls) (+ line 1) (if next next section))))))
+
+(define (diff--layout-hunks buf section file hunks)
+  (let loop ((hs hunks) (n 0) (acc '()))
+    (if (null? hs)
+        (reverse acc)
+        (let* ((h (car hs))
+               (start (diff--line-number buf (diff--get h 'start-byte)))
+               (stop-byte (max (diff--get h 'start-byte)
+                               (- (diff--get h 'end-byte) 1)))
+               (end (diff--line-number buf stop-byte)))
+          (loop (cdr hs) (+ n 1)
+            (cons (list 'n n
+                        'line start
+                        'end end
+                        'header (diff--get h 'header)
+                        'old-start (diff--get h 'old-start)
+                        'new-start (diff--get h 'new-start)
+                        'patch (diff--get h 'patch)
+                        'lines (diff--get h 'lines))
+                  acc))))))
+
+(define (diff--layout-card buf f overrides)
+  (let* ((start (diff--line-number buf (diff--get f 'start-byte)))
+         (stop-byte (max (diff--get f 'start-byte)
+                         (- (diff--get f 'end-byte) 1)))
+         (end (diff--line-number buf stop-byte))
+         (section (diff--section-before-line buf start))
+         (name (diff--name f))
+         (key (diff--key section name))
+         (override (assoc key overrides)))
+    (list 'key key 'section section 'file name
+          'status (if override (cadr override) (diff--file-status f))
+          'start start 'end end 'f f
+          'hunks (diff--layout-hunks buf section name
+                                    (or (diff--get f 'hunks) '())))))
+
 (define (diff--layout-parse buf)
-  (let* ((text (buffer-text buf))
-         (overrides (or (buffer-local buf 'diff-overrides) '())))
-    (let loop ((ls (split-lines text)) (n 1) (sec "")
-               (fs (diff-parse text)) (cur #f) (acc '()))
-      (cond
-        ((null? ls)
-         (reverse (if cur (cons (diff--close-card cur (- n 1) overrides) acc) acc)))
-        ((diff--section-line? buf (car ls))
-         (loop (cdr ls) (+ n 1) (diff--section-line? buf (car ls)) fs #f
-               (if cur (cons (diff--close-card cur (- n 1) overrides) acc) acc)))
-        ((and (string-prefix? "diff --git a/" (car ls)) (pair? fs))
-         (loop (cdr ls) (+ n 1) sec (cdr fs)
-               (list sec (car fs) n '())
-               (if cur (cons (diff--close-card cur (- n 1) overrides) acc) acc)))
-        ((and cur (string-prefix? "@@" (car ls)))
-         (loop (cdr ls) (+ n 1) sec fs
-               (list (car cur) (cadr cur) (caddr cur) (cons n (list-ref cur 3)))
-               acc))
-        (else (loop (cdr ls) (+ n 1) sec fs cur acc))))))
+  (let ((overrides (or (buffer-local buf 'diff-overrides) '())))
+    (map (lambda (f) (diff--layout-card buf f overrides))
+         (diff-parse (buffer-text buf)))))
 
 ;; cur while scanning: (SECTION FILEPLIST START-LINE HUNK-LINES-reversed)
 (define (diff--close-card cur end overrides)
@@ -383,16 +409,25 @@
                                       (if (buffer-local buf 'diff-conflict-only)
                                           "show all" "show conflicts only"))))))))
 
+(define (diff--keymap-item key label)
+  (list 'tag "span" 'class "diff-keymap-item"
+        'children
+        (list (list 'tag "span" 'class "diff-key" 'text key)
+              (list 'tag "span" 'class "diff-key-label" 'text label))))
+
 (define (diff--keymap-block)
   (list 'tag "div" 'class "diff-keymap"
-        'segs '(("diff-key" "n/p") ("diff-key-label" " hunks/files   ")
-                ("diff-key" "N/P") ("diff-key-label" " files   ")
-                ("diff-key" "TAB") ("diff-key-label" " hunk   ")
-                ("diff-key" "f") ("diff-key-label" " file   ")
-                ("diff-key" "F") ("diff-key-label" " all   ")
-                ("diff-key" "RET") ("diff-key-label" " open   ")
-                ("diff-key" "g") ("diff-key-label" " refresh   ")
-                ("diff-key" "w") ("diff-key-label" " watch"))))
+        'children
+        (list (diff--keymap-item "n/p" "hunks/files")
+              (diff--keymap-item "N/P" "files")
+              (diff--keymap-item "TAB" "fold hunk")
+              (diff--keymap-item "f" "fold file")
+              (diff--keymap-item "F" "fold all")
+              (diff--keymap-item "s" "stage")
+              (diff--keymap-item "RET" "open")
+              (diff--keymap-item "g" "refresh")
+              (diff--keymap-item "w" "watch")
+              (diff--keymap-item "?" "explain"))))
 
 (define (diff--active-tab buf visible commits)
   (or (buffer-local buf 'diff-tab)
@@ -911,6 +946,7 @@
       (buffer-set-local! buf 'desktop-skip-locals
         '(render-blocks diff-card-cache diff-layout-cache))
       (buffer-set-local! buf 'render-mode "blocks")
+      (buffer-set-local! buf 'ts-lang "diff")
       (buffer-set-local! buf 'diff-commits '())
       (buffer-set-local! buf 'diff-tab "changes")
       (buffer-set-local! buf 'diff-open-cards
@@ -922,6 +958,100 @@
 
 (mode-doc! "diff-show"
   "One commit, already written. Every card starts open. `n` and `p` step over hunks, and `RET` opens the file at that line. Nothing refreshes, because a commit does not change.")
+
+(define (diff--changes-text buf)
+  (let* ((text (buffer-text buf))
+         (commits (or (buffer-local buf 'diff-commits) '())))
+    (if (null? commits)
+        (string-trim text)
+        (let ((change-lines (max 0 (- (car (car commits)) 3))))
+          (string-trim
+            (string-join
+              (diff--first-n (split-lines text) change-lines)
+              "\n"))))))
+
+(define (diff--explanation-buffer buf)
+  (string-append "*explain: " buf "*"))
+
+(define (diff--explanation-prompt changes)
+  (string-append
+    "Explain this unified diff to a developer. Describe its purpose, behavior changes, important files, risks, and useful review checks. Be concise and do not invent missing context.\n\n"
+    "```diff\n" changes "\n```"))
+
+(define (diff--write-explanation! out text)
+  (when (buffer-exists? out)
+    (buffer-set-read-only! out #f)
+    (buffer-delete-range! out 0 (buffer-size out))
+    (buffer-append! out
+      (string-append "# Diff explanation\n\n"
+                     (if (and (string? text) (not (equal? text "")))
+                         text
+                         "The LLM returned no explanation.")
+                     "\n"))
+    (with-current-buffer out (lambda () (set-mode! "markdown-mode")))
+    (buffer-set-read-only! out #t)))
+
+(domain! 'files)
+(effects! '(write display external spend))
+
+(define-command "diff-explain" "Ask the LLM to explain this diff"
+  (lambda ()
+    (let* ((source (current-buffer))
+           (changes (diff--changes-text source))
+           (out (diff--explanation-buffer source)))
+      (if (equal? changes "")
+          (message "no changes to explain")
+          (begin
+            (buffer-create out)
+            (buffer-child! source out)
+            (diff--write-explanation! out "Explaining the diff…")
+            (display-buffer-other-window! out)
+            (message "LLM is explaining the diff")
+            (llm (diff--explanation-prompt changes)
+              (lambda (answer)
+                (if (buffer-exists? out)
+                    (begin
+                      (diff--write-explanation! out answer)
+                      (message "Diff explanation ready"))
+                    (message "Diff explanation discarded")))))))))
+
+(domain! 'unknown)
+(effects! '(unknown))
+
+(define (diff--stage-finish! buf result label)
+  (if (diff--error? result)
+      (message (string-append "stage failed: " (cadr result)))
+      (begin
+        (message (string-append "staged " label))
+        (diff-refresh buf))))
+
+(domain! 'git)
+(effects! '(write display external execute))
+
+(define-command "diff-stage" "Stage the hunk at point, or the current file"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (line (diff--line-number buf (point)))
+           (card (diff--card-at (diff-layout buf) line))
+           (hunk (and card (diff--hunk-at-line card line)))
+           (stage-file (diff--backend-fn buf 'stage-file))
+           (stage-hunk (diff--backend-fn buf 'stage-hunk)))
+      (cond
+        ((not card) (message "no change here"))
+        ((equal? (diff--get card 'section) "Staged changes")
+         (message "this change is already staged"))
+        ((and hunk (> line (diff--get card 'start)) stage-hunk)
+         (stage-hunk buf card hunk
+           (lambda (result)
+             (diff--stage-finish! buf result (diff--get card 'file)))))
+        (stage-file
+         (stage-file buf card
+           (lambda (result)
+             (diff--stage-finish! buf result (diff--get card 'file)))))
+        (else (message "this diff cannot stage changes"))))))
+
+(domain! 'unknown)
+(effects! '(unknown))
 
 ;;; --- folding ------------------------------------------------------------------
 
@@ -1111,6 +1241,7 @@
       (buffer-set-local! buf 'desktop-skip-locals
         '(render-blocks diff-card-cache diff-layout-cache))
       (buffer-set-local! buf 'render-mode "blocks")
+      (buffer-set-local! buf 'ts-lang "diff")
       ;; Restore lands here with the locals and no text. Re-arm the watch
       ;; and re-read; the open cards survive because diff--apply! only opens
       ;; cards it has not shown before.
@@ -1129,6 +1260,8 @@
     ("F" "diff-toggle-all")
     ("1" "diff-show-changes")
     ("2" "diff-show-history")
+    ("?" "diff-explain")
+    ("s" "diff-stage")
     ("RET" "diff-visit")
     ("g" "diff-revert")
     ("w" "diff-toggle-watch")
@@ -1137,14 +1270,15 @@
     ("C-c C-v" "diff-toggle-view")))
 
 (mode-doc! "diff-mode"
-  "The top keymap lists the main commands. Tabs separate changes from previous commits. Key 1 shows changes and key 2 shows history. TAB folds a hunk, f folds its file, and F folds all files. n and p step over visible hunks, or files when every hunk is folded. N and P always step over files. RET opens the file at that line. g re-reads the diff, and w follows the tree.")
+  "The top keymap lists the main commands. Tabs separate changes from previous commits. Key 1 shows changes and key 2 shows history. TAB folds a hunk, f folds its file, and F folds all files. n and p step over visible hunks, or files when every hunk is folded. N and P always step over files. RET opens the file at that line. Question mark asks the LLM to explain the changes. s stages the hunk at point, or its file from the header. g re-reads the diff, and w follows the tree.")
 
 ;;; --- the stylesheet -----------------------------------------------------------
 ;;; The mode ships its own CSS; the client renders structure and knows none
 ;;; of these names.
 
 (define-style! 'diff "
-.diff-keymap { display: flex; flex-wrap: wrap; padding: 4px 2px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg, #8a857a); }
+.diff-keymap { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 4px 2px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg, #8a857a); }
+.diff-keymap-item { display: inline-flex; gap: 5px; align-items: baseline; }
 .diff-key { color: var(--accent-fg, #26356b); font-weight: 600; }
 .diff-tabs { margin: 0 0 10px; }
 .diff-message { font-family: var(--font-mono); font-size: 12px; line-height: 1.55; margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hl-line-bg, rgba(0,0,0,0.03)); border-left: 2px solid var(--diff-file-fg, rgba(0,0,0,0.2)); }

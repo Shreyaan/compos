@@ -107,6 +107,26 @@ defmodule Compos.Core.Git do
     end
   end
 
+  @doc "Stage one path in the index."
+  def stage_file(dir, path), do: run(dir, ["add", "--", path])
+
+  @doc "Apply one unified patch to the index."
+  def stage_patch(dir, patch) when is_binary(patch) do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "compos-stage-#{System.unique_integer([:positive, :monotonic])}.diff"
+      )
+
+    try do
+      with :ok <- File.write(path, patch) do
+        run(dir, ["apply", "--cached", "--whitespace=nowarn", path])
+      end
+    after
+      File.rm(path)
+    end
+  end
+
   @doc "The raw text of one commit."
   def show(dir, ref), do: run(dir, ["show", "--no-color", "--no-ext-diff", ref])
 
@@ -183,140 +203,137 @@ defmodule Compos.Core.Git do
 
   # --- unified diff ----------------------------------------------------------
 
-  @hunk_header ~r/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
-  @git_header ~r/^diff --git a\/(.*) b\/(.*)$/
+
+    @block_query "(block) @block"
+  @file_query """
+  (old_file (filename) @old)
+  (new_file (filename) @new)
+  (command (filename) @command_path)
+  (binary_change) @binary
+  (binary_patch) @binary
+  (hunk) @hunk
+  """
+  @hunk_query """
+  (location) @location
+  (location (linerange) @range)
+  (addition) @add
+  (deletion) @del
+  (change) @change
+  (context) @ctx
+  (unrecognized) @ctx
+  """
 
   defp parse_diff(out) do
-    out
-    |> String.split("\n")
-    |> parse_files([], nil)
+    "diff"
+    |> Compos.Core.TS.ts_query_nif(out, @block_query)
+    |> Enum.filter(fn {capture, _, _} -> capture == "block" end)
+    |> Enum.map(fn {_, start, stop} ->
+      parse_block(binary_part(out, start, stop - start), start)
+    end)
   end
 
-  defp parse_files([], files, cur), do: cur |> close_file(files) |> Enum.reverse()
+  defp parse_block(block, base) do
+    captures = Compos.Core.TS.ts_query_nif("diff", block, @file_query)
+    old_file = first_capture_text(block, captures, "old")
+    new_file = first_capture_text(block, captures, "new")
+    command_paths =
+      block
+      |> first_capture_text(captures, "command_path")
+      |> case do
+        nil -> []
+        text -> String.split(text)
+      end
 
-  defp parse_files([line | rest], files, cur) do
-    cond do
-      String.starts_with?(line, "diff --git ") ->
-        parse_files(rest, close_file(cur, files), open_file(line))
-
-      # anything before the first `diff --git` is not ours to read
-      is_nil(cur) ->
-        parse_files(rest, files, nil)
-
-      String.starts_with?(line, "--- ") ->
-        parse_files(rest, files, %{cur | file_a: strip_ab(binary_part(line, 4, byte_size(line) - 4))})
-
-      String.starts_with?(line, "+++ ") ->
-        parse_files(rest, files, %{cur | file_b: strip_ab(binary_part(line, 4, byte_size(line) - 4))})
-
-      String.starts_with?(line, "Binary files ") or String.starts_with?(line, "GIT binary patch") ->
-        parse_files(rest, files, %{cur | binary?: true})
-
-      String.starts_with?(line, "@@") ->
-        parse_files(rest, files, open_hunk(cur, line))
-
-      cur.hunks == [] ->
-        # index, mode, and similarity headers sit between the paths and the
-        # first hunk
-        parse_files(rest, files, cur)
-
-      true ->
-        parse_files(rest, files, add_line(cur, line))
-    end
-  end
-
-  defp open_file(line) do
-    {a, b} =
-      case Regex.run(@git_header, line) do
-        [_, a, b] -> {a, b}
+    {command_old, command_new} =
+      case command_paths do
+        [a, b | _] -> {a, b}
+        [a] -> {a, a}
         _ -> {nil, nil}
       end
 
-    %{file_a: a, file_b: b, binary?: false, hunks: []}
-  end
+    hunk_ranges =
+      captures
+      |> Enum.filter(fn {capture, _, _} -> capture == "hunk" end)
+      |> Enum.map(fn {_, start, stop} -> {start, stop} end)
 
-  defp close_file(nil, files), do: files
+    patch_head =
+      case hunk_ranges do
+        [{start, _} | _] -> binary_part(block, 0, start)
+        [] -> block
+      end
 
-  defp close_file(cur, files) do
-    hunks = cur.hunks |> Enum.reverse() |> Enum.map(&close_hunk/1)
-    [%{cur | hunks: hunks} | files]
-  end
-
-  defp close_hunk(h) do
     %{
-      header: h.header,
-      old_start: h.old_start,
-      old_count: h.old_count,
-      new_start: h.new_start,
-      new_count: h.new_count,
-      lines: Enum.reverse(h.lines)
+      file_a: strip_ab(old_file || command_old),
+      file_b: strip_ab(new_file || command_new),
+      binary?: Enum.any?(captures, fn {capture, _, _} -> capture == "binary" end),
+      patch_head: patch_head,
+      start_byte: base,
+      end_byte: base + byte_size(block),
+      hunks:
+        Enum.map(hunk_ranges, fn {start, stop} ->
+          raw = binary_part(block, start, stop - start)
+          parse_ts_hunk(raw, base + start)
+        end)
     }
   end
 
-  defp open_hunk(cur, line) do
-    case Regex.run(@hunk_header, line) do
-      [_ | caps] ->
-        [old_start, old_count, new_start, new_count] = hunk_counts(caps)
+  defp parse_ts_hunk(raw, start_byte) do
+    captures = Compos.Core.TS.ts_query_nif("diff", raw, @hunk_query)
+    header = first_capture_text(raw, captures, "location") || ""
+    ranges = capture_texts(raw, captures, "range")
+    {old_start, old_count} = parse_linerange(Enum.at(ranges, 0, "-0,0"))
+    {new_start, new_count} = parse_linerange(Enum.at(ranges, 1, "+0,0"))
 
-        hunk = %{
-          header: line,
-          old_start: old_start,
-          old_count: old_count,
-          new_start: new_start,
-          new_count: new_count,
-          lines: [],
-          rem_old: old_count,
-          rem_new: new_count
-        }
+    lines =
+      captures
+      |> Enum.filter(fn {capture, _, _} -> capture in ["add", "del", "change", "ctx"] end)
+      |> Enum.sort_by(fn {_, start, _} -> start end)
+      |> Enum.map(fn
+        {"add", start, stop} -> {:add, change_text(raw, start, stop)}
+        {"del", start, stop} -> {:del, change_text(raw, start, stop)}
+        {"change", start, stop} -> {:add, change_text(raw, start, stop)}
+        {"ctx", start, stop} -> {:ctx, change_text(raw, start, stop)}
+      end)
 
-        %{cur | hunks: [hunk | cur.hunks]}
+    %{
+      header: header,
+      old_start: old_start,
+      old_count: old_count,
+      new_start: new_start,
+      new_count: new_count,
+      lines: lines,
+      patch: ensure_newline(raw),
+      start_byte: start_byte,
+      end_byte: start_byte + byte_size(raw)
+    }
+  end
 
-      nil ->
-        cur
+  defp first_capture_text(text, captures, name) do
+    case Enum.find(captures, fn {capture, _, _} -> capture == name end) do
+      {_, start, stop} -> binary_part(text, start, stop - start)
+      nil -> nil
     end
   end
 
-  # a missing count means one line
-  defp hunk_counts(caps) do
-    [os, oc, ns, nc] = Enum.map(0..3, fn i -> Enum.at(caps, i, "") end)
-    [num(os, 0), num(oc, 1), num(ns, 0), num(nc, 1)]
+  defp capture_texts(text, captures, name) do
+    for {^name, start, stop} <- captures, do: binary_part(text, start, stop - start)
   end
 
-  defp num("", default), do: default
-  defp num(nil, default), do: default
-  defp num(s, _default), do: String.to_integer(s)
-
-  defp add_line(cur, line) do
-    [h | rest] = cur.hunks
-
-    # the counts in the header say where the hunk ends. Trailing blanks and
-    # the "\ No newline" marker fall outside it.
-    if h.rem_old <= 0 and h.rem_new <= 0 do
-      cur
-    else
-      case tag_line(line) do
-        nil -> cur
-        {tag, text} -> %{cur | hunks: [push_line(h, tag, text) | rest]}
-      end
+  defp parse_linerange(<<_sign::binary-size(1), rest::binary>>) do
+    case String.split(rest, ",", parts: 2) do
+      [start, count] -> {String.to_integer(start), String.to_integer(count)}
+      [start] -> {String.to_integer(start), 1}
     end
   end
 
-  defp tag_line(" " <> text), do: {:ctx, text}
-  defp tag_line("+" <> text), do: {:add, text}
-  defp tag_line("-" <> text), do: {:del, text}
-  # git strips nothing, but editors and mail transports do: a bare empty line
-  # inside a hunk is an empty context line
-  defp tag_line(""), do: {:ctx, ""}
-  defp tag_line(_), do: nil
+  defp change_text(text, start, stop) when stop > start do
+    line = binary_part(text, start, stop - start)
+    binary_part(line, 1, byte_size(line) - 1)
+  end
 
-  defp push_line(h, :ctx, text),
-    do: %{h | lines: [{:ctx, text} | h.lines], rem_old: h.rem_old - 1, rem_new: h.rem_new - 1}
+  defp change_text(_text, _start, _stop), do: ""
 
-  defp push_line(h, :add, text),
-    do: %{h | lines: [{:add, text} | h.lines], rem_new: h.rem_new - 1}
-
-  defp push_line(h, :del, text),
-    do: %{h | lines: [{:del, text} | h.lines], rem_old: h.rem_old - 1}
+  defp ensure_newline(text), do: if(String.ends_with?(text, "\n"), do: text, else: text <> "\n")
 
   defp strip_ab("a/" <> rest), do: rest
   defp strip_ab("b/" <> rest), do: rest

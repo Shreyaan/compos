@@ -203,7 +203,7 @@
 
 (define-fence-kind! "diff"
   "A unified diff. Its lines wear the diff faces. It does not run."
-  'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face
+  'runnable #f 'ts-lang "diff" 'line-face fence-kind--diff-line-face
   'fence-face "diff-file"
   ;; the kind carries its keys (diff-block.scm defines them at boot): a
   ;; mode that finds a diff block in its text arms them, so the fence
@@ -212,7 +212,7 @@
 
 (define-fence-kind! "patch"
   "A unified diff. The same paint as the diff kind."
-  'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face)
+  'runnable #f 'ts-lang "diff" 'line-face fence-kind--diff-line-face)
 
 (define-fence-kind! "rewrite"
   "A legacy name for a hand-written waiting block. It does not run."

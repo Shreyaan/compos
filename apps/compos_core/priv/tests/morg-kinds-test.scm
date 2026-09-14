@@ -75,8 +75,10 @@
     (when (member "elixir" (ts-langs))
       (check-equal! (fence-kind-ts-lang "exs") "elixir"
                     "a loaded grammar resolves through the alias"))
-    (check-equal! (fence-kind-ts-lang "diff") #f
-                  "the diff kind declines tree-sitter")
+    (check-equal! (fence-kind-ts-lang "diff") "diff"
+                  "the diff kind uses the shared diff grammar")
+    (check-equal! (fence-kind-ts-lang "patch") "diff"
+                  "the patch alias uses the shared diff grammar")
     (check-equal! (fence-kind-ts-lang "zz-no-such-grammar") #f
                   "an unknown info string with no grammar paints nothing")))
 

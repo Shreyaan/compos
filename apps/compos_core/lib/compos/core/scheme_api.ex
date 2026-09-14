@@ -435,6 +435,10 @@ defmodule Compos.Core.SchemeAPI do
         "(git-status DIR [PATHSPEC] [CB]) — return (path P orig-path P2 index X worktree Y) plists; a pathspec scopes the read.",
       "git-diff" =>
         "(git-diff DIR [OPTS] [CB]) — return parsed file plists; OPTS is (base REF path P staged BOOL).",
+      "git-stage-file" =>
+        "(git-stage-file DIR PATH [CB]) — stage one path in the index; return #t or (error MSG).",
+      "git-stage-patch" =>
+        "(git-stage-patch DIR PATCH [CB]) — apply one unified patch to the index; return #t or (error MSG).",
       "git-log" =>
         "(git-log DIR N [PATHSPEC] [CB]) — return the last N commits as (sha short-sha author date subject) plists.",
       "git-show" => "(git-show DIR REF [CB]) — return the raw text of one commit.",
@@ -2687,33 +2691,7 @@ defmodule Compos.Core.SchemeAPI do
       # (diff-parse TEXT) -> the same file plists git-diff returns. Text that
       # git handed us whole — a commit — has no structured form of its own.
       "diff-parse" => fn [text] ->
-        for f <- Compos.Core.Git.parse(text) do
-          [
-            {:sym, "file-a"},
-            f.file_a || false,
-            {:sym, "file-b"},
-            f.file_b || false,
-            {:sym, "binary?"},
-            f.binary?,
-            {:sym, "hunks"},
-            for h <- f.hunks do
-              [
-                {:sym, "header"},
-                h.header,
-                {:sym, "old-start"},
-                h.old_start,
-                {:sym, "old-count"},
-                h.old_count,
-                {:sym, "new-start"},
-                h.new_start,
-                {:sym, "new-count"},
-                h.new_count,
-                {:sym, "lines"},
-                for({tag, t} <- h.lines, do: [{:sym, Atom.to_string(tag)}, t])
-              ]
-            end
-          ]
-        end
+        text |> Compos.Core.Git.parse() |> diff_plist()
       end,
       "git-prefix" => fn [dir | rest] ->
         git_dispatch(rest, fn -> Git.prefix(dir) end, & &1)
@@ -2741,6 +2719,12 @@ defmodule Compos.Core.SchemeAPI do
 
         [dir, opts | rest] ->
           git_dispatch(rest, fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
+      end,
+      "git-stage-file" => fn [dir, path | rest] ->
+        git_dispatch(rest, fn -> Git.stage_file(dir, path) end, fn _ -> true end)
+      end,
+      "git-stage-patch" => fn [dir, patch | rest] ->
+        git_dispatch(rest, fn -> Git.stage_patch(dir, patch) end, fn _ -> true end)
       end,
       "git-log" => fn [dir, n | rest] ->
         {path, rest} = opt_path(rest)
@@ -2928,6 +2912,12 @@ defmodule Compos.Core.SchemeAPI do
         f.file_b || false,
         {:sym, "binary?"},
         f.binary?,
+        {:sym, "patch-head"},
+        Map.get(f, :patch_head, ""),
+        {:sym, "start-byte"},
+        Map.get(f, :start_byte, 0),
+        {:sym, "end-byte"},
+        Map.get(f, :end_byte, 0),
         {:sym, "hunks"},
         Enum.map(f.hunks, &hunk_plist/1)
       ]
@@ -2946,6 +2936,12 @@ defmodule Compos.Core.SchemeAPI do
       h.new_start,
       {:sym, "new-count"},
       h.new_count,
+      {:sym, "patch"},
+      Map.get(h, :patch, ""),
+      {:sym, "start-byte"},
+      Map.get(h, :start_byte, 0),
+      {:sym, "end-byte"},
+      Map.get(h, :end_byte, 0),
       {:sym, "lines"},
       for({tag, text} <- h.lines, do: [{:sym, Atom.to_string(tag)}, text])
     ]

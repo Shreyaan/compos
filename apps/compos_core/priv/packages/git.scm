@@ -105,10 +105,30 @@
         (buffer-set-local! out 'diff-backend "git")
         (buffer-set-local! out 'diff-root root)))))
 
+(define (git--stage-file buf card cb)
+  (let ((root (buffer-local buf 'diff-root))
+        (file (diff--get card 'file)))
+    (if (and root file)
+        (git-stage-file root file cb)
+        (cb '(error "this diff has no file to stage")))))
+
+(define (git--stage-hunk buf card hunk cb)
+  (let ((root (buffer-local buf 'diff-root))
+        (file-data (diff--get card 'f)))
+    (if (and root file-data hunk)
+        (git-stage-patch root
+          (string-append
+            (or (diff--get file-data 'patch-head) (diff--file-header file-data))
+            (or (diff--get hunk 'patch) (diff--hunk-text hunk)))
+          cb)
+        (cb '(error "this diff has no hunk to stage")))))
+
 (define-diff-backend "git"
   (list 'read git--read
         'resolve git--resolve
-        'show git--show))
+        'show git--show
+        'stage-file git--stage-file
+        'stage-hunk git--stage-hunk))
 
 ;; legacy: buffers saved before the backend split carry 'git-* locals and
 ;; the mode names "git-diff" / "git-show" — upgrade and hand over
