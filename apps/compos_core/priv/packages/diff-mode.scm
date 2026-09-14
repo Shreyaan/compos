@@ -448,9 +448,11 @@
              (subject (or (diff--get h 'subject) ""))
              (where (if (string? branch) branch "detached"))
              (at (string-trim (string-append sha " " subject))))
-        (list (component 'ui/kv
-                (list 'class "diff-head"
-                      'pairs (list (list "Head" (string-trim (string-append where "  " at))))))))))) 
+        ;; ui/kv carries no class of its own, and this line needs one to be
+;; styled and found. A tagged block with a class is what every other
+;; line of this view uses.
+        (list (list 'tag "div" 'class "diff-head"
+                    'text (string-trim (string-append "Head:  " where "  " at)))))))) 
 
 (define (diff--tabs-block active change-count commit-count)
   (component 'ui/tabs
@@ -1347,8 +1349,7 @@
 .diff-keymap { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 4px 2px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg, #8a857a); }
 .diff-keymap-item { display: inline-flex; gap: 5px; align-items: baseline; }
 .diff-key { color: var(--accent-fg, #26356b); font-weight: 600; }
-.diff-head { margin: 0 0 10px; font-family: var(--font-mono); font-size: 12px; }
-.diff-head .c-kv-key { color: var(--dim-fg, #8a857a); }
+.diff-head { margin: 0 0 8px; font-family: var(--font-mono); font-size: 12px; color: var(--dim-fg, #8a857a); }
 .diff-tabs { margin: 0 0 10px; }
 .diff-message { font-family: var(--font-mono); font-size: 12px; line-height: 1.55; margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hl-line-bg, rgba(0,0,0,0.03)); border-left: 2px solid var(--diff-file-fg, rgba(0,0,0,0.2)); }
 .diff-conflict-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; margin: 0 0 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; background: var(--diff-conflict-bg, rgba(168, 58, 43, 0.12)); border: 1px solid var(--alert-fg, #a83a2b); }
