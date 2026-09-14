@@ -260,24 +260,13 @@
 
 (effects! '(write))
 
-;; A streaming turn hands the fleet an event batch many times a second,
-;; and the old refresh drew the list for every one of them. That is what
-;; made it jump: the rows re-sort under the reader as a status flips, and
-;; every draw is a patch to the browser. Two rules settle it. A list
-;; nobody is looking at is not drawn at all, and a burst of events draws
-;; once, when it stops.
-(define *agents-refresh-ms* 800)
-
-(define (agents-buffer-shown?)
-  (and (buffer-exists? *chat-list-buffer*)
-       (or (equal? (current-buffer) *chat-list-buffer*)
-           (let loop ((ws (window-list-all)))
-             (cond ((null? ws) #f)
-                   ((equal? (cadr (car ws)) *chat-list-buffer*) #t)
-                   (else (loop (cdr ws))))))))
-
+;; The chat list is a still picture. A streaming turn hands the fleet an
+;; event batch many times a second, and a list that redraws under the
+;; reader re-sorts its rows and carries the cursor off the chat they were
+;; reading. So no event ever draws it. The modeline carries the news
+;; instead, and g draws the list again when the reader asks for it.
 (define (agents-refresh!)
-  (when (agents-buffer-shown?)
+  (when (buffer-known? *chat-list-buffer*)
     (list-refresh! *chat-list-buffer*)))
 
 ;; a verb ran on the chat at point, so the row it acted on is stale and so
@@ -287,14 +276,11 @@
     (list-refresh! *chat-list-buffer*)
     (chat-list-preview!)))
 
-;; the fleet's surfaces after an event batch: the modeline answers at
-;; once, because a chat that needs you is news; the list settles.
+;; the fleet's surfaces after an event batch: the modeline answers, and
+;; it answers alone -- the chat list is never drawn behind its reader.
 (define (agents-note-event! &optional slug)
   (when slug (chats-note-activity! (agent-buf slug)))
-  (agents-modeline-refresh!)
-  (when (agents-buffer-shown?)
-    (debounce! "agents-refresh" *agents-refresh-ms*
-      (lambda (ignored) (agents-refresh!)) #f)))
+  (agents-modeline-refresh!))
 
 (define (agents-current-buf)
   (let ((row (list-current *chat-list-buffer*)))
