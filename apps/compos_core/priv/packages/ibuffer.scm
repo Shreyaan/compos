@@ -780,15 +780,22 @@
 ;; that asked the column how wide it is while the column was asking the
 ;; heading how wide it is never came back.
 (define (ibuffer-heading-text buf row)
-  (let* ((plain (ibuffer-heading-plain buf row))
+  (let* ((label (ibuffer-section-label row))
          (name (ibuffer-heading-name buf row))
          (tally (ibuffer-heading-details buf row))
          (cols (list-columns buf))
          (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
-         (room (and width (- width (string-length tally) 2))))
-    (if (and room (> room (string-length name)))
-        (string-append (string-pad-right name room) tally)
-        plain)))
+         (set-out (lambda (head)
+                    (string-append (string-pad-right head (- width (string-length tally)))
+                                   tally))))
+    (cond ((not width) (ibuffer-heading-plain buf row))
+          ;; the name, its kind, and the tally at the far end
+          ((>= width (+ (string-length name) 2 (string-length tally))) (set-out name))
+          ;; too narrow for the kind: the tally outranks it
+          ((>= width (+ (string-length label) 2 (string-length tally))) (set-out label))
+          ;; too narrow for both: a heading is its name before it is
+          ;; anything else, and a name cut in half says nothing
+          (else label))))
 
 (define (ibuffer-heading-head buf row)
   (list ""
@@ -839,12 +846,10 @@
 ;; multibyte. A name too long for the column loses its middle, and the
 ;; tail with it; then there is no span.
 (define (ibuffer-count-overlay buf row off)
-  (let* ((cols (list-columns buf))
-         (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
-         (text (ibuffer-heading-text buf row))
+  (let* ((text (ibuffer-heading-text buf row))
          (label (ibuffer-section-label row))
          (head (+ off 2 1 2 (string-byte-length (ibuffer-chevron row)) 2)))
-    (if (and width (> (string-length text) width))
+    (if (equal? text label)
         '()
         (list (list (+ head (string-byte-length label))
                     (+ head (string-byte-length text))
