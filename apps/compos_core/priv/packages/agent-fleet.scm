@@ -182,11 +182,13 @@
 (define (chats-model b)
   (or (buffer-local b 'agent-model) (buffer-local b 'llm-model) ""))
 
-;; the context tokens stand in for the size of a chat: what the size
-;; column shows, what the size sort reads, what a heading adds up
-(define (chats-tokens b)
-  (let ((n (buffer-local b 'chat-context-used)))
-    (and (number? n) (> n 0) n)))
+;; the size of a chat is the size of its transcript on disk -- the
+;; number dired would show for that file: what the size column shows,
+;; what the size sort reads, what a heading adds up. A chat that has
+;; not written its file yet has no size to show
+(define (chats-filesize b)
+  (let ((p (ignore-errors (lambda () (chat-log-path b)))))
+    (and (string? p) (file-exists? p) (file-size p))))
 
 (define (chats-summary b)
   (let ((s (buffer-local b 'chat-summary)))
