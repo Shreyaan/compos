@@ -55,12 +55,16 @@
       (check-false! (equal? (car keys) (car (cdr keys))) "and they differ"))))
 
 (deftest 'a-page-is-named-after-the-row-that-opened-it
-  "a project by its id, a conversation by the head of its urn"
+  "the page's title is the row's name, and the buffer wears that same title"
   (lambda ()
     (let ((project (car (li-parse t--li-projects)))
           (thread (car (li-parse-threads t--li-inbox))))
-      (check-equal! (linkedin-detail-buffer project) "*linkedin:1923656034*" "a project page")
-      (check-equal! (linkedin-detail-buffer thread) "*linkedin:msg:ZThkMDNlY2Mt*" "a thread page"))))
+      (check-equal! (linkedin-detail-buffer project) "*Anthriq Compiler Expert*" "a project page")
+      (check-equal! (linkedin-detail-buffer thread) "*Arnab chaudhuri*" "a thread page")
+      (check-true! (li-has? (linkedin-detail-html project) "<h1>Anthriq Compiler Expert</h1>")
+                   "the page says the same as its buffer")
+      (check-true! (li-has? (linkedin-detail-html thread) "<h1>Arnab chaudhuri</h1>")
+                   "a thread page too"))))
 
 (effects! '(write))
 
