@@ -7623,6 +7623,7 @@
     (when (pair? matches)
       (select-window! (car (nth (min (cadr token) (- (length matches) 1)) matches))))))
 
+;; A user open selects its result. A display records how to quit and keeps focus.
 (define (layout-target-open! name select? inhibit-same?)
   (and (fill-candidate? name) (window-fill-member? name)
        (not (buffer-context?))
@@ -7673,31 +7674,6 @@
             (if (and (not (equal? win selected)) (> score age))
                 (loop (cdr windows) win score)
                 (loop (cdr windows) best age)))))))
-
-;; A user open selects its result. A display records how to quit and keeps focus.
-(define (layout-target-open! name select? inhibit-same?)
-  (and (fill-candidate? name) (window-fill-member? name)
-       (not (buffer-context?))
-       (let* ((selected (active-window))
-              (focus (window-buffer selected))
-              (shown (if inhibit-same?
-                         (window-showing-other name selected)
-                         (window-showing name)))
-              (panes (layout-target-visible-buffers))
-              (capacity (layout-target-capacity (layout-target))))
-         (cond (shown
-                (when select? (select-window! shown))
-                shown)
-               ((and (not (member name panes))
-                     (or (not capacity) (< (length panes) capacity)))
-                (layout-target-arrange! (append panes (list name)) (if select? name focus))
-                (window-showing name))
-               (else
-                 (let ((win (if select? selected (layout-replacement-window selected))))
-                   (when win
-                     (display-buffer-in-window! win name)
-                     (when select? (select-window! win))
-                     win)))))))
 
 ;; Window changes reflow occupied slots. Closing a pane does not reopen hidden work.
 (define (layout-target-on-change!)
