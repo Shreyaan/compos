@@ -247,7 +247,8 @@
   (list 'when? (lambda (b) (and (not (buffer-known? b)) (string-suffix? ".chat" b)))
         'dot (lambda (b) (list "." "faint"))
         'name (lambda (b) (list "" (chats-archived-title b)))
-        'size (lambda (b) #f)
+        ;; the row is the file, so its size is the file's own
+        'size (lambda (b) (and (file-exists? b) (file-size b)))
         'label (lambda (b) "archived")
         'match (lambda (b) (string-append (chats-archived-title b) " archived"))
         'face (lambda (b) "dim")
@@ -754,7 +755,8 @@
              "list standing. RET enters the chat's own group and raises the "
              "window that holds it; q leaves and changes nothing. ; cycles "
              "what a section is: none, group, state, model. , cycles the "
-             "order inside a section. The verbs act on the chat at point "
+             "order inside a section: most recent first, by name, or by the "
+             "size of the transcript on disk. The verbs act on the chat at point "
              "and leave the list standing: s steers it, y and d answer the "
              "permission it waits on, r gives it a title, k stops its "
              "runtime and keeps the transcript, a archives it, g draws the "
@@ -1010,7 +1012,7 @@
       (message (string-append "grouped by " (symbol->string next))))))
 
 (define-command "chat-list-resort"
-  "Cycle the order inside a section: recent, name, size"
+  "Cycle the order inside a section: recent, name, size on disk"
   (lambda ()
     (let ((next (ibuffer-cycle-after (ibuffer-sort *chat-list-buffer*)
                                      '(recent name size))))
