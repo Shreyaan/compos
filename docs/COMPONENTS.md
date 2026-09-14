@@ -41,6 +41,8 @@ the component through props.
 - `ui/tabs` — one row of choices over the same view, current one marked
 - `ui/actions` — a row of clickable actions with their keys
 - `ui/kv` — compact key/value details
+- `ui/keymap` — the keys in force and what each one does
+- `ui/group` — a labelled grouping of related blocks
 - `ui/empty` — empty-state notice
 - `ui/badge` — short status chip
 

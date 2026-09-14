@@ -238,6 +238,43 @@
 
 ;;; --- living gallery ----------------------------------------------------------
 
+(defcomponent 'ui/keymap
+  "The keys in force and what each one does."
+  '((keys list required) (tag string optional) (class string optional))
+  '(keys (("g" "revert-buffer") ("q" "quit-window" "Close the window")))
+  (lambda (p)
+    (list 'tag (component--get p 'tag "c-key-hints")
+          'class (string-append "c-keymap " (component--get p 'class ""))
+          'children
+          (map (lambda (k)
+                 (list 'tag "c-row" 'class "c-keymap-row"
+                       'segs
+                       (append
+                         (list (list "c-keymap-key" (car k))
+                               (list "c-keymap-cmd" (cadr k)))
+                         (if (> (length k) 2)
+                             (list (list "c-keymap-doc" (nth 2 k)))
+                             '()))))
+               (component--get p 'keys '())))))
+
+(defcomponent 'ui/group
+  "A labelled grouping of related blocks."
+  '((title string optional) (body blocks optional) (tag string optional) (class string optional))
+  '(title "Motion" body ((tag "c-text" text "n and p move by one row.")))
+  (lambda (p)
+    (list 'tag (component--get p 'tag "c-group")
+          'class (string-append "c-group " (component--get p 'class ""))
+          'attrs (if (component--has? p 'title)
+                     (list (list "label" (component--get p 'title "")))
+                     '())
+          'children
+          (append
+            (if (component--has? p 'title)
+                (list (component 'ui/section
+                        (list 'title (component--get p 'title "") 'level 3)))
+                '())
+            (component--get p 'body '())))))
+
 (define *component-gallery-buffer* "*Components*")
 
 (define (component-gallery-blocks)
@@ -326,6 +363,13 @@
 .c-badge { display: inline-block; border-radius: 999px; padding: 1px 7px; background: var(--hl-line-bg); font-size: 10px; }
 .c-kv { padding: 7px 10px; font-family: var(--font-mono); font-size: 11px; }
 .c-kv-row { display: grid; grid-template-columns: minmax(8ch, .35fr) 1fr; gap: 10px; }
+.c-group { display: block; margin: 0 0 10px; }
+.c-keymap { display: block; font-family: var(--font-mono); font-size: 11px; padding: 4px 0 10px; }
+.c-keymap-row { display: grid; grid-template-columns: minmax(9ch, auto) minmax(14ch, auto) 1fr; gap: 10px; padding: 2px 10px; }
+.c-keymap-row:hover { background: var(--hl-line-bg); }
+.c-keymap-key { color: var(--accent-fg); font-weight: 600; }
+.c-keymap-cmd { color: var(--fg); }
+.c-keymap-doc { color: var(--dim-fg); }
 ")
 
 (category! 'ui)
