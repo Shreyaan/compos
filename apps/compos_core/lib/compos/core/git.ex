@@ -209,23 +209,17 @@ defmodule Compos.Core.Git do
   (old_file (filename) @old)
   (new_file (filename) @new)
   (command (filename) @command_path)
-  (binary_change) @binary
-  (binary_patch) @binary
   (hunk) @hunk
   """
-  @hunk_query """
-  (location) @location
-  (location (linerange) @range)
-  (addition) @add
-  (deletion) @del
-  (change) @change
-  (context) @ctx
-  (unrecognized) @ctx
-  """
+  @hunk_location_query "(location) @location"
+  @hunk_range_query "(location (linerange) @range)"
+  @hunk_add_query "(addition) @add"
+  @hunk_del_query "(deletion) @del"
+  @hunk_change_query "(change) @change"
+  @hunk_context_query "(context) @ctx"
 
   defp parse_diff(out) do
-    "diff"
-    |> Compos.Core.TS.ts_query_nif(out, @block_query)
+    Compos.Core.TS.ts_query_nif("diff", out, @block_query)
     |> Enum.filter(fn {capture, _, _} -> capture == "block" end)
     |> Enum.map(fn {_, start, stop} ->
       parse_block(binary_part(out, start, stop - start), start)
@@ -237,8 +231,7 @@ defmodule Compos.Core.Git do
     old_file = first_capture_text(block, captures, "old")
     new_file = first_capture_text(block, captures, "new")
     command_paths =
-      block
-      |> first_capture_text(captures, "command_path")
+      first_capture_text(block, captures, "command_path")
       |> case do
         nil -> []
         text -> String.split(text)
@@ -262,25 +255,44 @@ defmodule Compos.Core.Git do
         [] -> block
       end
 
+    hunks =
+      Enum.map(hunk_ranges, fn {start, stop} ->
+        raw = binary_part(block, start, stop - start)
+        parse_ts_hunk(raw, base + start)
+      end)
+
+    end_byte =
+      case List.last(hunks) do
+        nil -> base + byte_size(block)
+        hunk -> hunk.end_byte
+      end
+
     %{
       file_a: strip_ab(old_file || command_old),
       file_b: strip_ab(new_file || command_new),
-      binary?: Enum.any?(captures, fn {capture, _, _} -> capture == "binary" end),
+      binary?: false,
       patch_head: patch_head,
       start_byte: base,
-      end_byte: base + byte_size(block),
-      hunks:
-        Enum.map(hunk_ranges, fn {start, stop} ->
-          raw = binary_part(block, start, stop - start)
-          parse_ts_hunk(raw, base + start)
-        end)
+      end_byte: end_byte,
+      hunks: hunks
     }
   end
 
   defp parse_ts_hunk(raw, start_byte) do
-    captures = Compos.Core.TS.ts_query_nif("diff", raw, @hunk_query)
-    header = first_capture_text(raw, captures, "location") || ""
-    ranges = capture_texts(raw, captures, "range")
+    location_captures = Compos.Core.TS.ts_query_nif("diff", raw, @hunk_location_query)
+    range_captures = Compos.Core.TS.ts_query_nif("diff", raw, @hunk_range_query)
+    captures =
+      Enum.flat_map(
+        [
+          @hunk_add_query,
+          @hunk_del_query,
+          @hunk_change_query,
+          @hunk_context_query
+        ],
+        &Compos.Core.TS.ts_query_nif("diff", raw, &1)
+      )
+    header = first_capture_text(raw, location_captures, "location") || ""
+    ranges = capture_texts(raw, range_captures, "range")
     {old_start, old_count} = parse_linerange(Enum.at(ranges, 0, "-0,0"))
     {new_start, new_count} = parse_linerange(Enum.at(ranges, 1, "+0,0"))
 
@@ -295,6 +307,11 @@ defmodule Compos.Core.Git do
         {"ctx", start, stop} -> {:ctx, change_text(raw, start, stop)}
       end)
 
+    structural_stop =
+      (location_captures ++ range_captures ++ captures)
+      |> Enum.map(fn {_, _, stop} -> stop end)
+      |> Enum.max(fn -> byte_size(raw) end)
+
     %{
       header: header,
       old_start: old_start,
@@ -302,9 +319,9 @@ defmodule Compos.Core.Git do
       new_start: new_start,
       new_count: new_count,
       lines: lines,
-      patch: ensure_newline(raw),
+      patch: header <> "\n" <> Enum.map_join(lines, "", &patch_line/1),
       start_byte: start_byte,
-      end_byte: start_byte + byte_size(raw)
+      end_byte: start_byte + structural_stop
     }
   end
 
@@ -326,14 +343,16 @@ defmodule Compos.Core.Git do
     end
   end
 
+  defp patch_line({:add, text}), do: "+" <> text <> "\n"
+  defp patch_line({:del, text}), do: "-" <> text <> "\n"
+  defp patch_line({:ctx, text}), do: " " <> text <> "\n"
+
   defp change_text(text, start, stop) when stop > start do
     line = binary_part(text, start, stop - start)
     binary_part(line, 1, byte_size(line) - 1)
   end
 
   defp change_text(_text, _start, _stop), do: ""
-
-  defp ensure_newline(text), do: if(String.ends_with?(text, "\n"), do: text, else: text <> "\n")
 
   defp strip_ab("a/" <> rest), do: rest
   defp strip_ab("b/" <> rest), do: rest

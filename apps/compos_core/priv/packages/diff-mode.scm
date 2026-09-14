@@ -230,6 +230,7 @@
          (key (diff--key section name))
          (override (assoc key overrides)))
     (list 'key key 'section section 'file name
+          'selection-active (not (equal? (buffer-local buf 'diff-selection) 'none))
           'status (if override (cadr override) (diff--file-status f))
           'start start 'end end 'f f
           'hunks (diff--layout-hunks buf section name
@@ -427,7 +428,8 @@
               (diff--keymap-item "RET" "open")
               (diff--keymap-item "g" "refresh")
               (diff--keymap-item "w" "watch")
-              (diff--keymap-item "?" "explain"))))
+              (diff--keymap-item "?" "explain")
+              (diff--keymap-item "ESC" "clear selection"))))
 
 (define (diff--active-tab buf visible commits)
   (or (buffer-local buf 'diff-tab)
@@ -529,12 +531,12 @@
                    a)))
     (list 'tag "div" 'class "diff-card"
           'anchor (string-append "card-" key)
-          'lines (list (diff--get c 'start) (diff--get c 'end)) 'mark "current"
+          'lines (list (diff--get c 'start) (diff--get c 'end)) 'mark (if (diff--get c 'selection-active) "current" #f)
           'children
           (cons
             (list 'tag "div" 'class "diff-card-head" 'click key
                   'lines (list (diff--get c 'start) (diff--get c 'start))
-                  'mark "current"
+                  'mark (if (diff--get c 'selection-active) "current" #f)
                   'segs (append
                           (list (list "diff-caret" (if open? "▾" "▸"))
                                 (list "diff-status" (diff--get c 'status))
@@ -561,7 +563,7 @@
          (open? (not (member hkey closed))))
     (list 'tag "div" 'class "diff-hunk"
           'anchor (string-append key "-" (number->string (diff--get h 'n)))
-          'lines (list (diff--get h 'line) (diff--get h 'end)) 'mark "current"
+          'lines (list (diff--get h 'line) (diff--get h 'end)) 'mark (if (diff--get c 'selection-active) "current" #f)
           'children
           (cons
             (list 'tag "div" 'class "diff-hunk-head"
@@ -632,7 +634,7 @@
 (define (diff--commit-row c)
   (list 'tag "div" 'class "diff-commit"
         'anchor (string-append "commit-" (caddr c))
-        'lines (list (car c) (car c)) 'mark "current"
+        'lines (list (car c) (car c)) 'mark (if (diff--get c 'selection-active) "current" #f)
         'segs (list (list "diff-sha" (caddr c))
                     (list "diff-date" (list-ref c 3))
                     (list "diff-author" (list-ref c 4))
@@ -851,29 +853,43 @@
           ((>= (car ls) cur) best)
           (else (loop (cdr ls) (car ls))))))
 
+(define (diff--select-point! buf)
+  (if (equal? (buffer-local buf 'diff-selection) 'none)
+      (begin
+        (buffer-set-local! buf 'diff-selection 'point)
+        (diff--reblock! buf))))
+
+(define-command "diff-clear-selection" "Clear the selected diff scope; ? will explain the whole diff"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'diff-selection 'none)
+      (set-mark! #f)
+      (diff--reblock! buf)
+      (message "diff selection cleared"))))
+
 (define-command "diff-next-hunk" "Move to the next hunk"
   (lambda ()
     (let* ((buf (current-buffer))
            (n (diff--next-in (diff--hunk-lines buf) (diff--line-number buf (point)))))
-      (if n (diff--goto-line! n) (message "no next hunk")))))
+      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no next hunk")))))
 
 (define-command "diff-prev-hunk" "Move to the previous hunk"
   (lambda ()
     (let* ((buf (current-buffer))
            (n (diff--prev-in (diff--hunk-lines buf) (diff--line-number buf (point)))))
-      (if n (diff--goto-line! n) (message "no previous hunk")))))
+      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no previous hunk")))))
 
 (define-command "diff-next-file" "Move to the next file"
   (lambda ()
     (let* ((buf (current-buffer))
            (n (diff--next-in (diff--file-lines buf) (diff--line-number buf (point)))))
-      (if n (diff--goto-line! n) (message "no next file")))))
+      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no next file")))))
 
 (define-command "diff-prev-file" "Move to the previous file"
   (lambda ()
     (let* ((buf (current-buffer))
            (n (diff--prev-in (diff--file-lines buf) (diff--line-number buf (point)))))
-      (if n (diff--goto-line! n) (message "no previous file")))))
+      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no previous file")))))
 
 ;;; --- visiting the source ------------------------------------------------------
 ;;; The target line is the hunk's new-start plus the context and added rows
@@ -970,6 +986,26 @@
               (diff--first-n (split-lines text) change-lines)
               "\n"))))))
 
+(define (diff--file-patch card)
+  (let* ((f (diff--get card 'f))
+         (head (or (diff--get f 'patch-head) ""))
+         (hunks (or (diff--get f 'hunks) '())))
+    (string-append head
+      (string-join (map (lambda (h) (or (diff--get h 'patch) "")) hunks) ""))))
+
+(define (diff--explain-text buf)
+  (if (equal? (buffer-local buf 'diff-selection) 'none)
+      (diff--changes-text buf)
+      (let* ((layout (diff-layout buf))
+             (line (diff--line-number buf (buffer-point buf)))
+             (card (diff--card-at layout line))
+             (hunk (and card (diff--hunk-at-line card line))))
+        (cond (hunk
+               (string-append (or (diff--get (diff--get card 'f) 'patch-head) "")
+                              (or (diff--get hunk 'patch) "")))
+              (card (diff--file-patch card))
+              (else (diff--changes-text buf))))))
+
 (define (diff--explanation-buffer buf)
   (string-append "*explain: " buf "*"))
 
@@ -997,7 +1033,7 @@
 (define-command "diff-explain" "Ask the LLM to explain this diff"
   (lambda ()
     (let* ((source (current-buffer))
-           (changes (diff--changes-text source))
+           (changes (diff--explain-text source))
            (out (diff--explanation-buffer source)))
       (if (equal? changes "")
           (message "no changes to explain")
@@ -1119,6 +1155,7 @@
 
 ;; also the click target: the card header in the rich view calls this
 (define (diff-toggle-card! buf key)
+  (buffer-set-local! buf 'diff-selection 'point)
   (let ((open (or (buffer-local buf 'diff-open-cards) '())))
     (buffer-set-local! buf 'diff-open-cards
       (if (member key open)
@@ -1130,6 +1167,7 @@
 ;; hunks default to open, so the local records the CLOSED ones: a refresh
 ;; that renumbers nothing keeps them closed and everything else visible
 (define (diff-toggle-hunk! buf section file n)
+  (buffer-set-local! buf 'diff-selection 'point)
   (let ((key (diff--hunk-key section file n))
         (closed (or (buffer-local buf 'diff-closed-hunks) '())))
     (buffer-set-local! buf 'diff-closed-hunks
@@ -1261,6 +1299,7 @@
     ("1" "diff-show-changes")
     ("2" "diff-show-history")
     ("?" "diff-explain")
+    ("ESC" "diff-clear-selection")
     ("s" "diff-stage")
     ("RET" "diff-visit")
     ("g" "diff-revert")
@@ -1270,7 +1309,7 @@
     ("C-c C-v" "diff-toggle-view")))
 
 (mode-doc! "diff-mode"
-  "The top keymap lists the main commands. Tabs separate changes from previous commits. Key 1 shows changes and key 2 shows history. TAB folds a hunk, f folds its file, and F folds all files. n and p step over visible hunks, or files when every hunk is folded. N and P always step over files. RET opens the file at that line. Question mark asks the LLM to explain the changes. s stages the hunk at point, or its file from the header. g re-reads the diff, and w follows the tree.")
+  "The top keymap lists the main commands. Tabs separate changes from previous commits. Key 1 shows changes and key 2 shows history. TAB folds a hunk, f folds its file, and F folds all files. n and p step over visible hunks, or files when every hunk is folded. N and P always step over files. RET opens the file at that line. Question mark explains the selected hunk or file; ESC clears the selection so question mark explains the whole diff. s stages the hunk at point, or its file from the header. g re-reads the diff, and w follows the tree.")
 
 ;;; --- the stylesheet -----------------------------------------------------------
 ;;; The mode ships its own CSS; the client renders structure and knows none

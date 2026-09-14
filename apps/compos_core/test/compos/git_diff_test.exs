@@ -424,7 +424,7 @@ defmodule Compos.GitDiffTest do
     selected_block =
       blocks(buf)
       |> Enum.flat_map(&walk_blocks/1)
-      |> Enum.find(&(&1.anchor == "card-" <> selected_card.key))
+      |> Enum.find(&(&1[:anchor] == "card-" <> selected_card.key))
 
     selected_head = hd(selected_block.children)
     assert selected_head.mark == "current"
@@ -489,6 +489,44 @@ defmodule Compos.GitDiffTest do
     assert prompt =~ "Explain this unified diff"
     assert prompt =~ "```diff"
     refute prompt =~ hd(commits(buf)).subject
+  end
+
+  test "diff explanation follows the selected hunk or file, and ESC clears it", ctx do
+    File.write!(
+      Path.join(ctx.dir, "a.txt"),
+      @twelve |> String.replace("line 2\n", "LINE TWO\n") |> String.replace("line 11\n", "LINE ELEVEN\n")
+    )
+    File.write!(Path.join(ctx.dir, "b.txt"), "b changed\n")
+
+    buf = open_diff(ctx)
+    Editor.set_window_buffer(buf)
+    a = Enum.find(cards(buf), &(&1.file == "a.txt" and &1.section == "Unstaged changes"))
+    [first_hunk, second_hunk] = a.hunks
+
+    goto_line(buf, second_hunk.line)
+    {:ok, hunk_text} = Session.eval(~s{(diff--explain-text "#{buf}")})
+    assert hunk_text =~ second_hunk.header
+    refute hunk_text =~ first_hunk.header
+
+    goto_line(buf, a.start)
+    {:ok, file_text} = Session.eval(~s{(diff--explain-text "#{buf}")})
+    assert file_text =~ first_hunk.header
+    assert file_text =~ second_hunk.header
+    refute file_text =~ "diff --git a/b.txt b/b.txt"
+
+    press("ESC")
+    assert Buffer.get_local(buf, "diff-selection") == {:sym, "none"}
+    refute Enum.any?(
+             blocks(buf) |> Enum.flat_map(&walk_blocks/1),
+             &((&1[:class] in ["diff-card", "diff-hunk"]) and &1[:mark] == "current")
+           )
+
+    {:ok, whole_text} = Session.eval(~s{(diff--explain-text "#{buf}")})
+    assert whole_text =~ "diff --git a/a.txt b/a.txt"
+    assert whole_text =~ "diff --git a/b.txt b/b.txt"
+
+    press("n")
+    assert Buffer.get_local(buf, "diff-selection") == {:sym, "point"}
   end
 
   test "the keymap and changes-history tabs lead the view", ctx do
