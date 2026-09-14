@@ -143,17 +143,11 @@
     (if f (f b) (default b))))
 
 ;;; --- last seen ----------------------------------------------------------------
-;;; The editor keeps an MRU order but no clock. This table notes the time
-;;; a buffer was last shown in the active window. It starts empty at boot,
-;;; so a buffer nobody showed since the restart has no time.
+;;; The editor keeps an MRU order but no clock. The buffer itself carries
+;;; the time it was last shown in the active window, as a local, so it
+;;; survives a restart and a purge can read it without waking the buffer.
 
-(define *ibuffer-seen* '())
-
-(define (ibuffer-note-seen! b)
-  (when (string? b)
-    (set! *ibuffer-seen*
-      (cons (list b (current-time))
-            (filter (lambda (e) (not (equal? (car e) b))) *ibuffer-seen*)))))
+(define (ibuffer-note-seen! b) (buffer-note-seen! b))
 
 (define (ibuffer--seen-hook!)
   (when (and (boundp 'active-window) (boundp 'window-buffer))
@@ -161,9 +155,7 @@
 
 (add-hook! 'window-configuration-change-hook 'ibuffer--seen-hook!)
 
-(define (ibuffer-seen-at b)
-  (let ((e (assoc b *ibuffer-seen*)))
-    (and e (cadr e))))
+(define (ibuffer-seen-at b) (buffer-last-seen b))
 
 (define (ibuffer-age-label age)
   (cond ((not age) "")
