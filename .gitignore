@@ -24,6 +24,7 @@ erl_crash.dump
 # rust nif build artifacts
 apps/compos_core/native/compos_ts/target/
 apps/compos_core/native/compos_loro/target/
+apps/compos_core/native/compos_rope/target/
 apps/compos_core/priv/native/
 desktop/src-tauri/target/
 burrito_out/

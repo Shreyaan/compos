@@ -170,13 +170,14 @@ defmodule Compos.GitDiffTest do
     assert Buffer.get_local(buf, "diff-root") == ctx.root
     assert Buffer.get_local(buf, "mode-name") == "diff-mode"
 
-    # the mode composed the block tree; the payload carries it whole. The
-    # first block is the section heading, chosen by the mode, not the view.
+    # the mode composed the block tree; the header leads the content.
     blocks = Buffer.get_local(buf, "render-blocks")
     assert is_list(blocks) and blocks != []
-    first = pl(hd(blocks))
-    assert first.class == "c-section diff-section"
-    assert first.text =~ "Unstaged changes"
+    [keymap, tabs, first_section | _] = pl(blocks)
+    assert keymap.class == "diff-keymap"
+    assert tabs.class =~ "diff-tabs"
+    assert first_section.class == "c-section diff-section"
+    assert first_section.text =~ "Unstaged changes"
 
     Editor.set_window_buffer(buf)
     assert leaf(buf).blocks == blocks
@@ -387,6 +388,62 @@ defmodule Compos.GitDiffTest do
     press("TAB")
     assert Buffer.get_local(buf, "diff-closed-hunks") == []
     assert Buffer.hidden(buf, "diff") == []
+  end
+
+  test "diff-toggle-file folds the file from inside a hunk", ctx do
+    buf = open_diff(ctx)
+    Editor.set_window_buffer(buf)
+
+    a = Enum.find(cards(buf), &(&1.file == "a.txt"))
+    goto_line(buf, hd(a.hunks).line + 1)
+    press("f")
+
+    refute unstaged("a.txt") in Buffer.get_local(buf, "diff-open-cards")
+    assert [_] = Buffer.hidden(buf, "diff")
+  end
+
+  test "diff-toggle-all folds and unfolds every file", ctx do
+    File.write!(Path.join(ctx.dir, "b.txt"), "new file\n")
+    buf = open_diff(ctx)
+    Editor.set_window_buffer(buf)
+
+    cs = cards(buf)
+    count = length(Buffer.get_local(buf, "diff-open-cards"))
+    assert count >= 2
+    goto_line(buf, hd(cs).start)
+
+    press("F")
+    assert Buffer.get_local(buf, "diff-open-cards") == []
+    assert length(Buffer.hidden(buf, "diff")) == count
+
+    # n/p become file navigation when no hunk is visible.
+    press("n")
+    assert line_of(buf, Buffer.point(buf)) == Enum.at(cs, 1).start
+    press("TAB")
+    assert Enum.at(cs, 1).key in Buffer.get_local(buf, "diff-open-cards")
+
+    press("F")
+    assert length(Buffer.get_local(buf, "diff-open-cards")) == count
+    assert Buffer.hidden(buf, "diff") == []
+  end
+
+  test "the keymap and changes-history tabs lead the view", ctx do
+    buf = open_diff(ctx)
+    Editor.set_window_buffer(buf)
+
+    [keymap, tabs | _] = blocks(buf)
+    assert keymap.class == "diff-keymap"
+    assert tabs.class =~ "diff-tabs"
+    assert Enum.map(tabs.children, & &1.click) == ["diff-tab-changes", "diff-tab-history"]
+
+    press("2")
+    assert Buffer.get_local(buf, "diff-tab") == "history"
+    assert Enum.any?(blocks(buf) |> Enum.flat_map(&walk_blocks/1), &(&1.class == "diff-log"))
+    refute Enum.any?(blocks(buf) |> Enum.flat_map(&walk_blocks/1), &(is_binary(&1.class) and &1.class =~ "diff-card"))
+
+    press("1")
+    assert Buffer.get_local(buf, "diff-tab") == "changes"
+    assert Enum.any?(blocks(buf) |> Enum.flat_map(&walk_blocks/1), &(is_binary(&1.class) and &1.class =~ "diff-card"))
   end
 
   test "the row cursor follows point onto both sides of a change", ctx do

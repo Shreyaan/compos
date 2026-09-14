@@ -383,20 +383,55 @@
                                       (if (buffer-local buf 'diff-conflict-only)
                                           "show all" "show conflicts only"))))))))
 
+(define (diff--keymap-block)
+  (list 'tag "div" 'class "diff-keymap"
+        'segs '(("diff-key" "n/p") ("diff-key-label" " hunks/files   ")
+                ("diff-key" "N/P") ("diff-key-label" " files   ")
+                ("diff-key" "TAB") ("diff-key-label" " hunk   ")
+                ("diff-key" "f") ("diff-key-label" " file   ")
+                ("diff-key" "F") ("diff-key-label" " all   ")
+                ("diff-key" "RET") ("diff-key-label" " open   ")
+                ("diff-key" "g") ("diff-key-label" " refresh   ")
+                ("diff-key" "w") ("diff-key-label" " watch"))))
+
+(define (diff--active-tab buf visible commits)
+  (or (buffer-local buf 'diff-tab)
+      (if (and (null? visible) (pair? commits)) "history" "changes")))
+
+(define (diff--tabs-block active change-count commit-count)
+  (component 'ui/tabs
+    (list 'class "diff-tabs"
+          'tabs
+          (list (list "diff-tab-changes"
+                      (string-append "Changes (" (number->string change-count) ")")
+                      (equal? active "changes") "1")
+                (list "diff-tab-history"
+                      (string-append "History (" (number->string commit-count) ")")
+                      (equal? active "history") "2")))))
+
 (define (diff--blocks buf)
   (let* ((layout (diff-layout buf))
          (only? (and (buffer-local buf 'diff-conflict-only) (diff--has-conflicts? layout)))
          (visible (if only? (diff--conflict-cards layout) layout))
          (commits (if only? '() (or (buffer-local buf 'diff-commits) '())))
-         (msg (diff--preamble buf)))
+         (active (diff--active-tab buf visible commits))
+         (msg (diff--preamble buf))
+         (content
+           (if (equal? active "history")
+               (if (null? commits)
+                   (list (component 'ui/empty '(text "no previous commits" class "diff-empty")))
+                   (diff--commit-blocks commits))
+               (append
+                 (diff--conflict-bar buf layout)
+                 (if (or only? (equal? msg "")) '()
+                     (list (list 'tag "pre" 'class "diff-message" 'text msg)))
+                 (if (null? visible)
+                     (list (component 'ui/empty '(text "no changes" class "diff-empty")))
+                     (diff--section-blocks buf visible))))))
     (append
-      (diff--conflict-bar buf layout)
-      (if (or only? (equal? msg "")) '() (list (list 'tag "pre" 'class "diff-message" 'text msg)))
-      (if (and (null? visible) (null? commits))
-          (list (component 'ui/empty '(text "nothing to show" class "diff-empty")))
-          '())
-      (diff--section-blocks buf visible)
-      (diff--commit-blocks commits))))
+      (list (diff--keymap-block)
+            (diff--tabs-block active (length visible) (length commits)))
+      content)))
 
 ;; everything above the first card or section header: a revision's own
 ;; header and message, already in the shape a reader wants. Generated
@@ -592,7 +627,10 @@
       (let ((keys (map (lambda (c) (diff--get c 'key)) (diff-layout buf))))
         (buffer-set-local! buf 'diff-open-cards
           (filter (lambda (k) (if (member k seen) (member k old-open) #t)) keys))
-        (buffer-set-local! buf 'diff-seen keys))
+        (buffer-set-local! buf 'diff-seen keys)
+        (when (not (buffer-local buf 'diff-tab))
+          (buffer-set-local! buf 'diff-tab
+            (if (and (null? keys) (pair? commits)) "history" "changes"))))
       ;; refresh keeps the reader where they were, clamped to the new text
       (buffer-goto! buf (min old-point (buffer-size buf)))
       (diff--fontify! buf)
@@ -736,13 +774,30 @@
 
 ;; the rows n/p step through: hunks in a diff, commits in the log view
 (define (diff--hunk-lines buf)
-  (let ((hs (apply append
-              (map (lambda (c) (map (lambda (h) (diff--get h 'line))
-                                    (diff--get c 'hunks)))
-                   (diff-layout buf)))))
-    (if (null? hs)
-        (map car (or (buffer-local buf 'diff-commits) '()))
-        hs)))
+  (let* ((layout (diff-layout buf))
+         (open (or (buffer-local buf 'diff-open-cards) '()))
+         (closed (or (buffer-local buf 'diff-closed-hunks) '()))
+         (hs
+           (apply append
+             (map
+               (lambda (c)
+                 (if (member (diff--get c 'key) open)
+                     (filter
+                       (lambda (line)
+                         (let ((h (diff--hunk-at-line c line)))
+                           (not (member
+                                  (diff--hunk-key (diff--get c 'section)
+                                                  (diff--get c 'file)
+                                                  (diff--get h 'n))
+                                  closed))))
+                       (map (lambda (h) (diff--get h 'line))
+                            (diff--get c 'hunks)))
+                     '()))
+               layout))))
+    (cond ((equal? (buffer-local buf 'diff-tab) "history")
+           (map car (or (buffer-local buf 'diff-commits) '())))
+          ((pair? hs) hs)
+          (else (diff--file-lines buf)))))
 
 (define (diff--file-lines buf)
   (map (lambda (c) (diff--get c 'start)) (diff-layout buf)))
@@ -855,6 +910,7 @@
         '(render-blocks diff-card-cache diff-layout-cache))
       (buffer-set-local! buf 'render-mode "blocks")
       (buffer-set-local! buf 'diff-commits '())
+      (buffer-set-local! buf 'diff-tab "changes")
       (buffer-set-local! buf 'diff-open-cards
         (map (lambda (c) (diff--get c 'key)) (diff-layout buf)))
       (diff--fontify! buf)
@@ -884,6 +940,50 @@
                        (diff--goto-line! (diff--get hunk 'line)))
                 (begin (diff-toggle-card! buf (diff--get card 'key))
                        (diff--goto-line! (diff--get card 'start)))))))))
+
+(domain! 'files)
+(effects! '(write display))
+
+(define-command "diff-toggle-file" "Fold or unfold the file at point"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (line (diff--line-number buf (point)))
+           (card (diff--card-at (diff-layout buf) line)))
+      (if card
+          (begin
+            (diff-toggle-card! buf (diff--get card 'key))
+            (diff--goto-line! (diff--get card 'start)))
+          (message "no file here")))))
+
+(define (diff-toggle-all! buf)
+  (let* ((keys (map (lambda (c) (diff--get c 'key)) (diff-layout buf)))
+         (open (or (buffer-local buf 'diff-open-cards) '()))
+         (all-open? (and (pair? keys)
+                         (null? (filter (lambda (key) (not (member key open))) keys)))))
+    (buffer-set-local! buf 'diff-open-cards (if all-open? '() keys))
+    (diff--refold! buf)
+    (diff--reblock! buf)))
+
+(define-command "diff-toggle-all" "Fold all files, or unfold all files"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (line (diff--line-number buf (point)))
+           (card (diff--card-at (diff-layout buf) line)))
+      (diff-toggle-all! buf)
+      (when card (diff--goto-line! (diff--get card 'start))))))
+
+(define (diff-select-tab! buf tab)
+  (buffer-set-local! buf 'diff-tab tab)
+  (diff--reblock! buf))
+
+(define-command "diff-show-changes" "Show the changes tab"
+  (lambda () (diff-select-tab! (current-buffer) "changes")))
+
+(define-command "diff-show-history" "Show the previous commits tab"
+  (lambda () (diff-select-tab! (current-buffer) "history")))
+
+(domain! 'unknown)
+(effects! '(unknown))
 
 ;; also the click target: the card header in the rich view calls this
 (define (diff-toggle-card! buf key)
@@ -924,10 +1024,12 @@
 (on-block-click! 'diff
   (lambda (buf id)
     (and (buffer-local buf 'diff-backend)
-         (begin (if (equal? id "diff-conflict-toggle")
-                    (diff-toggle-conflicts! buf)
-                    (diff-toggle-card! buf id))
-                #t))))
+         (begin
+           (cond ((equal? id "diff-conflict-toggle") (diff-toggle-conflicts! buf))
+                 ((equal? id "diff-tab-changes") (diff-select-tab! buf "changes"))
+                 ((equal? id "diff-tab-history") (diff-select-tab! buf "history"))
+                 (else (diff-toggle-card! buf id)))
+           #t))))
 
 ;;; --- watching -----------------------------------------------------------------
 
@@ -1021,6 +1123,10 @@
     ("N" "diff-next-file")
     ("P" "diff-prev-file")
     ("TAB" "diff-toggle-fold")
+    ("f" "diff-toggle-file")
+    ("F" "diff-toggle-all")
+    ("1" "diff-show-changes")
+    ("2" "diff-show-history")
     ("RET" "diff-visit")
     ("g" "diff-revert")
     ("w" "diff-toggle-watch")
@@ -1029,13 +1135,16 @@
     ("C-c C-v" "diff-toggle-view")))
 
 (mode-doc! "diff-mode"
-  "The changes you have not committed, as cards. `n` and `p` step over hunks, `N` and `P` over files. `TAB` folds a card and `RET` opens the file at that line. `g` re-reads the diff, and `w` follows the tree. A merge in conflict shows a bar above the cards; `m`, or clicking it, narrows the view to only those files.")
+  "The top keymap lists the main commands. Tabs separate changes from previous commits. Key 1 shows changes and key 2 shows history. TAB folds a hunk, f folds its file, and F folds all files. n and p step over visible hunks, or files when every hunk is folded. N and P always step over files. RET opens the file at that line. g re-reads the diff, and w follows the tree.")
 
 ;;; --- the stylesheet -----------------------------------------------------------
 ;;; The mode ships its own CSS; the client renders structure and knows none
 ;;; of these names.
 
 (define-style! 'diff "
+.diff-keymap { display: flex; flex-wrap: wrap; padding: 4px 2px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg, #8a857a); }
+.diff-key { color: var(--accent-fg, #26356b); font-weight: 600; }
+.diff-tabs { margin: 0 0 10px; }
 .diff-message { font-family: var(--font-mono); font-size: 12px; line-height: 1.55; margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hl-line-bg, rgba(0,0,0,0.03)); border-left: 2px solid var(--diff-file-fg, rgba(0,0,0,0.2)); }
 .diff-conflict-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; margin: 0 0 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; background: var(--diff-conflict-bg, rgba(168, 58, 43, 0.12)); border: 1px solid var(--alert-fg, #a83a2b); }
 .diff-conflict-icon { color: var(--alert-fg, #a83a2b); }
