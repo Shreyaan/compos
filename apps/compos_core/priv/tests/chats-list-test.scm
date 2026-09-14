@@ -65,7 +65,7 @@
       (list 'ibuffer-grouping grouping 'ibuffer-sort sort 'ibuffer-collapsed '()))
     (list-set-filters! *chat-list* (list (list "match" "zz-chats-")))
     (list-refresh! *chat-list*)
-    (list-goto-first-entry *chat-list*)
+    (ibuffer-goto-first-row! *chat-list*)
     (list one two)))
 
 (define (chats-test-names)
@@ -204,6 +204,28 @@
         (check-equal! (ibuffer-heading-count folded) 2 "it still counts its members"))
       (ibuffer-toggle-fold! (string-append "group:" (car ids)) *chat-list*)
       (check-equal! (length (chats-test-names)) 3 "unfolded, the rows return")
+      (chats-test-reset!))))
+
+(deftest 'chats-group-row-stands-for-its-chats
+  "a group row takes the highlight, and a verb on it reads every chat under it"
+  (lambda ()
+    (let* ((ids (chats-test-open! 'group 'name))
+           (es (list-entries *chat-list*))
+           (at (let loop ((k 0) (rest es))
+                 (cond ((null? rest) #f)
+                       ((ibuffer-heading? (car rest)) k)
+                       (else (loop (+ k 1) (cdr rest)))))))
+      (check-true! (string? (list-current *chat-list*))
+                   "the list opens on a chat, not on the group over it")
+      (check-true! (list-selectable? *chat-list* (nth at es))
+                   "an open group row is a row like any other")
+      (list-goto-index! *chat-list* at)
+      (check-true! (ibuffer-heading? (list-current *chat-list*))
+                   "and it takes the highlight")
+      (check-equal! (agents-targets) '("*zz-chats-a*" "*zz-chats-b*")
+                    "a verb on the group row acts on every chat under it")
+      (check-false! (agents-current-buf)
+                    "and no one chat answers as the chat at point")
       (chats-test-reset!))))
 
 (deftest 'chats-sections-by-state
