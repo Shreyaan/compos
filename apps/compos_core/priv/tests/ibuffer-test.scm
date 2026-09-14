@@ -250,19 +250,22 @@
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-heading-carries-its-count-beside-the-name
-  "a heading's name cell ends with the count; its field cells say nothing"
+  "a heading's name cell holds the name, its kind and its tally; its field cells say nothing"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (let* ((heading (car (filter ibuffer-heading? (list-entries "*ibuffer*"))))
            (cells (ibuffer-wide-cells "*ibuffer*" heading))
            (name (car (nth 2 cells))))
-      (check-true! (string-suffix? "  3" name) "the count follows the name in its cell")
+      (check-true! (string-prefix? "ZZ-IB  mode" name) "the name leads, in upper case, then its kind")
+      (check-true! (string-suffix? "3 buffers" name) "the tally ends the cell")
       (check-equal! (nth 3 cells) "" "the first field cell is empty")
       (check-equal! (nth 4 cells) "" "and so is the second")
       (let* ((text (buffer-text "*ibuffer*"))
-             (line (car (filter (lambda (l) (string-contains? l "zz-ib  3"))
-                                (string-split text "\n")))))
-        (check-true! (string? line) "the drawn line reads name, two spaces, count")))
+             (lines (filter (lambda (l) (string-contains? l "ZZ-IB  mode"))
+                            (string-split text "\n"))))
+        (check-true! (pair? lines) "the drawn line reads the name and its kind")
+        (check-true! (string-suffix? "3 buffers" (car lines))
+                     "and ends with the tally")))
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-name-column-stops-at-its-cap
