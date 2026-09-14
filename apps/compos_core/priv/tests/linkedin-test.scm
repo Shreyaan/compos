@@ -116,8 +116,8 @@
                     "Thank you for reaching out. Please let me know a convenient time."
                     "the whole message rides the card; the clamp is CSS"))))
 
-(deftest 'the-tab-you-are-on-is-the-filled-pill
-  "the head draws its own blocks, so a tab bar reads as tabs"
+(deftest 'the-tab-you-are-on-is-the-marked-tab
+  "the head draws its tabs with ui/tabs, so the bar reads as every other tab bar"
   (lambda ()
     (let ((buf "*t-linkedin-head*"))
       (buffer-create buf)
@@ -125,12 +125,16 @@
       (buffer-set-local! buf 'linkedin-threads (li-parse-threads t--li-inbox))
       (buffer-set-local! buf 'linkedin-tab 'projects)
       (let* ((head (linkedin--composml-head buf '()))
-             (pills (plist-get (nth 1 head) 'children))
-             (style (lambda (p) (cadr (car (plist-get p 'attrs))))))
-        (check-equal! (length pills) 2 "one pill per tab")
-        (check-equal! (plist-get (car pills) 'text) "projects  2" "each says what it holds")
-        (check-true! (li-has? (style (car pills)) "background:var(--accent-fg")
-                     "the tab you are on is filled")
-        (check-false! (li-has? (style (cadr pills)) "background:var(--accent-fg")
-                      "and the other is outlined"))
+             (bar (nth 1 head))
+             (tabs (plist-get bar 'children))
+             (label (lambda (tb) (cadr (car (plist-get tb 'segs))))))
+        (check-equal! (plist-get bar 'tag) "c-tabs" "the bar is the component's")
+        (check-equal! (length tabs) 2 "one tab per reading")
+        (check-equal! (label (car tabs)) "projects 2" "each says what it holds")
+        (check-equal! (plist-get (car tabs) 'click) "linkedin-tab-projects"
+                      "a click comes back under the tab's own name")
+        (check-true! (li-has? (plist-get (car tabs) 'class) "c-tab-on")
+                     "the tab you are on is the marked one")
+        (check-false! (li-has? (plist-get (cadr tabs) 'class) "c-tab-on")
+                      "and the other is not"))
       (buffer-kill! buf))))
