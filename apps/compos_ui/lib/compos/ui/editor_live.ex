@@ -104,9 +104,16 @@ defmodule Compos.Ui.EditorLive do
   def handle_event("intent", %{"type" => type, "from" => from, "to" => to} = p, socket)
       when is_binary(type) and is_integer(from) and is_integer(to) do
     text = if is_binary(p["text"]), do: p["text"], else: ""
+    # The caret's own byte, and the buffer version it was measured against.
+    # Both are only about the window the reader is in: a caret measured in
+    # some other window names a byte in some other buffer, and the edit
+    # lands in the active one. Anything else keeps the old rule.
+    own? = safe_int(p["win"]) == Compos.Core.Editor.active_window(socket.assigns.frame)
+    at = if own? and is_integer(p["at"]), do: p["at"], else: -1
+    v = if own? and is_integer(p["v"]), do: p["v"], else: -1
 
     Input.run(socket.assigns.frame, fn ->
-      Compos.Core.KeyDispatch.handle_intent(type, from, to, text)
+      Compos.Core.KeyDispatch.handle_intent(type, from, to, text, at, v)
     end)
 
     {:noreply, socket |> drain() |> refresh()}

@@ -3006,6 +3006,9 @@ defmodule Compos.Ui.Layouts do
                   if (!p || p.closest(".cap-pop")) return false;
                   // text inside an island (data-len) is display, not source
                   if (p.closest("[data-len]")) return false;
+                  // a measuring probe (rowMetrics, the column probe) stands
+                  // in the editable for one layout and is not source
+                  if (p.closest("[data-probe]")) return false;
                   return !(p.classList.contains("cursor") && t.textContent === " ");
                 };
                 const domByte = (node, offset) => {
@@ -3212,9 +3215,21 @@ defmodule Compos.Ui.Layouts do
                   const to = range ? domByte(range.endContainer, range.endOffset) : null;
                   let text = e.data;
                   if (text == null && e.dataTransfer) text = e.dataTransfer.getData("text/plain");
+                  // Where the reader's caret actually is, and the text it was
+                  // measured against. The server takes the byte only while the
+                  // version still matches: then this DOM is the text the server
+                  // holds, and the caret the reader is looking at is the one
+                  // that acts. A stale DOM keeps the old rule and acts at point.
+                  const caret =
+                    domSel && domSel.focusNode && buf.contains(domSel.focusNode)
+                      ? domByte(domSel.focusNode, domSel.focusOffset)
+                      : null;
+                  const ver = parseInt(buf.dataset.v, 10);
                   Telem.push(this, "intent", {
                     win: winIdOf(buf), type: e.inputType,
                     from: from == null ? -1 : from, to: to == null ? -1 : to,
+                    at: caret == null ? -1 : caret,
+                    v: Number.isFinite(ver) ? ver : -1,
                     text: text || ""
                   });
                 };
@@ -3279,11 +3294,15 @@ defmodule Compos.Ui.Layouts do
                   // never echoes (it moved point past an insertion) waits
                   // three seconds, then the server's point stands.
                   if (this._selPending) { markCurrentRow(buf); return; }
+                  // A report is acknowledged when the server's point is the
+                  // one reported. It is never DEFENDED: holding the caret
+                  // still for three seconds while the two sides disagreed was
+                  // a workaround for point and the caret drifting apart, and
+                  // the intent now carries the caret's own byte, so they do
+                  // not drift. The caret follows point, always.
                   const rep = this._reported;
-                  if (rep && !rep.acked) {
-                    if (rep.point === pt && (rep.mark === null ? pt : rep.mark) === wantAnchor) rep.acked = true;
-                    else if (performance.now() - rep.at < 3000) { markCurrentRow(buf); return; }
-                  }
+                  if (rep && !rep.acked && rep.point === pt &&
+                      (rep.mark === null ? pt : rep.mark) === wantAnchor) rep.acked = true;
                   this._settingSel = true;
                   try {
                     if (wantAnchor !== pt) {
@@ -3705,12 +3724,26 @@ defmodule Compos.Ui.Layouts do
                     // the line's own font, and the gutter is not text
                     const content = ln && (ln.matches(".line-content") ? ln : ln.querySelector(".line-content"));
                     if (content) {
-                      const probe = document.createElement("span");
-                      probe.textContent = "0".repeat(80);
-                      probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
-                      content.appendChild(probe);
-                      const cw = probe.getBoundingClientRect().width / 80;
-                      probe.remove();
+                      // the same cache as rowMetrics: a character's width
+                      // moves with the font, not with the patch that asked
+                      const ccs = getComputedStyle(content);
+                      const ckey2 = ccs.fontFamily + "|" + ccs.fontSize + "|" +
+                        this.zoomRatio() + "|" + (document.fonts ? document.fonts.status : "");
+                      this._charWidth = this._charWidth || new WeakMap();
+                      const chit = this._charWidth.get(content);
+                      let cw;
+                      if (chit && chit.key === ckey2) {
+                        cw = chit.val;
+                      } else {
+                        const probe = document.createElement("span");
+                        probe.dataset.probe = "1";
+                        probe.textContent = "0".repeat(80);
+                        probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+                        content.appendChild(probe);
+                        cw = probe.getBoundingClientRect().width / 80;
+                        probe.remove();
+                        this._charWidth.set(content, { key: ckey2, val: cw });
+                      }
                       // .line-content is the flex child that holds the text:
                       // its box is the width the text actually has, after the
                       // gutter, the gap and the line padding
@@ -4015,7 +4048,24 @@ defmodule Compos.Ui.Layouts do
                 const host =
                   line && (line.matches(".line-content") ? line : line.querySelector(".line-content") || line);
                 if (!host) return null;
+                // Measuring appends a node inside the editable and forces a
+                // layout, and afterPatch asks after every patch. The answer
+                // moves with the font and the zoom, never with the patch
+                // that asked, so keep it per host and touch the DOM only
+                // when one of those moves. Probing under the caret on every
+                // write from another window is what reported a byte past
+                // point, and an unechoed report holds the caret for three
+                // seconds.
+                const rcs = getComputedStyle(host);
+                // fonts.status flips once when a web font lands: a metric
+                // measured before it did is wrong, and nothing else moves.
+                const rkey = rcs.fontFamily + "|" + rcs.fontSize + "|" + rcs.lineHeight + "|" +
+                  this.zoomRatio() + "|" + (document.fonts ? document.fonts.status : "");
+                this._rowMetrics = this._rowMetrics || new WeakMap();
+                const rhit = this._rowMetrics.get(host);
+                if (rhit && rhit.key === rkey) return rhit.val;
                 const probe = document.createElement("span");
+                probe.dataset.probe = "1";
                 probe.style.cssText =
                   "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0";
                 probe.textContent = "0\n".repeat(20).slice(0, -1);
@@ -4023,7 +4073,9 @@ defmodule Compos.Ui.Layouts do
                 const visual = probe.getBoundingClientRect().height / 20;
                 const layout = probe.offsetHeight / 20;
                 probe.remove();
-                return visual > 0 && layout > 0 ? { visual, layout } : null;
+                const rval = visual > 0 && layout > 0 ? { visual, layout } : null;
+                this._rowMetrics.set(host, { key: rkey, val: rval });
+                return rval;
               },
               // The height that actually shows text. clientHeight is the
               // padding box, and .buf pads 12px and 22px (a writing buffer

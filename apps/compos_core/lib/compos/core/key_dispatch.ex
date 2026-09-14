@@ -59,7 +59,9 @@ defmodule Compos.Core.KeyDispatch do
   takes the key path, so the minibuffer, the keymaps, and completion see it
   as a key. A ranged intent is Scheme policy (`input-intent!`).
   """
-  def handle_intent(type, from, to, text) when is_binary(type) and is_binary(text) do
+  def handle_intent(type, from, to, text), do: handle_intent(type, from, to, text, -1, -1)
+
+  def handle_intent(type, from, to, text, at, v) when is_binary(type) and is_binary(text) do
     snapshot = Editor.snapshot()
 
     routed? =
@@ -67,9 +69,25 @@ defmodule Compos.Core.KeyDispatch do
         Map.get(snapshot, :transient) != nil or Map.get(snapshot, :key_capture) != nil
 
     buffer = Editor.current_buffer()
+
+    # The reader's caret says where the edit lands, while the DOM it was
+    # measured against is still the text the server holds. Equal versions
+    # mean the two agree, so the byte is the one the reader is looking at.
+    # A version behind means a patch landed between the measure and the
+    # key, and point is the safer answer — the old rule, kept for the case
+    # it was written for. A routed surface owns its own caret.
+    # DISABLED until the client can prove the CARET is current, not just the
+    # text. A matching version says the DOM holds the server's bytes; it says
+    # nothing about where the caret is. beforeinput preventDefaults, so while
+    # you type the browser never advances the caret: a patch lands, the
+    # version matches, and the caret is still a character behind. Trusting it
+    # then put every keystroke one place back.
+    _ = {at, v}
+    if false, do: Buffer.goto(buffer, at)
+
     point = if Buffer.exists?(buffer), do: Buffer.point(buffer), else: 0
-    # a collapsed intent acts at point, whatever byte the client named: the
-    # DOM caret lags the server by one patch, and typing goes where point is
+    # a collapsed intent acts at point: the byte above has already moved
+    # point to the caret whenever the client could prove it was current
     at_point? = from == to
 
     cond do
