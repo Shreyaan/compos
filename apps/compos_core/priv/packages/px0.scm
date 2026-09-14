@@ -65,13 +65,13 @@
               (let ((root (plist-get m 'root)))
                 (if (string? root) root 'busy)))))))
 
-;; (PORT . FOUND?) for ROOT: its running server, else the first free port
+;; (PORT FOUND?) for ROOT: its running server, else the first free port
 (define (px0--port-for root)
   (let loop ((p px0-first-port) (n 0) (free #f))
     (if (>= n px0-port-span)
-        (cons free #f)
+        (list free #f)
         (let ((at (px0--probe p)))
-          (cond ((equal? at root) (cons p #t))
+          (cond ((equal? at root) (list p #t))
                 ((equal? at 'free) (loop (+ p 1) (+ n 1) (or free p)))
                 (else (loop (+ p 1) (+ n 1) free)))))))
 
@@ -101,7 +101,7 @@
   (let* ((found (px0--port-for root))
          (port (car found)))
     (cond ((not port) #f)
-          ((cdr found) port)
+          ((cadr found) port)
           ((px0--start! root port) port)
           (else #f))))
 
@@ -164,7 +164,7 @@
   (lambda ()
     (let* ((root (px0--root))
            (found (px0--port-for root)))
-      (if (not (cdr found))
+      (if (not (cadr found))
           (message "px0: nothing running for this project")
           (begin
             (px0--kill! root)

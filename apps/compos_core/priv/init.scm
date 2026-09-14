@@ -92,6 +92,7 @@
 (load-bundled-package "setup.scm")
 (load-bundled-package "skills.scm")
 (load-bundled-package "prompts.scm")
+(load-bundled-package "px0.scm")
 (load-bundled-package "llm-config.scm")
 (load-bundled-package "sockets.scm")
 (load-bundled-package "spotify.scm")
