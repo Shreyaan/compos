@@ -78,3 +78,55 @@
       (check-equal! (car (car (linkedin--rows buf))) 'kind "the conversations")
       (check-equal! (car (car (linkedin--columns buf))) "who" "the messages columns")
       (buffer-kill! buf))))
+
+;;; --- the index as cards --------------------------------------------------
+;;; The same rows, projected as blocks. A field role is what the shared
+;;; list lays a card out by, so the roles are what these check.
+
+(define (t--li-field block role)
+  (let loop ((cs (plist-get block 'children)))
+    (cond ((null? cs) #f)
+          ((equal? (cadr (car (plist-get (car cs) 'attrs))) role) (car cs))
+          (else (loop (cdr cs))))))
+
+(deftest 'a-card-says-the-name-the-count-and-the-day
+  "a project row, as the blocks the list lays out"
+  (lambda ()
+    (let* ((row (car (li-parse t--li-projects)))
+           (block (linkedin--project-block "*t-li-cards*" row)))
+      (check-equal! (plist-get (t--li-field block "primary") 'text)
+                    "Anthriq Compiler Expert" "the name leads")
+      (check-equal! (plist-get (t--li-field block "count") 'text) "3" "the pipeline counts")
+      (check-true! (li-has? (plist-get (t--li-field block "secondary") 'text) "1/27/2026")
+                   "and the day it was created sits under both"))))
+
+(deftest 'an-unread-card-says-so-where-the-list-can-see-it
+  "the unread attribute is the shared list's own: it lights the left edge"
+  (lambda ()
+    (let* ((rows (li-parse-threads t--li-inbox))
+           (unread (linkedin--thread-block "*t-li-cards*" (car rows)))
+           (read (linkedin--thread-block "*t-li-cards*" (car (cdr rows)))))
+      (check-equal! (cadr (car (plist-get unread 'attrs))) "true" "the badge carries")
+      (check-equal! (cadr (car (plist-get read 'attrs))) "false" "and a read thread says so")
+      (check-equal! (plist-get (t--li-field unread "detail") 'text)
+                    "Thank you for reaching out. Please let me know a convenient time."
+                    "the whole message rides the card; the clamp is CSS"))))
+
+(deftest 'the-tab-you-are-on-is-the-filled-pill
+  "the head draws its own blocks, so a tab bar reads as tabs"
+  (lambda ()
+    (let ((buf "*t-linkedin-head*"))
+      (buffer-create buf)
+      (buffer-set-local! buf 'linkedin-rows (li-parse t--li-projects))
+      (buffer-set-local! buf 'linkedin-threads (li-parse-threads t--li-inbox))
+      (buffer-set-local! buf 'linkedin-tab 'projects)
+      (let* ((head (linkedin--composml-head buf '()))
+             (pills (plist-get (nth 1 head) 'children))
+             (style (lambda (p) (cadr (car (plist-get p 'attrs))))))
+        (check-equal! (length pills) 2 "one pill per tab")
+        (check-equal! (plist-get (car pills) 'text) "projects  2" "each says what it holds")
+        (check-true! (li-has? (style (car pills)) "background:var(--accent-fg")
+                     "the tab you are on is filled")
+        (check-false! (li-has? (style (cadr pills)) "background:var(--accent-fg")
+                      "and the other is outlined"))
+      (buffer-kill! buf))))

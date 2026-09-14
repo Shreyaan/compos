@@ -29,6 +29,7 @@ defmodule Compos.Ui.KeySpecTest do
     const cases = #{Jason.encode!(cases)};
     const out = cases.map((c) => {
       globalThis.document = {
+        querySelector: (s) => s === ".window.active .cap-pop" && c.completion ? {} : null,
         activeElement: c.editable
           ? { closest: (s) => (
               s === ".buf[contenteditable]" ||
@@ -65,6 +66,16 @@ defmodule Compos.Ui.KeySpecTest do
 
   defp event(key, code, mods \\ []) do
     Map.merge(%{key: key, code: code}, Map.new(mods, &{&1, true}))
+  end
+
+  test "completion owns arrows and Enter while text still uses beforeinput" do
+    keys = ~w(ArrowUp ArrowDown ArrowLeft ArrowRight Enter)
+    results = run(for key <- keys, do: %{event: event(key, key), editable: true,
+      editing: true, completion: true})
+    assert Enum.all?(results, &(&1["native"] == false))
+    [typing] = run([%{event: event("a", "KeyA"), editable: true,
+      editing: true, completion: true}])
+    assert typing["native"] == true
   end
 
   test "an inactive editable cannot swallow the selected list pane's keys" do

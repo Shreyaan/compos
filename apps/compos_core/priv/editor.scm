@@ -991,6 +991,10 @@
 ;;;   'row-cells   (buf entry) -> (CELLS ...)
 ;;;   'collection semantic collection tag; 'composml (buf entry) -> block
 ;;;              Optional semantic row projection; keys must be strings.
+;;;   'composml-head (buf head) -> (BLOCK ...)
+;;;              Optional head of that projection. The default draws the
+;;;              head's own lines as text; a mode answering this draws it
+;;;              as blocks, so a tab bar can be tabs.
 ;;;
 ;;; The mark goes on the first line and the lines under it start where it
 ;;; does. A two-line row has no single label row, so the head shows none.
@@ -2032,7 +2036,13 @@
                 'render-blocks
                 (list
                   (list 'tag "c-headerline" 'class "semantic-list-header"
-                        'children (map (lambda (ln) (list 'tag "pre" 'text (car ln))) head))
+                        ;; the head is text and its faces. A mode that wants
+                        ;; its own head -- tabs as tabs, a title as a title --
+                        ;; answers 'composml-head with blocks instead.
+                        'children (let ((f (list-opt buf 'composml-head)))
+                                    (if f
+                                        (f buf head)
+                                        (map (lambda (ln) (list 'tag "pre" 'text (car ln))) head))))
                   (list 'tag collection 'class "semantic-list"
                         'attrs '(("role" "list"))
                         'children

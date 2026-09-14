@@ -1637,6 +1637,10 @@ defmodule Compos.Ui.Layouts do
             // A pane switch can leave DOM focus in the old editable until
             // the next patch. Only the selected pane may handle keys natively.
             if (!a || !a.closest || !a.closest(".window.active .buf[contenteditable]")) return false;
+            // The popup's keymap owns navigation and acceptance. Letting
+            // the browser handle these keys also moves its native caret.
+            if (document.querySelector(".window.active .cap-pop") &&
+                (NATIVE_MOTION.includes(e.key) || e.key === "Enter")) return false;
             // A Cmd-arrow is a key until the buffer is in the editing
             // state (editingAfterKey); then the browser moves the caret.
             if (e.metaKey && !e.ctrlKey && !e.altKey &&

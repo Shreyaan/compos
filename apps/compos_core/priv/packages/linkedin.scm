@@ -263,14 +263,24 @@
 ;; steps is a second tab opened -- the churn this whole design avoids.
 ;; K gets (TAB ON-INBOX?), or #f when the tab is gone.
 (define (linkedin--kept-tab! k)
-  (if (not *linkedin-inbox-tab*)
-      (k #f)
-      (tab-list
-        (lambda (ts)
-          (let ((mine (filter (lambda (t) (equal? (plist-get t 'id) *linkedin-inbox-tab*)) ts)))
-            (unless (pair? mine) (set! *linkedin-inbox-tab* #f))
-            (k (and (pair? mine)
-                    (list *linkedin-inbox-tab* (linkedin--inbox-tab? (car mine))))))))))
+  (tab-list
+    (lambda (ts)
+      (let ((mine (and *linkedin-inbox-tab*
+                       (filter (lambda (t) (equal? (plist-get t 'id) *linkedin-inbox-tab*)) ts))))
+        (cond
+          ((and mine (pair? mine))
+           (k (list *linkedin-inbox-tab* (linkedin--inbox-tab? (car mine)))))
+          (else
+           ;; the id is only in memory, and the reader outlives it: a
+           ;; reload of this package, a restart, a session. A Recruiter
+           ;; inbox tab already standing there is the tab this app would
+           ;; have opened, so it is adopted rather than doubled.
+           (set! *linkedin-inbox-tab* #f)
+           (let ((open (filter linkedin--inbox-tab? ts)))
+             (cond ((pair? open)
+                    (set! *linkedin-inbox-tab* (plist-get (car open) 'id))
+                    (k (list *linkedin-inbox-tab* #t)))
+                   (else (k #f))))))))))
 
 ;; the tab is ours only if it was not there before the open
 (define (linkedin--await-tab! known tries k)
@@ -615,13 +625,102 @@ a{color:var(--accent);text-decoration:none}
             (list (or (plist-get row 'created) "") "dim")
             (number->string (or (plist-get row 'count) 0)))))
 
+;;; --- the index, as cards -------------------------------------------------
+;;; The listing also projects itself semantically: one record per row with
+;;; field roles, which the shared list CSS lays out as a card -- a name,
+;;; the count on its right, the detail under it. The app's own polish
+;;; rides on the blocks as inline style, so nothing outside this file
+;;; changes colour, and every value is a theme variable so the cards
+;;; follow the theme rather than fighting it.
+
+(define li-css-title "padding:.7em .9em .1em;font-weight:700;font-size:1.06em;letter-spacing:-.01em")
+(define li-css-tabs "display:flex;gap:.4em;align-items:center;flex-wrap:wrap;padding:.25em .9em .5em")
+(define li-css-tab-on "border-radius:999px;padding:.16em .8em;background:var(--accent-fg,#0a66c2);color:var(--default-bg,#fff);font-weight:600;font-size:.84em")
+(define li-css-tab-off "border-radius:999px;padding:.16em .8em;border:1px solid var(--border-bg,#d8d4cb);color:var(--dim-fg,#8a857a);font-size:.84em")
+(define li-css-note "padding:0 .9em .55em;color:var(--dim-fg,#8a857a);font-size:.78em")
+(define li-css-rule "border-bottom:1px solid var(--border-bg,#e2ded4);margin:0 .5em")
+(define li-css-name "font-weight:600")
+(define li-css-count "color:var(--accent-fg,#0a66c2);font-weight:600;font-variant-numeric:tabular-nums")
+(define li-css-sub "font-size:.84em")
+(define li-css-chip "border-radius:999px;padding:.05em .6em;border:1px solid var(--border-bg,#d8d4cb);font-size:.76em")
+(define li-css-snippet "font-size:.85em;opacity:.85;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden")
+
+;; one block: a tag, the field role the list lays it out by, and the style
+(define (li--block tag text field css)
+  (list 'tag tag
+        'attrs (append (if field (list (list "field" field)) '())
+                       (if css (list (list "style" css)) '()))
+        'text (if (number? text) (number->string text) (or text ""))))
+
+;; a tab is a pill: the one you are on filled, the others outlined, each
+;; carrying what its reading holds
+(define (li--tab-pill buf tab at)
+  (let* ((rs (or (buffer-local buf (if (equal? tab 'messages) 'linkedin-threads 'linkedin-rows))
+                 '()))
+         (label (string-append (symbol->string tab)
+                               (if (null? rs) "" (string-append "  " (number->string (length rs)))))))
+    (list 'tag "span"
+          'attrs (list (list "style" (if (equal? tab at) li-css-tab-on li-css-tab-off)))
+          'text label)))
+
+;; The head the cards stand under: the app, its tabs, and the keys. The
+;; text head says the same thing in one line of chips; this one says it in
+;; the shape a reader already knows a tab bar by.
+(define (linkedin--composml-head buf head)
+  (let* ((at (linkedin-tab buf))
+         (q (if (boundp 'list-query) (list-query buf) ""))
+         (note (if (equal? q "")
+                   "RET page · o recruiter · w copy · ←/→ tab · g refresh · q quit"
+                   (string-append "matching \"" q "\" · \\ widens"))))
+    (list
+      (li--block "div" "LinkedIn Recruiter" #f li-css-title)
+      (list 'tag "div" 'attrs (list (list "style" li-css-tabs))
+            'children (map (lambda (t) (li--tab-pill buf t at)) *linkedin-tabs*))
+      (li--block "div" note #f li-css-note)
+      (li--block "div" "" #f li-css-rule))))
+
+;; a project card: the name, the pipeline count on its right, and the day
+;; it was created with its id under both
+(define (linkedin--project-block buf row)
+  (list 'tag "div"
+        'children
+        (list (li--block "span" (plist-get row 'name) "primary" li-css-name)
+              (li--block "span" (or (plist-get row 'count) 0) "count" li-css-count)
+              (li--block "span"
+                         (string-append "created " (or (plist-get row 'created) "—")
+                                        "   ·   " (plist-get row 'id))
+                         "secondary" li-css-sub))))
+
+;; a conversation card: who, when, the InMail status as a chip, and the
+;; last message clamped to two lines. The unread attribute is the shared
+;; list's own: it lights the left edge and thickens the name.
+(define (linkedin--thread-block buf row)
+  (let ((status (or (plist-get row 'status) "")))
+    (list 'tag "div"
+          'attrs (list (list "unread" (if (plist-get row 'unread) "true" "false")))
+          'children
+          (append
+            (list (li--block "span" (plist-get row 'name) "primary" li-css-name)
+                  (li--block "span" (or (plist-get row 'moved) "") "trailing" li-css-sub))
+            (if (equal? status "")
+                '()
+                (list (list 'tag "span" 'attrs '(("field" "tags"))
+                            'children (list (li--block "span" status #f li-css-chip)))))
+            (list (li--block "span" (or (plist-get row 'body) "") "detail" li-css-snippet))))))
+
+(define (linkedin--composml buf row)
+  (if (li-thread? row)
+      (linkedin--thread-block buf row)
+      (linkedin--project-block buf row)))
+
 (define *linkedin-doc*
   (string-append
     "LinkedIn Recruiter, in two tabs over one listing: the open projects, "
     "and the inbox. Both are read from a rendered background tab and cut "
-    "down by an XSLT stylesheet. On projects, the pipeline column is how "
-    "many candidates stand in the project; on messages, the last column is "
-    "the whole last message and `new` marks an unread thread. <left> and "
+    "down by an XSLT stylesheet. Each row is a card: the name, its count "
+    "or its day on the right, and under both what it is -- when it was "
+    "created, or the whole last message. An unread thread lights its "
+    "left edge. <left> and "
     "<right> change the tab, and a tab reads its page the first time you "
     "enter it. Moving shows that row as a page beside the listing, and the "
     "detail walk flips through the pages you have opened. RET shows it "
@@ -649,6 +748,9 @@ a{color:var(--accent);text-decoration:none}
                              'cells linkedin--cells))
         'title (lambda (buf) "LinkedIn Recruiter")
         'meta linkedin--tab-bar
+        'collection "c-list"
+        'composml linkedin--composml
+        'composml-head linkedin--composml-head
         'total (lambda (buf) (length (linkedin--rows buf)))
         'footer (lambda (buf) (list (list "RET" "page") (list "o" "recruiter")
                                     (list "w" "copy") (list "<left>/<right>" "tab")

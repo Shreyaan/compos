@@ -36,6 +36,24 @@ defmodule Compos.SchemeIdeTest do
     :ok
   end
 
+  test "typing in Scheme mode automatically offers completions" do
+    buf = scheme_buffer("")
+    assert is_integer(Buffer.get_local(buf, "capf-auto-watch"))
+    press(String.graphemes("buffer-te"))
+    assert Buffer.text(buf) == "buffer-te"
+    await_completion(100)
+    assert inspect(Editor.snapshot().completion) =~ "buffer-text"
+    Editor.completion_dismiss()
+  end
+
+  defp await_completion(0), do: flunk("automatic completion did not appear")
+  defp await_completion(tries) do
+    if Editor.snapshot().completion == nil do
+      Process.sleep(20)
+      await_completion(tries - 1)
+    end
+  end
+
   test "M-. jumps to a definition in the buffer; M-, returns" do
     buf = scheme_buffer("(define (zz-here x) x)\n(zz-here 1)\n")
 
@@ -67,15 +85,21 @@ defmodule Compos.SchemeIdeTest do
   end
 
   test "completion offers primitives and catalog names" do
-    buf = scheme_buffer("(buffer-te")
+    buf = scheme_buffer("(buffer-")
 
-    Buffer.goto(buf, 10)
+    Buffer.goto(buf, 8)
     press(["C-M-i"])
 
     comp = Editor.render_state().completion
     assert comp != nil
     labels = Enum.map(comp.candidates, & &1.label)
-    assert "buffer-text" in labels
+    assert "buffer-anchor" in labels
+    point = Buffer.point(buf)
+    press(["<down>"])
+    assert Buffer.point(buf) == point
+    assert Editor.render_state().completion.candidates != comp.candidates
+    press(["<up>"])
+    assert Buffer.point(buf) == point
     press(["C-g"])
   end
 
