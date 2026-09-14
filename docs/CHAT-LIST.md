@@ -67,6 +67,16 @@ idea, not an application's.
 - `g` draws the list again
 - `+` starts a new chat
 
+## The list is still
+
+Nothing draws the list behind you. A streaming turn fires events many
+times a second, and a list that redrew on them would re-sort its rows
+and carry the cursor off the chat you were reading. So no event draws
+it: the modeline carries the news of a chat that needs you, and `g`
+draws the list again when you ask. A draw keeps the row you were on --
+it finds that chat again wherever the new order puts it. Closing the
+filter is not a move either: the rows widen back under the same cursor.
+
 ## The saved chats
 
 The last section holds the newest saved conversations. A chat you
