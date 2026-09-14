@@ -1,13 +1,15 @@
 ;;; agent-fleet.scm --- Chat fleet list, archive, and attention UI.
 ;;;
-;;; This module owns the *chats* list and actions across chat buffers. Runtime
-;;; lifecycle and transcript rendering remain in agent.scm.
+;;; This module owns the *chat-list* application and the actions across chat
+;;; buffers. Runtime lifecycle and transcript rendering remain in agent.scm.
 
 (domain! 'chat)
 (effects! '(write))
 (category! 'chat)
 
-(define *agents-buffer* "*chats*")
+;; one list over the chats: the application's buffer, which every fleet
+;; action reads its targets from. docs/CHAT-LIST.md is the contract.
+(define *chat-list-buffer* "*chat-list*")
 
 
 (define (agent-threads)
@@ -253,7 +255,7 @@
 
 ;; No key bar over the rows: ? shows every key with the mode's own
 ;; words, the same as the buffers table.
-(ibuffer-view! *agents-buffer* 'sort 'recent)
+(ibuffer-view! *chat-list-buffer* 'sort 'recent)
 
 ;; the table's rows, then the saved conversations as the last section
 (define (chats-rows buf)
@@ -271,16 +273,16 @@
 (define *agents-refresh-ms* 800)
 
 (define (agents-buffer-shown?)
-  (and (buffer-exists? *agents-buffer*)
-       (or (equal? (current-buffer) *agents-buffer*)
+  (and (buffer-exists? *chat-list-buffer*)
+       (or (equal? (current-buffer) *chat-list-buffer*)
            (let loop ((ws (window-list-all)))
              (cond ((null? ws) #f)
-                   ((equal? (cadr (car ws)) *agents-buffer*) #t)
+                   ((equal? (cadr (car ws)) *chat-list-buffer*) #t)
                    (else (loop (cdr ws))))))))
 
 (define (agents-refresh!)
   (when (agents-buffer-shown?)
-    (list-refresh! *agents-buffer*)))
+    (list-refresh! *chat-list-buffer*)))
 
 ;; the fleet's surfaces after an event batch: the modeline answers at
 ;; once, because a chat that needs you is news; the list settles.
@@ -291,14 +293,14 @@
     (debounce! "agents-refresh" *agents-refresh-ms*
       (lambda (ignored) (agents-refresh!)) #f)))
 
-(define (agents-current-buf) (list-current *agents-buffer*))
+(define (agents-current-buf) (list-current *chat-list-buffer*))
 
 (define (agents-current-slug)
   (let ((b (agents-current-buf)))
     (and b (buffer-local b 'agent-slug))))
 
 (define (agents-targets)
-  (filter (lambda (b) (buffer-exists? b)) (list-targets *agents-buffer*)))
+  (filter (lambda (b) (buffer-exists? b)) (list-targets *chat-list-buffer*)))
 
 (define (agents-report verb bs)
   (message (if (= (length bs) 1)
@@ -307,7 +309,7 @@
 
 (define-command "chats-retitle" "Give the chat at point a title"
   (lambda ()
-    (let ((b (ibuffer-current *agents-buffer*)))
+    (let ((b (ibuffer-current *chat-list-buffer*)))
       (if (not (and (string? b) (buffer-exists? b)))
           (message "no chat here")
           (minibuffer-read
@@ -316,7 +318,7 @@
             (lambda (name)
               (unless (equal? name "")
                 (chat-title b name)
-                (list-refresh! *agents-buffer*))))))))
+                (list-refresh! *chat-list-buffer*))))))))
 
 (define (agents-live-slug buf)
   (let ((slug (or (buffer-local buf 'agent-slug) (chat-ensure-runtime! buf))))
@@ -400,8 +402,8 @@
           (message "no chat here")
           (begin
             (for-each agents-archive! bs)
-            (list-clear-marks! *agents-buffer*)
-            (list-refresh! *agents-buffer*)
+            (list-clear-marks! *chat-list-buffer*)
+            (list-refresh! *chat-list-buffer*)
             (agents-report "archived" bs))))))
 
 (mode-icon! "ichat-mode" "")
@@ -426,7 +428,7 @@
              "to archive, and x runs the flags. RET opens the chat at point. "
              "The last section holds the newest saved conversations; RET on "
              "one reads its file back and revives the chat.")
-      'buffer *agents-buffer*
+      'buffer *chat-list-buffer*
       'category 'chat
       'title (lambda (buf) "Chats")
       'noun "chat"
@@ -448,7 +450,7 @@
               ("+" "agent-open")))))
 
 (define (ichat-open!)
-  (ibuffer-open! 'chats *agents-buffer* "ichat-mode"))
+  (ibuffer-open! 'chats *chat-list-buffer* "ichat-mode"))
 
 ;; C-x c: the same table in the minibuffer form, with its own view so
 ;; the sort and the folds of *chats* stay what you set them to

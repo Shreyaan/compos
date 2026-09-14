@@ -650,11 +650,17 @@ defmodule Compos.Ui.EditorLive do
         # a buffer that left the window set stops feeding this client (S15)
         socket.assigns.subscribed
         |> MapSet.difference(visible)
-        |> Enum.each(fn name -> Events.unsubscribe(name); Events.unsubscribe_display(name) end)
+        |> Enum.each(fn name ->
+          Events.unsubscribe(name)
+          Events.unsubscribe_display(name)
+        end)
 
         visible
         |> MapSet.difference(socket.assigns.subscribed)
-        |> Enum.each(fn name -> Events.subscribe(name); Events.subscribe_display(name) end)
+        |> Enum.each(fn name ->
+          Events.subscribe(name)
+          Events.subscribe_display(name)
+        end)
 
         visible
       else
@@ -1044,7 +1050,10 @@ defmodule Compos.Ui.EditorLive do
                                       {next, prepared} ->
         # Absolute offsets change after an edit above this line. Segment
         # identity depends on relative ranges, not its document position.
-        ts = line_ts |> Enum.sort_by(&elem(&1, 3)) |> Enum.map(fn {s, e, cls, _} -> {s - start, e - start, cls} end)
+        ts =
+          line_ts
+          |> Enum.sort_by(&elem(&1, 3))
+          |> Enum.map(fn {s, e, cls, _} -> {s - start, e - start, cls} end)
         ov = Enum.map(line_ov, fn {s, e, cls} -> {s - start, e - start, cls} end)
 
         ch =

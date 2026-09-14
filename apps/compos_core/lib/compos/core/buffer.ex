@@ -719,10 +719,6 @@ defmodule Compos.Core.Buffer do
   @doc "win_id's effective point: its stored one, or the buffer point (swapped in / no entry)."
   def win_point(name, win_id), do: GenServer.call(via(name), {:wp_get, win_id})
 
-  @doc """
-  Highlight spans from the buffer's incremental tree-sitter state ([] if the
-  buffer has no ts-lang). Cached per version, shared by every client.
-  """
   @doc "Request display faces without waiting for the buffer or parser. Results are published by version."
   def request_fontification(name, version, start, stop)
       when is_integer(version) and is_integer(start) and is_integer(stop) and start >= 0 and
@@ -730,6 +726,10 @@ defmodule Compos.Core.Buffer do
     GenServer.cast(via(name), {:fontify, version, start, stop})
   end
 
+  @doc """
+  Highlight spans from the buffer's incremental tree-sitter state ([] if the
+  buffer has no ts-lang). Cached per version, shared by every client.
+  """
   def ts_highlight(name), do: GenServer.call(via(name), :ts_highlight, 30_000)
 
   @doc """
@@ -1087,6 +1087,8 @@ defmodule Compos.Core.Buffer do
     end
   end
 
+  defp on_info(_, state), do: {:noreply, state}
+
   defp start_fontification(state) do
     f = state.fontify
     pending = Enum.filter(f.pending, fn {v, _, _} -> v == state.version end)
@@ -1125,8 +1127,6 @@ defmodule Compos.Core.Buffer do
         }
     end
   end
-
-  defp on_info(_, state), do: {:noreply, state}
 
   @impl true
   def terminate(_reason, %{discard: true} = state) do
