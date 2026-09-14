@@ -1347,6 +1347,8 @@
 .diff-keymap { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 4px 2px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg, #8a857a); }
 .diff-keymap-item { display: inline-flex; gap: 5px; align-items: baseline; }
 .diff-key { color: var(--accent-fg, #26356b); font-weight: 600; }
+.diff-head { margin: 0 0 10px; font-family: var(--font-mono); font-size: 12px; }
+.diff-head .c-kv-key { color: var(--dim-fg, #8a857a); }
 .diff-tabs { margin: 0 0 10px; }
 .diff-message { font-family: var(--font-mono); font-size: 12px; line-height: 1.55; margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hl-line-bg, rgba(0,0,0,0.03)); border-left: 2px solid var(--diff-file-fg, rgba(0,0,0,0.2)); }
 .diff-conflict-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; margin: 0 0 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; background: var(--diff-conflict-bg, rgba(168, 58, 43, 0.12)); border: 1px solid var(--alert-fg, #a83a2b); }
