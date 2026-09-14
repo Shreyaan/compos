@@ -168,6 +168,24 @@
     (check-equal! (length (ibuffer-test-names)) 3 "RET on the heading opens it again")
     (ibuffer-test-reset!)))
 
+(deftest 'ibuffer-a-name-written-as-markdown-draws-as-text
+  "a name a summary wrote in Markdown draws as words, with the emphasis as a face"
+  (lambda ()
+    (check-equal! (ibuffer-md-plain "fix `list-refresh!` and **fold** state")
+                  '("fix list-refresh! and fold state"
+                    ((4 13 "morg-code") (22 4 "morg-bold")))
+                  "the markers go, and each run keeps its face")
+    (check-equal! (ibuffer-md-plain "see [the docs](http://x) here")
+                  '("see the docs here" ((4 8 "link")))
+                  "a link draws its text, never its target")
+    (check-equal! (ibuffer-md-plain "*scratch*") '("*scratch*" ())
+                  "one star each side is a buffer's name, not emphasis")
+    (check-equal! (ibuffer-md-plain "zz_ib_notes") '("zz_ib_notes" ())
+                  "an underscore inside a word is part of the word")
+    (ibuffer-test-open! 'mode 'name)
+    (check-true! (ibuffer-md-row? "*zz-ib-a*") "a row with no file is read as prose")
+    (ibuffer-test-reset!)))
+
 (deftest 'ibuffer-headings-and-marks-wear-bands
   "a heading wears its register, a marked row wears a band across the row"
   (lambda ()

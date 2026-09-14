@@ -280,9 +280,78 @@
 (define (ibuffer-row-color b) (ibuffer-ask b 'face ibuffer-buffer-face))
 (define (ibuffer-row-modified? b) (ibuffer-ask b 'modified? ibuffer-buffer-modified?))
 
+;;; --- Markdown in a name -------------------------------------------------------
+;;; A chat names itself in the words its own summary wrote, and those
+;;; words arrive as Markdown: `a name in code`, **a stressed word**, a
+;;; [link](to somewhere). A table that draws the markers draws
+;;; punctuation nobody typed, and the markers cost width the name needs.
+;;; The row takes the text without them and wears the emphasis as a face.
+;;;
+;;; One star each side is not on the list. A buffer is called *scratch*,
+;;; and a table that reads that as emphasis renames every special buffer
+;;; it draws.
+
+(define *ibuffer-md-marks* '("`" "**" "_" "["))
+
+(define *ibuffer-md-wrapped*
+  '(("`[^`\n]+`" 1 1 "morg-code")
+    ("\\*\\*[^*\n]+\\*\\*" 2 2 "morg-bold")
+    ("\\b_[^_\n]+_\\b" 1 1 "morg-italic")))
+
+(define md--title-link-pattern "\\[([^]\n]+)\\]\\(([^)\n]+)\\)")
+
+;; (START END TEXT FACE) for every inline construct in SRC
+(define (ibuffer-md--hits src)
+  (append
+    (apply append
+      (map (lambda (rule)
+             (let ((open (nth 1 rule)) (close (nth 2 rule)) (face (nth 3 rule)))
+               (map (lambda (r)
+                      (let ((s (car r)) (e (cadr r)))
+                        (list s e (substring-bytes src (+ s open) (- e close)) face)))
+                    (re-find* (car rule) src))))
+           *ibuffer-md-wrapped*))
+    (let loop ((at 0) (out '()))
+      (let ((m (re-groups md--title-link-pattern src at)))
+        (if (not m)
+            (reverse out)
+            (let ((whole (nth 0 m)) (text (nth 1 m)))
+              (loop (cadr whole)
+                    (cons (list (car whole) (cadr whole)
+                                (substring-bytes src (car text) (cadr text))
+                                "link")
+                          out))))))))
+
+;; the text with the markers gone, and (START LEN FACE) over that text
+(define (ibuffer-md-plain src)
+  (if (not (fold (lambda (yes m) (or yes (string-contains? src m))) #f *ibuffer-md-marks*))
+      (list src '())
+      (let loop ((from 0) (out "") (spans '()))
+        (let* ((hits (filter (lambda (h) (>= (car h) from)) (ibuffer-md--hits src)))
+               (hit (if (null? hits) #f (car (sort hits)))))
+          (if (not hit)
+              (list (string-append out (substring-bytes src from (string-byte-length src)))
+                    (reverse spans))
+              (let* ((head (substring-bytes src from (car hit)))
+                     (text (nth 2 hit))
+                     (at (+ (string-byte-length out) (string-byte-length head))))
+                (loop (cadr hit)
+                      (string-append out head text)
+                      (cons (list at (string-byte-length text) (nth 3 hit)) spans))))))))
+
+(define (ibuffer-md-text src) (car (ibuffer-md-plain src)))
+
+;; A file's name is a file's name: it says what the disk says, marks and
+;; all. Only a name somebody wrote as prose -- a chat's title -- is read
+;; as Markdown.
+(define (ibuffer-md-row? b)
+  (not (and (string? b) (buffer-known? b) (buffer-path b))))
+
 (define (ibuffer-row-title b)
   (let ((parts (ibuffer-row-name b)))
-    (string-append (car parts) (cadr parts))))
+    (if (ibuffer-md-row? b)
+        (ibuffer-md-text (string-append (car parts) (cadr parts)))
+        (string-append (car parts) (cadr parts)))))
 
 (define (ibuffer-row-icon b) (if (buffer-known? b) (buffer-icon b) ""))
 
@@ -544,6 +613,7 @@
 ;; The list fetches its rows on open and on g. A mark or a narrowing
 ;; redraws the rows it already has, so the cursor stays stable.
 (define (ibuffer-rows buf)
+  (ibuffer-columns-clear!)
   (let ((rows (ibuffer-source buf))
         (grouping (ibuffer-grouping buf)))
     (ibuffer-note-kinds! rows)
@@ -713,9 +783,24 @@
         ((equal? tag 'group) (ibuffer-row-group-label b))
         (else (ibuffer-row-last b))))
 
+;; Fitting the columns walks every row, and a heading asks for them
+;; again to know where its tally sits: a table of forty sections used to
+;; walk its rows forty times over. The widths hold for one draw, so one
+;; draw computes them once. The rows fn clears the memo as a draw opens.
+(define *ibuffer-columns-memo* '())
+
+(define (ibuffer-columns-clear!) (set! *ibuffer-columns-memo* '()))
+
 (define (ibuffer-columns-for buf all)
-  (ibuffer-columns buf
-    (map ibuffer-field-column (ibuffer-fields-fitted buf (ibuffer-fields buf all)))))
+  (let* ((key (list buf (length all)))
+         (hit (assoc key *ibuffer-columns-memo*)))
+    (if hit
+        (cadr hit)
+        (let ((cols (ibuffer-columns buf
+                      (map ibuffer-field-column
+                           (ibuffer-fields-fitted buf (ibuffer-fields buf all))))))
+          (set! *ibuffer-columns-memo* (cons (list key cols) *ibuffer-columns-memo*))
+          cols))))
 
 ;; A field with nothing to say leaves a hole where a column was, and
 ;; two holes in a row read as a shorter row. A dash says nothing and
@@ -754,6 +839,10 @@
 ;; instead of shouting it across the row. Everything stays in the name
 ;; cell: a count in the size column stood a name column away from the
 ;; name it counted, and the band under the heading stopped there.
+;; the name of a section: this package's default, which a theme may
+;; take over. It is a register of its own, so it is a colour of its own
+(defface! 'list-section-name 'fg "#c3b0f0" 'weight "600")
+
 (define (ibuffer-section-starred? label)
   (let ((n (string-length label)))
     (and (> n 1)
@@ -825,7 +914,7 @@
 (define (ibuffer-heading-head buf row)
   (list ""
         (list (ibuffer-chevron row) (or (ibuffer-heading-face row) "dim"))
-        (list (ibuffer-heading-text buf row) "accent")))
+        (list (ibuffer-heading-text buf row) "list-section-name")))
 
 ;; a heading says nothing in the field columns
 (define (ibuffer-heading-cells buf row fields)
@@ -862,8 +951,10 @@
   (cond ((ibuffer-heading? b) (ibuffer-count-overlay buf b off))
         ((not (equal? (list-mark-of buf b) " "))
          (append (ibuffer-band buf b off "ibuffer-marked")
-                 (ibuffer-dir-overlay buf b off)))
-        (else (ibuffer-dir-overlay buf b off))))
+                 (ibuffer-dir-overlay buf b off)
+                 (ibuffer-md-overlay buf b off)))
+        (else (append (ibuffer-dir-overlay buf b off)
+                      (ibuffer-md-overlay buf b off)))))
 
 (define (ibuffer-cell-text cell) (if (pair? cell) (car cell) cell))
 
@@ -882,6 +973,33 @@
                     (+ head (string-byte-length text))
                     "faint")))))
 
+;; the name column starts after the mark, the dot and the icon, each
+;; with a gap; every overlay over the name measures from there
+(define (ibuffer-name-start buf b off)
+  (let ((dot (let ((d (ibuffer-cell-text (ibuffer-row-dot b))))
+               (if (equal? d "") " " d)))
+        (icon (let ((i (ibuffer-row-icon b))) (if (equal? i "") " " i))))
+    (+ off 2 (string-byte-length dot) 2 (string-byte-length icon) 2)))
+
+;; the emphasis a Markdown name carries, as faces over the drawn name.
+;; A name too long for its column loses its middle, and the spans with
+;; it: a face over the wrong half of a name is worse than no face.
+(define (ibuffer-md-overlay buf b off)
+  (let* ((parts (if (ibuffer-md-row? b) (ibuffer-row-name b) (list "" "")))
+         (plain (ibuffer-md-plain (string-append (car parts) (cadr parts))))
+         (spans (cadr plain)))
+    (if (null? spans)
+        '()
+        (let* ((cols (list-columns buf))
+               (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
+               (fitted (if width (list-fit (car plain) width 'middle) (car plain))))
+          (if (not (equal? fitted (car plain)))
+              '()
+              (let ((start (ibuffer-name-start buf b off)))
+                (map (lambda (s)
+                       (list (+ start (car s)) (+ start (car s) (cadr s)) (nth 2 s)))
+                     spans)))))))
+
 (define (ibuffer-dir-overlay buf b off)
   (let* ((parts (ibuffer-row-name b))
          (dir (car parts)))
@@ -891,12 +1009,7 @@
                (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
                (fitted (list-fit (string-append dir (cadr parts)) width 'middle))
                (dim (substring fitted 0 (ibuffer-prefix-chars fitted dir)))
-               (dot (let ((d (ibuffer-cell-text (ibuffer-row-dot b))))
-                      (if (equal? d "") " " d)))
-               (icon (let ((i (ibuffer-row-icon b))) (if (equal? i "") " " i)))
-               (start (+ off 2
-                         (string-byte-length dot) 2
-                         (string-byte-length icon) 2)))
+               (start (ibuffer-name-start buf b off)))
           (if (equal? dim "")
               '()
               (list (list start (+ start (string-byte-length dim)) "dim")))))))
@@ -1151,6 +1264,12 @@
 }
 :is(buffers, chat-list) > .semantic-direct[marked=true] {
   box-shadow: inset 3px 0 var(--accent-fg, #7aa2f7);
+}
+
+/* A chat that is running says so without a word: its dot breathes. */
+@keyframes ibuffer-live-dot { 0%, 100% { opacity: 1 } 50% { opacity: 0.25 } }
+:is(buffers, chat-list) c-text.chat-live {
+  animation: ibuffer-live-dot 1.4s ease-in-out infinite;
 }
 
 /* A heading leaves the grid: it is the line that opens a section, not a

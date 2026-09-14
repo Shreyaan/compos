@@ -132,18 +132,19 @@
     (chats-test-reset!)))
 
 (deftest 'the-resting-list-is-flat-and-most-recent-first
-  "no sections at rest: the order you last used a chat is the order it arrives in"
+  "at rest the list stands in sections, one per group, most recently used first inside each"
   (lambda ()
     (chats-test-reset!)
     (chats-test-chat! "*zz-chats-a*" #f)
     (chats-test-chat! "*zz-chats-b*" #f)
     (chats-test-chat! "*zz-chats-c*" #f)
     (run-command "chat-list")
-    (check-equal! (ibuffer-grouping *chat-list*) 'none "flat, every time")
+    (check-equal! (ibuffer-grouping *chat-list*) 'group "a chat belongs to the work it was opened for")
     (check-equal! (ibuffer-sort *chat-list*) 'recent "most recently used first")
     (list-set-filters! *chat-list* (list (list "match" "zz-chats-")))
     (list-refresh! *chat-list*)
-    (check-equal! (chats-test-heading-labels) '() "no section stands over the rows")
+    (check-equal! (chats-test-heading-labels) '("ungrouped")
+                  "a chat in no group sits under the one section that says so")
     (check-equal! (length (chats-test-names)) 3 "every chat is a row of its own")
     (chats-test-reset!)))
 

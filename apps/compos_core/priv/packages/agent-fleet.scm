@@ -173,11 +173,19 @@
         ((equal? status 'api) "idle")
         (else "stopped")))
 
+;; The colours a chat's state wears. They are this package's defaults,
+;; so a theme can say otherwise, and they are the ones the design names:
+;; a live chat teal, a stopped one coral, an idle one out of the way.
+(defface! 'chat-live 'fg "#6fb8a5")
+(defface! 'chat-stopped 'fg "#e08d78")
+(defface! 'chat-idle 'fg "#4a4660")
+(defface! 'chat-archived 'fg "#3a3746")
+
 (define (chats-state-face status)
   (cond ((equal? status 'needs_attention) "alert")
-        ((or (equal? status 'running) (equal? status 'starting)) "accent")
-        ((equal? status 'dead) "faint")
-        (else "dim")))
+        ((or (equal? status 'running) (equal? status 'starting)) "chat-live")
+        ((equal? status 'dead) "chat-stopped")
+        (else "chat-idle")))
 
 (define (chats-model b)
   (or (buffer-local b 'agent-model) (buffer-local b 'llm-model) ""))
@@ -224,9 +232,12 @@
 
 (ibuffer-kind! 'chat
   (list 'when? (lambda (b) (and (buffer-known? b) (chat-buffer? b)))
+        ;; a round dot, lit by what the chat is doing: the eye reads a
+        ;; colour before it reads a word, and the live one pulses
         'dot (lambda (b)
                (let ((s (chat-row-status b)))
-                 (list (agent-status-glyph s) (chats-state-face s))))
+                 (list (if (equal? s 'needs_attention) "!" "●")
+                       (chats-state-face s))))
         'name (lambda (b) (list "" (chats-alert-name b)))
         'size chats-filesize
         ;; a chat found by a word in its text says which word, in place of
@@ -249,7 +260,7 @@
 ;; a saved conversation is a file no buffer holds
 (ibuffer-kind! 'archived
   (list 'when? (lambda (b) (and (not (buffer-known? b)) (string-suffix? ".chat" b)))
-        'dot (lambda (b) (list "." "faint"))
+        'dot (lambda (b) (list "●" "chat-archived"))
         'name (lambda (b) (list "" (chats-archived-title b)))
         ;; the row is the file, so its size is the file's own
         'size (lambda (b) (and (file-exists? b) (file-size b)))
@@ -721,6 +732,7 @@
     (if (> live 0) (string-append (number->string live) " live") "")))
 
 (define (chat-list-rows buf)
+  (ibuffer-columns-clear!)
   (let ((grouping (ibuffer-grouping buf)))
     (append
       (if (member grouping '(state model))
@@ -794,7 +806,10 @@
               ("a" "chats-archive") ("r" "chats-retitle")
               ("k" "chats-kill-runtime") ("g" "agents-refresh")
               ("+" "agent-open")))))
-(ibuffer-view! *chat-list-buffer* 'sort 'recent 'grouping 'none)
+;; The list rests in sections, one per group: a chat belongs to the work
+;; it was opened for, and the group it sits in says which. ; cycles that
+;; away for a flat table when you want one.
+(ibuffer-view! *chat-list-buffer* 'sort 'recent 'grouping 'group)
 
 ;; ---- the application
 
