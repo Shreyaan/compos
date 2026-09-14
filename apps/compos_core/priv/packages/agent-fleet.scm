@@ -721,6 +721,15 @@
 ;; a section is a group, a state or a model, and none is the flat list in
 ;; most recently used order: the order you last used a chat is the one the
 ;; half-remembered name arrives in
+;; a chat that is running is the one thing about a section you want
+;; before you open it; a section with none says only how many it holds
+(define (chats-live-note members)
+  (let ((live (length (filter (lambda (b)
+                                (and (buffer-known? b)
+                                     (member (chat-row-status b) '(running starting))))
+                              (filter string? members)))))
+    (if (> live 0) (string-append (number->string live) " live") "")))
+
 (define (chat-list-rows buf)
   (let ((grouping (ibuffer-grouping buf)))
     (append
@@ -771,6 +780,9 @@
       'category 'chat
       'title (lambda (buf) "Chats")
       'noun "chat"
+      ;; what a section of chats is worth saying beyond how many: how
+      ;; many of them are running right now
+      'section-note (lambda (buf members) (chats-live-note members))
       'rows (lambda (buf) (chat-list-rows buf))
       ;; the picker acts on one chat, the one at point: no marks, and no
       ;; flag-then-run, which is a table's idea and not an application's

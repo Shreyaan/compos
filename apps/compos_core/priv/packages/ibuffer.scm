@@ -558,13 +558,25 @@
 ;; A heading carries how many rows it stands for, and how many of them
 ;; hold edits the disk does not have. The bytes belong to the whole
 ;; table, and the meta line says them once. The modified count does not:
-;; it says which section holds the work you have not saved.
+;; it says which section holds the work you have not saved. A view that
+;; knows a better note -- a chat list counting the live chats -- gives
+;; one through the 'section-note option.
+(define (ibuffer-heading-note buf row)
+  (let ((own (list-opt buf 'section-note)))
+    (if own
+        (own buf (ibuffer-heading-members row))
+        (let ((dirty (ibuffer-heading-modified row)))
+          (if (> dirty 0)
+              (string-append (number->string dirty) " modified")
+              "")))))
+
+;; A bare digit after a name says nothing about what it counts. The
+;; tally names the view's own noun -- "3 chats", "3 buffers" -- and the
+;; view adds what else is worth saying about the rows it stands for.
 (define (ibuffer-heading-details buf row)
-  (let ((dirty (ibuffer-heading-modified row)))
-    (string-append (number->string (ibuffer-heading-count row))
-                   (if (> dirty 0)
-                       (string-append " · " (number->string dirty) " modified")
-                       ""))))
+  (let ((note (ibuffer-heading-note buf row)))
+    (string-append (ibuffer-noun buf (ibuffer-heading-count row))
+                   (if (equal? note "") "" (string-append " · " note)))))
 
 (define (ibuffer-chevron row) (if (ibuffer-heading-folded? row) "▸" "▾"))
 
@@ -687,13 +699,20 @@
   (ibuffer-columns buf
     (map ibuffer-field-column (ibuffer-fields-fitted buf (ibuffer-fields buf all)))))
 
+;; A field with nothing to say leaves a hole where a column was, and
+;; two holes in a row read as a shorter row. A dash says nothing and
+;; keeps the column.
+(define (ibuffer-field-fill cell) (if (equal? cell "") "—" cell))
+
 (define (ibuffer-cells-for buf b all)
   (let ((fields (ibuffer-fields buf all)))
     (if (ibuffer-heading? b)
         (ibuffer-heading-cells buf b (length fields))
         (append (ibuffer-cell-head b)
                 (map (lambda (f)
-                       (list (ibuffer-field-cell b (ibuffer-field-tag f)) "faint"))
+                       (list (ibuffer-field-fill
+                               (ibuffer-field-cell b (ibuffer-field-tag f)))
+                             "faint"))
                      fields)))))
 
 (define (ibuffer-narrow-columns buf) (ibuffer-columns-for buf *ibuffer-narrow-fields*))
@@ -706,13 +725,56 @@
         (list (ibuffer-row-title b) (ibuffer-row-color b))))
 
 ;; A section name reads as a name, in one accent, whatever the section
-;; is. The chevron in front of it carries the section's own colour: the
-;; group keeps its identity in one glyph instead of shouting it across
-;; the row. The count sits two spaces after the name, in the name cell:
-;; a count in the size column stood a name column away from the name it
-;; counted, and the band under the heading stopped there.
+;; is, and in a register no row uses: upper case, the kind of thing it
+;; is beside it, the tally at the far end of the name cell. A heading
+;; set like a row is read as a row. The chevron in front of it carries
+;; the section's own colour: the group keeps its identity in one glyph
+;; instead of shouting it across the row. Everything stays in the name
+;; cell: a count in the size column stood a name column away from the
+;; name it counted, and the band under the heading stopped there.
+(define (ibuffer-section-starred? label)
+  (let ((n (string-length label)))
+    (and (> n 1)
+         (equal? (substring label 0 1) "*")
+         (equal? (substring label (- n 1) n) "*"))))
+
+;; The stars around a buffer name say "buffer" in punctuation, and a
+;; heading that wears them reads as one more row. The heading drops them
+;; and says the word instead.
+(define (ibuffer-section-label row)
+  (let ((label (ibuffer-heading-label row)))
+    (string-upcase (if (ibuffer-section-starred? label)
+                       (substring label 1 (- (string-length label) 1))
+                       label))))
+
+;; what kind of thing this section is: the word the grouping groups by
+(define (ibuffer-section-kind buf row)
+  (let ((label (ibuffer-heading-label row))
+        (grouping (ibuffer-grouping buf)))
+    (cond ((equal? (ibuffer-heading-key row) "archived") "saved")
+          ((ibuffer-section-starred? label) "buffer")
+          ((equal? grouping 'mode) "mode")
+          ((equal? grouping 'directory) "directory")
+          ((equal? grouping 'state) "state")
+          ((equal? grouping 'model) "model")
+          (else "group"))))
+
+(define (ibuffer-heading-name buf row)
+  (string-append (ibuffer-section-label row) "  " (ibuffer-section-kind buf row)))
+
+;; The name cell holds the whole heading: what the section is on the
+;; left, what it holds on the right, and the space between them is the
+;; rule. A tally hard against the name reads as a suffix of it.
 (define (ibuffer-heading-text buf row)
-  (string-append (ibuffer-heading-label row) "  " (ibuffer-heading-details buf row)))
+  (let* ((name (ibuffer-heading-name buf row))
+         (tally (ibuffer-heading-details buf row))
+         (cols (list-columns buf))
+         (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
+         (room (and width (- width (string-length tally) 2))))
+    (string-append (if (and room (> room (string-length name)))
+                       (string-pad-right name room)
+                       (string-append name "  "))
+                   tally)))
 
 (define (ibuffer-heading-head buf row)
   (list ""
@@ -757,21 +819,22 @@
 
 (define (ibuffer-cell-text cell) (if (pair? cell) (car cell) cell))
 
-;; the count at the end of a heading is faint: a span over the tail of
-;; the name cell. The cell sits after the mark, the empty dot column,
-;; and the chevron, which is multibyte. A name too long for the column
-;; loses its middle, and the count with it; then there is no span.
+;; the name is the only lit part of a heading: the kind and the tally
+;; after it are faint, one span over the tail of the name cell. The cell
+;; sits after the mark, the empty dot column, and the chevron, which is
+;; multibyte. A name too long for the column loses its middle, and the
+;; tail with it; then there is no span.
 (define (ibuffer-count-overlay buf row off)
   (let* ((cols (list-columns buf))
          (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
          (text (ibuffer-heading-text buf row))
-         (count (ibuffer-heading-details buf row)))
+         (label (ibuffer-section-label row))
+         (head (+ off 2 1 2 (string-byte-length (ibuffer-chevron row)) 2)))
     (if (and width (> (string-length text) width))
         '()
-        (let ((start (+ off 2 1 2
-                        (string-byte-length (ibuffer-chevron row)) 2
-                        (- (string-byte-length text) (string-byte-length count)))))
-          (list (list start (+ start (string-byte-length count)) "faint"))))))
+        (list (list (+ head (string-byte-length label))
+                    (+ head (string-byte-length text))
+                    "faint")))))
 
 (define (ibuffer-dir-overlay buf b off)
   (let* ((parts (ibuffer-row-name b))
@@ -1004,6 +1067,9 @@
 :is(buffers, chat-list) > .semantic-direct > [data-col] {
   grid-row: 1; grid-column: var(--field-column) / span var(--field-width);
   min-width: 0; white-space: pre; overflow: hidden;
+}
+:is(buffers, chat-list) > .semantic-direct[in-section=true] {
+  box-shadow: inset 1px 0 var(--c-faint-fg, #3a3a44);
 }
 :is(buffers, chat-list) > .semantic-direct[marked=true] {
   box-shadow: inset 3px 0 var(--accent-fg, #7aa2f7);
@@ -1379,11 +1445,20 @@
 ;; once, and a hot reload that redefines a fn must reach the mode. A
 ;; procedure stored by value stays the old one, and the old cells fn
 ;; calling a new heading fn was an arity error in the live editor.
+;; A section with no edge is a run of rows that happen to follow a
+;; name. Its members hang off a spine, and the row says it belongs to
+;; one. A grouped table puts every live row under a heading; a flat one
+;; has headings only over rows that are not buffers, the saved chats.
+(define (ibuffer-row-in-section? buf entry)
+  (or (not (equal? (ibuffer-grouping buf) 'none))
+      (not (buffer-known? entry))))
+
 (define (ibuffer-composml-record buf entry)
   (if (ibuffer-heading? entry) (list 'tag "c-headline")
     (list 'tag (if (equal? (list-mode-of buf) "chat-list-mode") "chat-entry" "buffer") 'layout "columns"
           'attrs (append (list (list "name" entry)
                                (list "modified" (if (ibuffer-row-modified? entry) "true" "false"))
+                               (list "in-section" (if (ibuffer-row-in-section? buf entry) "true" "false"))
                                (list "marked" (if (assoc entry (list-marks buf)) "true" "false")))
             (if (buffer-exists? entry)
               (list (list "mode" (or (buffer-local entry 'mode-name) ""))
