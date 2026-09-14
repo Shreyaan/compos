@@ -18,6 +18,29 @@ Where a buffer lands follows from what you did, not from what the buffer is.
 - A preview lands in the window the pick will land in. Look and open are
   the same window, always.
 
+## One window per mode
+
+A group shows one window per major mode. Every chat is in the chat pane;
+every dired listing is in the dired window. A second buffer of a mode takes
+the window the first one holds rather than a window of its own, so a group
+never shows two chats at once.
+
+Nothing is remembered for this. The mode of what a window already holds is
+the memory, so it lapses on its own the moment that window shows something
+else. `(window-showing-mode MODE [EXCEPT])` answers the window, the selected
+one first — that is what keeps a found file and a command in the window you
+are in. `mode-window` is the action that uses it, second in the fallback
+chain, after `reuse-window`.
+
+It outranks a target layout. A three-column target with a column free is no
+licence to show a second chat: the chat pane takes it and the column stays
+free. `layout-target-open!` asks before it grows a pane.
+
+This is also how a list's detail shares the list's window: give the detail
+buffer the list's major mode and no other mechanism is needed.
+`display-buffer-detail!` below remains for a detail whose mode differs from
+its list's.
+
 ## The three verbs
 
 1. `switch-to-buffer!` visits a buffer. With a target layout it reuses an existing view, fills spare capacity, then replaces the selected pane. Without a target it takes the selected window. Foreign buffers use the popup.
@@ -30,13 +53,14 @@ Where a buffer lands follows from what you did, not from what the buffer is.
 
 1. the rule for the name in `*display-buffer-alist*`;
 2. `*display-buffer-base-action*`, the user's list, empty by default;
-3. `*display-buffer-fallback-action*`: `reuse-window`, `pop-up-window`, `use-some-window`, `same-window`.
+3. `*display-buffer-fallback-action*`: `reuse-window`, `mode-window`, `pop-up-window`, `use-some-window`, `same-window`.
 
 The actions:
 
 | action | what it does |
 | --- | --- |
 | `reuse-window` | a window that shows the buffer already |
+| `mode-window` | a work window whose buffer has the same major mode; the selected window first |
 | `pop-up-window` | split the largest work window when it is big enough (`split-window-sensibly`), else the selected one |
 | `use-some-window` | the least recently used other work window; excludes the popup and peeks |
 | `same-window` | the selected window (`same` is the same action) |
