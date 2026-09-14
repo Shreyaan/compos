@@ -7623,16 +7623,39 @@
     (when (pair? matches)
       (select-window! (car (nth (min (cadr token) (- (length matches) 1)) matches))))))
 
-(define (layout-target-arrange! panes focus)
-  (let ((target (layout-target))
-        (token (if (equal? focus (window-buffer (active-window)))
-                   (layout-focus-token) (list focus 0))))
-    (when (pair? panes)
-      (if (equal? target 'adaptive)
-          (tile-adaptive-windows! panes)
-          (tile-windows! target panes))
-      (layout-focus-restore! token)
-      panes)))
+(define (layout-target-open! name select? inhibit-same?)
+  (and (fill-candidate? name) (window-fill-member? name)
+       (not (buffer-context?))
+       (let* ((selected (active-window))
+              (focus (window-buffer selected))
+              (shown (if inhibit-same?
+                         (window-showing-other name selected)
+                         (window-showing name)))
+              ;; One window per mode outranks the target's spare capacity. A
+              ;; three-column target is no licence to show two chats: the
+              ;; second one takes the pane the first one already holds.
+              (kin (and (not shown)
+                        (window-showing-mode (buffer-local name 'mode-name)
+                                             (and inhibit-same? selected))))
+              (panes (layout-target-visible-buffers))
+              (capacity (layout-target-capacity (layout-target))))
+         (cond (shown
+                (when select? (select-window! shown))
+                shown)
+               (kin
+                (display-buffer-in-window! kin name)
+                (when select? (select-window! kin))
+                kin)
+               ((and (not (member name panes))
+                     (or (not capacity) (< (length panes) capacity)))
+                (layout-target-arrange! (append panes (list name)) (if select? name focus))
+                (window-showing name))
+               (else
+                 (let ((win (if select? selected (layout-replacement-window selected))))
+                   (when win
+                     (display-buffer-in-window! win name)
+                     (when select? (select-window! win))
+                     win)))))))
 
 ;; Results replace the least recently used other work pane. Ties keep order.
 (define (layout-replacement-window selected)
@@ -7871,14 +7894,20 @@
   (let ((buf (window-buffer win)))
     (and (string? buf) (buffer-local buf 'mode-name))))
 
+;; The selected window comes first, so a command that opens one thing still
+;; opens it where you are: you are already in the window of its mode.
 (define (window-showing-mode mode &optional except)
   (and (string? mode)
-       (let loop ((ws (display--work-windows)))
-         (cond ((null? ws) #f)
-               ((and (not (equal? (car ws) except))
-                     (equal? (window-mode (car ws)) mode))
-                (car ws))
-               (else (loop (cdr ws)))))))
+       (let ((me (active-window))
+             (work (display--work-windows)))
+         (define (fits? w)
+           (and (not (equal? w except)) (equal? (window-mode w) mode)))
+         (if (and (member me work) (fits? me))
+             me
+             (let loop ((ws work))
+               (cond ((null? ws) #f)
+                     ((fits? (car ws)) (car ws))
+                     (else (loop (cdr ws)))))))))
 
 (define-display-action! 'mode-window
   (lambda (name alist)
