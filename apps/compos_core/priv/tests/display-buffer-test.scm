@@ -22,6 +22,7 @@
   (make-directory! t--db-dir)
   (let ((rules *display-buffer-alist*)
         (base *display-buffer-base-action*)
+        (fallback *display-buffer-fallback-action*)
         (h split-height-threshold)
         (w split-width-threshold))
     (set! split-height-threshold (car thresholds))
@@ -40,6 +41,7 @@
                 (buffer-list))
       (set! *display-buffer-alist* rules)
       (set! *display-buffer-base-action* base)
+      (set! *display-buffer-fallback-action* fallback)
       (set! split-height-threshold h)
       (set! split-width-threshold w)
       (set! *peek-recent* '())
@@ -296,3 +298,51 @@
           (peek-dismiss!)
           (check-equal! (length (window-list)) 1 "dismissed: the window the peek made is gone")
           (check-false! (buffer-exists? b) "and the peek with it"))))))
+
+(deftest 'mode-preference-survives-a-temporary-cover
+  "display reuses the work window beneath a special buffer"
+  (lambda ()
+    (t--db-with t--db-wide
+      (lambda ()
+        (for-each (lambda (b)
+                    (buffer-create b)
+                    (buffer-set-local! b 'mode-name "text-mode"))
+                  '("*zz-db-a*" "*zz-db-b*"))
+        (let ((win (display-buffer "*zz-db-a*")))
+          (buffer-create "*zz-db-cover*")
+          (buffer-set-local! "*zz-db-cover*" 'mode-name "help-mode")
+          (buffer-set-local! "*zz-db-cover*" 'special #t)
+          (display-buffer-in-window! win "*zz-db-cover*")
+          (check-equal! (window-preferred-mode win) "text-mode" "the cover keeps the preference")
+          (check-true! (window-prefers-buffer? win "*zz-db-b*") "the next work buffer matches")
+          (window-tree-set! (window-tree))
+          (set! win (window-showing "*zz-db-cover*"))
+          (check-equal! (window-preferred-mode win) "text-mode" "restoring the tree keeps the preference")
+          (check-equal! (display-buffer "*zz-db-b*") win "the stack receives the next work buffer"))))))
+
+(deftest 'free-layout-switch-reuses-the-same-mode-window
+  "ordinary switching reuses a matching window without a target layout"
+  (lambda ()
+    (t--db-with t--db-wide
+      (lambda ()
+        (for-each (lambda (b)
+                    (buffer-create b)
+                    (buffer-set-local! b 'mode-name "text-mode"))
+                  '("*zz-db-a*" "*zz-db-b*"))
+        (let ((source (active-window)) (win (display-buffer "*zz-db-a*")))
+          (switch-to-buffer! "*zz-db-b*")
+          (check-equal! (active-window) win "the matching window is selected")
+          (check-equal! (window-buffer source) "*scratch*" "the source stays unchanged")
+          (check-equal! (window-buffer win) "*zz-db-b*" "the buffer opens in the matching stack"))))))
+
+(deftest 'a-listing-keeps-its-own-mode-preference
+  "a special listing is a mode destination, not automatically a temporary cover"
+  (lambda ()
+    (t--db-with t--db-wide
+      (lambda ()
+        (buffer-create "*zz-db-list*")
+        (buffer-set-local! "*zz-db-list*" 'mode-name "Dired")
+        (buffer-set-local! "*zz-db-list*" 'special #t)
+        (display-buffer-in-window! (active-window) "*zz-db-list*")
+        (check-equal! (window-preferred-mode (active-window)) "Dired"
+                      "directory buffers cycle with directories")))))

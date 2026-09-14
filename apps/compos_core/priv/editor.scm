@@ -4582,6 +4582,15 @@
         ((and (not *layout-busy*) (layout-target)
               (not (popup--class? (window-buffer (active-window))))
               (window-display! (lambda () (layout-target-open! buf #t #f)))) buf)
+        ((and (not *layout-busy*) (not (layout-target))
+              (not (popup--class? (window-buffer (active-window))))
+              (let ((win (or (window-showing buf)
+                             (window-showing-mode (buffer-local buf 'mode-name)))))
+                (and win
+                     (begin
+                       (window-display! (lambda () (display-buffer-in-window! win buf)))
+                       (select-window! win)
+                       #t)))) buf)
         (else
           (window-display!
             (lambda ()
@@ -7872,14 +7881,31 @@
         (window-showing-other name (active-window))
         (window-showing name))))
 
-;; One window per mode. A group keeps its chats in one window -- the chat
-;; pane -- its dired listings in one window, and a list's detail beside the
-;; list when the two share a mode. Nothing is remembered: the mode of what a
-;; window already holds is the memory, so it lapses of its own accord the
-;; moment that window shows something else.
+;; A window prefers the mode of its work buffer. Temporary covers keep the
+;; preference of the nearest work buffer in its own history. This uses the
+;; history already carried through tiling and desktop restore.
 (define (window-mode win)
   (let ((buf (window-buffer win)))
     (and (string? buf) (buffer-local buf 'mode-name))))
+
+;; special-mode also includes persistent listings, so it does not mean cover.
+;; Help is a cover by default; other surfaces may opt in with a buffer local.
+(define (window-preference-cover? buf)
+  (or (buffer-local buf 'window-preference-cover)
+      (buffer-derived-mode? buf "help-mode")))
+
+(define (window-preferred-mode win)
+  (or (and (boundp 'window-cycle-mode) (window-cycle-mode win))
+      (let loop ((buffers (cons (window-buffer win) (window-prev-buffers win))))
+        (cond ((null? buffers) (window-mode win))
+              ((and (buffer-known? (car buffers))
+                    (not (window-preference-cover? (car buffers))))
+               (buffer-local (car buffers) 'mode-name))
+              (else (loop (cdr buffers)))))))
+
+(define (window-prefers-buffer? win buf)
+  (let ((mode (window-preferred-mode win)))
+    (and (string? mode) (buffer-derived-mode? buf mode))))
 
 ;; The selected window comes first, so a command that opens one thing still
 ;; opens it where you are: you are already in the window of its mode.
@@ -7888,7 +7914,9 @@
        (let ((me (active-window))
              (work (display--work-windows)))
          (define (fits? w)
-           (and (not (equal? w except)) (equal? (window-mode w) mode)))
+           (and (not (equal? w except))
+                (or (equal? (window-preferred-mode w) mode)
+                    (equal? (window-mode w) mode))))
          (if (and (member me work) (fits? me))
              me
              (let loop ((ws work))
@@ -14275,8 +14303,14 @@
   "(define-display-action! NAME FN) — register a display action; FN takes NAME and ALIST and returns a window or #f")
 (public! 'window-mode
   "(window-mode WIN) — the major mode of the buffer WIN shows, or #f")
+(catalog-meta! 'function 'window-preferred-mode 'domain 'windows 'effects '(read))
+(public! 'window-preferred-mode
+  "(window-preferred-mode WIN) — explicit cycle mode, else the nearest work buffer's mode beneath temporary covers")
+(catalog-meta! 'function 'window-prefers-buffer? 'domain 'windows 'effects '(read))
+(public! 'window-prefers-buffer?
+  "(window-prefers-buffer? WIN BUF) — whether BUF matches WIN's preferred mode, including derived modes")
 (public! 'window-showing-mode
-  "(window-showing-mode MODE [EXCEPT]) — the work window whose buffer is in MODE, or #f; a group keeps one window per mode")
+  "(window-showing-mode MODE [EXCEPT]) — the work window preferring or showing MODE, or #f")
 (public! 'split-window-sensibly
   "(split-window-sensibly WIN) — split WIN below when it is tall enough, beside when wide enough; the new window or #f")
 (public! 'window-quit-restore!

@@ -165,18 +165,15 @@
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-headings-and-marks-wear-bands
-  "a heading row and a marked row each get a background overlay across the row"
+  "a heading wears its register, a marked row wears a band across the row"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (let* ((es (list-entries "*ibuffer*"))
            (heading (car es))
            (ov (ibuffer-row-overlays "*ibuffer*" heading 100)))
-      (check-equal! (length ov) 2 "a band and the tail's span on a heading")
-      (check-equal! (nth 2 (car ov)) *list-section-row-face* "the heading face")
-      (check-equal! (car (car ov)) 100 "from the row's start")
-      (check-true! (> (cadr (car ov)) 100) "to its end")
-      (check-equal! (nth 2 (cadr ov)) "faint" "the kind and the tally are faint")
-      (check-equal! (car (cadr ov))
+      (check-equal! (length ov) 1 "no band: the heading is not a coloured row")
+      (check-equal! (nth 2 (car ov)) "faint" "the kind, the rule and the tally are faint")
+      (check-equal! (car (car ov))
                     (+ 100 2 1 2 (string-byte-length (ibuffer-chevron heading)) 2
                        (string-byte-length (ibuffer-section-label heading)))
                     "the faint span starts where the name ends"))
@@ -250,20 +247,20 @@
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-heading-carries-its-count-beside-the-name
-  "a heading's name cell holds the name, its kind and its tally; its field cells say nothing"
+  "a heading's name cell holds the name, a rule and its tally; its field cells say nothing"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (let* ((heading (car (filter ibuffer-heading? (list-entries "*ibuffer*"))))
            (cells (ibuffer-wide-cells "*ibuffer*" heading))
            (name (car (nth 2 cells))))
-      (check-true! (string-prefix? "ZZ-IB  mode" name) "the name leads, in upper case, then its kind")
-      (check-true! (string-suffix? "3 buffers" name) "the tally ends the cell")
+      (check-true! (string-prefix? "ZZ-IB" name) "the name leads, in upper case")
+      (check-true! (string-contains? name "─") "a rule runs from the name to the tally")
+      (check-true! (string-suffix? "3 buffers" name) "and the tally ends the cell")
       (check-equal! (nth 3 cells) "" "the first field cell is empty")
       (check-equal! (nth 4 cells) "" "and so is the second")
-      (let* ((text (buffer-text "*ibuffer*"))
-             (lines (filter (lambda (l) (string-contains? l "ZZ-IB  mode"))
-                            (string-split text "\n"))))
-        (check-true! (pair? lines) "the drawn line reads the name and its kind")
+      (let ((lines (filter (lambda (l) (string-contains? l "▾  ZZ-IB"))
+                           (string-split (buffer-text "*ibuffer*") "\n"))))
+        (check-true! (pair? lines) "the drawn line reads the chevron and the name")
         (check-true! (string-suffix? "3 buffers" (car lines))
                      "and ends with the tally")))
     (ibuffer-test-reset!)))

@@ -78,8 +78,9 @@ defmodule Compos.IbufferTest do
     assert headline =~ "GROUP group · mode · directory · none   SORT name · recent · size   ? keys"
     refute text =~ "SIZE"
     refute text =~ "d flag"
-    # a heading carries its kind beside its name and its tally at the end
-    assert heading =~ ~r/^\s+▾  [A-Z0-9].*  group\s+\d+ buffers?$/
+    # a heading names itself in upper case, rules across, and ends with
+    # its tally; a column too narrow for the kind word drops that first
+    assert heading =~ ~r/^\s+▾  [A-Z0-9].*─+ \d+ buffers?$/
     # every field is a column: the size, then the mode
     assert text =~ ~r/\*zz-ibuffer-a\*\s+0  Fundamental/
   end
@@ -142,9 +143,9 @@ defmodule Compos.IbufferTest do
     # register: upper case, with the kind of section it is beside it
     current_head = String.upcase(current)
     foreign_head = String.upcase(foreign)
-    assert text =~ "▾  #{current_head}  group"
-    assert text =~ "▾  #{foreign_head}  group"
-    assert text =~ "▾  UNGROUPED  group"
+    assert text =~ "▾  #{current_head} "
+    assert text =~ "▾  #{foreign_head} "
+    assert text =~ "▾  UNGROUPED "
     assert text =~ ~r/^3 buffers · by group · name/m
     refute text =~ "in this group"
     assert :binary.match(text, current_head) < :binary.match(text, "*zz-ibuffer-a*")

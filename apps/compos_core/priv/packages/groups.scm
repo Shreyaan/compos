@@ -2355,12 +2355,9 @@ is forgotten and that group falls back to creation order in the switcher."
 (effects! '(write display))
 
 ;;; --- Alt-Tab inside a group -----------------------------------------------
-;;; A pane has a cycle kind, and for now a kind is a mode name. Name a mode
-;;; and the pane walks that mode's buffers; name none and it walks every
-;;; buffer of the group that is not a chat. A pane already showing a chat
-;;; names chat-mode by itself, so a chat pane walks the chats before you set
-;;; anything. A frame with a chat beside your work therefore gives one key
-;;; one meaning in either pane, and neither pane can pull the other's kind in.
+;;; Each window cycles its preferred mode within the group. The preference
+;;; follows its work buffer through temporary covers. An explicit cycle mode
+;;; overrides automatic selection. Cycling always stays in the selected window.
 ;;;
 ;;; The buffer arrives in the window you are in. The walk never selects
 ;;; another window and never moves the frame to another group: a buffer you
@@ -2380,8 +2377,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((hit (assoc id *window-cycle-modes*)))
     (and hit (cadr hit))))
 
-;; #f takes the naming away, and the pane is back to every buffer that is
-;; not a chat
+;; #f removes the override and restores automatic mode preference.
 (define (window-cycle-mode! id mode)
   (set! *window-cycle-modes*
         (filter (lambda (r) (not (equal? (car r) id))) *window-cycle-modes*))
@@ -2389,10 +2385,9 @@ is forgotten and that group falls back to creation order in the switcher."
     (set! *window-cycle-modes* (cons (list id mode) *window-cycle-modes*)))
   mode)
 
-;; the mode this pane walks, or #f for every buffer that is not a chat
+;; The same preference controls routing and cycling.
 (define (group-cycle-mode)
-  (or (window-cycle-mode (active-window))
-      (and (chat-buffer? (current-buffer)) "chat-mode")))
+  (window-preferred-mode (active-window)))
 
 (define (group-cycle-kind? b mode)
   (if mode (buffer-derived-mode? b mode) (not (chat-buffer? b))))
@@ -2441,7 +2436,10 @@ is forgotten and that group falls back to creation order in the switcher."
         (message "No other buffer to cycle in this group")
         (begin
           (set! *group-cycle-pos* (modulo (+ *group-cycle-pos* dir) n))
-          (switch-to-buffer! (list-ref *group-cycle-ring* *group-cycle-pos*))))))
+          (window-display!
+            (lambda ()
+              (switch-to-buffer-here! (list-ref *group-cycle-ring* *group-cycle-pos*))
+              (active-window)))))))
 
 (define-command "group-next-buffer"
   "Walk this pane's kind of buffer in this group, most recently used first"
@@ -2451,18 +2449,79 @@ is forgotten and that group falls back to creation order in the switcher."
   "Walk this pane's kind of buffer in this group, the other way"
   (lambda () (group-cycle! -1)))
 
-;; naming a mode is how a pane says what its cycle key walks; an empty answer
-;; takes the naming away, and the pane walks every buffer that is not a chat
+(domain! 'windows)
+(effects! '(write display))
+
+;; Consolidation is explicit. It moves matching history entries, not buffers'
+;; contents, and leaves unrelated entries in their original windows.
+(define (mode-consolidate!)
+  (let* ((destination (active-window))
+         (mode (group-cycle-mode))
+         (group (group-cycle-group))
+         (open (buffer-list)))
+    (define (matches? buf)
+      (and (member buf open) (string? mode)
+           (group-cycle-member? buf group)
+           (buffer-derived-mode? buf mode)
+           (not (string-prefix? " " buf))
+           (not (buffer-context-only? buf))))
+    (let ((buffers (filter matches? (buffer-list-mru)))
+          (windows (display--work-windows)))
+      (cond ((not (member destination windows))
+             (message "Select a work window to consolidate") #f)
+            ((null? buffers)
+             (message "No mode buffers to consolidate") #f)
+            (else
+              (winner-save!)
+              (with-layout-suppressed
+                (lambda ()
+                  (for-each
+                    (lambda (win)
+                      (unless (equal? win destination)
+                        (let* ((shown (window-buffer win))
+                               (history (window-prev-buffers win))
+                               (remaining (filter (lambda (b) (not (matches? b))) history)))
+                          (when (or (matches? shown) (not (equal? history remaining)))
+                            (window-quit-restore-forget! win)
+                            (cond ((not (matches? shown))
+                                   (set-window-prev-buffers! win remaining))
+                                  ((pair? remaining)
+                                   (display-buffer-in-window! win (car remaining))
+                                   (set-window-prev-buffers! win (cdr remaining))
+                                   (window-cycle-mode! win #f))
+                                  (else
+                                    (window-cycle-mode! win #f)
+                                    (delete-window-id! win)))))))
+                    windows)
+                  (set-window-prev-buffers! destination
+                    (append (window-prev-buffers destination) buffers))
+                  (window-quit-restore-forget! destination)
+                  (select-window! destination)))
+              (window-state-changed!)
+              (message (string-append "Consolidated " (number->string (length buffers))
+                                      " " mode " buffers"))
+              (active-window))))))
+
+(define-command "mode-consolidate"
+  "Gather this group's preferred-mode buffers into the selected window"
+  mode-consolidate!)
+(public! 'mode-consolidate!
+  "(mode-consolidate!) — gather the preferred mode's open group buffers into the selected window; preserve unrelated histories")
+
+(domain! 'groups)
+(effects! '(write display))
+
+;; An empty answer restores automatic mode preference.
 (define-command "window-cycle-mode" "Set the mode this pane's cycle key walks"
   (lambda ()
     (let ((id (active-window)))
-      (minibuffer-read "Cycle mode (empty for every non-chat buffer): " '()
+      (minibuffer-read "Cycle mode (empty for automatic): " '()
         (lambda (name)
           (let ((mode (if (equal? (string-trim name) "") #f (string-trim name))))
             (window-cycle-mode! id mode)
             (message (if mode
                          (string-append "This pane cycles " mode)
-                         "This pane cycles every buffer that is not a chat"))))))))
+                         "This window cycles its preferred mode"))))))))
 
 ;; one key, one meaning in every pane: C-` walks the buffers this pane
 ;; cycles, chat or not. The popup toggle keeps the family and sits on M-`.

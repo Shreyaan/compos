@@ -805,12 +805,11 @@
           ;; anything else, and a name cut in half says nothing
           (else label))))
 
-;; The chevron stands at the left margin, where the rows show their
-;; state: a heading that starts to the right of everything it holds
-;; reads as one more row, indented.
+;; The chevron sits against the name it opens, in the section's own
+;; colour: the group keeps its identity in one glyph.
 (define (ibuffer-heading-head buf row)
-  (list (list (ibuffer-chevron row) (or (ibuffer-heading-face row) "dim"))
-        ""
+  (list ""
+        (list (ibuffer-chevron row) (or (ibuffer-heading-face row) "dim"))
         (list (ibuffer-heading-text buf row) "accent")))
 
 ;; a heading says nothing in the field columns

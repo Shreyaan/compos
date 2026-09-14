@@ -1,7 +1,6 @@
 ;;; group-cycle-test.scm --- one key walks a group's buffers, most recently
 ;;; used first, and flips between the last two the way Alt-Tab flips between
-;;; two windows. A pane walks its own kind: the mode it names, else every
-;;; buffer that is not a chat, and a pane showing a chat walks the chats.
+;;; two windows. A window walks its preferred mode automatically.
 ;;; The walk never leaves the group and never leaves the window.
 ;;;
 ;;; No test presses a key. The commands drive the walk, and no test names a
@@ -70,15 +69,15 @@
                   "this chat leads, the rest follow by use")
     (group-cycle-test-reset!)))
 
-(deftest 'group-cycle-walks-the-work-buffers-in-a-work-pane
-  "anything that is not a chat walks the group's other non-chat buffers"
+(deftest 'group-cycle-walks-the-preferred-mode-in-a-work-window
+  "a work window automatically cycles its work buffer mode"
   (lambda ()
     (group-cycle-test-open!)
     (switch-to-buffer! "*zz-cyc-work-a*")
-    (check-false! (group-cycle-mode) "no mode named, so every non-chat buffer")
+    (check-equal! (group-cycle-mode) "text-mode" "the work buffer supplies the preference")
     (check-equal! (group-cycle-test-mine)
-                  (list "*zz-cyc-work-a*" "*zz-cyc-work-b*")
-                  "the work buffers of this group, most recent first")
+                  (list "*zz-cyc-work-a*")
+                  "other modes stay out of the automatic ring")
     (check-false! (member "*zz-cyc-three*" (group-cycle-ring))
                   "a chat is never in a work pane's ring")
     (group-cycle-test-reset!)))
@@ -94,8 +93,8 @@
                   "only the buffer in that mode")
     (window-cycle-mode! (active-window) #f)
     (check-equal! (group-cycle-test-mine)
-                  (list "*zz-cyc-work-a*" "*zz-cyc-work-b*")
-                  "take the naming away and every non-chat buffer is back")
+                  (list "*zz-cyc-work-a*")
+                  "clearing the override restores the automatic preference")
     (group-cycle-test-reset!)))
 
 (deftest 'group-cycle-never-leaves-the-group
@@ -153,3 +152,69 @@
     (check-true! (procedure? (command-function "group-next-buffer")) "the walk")
     (check-true! (procedure? (command-function "group-previous-buffer")) "the other way")
     (check-true! (procedure? (command-function "window-cycle-mode")) "the naming")))
+
+(deftest 'group-cycle-same-mode-stays-in-its-window
+  "cycling text buffers preserves the selected window and its neighbor"
+  (lambda ()
+    (group-cycle-test-open!)
+    (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
+    (tile-windows! 'two-pane '("*zz-cyc-work-a*" "*zz-cyc-three*"))
+    (select-window! (window-showing "*zz-cyc-work-a*"))
+    (let ((win (active-window)) (neighbor (window-showing "*zz-cyc-three*")))
+      (run-command "group-next-buffer")
+      (check-equal! (current-buffer) "*zz-cyc-work-b*" "the other text buffer opens")
+      (check-equal! (active-window) win "cycling stays in this window")
+      (check-equal! (window-buffer neighbor) "*zz-cyc-three*" "the neighbor stays")
+      (run-command "group-next-buffer")
+      (check-equal! (current-buffer) "*zz-cyc-work-a*" "cycling returns to the first buffer"))
+    (group-cycle-test-reset!)))
+
+(define (group-consolidate-test-open!)
+  (group-cycle-test-open!)
+  (layout-target-set! #f)
+  (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
+  (buffer-set-local! "*zz-cyc-work-there*" 'mode-name "text-mode")
+  (tile-windows! 'grid '("*zz-cyc-work-a*" "*zz-cyc-work-b*"
+                         "*zz-cyc-three*" "*zz-cyc-work-b*"))
+  (let ((windows (map car (window-list))))
+    (set-window-prev-buffers! (nth 0 windows) '("*zz-cyc-work-there*"))
+    (set-window-prev-buffers! (nth 1 windows) '("*zz-cyc-one*"))
+    (set-window-prev-buffers! (nth 2 windows) '("*zz-cyc-work-b*" "*zz-cyc-two*"))
+    (set-window-prev-buffers! (nth 3 windows) '())
+    (select-window! (car windows))
+    windows))
+
+(deftest 'mode-consolidate-gathers-history-and-preserves-unrelated-work
+  "matching buffers move to one window; unrelated histories and foreign groups stay"
+  (lambda ()
+    (let* ((windows (group-consolidate-test-open!))
+           (destination (car windows)))
+      (run-command "mode-consolidate")
+      (check-equal! (active-window) destination "the destination stays selected")
+      (check-equal! (current-buffer) "*zz-cyc-work-a*" "the current buffer stays visible")
+      (check-equal! (window-prev-buffers destination)
+                    '("*zz-cyc-work-there*" "*zz-cyc-work-b*")
+                    "the destination keeps its history and gains the matching buffer")
+      (check-equal! (window-buffer (nth 1 windows)) "*zz-cyc-one*" "the source reveals unrelated work")
+      (check-equal! (window-prev-buffers (nth 1 windows)) '() "the source drops matching history")
+      (check-equal! (window-buffer (nth 2 windows)) "*zz-cyc-three*" "unrelated work stays visible")
+      (check-equal! (window-prev-buffers (nth 2 windows)) '("*zz-cyc-two*") "hidden matches move too")
+      (check-false! (window-exists? (nth 3 windows)) "the redundant empty window closes")
+      (check-true! (buffer-known? "*zz-cyc-work-b*") "the gathered buffer stays alive")
+      (let ((before (window-tree)))
+        (run-command "mode-consolidate")
+        (check-equal! (window-tree) before "a second consolidation changes nothing")))
+    (group-cycle-test-reset!)))
+
+(deftest 'mode-consolidate-includes-hidden-mode-buffers
+  "a buffer need not be displayed or in a window history to join the stack"
+  (lambda ()
+    (group-cycle-test-open!)
+    (layout-target-set! #f)
+    (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
+    (switch-to-buffer-here! "*zz-cyc-work-a*")
+    (delete-other-windows!)
+    (set-window-prev-buffers! (active-window) '())
+    (run-command "mode-consolidate")
+    (check-equal! (window-prev-buffers (active-window)) '("*zz-cyc-work-b*") "the hidden buffer joins")
+    (group-cycle-test-reset!)))

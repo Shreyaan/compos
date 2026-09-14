@@ -665,3 +665,32 @@ WhatsApp exposes this choice as `whatsapp-group`, empty by default:
 ```
 
 WhatsApp reuses its existing scene layout. Its buffers join the destination without losing existing memberships.
+
+## Same-mode window preference
+
+A window automatically prefers its current work buffer's major mode.
+Help keeps the underlying buffer's preference from window history.
+Other temporary surfaces can opt in through the `window-preference-cover` buffer local.
+Listings keep their own mode preference.
+Opening another buffer of that mode reuses the window, including in a free layout.
+Explicit display rules and other-window constraints still control display requests.
+
+`` C-` `` cycles open buffers of the preferred mode within the current group.
+Cycling stays in the selected window. Other modes stay out of the cycle.
+`M-x window-cycle-mode` overrides the preference; an empty answer restores automatic selection.
+An ordinary work buffer of another mode changes the automatic preference.
+
+Scheme callers can inspect `(window-preferred-mode WIN)` and
+`(window-prefers-buffer? WIN BUF)`. The latter includes derived modes.
+Automatic preferences use existing window history and require no separate persisted state.
+Explicit cycle overrides retain their existing runtime-only lifetime.
+
+### Consolidate a mode
+
+`M-x mode-consolidate` gathers open buffers of the window's preferred mode into its history.
+It operates within the current group and frame. Ungrouped work gathers only ungrouped buffers.
+The current buffer remains visible. Hidden matching buffers also join the destination history.
+Other windows lose matching history entries. A matching display reveals its next unrelated buffer;
+if none remains, that window closes. No buffer is killed.
+Existing destination history keeps its order; additional buffers follow in most-recent order.
+The command is also available as `(mode-consolidate!)` in Scheme.
