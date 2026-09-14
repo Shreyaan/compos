@@ -811,14 +811,34 @@ a{color:var(--accent);text-decoration:none}
   (let ((row (list-current *amazon-buffer*)))
     (and row (amazon-detail-buffer row))))
 
+;;; The third column is whichever product page is already on screen -- the one
+;;; you are reading keeps its place. Only when none is showing does the listing's
+;;; current row decide, and a page opened before a rename still counts: every
+;;; detail buffer carries its row, whatever it is called.
+(define (amazon--detail-pane)
+  (let ((shown (let loop ((ws (window-list)))
+                 (cond ((null? ws) #f)
+                       ((and (not (equal? (car (cdr (car ws))) *amazon-buffer*))
+                             (buffer-local (car (cdr (car ws))) 'amazon-row))
+                        (car (cdr (car ws))))
+                       (else (loop (cdr ws)))))))
+    (or shown
+        (let ((want (amazon-current-detail)))
+          (and want (buffer-exists? want) want)))))
+
 (define (amazon-layout!)
   (let* ((id (amazon-home-group!))
          (chat (and id (boundp 'group-chat) (group-chat id)))
          (panes (filter (lambda (b) (and b (buffer-exists? b)))
-                        (list chat *amazon-buffer* (amazon-current-detail)))))
-    ;; the app is always chat | listing | detail, side by side, whatever
-    ;; the frame width -- adaptive tiling stacked them on a narrow frame
+                        (list *amazon-buffer* (amazon--detail-pane) chat))))
+    ;; three columns whatever the frame width -- adaptive tiling stacked them
+    ;; on a narrow frame. The listing leads the list because tile-windows!
+    ;; clears the frame and fills from the selected window outward: the first
+    ;; buffer lands in the pane you were already in and keeps the focus. Lead
+    ;; with the chat and the app opens beside you instead of under your hands.
     (when (pair? (cdr panes)) (tile-windows! 'columns panes))
+    (let ((home (window-showing *amazon-buffer*)))
+      (when home (select-window! home)))
     panes))
 
 ;;; --- opening it ----------------------------------------------------------

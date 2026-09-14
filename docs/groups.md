@@ -689,8 +689,19 @@ Explicit cycle overrides retain their existing runtime-only lifetime.
 
 `M-x mode-consolidate` gathers open buffers of the window's preferred mode into its history.
 It operates within the current group and frame. Ungrouped work gathers only ungrouped buffers.
-The current buffer remains visible. Hidden matching buffers also join the destination history.
-Other windows lose matching history entries. A matching display reveals its next unrelated buffer;
-if none remains, that window closes. No buffer is killed.
-Existing destination history keeps its order; additional buffers follow in most-recent order.
+The destination contains only matching buffers, including hidden buffers.
+Its other buffers move together into a persisted invisible window, preserving their order.
+The destination stays selected in its pane. No new visible windows are created.
+Other visible windows drop matching entries and reveal their next unrelated buffer.
+A window with no remaining buffer closes, reducing the visible layout. No buffer is killed.
+Matching destination history keeps its order; additional buffers follow in most-recent order.
 The command is also available as `(mode-consolidate!)` in Scheme.
+
+`(hidden-window-list)` lists invisible windows for the current frame and group.
+`(hidden-window-buffers ID)` reads a window's ordered stack.
+`(hidden-window-show! ID)` explicitly exchanges that stack with the selected pane's stack.
+The displaced stack becomes invisible. The pane's geometry stays unchanged.
+
+Quitting a listing restores only its own window history. If that history is empty,
+the window closes instead of refilling from group recency or another window's buffers.
+The last window stays visible when it has no predecessor; quitting reports that condition.

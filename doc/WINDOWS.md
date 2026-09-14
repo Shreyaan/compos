@@ -46,8 +46,9 @@ Letters denote distinct buffer identities unless repeated explicitly.
    buffer changed while covered. Do not rewind document edits.
 7. Redraws, reloads of the same displayed identity, focus-only changes, headless
    buffer work, failed displays, and canceled operations add no return layers.
-8. Preserve existing pane geometry on a buffer close. Only an explicit window
-   deletion or dismissal of a display-created temporary pane removes a window.
+8. Restore only the closing window's own history. If no predecessor remains,
+   close that window and let the layout shrink. Do not borrow from group recency.
+   The last window remains visible if it has no predecessor.
 9. No live window may remain attached to a killed buffer. No stale return record
    may affect a different window that later reuses an identifier.
 
@@ -95,7 +96,7 @@ any other displays of the killed buffer.
 | C6: Kill unrelated buffer | Kill a buffer absent from all current displays and return chains | No window, focus, geometry, or return-history change. |
 | C7: Predecessor visible elsewhere | `L: A → B`, `R: A`; close B | L restores A as well. Do not choose an unrelated buffer just to avoid duplication. |
 | C8: Multiple dead predecessors | `L: A → B → C → D`; B and C have been killed | Closing D skips both and reveals A. |
-| C9: No usable predecessor | Close the current buffer with an exhausted return chain | Keep a work pane and choose a deterministic eligible fallback; use scratch if necessary. |
+| C9: No usable predecessor | Close the current buffer with an exhausted return chain | Remove the exhausted window and shrink the layout. Do not borrow another buffer. If this is the last window, keep its current buffer and report that no predecessor exists. |
 | C10: Last window | Close/kill its current buffer | Leave one valid work window; restore its predecessor or fallback. |
 | C11: Refused kill | Modified-buffer handling refuses or cancels the close | Preserve buffer, view, history, quit ownership, layout, and focus. |
 | C12: Buffer renamed | A is renamed while underneath B | Closing B restores the same buffer under its new name and saved view. |

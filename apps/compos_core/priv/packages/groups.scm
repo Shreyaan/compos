@@ -2452,12 +2452,10 @@ is forgotten and that group falls back to creation order in the switcher."
 (domain! 'windows)
 (effects! '(write display))
 
-;; Consolidation is explicit. It moves matching history entries, not buffers'
-;; contents, and leaves unrelated entries in their original windows.
 (define (mode-consolidate!)
   (let* ((destination (active-window))
          (mode (group-cycle-mode))
-         (group (group-cycle-group))
+         (group (or (frame-group) (group-cycle-group)))
          (open (buffer-list)))
     (define (matches? buf)
       (and (member buf open) (string? mode)
@@ -2465,25 +2463,42 @@ is forgotten and that group falls back to creation order in the switcher."
            (buffer-derived-mode? buf mode)
            (not (string-prefix? " " buf))
            (not (buffer-context-only? buf))))
-    (let ((buffers (filter matches? (buffer-list-mru)))
-          (windows (display--work-windows)))
+    (let* ((buffers (filter matches? (buffer-list-mru)))
+           (windows (display--work-windows))
+           (shown (window-buffer destination))
+           (point (window-point destination))
+           (stack (cons shown (window-prev-buffers destination)))
+           (matching (append (filter matches? stack) buffers))
+           (other (filter (lambda (b) (not (matches? b))) stack)))
       (cond ((not (member destination windows))
              (message "Select a work window to consolidate") #f)
             ((null? buffers)
              (message "No mode buffers to consolidate") #f)
             (else
-              (winner-save!)
               (with-layout-suppressed
                 (lambda ()
+                  ;; Remove matching entries from existing hidden windows too.
+                  (set! *hidden-windows*
+                    (filter (lambda (r) (pair? (nth 3 r)))
+                      (map (lambda (r)
+                             (if (and (equal? (cadr r) (selected-frame))
+                                      (equal? (caddr r) group))
+                                 (list (car r) (cadr r) (caddr r)
+                                       (filter (lambda (b) (not (matches? b))) (nth 3 r))
+                                       (if (matches? (car (nth 3 r))) #f (nth 4 r)))
+                                 r))
+                           *hidden-windows*)))
+                  (when (pair? other)
+                    (hidden-window-create! other (and (equal? shown (car other)) point)))
                   (for-each
                     (lambda (win)
                       (unless (equal? win destination)
-                        (let* ((shown (window-buffer win))
+                        (let* ((buf (window-buffer win))
                                (history (window-prev-buffers win))
                                (remaining (filter (lambda (b) (not (matches? b))) history)))
-                          (when (or (matches? shown) (not (equal? history remaining)))
+                          (when (or (matches? buf) (not (equal? history remaining)))
                             (window-quit-restore-forget! win)
-                            (cond ((not (matches? shown))
+                            (cond ((not (matches? buf))
                                    (set-window-prev-buffers! win remaining))
                                   ((pair? remaining)
                                    (display-buffer-in-window! win (car remaining))
@@ -2493,20 +2508,22 @@ is forgotten and that group falls back to creation order in the switcher."
                                     (window-cycle-mode! win #f)
                                     (delete-window-id! win)))))))
                     windows)
-                  (set-window-prev-buffers! destination
-                    (append (window-prev-buffers destination) buffers))
+                  (unless (matches? shown)
+                    (display-buffer-in-window! destination (car matching)))
+                  (set-window-prev-buffers! destination matching)
                   (window-quit-restore-forget! destination)
-                  (select-window! destination)))
-              (window-state-changed!)
+                  (select-window! destination)
+                  (layout-target-note-slots! (layout-target-visible-buffers))))
               (message (string-append "Consolidated " (number->string (length buffers))
-                                      " " mode " buffers"))
-              (active-window))))))
+                                      " " mode " buffers; other buffers are in a hidden window"))
+              destination)))))
+
 
 (define-command "mode-consolidate"
   "Gather this group's preferred-mode buffers into the selected window"
   mode-consolidate!)
 (public! 'mode-consolidate!
-  "(mode-consolidate!) — gather the preferred mode's open group buffers into the selected window; preserve unrelated histories")
+  "(mode-consolidate!) — gather the preferred mode's open group buffers into the selected window; move other destination buffers into an invisible window")
 
 (domain! 'groups)
 (effects! '(write display))

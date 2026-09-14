@@ -8968,12 +8968,26 @@
           (popup-forget!)
           (message (string-append buf " is an ordinary window now"))))))
 
-;; q in special buffers: close the popup, or kill this buffer and go back.
-;; Every buffer that binds q is a listing you can make again — dired,
-;; ibuffer, help, diff, notmuch, agents, mcp-hub. The kill is what stops q
-;; from flipping between two listings: a buffer that only moves down the
-;; MRU ring is still the candidate the next q picks. buffer-kill! puts the
-;; most recent buffer that is not on screen in the window.
+(define (window-unwind-or-close! win)
+  (let* ((cur (window-buffer win))
+         (history (filter (lambda (b) (and (buffer-exists? b) (not (equal? b cur))))
+                          (window-prev-buffers win)))
+         (record (window-quit-restore win)))
+    (cond ((and record (equal? (cadr record) 'window) (other-window-id win))
+           (window-quit-restore-forget! win)
+           (delete-window-id! win) #t)
+          ((pair? history)
+           (window-quit-restore-forget! win)
+           (display-buffer-in-window! win (car history))
+           (set-window-prev-buffers! win (cdr history)) #t)
+          ((other-window-id win)
+           (window-quit-restore-forget! win)
+           (delete-window-id! win) #t)
+          (else
+            (message "No previous buffer; this is the last window") #f))))
+
+;; Quit consumes this window's own stack. An exhausted window closes before
+;; the buffer dies, so kill repair cannot refill it from group recency.
 (define-command "quit-window" "Close the popup, or kill this buffer and go back"
   (lambda ()
     (cond
@@ -9005,16 +9019,8 @@
           ;; stay. A listing reports itself as modified — it has no path.
           (if (and (buffer-path cur) (buffer-modified? cur))
               (message "Buffer is modified — save it, or C-x k to kill it")
-              (begin
-                ;; The core releases the killed buffer's windows: each one
-                ;; stays and shows what it showed before (Emacs kill-buffer
-                ;; deletes no window), and buffer-kill-repair then fills a
-                ;; group window from its group. Only a display's own work is
-                ;; undone here first: the window a display made goes with
-                ;; the listing; a window the display took shows again what
-                ;; it showed.
-                (window-quit-restore! (active-window))
-                ;; a live process (tail, shell) dies with its buffer
+              (when (window-unwind-or-close! (active-window))
+                ;; A live process dies only when its buffer can be dismissed.
                 (if (process-running? cur) (process-kill! cur))
                 (buffer-kill! cur))))))))
 

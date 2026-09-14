@@ -92,4 +92,41 @@ defmodule Compos.GroupCycleSchemeTest do
       Editor.select_frame(previous)
     end
   end
+
+  test "dired-quit after chat consolidation closes the exhausted window" do
+    previous = Editor.last_active_frame()
+    {:ok, frame} = Editor.attach_frame(nil)
+
+    try do
+      assert {:ok, _} = Session.eval(~s|(load "#{@file_}")|, frame)
+
+      assert {:ok, _} =
+               Session.eval(
+                 """
+                 (group-cycle-test-open!)
+                 (buffer-set-local! "*zz-cyc-work-a*" 'mode-name "Dired")
+                 (tile-windows! 'two-pane '("*zz-cyc-three*" "*zz-cyc-work-a*"))
+                 (layout-target-set! 'two-pane)
+                 (set-window-prev-buffers! (window-showing "*zz-cyc-three*") '("*zz-cyc-one*"))
+                 (set-window-prev-buffers! (window-showing "*zz-cyc-work-a*") '("*zz-cyc-two*"))
+                 (select-window! (window-showing "*zz-cyc-three*"))
+                 (run-command "mode-consolidate")
+                 (select-window! (window-showing "*zz-cyc-work-a*"))
+                 (local-set-key "<f9>" "dired-quit")
+                 """,
+                 frame
+               )
+
+      assert {:ok, "()"} = Session.eval("(window-prev-buffers (active-window))", frame)
+      KeyDispatch.handle_key(frame, "<f9>")
+      assert {:ok, "1"} = Session.eval("(length (window-list))", frame)
+      assert {:ok, "\"*zz-cyc-three*\""} = Session.eval("(current-buffer)", frame)
+      assert {:ok, "#t"} = Session.eval(~s|(buffer-known? "*zz-cyc-two*")|, frame)
+      assert {:ok, "#f"} = Session.eval(~s|(window-showing "*zz-cyc-two*")|, frame)
+    after
+      Session.eval("(group-cycle-test-reset!)", frame)
+      Editor.delete_frame(frame)
+      Editor.select_frame(previous)
+    end
+  end
 end

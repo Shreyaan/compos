@@ -346,3 +346,33 @@
         (display-buffer-in-window! (active-window) "*zz-db-list*")
         (check-equal! (window-preferred-mode (active-window)) "Dired"
                       "directory buffers cycle with directories")))))
+
+(deftest 'quit-window-exhausted-history-does-not-borrow-a-buffer
+  "an exhausted work window closes even when other buffers are available"
+  (lambda ()
+    (t--db-with t--db-wide
+      (lambda ()
+        (buffer-create "*zz-db-a*")
+        (buffer-create "*zz-db-b*")
+        (let ((source (active-window)) (win (display-buffer "*zz-db-a*")))
+          (window-quit-restore-forget! win)
+          (set-window-prev-buffers! win '())
+          (select-window! win)
+          (run-command "quit-window")
+          (check-equal! (length (window-list)) 1 "the layout degrades")
+          (check-equal! (active-window) source "the surviving window is selected")
+          (check-equal! (current-buffer) "*scratch*" "no unrelated buffer is borrowed")
+          (check-true! (buffer-known? "*zz-db-b*") "hidden buffers remain alive"))))))
+
+(deftest 'quit-window-last-exhausted-window-stays
+  "the final window cannot close or borrow a buffer"
+  (lambda ()
+    (t--db-with t--db-wide
+      (lambda ()
+        (buffer-create "*zz-db-a*")
+        (switch-to-buffer-here! "*zz-db-a*")
+        (set-window-prev-buffers! (active-window) '())
+        (window-quit-restore-forget! (active-window))
+        (run-command "quit-window")
+        (check-equal! (current-buffer) "*zz-db-a*" "the final window stays on its buffer")
+        (check-true! (buffer-known? "*zz-db-a*") "the final buffer is not killed")))))
