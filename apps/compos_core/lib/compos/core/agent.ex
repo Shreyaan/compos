@@ -202,7 +202,12 @@ defmodule Compos.Core.Agent do
     backend = Backend.module(config)
     {:ok, handle} = backend.start(Map.put(config, "slug", slug), self())
     capabilities = backend.capabilities()
-    ChatPerf.emit(slug, :session_start, %{backend: backend, buffer: buffer, model: Map.get(config, "model")})
+
+    ChatPerf.emit(slug, :session_start, %{
+      backend: backend,
+      buffer: buffer,
+      model: Map.get(config, "model")
+    })
 
     steering =
       cond do
@@ -485,8 +490,7 @@ defmodule Compos.Core.Agent do
       {:reply,
        Buffer.insert_at_local(state.buffer_ref, "agent-saved-mark", text,
          source: {:agent, state.slug}
-       ),
-       state}
+       ), state}
     catch
       # Rendering is downstream of the backend. Killing the target buffer
       # must discard a late chunk, not kill the session process with :noproc.
@@ -952,6 +956,7 @@ defmodule Compos.Core.Agent do
 
   defp send_prompt(state, text, display, images) do
     ChatPerf.emit(state.slug, :turn_start, %{epoch: state.epoch + 1, input_bytes: byte_size(text)})
+
     state =
       state
       # echo the user turn into the transcript via the ordered event channel —
@@ -985,7 +990,12 @@ defmodule Compos.Core.Agent do
     Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
       t0 = System.monotonic_time(:microsecond)
       result = Backend.context(slug, display)
-      ChatPerf.emit(slug, :context_end, %{epoch: epoch, duration_us: System.monotonic_time(:microsecond) - t0})
+
+      ChatPerf.emit(slug, :context_end, %{
+        epoch: epoch,
+        duration_us: System.monotonic_time(:microsecond) - t0
+      })
+
       send(me, {:context, epoch, text, display, images, result})
     end)
 
@@ -1118,5 +1128,4 @@ defmodule Compos.Core.Agent do
 
   defp coalesce([e | rest]), do: [e | coalesce(rest)]
   defp coalesce([]), do: []
-
 end

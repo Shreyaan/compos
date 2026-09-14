@@ -11,7 +11,12 @@ defmodule Compos.Core.ChatPerfTest do
     assert :ok = ChatPerf.emit(slug, :tool_call, %{duration_ms: 12, backend: TestBackend})
 
     events = await_events(slug)
-    assert [%{"kind" => "tool_call", "duration_ms" => 12, "backend" => "Elixir.TestBackend"} = event] = events
+
+    assert [
+             %{"kind" => "tool_call", "duration_ms" => 12, "backend" => "Elixir.TestBackend"} =
+               event
+           ] = events
+
     assert event["chat"] == slug
     assert is_integer(event["at_us"])
     assert is_integer(event["mono_us"])

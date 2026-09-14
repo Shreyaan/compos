@@ -41,8 +41,11 @@ defmodule Compos.Core.ChatPerf do
           end
         end)
 
-      {:error, :enoent} -> []
-      {:error, _} -> []
+      {:error, :enoent} ->
+        []
+
+      {:error, _} ->
+        []
     end
   end
 
