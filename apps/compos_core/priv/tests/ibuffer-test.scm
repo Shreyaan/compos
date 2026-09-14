@@ -61,9 +61,13 @@
     (check-true! (member 'ibuffer--seen-hook!
                          (hook-functions 'window-configuration-change-hook))
                  "the hook is on window-configuration-change-hook")
+    ;; the stamp is the buffer's own local, so it needs a buffer: the hook
+    ;; only ever passes the buffer the active window shows
+    (buffer-create "*zz-ib-seen*")
     (ibuffer-note-seen! "*zz-ib-seen*")
     (check-equal! (ibuffer-last-label "*zz-ib-seen*") "now" "just noted")
-    (check-equal! (ibuffer-last-label "*zz-ib-never-shown*") "" "never noted")))
+    (check-equal! (ibuffer-last-label "*zz-ib-never-shown*") "" "never noted")
+    (buffer-kill! "*zz-ib-seen*")))
 
 (deftest 'ibuffer-sections-by-mode
   "grouped by mode, one heading per mode, by name, with the member count"
