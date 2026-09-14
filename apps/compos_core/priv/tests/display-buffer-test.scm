@@ -95,6 +95,24 @@
           (check-false! (equal? (display-buffer "*zz-db-c*") first)
                         "another mode does not take that window"))))))
 
+;; A target layout is no licence for two panes of one mode: with a column
+;; still free, the second buffer of a mode takes the first one's pane.
+(deftest 'a-target-layout-does-not-give-one-mode-two-panes
+  "one window per mode outranks the target's spare capacity"
+  (lambda ()
+    (t--db-with t--db-wide
+      (lambda ()
+        (buffer-create "*zz-db-a*")
+        (buffer-create "*zz-db-b*")
+        (with-current-buffer "*zz-db-a*" (lambda () (set-mode! "text-mode")))
+        (with-current-buffer "*zz-db-b*" (lambda () (set-mode! "text-mode")))
+        (layout-target-set! 'columns)
+        (let ((first (display-buffer "*zz-db-a*")))
+          (check-equal! (display-buffer "*zz-db-b*") first
+                        "the second buffer of the mode took the first one's pane")
+          (check-equal! (length (window-list)) 2 "the free column stayed free"))
+        (layout-target-set! #f)))))
+
 (deftest 'pop-up-window-splits-beside-and-selects-nothing
   "one wide window: the buffer takes a new window beside it; point stays"
   (lambda ()
