@@ -179,11 +179,17 @@
 
 ;;; --- the buffer kind and the file kind ----------------------------------------
 
+(define (ibuffer-human-unit n unit suffix)
+  (let* ((tenths (quotient (+ (* n 10) (quotient unit 2)) unit))
+         (whole (quotient tenths 10))
+         (tenth (remainder tenths 10)))
+    (string-append (number->string whole) "." (number->string tenth) suffix)))
+
+;; a size reads the way dired writes one: a unit and one decimal, so
+;; 1.4M and 56.3k rather than 1M and 56k
 (define (ibuffer-human n)
-  (cond ((>= n 1048576)
-         (string-append (number->string (quotient n 1048576)) "M"))
-        ((>= n 1024)
-         (string-append (number->string (quotient n 1024)) "k"))
+  (cond ((>= n 1048576) (ibuffer-human-unit n 1048576 "M"))
+        ((>= n 1024) (ibuffer-human-unit n 1024 "k"))
         (else (number->string n))))
 
 (define (ibuffer-short-mode b)
