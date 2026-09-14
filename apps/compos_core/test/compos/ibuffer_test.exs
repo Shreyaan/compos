@@ -75,11 +75,11 @@ defmodule Compos.IbufferTest do
     [headline, heading | _rows] = String.split(text, "\n")
     # the head is one line: the counts and the chips; no key bar, no label row
     assert headline =~ ~r/^Buffers  \d+ buffers/
-    assert headline =~ "GROUP group · mode · directory   SORT name · recent · size   ? keys"
+    assert headline =~ "GROUP group · mode · directory · none   SORT name · recent · size   ? keys"
     refute text =~ "SIZE"
     refute text =~ "d flag"
-    # a heading carries its count beside its name
-    assert heading =~ ~r/^\s+▾  \S.*  \d+$/
+    # a heading carries its kind beside its name and its tally at the end
+    assert heading =~ ~r/^\s+▾  [A-Z0-9].*  group\s+\d+ buffers?$/
     # every field is a column: the size, then the mode
     assert text =~ ~r/\*zz-ibuffer-a\*\s+0  Fundamental/
   end
@@ -138,17 +138,20 @@ defmodule Compos.IbufferTest do
       (list-set-filters! "*ibuffer*" (list (list "match" "zz-ibuffer-"))))})
 
     text = Buffer.text("*ibuffer*")
-    # every section wears the name of its group; the current one leads
-    assert text =~ "▾  #{current}"
-    assert text =~ "▾  #{foreign}"
-    assert text =~ "▾  ungrouped"
+    # every section wears the name of its group, in the heading's own
+    # register: upper case, with the kind of section it is beside it
+    current_head = String.upcase(current)
+    foreign_head = String.upcase(foreign)
+    assert text =~ "▾  #{current_head}  group"
+    assert text =~ "▾  #{foreign_head}  group"
+    assert text =~ "▾  UNGROUPED  group"
     assert text =~ ~r/^3 buffers · by group · name/m
     refute text =~ "in this group"
-    assert :binary.match(text, current) < :binary.match(text, "*zz-ibuffer-a*")
-    assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, foreign)
-    assert :binary.match(text, foreign) < :binary.match(text, "*zz-ibuffer-b*")
-    assert :binary.match(text, "*zz-ibuffer-b*") < :binary.match(text, "ungrouped")
-    assert :binary.match(text, "ungrouped") < :binary.match(text, "*zz-ibuffer-c*")
+    assert :binary.match(text, current_head) < :binary.match(text, "*zz-ibuffer-a*")
+    assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, foreign_head)
+    assert :binary.match(text, foreign_head) < :binary.match(text, "*zz-ibuffer-b*")
+    assert :binary.match(text, "*zz-ibuffer-b*") < :binary.match(text, "UNGROUPED")
+    assert :binary.match(text, "UNGROUPED") < :binary.match(text, "*zz-ibuffer-c*")
     assert length(:binary.matches(text, "*zz-ibuffer-a*")) == 1
 
     # The headings are labels. The live key path skips them in both directions.
@@ -166,8 +169,8 @@ defmodule Compos.IbufferTest do
 
     narrowed = Buffer.text("*ibuffer*")
     refute narrowed =~ "in this group"
-    assert narrowed =~ "▾  #{foreign}"
-    refute narrowed =~ "ungrouped"
+    assert narrowed =~ "▾  #{foreign_head}"
+    refute narrowed =~ "UNGROUPED"
   end
 
   test "ibuffer sorts buffer rows by name instead of MRU" do
