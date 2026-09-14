@@ -73,6 +73,34 @@ defmodule Compos.Ui.TextDisplayTest do
     assert_receive {:display_work, ^name, %{prepared: 1}}
   end
 
+  test "line motion crosses a viewport boundary in both directions", %{conn: conn, name: name} do
+    text = Buffer.text(name)
+    {start, _} = :binary.match(text, "row 4001 λ")
+    {above, _} = :binary.match(text, "row 4000 λ")
+    Buffer.goto(name, start)
+    {:ok, view, html} = live(conn, "/")
+    fid = frame(html)
+    win = Editor.render_state(fid).tree.id
+    view |> element("#editor") |> render_hook("scroll", %{"win" => win, "lines" => 4000 - Editor.render_state(fid).tree.top})
+    v = Buffer.version(name)
+    view |> element("#editor") |> render_hook("edge_motion", %{
+      "win" => win, "point" => start, "v" => v, "dir" => -1, "count" => 1
+    })
+    assert Buffer.point(name) == above
+    assert has_element?(view, ".line", "row 4000 λ")
+    tree = Editor.render_state(fid).tree
+    assert tree.top == 3999 - div(tree.rows, 2)
+    view |> element("#editor") |> render_hook("edge_motion", %{
+      "win" => win, "point" => above, "v" => v, "dir" => 1, "count" => 1, "extend" => true
+    })
+    assert Buffer.point(name) == start
+    assert Buffer.mark(name) == above
+    view |> element("#editor") |> render_hook("edge_motion", %{
+      "win" => win, "point" => above, "v" => v - 1, "dir" => -1, "count" => 1
+    })
+    assert Buffer.point(name) == start
+  end
+
   test "typing preserves faces while fontification is pending, then corrects them", %{
     conn: conn,
     name: name

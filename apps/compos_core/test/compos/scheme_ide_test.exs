@@ -94,6 +94,7 @@ defmodule Compos.SchemeIdeTest do
     assert comp != nil
     labels = Enum.map(comp.candidates, & &1.label)
     assert "buffer-anchor" in labels
+    assert Enum.all?(comp.candidates, &List.keymember?(&1.facts, "Documentation", 0))
     point = Buffer.point(buf)
     press(["<down>"])
     assert Buffer.point(buf) == point

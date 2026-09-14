@@ -156,6 +156,22 @@
     "begin" "do" "quote" "quasiquote" "unquote" "set!"
     "else" "delay" "force" "apply" "error"))
 
+(define (scheme-ide--completion-row name kind doc)
+  (list name kind "symbol" '() ""
+        (if (and (string? doc) (not (equal? doc "")))
+            (list (list "Documentation" doc)) '())))
+
+(define (scheme-ide--syntax-doc name)
+  (cond
+    ((equal? name "define") "(define NAME VALUE)\n(define (NAME ARG ...) BODY ...)\n\nBind a value or define a named function.")
+    ((equal? name "lambda") "(lambda (ARG ...) BODY ...)\n\nCreate an anonymous function.")
+    ((equal? name "if") "(if TEST THEN ELSE)\n\nEvaluate THEN when TEST is true, otherwise ELSE.")
+    ((equal? name "let") "(let ((NAME VALUE) ...) BODY ...)\n\nEvaluate BODY with local bindings.")
+    ((equal? name "let*") "(let* ((NAME VALUE) ...) BODY ...)\n\nBind names in order; later values can use earlier bindings.")
+    ((equal? name "begin") "(begin EXPR ...)\n\nEvaluate expressions in order and return the last value.")
+    ((equal? name "set!") "(set! NAME VALUE)\n\nChange the value of an existing binding.")
+    (else #f)))
+
 (define (scheme-ide--complete prefix)
   (let ((syn (filter (lambda (s) (string-prefix? prefix s)) *scheme-ide-syntax*))
         (prims (filter (lambda (e) (string-prefix? prefix (car e)))
@@ -165,10 +181,14 @@
                      (catalog))))
     (let ((prim-names (map car prims)))
       (append
-        (map (lambda (s) (list s "syntax")) syn)
-        (map (lambda (e) (list (car e) "primitive"))
+        (map (lambda (s) (scheme-ide--completion-row s "syntax" (scheme-ide--syntax-doc s))) syn)
+        (map (lambda (e) (scheme-ide--completion-row (car e) "primitive" (cadr e)))
              (filter (lambda (e) (not (member (car e) syn))) prims))
-        (map (lambda (e) (list (catalog--get e 'name) (catalog--get e 'kind)))
+        (map (lambda (e)
+               (let ((sig (catalog--get e 'sig)) (doc (catalog--get e 'doc)))
+                 (scheme-ide--completion-row (catalog--get e 'name) (catalog--get e 'kind)
+                   (string-append (if (string? sig) (string-append sig "\n\n") "")
+                                  (if (string? doc) doc "")))))
              (filter (lambda (e) (not (member (catalog--get e 'name) prim-names)))
                      cat))))))
 

@@ -4406,6 +4406,17 @@
 ;; as it always did. EXTEND grows the region instead of clearing it.
 (define (visual-next-line! &optional extend)
   (or (visual-row-move! 1 extend) (next-line!)))
+
+;; The browser reached the edge of the rendered slice, not of the buffer.
+;; Cross that source-line boundary in the buffer; redisplay supplies the
+;; next slice, where native wrapped-line motion can continue.
+(define (visual-edge-move! dir extend count)
+  (visual--mark! extend)
+  (repeat-count count (if (< dir 0) previous-line! next-line!))
+  (recenter!))
+
+(public! 'visual-edge-move!
+  "(visual-edge-move! DIR EXTEND COUNT) — cross a rendered text slice boundary by source lines")
 (define (visual-previous-line! &optional extend)
   (or (visual-row-move! -1 extend) (previous-line!)))
 (define (visual-beginning-of-line! &optional extend)

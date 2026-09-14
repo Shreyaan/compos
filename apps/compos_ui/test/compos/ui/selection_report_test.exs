@@ -50,4 +50,50 @@ defmodule Compos.Ui.SelectionReportTest do
       File.rm(path)
     end
   end
+  test "native line motion crosses a slice edge but keeps wrapped rows native" do
+    src = File.read!(Path.expand("../../../lib/compos/ui/layouts.ex", __DIR__))
+    [_, rest] = String.split(src, "this.moveEditable = (buf, alter, dir, granularity, count) => {", parts: 2)
+    [body, _] = String.split(rest, "this.handleEvent(\"select\"", parts: 2)
+    script = """
+    const assert = require('node:assert/strict');
+    const first = {}, last = {};
+    let row = first, top = 100, byte = 20, next;
+    const node = {nodeType: 1, closest: () => row};
+    const sel = {focusNode: node, focusOffset: 0,
+      modify: () => {row=next.row;top=next.top;byte=next.byte;}};
+    globalThis.window = {getSelection: () => sel};
+    globalThis.document = {createRange: () => ({setStart(){},collapse(){},getBoundingClientRect:()=>({top})})};
+    const buf = {contains: () => true, classList: {contains: () => false},
+      dataset: {v:'7'}, querySelectorAll: () => [first,last]};
+    const domByte = () => byte;
+    const winIdOf = () => 1;
+    let events=[], selections=0;
+    const hook={pushEvent:(name,p)=>events.push([name,p]),sendSelection:()=>selections++};
+    (function(){this.moveEditable = (buf, alter, dir, granularity, count) => {#{body}}).call(hook);
+    next={row:first,top:100,byte:0};
+    hook.moveEditable(buf,'move','backward','line',1);
+    assert.equal(events[0][0],'edge_motion');
+    assert.equal(events[0][1].point,20);
+    assert.equal(events[0][1].dir,-1);
+    assert.equal(selections,0);
+    events=[];row=first;top=120;byte=40;next={row:first,top:100,byte:20};
+    hook.moveEditable(buf,'move','backward','line',1);
+    assert.equal(events.length,0,'wrapped row above remains a native move');
+    assert.equal(selections,1);
+    row=last;top=200;byte=90;next={row:last,top:200,byte:100};
+    hook.moveEditable(buf,'extend','forward','line',1);
+    assert.equal(events[0][1].dir,1);
+    assert.equal(events[0][1].point,90);
+    assert.equal(events[0][1].extend,true);
+    """
+    path = Path.join(System.tmp_dir!(), "compos-edge-#{System.unique_integer([:positive])}.js")
+    File.write!(path, script)
+    try do
+      {out, status} = System.cmd("node", [path], stderr_to_stdout: true)
+      assert status == 0, out
+    after
+      File.rm(path)
+    end
+  end
+
 end

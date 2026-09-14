@@ -3198,8 +3198,10 @@ defmodule Compos.Core.Editor do
     top =
       cond do
         leaf.manual -> top
-        cl < top -> cl
-        cl >= top + rows -> cl - rows + 1
+        cl < top or cl >= top + rows ->
+          # Crossing the viewport edge recenters point, leaving room to
+          # keep moving instead of pushing the window one line per key.
+          max(0, min(cl - div(rows, 2), max(total_lines - rows, 0)))
         true -> top
       end
 

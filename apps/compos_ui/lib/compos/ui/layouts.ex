@@ -468,7 +468,7 @@ defmodule Compos.Ui.Layouts do
           /* completion-at-point popup: inline card anchored under the prefix */
           .cap-pop {
             position: absolute; top: calc(100% + 3px); z-index: 15;
-            display: block; min-width: 240px; max-width: 380px;
+            display: block; min-width: 18em; max-width: 28em;
             background: var(--window-bg, #fdfcf8);
             border: 1px solid var(--default-fg, #1b1a17);
             box-shadow: 3px 3px 0 rgba(27, 26, 23, 0.18);
@@ -478,23 +478,40 @@ defmodule Compos.Ui.Layouts do
           .cap-title {
             display: flex; padding: 4px 10px 5px;
             border-bottom: 1px solid var(--border-bg, #e2dbc9);
-            font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase;
+            font-size: .75em; letter-spacing: 0.13em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a);
           }
           .cap-row {
             display: flex; align-items: baseline; gap: 10px; padding: 3px 10px;
-            border-left: 2px solid transparent; font-size: 12.5px;
+            border-left: 2px solid transparent; font-size: 1em;
           }
           .cap-row.selected {
             background: var(--select-bg, #e7e9f1);
             border-left-color: var(--accent-fg, #26356b);
           }
           .cap-row.selected .cap-label { color: var(--accent-fg, #26356b); font-weight: 600; }
-          .cap-label { white-space: nowrap; }
+          .cap-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .cap-kind {
-            margin-left: auto; font-size: 10px; letter-spacing: 0.1em;
+            margin-left: auto; font-size: .75em; letter-spacing: 0.1em;
             text-transform: uppercase; color: var(--dim-fg, #8a857a);
           }
+          .cap-doc {
+            position: fixed; inset: auto; margin: 0; z-index: 16;
+            width: 24em; max-height: 18em; overflow: auto;
+            padding: 12px 14px; box-sizing: border-box;
+            background: var(--window-bg, #fdfcf8);
+            color: var(--default-fg, #1b1a17);
+            border: 2px solid var(--accent-fg, #26356b);
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.22);
+            white-space: pre-wrap; overflow-wrap: anywhere;
+            font-size: .9em; line-height: 1.45;
+          }
+          .cap-doc-name {
+            display: block; font-weight: 700; margin: -12px -14px 12px; padding: 10px 14px;
+            background: var(--select-bg, #e7e9f1); color: var(--accent-fg, #26356b);
+            border-bottom: 1px solid var(--accent-fg, #26356b);
+          }
+          .cap-doc-body { display: block; }
           .cursor {
             background: var(--cursor-bg, #26356b);
             color: var(--window-bg, #fdfcf8);
@@ -2951,6 +2968,14 @@ defmodule Compos.Ui.Layouts do
                     this._motionAt = performance.now();
                     if (native) this._gestureAt = this._motionAt;
                   }
+                  if (native && onSurface && !onSurface.classList.contains("client-scroll") &&
+                      !e.metaKey && !e.altKey && !e.ctrlKey &&
+                      (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+                    e.preventDefault();
+                    this.moveEditable(onSurface, e.shiftKey ? "extend" : "move",
+                      e.key === "ArrowUp" ? "backward" : "forward", "line", 1);
+                    return;
+                  }
                   if (native) return;
                   const spec = keySpec(e);
                   if (spec === null) return;
@@ -3437,6 +3462,40 @@ defmodule Compos.Ui.Layouts do
                 };
                 // a motion command asks the browser's layout to move the
                 // selection; the answer is the selection, as bytes
+                this.moveEditable = (buf, alter, dir, granularity, count) => {
+                  const sel = window.getSelection();
+                  if (!sel || !buf.contains(sel.focusNode)) return;
+                  const n = Math.max(1, Math.min(parseInt(count, 10) || 1, 1000));
+                  const focusRow = () => {
+                    const el = sel.focusNode.nodeType === 1 ? sel.focusNode : sel.focusNode.parentElement;
+                    return el.closest(".line");
+                  };
+                  const caretTop = () => {
+                    const r = document.createRange();
+                    r.setStart(sel.focusNode, sel.focusOffset); r.collapse(true);
+                    return r.getBoundingClientRect().top;
+                  };
+                  for (let i = 0; i < n; i++) {
+                    const before = domByte(sel.focusNode, sel.focusOffset);
+                    const anchor = alter === "extend" ? domByte(sel.anchorNode, sel.anchorOffset) : null;
+                    const row = focusRow(), top = caretTop();
+                    sel.modify(alter, dir, granularity);
+                    const after = domByte(sel.focusNode, sel.focusOffset);
+                    const rows = buf.querySelectorAll(".line");
+                    const edge = dir === "backward" ? rows[0] : rows[rows.length - 1];
+                    if (granularity === "line" && !buf.classList.contains("client-scroll") &&
+                        row === edge && focusRow() === row &&
+                        (before === after || Math.abs(caretTop() - top) < 1)) {
+                      clearTimeout(this._selt);
+                      this._selPending = false; this._gestureAt = 0;
+                      this.pushEvent("edge_motion", {win: winIdOf(buf), point: before,
+                        v: parseInt(buf.dataset.v, 10), dir: dir === "backward" ? -1 : 1,
+                        extend: alter === "extend", mark: anchor, count: n - i});
+                      return;
+                    }
+                  }
+                  this.sendSelection(buf, true);
+                };
                 this.handleEvent("select", ({ alter, dir, granularity, count }) => {
                   const buf = document.querySelector(".window.active .buf[contenteditable]");
                   const sel = window.getSelection();
@@ -3447,11 +3506,9 @@ defmodule Compos.Ui.Layouts do
                   // and only the caret it ends on travels back. The daemon
                   // holds one pending request per frame, so N requests
                   // would collapse to one row.
-                  const n = Math.max(1, Math.min(parseInt(count, 10) || 1, 1000));
                   try {
-                    for (let i = 0; i < n; i++) sel.modify(alter, dir, granularity);
+                    this.moveEditable(buf, alter, dir, granularity, count);
                   } catch (_) { return; }
-                  this.sendSelection(buf, true);
                 });
 
                 this.handleEvent("clipboard", ({ text }) => {
@@ -4124,6 +4181,26 @@ defmodule Compos.Ui.Layouts do
                 const m = this.rowMetrics(line);
                 return (m && m.layout) || this.rowPx || 22;
               },
+              placeCompletionDocs() {
+                const doc = document.querySelector(".window.active .cap-doc");
+                if (!doc) return;
+                const popup = doc.closest(".cap-pop");
+                if (!popup) return;
+                if (!doc.matches(":popover-open")) doc.showPopover();
+                const zoom = this.zoomRatio();
+                doc.style.width = Math.min(440, window.innerWidth - 16) / zoom + "px";
+                const p = popup.getBoundingClientRect();
+                const right = window.innerWidth - p.right - 16;
+                const left = p.left - 16;
+                const beside = Math.max(right, left) >= 240;
+                if (beside) doc.style.width = Math.min(440, Math.max(right, left)) / zoom + "px";
+                const d = doc.getBoundingClientRect();
+                const x = beside ? (right >= left ? p.right + 8 : p.left - d.width - 8)
+                  : Math.max(8, Math.min(p.left, window.innerWidth - d.width - 8));
+                const y = beside ? p.top : p.bottom + 8;
+                doc.style.left = x / zoom + "px";
+                doc.style.top = Math.max(8, Math.min(y, window.innerHeight - d.height - 8)) / zoom + "px";
+              },
               afterPatch() {
                 // the patch stamp: selChangeH compares it with the gesture
                 // stamp to tell a reader's caret move from a patch's
@@ -4138,6 +4215,7 @@ defmodule Compos.Ui.Layouts do
                 this.syncKeyboardOwner();
                 this.syncEditable();
                 // re-measure after every patch: splits, buffer switches and
+                this.placeCompletionDocs();
                 // per-buffer styles all change how many rows fit where
                 clearTimeout(this._wrt);
                 this._wrt = setTimeout(() => Telem.time("win-rows", this.sendWinRows), 30);

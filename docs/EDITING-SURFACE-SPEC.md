@@ -287,3 +287,10 @@ This change does not replace the input or selection protocol. The editor
 still serializes commands and owns point. Snapshot text materialization and
 fold geometry can still involve the whole buffer; this bound applies to line
 preparation, face queries, and the line DOM, not every operation in redisplay.
+
+Native vertical motion stays within the rendered text until it reaches a
+slice boundary. At that boundary the client sends a versioned motion request;
+the buffer crosses the source-line boundary and recenters the cursor. Moving
+past the viewport edge places point halfway down the next screen, clamped at
+the beginning and end of the file. Wrapped rows inside the slice still use
+the browser's layout, and Shift-selection retains its anchor across the edge.

@@ -119,6 +119,25 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # Cross the DOM slice boundary against the versioned buffer, then recenter.
+  def handle_event("edge_motion", %{"win" => win, "point" => point, "v" => version,
+                                    "dir" => dir, "count" => count} = p, socket)
+      when is_integer(point) and point >= 0 and dir in [-1, 1] and
+             is_integer(count) and count > 0 and count <= 1000 do
+    Input.run(socket.assigns.frame, fn ->
+      buf = Compos.Core.Editor.current_buffer()
+      if safe_int(win) == Compos.Core.Editor.active_window() and
+           version == Compos.Core.Buffer.version(buf) do
+        Compos.Core.Buffer.goto(buf, point)
+        if p["extend"] == true and is_integer(p["mark"]) and p["mark"] >= 0 do
+          Compos.Core.Buffer.set_mark(buf, p["mark"])
+        end
+        Compos.Core.Session.call_named("visual-edge-move!", [dir, p["extend"] == true, count])
+      end
+    end)
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # what the browser measured: round trips, patches, paints, long tasks.
   # The rows go to the collector and nothing renders: this is a report,
   # not an edit.
@@ -2093,7 +2112,14 @@ defmodule Compos.Ui.EditorLive do
             ><c-text class="cap-title">completion-at-point · {@completion.total}</c-text><c-text
               :for={c <- @completion.candidates}
               class={"cap-row #{if c.selected, do: "selected"}"}
-            ><c-text class="cap-label">{c.label}</c-text><c-text class="cap-kind">{c.hint}</c-text></c-text></c-text><% end %></c-text>
+            ><c-text class="cap-label">{c.label}</c-text><c-text class="cap-kind">{c.hint}</c-text></c-text><c-text
+              :for={c <- @completion.candidates}
+              :if={c.selected}
+              class="cap-doc"
+              popover="manual"
+              role="note"
+              aria-label="Completion documentation"
+            ><c-text class="cap-doc-name">{c.label}</c-text><c-text class="cap-doc-body">{completion_doc(c)}</c-text></c-text></c-text><% end %></c-text>
         </c-line>
         </.dynamic_tag>
         <% end %>
@@ -4101,6 +4127,13 @@ defmodule Compos.Ui.EditorLive do
 
   # popup anchor column in ch units (monospace): graphemes from line start
   # to the completion region start
+  defp completion_doc(candidate) do
+    case List.keyfind(Map.get(candidate, :facts, []), "Documentation", 0) do
+      {_, doc} -> doc
+      nil -> "No documentation available."
+    end
+  end
+
   defp pop_col(text, line_start, comp_start) do
     len = comp_start |> max(line_start) |> min(byte_size(text))
     text |> binary_part(line_start, len - line_start) |> String.length()

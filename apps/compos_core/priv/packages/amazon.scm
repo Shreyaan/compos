@@ -486,28 +486,45 @@ a{color:var(--accent);text-decoration:none}
             (else (loop (cdr ts))))))))
 
 
-;;; Whether the add worked is not in the response text -- the asin echoes back
-;;; even on a sign-in page, and the cart page does not always name it. What
-;;; answers is the cart badge: read it before, read it in the reply, and the
-;;; add landed when the count moved. A sign-in title is its own answer.
+;;; Amazon no longer adds from a plain fetch. /gp/aws/cart/add.html answers the
+;;; cart page while adding nothing, and the detail page's own form 404s when it
+;;; is posted without the product page as referer -- a referer fetch cannot set.
+;;; So load the product page in a hidden iframe on the amazon tab and press the
+;;; real Add to cart button: same origin, same cookies, Amazon's own javascript.
+;;; Whether it landed is the cart badge and nothing else -- read it before, read
+;;; it after the click, and the add worked when the count moved. Anything else,
+;;; including a page titled Shopping Cart, is a failure. A sign-in page is its
+;;; own answer. The click needs seconds, not milliseconds; the caller polls.
 (define (amazon--cart-js asin)
   (string-append
    "(function(){window.__amzcart='pending';"
-   "var c0=document.querySelector('#nav-cart-count');"
-   "var before=c0?parseInt(c0.textContent.trim(),10):null;"
-   "fetch('/gp/aws/cart/add.html?ASIN.1=" asin "&Quantity.1=1',{credentials:'include'})"
-   ".then(function(r){return r.text().then(function(t){return {t:t,url:r.url||''}})})"
-   ".then(function(o){"
-   "var d=new DOMParser().parseFromString(o.t,'text/html');"
-   "var n=d.querySelector('#nav-cart-count');"
-   "var after=n?parseInt(n.textContent.trim(),10):null;"
-   "var title=(d.title||'').trim();"
-   "var signin=/sign ?in/i.test(title)||/\\/ap\\/signin/.test(o.url);"
-   "var cart=/cart/i.test(title);"
-   "var moved=(after!==null&&before!==null&&after>before);"
-   "window.__amzcart=JSON.stringify({added:(!signin&&(moved||(cart&&after!==null))),"
-   "signin:signin,before:before,after:after,title:title.slice(0,60)})})"
-   ".catch(function(e){window.__amzcart='err:'+e.message});return 'started'})()"))
+   "function cnt(d){var n=d&&d.querySelector('#nav-cart-count');"
+   "return n?parseInt(n.textContent.trim(),10):null}"
+   "function cart(){return fetch('/gp/cart/view.html',{credentials:'include'})"
+   ".then(function(r){return r.text()}).then(function(t){"
+   "return cnt(new DOMParser().parseFromString(t,'text/html'))})}"
+   "var fr=document.createElement('iframe');"
+   "fr.style.cssText='position:fixed;left:-9999px;top:0;width:1280px;height:1000px;opacity:0';"
+   "var before=null,step=0,done=false;"
+   "function say(o){if(done)return;done=true;o.before=before;"
+   "window.__amzcart=JSON.stringify(o);try{fr.remove()}catch(e){}}"
+   "setTimeout(function(){say({added:false,error:'timed out'})},40000);"
+   "cart().then(function(b){before=b;"
+   "fr.onload=function(){if(done||step++>0)return;try{var d=fr.contentDocument;"
+   "var title=(d.title||'');"
+   "if(/sign ?in/i.test(title)||/\\/ap\\/signin/.test(String(fr.contentWindow.location.href)))"
+   "{say({added:false,signin:true});return}"
+   "var btn=d.querySelector('#add-to-cart-button')"
+   "||d.querySelector('input[name=\"submit.add-to-cart\"]');"
+   "if(!btn){say({added:false,error:'no add-to-cart button',title:title.slice(0,60)});return}"
+   "btn.click();"
+   "setTimeout(function(){if(done)return;cart().then(function(a){"
+   "say({added:(a!==null&&before!==null&&a>before),after:a,"
+   "title:(fr.contentDocument?(fr.contentDocument.title||''):'').slice(0,60)})})},5000)"
+   "}catch(e){say({added:false,error:String(e.message)})}};"
+   "fr.src='/dp/" asin "';document.body.appendChild(fr)})"
+   ".catch(function(e){say({added:false,error:String(e.message)})});"
+   "return 'started'})()"))
 
 (define (amazon--cart-done! asin answer)
   (let* ((text (if (string? answer) answer ""))
@@ -528,8 +545,21 @@ a{color:var(--accent);text-decoration:none}
       (amazon-log! (string-append asin " not added -- signed out -- " text))
       (message (string-append "Sign in to " amazon-host " in your browser, then try again")))
      (else
-      (amazon-log! (string-append asin " failed -- " (if (string? answer) answer "no answer")))
-      (message (string-append "Could not add " (amazon-name-of asin) " -- see " *amazon-log*))))))
+      (amazon-log! (string-append asin " not added -- " (if (string? answer) answer "no answer")))
+      (message (string-append "The cart did not move -- " (amazon-name-of asin)
+                              " was not added. See " *amazon-log*))))))
+
+(define (amazon--cart-poll! tab asin tries)
+  (tab-eval tab "window.__amzcart"
+    (lambda (v)
+      (cond ((and (string? v) (not (equal? v "pending")) (not (equal? v "")))
+             (amazon--cart-done! asin v))
+            ((<= tries 0)
+             (amazon--cart-done! asin "{\"added\":false,\"error\":\"no answer\"}"))
+            (else
+             (debounce! 'amazon-cart 1200
+                        (lambda (_) (amazon--cart-poll! tab asin (- tries 1)))
+                        #f))))))
 
 (define (amazon-cart-add! asin)
   (message (string-append "Adding " (amazon-name-of asin) " to the cart..."))
@@ -540,10 +570,8 @@ a{color:var(--accent);text-decoration:none}
                 (message (string-append "No " amazon-host " tab is open -- open one and try again")))
          (begin
            (tab-eval tab (amazon--cart-js asin) (lambda (v) #f))
-           (debounce! 'amazon-cart 1800
-                      (lambda (_)
-                        (tab-eval tab "window.__amzcart"
-                                  (lambda (v) (amazon--cart-done! asin v))))
+           (debounce! 'amazon-cart 2500
+                      (lambda (_) (amazon--cart-poll! tab asin 40))
                       #f))))))
 
 (define (amazon-open-external! asin)
@@ -642,6 +670,31 @@ a{color:var(--accent);text-decoration:none}
           (list (amz-delivery-label (plist-get row 'delivery)) "dim")
           (list asin "dim"))))
 
+(define (amazon--columns buf)
+  (list (list "" 4) (list "product" 52) (list "₹" 10)
+        (list "with gst" 9) (list "rating" 7)
+        (list "delivery" 9) (list "asin" 12)))
+
+;;; A three-column app leaves the listing about 59 columns wide, which cuts the
+;;; price, delivery and asin off the right edge and packs the key hints down to
+;;; the first five. The narrow profile drops the columns that repeat on the
+;;; product page and shortens the hints so the ones worth pressing survive; ?
+;;; still shows every key.
+(define (amazon--narrow-columns buf)
+  (list (list "" 4) (list "product" 26) (list "₹" 9) (list "delivery" 9)))
+
+(define (amazon--narrow-cells buf row)
+  (let ((cs (amazon--cells buf row)))
+    (list (list-ref cs 0)
+          (amz-clip (plist-get row 'title) 26)
+          (list-ref cs 2)
+          (list-ref cs 5))))
+
+(define (amazon--narrow-footer buf)
+  (list (list "RET" "open") (list "c" "cart") (list "m" "save")
+        (list "N" "note") (list "n/p" "pg") (list "x" "hide")
+        (list "d" "sort") (list "o" "web") (list "q" "quit")))
+
 (define-list-mode! "amazon-mode"
   (list 'doc "Amazon Business search results, as the account sees them: the price is yours, excluding GST, with the retail price beside it. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, N writes a note on it, n and p walk to the next and previous page of results, x takes it out of the listing and X shows the hidden ones again marked ⊘, c adds it to the cart, o opens it in the real browser, w copies its link, s runs another search, g reads this page again, q quits."
         'buffer *amazon-buffer*
@@ -656,11 +709,17 @@ a{color:var(--accent);text-decoration:none}
                       (amz-sort-by-delivery rows)
                       rows)))
         'key (lambda (buf row) (plist-get row 'asin))
-        'columns (lambda (buf)
-                   (list (list "" 4) (list "product" 52) (list "₹" 10)
-                         (list "with gst" 9) (list "rating" 7)
-                         (list "delivery" 9) (list "asin" 12)))
+        'columns amazon--columns
         'cells amazon--cells
+        'layouts (list (list 'name 'narrow
+                             'max-cols 74
+                             'columns amazon--narrow-columns
+                             'cells amazon--narrow-cells
+                             'footer amazon--narrow-footer)
+                       (list 'name 'wide
+                             'default #t
+                             'columns amazon--columns
+                             'cells amazon--cells))
         'title (lambda (buf) (or (buffer-local buf 'amazon-query) "Amazon"))
         'meta (lambda (buf)
                 (string-append amazon-host " · business price, excluding GST"

@@ -44,6 +44,26 @@ defmodule Compos.Ui.IntentTest do
     assert Buffer.point(buf) == 3
   end
 
+  test "completion documentation follows selection without editing the buffer", %{conn: conn} do
+    buf = fresh_buffer("ab")
+    {:ok, view, _} = live(conn, "/")
+    Editor.completion_show(0, 0, [
+      ["alpha", "function", "symbol", [], "", [["Documentation", "(alpha X) — First help."]]],
+      ["beta", "function", "symbol", [], "", [["Documentation", "(beta Y) — Second help."]]]
+    ])
+    assert has_element?(view, ".cap-doc-name", "alpha")
+    assert has_element?(view, ".cap-doc-body", "First help.")
+    view |> element("#editor") |> render_hook("key", %{"k" => "<down>"})
+    assert has_element?(view, ".cap-doc-name", "beta")
+    assert has_element?(view, ".cap-doc-body", "Second help.")
+    refute has_element?(view, ".cap-doc-body", "First help.")
+    assert Buffer.text(buf) == "ab"
+    assert Buffer.point(buf) == 2
+    view |> element("#editor") |> render_hook("key", %{"k" => "RET"})
+    assert Buffer.text(buf) == "beta"
+    refute has_element?(view, ".cap-doc")
+  end
+
   test "a collapsed intent acts at point, whatever byte the client named", %{conn: conn} do
     buf = fresh_buffer("ab")
     Buffer.goto(buf, 1)
