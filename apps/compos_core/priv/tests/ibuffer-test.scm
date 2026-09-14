@@ -135,7 +135,9 @@
     (run-command "ibuffer-toggle-grouping")
     (check-equal! (ibuffer-grouping) 'directory "mode then directory")
     (run-command "ibuffer-toggle-grouping")
-    (check-equal! (ibuffer-grouping) 'group "directory then group")
+    (check-equal! (ibuffer-grouping) 'none "directory then none: a flat table is one of the choices")
+    (run-command "ibuffer-toggle-grouping")
+    (check-equal! (ibuffer-grouping) 'group "none then group, and round again")
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-folds-a-section-into-its-heading
