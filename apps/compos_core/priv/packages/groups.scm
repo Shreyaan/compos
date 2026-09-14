@@ -3211,10 +3211,6 @@
           ;; last, so the named default wins over what the workspace hands down
           (when (boundp (quote llm-default-bundle-apply!))
             (llm-default-bundle-apply! buf))
-          ;; a group's chats share one window: the chat pane. A new chat
-          ;; replaces the chat already there rather than take a pane of its own.
-          (let ((pane (window-showing-mode "chat-mode")))
-            (when pane (select-window! pane)))
           (switch-to-buffer-here! buf)
           (window-quit-restore-forget! (active-window))
           (end-of-buffer!)
@@ -3238,31 +3234,27 @@
             (dired-open dir))))))
 
 (define (group-chat-buffer-show! buf)
-  (let ((shown (window-showing buf))
-        ;; the group's chat pane: one window holds every chat, so a second
-        ;; chat takes the first one's place instead of a pane of its own.
-        (pane (window-showing-mode "chat-mode")))
-    (cond
-      (shown (select-window! shown))
-      (pane (select-window! pane) (switch-to-buffer-here! buf))
-      (else
-        ;; The chat joins the frame beside the panes already on it. A
-        ;; collapse to one window and a split in two is only right for a
-        ;; frame that shows one thing: a three-pane scene -- a mail index
-        ;; and its preview -- lost the preview every time its chat opened,
-        ;; and the group then had two buffers to tile instead of three.
-        ;;
-        ;; The frame's chosen layout is the frame's to keep: a C-x l pick
-        ;; survives a pane opening, so the chat arranges by that name and
-        ;; the width decides only for a frame that never chose.
-        (let ((panes (append (layout-target-visible-buffers) (list buf)))
-              (chosen (layout-target)))
-          (if chosen
-              (tile-windows! chosen panes)
-              (tile-adaptive-windows! panes)))
-        (let ((chat-window (window-showing buf)))
-          (when chat-window (select-window! chat-window)))
-        (switch-to-buffer! buf))))
+  (let ((w (window-showing buf)))
+    (if w
+        (select-window! w)
+        (begin
+          ;; The chat joins the frame beside the panes already on it. A
+          ;; collapse to one window and a split in two is only right for a
+          ;; frame that shows one thing: a three-pane scene -- a mail index
+          ;; and its preview -- lost the preview every time its chat opened,
+          ;; and the group then had two buffers to tile instead of three.
+          ;;
+          ;; The frame's chosen layout is the frame's to keep: a C-x l pick
+          ;; survives a pane opening, so the chat arranges by that name and
+          ;; the width decides only for a frame that never chose.
+          (let ((panes (append (layout-target-visible-buffers) (list buf)))
+                (chosen (layout-target)))
+            (if chosen
+                (tile-windows! chosen panes)
+                (tile-adaptive-windows! panes)))
+          (let ((chat-window (window-showing buf)))
+            (when chat-window (select-window! chat-window)))
+          (switch-to-buffer! buf))))
   (set-mode! "chat-mode")
   (end-of-buffer!)
   buf)

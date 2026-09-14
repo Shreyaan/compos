@@ -81,12 +81,25 @@
       (check-equal! (ibuffer-heading-members heading) '("*zz-ib-b*") "its member"))
     (let ((second (nth 1 (filter ibuffer-heading? (list-entries "*ibuffer*")))))
       (check-equal! (ibuffer-heading-count second) 2 "the zz-ib heading counts two")
-      (check-equal! (ibuffer-heading-details "*ibuffer*" second) "2"
-                    "and a heading with nothing unsaved says that one number")
+      (check-equal! (ibuffer-heading-details "*ibuffer*" second) "2 buffers"
+                    "and a heading counts in the view's own noun, never a bare digit")
       (check-equal! (ibuffer-heading-details "*ibuffer*"
                       (list "zz" "" "separator" "zz" 3 2 0 #f '()))
-                    "3 · 2 modified"
-                    "a heading says how many of its rows hold unsaved edits"))
+                    "3 buffers · 2 modified"
+                    "a heading says how many of its rows hold unsaved edits")
+      (check-equal! (ibuffer-section-label second) "ZZ-IB"
+                    "the name is set in a register no row uses")
+      (check-equal! (ibuffer-section-kind "*ibuffer*" second) "mode"
+                    "and it says what kind of section it is")
+      (check-equal! (ibuffer-section-label (list "*mail*" "" "separator" "group:g" 1 0 0 #f '()))
+                    "MAIL"
+                    "a group named after a buffer drops the stars")
+      (check-equal! (ibuffer-section-kind "*ibuffer*"
+                      (list "*mail*" "" "separator" "group:g" 1 0 0 #f '()))
+                    "buffer"
+                    "and says the word the stars stood for"))
+    (check-equal! (ibuffer-field-fill "") "—" "an empty field keeps its column")
+    (check-equal! (ibuffer-field-fill "2.4k") "2.4k" "a field with something to say says it")
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-sections-by-directory-put-no-file-last

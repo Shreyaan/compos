@@ -61,7 +61,7 @@
   'group 'windows 'type 'list)
 
 (defcustom '*display-buffer-fallback-action*
-  '(reuse-window mode-window pop-up-window use-some-window same-window)
+  '(reuse-window pop-up-window use-some-window same-window)
   "Display actions tried last for a buffer with no rule."
   'group 'windows 'type 'list)
 

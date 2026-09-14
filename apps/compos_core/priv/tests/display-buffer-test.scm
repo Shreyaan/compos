@@ -1,8 +1,7 @@
 ;;; display-buffer-test.scm --- where a buffer goes: the action chain.
 ;;;
 ;;; display-buffer tries the rule for the name, the base action, then the
-;;; fallback: reuse-window, mode-window, pop-up-window, use-some-window,
-;;; same-window.
+;;; fallback: reuse-window, pop-up-window, use-some-window, same-window.
 ;;; The thresholds decide a split; the tests set them, so the frame's
 ;;; size does not.
 
@@ -54,12 +53,12 @@
 (define (t--db-rect win) (assoc win (window-rects)))
 
 (deftest 'a-buffer-with-no-rule-takes-the-fallback-chain
-  "the chain is reuse, mode, pop-up, use-some, same; a rule's action goes first"
+  "the chain is reuse, pop-up, use-some, same; a rule's action goes first"
   (lambda ()
     (t--db-with t--db-wide
       (lambda ()
         (check-equal! (display-buffer-actions-for "*zz-db-none*")
-                      '(reuse-window mode-window pop-up-window use-some-window same-window)
+                      '(reuse-window pop-up-window use-some-window same-window)
                       "the fallback")
         (add-display-rule! "*zz-db-ruled*" 'same-window)
         (check-equal! (car (display-buffer-actions-for "*zz-db-ruled*")) 'same-window
@@ -73,27 +72,6 @@
                       "and the fallback after it")
         (check-equal! (car (display-buffer-actions-for "*zz-db-ruled*")) 'same-window
                       "a rule still comes before the base action")))))
-
-;; One window per mode: the second buffer of a mode takes the window the
-;; first one holds, instead of splitting a pane of its own for it.
-(deftest 'a-second-buffer-of-a-mode-takes-the-window-the-first-one-holds
-  "mode-window keeps a group to one window per mode"
-  (lambda ()
-    (t--db-with t--db-wide
-      (lambda ()
-        (buffer-create "*zz-db-a*")
-        (buffer-create "*zz-db-b*")
-        (with-current-buffer "*zz-db-a*" (lambda () (set-mode! "text-mode")))
-        (with-current-buffer "*zz-db-b*" (lambda () (set-mode! "text-mode")))
-        (let ((first (display-buffer "*zz-db-a*")))
-          (check-equal! (window-mode first) "text-mode" "the mode came with it")
-          (check-equal! (display-buffer "*zz-db-b*") first
-                        "the same mode took the same window")
-          (check-equal! (window-buffer first) "*zz-db-b*" "and replaced it there")
-          (buffer-create "*zz-db-c*")
-          (with-current-buffer "*zz-db-c*" (lambda () (set-mode! "fundamental-mode")))
-          (check-false! (equal? (display-buffer "*zz-db-c*") first)
-                        "another mode does not take that window"))))))
 
 (deftest 'pop-up-window-splits-beside-and-selects-nothing
   "one wide window: the buffer takes a new window beside it; point stays"
@@ -182,7 +160,7 @@
             (check-equal! (length (window-list)) 2 "capacity is respected")
             (check-equal! (current-buffer) home "replacement preserves focus"))
           (layout-target-set! #f)
-          (check-equal! (caddr (display-buffer-actions-for "*zz-db-b*")) 'pop-up-window
+          (check-equal! (cadr (display-buffer-actions-for "*zz-db-b*")) 'pop-up-window
                         "free restores sensible splitting"))))))
 
 (deftest 'same-window-is-the-last-resort-and-inhibit-keeps-it-out
