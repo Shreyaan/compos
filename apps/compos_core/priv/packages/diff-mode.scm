@@ -230,7 +230,6 @@
          (key (diff--key section name))
          (override (assoc key overrides)))
     (list 'key key 'section section 'file name
-          'selection-active (not (equal? (buffer-local buf 'diff-selection) 'none))
           'status (if override (cadr override) (diff--file-status f))
           'start start 'end end 'f f
           'hunks (diff--layout-hunks buf section name
@@ -855,10 +854,8 @@
           (else (loop (cdr ls) (car ls))))))
 
 (define (diff--select-point! buf)
-  (if (equal? (buffer-local buf 'diff-selection) 'none)
-      (begin
-        (buffer-set-local! buf 'diff-selection 'point)
-        (diff--reblock! buf))))
+  (buffer-set-local! buf 'diff-selection 'point)
+  (diff--reblock! buf))
 
 (define-command "diff-clear-selection" "Clear the selected diff scope; ? will explain the whole diff"
   (lambda ()
