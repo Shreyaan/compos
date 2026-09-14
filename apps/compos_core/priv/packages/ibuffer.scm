@@ -597,7 +597,7 @@
 ;; first when the window is too narrow for every field.
 (define (ibuffer-row-line-name buf row)
   (if (ibuffer-heading? row)
-      (ibuffer-heading-text buf row)
+      (ibuffer-heading-plain buf row)
       (ibuffer-row-title row)))
 
 ;; The width the names ask for. A window with room to spare shows every
@@ -765,16 +765,27 @@
 ;; The name cell holds the whole heading: what the section is on the
 ;; left, what it holds on the right, and the space between them is the
 ;; rule. A tally hard against the name reads as a suffix of it.
+(define (ibuffer-heading-plain buf row)
+  (string-append (ibuffer-heading-name buf row) "  "
+                 (ibuffer-heading-details buf row)))
+
+;; The name cell holds the whole heading: what the section is on the
+;; left, what it holds on the right, and the space between them is the
+;; rule. A tally hard against the name reads as a suffix of it. The
+;; width the column settled on decides the gap, so only the drawn cell
+;; asks for it: the fitting pass reads the plain form, and a heading
+;; that asked the column how wide it is while the column was asking the
+;; heading how wide it is never came back.
 (define (ibuffer-heading-text buf row)
-  (let* ((name (ibuffer-heading-name buf row))
+  (let* ((plain (ibuffer-heading-plain buf row))
+         (name (ibuffer-heading-name buf row))
          (tally (ibuffer-heading-details buf row))
          (cols (list-columns buf))
          (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
          (room (and width (- width (string-length tally) 2))))
-    (string-append (if (and room (> room (string-length name)))
-                       (string-pad-right name room)
-                       (string-append name "  "))
-                   tally)))
+    (if (and room (> room (string-length name)))
+        (string-append (string-pad-right name room) tally)
+        plain)))
 
 (define (ibuffer-heading-head buf row)
   (list ""
