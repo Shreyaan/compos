@@ -798,8 +798,8 @@ a{color:var(--accent);text-decoration:none}
   (lambda (buf) (string-append "*" (or (buffer-local buf 'amazon-title) "amazon") "*")))
 
 ;; the listing and every page it opens wear the Amazon mark
-(mode-icon! "amazon-mode" "")
-(mode-icon! "amazon-detail-mode" "")
+(mode-icon! "amazon-mode" "")
+(mode-icon! "amazon-detail-mode" "")
 
 
 ;;; --- the layout ----------------------------------------------------------

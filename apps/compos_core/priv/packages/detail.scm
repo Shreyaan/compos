@@ -152,9 +152,10 @@
 (define (detail-kept-name buf)
   (let* ((mode (buffer-local buf 'mode-name))
          (hit (assoc mode *detail-names*))
-         (named (and hit ((cadr hit) buf))))
-    (detail--free-name
-      (if (and (string? named) (not (equal? named ""))) named buf))))
+         (named (and hit ((cadr hit) buf)))
+         (want (if (and (string? named) (not (equal? named ""))) named buf)))
+    ;; a page already under its own name keeps it; only a clash takes a number
+    (if (equal? want buf) buf (detail--free-name want))))
 
 ;; keep the detail in this window: it takes its own name, and the next row
 ;; opens a new one. It is nobody's child from here, and the walk keeps it.
@@ -165,7 +166,8 @@
       ((not owner) (message "This buffer is not a list's detail") #f)
       ((buffer-local buf 'detail-kept) (message "This detail is already kept") #f)
       (else
-        (let ((new (rename-buffer! buf (detail-kept-name buf))))
+        (let* ((want (detail-kept-name buf))
+               (new (if (equal? want buf) buf (rename-buffer! buf want))))
           (cond
             ((not new) (message "That name is taken") #f)
             (else
