@@ -7469,12 +7469,16 @@
 ;;;
 ;;;   the rule for NAME in *display-buffer-alist*
 ;;;   *display-buffer-base-action*       the user's, empty by default
-;;;   *display-buffer-fallback-action*   reuse-window pop-up-window
-;;;                                      use-some-window same-window
+;;;   *display-buffer-fallback-action*   reuse-window mode-window
+;;;                                      pop-up-window use-some-window
+;;;                                      same-window
 ;;;
 ;;; The actions, each a function of NAME and ALIST on *display-buffer-actions*:
 ;;;
 ;;;   reuse-window     a window that shows NAME already
+;;;   mode-window      a work window whose buffer has NAME's major mode: a
+;;;                    group keeps one window per mode, so every chat lands
+;;;                    in the chat pane
 ;;;   pop-up-window    split the largest work window when it is big
 ;;;                    enough (split-window-sensibly), else the selected one
 ;;;   use-some-window  another work window; the popup and a peek are not one
@@ -7498,7 +7502,7 @@
 (define window-min-width 10)
 (define *display-buffer-base-action* '())
 (define *display-buffer-fallback-action*
-  '(reuse-window pop-up-window use-some-window same-window))
+  '(reuse-window mode-window pop-up-window use-some-window same-window))
 (define *display-buffer-actions* '())
 
 (define (define-display-action! name fn)
@@ -7831,6 +7835,31 @@
     (if (plist-get alist 'inhibit-same-window)
         (window-showing-other name (active-window))
         (window-showing name))))
+
+;; One window per mode. A group keeps its chats in one window -- the chat
+;; pane -- its dired listings in one window, and a list's detail beside the
+;; list when the two share a mode. Nothing is remembered: the mode of what a
+;; window already holds is the memory, so it lapses of its own accord the
+;; moment that window shows something else.
+(define (window-mode win)
+  (let ((buf (window-buffer win)))
+    (and (string? buf) (buffer-local buf 'mode-name))))
+
+(define (window-showing-mode mode &optional except)
+  (and (string? mode)
+       (let loop ((ws (display--work-windows)))
+         (cond ((null? ws) #f)
+               ((and (not (equal? (car ws) except))
+                     (equal? (window-mode (car ws)) mode))
+                (car ws))
+               (else (loop (cdr ws)))))))
+
+(define-display-action! 'mode-window
+  (lambda (name alist)
+    (let ((win (window-showing-mode
+                 (buffer-local name 'mode-name)
+                 (and (plist-get alist 'inhibit-same-window) (active-window)))))
+      (and win (display-buffer-in-window! win name)))))
 
 (define-display-action! 'pop-up-window
   (lambda (name alist)
@@ -14184,6 +14213,10 @@
   "(layout-target-set! NAME) — keep NAME as the target algorithm as panes open or close; #f frees the frame")
 (public! 'define-display-action!
   "(define-display-action! NAME FN) — register a display action; FN takes NAME and ALIST and returns a window or #f")
+(public! 'window-mode
+  "(window-mode WIN) — the major mode of the buffer WIN shows, or #f")
+(public! 'window-showing-mode
+  "(window-showing-mode MODE [EXCEPT]) — the work window whose buffer is in MODE, or #f; a group keeps one window per mode")
 (public! 'split-window-sensibly
   "(split-window-sensibly WIN) — split WIN below when it is tall enough, beside when wide enough; the new window or #f")
 (public! 'window-quit-restore!
