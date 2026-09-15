@@ -478,6 +478,31 @@
           (message "this is the input marker")
           (unless (delete-active-region!) (delete-char! 1))))))
 
+(effects! '(write display))
+
+;; Scrolled up in a long chat, a window keeps its own scroll pin and stops
+;; following point. Back to the newest message means both halves: point home
+;; in the input, and every window showing this chat off its pin again.
+(define (chat-to-bottom-target)
+  (let ((buf (current-buffer)))
+    (if (chat-buffer? buf)
+        buf
+        (let loop ((ws (window-list)))
+          (cond ((null? ws) #f)
+                ((chat-buffer? (cadr (car ws))) (cadr (car ws)))
+                (else (loop (cdr ws))))))))
+
+(define-command "chat-to-bottom" "Scroll this chat to the newest message"
+  (lambda ()
+    (let ((buf (chat-to-bottom-target)))
+      (if (not buf)
+          (message "no chat here")
+          (begin
+            (with-current-buffer buf (lambda () (end-of-buffer!)))
+            (buffer-windows-follow-point! buf))))))
+
+(effects! '(write))
+
 ;; the chat keeps point in its input around every command
 (define (chat-input-post-command!)
   (chat-snap-to-input!))
