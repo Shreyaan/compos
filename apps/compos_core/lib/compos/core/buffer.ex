@@ -294,6 +294,47 @@ defmodule Compos.Core.Buffer do
   """
   def set_locals(name, %{} = locals), do: GenServer.call(via(name), {:set_locals, locals})
 
+  @doc "Read selected metadata for many buffers in one call. Dormant buffers stay asleep."
+  def read_many(names, fields, keys) do
+    Enum.map(names, fn name ->
+      values =
+        case BufferView.project(name, fields, keys) do
+          {:ok, values} ->
+            values
+
+          :error ->
+            read_many_fallback(name, fields, keys)
+        end
+
+      [name | Enum.map(values, &(&1 || false))]
+    end)
+  end
+
+  defp read_many_fallback(name, fields, keys) do
+    if exists?(name) do
+      try do
+        GenServer.call(via(name), {:read_metadata, fields, keys})
+      catch
+        :exit, _ -> read_catalog_metadata(name, fields, keys)
+      end
+    else
+      read_catalog_metadata(name, fields, keys)
+    end
+  end
+
+  defp read_catalog_metadata(name, fields, keys) do
+    meta = BufferStore.lookup(name) || %{}
+    indexed = Map.get(meta, :locals, %{})
+    known_keys = Map.get(meta, :local_keys, [])
+    # Load at most one checkpoint if a requested local is too large to index.
+    locals =
+      if Enum.any?(keys, &(&1 in known_keys and not Map.has_key?(indexed, &1))),
+        do: locals(name),
+        else: indexed
+
+    Enum.map(fields, &Map.get(meta, &1)) ++ Enum.map(keys, &Map.get(locals, &1))
+  end
+
   def get_local(name, key) do
     case BufferView.local(name, key) do
       {:ok, value} -> value
@@ -1273,6 +1314,12 @@ defmodule Compos.Core.Buffer do
     do: {:reply, Map.get(state.locals, key), state}
 
   defp on_call(:locals, _from, state), do: {:reply, state.locals, state}
+
+  defp on_call({:read_metadata, fields, keys}, _from, state) do
+    view = view(state)
+    values = Enum.map(fields, &Map.get(view, &1)) ++ Enum.map(keys, &Map.get(state.locals, &1))
+    {:reply, values, state}
+  end
 
   # An overlay change repaints the views that show the buffer, the way a
   # local does. A mode that paints from the reactor (morg, markdown) sets

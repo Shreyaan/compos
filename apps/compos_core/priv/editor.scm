@@ -493,7 +493,8 @@
         (let* ((opts (list-mode-opts (list-mode-of buf)))
                (layouts (or (plist-get opts 'layouts) '()))
                (profile (list-select-layout buf layouts width)))
-          (buffer-set-local! buf 'list-layout-cache (list width profile))
+          (when (buffer-exists? buf)
+            (buffer-set-local! buf 'list-layout-cache (list width profile)))
           profile))))
 
 (define (list-opt buf key)
@@ -1081,7 +1082,9 @@
 ;; window, and one nobody has measured gets the default. The last column
 ;; keeps one character clear of the edge, so nothing wraps.
 (define (list-view-width buf)
-  (max 40 (- (buffer-cols buf) 1)))
+  ;; A dormant list's saved text and semantic ranges share its last width.
+  (or (and (not (buffer-exists? buf)) (buffer-local buf 'list-width))
+      (max 40 (- (buffer-cols buf) 1))))
 
 ;; the column that declares no width takes whatever the others leave, so
 ;; the table fills the window instead of stopping short of it
@@ -1341,7 +1344,18 @@
 (define (list-key-lines buf)
   (let* ((f (list-opt buf 'footer))
          (keys (if f (f buf) '())))
-    (if (null? keys) '() (list (list-key-bar buf keys)))))
+    (cond ((or (null? keys) (list-opt buf 'keymap-component)) '())
+          ((list-opt buf 'wrap-key-hints)
+           (let ((width (list-view-width buf)))
+             (let loop ((rest keys) (line '()) (out '()))
+               (if (null? rest)
+                   (reverse (if (null? line) out (cons (list-key-bar-text (reverse line)) out)))
+                   (let ((next (cons (car rest) line)))
+                     (if (or (null? line)
+                             (<= (string-length (car (list-key-bar-text (reverse next)))) width))
+                         (loop (cdr rest) next out)
+                         (loop rest '() (cons (list-key-bar-text (reverse line)) out))))))))
+          (else (list (list-key-bar buf keys))))))
 
 (define (list-table-head buf)
   (let* ((cols (list-columns buf))
@@ -1468,7 +1482,11 @@
                                                 (list (list 0 (string-byte-length mark) "alert")))
                                             (list-shift-spans (car (cdr laid)) n)))
                               out))))))
-        (list (list (string-append mark ((list-ctx-render ctx) buf e)) '())))))
+        (let ((template (list-text-template buf)))
+          (list (list (string-append mark
+            (if template
+                (car (list-format-template (template buf e) (list-pretty? buf)))
+                ((list-ctx-render ctx) buf e))) '()))))))
 
 ;; the whole view, top to bottom
 ;; the view: the header, then the rows. The key bar is in the header,
@@ -1862,23 +1880,23 @@
 ;; The key belongs to the list whenever a list stands behind the prompt.
 ;; At the first section, backwards does nothing — it must not fall
 ;; through to the history and type a past answer into the filter.
+(define (list-move-section! buf step)
+  (let* ((i (list-clamped-index buf))
+         (from (if (and i (< step 0)) (or (list-section-here buf i) i) i))
+         (head (and from (list-section-index buf from step))))
+    (when head
+      (let* ((entries (list-entries buf))
+             (target (if (list-selectable? buf (nth head entries))
+                         head
+                         (list-step-selectable-index buf head 1))))
+        (list-ensure-shown! buf target)
+        (list-goto-index! buf target)
+        (list-preview! buf)))
+    #t))
+
 (define (mb-list-section! step)
   (let ((buf (mb-list-target)))
-    (and buf
-         (let* ((i (list-clamped-index buf))
-                (from (if (and i (< step 0)) (or (list-section-here buf i) i) i))
-                (head (and from (list-section-index buf from step))))
-           (when head
-             (let* ((entries (list-entries buf))
-                    (target (if (list-selectable? buf (nth head entries))
-                                head
-                                (list-step-selectable-index buf head 1))))
-               (with-invoking-buffer
-                 (lambda ()
-                   (list-ensure-shown! buf target)
-                   (list-goto-index! buf target)
-                   (list-preview! buf)))))
-           #t))))
+    (and buf (with-invoking-buffer (lambda () (list-move-section! buf step))))))
 
 ;; The narrowing is live, and the input IS it. The prompt opens holding
 ;; the query the list already has, so `/` edits the narrowing instead of
@@ -2083,22 +2101,69 @@
               (loop (cdr ranges) (cdr descs)
                 (if (> (cadr r) 0) (cons (list a (+ a (cadr r)) (car descs)) out) out)))))))))
 
+;; Template layout and semantic columns are shared by all list modes.
+(define-style! 'list-template "
+.semantic-direct.line {
+  display: grid; grid-template-columns: none; grid-auto-columns: 1ch;
+  column-gap: 0; align-items: baseline; white-space: nowrap;
+}
+.semantic-direct > [data-col] {
+  grid-row: 1; grid-column: var(--field-column) / span var(--field-width);
+  min-width: 0; white-space: pre; overflow: hidden;
+}
+")
+
+(public! 'list-format-template
+  "(list-format-template FIELDS PRETTY?) — format (TEXT CLASS WIDTH TRIM PREFIX) fields as text and relative UTF-8 ranges; WIDTH #f leaves text natural")
+(define (list-format-template fields pretty?)
+  (let loop ((rest fields) (at 0) (texts '()) (ranges '()))
+    (if (null? rest) (list (string-join (reverse texts) "") (reverse ranges))
+        (let* ((f (car rest)) (width (nth 2 f))
+               (text (string-append (or (nth 4 f) "")
+                       (if (and pretty? width)
+                           (string-pad-right (list-fit (car f) width (or (nth 3 f) 'end)) width)
+                           (car f))))
+               (end (+ at (string-byte-length text))))
+          (loop (cdr rest) end (cons text texts)
+            (if (= at end) ranges
+                (cons (list at end (list 'tag "span" 'class (cadr f))) ranges)))))))
+
+(define (list-text-template buf)
+  (let ((prepare (list-opt buf 'prepare-template)))
+    (if prepare (prepare buf) (list-opt buf 'text-template))))
+
+(define (list-pretty? buf)
+  (let ((option (list-opt buf 'pretty)))
+    (if (procedure? option) (option buf) option)))
+
+(define (list-relative-fields buf row start ctx block)
+  (let ((fields (plist-get block 'relative-fields)))
+    (if (not fields) '()
+        (let* ((prefix (if (list-ctx-marks? ctx)
+                           (string-byte-length (list-mark-of buf row ctx)) 0))
+               (base (+ start prefix)))
+          (append
+            (if (> prefix 0)
+                (list (list start base (list 'tag "span" 'class "list-mark"))) '())
+            (map (lambda (field)
+                   (list (+ base (car field)) (+ base (cadr field)) (nth 2 field))) fields))))))
+
 ;; Semantic text records keep the existing text, faces and line geometry.
-(define (list-composml-text! buf rows &optional prepared)
+(define (list-composml-text! buf rows &optional prepared destination)
   (let ((record (or (list-opt buf 'composml-record)
                     (lambda (b row) (list 'tag "c-item"))))
         (root (or (list-opt buf 'composml-root)
                   (lambda (b) (list 'tag "c-list" 'attrs
                     (list (list "mode" (list-mode-of b))))))))
     (unless (list-opt buf 'composml)
-      (desktop-skip! buf 'render-text-root)
-      (desktop-skip! buf 'render-records)
+      (desktop-skip! (or destination buf) 'render-text-root)
+      (desktop-skip! (or destination buf) 'render-records)
       ;; the draw's own context and field fn, read once: a row that asked
       ;; for them itself cost this pass twice its time (docs/LISTS.md).
       (let* ((ctx (list-row-ctx buf))
              (fields (list-opt buf 'composml-fields))
              (key-of (list-ctx-key ctx)))
-        (list-set-locals! buf
+        (list-set-locals! (or destination buf)
           (list 'render-text-root (root buf)
                 'render-records
                 (let loop ((rs rows) (offsets (list-offsets buf)) (ps prepared) (out '()))
@@ -2106,25 +2171,30 @@
                     (let* ((row (car rs)) (start (car offsets))
                            (size (fold (lambda (n ln) (+ n (string-byte-length (car ln)) 1))
                                        0 (if (pair? ps) (cadr (car ps)) (list-row-lines buf row ctx))))
-                           (block (record buf row)))
+                           (block (append
+                                    (if (and (pair? ps) (> (length (car ps)) 3))
+                                        (list 'relative-fields (nth 3 (car ps))
+                                              'layout (if (nth 4 (car ps)) "columns" #f)) '())
+                                    (record buf row))))
                       (loop (cdr rs) (cdr offsets) (and (pair? ps) (cdr ps))
                         (cons (list start (+ start size)
                                 (append (list 'fields (if fields (list-composml-fields buf row start ctx fields
                                                                 (and (pair? ps) (car (car ps)))
-                                                                (and (pair? ps) (nth 2 (car ps)))) '())
+                                                                (and (pair? ps) (nth 2 (car ps))))
+                                                (list-relative-fields buf row start ctx block))
                                               'attrs (append
                                 (list (list "record-id" (let ((key (if key-of (key-of buf row) row)))
                                   (if (string? key) key (value->string key)))))
                                 (or (plist-get block 'attrs) '()))) block)) out)))))))))))
 
-(define (list-composml! buf rows head)
+(define (list-composml! buf rows head &optional destination)
   (let ((render (list-opt buf 'composml))
         (collection (list-opt buf 'collection)))
     (when (and render collection)
-      (desktop-skip! buf 'render-blocks)
-      (desktop-skip! buf 'render-root)
+      (desktop-skip! (or destination buf) 'render-blocks)
+      (desktop-skip! (or destination buf) 'render-root)
       (let ((per (list-row-height buf)) (first (length head)))
-        (list-set-locals! buf
+        (list-set-locals! (or destination buf)
           (list 'render-mode "blocks"
                 'render-root (let ((root (list-opt buf 'composml-root)))
                                (if root (root buf) (list 'tag "c-buffer")))
@@ -2184,16 +2254,25 @@
                                (not (equal? q (cadr previous)))))
                       (equal? ctx (caddr previous))))
          (old (if reuse? (nth 3 previous) '()))
+         (template (list-text-template buf))
+         (pretty? (and template (list-pretty? buf)))
          (ks (let ((cl (list-ctx-column-lines ctx))) (and (pair? cl) (car cl))))
          (prepared
            (map (lambda (row)
                   (let ((hit (assoc row old)))
-                    (if hit (cadr hit)
+                    (if (and hit (not template)) (cadr hit)
+                        (if template
+                            (let* ((spec (template buf row))
+                                   (formatted (list-format-template spec pretty?))
+                                   (mark (if (list-ctx-marks? ctx) (list-mark-of buf row ctx) "")))
+                              (list '() (list (list (string-append mark (car formatted)) '()))
+                                    #f (cadr formatted)
+                                    #t))
                         ;; one layout per row, kept: the lines and the
                         ;; composml field ranges are two readings of it
                         (let* ((cells (list-row-cells buf row ctx))
                                (laid (and ks (list-lay-out (car cells) ks #t))))
-                          (list cells (list-row-lines buf row ctx cells laid) laid)))))
+                          (list cells (list-row-lines buf row ctx cells laid) laid))))))
                 rows)))
     (when cache?
       (set! *list-filter-row-cache*
@@ -2280,7 +2359,13 @@
           ;; clear and then a set
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
           (list-composml! buf shown head)
-          (list-composml-text! buf shown prepared)))
+          (list-composml-text! buf shown prepared)
+          (when (list-opt buf 'keymap-component)
+            (desktop-skip! buf 'footer-line-blocks)
+            (let* ((footer (list-opt buf 'footer))
+                   (blocks (and footer (list (component 'ui/keymap (list 'keys (footer buf)))))))
+              (unless (equal? blocks (buffer-local buf 'footer-line-blocks))
+                (buffer-set-local! buf 'footer-line-blocks blocks))))))
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
             (last (- (list-shown-count buf) 1)))
         ;; Restore the buffer's point without moving every window that
@@ -3739,6 +3824,15 @@
 ;; asks derived-mode? instead of comparing one string and missing every child.
 (define *mode-parents* '())
 
+;; A mode declares dismissal independently of its parent or q command.
+(defvar '*dismissible-modes* '())
+
+(define (mode-dismissible! mode)
+  (unless (member mode *dismissible-modes*)
+    (set! *dismissible-modes* (cons mode *dismissible-modes*))))
+
+(public! 'mode-dismissible! "(mode-dismissible! MODE) — declare that MODE and its derived modes support dismissal; dismiss-mode supplies child-first q and window chrome")
+
 (define (mode-parent! name parent)
   (set! *mode-parents*
     (cons (list name parent)
@@ -3888,7 +3982,7 @@
       (clear-local-map! buf)
       ;; Semantic projections belong to the old mode; the new setup rebuilds them.
       (for-each (lambda (key) (buffer-set-local! buf key #f))
-                '(render-root render-text-root render-records)))
+                '(render-root render-text-root render-records footer-line-blocks)))
     (define-keymap! (mode-keymap name))
     (use-local-map! buf (mode-keymap name))
     (buffer-set-local! buf 'mode-name name)
@@ -8704,6 +8798,12 @@
                    (when quit (window-quit-restore-note! win (cadr quit) (caddr quit)))))
                 (record (set-window-prev-buffers! win (cons (car record) (cadr record))))
                 (else (set-window-prev-buffers! win '())))
+          ;; Rebuilt panes cannot inherit a foreign group's stack or return.
+          (set-window-prev-buffers! win (window-eligible-history win))
+          (let ((quit (window-quit-restore win)))
+            (when (and quit (equal? (cadr quit) 'other)
+                       (not (window-history-member? win (caddr quit))))
+              (window-quit-restore-forget! win)))
           (loop (cdr rows) (if record (layout--drop-record record remaining) remaining)))))))
 
 ;; The engine runs one arrangement at a time. switch-to-buffer! wakes a dormant
@@ -8821,6 +8921,15 @@
 (define window-fill-source (lambda () (buffer-list-mru)))
 (define window-fill-primary? (lambda (buffer) #t))
 (define window-fill-member? (lambda (buffer) #t))
+
+;; History permits utility covers, but never another group's content.
+;; groups.scm supplies ownership policy separately from layout fill policy.
+(define window-history-member? (lambda (win buffer) #t))
+(define (window-eligible-history win)
+  (filter (lambda (b)
+            (and (buffer-known? b) (not (equal? b (window-buffer win)))
+                 (window-history-member? win b)))
+          (window-prev-buffers win)))
 
 (define (window-fill-buffers)
   (filter fill-candidate? (window-fill-source)))
@@ -9141,8 +9250,7 @@
 
 (define (window-unwind-or-close! win)
   (let* ((cur (window-buffer win))
-         (history (filter (lambda (b) (and (buffer-exists? b) (not (equal? b cur))))
-                          (window-prev-buffers win)))
+         (history (window-eligible-history win))
          (record (window-quit-restore win)))
     (cond ((and record (equal? (cadr record) 'window) (other-window-id win))
            (window-quit-restore-forget! win)
@@ -12048,6 +12156,18 @@
 .dseg-gap { flex: 1 1 auto; }
 .dseg-stack { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
 .dseg-wide { flex: 1 1 0; min-width: 0; }
+/* Chat title owns the first row. Metadata wraps independently in each pane. */
+.dash-persistent:has(.dseg-chat-title) { flex-wrap: wrap; gap: 8px 16px; }
+.dash-persistent .dseg-chat-title { flex: 1 0 100%; min-width: 0; }
+.dash-persistent .dseg-chat-title + .dseg-rule { display: none; }
+.dash-persistent .dseg-chat-title .dseg-v {
+  display: block; font-size: 18px; font-weight: 700; line-height: 1.3;
+  color: var(--default-fg, #1b1a17); white-space: normal; overflow: visible;
+  overflow-wrap: anywhere; -webkit-line-clamp: unset; }
+.dash-persistent:has(.dseg-chat-title) .dseg-rule { display: none; }
+.dash-persistent:has(.dseg-chat-title) .dseg { max-width: 100%; }
+.dash-persistent:has(.dseg-chat-title) .dseg-v { white-space: normal; overflow-wrap: anywhere; }
+
 .dseg-wide .dseg-v { white-space: normal; overflow: hidden; text-overflow: ellipsis;
                      display: -webkit-box; -webkit-box-orient: vertical;
                      -webkit-line-clamp: 2; }
@@ -12501,12 +12621,9 @@
 (define (mode-headline mode)
   (let ((e (assoc mode *mode-headlines*))) (and e (cadr e))))
 
-;; A chat in a narrow pane keeps what it is and what is behind it. Its
-;; group is already the colour of the headline's own border and its title
-;; is already the modeline name, so neither needs the room; the model and
-;; the lane have nowhere else to appear, because the chat modeline gave
-;; them up.
-(define-mode-headline! "chat-mode" '(mode llm))
+;; Chat identity is visible at every width. CSS wraps metadata beneath
+;; the title per pane; a buffer-wide cache must not choose a pane's width.
+(define-mode-headline! "chat-mode" #f)
 
 ;; The minor modes first, then the major mode: the same walk buffer-layout
 ;; makes, so one buffer answers with one declaration. WIDTH is the columns
@@ -12535,7 +12652,7 @@
 
 (define (dashboard-line-blocks buf &optional preset-cell)
   (let* ((vcs (dash--vcs buf))
-         (summary (dash--summary buf))
+         (summary (if (chat-buffer? buf) (or (dash--summary buf) buf) #f))
          (preset (if preset-cell (car preset-cell) (dash--preset buf)))
          ;; every segment carries its name, so a narrow window keeps the
          ;; ones its mode declared and drops the rest
@@ -12567,18 +12684,27 @@
              ;; inline: a chat says what it is doing, and every other buffer of
              ;; the repo names the open jj change, kept fresh by jj.scm
              ;; A click on it opens the log of every line it showed.
-             (cond (summary (list (list 'wide (dash--wide-seg #f summary))))
+             (cond (summary
+                    (append (list (list 'wide (dash--wide-seg #f summary "dseg-chat-title")))
+                            (if (and vcs (not (dash--summary buf)))
+                                (list (list 'wide (dash--wide-seg "jj" vcs))) '())))
                    (vcs (list (list 'wide (dash--wide-seg "jj" vcs))))
                    (else '()))))
          (keep (dash--headline-keep buf (buffer-cols buf))))
     (dash--ruled
       (map cadr
-           (if keep
-               (filter (lambda (cell) (member (car cell) keep)) cells)
-               cells)))))
+           (let ((ordered (if summary
+                              (append (filter (lambda (cell) (equal? (car cell) 'wide)) cells)
+                                      (filter (lambda (cell) (not (equal? (car cell) 'wide))) cells))
+                              cells)))
+             (if keep
+                 (filter (lambda (cell) (member (car cell) keep)) ordered)
+                 ordered))))))
 
-(define (dash--wide-seg key text)
-  (let ((base (dash--seg key (list (list "f-dim" text)) 'left "dseg-inline dseg-wide")))
+(define (dash--wide-seg key text &optional title-class)
+  (let ((base (dash--seg key (list (list (if title-class "dseg-strong" "f-dim") text))
+                         'left (string-append "dseg-inline dseg-wide"
+                                  (if title-class (string-append " " title-class) "")))))
     (list 'tag "c-action"
           'class (plist-get base 'class)
           'children (plist-get base 'children)

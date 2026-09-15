@@ -834,21 +834,125 @@
                        (split (cdr rest) titles (cons b metadata) transcripts))
                       (else (split (cdr rest) titles metadata (cons b transcripts))))))))))
 
+;;; --- the snapshot ---------------------------------------------------------
+;;; One batch read carries every fact a chat row shows: the title, summary,
+;;; model, transcript size, and group. Sectioning and sorting read it. A
+;;; runtime status is asked once per chat here and carried along, so the
+;;; sectioning no longer calls ibuffer-note-kinds! or walks each buffer's
+;;; group membership per row.
+
+(define *chat-list-snapshots* '())
+
+;; a snapshot row: (NAME TITLE SUMMARY MODEL SIZE GROUP-ID). A chat's runtime
+;; status stays out of the snapshot: the default grouping never reads it,
+;; and the state grouping asks it through the existing memo.
+(define (chat-list-table-row r)
+  (let* ((name (car r))
+         (title (let ((t (nth 4 r))) (if (and (string? t) (not (equal? t ""))) t #f)))
+         (summary (nth 5 r))
+         (model (or (nth 6 r) (nth 7 r) ""))
+         (size (or (nth 9 r) (chats-filesize name)))
+         (ids (nth 10 r))
+         (ids (cond ((string? ids) (list ids)) ((pair? ids) ids) (else '())))
+         (label (or title (and (string? summary) (not (equal? summary "")) summary) name)))
+    (list name label summary model (or size #f) (if (pair? ids) (car ids) #f))))
+
+(define (chat-list-table-load! buf names)
+  (let ((raw (buffer-read-many names '(path)
+               '(mode-name agent-slug chat-title chat-summary agent-model llm-model
+                 chat-log-id chat-log-size group-id group-ids group))))
+    (set! *chat-list-snapshots*
+      (take-n (cons (cons buf (map chat-list-table-row raw))
+                    (remove (lambda (e) (equal? (car e) buf)) *chat-list-snapshots*)) 16))
+    ;; the cell path asks ibuffer-row-kind per row; note it from the
+    ;; mode-name this read already holds, so it never re-asks a buffer
+    (set! *ibuffer-kind-notes*
+      (map (lambda (r) (list (car r) (if (equal? (nth 2 r) "chat-mode") 'chat 'buffer)))
+           raw))))
+
+(define (chat-list-table-data buf name)
+  (let ((view (assoc buf *chat-list-snapshots*)))
+    (and view (assoc name (cdr view)))))
+
+(define (chat-list-row-name r) (car r))
+(define (chat-list-row-title r) (nth 1 r))
+(define (chat-list-row-summary r) (nth 2 r))
+(define (chat-list-row-model r) (nth 3 r))
+(define (chat-list-row-size r) (nth 4 r))
+(define (chat-list-row-group r) (nth 5 r))
+
+;; a heading built from snapshot facts: count, bytes, face, members
+(define (chat-list-heading buf label key members face)
+  (list label "" (if (ibuffer-folded? key buf) "folded" "separator") key
+        (length members) 0
+        (fold (lambda (n b)
+                (+ n (or (let ((d (chat-list-table-data buf b)))
+                           (and d (chat-list-row-size d)))
+                         0)))
+              0 members)
+        face members))
+
+(define (chat-list-sort-members buf members)
+  (let ((order (ibuffer-sort buf))
+        (row-of (lambda (b) (or (chat-list-table-data buf b)
+                                (list b b "" "" #f #f)))))
+    (cond ((equal? order 'size)
+           (map cadr (sort (map (lambda (b)
+                                  (list (- 0 (or (chat-list-row-size (row-of b)) 0)) b))
+                                members))))
+          ((equal? order 'name)
+           (map cadr (sort (map (lambda (b)
+                                  (list (string-downcase (chat-list-row-title (row-of b))) b))
+                                members))))
+          (else members))))
+
+(define (chat-list-section buf label key members face)
+  (if (null? members) '()
+      (let ((ordered (chat-list-sort-members buf members)))
+        (if (ibuffer-folded? key buf)
+            (list (chat-list-heading buf label key ordered face))
+            (cons (chat-list-heading buf label key ordered face) ordered)))))
+
+;; rows sectioned by group from the snapshot: the ibuffer bucketing, but
+;; membership is a snapshot lookup, never a per-buffer group read
+(define (chat-list-group-sections buf)
+  (apply append
+    (map (lambda (bucket)
+           (chat-list-section buf (car bucket) (nth 1 bucket) (nth 2 bucket) (nth 3 bucket)))
+         (ibuffer-group-buckets (ibuffer-scope-names buf) (frame-group)
+           (lambda (b)
+             (let ((d (chat-list-table-data buf b)))
+               (let ((g (and d (chat-list-row-group d))))
+                 (if g (list g) '()))))))))
+
+(define (chat-list-keyed-sections buf key-of)
+  (let* ((names (ibuffer-scope-names buf))
+         (keys (dedupe-names (map key-of names)))
+         (named (map cadr (sort (map (lambda (k) (list (string-downcase k) k)) keys)))))
+    (apply append
+      (map (lambda (k)
+             (chat-list-section buf k k
+               (filter (lambda (b) (equal? (key-of b) k)) names) "faint"))
+           named))))
+
 (define (chat-list-rows buf)
   (ibuffer-columns-clear!)
   (let ((grouping (ibuffer-grouping buf)))
+    (chat-list-table-load! buf (ibuffer-scope-names buf))
     (append
-      (if (member grouping '(state model))
-          (let ((rows (ibuffer-source buf)))
-            (ibuffer-note-kinds! rows)
-            (ibuffer-keyed-sections buf rows
-              (if (equal? grouping 'state)
-                  (lambda (b) (chats-state-label (chat-row-status b)))
-                  (lambda (b) (let ((m (chats-model b)))
-                                (if (equal? m "") "no model" m))))
-              (lambda (k) "faint")
-              #f))
-          (ibuffer-rows buf))
+      (cond
+        ((equal? grouping 'none)
+         (let ((members (map chat-list-row-name (cdr (assoc buf *chat-list-snapshots*)))))
+           (chat-list-sort-members buf members)))
+        ((equal? grouping 'state)
+         (chat-list-keyed-sections buf
+           (lambda (b) (chats-state-label (chat-row-status b)))))
+        ((equal? grouping 'model)
+         (chat-list-keyed-sections buf
+           (lambda (b)
+             (let ((m (let ((d (chat-list-table-data buf b))) (and d (chat-list-row-model d)))))
+               (if (or (not m) (equal? m "")) "no model" m)))))
+        (else (chat-list-group-sections buf)))
       ;; a chat you archived is still a chat you switch to: the saved
       ;; conversations come under the live ones, and RET on one reads its
       ;; file back

@@ -7,7 +7,7 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 1. A draw reads the mode once. The row context (`list-row-ctx`) carries the mark column, the column lines, the mode's `cells`, `row-cells`, `render`, and `key` fns, and the marks. Every row reads the context. No row calls `list-opt` or reads a buffer-local: a buffer-local read is a call into the buffer's process (0.16 ms), and a row that asked ten times cost 6 ms.
 2. The header is computed once per draw and passed down with its line count. Each displayed row computes its cells and text lines once; semantic records reuse both. Selection overlays use the saved row offsets, so cursor movement never recomputes cells.
 3. The chip (the narrowing and its count) is computed only while the list is narrowed. Counting asks the mode about every row.
-   The key bar (the mode's `'footer` keys) is a header line under the counts, where the eye lands on an open; at the foot of the text it scrolled away with the rows.
+   The key bar (the mode's `'footer` keys) defaults to a header line under the counts. With `'keymap-component #t`, the shared `ui/keymap` component lives in a pinned footer; it wraps without discarding hints.
 4. A draw is few buffer changes: one `buffer-replace-range!` of the whole text, one `buffer-set-locals!` for the offsets, the head count, the row height, the width, and the stamp, one overlay set, one goto. Every change is a frame refresh and a render. A delete and then an append let a render between them see an empty buffer, reset the window's top, and write it back; the view jumped. `list_draw_test.exs` holds a redraw at eight changes or fewer.
 5. Numbers that hold this: 400 rows draw in about 330 ms and 60 rows in about 150 ms, on a laptop, with faces on every cell.
 
@@ -71,3 +71,98 @@ Chat peek copies retain the rich renderer's block ranges and input boundary from
 Ibuffer's searchable marginalia includes the row title/name, mode, path, kind metadata, size and age. It excludes transcript hits from chat-list. Search data is cached per source snapshot (up to 16 views, 2048 rows each); changing the query reuses it and refreshing the source invalidates it. Chat-list adds transcript snippets through its own matcher.
 
 The minibuffer picker also defers its table draw by 60 ms and flushes before selection. Ibuffer previews wait 150 ms and validate the row and query again before loading a buffer, so typing and navigation do not synchronously initialize a preview on every key.
+
+## Fast buffer picker
+
+`ibuffer-prompt` and `ibuffer` use the same `ibuffer-mode` renderer.
+The prompt uses a minibuffer dock; the management command uses an ordinary window. It loads
+metadata with one `buffer-read-many` call, then groups, filters, and formats
+that snapshot. Each visible row is formatted once. Text and CSS field ranges
+come from that same result. Opening a picker does not weigh chat logs.
+
+Both forms share three `defcustom`s in the `buffers` group:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ibuffer-info` | `#t` | Show mode, group membership, and `*` for unsaved files. |
+| `ibuffer-pretty` | `#t` | Align and fit the Name, Mode, and Group columns. |
+| `ibuffer-group-by` | `'group` | Group by `group`, `mode`, `directory`, or `none`. |
+
+Group sections use group names. The current group leads; other groups follow
+by name. Rows retain recency within each section. `M-g` cycles grouping for
+the open picker. `C-c i` toggles Info and `C-c p` toggles Pretty without loading
+the source again. The Pretty toggle reports server redraw milliseconds in
+the echo area; it does not include browser patch or paint time.
+Use `customize-save!` to persist a setting.
+
+`(ibuffer-format ROW INFO? [GROUP?])` describes fields from the loaded snapshot.
+`ROW` is `(NAME TITLE MODE GROUP MODIFIED PATH GROUP-ID SIZE)`.
+It returns `(TEXT CLASS WIDTH TRIM PREFIX)` field specifications. Buffer columns
+have compact fixed widths, so a delayed dock measurement or filtering cannot
+stretch the name column across the screen. Group labels resolve registered
+name icons using the same name format as the group rail. That projection is
+cached across refreshes, and invalidated by group records, name format, or icon
+registry changes; loading rows and grouping them share it.
+
+Any list can supply `text-template` (buffer, row), or `prepare-template`
+(buffer) returning that callback with context captured once per draw, and
+`pretty` (boolean or
+buffer callback). The shared list renderer fits and pads those fields when
+Pretty is enabled, computes UTF-8 ranges once per row, and reuses that result
+for text and semantic rendering. Both plain and pretty templates use direct
+semantic rows; Pretty only controls fitting and presentation, not DOM nesting. `list-format-template` exposes the same pure
+formatter for headers. The classes are `ibuffer-name`, `ibuffer-info`,
+`ibuffer-mode`, `ibuffer-size`, `ibuffer-file`, `ibuffer-group`, and `ibuffer-modified`.
+The pretty view uses section bands and a selection accent. Size and file columns
+come from the existing bulk snapshot; group names appear in section headings
+and also in a column when grouping by something else. Section counts come from the snapshot, without new buffer reads.
+Pretty off skips the rich header, Size/File formatting, and section counts.
+Metadata uses existing `f-dim`, `f-warn`, `f-accent`, and `f-bold` theme classes;
+selection uses the standard `hl-line` styling.
+
+A `composml-record` callback can also return `relative-fields` for text it
+already formatted. Existing column-based lists keep their field path.
+
+`M-x ibuffer` (also `C-x C-b`) opens a buffer with group headings and
+metadata, using the plain presentation. `M-x ibuffer-pretty` opens that
+management buffer with the pretty presentation. `C-x b` stays in the normal
+minibuffer.
+`C-x b` (`ibuffer-prompt`) opens the normal minibuffer completion list of
+filenames, with no table buffer, dock or semantic row rendering. Selection previews in the invoking window;
+cancel restores it, and buffers woken only for preview are put back to sleep.
+`ibuffer-info` adds native completion hints for mode, group, and unsaved status
+from the same bulk read; hints are also searchable. With Info off it reads only
+the path needed for eligibility and displays names alone.
+Duplicate filenames use full paths to distinguish them.
+`M-x ibuffer-prompt-pretty` opens the richer docked table explicitly. `ibuffer-prompt!` accepts these options after its shape argument.
+
+The management buffer uses the original responsive table renderer and keymap:
+narrow below 64 columns, compact below 100, wide otherwise. The key hint bar
+fits the available width. Names use the theme's fixed-pitch face; group labels
+use its fixed-pitch and bold faces, keeping the calculated line widths valid.
+The management key hints wrap at the window width, including `p` for preview
+and `M-↓/↑` for group navigation. The reusable `ui/keymap` component gives keys
+small theme-colored keycaps and labels in the theme's proportional font.
+`footer-line-blocks` carries the component through the normal block renderer;
+it is rebuilt on redraw/restore and cleared on a mode change.
+
+`(mode-dismissible! "ibuffer-mode")` explicitly declares dismissal support,
+independent of `special-mode` and the name of the quit command. Derived modes
+inherit the declaration. `dismiss-mode` supplies child-first dismissal and the
+corner `q`, then delegates to the mode's own quit action. Prompt surfaces remain
+excluded. The normal `C-x b` picker is unchanged.
+
+Preview copies read `buffer-text` for live and sleeping buffers alike. That reads
+the saved checkpoint without waking the source, including generated dired and
+detail views. A preview copies presentation data without running the source mode
+setup; HTML details render in an inert, sandboxed document.
+
+When the selected preview target is already visible in this frame, its existing
+window gets the preview border instead of a duplicate card. The highlight is
+window-specific, preserves focus and editing, and clears when the preview changes
+or is dismissed. Hidden targets still use floating cards.
+
+List previews reuse their normal ComposML projection. When transient blocks or
+field ranges were discarded during sleep, the shared list renderer rebuilds
+them from saved entries into the preview copy. It does not run mode setup or
+fetch rows. Text tables retain their saved width and semantic fields.

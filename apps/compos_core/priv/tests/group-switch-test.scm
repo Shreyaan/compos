@@ -1414,14 +1414,15 @@
       (group-mru-note! here)
 
       (check-true! (group-visible-homogeneous? here) "the shared predicate sees one group")
+      (define *t-sw-new-label* (car (group-switch-new-action)))
       (run-command "group-switch")
-      (check-equal! (t--sw-selected) "zzsw-recent" "the most recent other group leads")
+      (check-equal! (t--sw-selected) "zzsw-here" "the current group leads")
+      (check-equal! (t--sw-at *t-sw-new-label*) 1 "new group is second")
       (check-true! (< (t--sw-at "zzsw-recent") (t--sw-at "zzsw-older"))
                    "the other groups keep MRU order")
       (check-true! (and (member "zzsw-here" (t--sw-labels)) #t)
                    "the group you stand in is a row too: the list shows them all")
-      (check-true! (< (t--sw-at "zzsw-older") (t--sw-at "zzsw-here"))
-                   "and it comes last: it never leads"))
+      (check-equal! (t--sw-at "zzsw-here") 0 "current group stays first"))
     (t--sw-done!)))
 
 (deftest 'group-mru-outranks-the-shared-history-ring
@@ -1446,8 +1447,8 @@
                     "a deleted group leaves the cache"))
     (t--sw-done!)))
 
-(deftest 'group-switch-puts-the-current-buffers-groups-first-in-a-mixed-frame
-  "a foreign selected buffer makes its groups immediate destinations"
+(deftest 'group-switch-preserves-mru-in-a-mixed-frame
+  "current buffer context leads, then new group, then other groups by recency"
   (lambda ()
     (t--sw-setup!)
     (let ((here (group-record-create! "zzsw-here"))
@@ -1466,10 +1467,12 @@
       (group-mru-note! here)
 
       (check-false! (group-visible-homogeneous? here) "the shared predicate sees the detour")
+      (define *t-sw-new-label* (car (group-switch-new-action)))
       (run-command "group-switch")
-      (check-equal! (t--sw-selected) "zzsw-target" "the selected buffer's group leads")
-      (check-true! (< (t--sw-at "zzsw-target") (t--sw-at "zzsw-recent"))
-                   "the buffer's group outranks a newer unrelated group"))
+      (check-equal! (t--sw-selected) "zzsw-target" "the selected buffer supplies the current context")
+      (check-equal! (t--sw-at *t-sw-new-label*) 1 "new group is second")
+      (check-true! (< (t--sw-at "zzsw-here") (t--sw-at "zzsw-recent"))
+                   "the remaining groups keep MRU order"))
     (t--sw-done!)))
 
 (deftest 'current-group-is-derived-from-every-visible-work-buffer

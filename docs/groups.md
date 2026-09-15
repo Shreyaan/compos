@@ -514,7 +514,12 @@ The active groups are derived the same way: `(active-groups)` answers every grou
 
 ### Switch candidates
 
-`switch` completes over this frame's groups in frame-local MRU order, and then over the groups of other frames in one marked section at the end. Every group of this frame is a candidate, the group you stand in too: it goes last in its section, so it is never the lead row and never the empty-input default. Groups with no MRU entry trail in creation order. The last row is `new`.
+`C-x g` pins the current group first and the new-group action second, then lists
+other local groups in MRU order. In a mixed frame the selected buffer supplies
+the current group. If there is no current group, the new-group action leads.
+Groups with no MRU entry trail in creation order; other frames' groups follow in
+a marked section. The new-group label describes whether it starts empty or
+uses the selected buffer.
 
 ### Candidate preview
 
@@ -705,3 +710,6 @@ The displaced stack becomes invisible. The pane's geometry stays unchanged.
 Quitting a listing restores only its own window history. If that history is empty,
 the window closes instead of refilling from group recency or another window's buffers.
 The last window stays visible when it has no predecessor; quitting reports that condition.
+
+The pinned current/new rows are consistent in homogeneous and mixed layouts.
+The remaining groups preserve MRU order.

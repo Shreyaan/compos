@@ -655,6 +655,8 @@ defmodule Compos.Core.SchemeAPI do
         "(buffer-set-locals! BUF PLIST) — set several buffer-locals in one change; the frame refreshes once, not once per key.",
       "buffer-local" =>
         "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset.",
+      "buffer-read-many" =>
+        "(buffer-read-many NAMES FIELDS LOCAL-KEYS) — one metadata snapshot per buffer; rows are (NAME FIELD-VALUES... LOCAL-VALUES...). Missing values are #f. Dormant buffers stay asleep. Fields: path, size, modified, read_only, point, mark, id.",
       "buffer-locals" =>
         "(buffer-locals BUF) — return ((KEY VALUE) ...) for every buffer-local, sorted by name.",
       "set-mark!" => "(set-mark! POS) — set the mark at byte POS; #f clears the mark.",
@@ -1848,6 +1850,19 @@ defmodule Compos.Core.SchemeAPI do
         :void
       end,
       "buffer-local" => fn [buf, k] -> Buffer.get_local(buf, plain(k)) || false end,
+      "buffer-read-many" => fn [names, fields, keys] ->
+        allowed = ~w(path size modified read_only point mark id)a
+
+        fields =
+          Enum.map(fields, fn field ->
+            name = plain(field)
+
+            Enum.find(allowed, &(Atom.to_string(&1) == name)) ||
+              raise(ArgumentError, "unsupported buffer field: #{name}")
+          end)
+
+        Buffer.read_many(names, fields, Enum.map(keys, &plain/1))
+      end,
       # every local at once, so a help page can show a buffer's own state.
       # The name comes back as a symbol, the way the setter takes it.
       "buffer-locals" => fn [buf] ->

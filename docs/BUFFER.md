@@ -195,3 +195,16 @@ Phase 1 includes:
 10. a sustained-edit latency check
 
 This slice keeps one cell per buffer. It does not implement semantic hunks, multi-cell commits, proposal UI, remote synchronization, or celld.
+
+## Bulk metadata reads
+
+`(buffer-read-many NAMES FIELDS LOCAL-KEYS)` returns one row per requested name:
+`(NAME FIELD-VALUES... LOCAL-VALUES...)`. Missing values are `#f`.
+Supported fields are `path`, `size`, `modified`, `read_only`, `point`, `mark`,
+and `id`. Local keys are selected explicitly.
+
+Each live row is projected inside ETS. Unrequested locals, text, and overlays
+are not copied. A missing live read-model row falls back to its buffer process.
+Dormant rows use the catalog, loading one checkpoint only when a requested
+local is too large to index. Reading metadata does not wake a dormant buffer.
+This is a snapshot per buffer, not a transaction across all buffers.

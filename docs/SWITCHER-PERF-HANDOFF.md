@@ -214,3 +214,100 @@ Each of these produced a wrong conclusion in this session.
 * **ibuffer_scheme_test.exs stops at the first failure.** Nothing after
   ibuffer-act-add-here-keeps-the-old-membership runs. To check a later test,
   write a throwaway wrapper .exs, run it, and delete it.
+
+## 8. The desktop globals defect, fixed 2026-09-16
+
+The editor logged that the globals did not install, with the reason: unbound
+variable list?. It then came up with no groups, no layouts and no history.
+
+install_globals puts the whole set back in one call. hidden-windows restores
+first, and its lambda read (list? saved). This Scheme has null? and pair? and
+has never had list?. The first of fourteen globals raised and the call died
+with all fourteen inside it. groups.scm had the same call in group-mru.
+
+1. (list? saved) became (pair? saved) in layouts.scm and groups.scm.
+2. desktop-global! in editor.scm restores one key. desktop-globals! walks
+   through it.
+3. install_globals in desktop.ex still tries the batch. On a raise it puts the
+   globals back one at a time and names the key that failed. A global that
+   cannot restore itself now loses only itself.
+
+Verified on the live daemon: all 14 globals round-trip without raising.
+
+## 9. Test state
+
+Passing: list_draw, list_page_scheme, list_performance, switcher_performance,
+list_group_narrow, modeline_scheme_test, buffer_lifecycle_test, and the three
+new tests below.
+
+New:
+
+* every-persisted-global-takes-back-what-it-gave in
+  priv/tests/hot-reload-test.scm. Each restore reads the value its own state
+  fn wrote. It raises when a broken global is registered, so it catches the
+  class.
+* a global whose restore raises does not take the others down, in
+  test/compos/desktop_restore_test.exs.
+* ibuffer-header-totals-come-off-the-source in priv/tests/ibuffer-test.scm.
+
+Known failures, all present before this work:
+
+* ibuffer-act-add-here-keeps-the-old-membership in ibuffer-test.scm.
+* A row-order failure in ibuffer_prompt_scheme_test.exs.
+* every literal mode-name write names a registered mode, in
+  desktop_restore_test.exs. The aa-other-mode it names is in ibuffer-test.scm
+  at HEAD.
+* LLM configuration history survives desktop restore. The test expects a flat
+  list; the code writes a plist. Neither file is in the working diff.
+* Five failures in group_switch_command_test.exs, in the area the second
+  session is editing. Not isolated against a clean tree.
+
+Deleted: test/compos/profile_sites_test.exs. It tested Eval.tally_on and
+tally_off, which do not exist. That design lost, because a check on the
+builtin path costs every command forever.
+
+## 10. This session (2026-09-16, later)
+
+Landing on top of the open change, in the working copy.
+
+### Landed
+
+* **One pass over the scope.** `ibuffer-table-load!` now reads `context-only`
+  in the same `buffer-read-many` and filters the snapshot with the
+  `ibuffer-row?` rules, so `ibuffer-table-rows` opens from
+  `ibuffer-scope-names` and never runs the per-buffer `ibuffer-source`
+  filter. The eligible set is unchanged (verified 237 of 637).
+  `ibuffer-workspace-path?` holds the workspace rule over a path already read.
+* **The chat list sections from a snapshot.** `chat-list-table-load!` reads
+  every chat fact in one `buffer-read-many`, and `chat-list-rows` sections by
+  group, state, or model from it. `ibuffer-note-kinds!` and
+  `ibuffer-group-buckets`'s per-row membership walk left the chat list's hot
+  path. A chat's runtime status stays out of the snapshot: the default group
+  view never reads it, and the state view asks it through the existing memo.
+  `chats-list-test.scm` passes.
+
+### Measured, and the honest number
+
+The snapshot is a win, but a small one for chats, because the cost moved, it
+did not vanish:
+
+* `buffer-read-many` over 40 chats is ~23 ms. The same read over 637 plain
+  buffers is 9 ms. Chat locals are expensive to read — the republish-the-whole-
+  map cost in open item 4 is the real floor.
+* `agent-status` (18 ms/40) and `chats-filesize` (27 ms/40) stay per row and
+  unbatchable. The cells still read both, so the size and the status are
+  asked in the loader AND in the draw.
+
+So the next win is not the sectioning. It is open item 4 (give locals their
+own ETS table), and then routing the drawn chat cells through the same
+snapshot so a status and a size are asked once per draw.
+
+### Still open, narrowed
+
+* The chat-list cells still use `ibuffer-cells-for`, which reads a live buffer
+  per row per field. Convert them to a `text-template` (as ibuffer-mode
+  already did) so the draw reads the snapshot the loader built.
+* `ibuffer_test.exs` has 8 failures about the column layout, the header, and
+  the switcher-style heading. These are the ibuffer-mode presentation that the
+  fast-picker change replaced, not this session's work. `ibuffer_picker_test`
+  covers the new form and passes.

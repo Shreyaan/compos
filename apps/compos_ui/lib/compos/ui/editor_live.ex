@@ -944,7 +944,8 @@ defmodule Compos.Ui.EditorLive do
   # the snapshot is immutable, so line offsets and text share one version.
   defp decorate(%{type: :leaf} = leaf, cache, _faces, active) do
     rope = Map.get(leaf, :rope) || Rope.new(leaf.text)
-    want = max(leaf.rows * 3 + 8, 1)
+    want = if String.contains?(leaf.window_class || "", "listing-peek"),
+      do: max(leaf.total_lines, 1), else: max(leaf.rows * 3 + 8, 1)
     client_scroll? = leaf.total_lines <= want
     whitespace = whitespace?(leaf)
 
@@ -1909,7 +1910,7 @@ defmodule Compos.Ui.EditorLive do
     ~M"""
     <c-window
       id={"win-#{@node.id}"}
-      class={"window #{if @active?, do: "active", else: "inactive"} #{if @dismissible?, do: "dismissible"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
+      class={"window #{if Map.get(@node, :highlighted, false), do: "preview-highlight"} #{if @active?, do: "active", else: "inactive"} #{if @dismissible?, do: "dismissible"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       style={window_style(@node)}
       active={to_string(@active?)}
       buffer={@node.buffer}
@@ -1930,16 +1931,22 @@ defmodule Compos.Ui.EditorLive do
         <c-group class="peek-card-body">
           <c-group inert>
             <%= cond do %>
+              <% @node.render_mode in ["html", "markdown"] and Map.has_key?(@node, :preview) -> %>
+                <iframe class="peek-document" srcdoc={@node.preview}
+                  sandbox="allow-same-origin" tabindex="-1" title={@node.header_line || @node.buffer}></iframe>
               <% @node.render_mode == "blocks" and Map.has_key?(@node, :blk) -> %>
-                <c-group class="blocks-view" style={@node.style}>
+                <.dynamic_tag tag_name={@node.blk_root.tag} {@node.blk_root.attrs}
+                  class="blocks-view" style={@node.style}>
                   <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
-                </c-group>
+                </.dynamic_tag>
               <% @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) -> %>
                 <Compos.Ui.AgentTranscript.composml blocks={@node.ag_blocks}
                   win={@node.id} buf={@node.buffer} verbosity={@node.agent.verbosity}
                   stick={false} scroll_top={0} scroll_anchor={nil} scroll_offset={0} peek={true} />
+              <% Map.get(@node, :semantic_records) not in [nil, false, []] -> %>
+                <.peek_text node={@node} />
               <% true -> %>
-                <pre>{@node.text}</pre>
+                <pre class="peek-plain">{@node.text}</pre>
             <% end %>
           </c-group>
         </c-group>
@@ -2190,7 +2197,10 @@ defmodule Compos.Ui.EditorLive do
       <% end %>
       <% end %>
       <% end %>
-      <c-group :if={@node.footer_line} class="buffer-footer">{@node.footer_line}</c-group>
+      <c-group :if={@node.footer_line || Map.get(@node, :footer_line_blocks)} class="buffer-footer">
+        <.blk :for={b <- Map.get(@node, :footer_line_blocks) || []} b={block_view(b)} line={-1} win={@node.id} />
+        {@node.footer_line}
+      </c-group>
       <c-modeline class="modeline">
         <c-text
           class="ml-caret"
@@ -2797,7 +2807,7 @@ defmodule Compos.Ui.EditorLive do
   # Presentation only: style, and the SVG geometry and paint attributes.
   # Nothing that loads a resource, runs a script, or submits a form. A tag
   # outside the list draws as a div, an attribute outside it is dropped.
-  @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre p h1 h2 h3 h4 table thead tbody tr th td ul ol li
+  @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre kbd p h1 h2 h3 h4 table thead tbody tr th td ul ol li
                  svg g path rect circle ellipse line polyline polygon text tspan title)
   @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target style d viewBox preserveAspectRatio fill stroke stroke-width
                   stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
@@ -2842,7 +2852,7 @@ defmodule Compos.Ui.EditorLive do
     end
     assigns = assigns |> assign(:pieces, pieces) |> assign(:direct, Map.get(assigns, :direct, false))
     ~M"""
-    <%= for {piece, px} <- Enum.with_index(@pieces) do %><%= if piece.field do %><%= if @direct do %><.direct_field id_prefix={"#{@id_prefix}-#{px}"} field={piece.field} segs={piece.segs} col={piece.col} width={piece.width} base={@base} win={@win} /><% else %><.dynamic_tag tag_name={piece.field.tag} {piece.field.attrs}><.seg :for={{{txt, cls}, sx} <- Enum.with_index(piece.segs)} id={"#{@id_prefix}-#{px}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /></.dynamic_tag><% end %><% else %><%= unless @direct do %><.seg :for={{{txt, cls}, sx} <- Enum.with_index(piece.segs)} id={"#{@id_prefix}-#{px}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /><% end %><% end %><% end %>
+    <%= for {piece, px} <- Enum.with_index(@pieces) do %><%= if piece.field do %><%= if @direct do %><.direct_field id_prefix={"#{@id_prefix}-#{px}"} field={piece.field} segs={piece.segs} col={piece.col} width={piece.width} base={@base} win={@win} /><% else %><.dynamic_tag tag_name={piece.field.tag} {piece.field.attrs} class={piece.field.class}><.seg :for={{{txt, cls}, sx} <- Enum.with_index(piece.segs)} id={"#{@id_prefix}-#{px}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /></.dynamic_tag><% end %><% else %><%= unless @direct do %><.seg :for={{{txt, cls}, sx} <- Enum.with_index(piece.segs)} id={"#{@id_prefix}-#{px}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /><% end %><% end %><% end %>
     """
   end
 
@@ -2853,11 +2863,28 @@ defmodule Compos.Ui.EditorLive do
     assigns = assign(assigns, uniform: length(classes) == 1, face_class: List.first(classes) || "",
       text: Enum.map_join(assigns.segs, &elem(&1, 0)))
     ~M"""
-    <.dynamic_tag tag_name={@field.tag} {@field.attrs} data-col={@col} style={"--field-column: #{@col + 1}; --field-width: #{@width}"} class={if @uniform, do: @face_class}><%= if @uniform do %>{@text}<% else %><.seg :for={{{txt, cls}, sx} <- Enum.with_index(@segs)} id={"#{@id_prefix}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /><% end %></.dynamic_tag>
+    <.dynamic_tag tag_name={@field.tag} {@field.attrs} data-col={@col} style={"--field-column: #{@col + 1}; --field-width: #{@width}"} class={Enum.join(Enum.reject([@field.class, if(@uniform, do: @face_class)], &(&1 in [nil, ""])), " ")}><%= if @uniform do %>{@text}<% else %><.seg :for={{{txt, cls}, sx} <- Enum.with_index(@segs)} id={"#{@id_prefix}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /><% end %></.dynamic_tag>
     """
   end
 
   # Wrap existing lines without introducing layout boxes or replacing text nodes.
+  defp peek_text(assigns) do
+    ~M"""
+    <.dynamic_tag tag_name={block_root(Map.get(@node, :text_root)).tag}
+      {block_root(Map.get(@node, :text_root)).attrs} class="peek-text">
+      <%= for group <- semantic_line_groups(@node.lines, @node.semantic_records) do %>
+        <.dynamic_tag tag_name={group.tag} {group.attrs} class="semantic-record">
+          <c-text :for={ln <- group.lines}
+            class={"line line-content #{if group.direct, do: "semantic-direct"}"}>
+            <.semantic_line id_prefix={"peek-#{@node.id}-#{ln.num}"} segs={ln.segs}
+              start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={group.direct} />
+          </c-text>
+        </.dynamic_tag>
+      <% end %>
+    </.dynamic_tag>
+    """
+  end
+
   defp semantic_line_groups(lines, records) do
     records = for [start, stop, pl] <- records || [], is_integer(start) and is_integer(stop), do: {start, stop, block_view(pl)}
     {tagged, _} = Enum.map_reduce(lines, records, fn line, remaining ->

@@ -567,6 +567,15 @@ The last-window behavior in Q09 is the current explicit boundary: preserve it an
 report the condition. It does not authorize a scratch replacement, foreign fallback,
 or invisible-window reveal.
 
+### Dismissal boundary regression coverage
+
+`apps/compos_core/test/compos/dismiss_test.exs` exercises foreign-history rejection
+through key dispatch for `dismiss-buffer`, `quit-window`, and `dired-quit`.
+It covers G09 saved histories and return records, G07 first-entry history isolation,
+Q05 exhausted child panes, and Q09 last-window preservation. An ungrouped
+application listing is not a global utility cover. Only explicit temporary covers
+and Help receive that exception. These cases do not certify the full window registry.
+
 ## Explicit picker placement — current rule
 
 `C-x b` chooses the physical pane. Mode affinity moves the whole logical

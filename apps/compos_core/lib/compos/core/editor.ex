@@ -3299,6 +3299,7 @@ defmodule Compos.Core.Editor do
       header_line: Map.get(locals, "header-line"),
       # the same mechanism under the content — a list's key bar pins here
       footer_line: Map.get(locals, "footer-line"),
+      footer_line_blocks: Map.get(locals, "footer-line-blocks"),
       # Scheme resolves durable ids into membership names. This last, purely
       # presentational compaction must happen per frame: one buffer can be
       # visible on two monitors whose current groups differ.
@@ -3352,6 +3353,7 @@ defmodule Compos.Core.Editor do
       total_lines: total_lines,
       line_numbers: Map.get(locals, "line-numbers") != "off",
       # extra CSS class on the window div (writing-mode centering etc.)
+      highlighted: id in (Map.get(locals, "window-highlight-ids") || []),
       window_class: Map.get(locals, "window-class") || nil,
       # inline style on the window itself. A popup hands its share of the
       # frame over this way: the stylesheet cannot read a number out of a

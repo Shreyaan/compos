@@ -861,9 +861,7 @@
 
 ;; C-x b in the editor: the ibuffer table in the minibuffer form. The
 ;; candidate prompt below stays for the surfaces that draw only a prompt.
-(define-command "ibuffer-prompt"
-  "Switch to a buffer from the table"
-  (lambda ()
+(define (switch-buffer-table! options)
     (let ((t0 (monotonic-ms)))
       (let* ((here (or (window-buffer (active-window)) (current-buffer)))
              (my-group (or (buffer-group here) (frame-local 'current-group)))
@@ -871,11 +869,82 @@
              (rows (switch-prompt-buffers here my-group (active-window))))
         (if (null? (filter (lambda (b) (not (equal? b here))) rows))
             (message "No other buffer available")
-            (ibuffer-prompt! rows *ibuffer-prompt-buffer* "ibuffer-mode" "Switch to: "
+            (ibuffer-prompt! rows *ibuffer-prompt-buffer* "ibuffer-pretty-mode" "Switch to: "
               (lambda (row close!)
                 (ibuffer-pick! row close!)
-                (group-current-recalculate!)))))
-      (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) t0)))))
+                (group-current-recalculate!))
+              "minibuffer" options)))
+      (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) t0))))
+
+(define (switch-bare-candidates names)
+  (let* ((pairs (map (lambda (name)
+                  (list (if (string-prefix? "/" name) (cadr (ibuffer-split-path name)) name) name)) names))
+         (labels (sort (map car pairs)))
+         (duplicates (let loop ((rest labels) (out '()))
+                       (if (or (null? rest) (null? (cdr rest))) out
+                           (loop (cdr rest) (if (equal? (car rest) (cadr rest))
+                                               (cons (car rest) out) out))))))
+    (map (lambda (pair)
+           (if (member (car pair) duplicates) (list (cadr pair) (cadr pair)) pair)) pairs)))
+
+(define (switch-buffer-info-candidates candidates rows groups)
+  (map (lambda (candidate)
+    (let* ((r (assoc (cadr candidate) rows))
+           (mode (or (nth 3 r) ""))
+           (ids (if (equal? mode "chat-mode") (nth 4 r) (or (nth 5 r) (nth 6 r))))
+           (ids (cond ((string? ids) (list ids)) ((pair? ids) ids) (else '())))
+           (group (string-join (map (lambda (id)
+                    (let ((g (assoc id groups))) (if g (cadr g) id))) ids) ", "))
+           (parts (filter (lambda (s) (not (equal? s "")))
+                    (list (if (and (nth 1 r) (nth 2 r)) "*" "") mode group))))
+      (list (car candidate) (string-join parts "  ")))) candidates))
+
+(define (switch-bare-prompt!)
+  (let* ((start (monotonic-ms))
+         (home (active-window))
+         (here (or (window-buffer home) (current-buffer)))
+         (group (or (buffer-group here) (frame-local 'current-group)))
+         (names (switch-prompt-buffers here group (active-window)))
+         (rows (if ibuffer-info
+                   (buffer-read-many names '(path modified) '(mode-name group-id group-ids group))
+                   (buffer-read-many names '(path) '())))
+         (names (map car (filter (lambda (r) (ibuffer-workspace-path? (cadr r))) rows)))
+         (candidates (switch-bare-candidates names))
+         (display (if ibuffer-info
+                      (switch-buffer-info-candidates candidates rows (ibuffer-table-group-labels))
+                      (map car candidates)))
+         (woken '())
+         (restore! (lambda ()
+                     (when (and (window-exists? home) (buffer-known? here))
+                       (window-preview-buffer! here home))))
+         (sleep-woken! (lambda (keep)
+                         (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b))) woken)
+                         (set! woken '()))))
+    (minibuffer-read-preview "Switch to: " display
+      (lambda (label)
+        (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
+          (if (and target (buffer-known? target) (window-exists? home))
+              (let ((sleeping? (not (buffer-exists? target))))
+                (window-preview-buffer! target home)
+                (when (and sleeping? (buffer-exists? target))
+                  (restore-buffer-runtime! target)
+                  (set! woken (cons target woken))))
+              (restore!))))
+      (lambda (label)
+        (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
+          (restore!)
+          (when target (ibuffer-pick! target (lambda () #f))
+                       (group-current-recalculate!))
+          (sleep-woken! target)))
+      (lambda () (restore!) (sleep-woken! #f))
+      ibuffer-info "minibuffer")
+    (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) start))))
+
+(define-command "ibuffer-prompt" "Switch to a buffer with the plain minibuffer list"
+  (lambda () (switch-bare-prompt!)))
+
+(define-command "ibuffer-prompt-pretty" "Switch to a buffer with the pretty minibuffer list"
+  (lambda () (switch-buffer-table! '(pretty #t))))
 
 (define (ibuffer-prompt-last-ms) *ibuffer-prompt-last-ms*)
 

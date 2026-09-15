@@ -35,6 +35,25 @@ defmodule Compos.Ui.DismissTest do
     refute has_element?(view, ".window.active .buf .cursor")
   end
 
+  test "ibuffer exposes the standard corner q dismissal", %{conn: conn} do
+    {:ok, view, _} = live(conn, "/")
+    assert {:ok, _} = Session.eval(~S{(run-command "ibuffer")})
+    assert has_element?(view, ".window.active.dismissible .dismiss-action kbd", "q")
+    assert has_element?(view, "buffers c-headline[face=fixed-pitch]")
+    assert has_element?(view, "buffers c-headline.line.semantic-direct > buffer-icon")
+    assert has_element?(view, "buffers c-headline.line.semantic-direct > c-label.f-fixed-pitch.f-bold")
+    refute has_element?(view, "buffers c-headline .line-content > div")
+    refute has_element?(view, "buffers c-label.f-variable-pitch")
+    assert has_element?(view, ".window.active .buffer-footer .c-keymap kbd", "p")
+    assert has_element?(view, ".window.active .buffer-footer .c-keymap-cmd", "preview")
+    assert has_element?(view, ".window.active .buffer-footer .c-keymap-cmd", "next/previous group")
+    assert has_element?(view, ".window.active .buffer-footer .c-keymap-cmd", "all bindings")
+    assert {:ok, _} = Session.eval(~S{(set-mode! "ibuffer-mode")})
+    assert has_element?(view, ".window.active .buffer-footer .c-keymap kbd", "p")
+    view |> element(".window.active .dismiss-action") |> render_click()
+    refute has_element?(view, ".window.active buffers")
+  end
+
   test "writable text retains its editing surface and no dismissal badge", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     refute has_element?(view, ".window.active .dismiss-action")

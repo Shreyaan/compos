@@ -209,7 +209,8 @@
     ("erc" "warn") ("shell" "warn") ("term" "warn")))
 
 (define (ibuffer-mode-family-face mode)
-  (let ((e (assoc mode *ibuffer-mode-faces*)))
+  (let ((e (assoc (if (string-suffix? "-mode" mode)
+                      (substring mode 0 (- (string-length mode) 5)) mode) *ibuffer-mode-faces*)))
     (and e (cadr e))))
 
 ;; the abbreviated directory and the base name of a path; a directory's
@@ -254,7 +255,8 @@
 
 (define (ibuffer-buffer-size b) (and (buffer-known? b) (buffer-size b)))
 
-(define (ibuffer-buffer-label b) (if (buffer-known? b) (ibuffer-short-mode b) "file"))
+(define (ibuffer-buffer-label b)
+  (if (buffer-known? b) (or (buffer-local b 'mode-name) "Fundamental") "file"))
 
 (define (ibuffer-buffer-last b)
   (if (buffer-known? b) (ibuffer-last-label b) (ibuffer-file-age b)))
@@ -374,15 +376,21 @@
 
 ;;; --- the source ---------------------------------------------------------------
 
-(define (ibuffer-workspace-buffer? b)
-  (let* ((root (and (boundp (quote daemon-workspace-root))
-                    (daemon-workspace-root)))
-         (path (or (buffer-path b)
-                   (and (string-prefix? "/" b) b))))
+;; the same rule over a path already read: the snapshot applies it to a
+;; row's path without asking the buffer again
+(define (ibuffer-workspace-path? path)
+  (let ((root (and (boundp (quote daemon-workspace-root))
+                   (daemon-workspace-root))))
     (or (not (string? root))
-        (not path)
+        (not (string? path))
+        (equal? path "")
         (equal? path root)
         (string-prefix? (string-append root "/") path))))
+
+(define (ibuffer-workspace-buffer? b)
+  (ibuffer-workspace-path?
+    (or (buffer-path b)
+        (and (string-prefix? "/" b) b))))
 
 (define (ibuffer-row? b)
   (and (buffer-known? b)
@@ -404,14 +412,19 @@
 ;; is the exact result set that a buffer prompt handed to ibuffer. A
 ;; symbol names a registered scope. The source keeps MRU order; a
 ;; section sorts its own rows.
-(define (ibuffer-source buf)
+;; the raw scope, unfiltered: the batched table filters on the snapshot it
+;; builds, so it reads the names here and applies ibuffer-row? from data it
+;; already holds instead of asking every buffer twice
+(define (ibuffer-scope-names buf)
   (let ((scope (buffer-local buf 'ibuffer-scope)))
-    (filter ibuffer-row?
-            (cond ((equal? scope #f) (buffer-list-mru))
-                  ((symbol? scope)
-                   (let ((s (assoc scope *ibuffer-scopes*)))
-                     (if s ((cadr s)) '())))
-                  (else scope)))))
+    (cond ((equal? scope #f) (buffer-list-mru))
+          ((symbol? scope)
+           (let ((s (assoc scope *ibuffer-scopes*)))
+             (if s ((cadr s)) '())))
+          (else scope))))
+
+(define (ibuffer-source buf)
+  (filter ibuffer-row? (ibuffer-scope-names buf)))
 
 ;; The number the chip reads as "N of M". Working M out again means
 ;; asking every buffer in the scope five questions, and the scope cannot
@@ -434,6 +447,8 @@
 (define (ibuffer-grouping &optional buf)
   (let ((buf (or buf (ibuffer-view))))
     (or (buffer-local buf 'ibuffer-grouping)
+        (and (member (list-mode-of buf) '("ibuffer-mode" "ibuffer-pretty-mode"))
+             (ibuffer-render-option buf 'group-by ibuffer-group-by))
         (ibuffer-view-default buf 'grouping)
         ibuffer-default-grouping)))
 
@@ -898,7 +913,7 @@
 ;; name it counted, and the band under the heading stopped there.
 ;; the name of a section: this package's default, which a theme may
 ;; take over. It is a register of its own, so it is a colour of its own
-(defface! 'list-section-name 'fg "#c3b0f0" 'weight "600")
+(defface! 'list-section-name 'inherit '("accent" "bold" "fixed-pitch"))
 
 (define (ibuffer-section-starred? label)
   (let ((n (string-length label)))
@@ -1168,8 +1183,13 @@
 ;; No key bar. Eight hints, permanently on, were a bar of chrome as tall
 ;; as four rows and louder than any of them. ? shows every key with the
 ;; mode's own words, and the meta line says so.
-(define (ibuffer-compact-footer buf) '())
-(define (ibuffer-wide-footer buf) '())
+(define (ibuffer-compact-footer buf) (ibuffer-wide-footer buf))
+(define (ibuffer-wide-footer buf)
+  '(("RET" "visit") ("p" "preview") ("m" "mark") ("u" "unmark") ("U" "unmark all")
+    ("d" "flag") ("x" "execute") ("k" "kill") ("K" "kill group")
+    ("g" "refresh") (";" "group") ("," "sort") ("TAB" "fold")
+    ("M-↓/↑" "next/previous group") ("G" "add to group")
+    ("C-x n n/w" "narrow/widen") ("/" "filter") ("q" "quit") ("?" "all bindings")))
 
 ;; Searchable marginalia is a snapshot of the list source. Query changes
 ;; reuse it instead of asking every buffer process for the same fields.
@@ -1348,20 +1368,46 @@
                       name))))))))
 
 ;; A listing peek is an isolated presentation copy. The shell owns scrolling and dismissal.
+(defvar '*listing-preview-projectors* '())
+
+(define (listing-preview-projector! mode fn)
+  (set! *listing-preview-projectors*
+    (cons (list mode fn)
+          (remove (lambda (entry) (equal? (car entry) mode)) *listing-preview-projectors*))))
+
+(public! 'listing-preview-projector!
+  "(listing-preview-projector! MODE FN) — FN(COPY SOURCE) restores preview presentation from saved data, without waking SOURCE or fetching")
+
 (define (listing-preview-text target)
-  (let* ((text (or (and (buffer-exists? target) (buffer-text target))
-                   (let ((path (buffer-path target)) (log (buffer-local target 'chat-log-id)))
-                     (cond ((and (string? log) (boundp 'chat-log-dir-for))
-                            (let ((file (string-append (chat-log-dir-for target) "/" log ".chat")))
-                              (and (file-exists? file) (read-file file))))
-                           ((and (string? path) (file-exists? path)) (read-file path))
-                           (else #f)))
-                   "No saved text is available."))
-         (limit (string-length text)))
-    (string-append (substring text 0 limit)
-                   (if (< limit (string-length text)) "\n\n… Open the buffer to read more." ""))))
+  ;; buffer-text reads the saved checkpoint too, without waking the buffer.
+  ;; File fallback loses generated views (details and directory listings).
+  (buffer-text target))
 
 (define (listing-preview! owner target)
+  (when (and (buffer-known? owner) (buffer-known? target)
+             (not (equal? owner target))
+             (not (buffer-local owner 'ibuffer-prompt-home-window))
+             (not (buffer-local owner 'listing-peek-disabled))
+             (or (equal? (window-buffer (active-window)) owner)
+                 (equal? (mb-list-target) owner))
+             (not (equal? (buffer-local owner 'listing-peek-dismissed-row) target)))
+    (let ((shown (map car (filter (lambda (w) (equal? (cadr w) target)) (window-list)))))
+      (cond ((pair? shown)
+             (listing-preview-dismiss! (frame-local 'listing-preview-owner))
+             (desktop-skip! target 'window-highlight-ids)
+             (buffer-set-local! target 'window-highlight-ids
+               (append shown (or (buffer-local target 'window-highlight-ids) '())))
+             (set-frame-local! 'listing-preview-owner owner)
+             (set-frame-local! 'listing-preview-target target)
+             (set-frame-local! 'listing-preview-highlight (list target shown))
+             target)
+            (else
+              (when (frame-local 'listing-preview-highlight)
+                (listing-preview-dismiss! (frame-local 'listing-preview-owner)))
+              (set-frame-local! 'listing-preview-target target)
+              (listing-preview-copy! owner target))))))
+
+(define (listing-preview-copy! owner target)
   (let ((source (if (equal? (window-buffer (active-window)) owner)
                     (active-window) (window-showing owner))))
     (when (and source (not (buffer-local owner 'ibuffer-prompt-home-window))
@@ -1374,19 +1420,28 @@
         (with-buffer-display-update copy (lambda ()
           (buffer-replace-range! copy 0 (string-byte-length (buffer-text copy))
                                 (listing-preview-text target))
-          ;; Activate presentation on the disposable copy, without a layout.
+          ;; Copy presentation, never run the target's setup on a buffer that
+          ;; has none of its source state. Setups can clear text or fetch data.
           (for-each (lambda (key) (buffer-set-local! copy key #f))
-            '(render-mode render-blocks render-root agent-blocks agent-saved-mark))
-          (with-layout-suppressed (lambda ()
-            (with-current-buffer copy (lambda ()
-              (with-list-mode-skip-render (lambda ()
-                (set-mode! (or (buffer-local target 'mode-name) "fundamental-mode"))))))))
+            '(agent-blocks agent-saved-mark render-records render-text-root
+              footer-line-blocks))
           (for-each (lambda (key)
             (buffer-set-local! copy key (buffer-local target key)))
-            '(render-mode render-blocks render-root))
+            '(mode-name render-mode render-blocks render-root render-records render-text-root preview-renderer
+              preview-authored))
+          ;; Every list mode already defines its projection. Rebuild it from
+          ;; saved rows into the copy, without setup or a rows/source fetch.
+          (when (pair? (list-mode-opts (list-mode-of target)))
+            (let ((rows (list-entries target)))
+              (unless (pair? (buffer-local copy 'render-blocks))
+                (list-composml! target rows (list-head-lines target) copy))
+              (unless (pair? (buffer-local copy 'render-records))
+                (list-composml-text! target rows #f copy))))
           (when (and (equal? (buffer-local target 'mode-name) "chat-mode")
                      (boundp 'chat-preview-project!))
             (chat-preview-project! copy target))
+          (let ((projector (assoc (buffer-local target 'mode-name) *listing-preview-projectors*)))
+            (when projector ((cadr projector) copy target)))
           (buffer-set-read-only! copy #t)
           (enable-minor-mode! copy "peek-mode")
           (buffer-set-locals! copy
@@ -1412,8 +1467,7 @@
 (define-command "listing-peek-open-other" "Open the selected preview in another work window"
   (lambda ()
     (let* ((owner (frame-local 'listing-preview-owner))
-           (copy (frame-local 'listing-preview-buffer))
-           (target (and copy (buffer-local copy 'listing-preview-source))))
+           (target (frame-local 'listing-preview-target)))
       (if (and owner target)
           (begin
             (listing-preview-dismiss! owner)
@@ -1461,14 +1515,13 @@
       (message (if disabled "Previews off" "Previews on")))))
 
 (define (listing-peek-dismiss!)
-  (let ((owner (frame-local 'listing-preview-owner))
-        (copy (frame-local 'listing-preview-buffer)))
+  (let ((owner (frame-local 'listing-preview-owner)))
     (when owner
       (buffer-set-local! owner 'listing-peek-dismissed-row
-                         (and copy (buffer-local copy 'listing-preview-source)))
+                         (frame-local 'listing-preview-target))
       (listing-preview-dismiss! owner))))
 
-(define-command "listing-peek-dismiss" "Dismiss the floating preview; keep focus in its source"
+(define-command "listing-peek-dismiss" "Dismiss the preview card or window highlight; keep focus in its source"
   listing-peek-dismiss!)
 
 
@@ -1477,6 +1530,13 @@
   (debounce-cancel! (string-append "listing-peek:" (selected-frame)))
   (when (equal? owner (frame-local 'listing-preview-owner))
     (let ((copy (frame-local 'listing-preview-buffer)) (focus (active-window)))
+      (let ((highlight (frame-local 'listing-preview-highlight)))
+        (when (and highlight (buffer-known? (car highlight)))
+          (buffer-set-local! (car highlight) 'window-highlight-ids
+            (remove (lambda (w) (member w (cadr highlight)))
+                    (or (buffer-local (car highlight) 'window-highlight-ids) '())))))
+      (set-frame-local! 'listing-preview-highlight #f)
+      (set-frame-local! 'listing-preview-target #f)
       (set-frame-local! 'listing-preview-owner #f)
       (set-frame-local! 'listing-preview-buffer #f)
       (when (and copy (popup-open?) (equal? (popup-buffer) copy))
@@ -1515,7 +1575,7 @@
 
 ;; open (or re-open) a view on SCOPE: *ibuffer* in ibuffer-mode unless a
 ;; view and its mode are named
-(define (ibuffer-open! scope &optional view mode)
+(define (ibuffer-open! scope &optional view mode picker? options)
   (let* ((from (active-window))
          (buf (or view (ibuffer-group-view! (or mode "ibuffer-mode") *ibuffer-buffer*)))
          (t0 (monotonic-ms))
@@ -1543,7 +1603,8 @@
          (t3 (monotonic-ms))
          ;; a management table's headings are rows; a picker's are not
          (_i (buffer-set-local! buf 'ibuffer-heading-rows
-                                (equal? (or mode "ibuffer-mode") "ibuffer-mode")))
+                                (and (not picker?) (member (or mode "ibuffer-mode") '("ibuffer-mode" "ibuffer-pretty-mode")) #t)))
+         (_opts (buffer-set-local! buf 'ibuffer-render-options (or options '())))
          (_g (ibuffer-refresh! buf))
          (t4 (monotonic-ms))
          (_h (ibuffer-goto-first-row! buf))
@@ -1575,17 +1636,9 @@
 
 (define *ibuffer-prompt-buffer* " *buffers*")
 (add-display-rule! *ibuffer-prompt-buffer* 'shaped '(side bottom size 0.4))
-(ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent 'grouping 'none)
+(ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent)
 
 (define-style! 'ibuffer-semantic-list "
-:is(buffers, chat-list) > .semantic-direct.line {
-  display: grid; grid-template-columns: none; grid-auto-columns: 1ch;
-  column-gap: 0; align-items: baseline; white-space: nowrap;
-}
-:is(buffers, chat-list) > .semantic-direct > [data-col] {
-  grid-row: 1; grid-column: var(--field-column) / span var(--field-width);
-  min-width: 0; white-space: pre; overflow: hidden;
-}
 /* The rows of a section hang off its spine and sit in from the name
    that opens them. The text stays flush -- the nesting is drawn, not
    spelled -- so a copy of the table is still a table. */
@@ -1605,7 +1658,16 @@
    row of it, so it can wear its own tracking and weight. The tracking
    goes on the name alone -- the rule after it is drawn with box
    characters, and letter-spacing would break the line into dashes. */
-:is(buffers, chat-list) > c-headline .line { padding-top: 7px; }
+:is(buffers, chat-list) > c-headline.line,
+:is(buffers, chat-list) > c-headline .line { padding-top: 7px; white-space: pre; }
+:is(buffers, chat-list) > c-headline.line-content,
+:is(buffers, chat-list) > c-headline .line-content {
+  white-space: pre; word-break: normal; overflow-wrap: normal;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%;
+}
+:is(buffers, chat-list) > c-headline c-label {
+  display: inline; white-space: pre; word-break: normal; overflow-wrap: normal;
+}
 :is(buffers, chat-list) > c-headline c-text.accent {
   letter-spacing: 0.16em;
   font-weight: 600;
@@ -1651,7 +1713,9 @@
     (popup-dismiss!))
   (let ((w (window-showing view)))
     (when w (window-quit-restore! w)))
-  (when (buffer-known? view) (buffer-kill! view)))
+  (when (buffer-known? view) (buffer-kill! view))
+  (set! *ibuffer-table-snapshots*
+    (remove (lambda (e) (equal? (car e) view)) *ibuffer-table-snapshots*)))
 
 ;; the wall time of the last ibuffer-prompt-line!, the minibuffer setup
 ;; alone: (ibuffer-prompt-line-ms) reads it back
@@ -1709,7 +1773,11 @@
                     (done)
                     (list-clear-query! view)
                     (ibuffer-prompt-close! view)))
-            (list 'legend *ibuffer-prompt-legend*)
+            (list 'legend
+                  (if (equal? (list-mode-of view) "ibuffer-mode")
+                      (append *ibuffer-prompt-legend*
+                        '(("C-c i" "info") ("C-c p" "pretty")))
+                      *ibuffer-prompt-legend*))
             (list 'style "filter")))
     (set! *mb-list-flush* flush)
     (set! *ibuffer-prompt-line-ms* (- (monotonic-ms) t0))))
@@ -1719,7 +1787,7 @@
 ;; open VIEW on SCOPE in MODE as a popup, then its prompt line. The
 ;; classes and the line numbers go on before the display rule floats the
 ;; buffer: popup-float! reads them when it writes the window class.
-(define (ibuffer-prompt! scope view mode label pick &optional shape)
+(define (ibuffer-prompt! scope view mode label pick &optional shape options)
   (let* ((home (active-window))
          (was (and home (window-buffer home))))
     (buffer-create view)
@@ -1727,7 +1795,7 @@
     (buffer-set-locals! view
       (list 'line-numbers "off" 'window-classes "bare"
             'window-shape (or shape minibuffer-default-shape)))
-    (ibuffer-open! scope view mode)
+    (ibuffer-open! scope view mode #t options)
     ;; Mode setup clears ordinary locals, so remember the invoking window
     ;; after the prompt view has been opened and initialized. The buffer
     ;; it showed rides along: the preview borrows that window, so every
@@ -1784,8 +1852,11 @@
          (visit-in-group row (and (boundp 'group-here) (group-here))))
         (else (message "no buffer here"))))
 
-(define-command "ibuffer" "List buffers in a traditional management table"
-  (lambda () (ibuffer-open! #f)))
+(define-command "ibuffer" "List buffers by group in a buffer"
+  (lambda () (ibuffer-open! #f #f #f #f '(pretty #f info #t group-by group))))
+
+(define-command "ibuffer-pretty" "List buffers with the pretty table presentation"
+  (lambda () (ibuffer-open! #f #f "ibuffer-pretty-mode" #f '(pretty #t))))
 
 ;; RET in the window form and RET in the minibuffer form are one act
 ;; (ibuffer-pick!). Only the presentation differs.
@@ -1845,6 +1916,8 @@
   (let ((owner (or buf (ibuffer-view))))
     (let ((home (buffer-local owner 'ibuffer-prompt-home-window))
           (target (or b (ibuffer-current owner))))
+      ;; A section is navigation, not a request to clear the last preview.
+      (unless (ibuffer-heading? target)
       (if home
           (when (and (equal? (mb-list-target) owner) (window-exists? home))
             (if (and (string? target) (buffer-known? target))
@@ -1854,7 +1927,12 @@
           (begin
             ;; Explicit row navigation can reopen a dismissed card.
             (buffer-set-local! owner 'listing-peek-dismissed-row #f)
-            (listing-preview-schedule! owner target))))))
+            (listing-preview-schedule! owner target)))))))
+
+(define-command "ibuffer-next-group" "Move to the next group in this buffer list"
+  (lambda () (list-move-section! (ibuffer-view) 1)))
+(define-command "ibuffer-previous-group" "Move to the previous group in this buffer list"
+  (lambda () (list-move-section! (ibuffer-view) -1)))
 
 (define-command "ibuffer-next" "Move down to the next buffer"
   (lambda () (list-move! 1)))
@@ -2039,7 +2117,7 @@
 ;; deep it sits with 'level -- a name the whitelist already carries --
 ;; and the style rules hang the spine and the indent off that.
 (define (ibuffer-composml-record buf entry)
-  (if (ibuffer-heading? entry) (list 'tag "c-headline")
+  (if (ibuffer-heading? entry) (list 'tag "c-headline" 'layout "columns" 'attrs '(("face" "fixed-pitch")))
     (list 'tag (if (equal? (list-mode-of buf) "chat-list-mode") "chat-entry" "buffer") 'layout "columns"
           'attrs (append (list (list "name" entry)
                                (list "modified" (if (ibuffer-row-modified? entry) "true" "false"))
@@ -2057,9 +2135,11 @@
          (all (cond ((equal? layout 'narrow) *ibuffer-narrow-fields*)
                     ((equal? layout 'compact) *ibuffer-compact-fields*)
                     (else *ibuffer-wide-fields*))))
-    (map (lambda (tag) (list 'tag tag))
+    (map (lambda (tag) (if (string? tag) (list 'tag tag) tag))
       (append (list (if chat? "chat-state" "buffer-state") "buffer-icon"
-                    (if (ibuffer-heading? entry) "c-label" (if chat? "chat-name" "buffer-name")))
+                    (if (ibuffer-heading? entry)
+                        (list 'tag "c-label" 'class "f-fixed-pitch f-bold")
+                        (if chat? "chat-name" "buffer-name")))
         (map (lambda (f)
           (cond
             ((equal? (car f) 'size) (if chat? "chat-tokens" "buffer-size"))
@@ -2069,7 +2149,7 @@
 
 (define *ibuffer-opts*
   (list
-    'composml-root (lambda (buf) (list 'tag "buffers"))
+    'composml-root (lambda (buf) (list 'tag "buffers" 'attrs '(("face" "fixed-pitch"))))
     'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
     'composml-fields (lambda (buf entry) (ibuffer-composml-fields buf entry))
     'doc (string-append
@@ -2163,6 +2243,7 @@
     'meta (lambda (buf) (ibuffer-meta buf))
     'total (lambda (buf) (ibuffer-total buf))
     'compact #t
+    'keymap-component #t
     'page-size 60
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
@@ -2171,7 +2252,10 @@
                               (begin (buffer-kill! b) #t)))))
     'noun "buffer"
     'preview (lambda (buf b) (ibuffer-preview! buf b))
-    'keys '(("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
+    'keys '(("M-<down>" "ibuffer-next-group") ("M-<up>" "ibuffer-previous-group")
+            ("M-n" "ibuffer-next-group") ("M-p" "ibuffer-previous-group")
+            ("C-c i" "ibuffer-toggle-info") ("C-c p" "ibuffer-toggle-pretty")
+            ("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
             ("RET" "ibuffer-visit") ("SPC" "list-toggle-mark")
             ("p" "ibuffer-toggle-preview")
             ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
@@ -2209,7 +2293,289 @@
 
 (mode-icon! "ibuffer-mode" "")
 
+
+(domain! 'buffers)
+(effects! '(write))
+
+(defcustom 'ibuffer-info #t
+  "Show mode, group, and unsaved changes in buffer lists."
+  'group 'buffers 'type 'boolean)
+
+(defcustom 'ibuffer-group-by 'group
+  "Group buffer lists by 'group, 'mode, 'directory, or 'none."
+  'group 'buffers 'type 'choice)
+
+(defcustom 'ibuffer-pretty #t
+  "Align buffer list names and metadata."
+  'group 'buffers 'type 'boolean)
+
+(define (ibuffer-render-option buf key fallback)
+  (let ((options (buffer-local buf 'ibuffer-render-options)))
+    (if (and options (list-plist-key? options key)) (plist-get options key) fallback)))
+
+(define (ibuffer-pretty? buf) (ibuffer-render-option buf 'pretty ibuffer-pretty))
+(define (ibuffer-info? buf) (ibuffer-render-option buf 'info ibuffer-info))
+
+(define (ibuffer-set-render-option! buf key value)
+  (buffer-set-local! buf 'ibuffer-render-options
+    (ibuffer-plist-put (or (buffer-local buf 'ibuffer-render-options) '()) key value)))
+
+;; Keep immutable display data outside buffer locals. Each source refresh
+;; reads the required fields in one host call; filtering and formatting read
+;; this snapshot. Never copy transcripts or render caches into the picker.
+(define *ibuffer-table-snapshots* '())
+
+;; Group labels depend on group/name configuration, not on a buffer refresh.
+;; Share this immutable projection between snapshot loading and sectioning.
+(define *ibuffer-table-group-label-cache* #f)
+(define (ibuffer-table-group-labels)
+  (let ((key (list *group-records* group-name-format *name-icons*)))
+    (if (and *ibuffer-table-group-label-cache*
+             (equal? key (car *ibuffer-table-group-label-cache*)))
+        (cadr *ibuffer-table-group-label-cache*)
+        (let ((labels (map (lambda (g)
+                        (list (car g) (name-text (group-name-segments (car g)))))
+                      *group-records*)))
+          (set! *ibuffer-table-group-label-cache* (list key labels))
+          labels))))
+
+
+(define (ibuffer-table-load! buf names)
+  (let* ((current (frame-group))
+         (groups (ibuffer-table-group-labels))
+         (raw (buffer-read-many names '(path modified size)
+                 '(mode-name chat-title chat-summary group-id group-ids group context-only)))
+         ;; the snapshot applies ibuffer-row? from the data this one call
+         ;; already read, so opening the table is one pass over the scope,
+         ;; not a per-buffer filter and then another pass
+         (eligible (filter (lambda (r)
+                             (let ((name (car r)) (path (nth 1 r)) (mode (or (nth 4 r) "")))
+                               (and (not (string-prefix? " " name))
+                                    (not (assoc name *ibuffer-views*))
+                                    (not (equal? mode "ibuffer-mode"))
+                                    (not (equal? mode "chat-list-mode"))
+                                    (not (nth 10 r))
+                                    (ibuffer-workspace-path? path))))
+                           raw))
+         (rows
+           (map (lambda (r)
+             (let* ((name (car r)) (path (nth 1 r)) (mode (or (nth 4 r) ""))
+                    (title (nth 5 r)) (summary (nth 6 r))
+                    (chat? (equal? mode "chat-mode"))
+                    (label (if (and chat? (string-prefix? "*" name))
+                               (cond ((and (string? title) (not (equal? title ""))) title)
+                                     ((string? summary) summary)
+                                     (else name))
+                               (if path (abbreviate-file-name path) name)))
+                    (ids (if chat? (nth 7 r) (or (nth 8 r) (nth 9 r))))
+                    (ids (cond ((string? ids) (list ids)) ((pair? ids) ids) (else '())))
+                    (group (string-join
+                             (map (lambda (id) (let ((g (assoc id groups)))
+                                                 (if g (cadr g) id))) ids) ", ")))
+               ;; NAME TITLE MODE GROUP MODIFIED PATH GROUP-ID SIZE. The template and
+               ;; matcher consume only this value, never a live buffer.
+               (list name label mode group (and path (nth 2 r)) (or path "")
+                     (if (member current ids) current (if (pair? ids) (car ids) #f))
+                     (or (nth 3 r) 0)))) eligible)))
+    (set! *ibuffer-table-snapshots*
+      (take-n (cons (cons buf rows)
+                    (remove (lambda (e) (equal? (car e) buf)) *ibuffer-table-snapshots*)) 16))))
+
+(define (ibuffer-table-data buf name)
+  (let ((view (assoc buf *ibuffer-table-snapshots*)))
+    (and view (assoc name (cdr view)))))
+
+(effects! '(pure))
+(public! 'ibuffer-format
+  "(ibuffer-format ROW INFO? [GROUP?]) — describe buffer columns as shared list-mode template fields")
+(define (ibuffer-format row info? &optional group?)
+  (if (not info?)
+      (list (list (nth 1 row) "ibuffer-name" 84 'middle ""))
+      (append
+        (list
+          (list (if (nth 4 row) "* " ". ") "ibuffer-info ibuffer-modified f-warn" #f 'end "")
+          (list (nth 1 row) "ibuffer-name" 38 'middle "")
+          (list (let ((size (nth 7 row)))
+                  (if (number? size) (ibuffer-human size) (or size "")))
+                "ibuffer-info ibuffer-size f-dim" 8 'end "  ")
+          (list (nth 2 row) "ibuffer-info ibuffer-mode f-dim" 24 'middle "  ")
+          (list (let ((path (nth 5 row)))
+                  (if (and path (not (equal? path ""))) (abbreviate-file-name path) "—"))
+                "ibuffer-info ibuffer-file f-dim" 48 'middle "  "))
+        (if group?
+            (list (list (nth 3 row) "ibuffer-info ibuffer-group f-dim" 22 'end "  ")) '()))))
+
+;; Headings carry member identities for folding and group actions. Drawing
+;; one does not sum buffer sizes or read modified state again.
+(define (ibuffer-table-heading label key kind members)
+  (list label "" kind key (length members) 0 0 #f members))
+
+(effects! '(read))
+(define (ibuffer-table-sections buf data grouping)
+  (if (equal? grouping 'none) (map car data)
+      (let* ((current (frame-group))
+             (groups (ibuffer-table-group-labels))
+             (folded (ibuffer-collapsed buf))
+             (ranked
+               (sort (let loop ((rs data) (i 0) (out '()))
+                 (if (null? rs) out
+                   (let* ((r (car rs)) (id (nth 6 r))
+                          (record (and id (assoc id groups)))
+                          (label (cond ((equal? grouping 'mode) (nth 2 r))
+                                       ((equal? grouping 'directory)
+                                        (if (equal? (nth 5 r) "") "no file"
+                                            (car (ibuffer-split-path (nth 5 r)))))
+                                       (else (if record (cadr record) (or id "ungrouped")))))
+                          (key (if (equal? grouping 'group) (string-append "group:" (or id "")) label))
+                          (rank (if (equal? grouping 'group)
+                                    (cond ((and id (equal? id current)) 0) (id 1) (else 2)) 0)))
+                     (loop (cdr rs) (+ i 1)
+                       (cons (list rank (string-downcase label) key i (car r) label) out))))))))
+        (let runs ((rs ranked) (out '()))
+          (if (null? rs) (apply append (reverse out))
+              (let ((key (nth 2 (car rs))) (label (nth 5 (car rs))))
+                (let take ((rest rs) (names '()))
+                  (if (and (pair? rest) (equal? (nth 2 (car rest)) key))
+                      (take (cdr rest) (cons (nth 4 (car rest)) names))
+                      (let* ((members (reverse names)) (closed? (member key folded))
+                             (head (ibuffer-table-heading label key
+                                     (if closed? "folded" "separator") members)))
+                        (runs rest (cons (if closed? (list head) (cons head members)) out)))))))))))
+
+(define (ibuffer-table-rows buf)
+  (let ((names (ibuffer-scope-names buf)) (order (ibuffer-sort buf)))
+    (ibuffer-table-load! buf names)
+    (let* ((data (cdr (assoc buf *ibuffer-table-snapshots*)))
+           (ordered
+             (cond ((equal? order 'recent) data)
+                   ((equal? order 'size)
+                    (map cadr (sort (map (lambda (r) (list (- 0 (nth 7 r)) r)) data))))
+                   (else (map cadr (sort (map (lambda (r) (list (string-downcase (nth 1 r)) r)) data)))))))
+      (ibuffer-table-sections buf ordered (ibuffer-grouping buf)))))
+
+(define (ibuffer-table-plain-template row info?)
+  (if (not info?)
+      (list (list (nth 1 row) "ibuffer-name" #f 'end ""))
+      (list
+        (list (if (nth 4 row) "* " "  ") "ibuffer-info ibuffer-modified f-warn" #f 'end "")
+        (list (nth 1 row) "ibuffer-name" #f 'end "")
+        (list (nth 2 row) "ibuffer-info ibuffer-mode f-dim" #f 'end "  ")
+        (list (nth 3 row) "ibuffer-info ibuffer-group f-dim" #f 'end "  "))))
+
+(define (ibuffer-table-header buf)
+  (if (not (ibuffer-pretty? buf))
+      (if (ibuffer-info? buf) "Name  Mode  Group" "Name")
+      (let ((group? (not (equal? (ibuffer-grouping buf) 'group))))
+        (string-append "Buffers\n"
+          (if (ibuffer-info? buf)
+              (car (list-format-template
+                (cons (list "  " "ibuffer-info" #f 'end "")
+                  (cdr (ibuffer-format '("" "Buffer" "Mode" "Group" #f "File" #f "Size") #t group?)))
+                #t)) "Buffer")))))
+
+(define (ibuffer-table-prepare-template buf)
+  (let* ((snapshot (assoc buf *ibuffer-table-snapshots*))
+         (data (if snapshot (cdr snapshot) '()))
+         (pretty? (ibuffer-pretty? buf))
+         (info? (ibuffer-info? buf))
+         (group? (and pretty? (not (equal? (ibuffer-grouping buf) 'group)))))
+    (lambda (buf row) (ibuffer-table-template row data group? info? pretty?))))
+
+(define (ibuffer-table-template row data group? info? pretty?)
+  (if (ibuffer-heading? row)
+      (if (not pretty?)
+          (list (list (ibuffer-heading-label row) "ibuffer-heading f-accent" #f 'end ""))
+          (list
+        (list (string-append "[ " (ibuffer-heading-label row) " ]") "ibuffer-heading f-accent f-bold" #f 'end "")
+        (list (string-append (number->string (length (ibuffer-heading-members row))) " buffers")
+              "ibuffer-section-info f-dim" #f 'end "  ")))
+      (let* ((r (or (assoc row data) (list row row "" "" #f "" #f 0)))
+             ;; Keep the file column separate from the display name.
+             (r (if (or (not pretty?) (equal? (nth 5 r) "")) r
+                    (cons (car r) (cons (cadr (ibuffer-split-path (nth 1 r))) (cddr r))))))
+        (if pretty?
+            (ibuffer-format r info? group?)
+            (ibuffer-table-plain-template r info?)))))
+
+(define (ibuffer-table-name buf row)
+  (car (list-format-template ((ibuffer-table-prepare-template buf) buf row) (ibuffer-pretty? buf))))
+
+(define (ibuffer-table-record buf row)
+  (list 'tag (if (ibuffer-heading? row) "c-headline" "buffer")
+        'attrs (if (and (ibuffer-heading? row) (ibuffer-pretty? buf)) '(("face" "header-line")) '())))
+
+(define-style! 'ibuffer-picker "
+/* Colors, selection and typography come from the theme's existing faces. */
+buffers[profile=pretty] > c-headline.line { padding-top: 0; }
+buffers[profile=pretty] > c-headline.line { display: flex; align-items: baseline; }
+buffers[profile=pretty] .ibuffer-heading { display: flex; flex: 1; align-items: baseline; gap: 1ch; }
+buffers[profile=pretty] .ibuffer-heading::after { content: ''; flex: 1; border-bottom: 1px dotted; }
+buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
+")
+
+(define (ibuffer-table-match? buf row input)
+  (if (ibuffer-heading? row)
+      (let loop ((members (ibuffer-heading-members row)))
+        (and (pair? members) (or (ibuffer-table-match? buf (car members) input)
+                                (loop (cdr members)))))
+      (let* ((r (or (ibuffer-table-data buf row) (list row row "" "" #f "" #f 0)))
+             (q (string-downcase (string-trim input))))
+        (and r
+          (if (and (string-suffix? "-mode" q) (not (string-index q " ")))
+              (equal? (string-downcase (nth 2 r)) q)
+              (completion-match?
+                (string-join (list (car r) (nth 1 r) (nth 2 r) (nth 3 r) (nth 5 r)) " ")
+                input 'substring))))))
+
+(effects! '(write))
+(define (ibuffer-table-redraw!)
+  (let ((buf (or (mb-list-target) (current-buffer))))
+    (when (member (list-mode-of buf) '("ibuffer-mode" "ibuffer-pretty-mode")) (list-redraw! buf))))
+
+(define-command "ibuffer-toggle-info" "Toggle metadata in this buffer list"
+  (lambda ()
+    (let ((buf (or (mb-list-target) (current-buffer))))
+      (ibuffer-set-render-option! buf 'info (not (ibuffer-info? buf)))
+      (ibuffer-table-redraw!))))
+(define-command "ibuffer-toggle-pretty" "Toggle this list's formatting and report redraw milliseconds"
+  (lambda ()
+    (let* ((buf (or (mb-list-target) (current-buffer)))
+           (pretty? (not (ibuffer-pretty? buf)))
+           (start (monotonic-ms)))
+      (ibuffer-set-render-option! buf 'pretty pretty?)
+      (ibuffer-table-redraw!)
+      (message (string-append "Pretty " (if pretty? "on" "off")
+                             " · redraw " (number->string (- (monotonic-ms) start)) " ms")))))
+
 (define-list-mode! "ibuffer-mode" *ibuffer-opts*)
+(mode-dismissible! "ibuffer-mode")
+(mode-dismissible! "ibuffer-pretty-mode")
+
+(define-list-mode! "ibuffer-pretty-mode"
+  (ibuffer-mode-opts
+    (list 'doc "A buffer picker. Type to narrow, RET to visit, C-g to cancel. Info and Pretty control its Scheme formatter; Group by chooses its sections."
+          'rows ibuffer-table-rows
+          'match ibuffer-table-match?
+          'layouts '()
+          'render ibuffer-table-name
+          'prepare-template ibuffer-table-prepare-template
+          'pretty ibuffer-pretty?
+          'header ibuffer-table-header
+          'filtered-heading
+            (lambda (buf head members)
+              (ibuffer-table-heading (ibuffer-heading-label head) (ibuffer-heading-key head)
+                (nth 2 head) (or members (filter (lambda (row)
+                  (ibuffer-table-match? buf row (list-query buf))) (ibuffer-heading-members head)))))
+          ;; The formatter's switches may change without changing the query.
+          'incremental-filter #f
+          'overlays #f
+          'composml-root (lambda (buf) (list 'tag "buffers" 'attrs
+            (list (list "profile" (if (ibuffer-pretty? buf) "pretty" "plain")))))
+          'composml-record ibuffer-table-record
+          'composml-fields #f)))
+
+(mode-keys! "minibuffer-mode"
+  '(("C-c i" "ibuffer-toggle-info") ("C-c p" "ibuffer-toggle-pretty")))
 
 (define-key "ctl-x-map" "C-b" "ibuffer")
 

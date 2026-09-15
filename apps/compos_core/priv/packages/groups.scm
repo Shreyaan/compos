@@ -1097,10 +1097,15 @@ is forgotten and that group falls back to creation order in the switcher."
                      (else #f))))
     (delete-other-windows!)
     (switch-to-buffer-here! main)
+    ;; The surviving physical pane must not carry the group we just left.
+    (set-window-prev-buffers! (active-window) '())
+    (window-quit-restore-forget! (active-window))
     (when side
       (split-window! 'h 0.6)
       (other-window!)
       (switch-to-buffer-here! side)
+      (set-window-prev-buffers! (active-window) '())
+      (window-quit-restore-forget! (active-window))
       (let ((window (window-showing main)))
         (when window (select-window! window))))))
 
@@ -1125,6 +1130,11 @@ is forgotten and that group falls back to creation order in the switcher."
       (lambda (window)
         (let ((win (car window))
               (buf (cadr window)))
+          (set-window-prev-buffers! win (window-eligible-history win))
+          (let ((rec (window-quit-restore win)))
+            (when (and rec (equal? (cadr rec) 'other)
+                       (not (window-history-member? win (caddr rec))))
+              (window-quit-restore-forget! win)))
           (unless (buffer-in-group? buf id)
             (set! clean #f)
             (let ((hidden
@@ -2043,19 +2053,16 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; instead of the name index, which answers with the first group of that
   ;; name and so showed another group's buffers. The rail rows are built with
   ;; them: moving the highlight is then a lookup and no scan.
-  (let* ((current (frame-group))
+  (let* ((current (or (frame-group) (buffer-group (current-buffer))))
          (all (group-ids-mru))
          ;; a group another live frame owns is still reachable: it comes
          ;; last, marked, and picking it raises the frame that holds it
          (away (filter group-elsewhere-frame (group-ids-mru-all)))
-         ;; every group, the one you stand in included: you came to see
-         ;; them all. It only never leads — it goes last in its section,
-         ;; so the empty-input default is still a switch
-         (recent (append (filter (lambda (id) (not (equal? id current))) all)
-                         (filter (lambda (id) (equal? id current)) all)))
-         (mine (group-buffer-memberships (current-buffer)))
-         (mine-recent (filter (lambda (id) (member id mine)) recent))
-         (others (filter (lambda (id) (not (member id mine))) recent))
+         ;; Pin the current context and creation action. Only the remaining
+         ;; destinations are sorted by recency. In a mixed frame the selected
+         ;; buffer supplies the context; an ungrouped buffer supplies none.
+         (here (filter (lambda (id) (equal? id current)) all))
+         (recent (filter (lambda (id) (not (equal? id current))) all))
          (action (group-switch-new-action))
          (action-row (list (car action) "new context"))
          (index (group-members-index))
@@ -2071,12 +2078,8 @@ is forgotten and that group falls back to creation order in the switcher."
                (set! seen (cons name seen))
                (set! rows (cons (list label g (group-switch-rail-rows index g)) rows))
                (group-switch-candidate-in index g label))))
-         (here-candidates
-           (if (group-visible-homogeneous? current)
-               (append (map candidate recent) (list action-row))
-               (let* ((first (map candidate mine-recent))
-                      (rest (map candidate others)))
-                 (append first (list action-row) rest))))
+         (here-candidates (append (map candidate here) (list action-row)
+                                  (map candidate recent)))
          (candidates
            (append here-candidates
                    (map (lambda (g) (group-switch-away-candidate (candidate g)))
@@ -2936,6 +2939,13 @@ is forgotten and that group falls back to creation order in the switcher."
   (lambda (b) (or (not (frame-group)) (group-primary-fill? b))))
 (set! window-fill-member?
   (lambda (b) (or (not (frame-group)) (buffer-in-group? b (frame-group)))))
+
+(set! window-history-member?
+  (lambda (win b)
+    (let ((group (or (frame-group) (buffer-group (window-buffer win))))
+          (owner (buffer-group b)))
+      (or (equal? owner group)
+          (and (not owner) (window-preference-cover? b))))))
 
 ;; the next buffer for a window in no group: the first of the pool that
 ;; is not the dying buffer

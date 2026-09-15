@@ -250,7 +250,7 @@
                  (list 'tag "c-row" 'class "c-keymap-row"
                        'segs
                        (append
-                         (list (list "c-keymap-key" (car k))
+                         (list (list "c-keymap-key" (car k) "kbd")
                                (list "c-keymap-cmd" (cadr k)))
                          (if (> (length k) 2)
                              (list (list "c-keymap-doc" (nth 2 k)))
@@ -364,12 +364,13 @@
 .c-kv { padding: 7px 10px; font-family: var(--font-mono); font-size: 11px; }
 .c-kv-row { display: grid; grid-template-columns: minmax(8ch, .35fr) 1fr; gap: 10px; }
 .c-group { display: block; margin: 0 0 10px; }
-.c-keymap { display: block; font-family: var(--font-mono); font-size: 11px; padding: 4px 0 10px; }
-.c-keymap-row { display: grid; grid-template-columns: minmax(9ch, auto) minmax(14ch, auto) 1fr; gap: 10px; padding: 2px 10px; }
-.c-keymap-row:hover { background: var(--hl-line-bg); }
-.c-keymap-key { color: var(--accent-fg); font-weight: 600; }
-.c-keymap-cmd { color: var(--fg); }
-.c-keymap-doc { color: var(--dim-fg); }
+.c-keymap { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 12px; font-family: var(--font-sans); font-size: 12px; line-height: 1.5; white-space: normal; }
+.c-keymap-row { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; max-width: 100%; }
+.c-keymap-key { display: inline-block; flex: none; padding: 1px 5px; border: 1px solid var(--border-bg); border-bottom-width: 2px; border-radius: 4px; background: var(--hl-line-bg); color: var(--accent-fg); font: 600 11px/1.4 var(--font-mono); white-space: nowrap; }
+.c-keymap-cmd { color: var(--fg); overflow-wrap: anywhere; }
+.c-keymap-doc { color: var(--dim-fg); overflow-wrap: anywhere; }
+.buffer-footer:has(.c-keymap) { padding: 0; max-height: 30%; overflow-y: auto; white-space: normal; }
+
 ")
 
 (category! 'ui)

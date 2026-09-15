@@ -37,12 +37,18 @@
 (define (dismiss--prompt-surface? buf)
   (and (boundp '*mb-list-buffer*) (equal? buf *mb-list-buffer*)))
 
+(define (dismiss--declared-mode? buf)
+  (let loop ((modes *dismissible-modes*))
+    (and (pair? modes)
+         (or (buffer-derived-mode? buf (car modes)) (loop (cdr modes))))))
+
 (define (buffer-dismissible? buf)
   (and (buffer-known? buf) (buffer-read-only? buf)
        (not (minibuffer-buffer? buf))
        (not (dismiss--prompt-surface? buf))
        (let ((cmd (dismiss--normal-command buf)))
-         (or (buffer-parent buf) (pair? (buffer-children buf))
+         (or (dismiss--declared-mode? buf)
+             (buffer-parent buf) (pair? (buffer-children buf))
              (member cmd '("quit-window" "dired-quit" "collect-quit"
                            "switch-quit" "overview-quit" "notmuch-back"
                            "notmuch-quit" "peek-dismiss"))))
@@ -112,7 +118,9 @@
       (when on (dismiss--caret-default! buf))
       (cond ((and on (not (minor-mode-on? buf "dismiss-mode")))
              (enable-minor-mode! buf "dismiss-mode"))
-            ((and (not on) (minor-mode-on? buf "dismiss-mode"))
+            ((and (not on)
+                  (or (minor-mode-on? buf "dismiss-mode")
+                      (member "dismiss-mode-map" (buffer-minor-maps buf))))
              (disable-minor-mode! buf "dismiss-mode"))))))
 
 (define (dismiss-sync-visible!)
@@ -145,6 +153,10 @@
 (define (dismiss--close-child! child)
   (let ((focus (active-window))
         (parent (buffer-parent child)))
+    (if (and (equal? (window-buffer (active-window)) child)
+             (= (length (window-list)) 1)
+             (null? (window-eligible-history (active-window))))
+        (begin (message "No previous buffer; this is the last window") #f)
     (if (and (buffer-path child) (buffer-modified? child))
         (begin (message "Buffer is modified — save it before dismissing") #f)
         (begin
@@ -152,17 +164,16 @@
             (lambda (row)
               (when (equal? (cadr row) child)
                 (let* ((win (car row)) (rec (window-quit-restore win))
-                       (past (filter (lambda (b) (and (buffer-known? b)
-                                                     (not (equal? b child))))
-                                     (window-prev-buffers win))))
+                       (past (window-eligible-history win)))
                   (cond
                     ((and (popup-open?) (equal? win (popup-window))) (popup-dismiss!))
                     ((and rec (equal? (cadr rec) 'window) (> (length (window-list)) 1))
                      (delete-window-id! win))
-                    (else
-                      (window-set-buffer! win
-                        (if (pair? past) (car past) (or parent "*scratch*")))
-                      (set-window-prev-buffers! win (if (pair? past) (cdr past) '()))))
+                    ((pair? past)
+                      (window-set-buffer! win (car past))
+                      (set-window-prev-buffers! win (cdr past)))
+                    ((> (length (window-list)) 1) (delete-window-id! win))
+                    (else (message "No previous buffer; this is the last window")))
                   (window-quit-restore-forget! win))))
             (window-list))
           ;; A child displayed in another frame remains that frame's view.
@@ -177,7 +188,7 @@
             (buffer-kill! child))
           (when (window-exists? focus) (select-window! focus))
           (dismiss-sync-visible!)
-          #t))))
+          #t)))))
 
 (define-command "dismiss-buffer" "Dismiss a child first, otherwise run this buffer's normal q action"
   (lambda ()

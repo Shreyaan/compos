@@ -95,6 +95,24 @@ defmodule Compos.Core.BufferView do
     ArgumentError -> []
   end
 
+  @doc "Project several fields and locals from one published row without copying unrelated state."
+  def project(name, fields, keys) when is_binary(name) do
+    value = fn map, key ->
+      {:andalso, {:is_map_key, key, map}, {:map_get, key, map}}
+    end
+
+    values =
+      Enum.map(fields, &value.(:"$1", &1)) ++
+        Enum.map(keys, &value.({:map_get, :locals, :"$1"}, &1))
+
+    case :ets.select(@table, [{{name, :"$1"}, [], [values]}]) do
+      [values] when is_list(values) -> {:ok, values}
+      _ -> :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
   @doc "One field of a buffer's view, or nil when it has no row."
   def get(name, key) do
     case field(name, key) do

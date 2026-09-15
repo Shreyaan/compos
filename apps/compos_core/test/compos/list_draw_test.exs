@@ -23,6 +23,27 @@ defmodule Compos.ListDrawTest do
     end
   end
 
+  test "a list template supplies text and semantic fields through the shared pretty switch" do
+    eval!(~S"""
+    (begin
+      (define *zz-template-pretty* #t)
+      (define-list-mode! "zz-template-mode"
+        (list 'buffer "*zz-template*" 'no-marks #t
+              'rows (lambda (buf) '("café"))
+              'text-template (lambda (buf row)
+                (list (list row "sample-name" 8 'end "")
+                      (list "ready" "sample-status" 6 'end "  ")))
+              'pretty (lambda (buf) *zz-template-pretty*)))
+      (list-mode-show! "zz-template-mode"))
+    """)
+    assert Buffer.text("*zz-template*") =~ "café      ready "
+    assert inspect(Buffer.get_local("*zz-template*", "render-records"), limit: :infinity) =~ "sample-status"
+    eval!(~S{(begin (set! *zz-template-pretty* #f) (list-redraw! "*zz-template*"))})
+    assert Buffer.text("*zz-template*") =~ "café  ready"
+    refute Buffer.text("*zz-template*") =~ "café      ready"
+    Compos.Core.kill_buffer("*zz-template*")
+  end
+
   test "set_locals writes several locals with one change" do
     name = "*zz-locals-#{System.unique_integer([:positive])}*"
     {:ok, ^name} = Compos.Core.create_buffer(name)

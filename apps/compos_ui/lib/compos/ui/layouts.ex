@@ -198,6 +198,11 @@ defmodule Compos.Ui.Layouts do
           }
           .window.active { background: var(--window-bg, #fdfcf8); }
 
+          .window.preview-highlight {
+            outline: 1px solid color-mix(in srgb, var(--accent-fg, #8f9cdb) 65%, transparent);
+            outline-offset: -1px;
+            box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-fg, #8f9cdb) 20%, transparent);
+          }
           /* A peek is a detached card, never a pane or editable surface. */
           .window.listing-peek {
             position: fixed; z-index: 50; inset: auto;
@@ -225,7 +230,11 @@ defmodule Compos.Ui.Layouts do
           .peek-card-body { margin: 0; padding: 18px 20px 34px; flex: 1; min-height: 0;
             font: inherit; font-size: 1em; line-height: 1.6;
             overflow-wrap: anywhere; overflow: auto; overscroll-behavior: contain; }
+          .peek-document { display: block; width: 100%; min-height: 300px; border: 0; pointer-events: none; }
           .peek-card-body pre { white-space: pre-wrap; font: inherit; margin: 0; }
+          .peek-card-body .peek-plain, .peek-text { font-family: var(--font-mono); }
+          .peek-text .line { display: block; white-space: pre; }
+          .peek-text .semantic-record { display: contents; }
           .windows:has(.listing-peek) * { transition: none !important; animation: none !important; }
           .peek-card-body .ag-scroll { overflow: visible; flex: none; }
           .peek-connector { position: fixed; inset: 0; width: 100vw; height: 100vh;
@@ -2822,7 +2831,17 @@ defmodule Compos.Ui.Layouts do
                   width: (width / zoom) + "px", height: (height / zoom) + "px", right: "auto", bottom: "auto",
                   visibility: "visible"});
                 const body = this.el.querySelector(".peek-card-body");
-                const content = body?.textContent;
+                const doc = body?.querySelector(".peek-document");
+                if (doc && !doc.dataset.peekSized) {
+                  doc.dataset.peekSized = "true";
+                  const size = () => {
+                    const root = doc.contentDocument?.documentElement;
+                    if (root) doc.style.height = Math.max(300, root.scrollHeight) + "px";
+                  };
+                  doc.addEventListener("load", size);
+                  size();
+                }
+                const content = doc?.getAttribute("srcdoc") || body?.textContent;
                 if (body && this.content !== content) {
                   body.scrollTop = body.scrollHeight;
                   this.content = content;

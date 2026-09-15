@@ -796,8 +796,7 @@
   (lambda ()
     (unless (peek-dismiss!)
       (let* ((win (active-window)) (cur (current-buffer))
-             (history (filter (lambda (buf) (and (buffer-exists? buf) (not (equal? buf cur))))
-                             (window-prev-buffers win))))
+             (history (window-eligible-history win)))
         (if (pair? history)
             (begin
               (switch-to-buffer-here! (car history))

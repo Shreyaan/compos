@@ -11,7 +11,7 @@ defmodule Compos.Ui.ComposMLTextListTest do
     Editor.delete_other_windows()
 
     {:ok, _} =
-      Session.eval(~S|(begin (buffer-create "*zz-semantic-buffer*") (run-command "ibuffer"))|)
+      Session.eval(~S|(begin (buffer-create "*zz-semantic-buffer*") (run-command "ibuffer-pretty"))|)
 
     on_exit(fn -> Compos.Core.kill_buffer("*zz-semantic-buffer*") end)
 
@@ -23,25 +23,71 @@ defmodule Compos.Ui.ComposMLTextListTest do
 
     text = row_text.()
     {:ok, view, _} = live(build_conn(), "/")
-    assert has_element?(view, "buffers.buf > buffer[record-id].line")
-    assert has_element?(view, "buffers.buf c-headline .line")
-    assert has_element?(view, "buffer.line-content", "zz-semantic-buffer")
-    refute has_element?(view, "buffers > buffer c-line, buffers > buffer > c-text")
-    refute has_element?(view, ~s(buffer[record-id="*zz-semantic-buffer*"] c-text))
-    assert has_element?(view, "buffers > buffer > buffer-name", "zz-semantic-buffer")
+    assert has_element?(view, "buffers.buf > buffer[record-id]")
+    assert has_element?(view, "buffers.buf c-headline.line")
+    assert has_element?(view, "buffers > buffer .ibuffer-name", "zz-semantic-buffer")
     html = view |> element(~s(buffer[record-id="*zz-semantic-buffer*"])) |> render()
-    assert html =~ ">*zz-semantic-buffer*</buffer-name>"
-    refute html =~ "\n"
-    assert html =~ "data-col="
-    assert html =~ "--field-column:"
+    assert html =~ "ibuffer-info ibuffer-mode"
+    assert html =~ "ibuffer-info ibuffer-file"
     [_, win, line] = Regex.run(~r/id="ln-(\d+)-(\d+)"/, html)
     view |> element("#editor") |> render_hook("mouse", %{"win" => String.to_integer(win), "line" => String.to_integer(line), "col" => 0})
-    assert has_element?(view, ~s(buffer[record-id="*zz-semantic-buffer*"][selected="true"]))
+    assert has_element?(view, ~s(buffer[record-id="*zz-semantic-buffer*"].hl-line))
     assert row_text.() == text
     view |> element("#editor") |> render_hook("key", %{"k" => "n"})
     assert row_text.() == text
     {:ok, _} = Session.eval(~S|(list-refresh! "*ibuffer*")|)
-    assert has_element?(view, "buffers.buf > buffer[record-id].line")
+    assert has_element?(view, "buffers.buf > buffer[record-id]")
+  end
+
+  test "picker metadata exposes formatter CSS classes on the rendered elements" do
+    Editor.minibuffer_close()
+    Editor.set_pending([])
+    Editor.delete_other_windows()
+    Editor.set_window_buffer("*scratch*")
+    {:ok, view, _} = live(build_conn(), "/")
+    {:ok, _} = Session.eval(~S|(begin
+      (buffer-create "*picker-css*")
+      (buffer-set-local! "*picker-css*" 'mode-name "text-mode")
+      (set! ibuffer-info #t) (set! ibuffer-pretty #t)
+      (run-command "ibuffer-prompt-pretty")
+      (list-set-query! " *buffers*" "picker-css"))|)
+    on_exit(fn ->
+      Session.eval("(when (minibuffer-state) (minibuffer-cancel!))")
+      Compos.Core.kill_buffer("*picker-css*")
+    end)
+    assert has_element?(view, "buffers .ibuffer-name", "picker-css"),
+      inspect({Buffer.text(" *buffers*"), Buffer.get_local(" *buffers*", "render-records"), Editor.current_buffer()})
+    assert has_element?(view, "buffers .ibuffer-info.ibuffer-mode", "text-mode")
+    assert has_element?(view, "buffers .ibuffer-info.ibuffer-file")
+    assert has_element?(view, "buffers .ibuffer-info.ibuffer-modified")
+    assert has_element?(view, "buffers[profile=pretty] .ibuffer-info.ibuffer-size")
+    assert has_element?(view, "buffers .ibuffer-heading", "[ ungrouped ]")
+  end
+
+  test "plain and pretty picker rows both use the direct DOM path" do
+    Editor.minibuffer_close()
+    Editor.set_pending([])
+    Editor.delete_other_windows()
+    Editor.set_window_buffer("*scratch*")
+    {:ok, view, _} = live(build_conn(), "/")
+    {:ok, _} = Session.eval(~S|(begin
+      (buffer-create "*picker-direct*")
+      (buffer-set-local! "*picker-direct*" 'mode-name "text-mode")
+      (run-command "ibuffer-prompt-pretty")
+      (list-set-query! " *buffers*" "picker-direct"))|)
+    on_exit(fn ->
+      Session.eval("(when (minibuffer-state) (minibuffer-cancel!))")
+      Compos.Core.kill_buffer("*picker-direct*")
+    end)
+    row = ~s(buffers > buffer[record-id="*picker-direct*"])
+    assert has_element?(view, row <> ".semantic-direct.line")
+    assert has_element?(view, row <> " > .ibuffer-mode", "text-mode")
+    refute has_element?(view, row <> " c-line")
+    refute has_element?(view, row <> " .ibuffer-mode c-text")
+    {:ok, _} = Session.eval(~S|(run-command "ibuffer-toggle-pretty")|)
+    assert has_element?(view, row <> ".semantic-direct.line")
+    assert has_element?(view, row <> " > .ibuffer-mode", "text-mode")
+    refute has_element?(view, row <> " c-line")
   end
 
   test "Dired exposes file identities without replacing its compact text renderer" do

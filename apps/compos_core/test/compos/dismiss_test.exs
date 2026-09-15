@@ -44,6 +44,130 @@ defmodule Compos.DismissTest do
     %{frame: frame}
   end
 
+  for command <- ["dismiss-buffer", "quit-window", "dired-quit"] do
+    @command command
+    test "#{command} skips foreign predecessors", %{frame: f} do
+      eval!("""
+      (define zz-dismiss-group (group-ensure-record! "zz-dismiss-home"))
+      (define zz-dismiss-away (group-ensure-record! "zz-dismiss-away"))
+      (buffer-add-group! "zz-dismiss-parent" zz-dismiss-group)
+      (buffer-add-group! "zz-dismiss-child" zz-dismiss-group)
+      (buffer-add-group! "zz-dismiss-under" zz-dismiss-away)
+      (switch-to-buffer-here! "zz-dismiss-child")
+      (buffer-child! "zz-dismiss-parent" "zz-dismiss-child")
+      (set-frame-local! 'current-group zz-dismiss-group)
+      (set-window-prev-buffers! (active-window)
+        '("zz-dismiss-under" "zz-dismiss-parent"))
+      (local-set-key "<f9>" "#{@command}")
+      """, f)
+      KeyDispatch.handle_key(f, "<f9>")
+      assert eval!("(current-buffer)", f) == ~s("zz-dismiss-parent")
+      assert eval!("(window-prev-buffers (active-window))", f) == "()"
+      assert eval!(~s{(buffer-known? "zz-dismiss-under")}, f) == "#t"
+    end
+
+    test "#{command} preserves the last window with only foreign history", %{frame: f} do
+      eval!("""
+      (define zz-dismiss-group (group-ensure-record! "zz-dismiss-home"))
+      (define zz-dismiss-away (group-ensure-record! "zz-dismiss-away"))
+      (buffer-add-group! "zz-dismiss-parent" zz-dismiss-group)
+      (buffer-add-group! "zz-dismiss-child" zz-dismiss-group)
+      (buffer-add-group! "zz-dismiss-under" zz-dismiss-away)
+      (switch-to-buffer-here! "zz-dismiss-child")
+      (buffer-child! "zz-dismiss-parent" "zz-dismiss-child")
+      (set-frame-local! 'current-group zz-dismiss-group)
+      (set-window-prev-buffers! (active-window) '("zz-dismiss-under"))
+      (local-set-key "<f9>" "#{@command}")
+      """, f)
+      KeyDispatch.handle_key(f, "<f9>")
+      assert eval!("(current-buffer)", f) == ~s("zz-dismiss-child")
+      assert eval!(~s{(buffer-known? "zz-dismiss-child")}, f) == "#t"
+    end
+  end
+
+  test "ungrouped application history cannot enter a group", %{frame: f} do
+    eval!("""
+    (define zz-dismiss-group (group-ensure-record! "zz-dismiss-home"))
+    (buffer-add-group! "zz-dismiss-parent" zz-dismiss-group)
+    (buffer-add-group! "zz-dismiss-child" zz-dismiss-group)
+    (for-each (lambda (g) (buffer-remove-group! "zz-dismiss-under" g))
+              (buffer-group-ids "zz-dismiss-under"))
+    (buffer-set-local! "zz-dismiss-under" 'special #t)
+    (switch-to-buffer-here! "zz-dismiss-child")
+    (buffer-child! "zz-dismiss-parent" "zz-dismiss-child")
+    (set-frame-local! 'current-group zz-dismiss-group)
+    (set-window-prev-buffers! (active-window)
+      '("zz-dismiss-under" "zz-dismiss-parent"))
+    (local-set-key "<f9>" "dismiss-buffer")
+    """, f)
+    KeyDispatch.handle_key(f, "<f9>")
+    assert eval!("(current-buffer)", f) == ~s("zz-dismiss-parent")
+  end
+
+  test "first entry into a group does not inherit the departing pane history", %{frame: f} do
+    eval!("""
+    (define zz-dismiss-group (group-ensure-record! "zz-dismiss-first-entry"))
+    (define zz-dismiss-away (group-ensure-record! "zz-dismiss-first-away"))
+    (buffer-add-group! "zz-dismiss-parent" zz-dismiss-group)
+    (buffer-add-group! "zz-dismiss-under" zz-dismiss-away)
+    (switch-to-buffer-here! "zz-dismiss-under")
+    (set-frame-local! 'current-group zz-dismiss-away)
+    (switch-to-group! zz-dismiss-group)
+    """, f)
+    assert eval!("(window-prev-buffers (active-window))", f) == "()"
+    assert eval!("(current-buffer)", f) == ~s("zz-dismiss-parent")
+  end
+
+  test "an exhausted child pane closes without borrowing its parent", %{frame: f} do
+    eval!("""
+    (split-window! 'h 0.5) (other-window!)
+    (switch-to-buffer-here! "zz-dismiss-child")
+    (buffer-child! "zz-dismiss-parent" "zz-dismiss-child")
+    (set-window-prev-buffers! (active-window) '())
+    (local-set-key "<f9>" "dismiss-buffer")
+    """, f)
+    KeyDispatch.handle_key(f, "<f9>")
+    assert eval!("(map cadr (window-list))", f) == ~s{("zz-dismiss-parent")}
+    assert eval!(~s{(buffer-known? "zz-dismiss-child")}, f) == "#f"
+  end
+
+  test "restoring a group removes foreign history and return records", %{frame: f} do
+    eval!("""
+    (define zz-dismiss-group (group-ensure-record! "zz-dismiss-home"))
+    (define zz-dismiss-away (group-ensure-record! "zz-dismiss-away"))
+    (buffer-add-group! "zz-dismiss-parent" zz-dismiss-group)
+    (buffer-add-group! "zz-dismiss-child" zz-dismiss-group)
+    (buffer-add-group! "zz-dismiss-under" zz-dismiss-away)
+    (switch-to-buffer-here! "zz-dismiss-child")
+    (set-frame-local! 'current-group zz-dismiss-group)
+    (set-window-prev-buffers! (active-window)
+      '("zz-dismiss-under" "zz-dismiss-parent"))
+    (window-quit-restore-note! (active-window) 'other "zz-dismiss-under")
+    (group-layout-save! zz-dismiss-group)
+    (switch-to-group! zz-dismiss-away)
+    (switch-to-group! zz-dismiss-group)
+    """, f)
+    assert eval!("(window-prev-buffers (active-window))", f) == ~s{("zz-dismiss-parent")}
+    assert eval!("(window-quit-restore (active-window))", f) == "#f"
+  end
+
+  test "a mode declares dismissal without naming its quit command", %{frame: f} do
+    eval!(
+      """
+      (define-mode "zz-dismiss-view-mode" (lambda () #t))
+      (mode-dismissible! "zz-dismiss-view-mode")
+      (mode-keys! "zz-dismiss-view-mode" '(("q" "zz-dismiss-parent-back")))
+      (set-mode! "zz-dismiss-view-mode")
+      (dismiss-sync-visible!)
+      """, f)
+    assert eval!(~s{(buffer-dismissible? "zz-dismiss-parent")}, f) == "#t"
+    assert eval!(~s{(minor-mode-on? "zz-dismiss-parent" "dismiss-mode")}, f) == "#t"
+    KeyDispatch.handle_key(f, "q")
+    assert eval!(~s{(buffer-local "zz-dismiss-parent" 'back-called)}, f) == "#t"
+    eval!(~s{(set-mode! "fundamental-mode") (local-set-key "q" "zz-dismiss-parent-back") (dismiss-sync-visible!)}, f)
+    assert eval!(~s{(buffer-dismissible? "zz-dismiss-parent")}, f) == "#f"
+  end
+
   test "dismissal unwinds nested children before the parent's command", %{frame: f} do
     eval!(
       """

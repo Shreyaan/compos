@@ -41,7 +41,7 @@ the component through props.
 - `ui/tabs` — one row of choices over the same view, current one marked
 - `ui/actions` — a row of clickable actions with their keys
 - `ui/kv` — compact key/value details
-- `ui/keymap` — the keys in force and what each one does
+- `ui/keymap` — responsive keycaps and action labels, using theme fonts and colors; optional third column text describes the action
 - `ui/group` — a labelled grouping of related blocks
 - `ui/empty` — empty-state notice
 - `ui/badge` — short status chip
@@ -79,3 +79,7 @@ their own effects. The shared catalog separates:
 
 Search these facets with `apropos`; `apropos-components` is only a convenience
 wrapper for `kind=component`.
+
+A buffer can pin component blocks below its content with `footer-line-blocks`.
+List modes opt into the shared keymap footer with `keymap-component #t`; their
+existing `footer` function supplies `(KEY LABEL)` pairs.

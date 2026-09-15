@@ -88,7 +88,7 @@
                     "no summary yet, no segment")
       (buffer-set-local! buf 'chat-summary "The user is testing the bar.")
       (let* ((blocks (dashboard-line-blocks buf))
-             (wide (car (reverse blocks)))
+             (wide (car blocks))
              (kids (plist-get wide 'children)))
         (check-equal! (length kids) 1
                       "the summary has no redundant label")
@@ -138,11 +138,28 @@
       (buffer-set-local! buf 'mode-name "chat-mode")
       (check-equal! (dash--headline-keep buf (+ narrow-cols 1)) #f
                     "a wide window keeps every segment")
-      (check-equal! (dash--headline-keep buf (- narrow-cols 1)) '(mode llm)
-                    "a narrow chat keeps what it is and what is behind it")
+      (check-equal! (dash--headline-keep buf (- narrow-cols 1)) #f
+                    "chat title and metadata stay visible at every width")
       (buffer-set-local! buf 'mode-name "text-mode")
       (check-equal! (dash--headline-keep buf (- narrow-cols 1)) #f
                     "a mode that declares nothing keeps every segment")
+      (buffer-kill! buf))))
+
+(deftest 'chat-header-always-starts-with-a-prominent-title
+  "a chat without a generated title still names itself before the metadata"
+  (lambda ()
+    (let ((buf "*chat:zz-header-untitled*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (let* ((blocks (dashboard-line-blocks buf))
+             (title (car blocks))
+             (value (car (plist-get title 'children))))
+        (check-true! (string-contains? (plist-get title 'class) "dseg-chat-title")
+                     "the first block is the prominent title")
+        (check-equal! (cadr (car (plist-get value 'segs))) buf
+                      "an untitled chat uses its buffer name")
+        (check-equal! (car (car (plist-get value 'segs))) "dseg-strong"
+                      "the title is emphasized"))
       (buffer-kill! buf))))
 
 (deftest 'a-dropped-headline-segment-takes-no-rule-with-it
@@ -177,7 +194,7 @@
       (check-equal! (buffer-local buf 'chat-summary) "Rewriting the dashboard segment."
                     "the running summary is still the latest")
       (let* ((blocks (dashboard-line-blocks buf))
-             (wide (car (reverse blocks)))
+             (wide (car blocks))
              (kids (plist-get wide 'children)))
         (check-equal! (cadr (car (plist-get (car kids) 'segs)))
                       "Adding titles to chats."
