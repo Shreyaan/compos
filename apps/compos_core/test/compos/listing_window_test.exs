@@ -10,7 +10,7 @@ defmodule Compos.ListingWindowTest do
   for {command, quit} <- [{"ibuffer", "ibuffer-quit"}, {"ichat", "chat-list-quit"}] do
     @command command
     @quit quit
-    test "#{command} opens here, previews a copy, and retains the listing on quit" do
+    test "#{command} opens here with an inert card and retains the listing on quit" do
       previous = Editor.last_active_frame()
       {:ok, frame} = Editor.attach_frame(nil)
 
@@ -49,16 +49,11 @@ defmodule Compos.ListingWindowTest do
           frame
         )
 
-        assert eval!("(equal? *lw-copy* \"*zz-lw-left*\")", frame) == "#f"
-        assert eval!("(buffer-text *lw-copy*)", frame) == "\"source text\""
-
-        assert eval!("(buffer-local *lw-copy* 'listing-preview-source)", frame) ==
-                 "\"*zz-lw-left*\""
-
-        assert eval!("(buffer-local \"*zz-lw-left*\" 'window-class)", frame) == "#f"
-        assert eval!("(buffer-read-only? *lw-copy*)", frame) == "#t"
+        assert eval!("(popup-open?)", frame) == "#t"
         assert eval!("(window-point (window-showing \"*zz-lw-left*\"))", frame) == "3"
         assert eval!("(equal? (active-window) *lw-window*)", frame) == "#t"
+        KeyDispatch.handle_key(frame, "<f10>")
+        assert eval!("(equal? (current-buffer) *lw-view*)", frame) == "#t"
         KeyDispatch.handle_key(frame, "<f10>")
         assert eval!("(current-buffer)", frame) == "\"*zz-lw-right*\""
         assert eval!("(buffer-known? *lw-copy*)", frame) == "#f"
@@ -137,7 +132,7 @@ defmodule Compos.ListingWindowTest do
     end
   end
 
-  test "the minibuffer picker previews a copy and restores its invoking buffer" do
+  test "the minibuffer picker has an inert card and restores its invoking buffer" do
     previous = Editor.last_active_frame()
     {:ok, frame} = Editor.attach_frame(nil)
 
@@ -160,15 +155,9 @@ defmodule Compos.ListingWindowTest do
                frame
              ) == "\"\""
 
-      for _ <- 1..100,
-          eval!("(buffer-local (popup-buffer) 'listing-preview-source)", frame) !=
-            "\"*zz-lw-prompt-target*\"",
-          do: Process.sleep(10)
-
-      assert eval!("(buffer-local (popup-buffer) 'listing-preview-source)", frame) ==
-               "\"*zz-lw-prompt-target*\""
-
-      assert eval!("(buffer-read-only? (popup-buffer))", frame) == "#t"
+      for _ <- 1..100, eval!("(frame-local 'listing-preview-owner)", frame) == "#f",
+        do: Process.sleep(10)
+      assert eval!("(and (frame-local 'listing-preview-owner) #t)", frame) == "#t"
       eval!("(minibuffer-cancel!)", frame)
       assert eval!("(window-buffer *lw-prompt-window*)", frame) == "\"*zz-lw-prompt-source*\""
       assert eval!("(popup-open?)", frame) == "#f"

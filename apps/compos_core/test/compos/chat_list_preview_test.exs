@@ -70,7 +70,7 @@ defmodule Compos.ChatListPreviewTest do
     :ok
   end
 
-  test "up and down move immediately but preview only the final row" do
+  test "up and down move immediately without previews" do
     press("n")
     stale = eval!("(chat-list--preview-request)")
     press(["n", "p"])
@@ -78,8 +78,9 @@ defmodule Compos.ChatListPreviewTest do
     eval!("(chat-list--preview-now! '#{stale})")
     assert eval!(~S{(list-current "*chat-list*")}) == ~s("*zz-dp-b*")
     assert eval!("*zz-dp-calls*") == "()"
-    eventually(fn -> eval!("*zz-dp-calls*") == ~s{("*zz-dp-b*")} end)
-    assert eval!("(buffer-local (popup-buffer) 'listing-preview-source)") == ~s("*zz-dp-b*")
+    Process.sleep(450)
+    assert eval!("*zz-dp-calls*") == "()"
+    assert eval!("(frame-local 'listing-preview-owner)") == "#f"
   end
 
   test "typing updates input before drawing the filtered list and preview" do
@@ -88,7 +89,8 @@ defmodule Compos.ChatListPreviewTest do
     assert eval!(~S{(plist-get (minibuffer-state) 'input)}) == ~s("zz-dp-c")
     eventually(fn -> eval!(~S{(list-current "*chat-list*")}) == ~s("*zz-dp-c*") end)
     assert eval!("*zz-dp-calls*") == "()"
-    eventually(fn -> eval!("*zz-dp-calls*") == ~s{("*zz-dp-c*")} end)
+    Process.sleep(450)
+    assert eval!("*zz-dp-calls*") == "()"
   end
 
   test "leaving cancels pending and already-queued previews" do

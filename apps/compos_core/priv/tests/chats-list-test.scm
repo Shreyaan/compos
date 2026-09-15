@@ -123,8 +123,7 @@
   (lambda ()
     (chats-test-open! 'none 'name)
     (chat-list-preview!)
-    (check-equal! (cadr (chat-list--preview-request)) (list-current *chat-list*)
-                  "the pending preview names the row at point")
+    (check-equal! (chat-list--preview-request) #f "row navigation schedules no preview")
     (chats-test-reset!)))
 
 (deftest 'the-resting-list-is-flat-and-most-recent-first

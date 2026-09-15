@@ -1902,6 +1902,7 @@ defmodule Compos.Ui.EditorLive do
         path: assigns.node.path,
         read_only: assigns.node.read_only,
         dismissible?: Map.get(assigns.node, :dismissible, false),
+        peek?: String.contains?(assigns.node.window_class || "", "listing-peek"),
         active?: assigns.node.id == assigns.active
       )
 
@@ -1916,7 +1917,33 @@ defmodule Compos.Ui.EditorLive do
       data-buffer={@node.buffer}
       data-path={@path}
       data-read-only={to_string(@read_only)}
+      phx-hook={if @peek?, do: "PeekCard"}
+      role={if @peek?, do: "note"}
+      aria-label={if @peek?, do: "Preview"}
     >
+      <%= if @peek? do %>
+        <c-group class="peek-card-header">
+          <c-text class="peek-card-label">Preview</c-text>
+          <c-text class="peek-card-title">{@node.header_line || @node.buffer}</c-text>
+          <button type="button" tabindex="-1" class="peek-card-dismiss" aria-label="Dismiss preview (q)"><kbd>q</kbd></button>
+        </c-group>
+        <c-group class="peek-card-body">
+          <c-group inert>
+            <%= cond do %>
+              <% @node.render_mode == "blocks" and Map.has_key?(@node, :blk) -> %>
+                <c-group class="blocks-view" style={@node.style}>
+                  <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
+                </c-group>
+              <% @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) -> %>
+                <Compos.Ui.AgentTranscript.composml blocks={@node.ag_blocks}
+                  win={@node.id} buf={@node.buffer} verbosity={@node.agent.verbosity}
+                  stick={false} scroll_top={0} scroll_anchor={nil} scroll_offset={0} peek={true} />
+              <% true -> %>
+                <pre>{@node.text}</pre>
+            <% end %>
+          </c-group>
+        </c-group>
+      <% else %>
       <%!-- Dismissal is one key and it costs no row. The q rides the top
              right corner of the window, on the empty end of whatever headline
              the buffer draws for itself. Nobody needs the word Back. --%>
@@ -2206,6 +2233,7 @@ defmodule Compos.Ui.EditorLive do
           <% end %>
         </c-position>
       </c-modeline>
+      <% end %>
     </c-window>
     """
   end

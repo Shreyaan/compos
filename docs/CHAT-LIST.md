@@ -1,21 +1,27 @@
 # Chat list
 
-## Listing buffers and transient previews
+## Listing buffers and floating peek cards
 
 `M-x ichat` (also `M-x chat-list`) and `M-x ibuffer` open an ordinary
 listing buffer in the window that invoked them. They reuse a matching listing
 buffer in the current group, without selecting another window that shows it.
 Different groups get separate listing buffers. The rows identify buffers.
 
-A preview is a read-only text copy in a popup. It has its own position and popup
-class; the original keeps its group, text, position, and display state. Sleeping
-buffers are read from saved text without starting their runtime. This is a text
-snapshot, not a second running chat. Moving to another row replaces the snapshot.
+Row navigation shows a **Preview** card after a short pause. The card is inset
+from the window borders, raised with a soft shadow, and connected by a line
+to the source row. It is a read-only presentation copy in the source mode, with rich chat and block
+rendering. It does not copy the source's chat runtime. The card is nearly pane
+sized and uses normal text size; changing groups in the list does not resize it.
 
-`RET` visits the original buffer in its owning group using normal placement rules.
-`q` removes the preview copy and reveals the invoking window's predecessor.
-The listing survives for reuse. No application-wide layout snapshot is restored.
-Closing the filter with `C-g` leaves its narrowing and the listing in place.
+The body starts at the bottom and scrolls with the mouse wheel or trackpad.
+Its content cannot take focus, edit, or activate links. The card's control is
+`q` to dismiss. Focus stays in the source list. The first `q` closes
+the card; a second `q` leaves the list. Dismissing a card suppresses it for that
+row until selection changes. `RET` in the source list opens the real buffer.
+Closing a picker removes its card too. `C-x o` or `Cmd-RET` while peeking
+opens the original buffer in another work window. Showing a peek never animates
+the listing. `RET` opens in the selected pane, moving the mode's window there
+when necessary; `q` returns to the same-group listing.
 In both ibuffer and ichat, `C-x n n` narrows to the group heading at point
 or the group containing the selected row. `C-x n w` shows all groups again,
 keeping the `/` query. Group scope survives refresh and folding; changing

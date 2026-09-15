@@ -2053,6 +2053,9 @@ defmodule Compos.Core.SchemeAPI do
       end,
       "window-rects" => fn [] -> Editor.window_rects() end,
       "select-window!" => fn [id] -> Editor.set_active(id) == :ok end,
+      "window-swap-id!" => fn [first, second] ->
+        Editor.swap_windows(first, second) == :ok
+      end,
       "active-window" => fn [] -> Editor.active_window() end,
       "window-point" => fn [id] ->
         case Editor.window_point(id) do

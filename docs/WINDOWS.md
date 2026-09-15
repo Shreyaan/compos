@@ -451,22 +451,21 @@ layout, hidden record, or quit route reintroduces chats into another window.
 points, quit records, and cycle-mode settings. Re-entry preserves the invoking window's predecessor.
 A second quit does nothing. Exit never reconstructs the layout from one remembered buffer.
 
-Chat-list now covers only the invoking window and previews a transient copy in a popup. Ordinary window history owns return; there is no frame-wide snapshot to replay. The return tests exercise grouped and ungrouped windows, duplicate displays, re-entry, and two frames.
+Chat-list covers only the invoking window. Its read-only peek floats above the workspace and never takes focus. Ordinary window history owns return; there is no frame-wide snapshot to replay. The return tests exercise grouped and ungrouped windows, duplicate displays, re-entry, and two frames.
 
-### R07 — Buffer listings and isolated previews
+### R07 — Floating peek cards
 
-| Case | Commands | Action and expected result |
+| Case | Commands | Expected result |
 |---|---|---|
-| R07a — Open here | `M-x ibuffer`; repeat with `M-x ichat` | Invoke in the right window of a group. The listing covers that window; other work windows retain their IDs, buffers, and histories. |
-| R07b — Reuse locally | `q`, `other-window`, then `M-x ibuffer` or `M-x ichat` | Reuse the group's listing buffer in the newly invoking window. Do not jump to the old window. |
-| R07c — Separate groups | `group-switch`, then `M-x ibuffer` or `M-x ichat` | Another group gets its own listing buffer. Each listing has one owner. |
-| R07d — Preview copy | `n` / `p` in either listing | Show a read-only text copy in the popup without taking focus. The original buffer remains in its group and retains its popup class and position. |
-| R07e — Repeated preview | `n`, `n`, `p`, then `q` | Replace one transient copy; remove it on quit. Do not accumulate preview buffers or permanent history entries. |
-| R07f — Foreign row | `RET` (`ibuffer-visit` / `chat-list-visit`) | Dismiss the preview, enter the original buffer's group, and make that original visible through group placement rules. Never import the foreign window into the listing's group. |
-| R07g — Quit locally | `q` (`ibuffer-quit` / `chat-list-quit`) | Reveal the predecessor here and keep the listing reusable. Changes made to other work windows while listing remain intact. |
-| R07h — Delayed preview | `n`, then `q` before the delay expires | A queued callback cannot reopen the popup after leaving the list. |
-| R07i — Sleeping source | `n` / `p` onto a sleeping chat | Read saved transcript text into the copy without starting the original runtime. |
-| R07j — Re-entry | Invoke `M-x ichat` twice, then `q` | Reuse the same listing and return once to the original predecessor. |
+| R07a — Navigate | `n` / `p` in `ibuffer` or `ichat` | After a short pause, show a raised, inset Preview card linked to the selected row. |
+| R07b — Focus | `other-window`, focus arrows, or click the card body | The card never takes focus. Its body has no interactive controls. |
+| R07c — Dismiss | `q` or the card's q button | Close only the card. Keep the source list, its selection, and focus. Do not reopen on the same row. |
+| R07d — Exit | `q` again | Reveal the source window's predecessor normally. |
+| R07e — Select | `RET` in the source list | Close the card and open the original buffer through the selection rules. |
+| R07f — Isolated view | Preview a buffer already visible elsewhere | Original text, point, mode, group and window classes remain untouched. |
+| R07g — Delayed callback | Move a row and immediately dismiss/leave | Cancel the queued peek. It cannot recreate the dismissed card. |
+| R07h — Geometry | Resize or scroll at different editor zoom levels | Keep the card inset and its connector attached to the visible source row and card edge. |
+| R07i — Picker exit | `C-g` in `C-x b` | Remove both picker and card; restore the invoking buffer. |
 
 ## 14. Applications inside a group — proposed contract
 
@@ -567,3 +566,26 @@ the actual command path. A source-text assertion or a screenshot alone is insuff
 The last-window behavior in Q09 is the current explicit boundary: preserve it and
 report the condition. It does not authorize a scratch replacement, foreign fallback,
 or invisible-window reveal.
+
+## Explicit picker placement — current rule
+
+`C-x b` chooses the physical pane. Mode affinity moves the whole logical
+window there, preserving its stack. The displaced window takes the vacated
+pane. A hidden stack exchanges with the selected pane without a split.
+Foreign selections enter their owning group first; windows never cross groups.
+This supersedes older cases describing `C-x b` as following a mode window.
+
+| Case | Command | Expected result |
+| --- | --- | --- |
+| E01 — Visible mode window | `C-x b`, select another chat, `RET` | Move the chat window into the invoking pane and show the choice. Preserve its stack. |
+| E02 — Hidden stack | `C-x b`, select a hidden mode buffer, `RET` | Exchange its stack with the chosen pane's stack; preserve pane geometry. |
+| E03 — No attraction | `C-x b`, select a mode with no window | Show the buffer in the invoking pane. |
+| E04 — Same pane | `C-x b`, choose another buffer of this mode | Keep the window in place. |
+| E05 — Foreign group | `C-x b`, choose a foreign buffer | Enter its group; only move windows belonging to that group. |
+| E06 — Return | `ibuffer`, `RET` on Amazon detail, `q` | Return to the same-group ibuffer, even after moving the mode window. |
+| E07 — Open elsewhere | `C-x o` or `Cmd-RET` while peeking | Dismiss the copy and open the original in another work window; split if needed. |
+| E08 — Scroll | Wheel or trackpad over the preview | Each new preview starts at the bottom and scrolls independently, without focus. |
+| E09 — Cross headings | `n` / `p` across group sections | Keep the pane-sized card and normal font size; no ibuffer animation. |
+| E10 — Rich mode | `n` / `p` onto chats and block views | Preserve source mode and rich presentation without copying chat runtime identity. |
+
+Normal mode-driven opens continue to use mode attraction.

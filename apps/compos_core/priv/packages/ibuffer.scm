@@ -1310,65 +1310,120 @@
                       (ibuffer-view! name)
                       name))))))))
 
-;; Preview copies have their own point, scroll state, and popup class.
+;; A listing peek is an isolated presentation copy. The shell owns scrolling and dismissal.
 (define (listing-preview-text target)
-  (or (and (buffer-exists? target) (buffer-text target))
-      (let ((path (buffer-path target)) (log (buffer-local target 'chat-log-id)))
-        (cond ((and (string? log) (boundp 'chat-log-dir-for))
-               (let ((file (string-append (chat-log-dir-for target) "/" log ".chat")))
-                 (and (file-exists? file) (read-file file))))
-              ((and (string? path) (file-exists? path)) (read-file path))
-              (else #f)))
-      "No saved text is available for this buffer."))
+  (let* ((text (or (and (buffer-exists? target) (buffer-text target))
+                   (let ((path (buffer-path target)) (log (buffer-local target 'chat-log-id)))
+                     (cond ((and (string? log) (boundp 'chat-log-dir-for))
+                            (let ((file (string-append (chat-log-dir-for target) "/" log ".chat")))
+                              (and (file-exists? file) (read-file file))))
+                           ((and (string? path) (file-exists? path)) (read-file path))
+                           (else #f)))
+                   "No saved text is available."))
+         (limit (string-length text)))
+    (string-append (substring text 0 limit)
+                   (if (< limit (string-length text)) "\n\n… Open the buffer to read more." ""))))
 
 (define (listing-preview! owner target)
-  (when (and (or (equal? (window-buffer (active-window)) owner)
-                       (equal? *mb-list-buffer* owner))
-             (buffer-known? target) (not (equal? owner target)))
-    (let* ((copy (string-append " *listing-preview:" (selected-frame) "*"))
-           (replacing (and (popup-open?) (equal? (popup-buffer) copy)))
-           (dismissing *popup-dismissing*))
-      (buffer-create copy)
-      (with-buffer-display-update copy (lambda ()
-      (buffer-replace-range! copy 0 (string-byte-length (buffer-text copy))
-                             (listing-preview-text target))
-      (buffer-set-local! copy 'listing-preview-source target)
-      (buffer-set-local! copy 'listing-preview-owner owner)
-      (buffer-move-to-group! copy (buffer-group owner))
-      ;; Enable the source major mode on the isolated copy. List modes
-      ;; reuse the copied surface instead of fetching their sources again.
-      (buffer-set-locals! copy '(render-mode #f agent-blocks #f agent-saved-mark #f
-                                 agent-marker-bytes #f agent-verbosity #f))
-      (buffer-set-local! copy 'default-directory (buffer-local target 'default-directory))
-      (with-layout-suppressed
-        (lambda ()
-          (with-current-buffer copy
-            (lambda ()
-              (with-list-mode-skip-render
-                (lambda () (set-mode! (or (buffer-local target 'mode-name) "fundamental-mode"))))))))
-      ;; Mode projections can depend on state beyond the text (diff cards,
-      ;; semantic lists, HTML). Preserve the source's existing presentation.
-      (for-each
-        (lambda (entry)
-          (when (string-prefix? "render-" (symbol->string (car entry)))
-            (buffer-set-local! copy (car entry) (cadr entry))))
-        (buffer-locals target))
-      (when (and (boundp 'chat-preview-project!)
-                 (equal? (buffer-local target 'mode-name) "chat-mode"))
-        (chat-preview-project! copy target))
-      (buffer-set-read-only! copy #t)
-      (enable-minor-mode! copy "peek-mode")
-      (when replacing (set! *popup-dismissing* #t))
-      (with-layout-suppressed
-        (lambda ()
-          (with-display-preview
-            (lambda () (peek-show-in-popup! copy (active-window))))))
-      (set! *popup-dismissing* dismissing)
-      (set-frame-local! 'listing-preview-owner owner)
-      (set-frame-local! 'listing-preview-buffer copy)
-      copy)))))
+  (let ((source (if (equal? (window-buffer (active-window)) owner)
+                    (active-window) (window-showing owner))))
+    (when (and source (buffer-known? target) (not (equal? owner target))
+               (or (equal? (active-window) source) (equal? (mb-list-target) owner))
+               (not (equal? (buffer-local owner 'listing-peek-dismissed-row) target)))
+      (let* ((copy (string-append " *listing-preview:" (selected-frame) "*"))
+             (focus (active-window)))
+        (buffer-create copy)
+        (with-buffer-display-update copy (lambda ()
+          (buffer-replace-range! copy 0 (string-byte-length (buffer-text copy))
+                                (listing-preview-text target))
+          ;; Activate presentation on the disposable copy, without a layout.
+          (for-each (lambda (key) (buffer-set-local! copy key #f))
+            '(render-mode render-blocks render-root agent-blocks agent-saved-mark))
+          (with-layout-suppressed (lambda ()
+            (with-current-buffer copy (lambda ()
+              (with-list-mode-skip-render (lambda ()
+                (set-mode! (or (buffer-local target 'mode-name) "fundamental-mode"))))))))
+          (for-each (lambda (key)
+            (buffer-set-local! copy key (buffer-local target key)))
+            '(render-mode render-blocks render-root))
+          (when (and (equal? (buffer-local target 'mode-name) "chat-mode")
+                     (boundp 'chat-preview-project!))
+            (chat-preview-project! copy target))
+          (buffer-set-read-only! copy #t)
+          (enable-minor-mode! copy "peek-mode")
+          (buffer-set-locals! copy
+            (list 'listing-preview-owner owner 'listing-preview-source target
+                  'header-line target 'window-classes "listing-peek"
+                  'line-numbers "off"))
+          (buffer-move-to-group! copy (buffer-group owner))
+          (with-layout-suppressed
+            (lambda () (with-display-preview
+              (lambda () (peek-show-in-popup! copy source)))))
+          ;; The floating helper owns its size. These two numeric properties
+          ;; anchor the card to a source window and byte position in the UI.
+          (buffer-set-local! copy 'window-style
+            (string-append (or (buffer-local copy 'window-style) "") ";--peek-source-window:"
+              (number->string source) ";--peek-source-point:"
+              (number->string (window-point source))))
+          (popup-keys! copy #f)
+          (set-frame-local! 'listing-preview-owner owner)
+          (set-frame-local! 'listing-preview-buffer copy)))
+        (when (window-exists? focus) (select-window! focus))
+        copy))))
+
+(define-command "listing-peek-open-other" "Open the selected preview in another work window"
+  (lambda ()
+    (let* ((owner (frame-local 'listing-preview-owner))
+           (copy (frame-local 'listing-preview-buffer))
+           (target (and copy (buffer-local copy 'listing-preview-source))))
+      (if (and owner target)
+          (begin
+            (listing-preview-dismiss! owner)
+            (let ((group (buffer-group target)))
+              (when (and group (not (equal? group (frame-group))))
+                (switch-to-group! group)))
+            (show-in-other-work-window! target))
+          (run-command "other-window")))))
+
+(define (listing-peek-track!)
+  (let ((owner (frame-local 'listing-preview-owner)))
+    (when (and owner (not (equal? (window-buffer (active-window)) owner))
+               (not (equal? (mb-list-target) owner)))
+      (listing-preview-dismiss! owner))))
+(add-hook! 'post-command-hook 'listing-peek-track!)
+
+(define (listing-preview-schedule! owner target)
+  (let ((ticket (+ 1 (or (frame-local 'listing-peek-ticket) 0)))
+        (key (string-append "listing-peek:" (selected-frame))))
+    (set-frame-local! 'listing-peek-ticket ticket)
+    (debounce-cancel! key)
+    (unless (equal? target (buffer-local owner 'listing-peek-dismissed-row))
+      (buffer-set-local! owner 'listing-peek-dismissed-row #f))
+    (unless (and (string? target) (buffer-known? target))
+      (listing-preview-dismiss! owner))
+    (when (and (string? target) (buffer-known? target))
+      (unless (equal? target (buffer-local owner 'listing-peek-dismissed-row))
+        (buffer-set-local! owner 'listing-peek-dismissed-row #f)
+        (debounce! key 180 (lambda (ignored)
+          (when (and (= ticket (or (frame-local 'listing-peek-ticket) 0))
+                     (buffer-known? owner) (equal? (list-current owner) target))
+            (listing-preview! owner target))) #f)))))
+
+(define (listing-peek-dismiss!)
+  (let ((owner (frame-local 'listing-preview-owner))
+        (copy (frame-local 'listing-preview-buffer)))
+    (when owner
+      (buffer-set-local! owner 'listing-peek-dismissed-row
+                         (and copy (buffer-local copy 'listing-preview-source)))
+      (listing-preview-dismiss! owner))))
+
+(define-command "listing-peek-dismiss" "Dismiss the floating preview; keep focus in its source"
+  listing-peek-dismiss!)
+
 
 (define (listing-preview-dismiss! owner)
+  (set-frame-local! 'listing-peek-ticket (+ 1 (or (frame-local 'listing-peek-ticket) 0)))
+  (debounce-cancel! (string-append "listing-peek:" (selected-frame)))
   (when (equal? owner (frame-local 'listing-preview-owner))
     (let ((copy (frame-local 'listing-preview-buffer)) (focus (active-window)))
       (set-frame-local! 'listing-preview-owner #f)
@@ -1386,15 +1441,23 @@
       (lambda () (window-unwind-or-close! (active-window))))))
 
 (define (listing-visit! view target)
-  (listing-quit! view)
+  ;; Leave the listing on the invoking window's history for q.
+  (listing-preview-dismiss! view)
   (cond ((buffer-known? target)
          (let ((group (buffer-group target)))
            (when (and group (not (equal? group (frame-group)))) (switch-to-group! group)))
-         (switch-to-buffer-in-group! target))
-        ((and (string? target) (file-exists? target)) (visit-in-group target (frame-group)))))
+         (switch-to-buffer-in-chosen-pane! target))
+        ((and (string? target) (file-exists? target)) (visit-in-group target (frame-group))))
+  (when (and (equal? (current-buffer) target)
+             (equal? (buffer-group view) (buffer-group target)))
+    (let ((win (active-window)))
+      (set-window-prev-buffers! win
+        (cons view (filter (lambda (b) (not (equal? b view))) (window-prev-buffers win))))
+      (window-quit-restore-forget! win))))
 
 (public! 'ibuffer-group-view! "(ibuffer-group-view! MODE BASE) — reuse a listing buffer owned by this group, or create one")
-(public! 'listing-preview! "(listing-preview! OWNER TARGET) — preview TARGET in the popup without moving focus")
+(public! 'listing-preview-schedule! "(listing-preview-schedule! OWNER TARGET) — debounce a read-only card tied to the selected source row")
+(public! 'listing-preview! "(listing-preview! OWNER TARGET) — show an inert floating card anchored to OWNER; focus stays in the list")
 (public! 'listing-preview-dismiss! "(listing-preview-dismiss! OWNER) — dismiss only OWNER's current popup preview")
 (public! 'listing-visit! "(listing-visit! VIEW TARGET) — leave VIEW and visit TARGET in its owning group")
 (public! 'listing-quit! "(listing-quit! BUFFER) — return through the invoking window's history and retain the listing")
@@ -1659,7 +1722,7 @@
         ((buffer-known? row)
          (peek-dismiss!)
          (close!)
-         (switch-to-buffer-in-group! row))
+         (switch-to-buffer-in-chosen-pane! row))
         ((file-exists? row)
          (peek-dismiss!)
          (close!)
@@ -1680,7 +1743,9 @@
           (listing-visit! view b)))))
 
 (define-command "ibuffer-quit" "Dismiss the preview and reveal the previous buffer here"
-  (lambda () (listing-quit! (ibuffer-view))))
+  (lambda ()
+    (if (equal? (frame-local 'listing-preview-owner) (ibuffer-view))
+        (listing-peek-dismiss!) (listing-quit! (ibuffer-view)))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer table"
   (lambda () (ibuffer-refresh!)))
@@ -1720,33 +1785,15 @@
 (define *ibuffer-preview-generation* 0)
 (define *ibuffer-preview-requests* '())
 
+;; Row motion schedules an isolated card; it never visits the source buffer.
 (define (ibuffer-preview! &optional buf b)
-  (let* ((buf (or buf (ibuffer-view)))
-         (b (or b (ibuffer-current buf)))
-         (frame (selected-frame))
-         (key (string-append "ibuffer-preview:" frame))
-         (q (list-query buf)))
-    (set! *ibuffer-preview-generation* (+ 1 *ibuffer-preview-generation*))
-    (let ((ticket *ibuffer-preview-generation*))
-      (set! *ibuffer-preview-requests*
-        (cons (list frame ticket)
-              (remove (lambda (r) (equal? (car r) frame)) *ibuffer-preview-requests*)))
-      (debounce! key 150
-        (lambda (ignored)
-          (let ((pending (assoc frame *ibuffer-preview-requests*))
-                (mb (minibuffer-state)))
-            (when (and pending (= ticket (cadr pending))
-                       (buffer-known? buf) (string? b) (buffer-known? b)
-                       (not (equal? b buf)) (equal? b (ibuffer-current buf))
-                       (equal? q (list-query buf))
-                       (or (not mb) (and (equal? (mb-list-target) buf)
-                                         (equal? (plist-get mb 'input) q))))
-              (listing-preview! buf b)))) #f))))
+  (let ((owner (or buf (ibuffer-view))))
+    (listing-preview-schedule! owner (or b (ibuffer-current owner)))))
 
-(define-command "ibuffer-next" "Move down and preview the selected buffer"
+(define-command "ibuffer-next" "Move down to the next buffer"
   (lambda () (list-move! 1)))
 
-(define-command "ibuffer-prev" "Move up and preview the selected buffer"
+(define-command "ibuffer-prev" "Move up to the previous buffer"
   (lambda () (list-move! -1)))
 
 
@@ -2044,7 +2091,8 @@
                               (begin (buffer-kill! b) #t)))))
     'noun "buffer"
     'preview (lambda (buf b) (ibuffer-preview! buf b))
-    'keys '(("RET" "ibuffer-visit") ("SPC" "list-toggle-mark")
+    'keys '(("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
+            ("RET" "ibuffer-visit") ("SPC" "list-toggle-mark")
             ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
             ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")
             ("TAB" "ibuffer-toggle-filter-group")

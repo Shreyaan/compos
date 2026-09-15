@@ -197,6 +197,43 @@ defmodule Compos.Ui.Layouts do
 
           }
           .window.active { background: var(--window-bg, #fdfcf8); }
+
+          /* A peek is a detached card, never a pane or editable surface. */
+          .window.listing-peek {
+            position: fixed; z-index: 50; inset: auto;
+            visibility: hidden; width: auto; height: auto;
+            max-width: calc(100vw - 48px); min-width: 0;
+            border: 1px solid color-mix(in srgb, var(--accent-fg, #8f9cdb) 65%, transparent);
+            border-radius: 14px;
+            background: color-mix(in srgb, var(--window-bg, #25231f) 92%, var(--accent-fg, #8f9cdb) 8%);
+            box-shadow: 0 28px 70px #0008, 0 9px 22px #0006,
+                        0 2px 3px #0005, inset 0 1px 0 #ffffff30;
+            transform: none; overflow: hidden; user-select: none;
+          }
+          .peek-card-header {
+            display: flex; align-items: center; gap: 12px; flex: 0 0 auto;
+            padding: 12px 16px; border-bottom: 1px solid #ffffff18;
+            background: color-mix(in srgb, var(--accent-fg, #8f9cdb) 12%, transparent);
+          }
+          .peek-card-label { text-transform: uppercase; font-size: 10px; letter-spacing: .14em;
+            font-weight: 700; color: var(--accent-fg, #aab5ef); }
+          .peek-card-title { flex: 1; min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .8; }
+          .peek-card-dismiss { border: 1px solid #ffffff30; border-radius: 5px;
+            background: transparent; color: inherit; padding: 2px 7px; cursor: pointer; }
+          .peek-card-dismiss:hover { background: #ffffff16; }
+          .peek-card-body { margin: 0; padding: 18px 20px 34px; flex: 1; min-height: 0;
+            font: inherit; font-size: 1em; line-height: 1.6;
+            overflow-wrap: anywhere; overflow: auto; overscroll-behavior: contain; }
+          .peek-card-body pre { white-space: pre-wrap; font: inherit; margin: 0; }
+          .windows:has(.listing-peek) * { transition: none !important; animation: none !important; }
+          .peek-card-body .ag-scroll { overflow: visible; flex: none; }
+          .peek-connector { position: fixed; inset: 0; width: 100vw; height: 100vh;
+            z-index: 49; overflow: visible; pointer-events: none;
+            color: var(--accent-fg, #aab5ef); filter: drop-shadow(0 2px 3px #0008); }
+          .peek-source-row { outline: 1px solid color-mix(in srgb, var(--accent-fg, #aab5ef) 60%, transparent);
+            outline-offset: -1px; background: color-mix(in srgb, var(--accent-fg, #aab5ef) 12%, transparent); }
+
           .window.workspace-pending {
             position: relative;
             box-shadow:
@@ -2693,6 +2730,132 @@ defmodule Compos.Ui.Layouts do
             // the LAST match in document order is the innermost. Only scroll
             // when it actually changed, or every unrelated re-render would
             // yank the view back.
+
+            PeekCard: {
+              mounted() {
+                const ns = "http://www.w3.org/2000/svg";
+                this.wire = document.createElementNS(ns, "svg");
+                this.wire.classList.add("peek-connector");
+                this.wire.setAttribute("aria-hidden", "true");
+                this.path = document.createElementNS(ns, "path");
+                this.path.setAttribute("fill", "none");
+                this.path.setAttribute("stroke", "currentColor");
+                this.path.setAttribute("stroke-width", "1.5");
+                this.dot = document.createElementNS(ns, "circle");
+                this.dot.setAttribute("r", "3");
+                this.dot.setAttribute("fill", "currentColor");
+                this.wire.append(this.path, this.dot);
+                document.body.append(this.wire);
+                this.schedule = () => {
+                  cancelAnimationFrame(this.raf);
+                  this.raf = requestAnimationFrame(() => this.place());
+                };
+                this.block = e => { e.preventDefault(); e.stopPropagation(); };
+                this.click = e => {
+                  this.block(e);
+                  if (e.target.closest(".peek-card-dismiss")) {
+                    const owner = this.el.style.getPropertyValue("--peek-source-window").trim();
+                    this.pushEvent("ui_cmd", {win: owner, cmd: "listing-peek-dismiss"});
+                  }
+                };
+                this.scrollPeek = e => {
+                  const body = this.el.querySelector(".peek-card-body");
+                  if (body) body.scrollTop += e.deltaY;
+                  e.preventDefault(); e.stopPropagation();
+                };
+                this.el.addEventListener("wheel", this.scrollPeek, {passive: false});
+                this.el.addEventListener("pointerdown", this.block);
+                this.el.addEventListener("mousedown", this.block);
+                this.el.addEventListener("click", this.click);
+                ["contextmenu", "dragstart"].forEach(event =>
+                  this.el.addEventListener(event, this.block, {passive: false}));
+                window.addEventListener("resize", this.schedule);
+                document.addEventListener("scroll", this.schedule, true);
+                this.resize = new ResizeObserver(this.schedule);
+                this.resize.observe(this.el.closest(".windows") || document.body);
+                this.mutations = new MutationObserver(this.schedule);
+                this.schedule();
+              },
+              beforeUpdate() {
+                this.savedScroll = this.el.querySelector(".peek-card-body")?.scrollTop;
+              },
+              updated() { this.place(); },
+              place() {
+                const ownerId = this.el.style.getPropertyValue("--peek-source-window").trim();
+                const point = Number(this.el.style.getPropertyValue("--peek-source-point"));
+                const owner = document.getElementById("win-" + ownerId);
+                if (this.owner !== owner) {
+                  this.mutations.disconnect();
+                  this.owner = owner;
+                  if (owner) this.mutations.observe(owner, {subtree: true, childList: true,
+                    attributes: true, attributeFilter: ["data-current", "data-s"]});
+                }
+                if (!owner) { this.el.style.visibility = "hidden"; this.wire.style.display = "none"; return; }
+                const area = (owner.closest(".windows") || document.body).getBoundingClientRect();
+                const o = owner.getBoundingClientRect();
+                let row = null;
+                for (const candidate of owner.querySelectorAll(".line[data-s]")) {
+                  if (Number(candidate.dataset.s) <= point && candidate.getClientRects().length) row = candidate;
+                }
+                row ||= owner.querySelector("[data-current], .line.hl-line, .selected");
+                if (this.row !== row) {
+                  this.row?.classList.remove("peek-source-row");
+                  this.row = row;
+                  row?.classList.add("peek-source-row");
+                }
+                const r = row ? row.getBoundingClientRect() : o;
+                const gap = 28;
+                const width = Math.max(180, Math.min(o.width - gap, area.width - gap * 2));
+                const height = Math.max(100, area.height - gap * 2);
+                const right = o.left + o.width / 2 < area.left + area.width / 2;
+                const left = right ? area.right - width - gap : area.left + gap;
+                const sy = Math.max(o.top + 12, Math.min(o.bottom - 12, r.top + r.height / 2));
+                const top = Math.max(area.top + gap, Math.min(area.bottom - height - gap, sy - height * .32));
+                // Compos zooms its editor root independently of the viewport.
+                // DOM rectangles and the connector use viewport pixels; fixed
+                // descendants still inherit CSS zoom, so convert the card back.
+                let zoom = 1;
+                for (let el = this.el; el; el = el.parentElement) {
+                  zoom *= Number.parseFloat(getComputedStyle(el).zoom) || 1;
+                }
+                Object.assign(this.el.style, {left: (left / zoom) + "px", top: (top / zoom) + "px",
+                  width: (width / zoom) + "px", height: (height / zoom) + "px", right: "auto", bottom: "auto",
+                  visibility: "visible"});
+                const body = this.el.querySelector(".peek-card-body");
+                const content = body?.textContent;
+                if (body && this.content !== content) {
+                  body.scrollTop = body.scrollHeight;
+                  this.content = content;
+                } else if (body && this.savedScroll !== undefined) {
+                  body.scrollTop = this.savedScroll;
+                }
+                this.savedScroll = undefined;
+                const sx = right ? Math.min(r.right, o.right) - 8 : Math.max(r.left, o.left) + 8;
+                const tx = right ? left : left + width;
+                const ty = Math.max(top + 28, Math.min(top + height - 28, sy));
+                const bend = Math.max(24, Math.abs(tx - sx) * .45);
+                const dir = right ? 1 : -1;
+                this.path.setAttribute("d", "M " + sx + " " + sy + " C " +
+                  (sx + dir * bend) + " " + sy + ", " + (tx - dir * bend) + " " + ty + ", " + tx + " " + ty);
+                this.dot.setAttribute("cx", sx);
+                this.dot.setAttribute("cy", sy);
+                this.wire.style.display = row && r.bottom > o.top && r.top < o.bottom ? "" : "none";
+              },
+              destroyed() {
+                cancelAnimationFrame(this.raf);
+                this.resize.disconnect(); this.mutations.disconnect();
+                this.row?.classList.remove("peek-source-row");
+                this.wire.remove();
+                window.removeEventListener("resize", this.schedule);
+                document.removeEventListener("scroll", this.schedule, true);
+                this.el.removeEventListener("wheel", this.scrollPeek);
+                this.el.removeEventListener("pointerdown", this.block);
+                this.el.removeEventListener("mousedown", this.block);
+                this.el.removeEventListener("click", this.click);
+                ["contextmenu", "dragstart"].forEach(event =>
+                  this.el.removeEventListener(event, this.block));
+              }
+            },
             BlockScroll: {
               mounted() {
                 this.scroller = this.el.querySelector(".blocks-scroll");
@@ -3546,6 +3709,7 @@ defmodule Compos.Ui.Layouts do
                   return { line: parseInt(lineEl.dataset.line || numEl.textContent, 10), col };
                 };
                 this.mouseH = (e) => {
+                  if (e.target.closest(".listing-peek")) return;
                   if (e.button !== 0) return;
                   if (e.target.closest("button, [phx-click]")) return;
                   const winEl = e.target.closest(".window[data-win-id]");
@@ -3892,6 +4056,7 @@ defmodule Compos.Ui.Layouts do
                   this.wheelPending.clear();
                 };
                 this.wheelH = (e) => {
+                  if (e.target.closest?.(".listing-peek")) return;
                   // agent/chat transcripts (.ag-scroll), diff cards
                   // (.diff-scroll) and buffers under the ship-all threshold
                   // (.buf.client-scroll) own their scrolling natively — the

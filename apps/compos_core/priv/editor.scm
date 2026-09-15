@@ -13540,25 +13540,25 @@
       (catalog-meta! 'command name 'domain 'windows 'effects '(write display))))
   '(left right up down))
 
-;; Swap this window's buffer with the directional neighbor's and follow it
+;; Move this logical window into the directional neighbor's pane and follow it.
+;; The neighboring logical window moves into this pane; both complete stacks stay whole.
 ;; (window-left/right/up/down — the window family)
 (define (window-swap! dir)
+  "Move this logical window to the neighboring pane, carrying its complete stack and state."
   (let ((nb (window-in-direction dir)))
     (if nb
-        (let ((mine (current-buffer)))
-          (switch-to-buffer-here! (cadr nb))
-          (select-window! (car nb))
-          (switch-to-buffer-here! mine)
-          (chat-snap-to-input!))
+        (if (window-swap-id! (active-window) (car nb))
+            (chat-snap-to-input!)
+            (message "Could not move window"))
         (message (string-append "No window " (symbol->string dir))))))
 
-(define-command "window-left" "Swap this window's buffer leftward and follow it"
+(define-command "window-left" "Move this window leftward with its complete buffer stack"
   (lambda () (window-swap! 'left)))
-(define-command "window-right" "Swap this window's buffer rightward and follow it"
+(define-command "window-right" "Move this window rightward with its complete buffer stack"
   (lambda () (window-swap! 'right)))
-(define-command "window-up" "Swap this window's buffer upward and follow it"
+(define-command "window-up" "Move this window upward with its complete buffer stack"
   (lambda () (window-swap! 'up)))
-(define-command "window-down" "Swap this window's buffer downward and follow it"
+(define-command "window-down" "Move this window downward with its complete buffer stack"
   (lambda () (window-swap! 'down)))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
@@ -13977,7 +13977,7 @@
          (run-command cmd))
         ;; the modeline's name is the dashboard's click target
         ((equal? cmd "modeline-expand") (run-command cmd))
-        ((equal? cmd "dismiss-buffer") (run-command cmd))
+        ((member cmd '("dismiss-buffer" "listing-peek-dismiss")) (run-command cmd))
         ;; a mode name in the modeline toggles that mode
         ((and (string? cmd) (string-prefix? "mode:" cmd))
          (modeline-toggle-mode! (string-join (cdr (string-split cmd ":")) ":")))
@@ -14520,7 +14520,7 @@
 (public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows move the focus; keyboard-quit, a window command, and a new landing do this")
 (public! 'editing-state-maps-off! "(editing-state-maps-off! MODE MAPS) — MODE's buffers refuse those maps in the editing state; chat-mode refuses editing-caret-map, so the Cmd-arrows stay the window motion in a chat")
 (public! 'editing-quit! "(editing-quit!) — mark the running command as a quit: after it the buffer is in the movement state; keyboard-quit calls this, and a command that aborts something calls it too")
-(public! 'window-default-keybindings "(window-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to window-left/right/up/down; the two panes' buffers swap and the focus follows")
+(public! 'window-default-keybindings "(window-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to window-left/right/up/down; the logical windows exchange panes with their complete stacks and focus follows")
 (public! 'buffer-default-keybindings "(buffer-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to buffer-left/right/up/down; the buffer moves to the neighbor and its previous buffer shows here")
 (public! 'arrow-chord "(arrow-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (arrow-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")

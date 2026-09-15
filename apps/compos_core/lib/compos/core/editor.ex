@@ -449,6 +449,10 @@ defmodule Compos.Core.Editor do
 
   @doc "Selecting a window selects its frame (Emacs: windows live on frames)."
   def set_active(id), do: GenServer.call(__MODULE__, {:set_active, id})
+
+  @doc "Exchange two logical windows' pane positions without changing either window."
+  def swap_windows(first, second),
+    do: GenServer.call(__MODULE__, {:swap_windows, first, second})
   def active_window(fid \\ nil), do: GenServer.call(__MODULE__, {:active_window, fid(fid)})
 
   def delete_other_windows(fid \\ nil),
@@ -2057,6 +2061,18 @@ defmodule Compos.Core.Editor do
 
   # selecting a window selects its frame: bare window ids arrive from Scheme
   # (ibuffer buffer-locals, agent closures) with no frame attached
+  def handle_call({:swap_windows, first, second}, _from, state) do
+    with %{} = f <- find_window_frame(state, first),
+         ^f <- find_window_frame(state, second),
+         %{} = left <- find_leaf(f.tree, first),
+         %{} = right <- find_leaf(f.tree, second) do
+      tree = swap_leaves(f.tree, first, left, second, right)
+      changed(:ok, state |> put_frame(%{f | tree: tree}) |> resync_swap(), f.id)
+    else
+      _ -> {:reply, {:error, :no_window}, state}
+    end
+  end
+
   def handle_call({:set_active, id}, _from, state) do
     case find_window_frame(state, id) do
       nil ->
@@ -2808,6 +2824,18 @@ defmodule Compos.Core.Editor do
 
   defp wins_showing(%{type: :split, children: cs}, buf),
     do: Enum.flat_map(cs, &wins_showing(&1, buf))
+
+  defp swap_leaves(%{type: :leaf, id: id} = leaf, first, left, second, right) do
+    cond do
+      id == first -> right
+      id == second -> left
+      true -> leaf
+    end
+  end
+
+  defp swap_leaves(%{type: :split} = split, first, left, second, right) do
+    %{split | children: Enum.map(split.children, &swap_leaves(&1, first, left, second, right))}
+  end
 
   defp find_leaf(%{type: :leaf} = leaf, id), do: if(leaf.id == id, do: leaf, else: nil)
 

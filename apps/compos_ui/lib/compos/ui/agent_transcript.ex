@@ -25,7 +25,7 @@ defmodule Compos.Ui.AgentTranscript do
       verbosity={@verbosity}
       buffer={@buf}
       follow-tail={to_string(@stick)}
-      phx-hook="AgentScroll"
+      phx-hook={if !assigns[:peek], do: "AgentScroll"}
       data-buf={@buf}
       data-win={@win}
       data-stick={to_string(@stick)}
@@ -33,7 +33,7 @@ defmodule Compos.Ui.AgentTranscript do
       data-scroll-anchor={@scroll_anchor}
       data-scroll-offset={@scroll_offset}
     >
-      <c-toolbar class="ag-verbosity" role="group" aria-label="Transcript verbosity">
+      <c-toolbar :if={!assigns[:peek]} class="ag-verbosity" role="group" aria-label="Transcript verbosity">
         <button type="button" class={if @verbosity == "info", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-info">info</button>
         <button type="button" class={if @verbosity == "log", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-log">log</button>
         <button type="button" class={if @verbosity == "debug", do: "active"} phx-click="ui_cmd" phx-value-win={@win} phx-value-cmd="agent-verbosity-debug">debug</button>

@@ -107,6 +107,21 @@
           (check-equal! (current-buffer) "*zz-detail-b*" "and back")
           (check-equal! (length (window-list)) 3 "the walk makes no window"))))))
 
+(deftest 'the-detail-destination-moves-with-its-window
+  "a user window move carries the remembered destination, so the next row opens there"
+  (lambda ()
+    (t--dt-with
+      (lambda ()
+        (t--dt-frame!)
+        (let ((win (display-buffer-detail! "*zz-detail-a*" "*zz-detail-list*")))
+          (select-window! win)
+          (window-swap! (if (window-in-direction 'left) 'left 'right))
+          (check-equal! (detail-window "*zz-detail-list*") win
+                        "the destination is still the same logical window")
+          (let ((again (display-buffer-detail! "*zz-detail-b*" "*zz-detail-list*")))
+            (check-equal! again win "the next row uses the moved window")
+            (check-equal! (window-buffer win) "*zz-detail-b*" "the new detail is visible there")))))))
+
 (deftest 'the-memory-lapses-when-the-window-goes
   "nothing to put back: the next row picks a window through the chain again"
   (lambda ()

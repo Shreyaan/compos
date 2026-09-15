@@ -542,8 +542,7 @@
            (row-of (lambda (label)
                      (let ((r (assoc label rows)))
                        (and r (not (chat-prompt-separator? r)) r))))
-           (restore-here! (lambda ()
-                            (when (buffer-known? here) (window-preview-buffer! here))))
+           (restore-here! (lambda () #f))
            ;; the preview wakes a sleeping chat; every one nobody picked
            ;; goes back to sleep (the switcher's contract)
            (woken '())
@@ -557,17 +556,8 @@
           (minibuffer-read-preview
             "Chat: "
             (map (lambda (r) (list (nth 0 r) (nth 1 r) (nth 2 r))) rows)
-            ;; the invoking window previews the live chat under the
-            ;; cursor; a saved conversation is a file, and waits for RET
-            (lambda (label)
-              (let ((r (row-of label)))
-                (when (and r (equal? (nth 2 r) "chat") (buffer-known? (nth 3 r)))
-                  (let* ((b (nth 3 r))
-                         (sleeping (not (buffer-exists? b))))
-                    (window-preview-buffer! b)
-                    (when (and sleeping (buffer-exists? b))
-                      (restore-buffer-runtime! b)
-                      (set! woken (cons b woken)))))))
+            ;; Choosing a row does not display or wake its buffer.
+            (lambda (label) #f)
             (lambda (label)
               (let ((r (row-of label)))
                 (cond
@@ -865,10 +855,10 @@
       'composml-root (lambda (buf) (list 'tag "chat-list"))
       'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
       'doc (string-append
-             "The chat list opens here and previews in a popup. The rows "
+             "The chat list opens here with inert floating peek cards. The rows "
              "are the recent chats, most recently used first. The list has the "
-             "focus, so n and p move and the row under the cursor shows its "
-             "chat in the preview pane. / opens the filter line: the filter "
+             "focus; n and p select rows and preview read-only snapshots. "
+             "/ opens the filter line: the filter "
              "reads the title first and the state second, and it reads every "
              "chat, not only the recent ones. A word that nobody put in a "
              "title is found in the text of every alive chat, and the row "
@@ -894,7 +884,7 @@
       'rows (lambda (buf) (chat-list-rows buf))
       'order-filtered chat-list-rank
       'match chat-list-match?
-      'preview (lambda (buf row) (chat-list-preview!))
+      'preview (lambda (buf b) (listing-preview-schedule! buf b))
       ;; The table stamps itself with the buffer count and redraws after
       ;; any command that moved it, so a buffer opened anywhere -- by a
       ;; chat you are not even reading -- rebuilt this list under the
@@ -908,7 +898,8 @@
       ;; n and p move, so the answer keys are y and d, and k stops a
       ;; runtime without touching the transcript the way the table's k
       ;; would kill the buffer outright
-      'keys '((";" "chat-list-regroup") ("," "chat-list-resort")
+      'keys '(("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
+              (";" "chat-list-regroup") ("," "chat-list-resort")
               ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
               ("/" "chat-list-filter") ("RET" "chat-list-visit")
               ("q" "chat-list-quit")
@@ -997,33 +988,11 @@
               *chat-list-preview-requests*)))
   (debounce-cancel! (chat-list--preview-key)))
 
-;; A timer can already be queued on the UI lane when it is cancelled.
-;; Check the request as well as the row and panes before touching a window.
-(define (chat-list--preview-now! request)
-  (when (equal? request (chat-list--preview-request))
-    (chat-list--cancel-preview!)
-    (let ((b (cadr request)) (owner (caddr request)))
-      (when (and (equal? (window-buffer (active-window)) owner)
-                 (equal? b (list-current owner)) (buffer-known? b))
-        (listing-preview! owner b)))))
-
-;; Filtering and row motion stay immediate; only the last selection of a
-;; burst loads a transcript. Each frame owns its timer and pending request.
+;; Compatibility callbacks cannot resurrect previews after a live reload.
+(define (chat-list--preview-now! request) #f)
 (define (chat-list-preview!)
-  (chat-list--cancel-preview!)
-  (let ((b (list-current (chat-list-buffer)))
-        (owner (chat-list-buffer)))
-    (when (and (equal? (window-buffer (active-window)) owner) (string? b) (buffer-known? b)
-               (not (equal? b (chat-list-buffer)))
-               (not (and (chat-list-preview-window)
-                         (equal? (buffer-local (popup-buffer) 'listing-preview-source) b))))
-      (let* ((generation (+ 1 *chat-list-preview-generation*))
-             (request (list generation b owner)))
-        (set! *chat-list-preview-generation* generation)
-        (set! *chat-list-preview-requests*
-          (cons (list (selected-frame) request) *chat-list-preview-requests*))
-        (debounce! (chat-list--preview-key) chat-list-preview-delay-ms
-                   chat-list--preview-now! request)))))
+  (let ((owner (chat-list-buffer)))
+    (listing-preview-schedule! owner (list-current owner))))
 
 ;; the application leaves the way it arrived: with one move. RET lands you
 ;; in the chat, in the chat's own group, because switching to a chat is
@@ -1173,7 +1142,9 @@
 
 (define-command "chat-list-quit"
   "Leave the chat list and change nothing"
-  (lambda () (chat-list-leave! #f)))
+  (lambda ()
+    (if (equal? (frame-local 'listing-preview-owner) (chat-list-buffer))
+        (listing-peek-dismiss!) (chat-list-leave! #f))))
 
 (define-command "ichat" "Open the chat buffer listing here"
   (lambda () (chat-list-open!)))

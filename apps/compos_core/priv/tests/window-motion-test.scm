@@ -91,12 +91,22 @@
       (check-equal! (current-buffer) t--wm-left "its buffer stays current")
       (t--wm-done!))))
 
-(deftest 'window-swap-carries-the-buffer-and-follows-it
-  "window-swap! right moves this buffer into the right pane, brings the right pane's buffer here, and selects the right pane"
+(deftest 'window-swap-moves-the-logical-window-and-follows-it
+  "window-swap! moves both logical window identities between panes, including their complete stacks"
   (lambda ()
-    (let ((panes (t--wm-setup!)))
+    (let* ((panes (t--wm-setup!))
+           (left (car panes))
+           (right (cadr panes))
+           (left-stack (window-prev-buffers left))
+           (right-stack (window-prev-buffers right)))
       (window-swap! 'right)
-      (check-equal! (active-window) (cadr panes) "the right pane is active")
-      (check-equal! (current-buffer) t--wm-left "the buffer came along")
-      (check-equal! (window-buffer (car panes)) t--wm-right "the left pane holds the other buffer")
-      (t--wm-done!))))
+      (let* ((rs (window-rects))
+             (left-rect (car (filter (lambda (r) (equal? (car r) left)) rs)))
+             (right-rect (car (filter (lambda (r) (equal? (car r) right)) rs))))
+        (check-equal! (active-window) left "the same logical window stays active")
+        (check-equal! (current-buffer) t--wm-left "its buffer stays at rest in that window")
+        (check-true! (> (list-ref left-rect 2) (list-ref right-rect 2))
+                     "that window now occupies the right pane")
+        (check-equal! (window-prev-buffers left) left-stack "its stack came along")
+        (check-equal! (window-prev-buffers right) right-stack "the displaced stack stayed whole")
+        (t--wm-done!)))))
