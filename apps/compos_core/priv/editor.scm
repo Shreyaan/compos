@@ -984,6 +984,10 @@
       (take-n (cons (list buf filters source rows) *list-filter-history*) 32))
     rows))
 
+(define (list-filter-source buf)
+  (let ((f (list-opt buf 'source-filter)) (source (list-source-entries buf)))
+    (if f (f buf source) source)))
+
 (define (list-render-rows! buf fetch)
   (if (list-opt buf 'local-filter)
       (begin
@@ -994,8 +998,8 @@
           (let ((updated (list-opt buf 'source-refreshed)))
             (when updated (updated buf))))
         (if (list-opt buf 'incremental-filter)
-            (list-filter-cached! buf (list-source-entries buf) fetch)
-            (list-keep buf (list-source-entries buf))))
+            (list-filter-cached! buf (list-filter-source buf) fetch)
+            (list-keep buf (list-filter-source buf))))
       ;; 'cached is the wake path: the rows already in 'list-entries ARE
       ;; the view, and calling the source again would pay its cost (the
       ;; network, for sentry) inside a switcher preview. A filter redraw
@@ -14292,6 +14296,7 @@
 (public! 'buffer-list "All buffer names")
 (public! 'buffer-list-mru "Buffer names, most recently used first")
 (public! 'buffer-exists? "(buffer-exists? NAME) -> bool")
+(public! 'buffer-ref "(buffer-ref BUF) — immutable handle for buffer-local reads and writes across renames, or #f if unknown")
 (public! 'buffer-known? "(buffer-known? NAME) -> bool: live OR dormant. A list shows dormant buffers, so a verb asks this one")
 (catalog-meta! 'function "buffer-known?" 'domain 'buffers 'effects '(read))
 (effects! '(write))

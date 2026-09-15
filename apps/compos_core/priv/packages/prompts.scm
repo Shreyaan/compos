@@ -157,8 +157,11 @@
           live-parts))))
 
 (define (chat-prompt-freeze! buf)
-  (chat-prompt-snapshot-parts
-    buf (chat-prompt-lane buf) (chat-prompt-live-parts buf)))
+  ;; Prompt sources can run while another lane renames the chat.
+  ;; Keep the snapshot attached to the same buffer throughout composition.
+  (let ((target (or (buffer-ref buf) buf)))
+    (chat-prompt-snapshot-parts
+      target (chat-prompt-lane target) (chat-prompt-live-parts target))))
 
 (define (chat-prompt-frozen? buf)
   (let ((snapshot (chat-prompt-snapshot buf)))

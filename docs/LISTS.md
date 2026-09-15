@@ -62,6 +62,8 @@ Ibuffer and chat lists reuse the previous candidate set when a substring query g
 
 Group folding edits the cached section heading and toggles its already-sorted members. It does not fetch the source or recompute group statistics. The redraw reuses prepared cells for unchanged rows when the layout context still matches.
 
+Ibuffer and ichat bind `C-x n n` to the group at point and `C-x n w` to all groups. Group scope is stored in the persistent buffer-local `ibuffer-narrow-group` as its section key and label. It filters the cached source before the text query, so widening retains that query and folding/refresh preserve the scope. Regrouping clears it. List modes can provide `source-filter (buf source)` to restrict a source snapshot before ordinary matching.
+
 Ibuffer also coalesces filter redraws over 60 ms while input updates immediately. A complete mode name such as `chat-mode` matches that exact major mode; ordinary text remains a substring search across name, title, mode and metadata. Filtered group counts and membership describe the matching subset, while the source retains all rows for widening and unfolding.
 
 Chat peek copies retain the rich renderer's block ranges and input boundary from live sources. Saved transcript files are projected into user/status/prose blocks without restoring chat identity or a runtime. Preview buffers enable the source major mode and remain read-only through peek-mode. Source render projections are preserved for rich modes; list modes skip refetching during preview setup. Switching modes clears the old chat rendering locals.

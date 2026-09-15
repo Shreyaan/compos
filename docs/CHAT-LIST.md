@@ -16,6 +16,10 @@ snapshot, not a second running chat. Moving to another row replaces the snapshot
 `q` removes the preview copy and reveals the invoking window's predecessor.
 The listing survives for reuse. No application-wide layout snapshot is restored.
 Closing the filter with `C-g` leaves its narrowing and the listing in place.
+In both ibuffer and ichat, `C-x n n` narrows to the group heading at point
+or the group containing the selected row. `C-x n w` shows all groups again,
+keeping the `/` query. Group scope survives refresh and folding; changing
+the grouping clears it. The header names the narrowed group.
 
 ## Keyword search
 

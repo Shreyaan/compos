@@ -352,6 +352,8 @@ defmodule Compos.Core.SchemeAPI do
         "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order.",
       "mru-note-group!" => "(mru-note-group! NAME) — record a group switch as a history entry.",
       "buffer-exists?" => "(buffer-exists? NAME) — return #t if the buffer NAME exists.",
+      "buffer-ref" =>
+        "(buffer-ref BUF) — return an immutable buffer handle for local reads and writes across renames, or #f if unknown.",
       "buffer-known?" =>
         "(buffer-known? NAME) — return #t if the buffer NAME is live OR dormant in the store; a dormant buffer wakes when you visit or edit it.",
       "buffer-text" => "(buffer-text BUF) — return the buffer's whole text as a string.",
@@ -955,6 +957,7 @@ defmodule Compos.Core.SchemeAPI do
         :void
       end,
       "buffer-exists?" => fn [name] -> Buffer.exists?(name) end,
+      "buffer-ref" => fn [name] -> Buffer.ref(name) || false end,
       # the buffer list names dormant buffers too: they hold a checkpoint
       # and no process. A verb asks this, not exists?, or it refuses to act
       # on the rows it shows.

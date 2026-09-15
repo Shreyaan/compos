@@ -42,6 +42,9 @@ is `chat-thread-context` in `priv/packages/chat.scm`.
 `chat-thread-context` joins them with `prompt-parts-text` and places the result in
 the request's `system` field. The first send freezes the section bodies and
 selection in `chat-prompt-snapshot`; later direct turns reuse that snapshot.
+Snapshot writes hold an immutable buffer reference before composing sections.
+A rename during composition therefore keeps the snapshot on the same chat.
+Direct turns, ACP setup, and explicit prompt freezing use this rule.
 
 ## ACP sessions
 

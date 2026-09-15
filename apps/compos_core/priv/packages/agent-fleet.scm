@@ -909,6 +909,7 @@
       ;; runtime without touching the transcript the way the table's k
       ;; would kill the buffer outright
       'keys '((";" "chat-list-regroup") ("," "chat-list-resort")
+              ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
               ("/" "chat-list-filter") ("RET" "chat-list-visit")
               ("q" "chat-list-quit")
               ("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")

@@ -663,13 +663,15 @@
         parts)))
 
 (define (chat-system-prompt-parts buf &optional tools?)
-  (let ((live (chat-live-system-prompt-parts buf tools?)))
+  (let* ((target (or (buffer-ref buf) buf))
+         (live (chat-live-system-prompt-parts target tools?)))
     (if (boundp (quote chat-prompt-snapshot-parts))
-        (chat-prompt-snapshot-parts buf 'direct live)
+        (chat-prompt-snapshot-parts target 'direct live)
         live)))
 
 (define (chat-thread-context slug display)
-  (let* ((buf (agent-buf slug))
+  (let* ((name (agent-buf slug))
+         (buf (or (buffer-ref name) name))
          (healed (chat-heal! buf))
          (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
     (unless (= healed 0)

@@ -365,9 +365,11 @@ nonstandard install out of the built-in connector catalog."
 
 (define (agent-system-prompt-parts conf)
   (let* ((buf (plist-get conf 'buffer))
-         (live (agent-live-system-prompt-parts conf)))
+         (target (and buf (or (buffer-ref buf) buf)))
+         (live (agent-live-system-prompt-parts
+                 (if target (append (list 'buffer target) conf) conf))))
     (if (and buf (boundp (quote chat-prompt-snapshot-parts)))
-        (chat-prompt-snapshot-parts buf 'acp live)
+        (chat-prompt-snapshot-parts target 'acp live)
         live)))
 
 (define (agent-config-with-system-parts conf)

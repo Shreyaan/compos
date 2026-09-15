@@ -281,3 +281,103 @@
       (check-true! (< (string-length code) 3200)
                    "the composed code section stays compact")
       (t--prompt-cleanup chat))))
+
+(deftest 'a-direct-prompt-snapshot-follows-a-rename-during-composition
+  "the snapshot follows identity, even when another buffer reuses the name"
+  (lambda ()
+    (for-each
+      (lambda (reuse?)
+        (let* ((chat (t--prompt-chat "*prompt-rename-direct*" "api"))
+               (renamed "*prompt-renamed-direct*")
+               (source chat-live-system-prompt-parts)
+               (parts '(("identity" "rename test"))))
+          (set! chat-live-system-prompt-parts
+            (lambda (&rest args)
+              ;; Restore the source before the tested call can fail.
+              (set! chat-live-system-prompt-parts source)
+              (rename-buffer! chat renamed)
+              (when reuse? (test-buffer! chat "replacement"))
+              parts))
+          (check-equal! (chat-system-prompt-parts chat #t) parts "composition succeeds")
+          (check-equal! (plist-get (chat-prompt-snapshot renamed) 'parts)
+                        parts "the original conversation owns its snapshot")
+          (check-false! (chat-prompt-snapshot chat)
+                        "the old name gets no snapshot")
+          (t--prompt-cleanup chat renamed)))
+      '(#f #t))))
+
+(deftest 'a-acp-prompt-snapshot-follows-a-rename-during-composition
+  "the snapshot follows identity, even when another buffer reuses the name"
+  (lambda ()
+    (for-each
+      (lambda (reuse?)
+        (let* ((chat (t--prompt-chat "*prompt-rename-acp*" "api"))
+               (renamed "*prompt-renamed-acp*")
+               (source agent-live-system-prompt-parts)
+               (parts '(("identity" "rename test"))))
+          (set! agent-live-system-prompt-parts
+            (lambda (&rest args)
+              ;; Restore the source before the tested call can fail.
+              (set! agent-live-system-prompt-parts source)
+              (rename-buffer! chat renamed)
+              (when reuse? (test-buffer! chat "replacement"))
+              parts))
+          (check-equal! (agent-system-prompt-parts (list 'buffer chat)) parts "composition succeeds")
+          (check-equal! (plist-get (chat-prompt-snapshot renamed) 'parts)
+                        parts "the original conversation owns its snapshot")
+          (check-false! (chat-prompt-snapshot chat)
+                        "the old name gets no snapshot")
+          (t--prompt-cleanup chat renamed)))
+      '(#f #t))))
+
+(deftest 'a-freeze-prompt-snapshot-follows-a-rename-during-composition
+  "the snapshot follows identity, even when another buffer reuses the name"
+  (lambda ()
+    (for-each
+      (lambda (reuse?)
+        (let* ((chat (t--prompt-chat "*prompt-rename-freeze*" "api"))
+               (renamed "*prompt-renamed-freeze*")
+               (source chat-prompt-live-parts)
+               (parts '(("identity" "rename test"))))
+          (set! chat-prompt-live-parts
+            (lambda (&rest args)
+              ;; Restore the source before the tested call can fail.
+              (set! chat-prompt-live-parts source)
+              (rename-buffer! chat renamed)
+              (when reuse? (test-buffer! chat "replacement"))
+              parts))
+          (check-equal! (chat-prompt-freeze! chat) parts "composition succeeds")
+          (check-equal! (plist-get (chat-prompt-snapshot renamed) 'parts)
+                        parts "the original conversation owns its snapshot")
+          (check-false! (chat-prompt-snapshot chat)
+                        "the old name gets no snapshot")
+          (t--prompt-cleanup chat renamed)))
+      '(#f #t))))
+
+(deftest 'chat-thread-context-keeps-its-buffer-through-a-rename
+  "record, tools, and prompt still belong to the conversation after healing"
+  (lambda ()
+    (let* ((chat (t--prompt-chat "*prompt-context-rename*" "api"))
+           (renamed "*prompt-context-renamed*")
+           (heal chat-heal!)
+           (record '((role "user" blocks (("text" "original conversation")))))
+           (parts '(("identity" "original prompt"))))
+      (buffer-set-local! chat 'agent-slug "prompt-context-rename-slug")
+      (buffer-set-local! chat 'chat-wire-turns record)
+      (buffer-set-local! chat 'chat-tool-specs '(("original-tool")))
+      (chat-prompt-snapshot-parts chat 'direct parts)
+      (set! chat-heal!
+        (lambda (buf)
+          (set! chat-heal! heal)
+          (rename-buffer! chat renamed)
+          (test-buffer! chat "replacement")
+          (heal buf)))
+      (let ((context (chat-thread-context "prompt-context-rename-slug" #f)))
+        (check-equal! (plist-get context 'turns) record "the original record")
+        (check-equal! (plist-get context 'system) (prompt-parts-text parts)
+                      "the original frozen prompt")
+        (when chat-use-tools
+          (check-equal! (plist-get context 'tools) '(("original-tool"))
+                        "the original tool snapshot")))
+      (check-false! (chat-prompt-snapshot chat) "the replacement stays untouched")
+      (t--prompt-cleanup chat renamed))))

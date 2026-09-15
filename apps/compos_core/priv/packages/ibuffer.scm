@@ -457,7 +457,8 @@
 
 (define (ibuffer-set-grouping! mode &optional buf)
   (let ((buf (or buf (ibuffer-view))))
-    (buffer-set-locals! buf (list 'ibuffer-grouping mode 'ibuffer-collapsed '()))
+    (buffer-set-locals! buf (list 'ibuffer-grouping mode 'ibuffer-collapsed '()
+                                'ibuffer-narrow-group #f))
     (when (buffer-known? buf) (ibuffer-refresh! buf))))
 
 (define (ibuffer-folded? key &optional buf)
@@ -1120,7 +1121,14 @@
 
 (define (ibuffer-meta-with buf line)
   (let loop ((rows (list-entries buf)) (n 0) (dirty 0) (bytes 0))
-    (cond ((null? rows) (line buf n dirty bytes))
+    (cond ((null? rows)
+           (let ((rendered (line buf n dirty bytes))
+                 (scope (buffer-local buf 'ibuffer-narrow-group)))
+             (if scope
+                 (list (string-append (car rendered) " · group: " (cadr scope)
+                                      " · C-x n w widens")
+                       (cadr rendered))
+                 rendered)))
           ((ibuffer-heading? (car rows))
            (let ((row (car rows)))
              (if (ibuffer-heading-folded? row)
@@ -1240,6 +1248,35 @@
            (cond ((< k 0) #f)
                  ((ibuffer-heading? (nth k es)) (nth k es))
                  (else (loop (- k 1))))))))
+
+;; Scope the source by section key before text filtering. Keep the complete
+;; source snapshot so widening never needs to refetch or lose the query.
+(define (ibuffer-narrow-source buf source)
+  (let ((scope (buffer-local buf 'ibuffer-narrow-group)))
+    (if (not scope) source
+        (let loop ((rows source) (inside #f) (out '()))
+          (cond ((null? rows) (reverse out))
+                ((ibuffer-heading? (car rows))
+                 (let ((keep (equal? (ibuffer-heading-key (car rows)) (car scope))))
+                   (loop (cdr rows) keep (if keep (cons (car rows) out) out))))
+                (else (loop (cdr rows) inside (if inside (cons (car rows) out) out))))))))
+
+(define-command "ibuffer-narrow-group" "Narrow this list to the group at point"
+  (lambda ()
+    (let* ((buf (ibuffer-view)) (head (ibuffer-section-at buf)))
+      (if (and head (not (equal? (nth 2 head) "match")))
+          (begin
+            (buffer-set-local! buf 'ibuffer-narrow-group
+              (list (ibuffer-heading-key head) (ibuffer-heading-label head)))
+            (list-render! buf 'view))
+          (message "no group at point")))))
+
+(define-command "ibuffer-widen-group" "Show every group, keeping the text filter"
+  (lambda ()
+    (let ((buf (ibuffer-view)))
+      (when (buffer-local buf 'ibuffer-narrow-group)
+        (buffer-set-local! buf 'ibuffer-narrow-group #f)
+        (list-render! buf 'view)))))
 
 (domain! 'buffers)
 (effects! '(read))
@@ -1922,7 +1959,8 @@
            "TAB folds the section at point. A narrow window shows the "
            "name and the age; a wider one adds the size and the mode, and "
            "a wide one the group. / narrows the table by name, mode, or path, "
-           "and \\ widens it. m marks one row, SPC toggles the mark, * marks all shown rows, u "
+           "and \\ widens it. C-x n n narrows to the group at point; C-x n w shows all groups. "
+           "m marks one row, SPC toggles the mark, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "
            "in a group, and K kills the group at point. RET enters the "
@@ -1959,6 +1997,7 @@
         (or (equal? old new)
             (not (string-suffix? "-mode" (string-downcase (string-trim old))))))
     'source-refreshed ibuffer-search-forget!
+    'source-filter ibuffer-narrow-source
     'filter-delay-ms ibuffer-filter-delay-ms
     'filtered-heading
       (lambda (buf head members)
@@ -2006,6 +2045,7 @@
     'noun "buffer"
     'preview (lambda (buf b) (ibuffer-preview! buf b))
     'keys '(("RET" "ibuffer-visit") ("SPC" "list-toggle-mark")
+            ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
             ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")
             ("TAB" "ibuffer-toggle-filter-group")
             ("," "ibuffer-toggle-sorting-mode")
