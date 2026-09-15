@@ -603,3 +603,19 @@ card, and the next arrow movement may reopen it, including at a list boundary.
 | E11 — Toggle off | `p`, then `<up>` / `<down>` | Navigate without creating a preview. |
 | E12 — Toggle on | `p` again | Immediately preview the selected buffer. |
 | E13 — Resume after dismissal | `q`, then `<up>` | Show the selected buffer's preview again; keep focus in ibuffer. |
+| E14 — Kill previewed entry | `k` in ibuffer while its preview is open | Kill the original named by the row, refresh ibuffer, and remove the separate preview copy and its popup. Keep focus in ibuffer. |
+| E15 — Decline kill | `k` on a modified file, then answer no | Keep the original, its row, and its preview. |
+
+### Highlight drives preview
+
+Every list mode with a `preview` callback previews a newly highlighted entry
+after refresh or filtering, as it does after arrow navigation. This is shared
+list behavior: individual kill/archive commands do not choose the next preview.
+Unchanged selection does not repeat the callback; background list refreshes
+do not change the active preview.
+
+| Case | Commands | Expected result |
+| --- | --- | --- |
+| E16 — Kill and follow | `k` in ibuffer with another row remaining | Remove the killed original and its copy, refresh the list, and preview the newly highlighted buffer. |
+| E17 — Refresh selection | `g` after the selected entry disappears from the source | Run the list mode's preview callback for the replacement selection. |
+| E18 — Background refresh | Refresh a list while another buffer has focus | Restore that list's point without opening its preview. |

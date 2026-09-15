@@ -21,6 +21,14 @@ back to `PARENT-map`, the setup runs PARENT's setup first, and
 `set-mode!` runs `PARENT-hook` before `NAME-hook`. `buffer-derived-mode?`
 answers true for the parent's name in the child's buffers.
 
+Two modes are bases the others are built from. `special-mode` is the
+read-only surface a list or a report wears. `prog-mode` is the base of
+every language mode: scheme, ruby, js, css, elixir and heex are children
+of it, so `prog-mode-map` and `prog-mode-hook` reach all of them, and
+`(buffer-derived-mode? BUF "prog-mode")` asks whether a buffer holds
+source code. `html-mode` stays outside it, because browse renders a page
+in that mode and a page is a document.
+
 `set-mode!` does this, in order:
 
 1. `change-major-mode-hook`, when the buffer leaves another mode.

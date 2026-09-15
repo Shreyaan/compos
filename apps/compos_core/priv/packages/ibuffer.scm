@@ -1908,7 +1908,14 @@
             (kill-buffer-confirm! target
               (lambda (killed?)
                 (when (and killed? (buffer-known? view))
-                  (list-unmark-key! view target))
+                  (list-unmark-key! view target)
+                  ;; The card is a separate buffer: killing its original
+                  ;; cannot remove the copy or its floating window.
+                  (let ((copy (frame-local 'listing-preview-buffer)))
+                    (when (and copy
+                               (equal? (frame-local 'listing-preview-owner) view)
+                               (equal? (buffer-local copy 'listing-preview-source) target))
+                      (listing-preview-dismiss! view))))
                 (ibuffer-kill-targets! view
                                       (cdr targets)
                                       (+ killed (if killed? 1 0))

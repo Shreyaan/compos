@@ -31,3 +31,15 @@
     (check-contains! (ts-known-url "markdown") "tree-sitter-grammars/tree-sitter-markdown"
                      "markdown")
     (check-true! (pair? (member "elixir" (ts-langs))) "and a compiled grammar is listed")))
+
+(deftest 'every-language-mode-is-built-from-prog-mode
+  "one ancestor answers \"is this buffer source code\", and one hook reaches them all"
+  (lambda ()
+    (for-each
+      (lambda (m) (check-true! (derived-mode? m "prog-mode") m))
+      '("scheme-mode" "ruby-mode" "js-mode" "css-mode" "elixir-mode" "heex-mode"))
+    (check-false! (derived-mode? "html-mode" "prog-mode")
+                  "a browse page wears html-mode and is a document, not source")
+    (check-false! (derived-mode? "text-mode" "prog-mode") "prose is not source")
+    (check-equal! (mode-hook-chain "elixir-mode") '(prog-mode-hook elixir-mode-hook)
+                  "the base hook runs before the language's own")))

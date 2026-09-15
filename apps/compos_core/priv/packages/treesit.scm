@@ -47,24 +47,32 @@
                "languages: " (string-join (ts-langs) " ")
                "  ·  installed: " (string-join (ts-installed-grammars) " ")))))
 
+;; Every language mode here is built from prog-mode, so one hook and one
+;; map reach all of them, and (buffer-derived-mode? BUF "prog-mode")
+;; answers "is this buffer source code" for every one.
+
 ;; .scm/.el buffers highlight through the dynamic scheme grammar once
 ;; installed (M-x ts-install-grammar scheme); until then ts-lang is set
 ;; but the NIF just returns no spans
-(define-mode "scheme-mode" (ts-mode "scheme"))
+(define-derived-mode "scheme-mode" "prog-mode" (ts-mode "scheme"))
 
 ;; ruby and javascript ride the same dynamic-grammar path; without the
 ;; grammar the mode still works (and an LSP server still attaches)
-(define-mode "ruby-mode" (ts-mode "ruby"))
-(define-mode "js-mode" (ts-mode "javascript"))
+(define-derived-mode "ruby-mode" "prog-mode" (ts-mode "ruby"))
+(define-derived-mode "js-mode" "prog-mode" (ts-mode "javascript"))
 
 ;; The editor's own surfaces are Elixir, HEEx, HTML and CSS, so those
 ;; four read structurally too. Two of the names already existed without
 ;; a mode behind them: lsp.scm registers elixir-ls for "elixir-mode",
 ;; and browse sets "html-mode" on a page it renders.
-(define-mode "css-mode" (ts-mode "css"))
+;;
+;; html-mode stays outside prog-mode for that last reason: a browse page
+;; is a document the reader never edits, and prog-mode-hook must not run
+;; on it. A .html file still parses and highlights the same way.
+(define-derived-mode "css-mode" "prog-mode" (ts-mode "css"))
 (define-mode "html-mode" (ts-mode "html"))
-(define-mode "elixir-mode" (ts-mode "elixir"))
-(define-mode "heex-mode" (ts-mode "heex"))
+(define-derived-mode "elixir-mode" "prog-mode" (ts-mode "elixir"))
+(define-derived-mode "heex-mode" "prog-mode" (ts-mode "heex"))
 
 (mode-doc! "ruby-mode"
   "Ruby. Run `M-x ts-install-grammar ruby` to get the colours.")

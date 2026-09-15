@@ -2183,7 +2183,17 @@
     prepared))
 
 (define (list-render! buf fetch)
-  (with-buffer-display-update buf (lambda () (list-render-content! buf fetch))))
+  (let* ((before (list-current buf))
+         (key (and before (list-key buf before))))
+    (with-buffer-display-update buf (lambda () (list-render-content! buf fetch)))
+    ;; Source changes and filtering can move the highlight without an arrow.
+    ;; Preview the settled selection, using the same callback as row motion.
+    (when (and (buffer-exists? buf)
+               (or (equal? (window-buffer (active-window)) buf)
+                   (equal? (mb-list-target) buf))
+               (let ((after (list-current buf)))
+                 (and after (not (equal? key (list-key buf after))))))
+      (list-preview! buf))))
 
 (define (list-render-content! buf fetch)
   (when (buffer-exists? buf)
@@ -4912,7 +4922,17 @@
     buf))
 
 (define-mode "text-mode" (lambda () #t))
-(define-mode "scheme-mode" (lambda () #t))   ; scheme grammar pending
+
+;; The base every language mode is built from, the way Emacs builds one.
+;; It adds no keys and no setup of its own. What it gives is one ancestor
+;; to ask about — (buffer-derived-mode? BUF "prog-mode") is "is this
+;; buffer source code" — one map to hang a key every source buffer wants
+;; on, and prog-mode-hook, which runs before the language's own hook.
+(define-mode "prog-mode" (lambda () #t))
+(define-derived-mode "scheme-mode" "prog-mode" (lambda () #t))   ; scheme grammar pending
+
+(mode-doc! "prog-mode"
+  "The base of every language mode. It adds no keys of its own: `prog-mode-map` and `prog-mode-hook` are where a key or a setting for every source buffer goes.")
 
 (mode-doc! "text-mode"
   "Plain prose: `.txt`. The mode adds no keys. `C-c C-v` renders the file, because the renderer reads the extension.")
