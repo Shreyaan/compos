@@ -199,12 +199,17 @@
 ;; what the size sort reads, what a heading adds up. A chat that has
 ;; not written its file yet has no size to show
 (define (chats-filesize b)
-  ;; the id the chat already carries, never a fresh one: drawing a row
-  ;; must not name a file the chat has not asked for
-  (let ((id (buffer-local b 'chat-log-id)))
-    (and (string? id)
-         (let ((p (string-append (chat-log-dir-for b) "/" id ".chat")))
-           (and (file-exists? p) (file-size p))))))
+  ;; the number the writer left behind. Two syscalls per chat row, on
+  ;; every draw of every buffer table, to learn a size the save already
+  ;; knew. The stat stays as the answer for a chat written before this
+  ;; local existed, and for one whose log another process changed.
+  (or (buffer-local b 'chat-log-size)
+      ;; the id the chat already carries, never a fresh one: drawing a row
+      ;; must not name a file the chat has not asked for
+      (let ((id (buffer-local b 'chat-log-id)))
+        (and (string? id)
+             (let ((p (string-append (chat-log-dir-for b) "/" id ".chat")))
+               (and (file-exists? p) (file-size p)))))))
 
 (define (chats-summary b)
   (let ((s (buffer-local b 'chat-summary)))
@@ -244,7 +249,9 @@
                  (list (if (equal? s 'needs_attention) "!" "●")
                        (chats-state-face s))))
         'name (lambda (b) (list "" (chats-alert-name b)))
-        'size chats-filesize
+        ;; by name, never by value: a reload redefines the function and a
+        ;; kind registered with the old one keeps calling it
+        'size (lambda (b) (chats-filesize b))
         ;; a chat found by a word in its text says which word, in place of
         ;; the state: you searched for the words, not for the state
         'label (lambda (b)

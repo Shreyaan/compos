@@ -523,7 +523,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (persist-global! 'group-mru
   (lambda () *group-mru*)
   (lambda (saved)
-    (when (list? saved) (set! *group-mru* (take-n saved group-mru-limit)))))
+    (when (pair? saved) (set! *group-mru* (take-n saved group-mru-limit)))))
 
 (persist-global! 'group-frame-contexts
   group-frame-context-state

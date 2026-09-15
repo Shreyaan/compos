@@ -413,7 +413,12 @@
                      (if s ((cadr s)) '())))
                   (else scope)))))
 
-(define (ibuffer-total buf) (length (ibuffer-source buf)))
+;; The number the chip reads as "N of M". Working M out again means
+;; asking every buffer in the scope five questions, and the scope cannot
+;; change while a filter narrows, so the source build leaves it behind.
+(define (ibuffer-total buf)
+  (let ((f (ibuffer-source-facts buf)))
+    (if f (nth 1 f) (length (ibuffer-source buf)))))
 
 ;;; --- the view state: sort, grouping, folds -----------------------------------
 ;;; The three live on the view's buffer, so they survive a quit and a
@@ -735,9 +740,12 @@
 (define *ibuffer-name-max* 40)
 
 (define (ibuffer-name-fit buf)
+  ;; The page is what the columns have to fit. Sizing from every row made
+  ;; a table of 245 measure 245 names to lay out 60, and let a buffer you
+  ;; cannot see set the width of the one you can.
   (fold (lambda (n row) (max n (string-length (ibuffer-row-line-name buf row))))
         0
-        (list-entries buf)))
+        (list-page-rows buf (list-entries buf))))
 
 ;; the room the fields and the fixed head leave: the mark, the dot, the
 ;; icon, one gap after each column, and every field's own width
@@ -782,13 +790,14 @@
   (list "" (nth 1 f) (nth 2 f) (nth 3 f)))
 
 (define (ibuffer-field-fit buf f)
+  ;; the page sizes the column, for the same reason ibuffer-name-fit does
   (let ((tag (ibuffer-field-tag f)))
     (fold (lambda (n row)
             (if (ibuffer-heading? row)
                 n
                 (max n (string-length (ibuffer-field-cell row tag)))))
           (nth 1 f)
-          (list-entries buf))))
+          (list-page-rows buf (list-entries buf)))))
 
 (define (ibuffer-field-grown buf f)
   (list (car f) (ibuffer-field-fit buf f) (nth 2 f) (nth 3 f)))
@@ -811,11 +820,23 @@
 (define (ibuffer-fields buf all)
   (filter (lambda (f) (ibuffer-field-live? buf (ibuffer-field-tag f))) all))
 
+;; A draw asks for the same cell twice: once to measure the column, once
+;; to fill it. The answers can cost a syscall -- a chat's size is a stat
+;; of its log file -- so they are kept for the length of one draw and
+;; dropped with the column widths.
+(define *ibuffer-cell-memo* '())
+
 (define (ibuffer-field-cell b tag)
-  (cond ((equal? tag 'size) (ibuffer-size-label b))
-        ((equal? tag 'mode) (ibuffer-row-label b))
-        ((equal? tag 'group) (ibuffer-row-group-label b))
-        (else (ibuffer-row-last b))))
+  (let* ((key (list b tag))
+         (hit (assoc key *ibuffer-cell-memo*)))
+    (if hit
+        (cadr hit)
+        (let ((v (cond ((equal? tag 'size) (ibuffer-size-label b))
+                       ((equal? tag 'mode) (ibuffer-row-label b))
+                       ((equal? tag 'group) (ibuffer-row-group-label b))
+                       (else (ibuffer-row-last b)))))
+          (set! *ibuffer-cell-memo* (cons (list key v) *ibuffer-cell-memo*))
+          v))))
 
 ;; Fitting the columns walks every row, and a heading asks for them
 ;; again to know where its tally sits: a table of forty sections used to
@@ -823,7 +844,9 @@
 ;; draw computes them once. The rows fn clears the memo as a draw opens.
 (define *ibuffer-columns-memo* '())
 
-(define (ibuffer-columns-clear!) (set! *ibuffer-columns-memo* '()))
+(define (ibuffer-columns-clear!)
+  (set! *ibuffer-columns-memo* '())
+  (set! *ibuffer-cell-memo* '()))
 
 (define (ibuffer-columns-for buf all)
   (let* ((key (list buf (length all)))
@@ -982,9 +1005,9 @@
 ;; row while it was set like one; now it says so in its own register --
 ;; the name in upper case, the kind beside it, a rule out to the tally
 ;; -- and a bar of colour on top of that only reads as a selection.
-(define (ibuffer-row-overlays buf b off)
+(define (ibuffer-row-overlays buf b off &optional ctx)
   (cond ((ibuffer-heading? b) (ibuffer-count-overlay buf b off))
-        ((not (equal? (list-mark-of buf b) " "))
+        ((not (equal? (list-mark-of buf b ctx) " "))
          (append (ibuffer-band buf b off "ibuffer-marked")
                  (ibuffer-dir-overlay buf b off)
                  (ibuffer-md-overlay buf b off)))
@@ -1085,16 +1108,11 @@
                   "warn"))
       (ibuffer-counts-text buf n dirty bytes)))
 
+;; DIRTY and BYTES stay in the shape the layout lines share, and are not
+;; counted: a total over the whole workspace cost a question per row to
+;; describe rows the page does not show.
 (define (ibuffer-counts-text buf n dirty bytes)
-  (list (list (string-append
-                (ibuffer-noun buf n)
-                (if (> dirty 0)
-                    (string-append " · " (number->string dirty) " modified")
-                    "")
-                (if (> bytes 0)
-                    (string-append " · " (ibuffer-human bytes))
-                    ""))
-              "dim")))
+  (list (list (ibuffer-noun buf n) "dim")))
 
 ;; the keys used to stand in a bar of their own over the rows. ? shows
 ;; them all, with the mode's doc, so the bar is one word here.
@@ -1122,9 +1140,13 @@
             *ibuffer-keys-hint*)))
 
 (define (ibuffer-meta-with buf line)
-  (let loop ((rows (list-entries buf)) (n 0) (dirty 0) (bytes 0))
+  ;; The header counts rows. It does not weigh them: a size is a question
+  ;; for the row it is printed beside, and asking every row in the
+  ;; workspace made a chat stat its log file twice to put one number in a
+  ;; line about buffers you are not looking at.
+  (let loop ((rows (list-entries buf)) (n 0))
     (cond ((null? rows)
-           (let ((rendered (line buf n dirty bytes))
+           (let ((rendered (line buf n 0 0))
                  (scope (buffer-local buf 'ibuffer-narrow-group)))
              (if scope
                  (list (string-append (car rendered) " · group: " (cadr scope)
@@ -1133,17 +1155,11 @@
                  rendered)))
           ((ibuffer-heading? (car rows))
            (let ((row (car rows)))
-             (if (ibuffer-heading-folded? row)
-                 (loop (cdr rows)
+             (loop (cdr rows)
+                   (if (ibuffer-heading-folded? row)
                        (+ n (ibuffer-heading-count row))
-                       (+ dirty (ibuffer-heading-modified row))
-                       (+ bytes (ibuffer-heading-bytes row)))
-                 (loop (cdr rows) n dirty bytes))))
-          (else
-           (let ((b (car rows)))
-             (loop (cdr rows) (+ n 1)
-                   (+ dirty (if (ibuffer-row-modified? b) 1 0))
-                   (+ bytes (or (ibuffer-row-size b) 0))))))))
+                       n))))
+          (else (loop (cdr rows) (+ n 1))))))
 
 (define (ibuffer-compact-meta buf) (ibuffer-meta-with buf ibuffer-compact-meta-line))
 (define (ibuffer-wide-meta buf) (ibuffer-meta-with buf ibuffer-wide-meta-line))
@@ -1162,6 +1178,25 @@
 (define (ibuffer-search-forget! buf)
   (set! *ibuffer-search-cache*
     (remove (lambda (entry) (equal? (car entry) buf)) *ibuffer-search-cache*)))
+
+;; The header is a function of the source, and typing in the filter line
+;; cannot change the source. Asking each row its size and modified flag,
+;; and deriving the unfiltered count again, cost 121ms of every keystroke
+;; in a table of 237 buffers. Both are worked out once, here, when the
+;; source is built.
+;;
+;; It lives beside the search cache and not in the buffer's locals: a
+;; local is published to every reader on write, and this is scaffolding
+;; for one line of a header.
+(define *ibuffer-source-facts* '())
+
+(define (ibuffer-source-facts! buf)
+  (set! *ibuffer-source-facts*
+    (cons (list buf (length (remove ibuffer-heading?
+                                    (or (buffer-local buf 'list-source-entries) '()))))
+          (remove (lambda (e) (equal? (car e) buf)) *ibuffer-source-facts*))))
+
+(define (ibuffer-source-facts buf) (assoc buf *ibuffer-source-facts*))
 
 (define (ibuffer-search-row buf row)
   (let* ((view (assoc buf *ibuffer-search-cache*))
@@ -1329,7 +1364,8 @@
 (define (listing-preview! owner target)
   (let ((source (if (equal? (window-buffer (active-window)) owner)
                     (active-window) (window-showing owner))))
-    (when (and source (not (buffer-local owner 'listing-peek-disabled)) (buffer-known? target) (not (equal? owner target))
+    (when (and source (not (buffer-local owner 'ibuffer-prompt-home-window))
+               (not (buffer-local owner 'listing-peek-disabled)) (buffer-known? target) (not (equal? owner target))
                (or (equal? (active-window) source) (equal? (mb-list-target) owner))
                (not (equal? (buffer-local owner 'listing-peek-dismissed-row) target)))
       (let* ((copy (string-append " *listing-preview:" (selected-frame) "*"))
@@ -1403,7 +1439,8 @@
       (buffer-set-local! owner 'listing-peek-dismissed-row #f))
     (unless (and (string? target) (buffer-known? target))
       (listing-preview-dismiss! owner))
-    (when (and (not (buffer-local owner 'listing-peek-disabled))
+    (when (and (not (buffer-local owner 'ibuffer-prompt-home-window))
+               (not (buffer-local owner 'listing-peek-disabled))
                (string? target) (buffer-known? target))
       (unless (equal? target (buffer-local owner 'listing-peek-dismissed-row))
         (buffer-set-local! owner 'listing-peek-dismissed-row #f)
@@ -1596,12 +1633,12 @@
 ;; close it. The close reads the result rather than trusting the attempt.
 (define (ibuffer-prompt-restore-home! view &optional keep)
   ;; the preview borrowed the invoking window; put back what it showed,
-  ;; unless the pick is what it is showing now — that one stays
+  ;; before either cancel or commit. Commit must resolve mode affinity from
+  ;; the real arrangement, not from a temporarily previewed buffer.
   (let ((w (buffer-local view 'ibuffer-prompt-home-window))
         (orig (buffer-local view 'ibuffer-prompt-home-buffer)))
     (when (and w orig (window-exists? w) (buffer-known? orig)
-               (not (equal? (window-buffer w) orig))
-               (not (and (string? keep) (equal? (window-buffer w) keep))))
+               (not (equal? (window-buffer w) orig)))
       (window-preview-buffer! orig w))))
 
 (define (ibuffer-prompt-close! view &optional keep)
@@ -1697,7 +1734,13 @@
     ;; way out of the prompt has to be able to give it back.
     (buffer-set-local! view 'ibuffer-prompt-home-window home)
     (buffer-set-local! view 'ibuffer-prompt-home-buffer was)
-    (ibuffer-prompt-line! view label pick)))
+    ;; The prompt previews in its invoking pane, never in a floating card.
+    ;; Cancel anything queued while initializing the prompt view.
+    (listing-preview-dismiss! view)
+    (let ((owner (frame-local 'listing-preview-owner)))
+      (when owner (listing-preview-dismiss! owner)))
+    (ibuffer-prompt-line! view label pick)
+    (ibuffer-preview! view)))
 
 ;; what RET does with a row, in the window form and in the minibuffer
 ;; form alike: the table closes (CLOSE!), the frame enters the group that
@@ -1800,9 +1843,18 @@
 ;; Row motion schedules an isolated card; it never visits the source buffer.
 (define (ibuffer-preview! &optional buf b)
   (let ((owner (or buf (ibuffer-view))))
-    ;; Explicit row navigation can reopen a dismissed card, even at a boundary.
-    (buffer-set-local! owner 'listing-peek-dismissed-row #f)
-    (listing-preview-schedule! owner (or b (ibuffer-current owner)))))
+    (let ((home (buffer-local owner 'ibuffer-prompt-home-window))
+          (target (or b (ibuffer-current owner))))
+      (if home
+          (when (and (equal? (mb-list-target) owner) (window-exists? home))
+            (if (and (string? target) (buffer-known? target))
+                (with-layout-suppressed
+                  (lambda () (window-preview-buffer! target home)))
+                (ibuffer-prompt-restore-home! owner)))
+          (begin
+            ;; Explicit row navigation can reopen a dismissed card.
+            (buffer-set-local! owner 'listing-peek-dismissed-row #f)
+            (listing-preview-schedule! owner target))))))
 
 (define-command "ibuffer-next" "Move down to the next buffer"
   (lambda () (list-move! 1)))
@@ -2059,12 +2111,14 @@
                                                 *ibuffer-groupings*)))
                  (ibuffer-set-grouping! next buf)
                  (message (string-append "grouped by " (symbol->string next)))))
-    'overlays (lambda (buf b off) (ibuffer-row-overlays buf b off))
+    'overlays (lambda (buf b off ctx) (ibuffer-row-overlays buf b off ctx))
     'incremental-query?
       (lambda (old new)
         (or (equal? old new)
             (not (string-suffix? "-mode" (string-downcase (string-trim old))))))
-    'source-refreshed ibuffer-search-forget!
+    'source-refreshed (lambda (buf)
+                        (ibuffer-search-forget! buf)
+                        (ibuffer-source-facts! buf))
     'source-filter ibuffer-narrow-source
     'filter-delay-ms ibuffer-filter-delay-ms
     'filtered-heading

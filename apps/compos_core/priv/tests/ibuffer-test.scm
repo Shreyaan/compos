@@ -557,3 +557,21 @@
     (check-true! (number? (list-page-size "*ibuffer*"))
                  "the registered mode carries the page-size option, not #f")
     (ibuffer-test-reset!)))
+
+(deftest 'ibuffer-header-totals-come-off-the-source
+  "the header's numbers are worked out when the source is built, not per keystroke"
+  (lambda ()
+    (ibuffer-test-open! 'mode 'name)
+    (let ((all (ibuffer-total "*ibuffer*")))
+      (check-equal! (nth 1 (ibuffer-source-facts "*ibuffer*")) all
+                    "the source build left the count behind")
+      (check-equal! (length (ibuffer-source-facts "*ibuffer*")) 2
+                    "and nothing else: the header counts rows, it does not weigh them")
+      (check-false! (buffer-local "*ibuffer*" 'ibuffer-source-facts)
+                    "and none of it sits in the locals every draw reads")
+      (list-set-filters! "*ibuffer*" (list (list "match" "zz-ib-c")))
+      (check-equal! (ibuffer-total "*ibuffer*") all
+                    "a narrowing leaves the total alone")
+      (check-equal! (list-count "*ibuffer*") 1
+                    "and the chip's other number is what the narrowing shows"))
+    (ibuffer-test-reset!)))

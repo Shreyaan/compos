@@ -619,3 +619,7 @@ do not change the active preview.
 | E16 — Kill and follow | `k` in ibuffer with another row remaining | Remove the killed original and its copy, refresh the list, and preview the newly highlighted buffer. |
 | E17 — Refresh selection | `g` after the selected entry disappears from the source | Run the list mode's preview callback for the replacement selection. |
 | E18 — Background refresh | Refresh a list while another buffer has focus | Restore that list's point without opening its preview. |
+
+### Preview scope
+
+`C-x C-b` uses floating preview cards (toggle with `p`). `C-x b` previews the highlighted buffer directly in the invoking pane, without a floating card or history entries. `C-g` restores the original buffer, point, and history. Before `RET` applies the normal chosen-pane placement rule, it restores the underlying arrangement so the preview cannot masquerade as the preferred mode window. Opening the minibuffer picker dismisses any existing floating preview.

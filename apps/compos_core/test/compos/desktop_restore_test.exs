@@ -542,6 +542,38 @@ defmodule Compos.DesktopRestoreTest do
     assert eval!("*dr-dropped*") == ~s{"boot"}
   end
 
+  # The whole set used to go back in one call. On 2026-09-16 the first
+  # entry's restore called (list? saved), which this Scheme does not have,
+  # and every global behind it was lost with it -- the groups, the layouts,
+  # the histories -- leaving one line in the log as the only sign. A global
+  # that cannot restore itself now loses only itself.
+  test "a global whose restore raises does not take the others down" do
+    eval!(~S{
+    (define *dr-sound* "boot")
+    (persist-global! 'dr-sound
+      (lambda () *dr-sound*)
+      (lambda (v) (set! *dr-sound* v)))
+    ;; registered last, so it restores first, exactly as the broken one did
+    (persist-global! 'dr-broken
+      (lambda () "value")
+      (lambda (v) (dr-no-such-name v)))
+    })
+
+    eval!(~s{(set! *dr-sound* "used")})
+    assert :ok = Desktop.save_now()
+
+    eval!(~s{(set! *dr-sound* "boot")})
+    assert :ok = Desktop.restore_now()
+
+    assert eval!("*dr-sound*") == ~s{"used"}
+
+    eval!(~S{
+    (set! *desktop-globals*
+      (remove (lambda (e) (or (equal? (car e) 'dr-sound) (equal? (car e) 'dr-broken)))
+              *desktop-globals*))
+    })
+  end
+
   test "LLM configuration history survives desktop restore" do
     eval!(~s{
       (set! *llm-config-history*

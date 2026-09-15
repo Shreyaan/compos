@@ -52,7 +52,8 @@
   (lambda ()
     (let ((buf "zz-dashboard-line"))
       (test-buffer! buf "hello\n")
-      (with-current-buffer buf (lambda () (post-command!)))
+      (switch-to-buffer! buf)
+      (dashboard--sync! buf)
       ;; the compact line carries the facts the expanded segments carry:
       ;; mode, group, model, lane. Neither rendering names the read-only
       ;; state today.
@@ -120,6 +121,7 @@
   (lambda ()
     (let ((buf "zz-dashboard-sync"))
       (test-buffer! buf "hello\n")
+      (switch-to-buffer! buf)
       (dashboard--sync! buf)
       (check-true! (string? (buffer-local buf 'dashboard-line)) "the compact line landed")
       (check-true! (pair? (buffer-local buf 'dashboard-line-blocks)) "the blocks landed")

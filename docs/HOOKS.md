@@ -54,3 +54,10 @@ list. The local table lives in Scheme, keyed by buffer name.
 Two tables are not hooks on purpose. `on-input-intent!` keys a handler
 by intent type. `add-paste-hook!` keys a handler by mode and runs the
 first that answers.
+
+### Dashboard presentation
+
+`dashboard--sync!` rebuilds presentation only when a window in any frame shows the buffer.
+Hidden updates set the transient `dashboard-dirty` local. Repeated updates keep one pending refresh.
+The buffer-shown and window-configuration hooks consume that refresh when the buffer appears.
+Restore requests a new sync; the dirty flag is not saved in the desktop.

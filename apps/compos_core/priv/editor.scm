@@ -484,13 +484,15 @@
 
 ;; Select one responsive profile per draw. Every option read then uses it.
 (define (list-active-layout buf)
-  (let* ((opts (list-mode-opts (list-mode-of buf)))
-         (layouts (or (plist-get opts 'layouts) '()))
-         (width (list-view-width buf))
-         (cache (buffer-local buf 'list-layout-cache)))
+  ;; the cache answers first: working the profile out again means reading
+  ;; the mode table and its layouts before finding out nothing changed
+  (let ((width (list-view-width buf))
+        (cache (buffer-local buf 'list-layout-cache)))
     (if (and (pair? cache) (equal? (car cache) width))
         (cadr cache)
-        (let ((profile (list-select-layout buf layouts width)))
+        (let* ((opts (list-mode-opts (list-mode-of buf)))
+               (layouts (or (plist-get opts 'layouts) '()))
+               (profile (list-select-layout buf layouts width)))
           (buffer-set-local! buf 'list-layout-cache (list width profile))
           profile))))
 
@@ -936,14 +938,20 @@
   ;; once. Threading the result so far through append copied every section
   ;; already kept onto the next one, so a table of 41 sections paid for its
   ;; own length again and again -- docs/LISTS.md rule 1.
-  (let walk ((rest entries) (heading #f) (rows '()) (out '()))
-    (cond ((null? rest)
-           (apply append
-             (reverse (cons (list-keep-section-emit buf heading rows filters ctx) out))))
-          ((list-section-start? buf (car rest))
-           (walk (cdr rest) (car rest) '()
-                 (cons (list-keep-section-emit buf heading rows filters ctx) out)))
-          (else (walk (cdr rest) heading (cons (car rest) rows) out)))))
+  ;;
+  ;; The section test is one option read, and an option read walks the
+  ;; mode table and the layout profile. Asking for it once per entry cost
+  ;; 90ms of every keystroke in the filter line of a 277-row table, so it
+  ;; is read once, here.
+  (let ((start? (or (list-opt buf 'section?) list-separator?)))
+    (let walk ((rest entries) (heading #f) (rows '()) (out '()))
+      (cond ((null? rest)
+             (apply append
+               (reverse (cons (list-keep-section-emit buf heading rows filters ctx) out))))
+            ((start? buf (car rest))
+             (walk (cdr rest) (car rest) '()
+                   (cons (list-keep-section-emit buf heading rows filters ctx) out)))
+            (else (walk (cdr rest) heading (cons (car rest) rows) out))))))
 
 (define (list-keep buf entries)
   (let ((filters (list-filters buf)))
@@ -1433,7 +1441,10 @@
 ;; three renders were each prepending their own. The mark goes on the
 ;; first line, and the lines under it start where it does.
 
-(define (list-row-lines buf e &optional ctx cells)
+(define (list-row-lines buf e &optional ctx cells laid)
+  ;; LAID is the first line's layout, already worked out by the caller.
+  ;; The composml pass needs the same layout to place its field ranges, so
+  ;; a draw that did not share it laid every row out twice.
   (let* ((ctx (or ctx (list-row-ctx buf)))
          (marks? (list-ctx-marks? ctx))
          (column-lines (list-ctx-column-lines ctx))
@@ -1447,18 +1458,14 @@
                      (out '()))
             (if (or (null? cs) (null? ks))
                 (reverse out)
-                (let* ((laid (list-lay-out (car cs) (car ks)))
+                (let* ((laid (if (and first? laid) laid (list-lay-out (car cs) (car ks))))
                        (pre (if first? head blank))
                        (n (string-byte-length pre)))
                   (loop (cdr cs) (cdr ks) #f
-                        (cons (list (string-trim-right
-                                      (string-append pre (car laid)))
-                                    (append (if (or (not first?)
-                                                    (equal? mark " ")
-                                                    (equal? mark ""))
+                        (cons (list (string-trim-right (string-append pre (car laid)))
+                                    (append (if (or (not first?) (equal? mark " ") (equal? mark ""))
                                                 '()
-                                                (list (list 0 (string-byte-length mark)
-                                                            "alert")))
+                                                (list (list 0 (string-byte-length mark) "alert")))
                                             (list-shift-spans (car (cdr laid)) n)))
                               out))))))
         (list (list (string-append mark ((list-ctx-render ctx) buf e)) '())))))
@@ -1944,14 +1951,20 @@
 ;; the row where its line landed rather than making the caller keep its
 ;; own running offset
 (define (list-row-overlays buf rows)
-  (let ((ovf (list-opt buf 'overlays)))
+  ;; The row context is what a draw already worked out once: the key
+  ;; function and the marks. Asking a row whether it is marked without it
+  ;; read the mode option and the marks local again, per row, so a page of
+  ;; 60 paid 120 reads to answer "no" 60 times. The context is built here
+  ;; and handed down.
+  (let ((ovf (list-opt buf 'overlays))
+        (ctx (list-row-ctx buf)))
     (if (not ovf)
         '()
         (let loop ((es rows) (offs (list-offsets buf)) (out '()))
           (if (or (null? es) (null? offs))
               (reverse out)
               (loop (cdr es) (cdr offs)
-                    (append (reverse (ovf buf (car es) (car offs))) out)))))))
+                    (append (reverse (ovf buf (car es) (car offs) ctx)) out)))))))
 
 ;; where a row went: a refresh may reorder the rows, and the reader stays
 ;; on the row rather than on its number
@@ -2055,13 +2068,15 @@
 ;; Optional semantic projection of the same selectable rows. Text offsets stay
 ;; authoritative for commands, search, marks, and per-window selection.
 ;; Field boundaries come from the same layout operation that wrote the text.
-(define (list-composml-fields buf row start &optional ctx fields cells)
+(define (list-composml-fields buf row start &optional ctx fields cells laid)
   (let ((fields (or fields (list-opt buf 'composml-fields))))
     (if (not fields) '()
       (let* ((ctx (or ctx (list-row-ctx buf)))
              (prefix (+ (string-byte-length (if (list-ctx-marks? ctx) (list-mark-of buf row ctx) "")) 1))
-             (laid (list-lay-out (car (or cells (list-row-cells buf row ctx)))
-                                (car (list-ctx-column-lines ctx)) #t)))
+             ;; the row was laid out once, when its lines were made
+             (laid (or laid
+                       (list-lay-out (car (or cells (list-row-cells buf row ctx)))
+                                     (car (list-ctx-column-lines ctx)) #t))))
         (let loop ((ranges (nth 2 laid)) (descs (fields buf row)) (out '()))
           (if (or (null? ranges) (null? descs)) (reverse out)
             (let* ((r (car ranges)) (a (+ start prefix (car r))))
@@ -2094,7 +2109,9 @@
                            (block (record buf row)))
                       (loop (cdr rs) (cdr offsets) (and (pair? ps) (cdr ps))
                         (cons (list start (+ start size)
-                                (append (list 'fields (if fields (list-composml-fields buf row start ctx fields (and (pair? ps) (car (car ps)))) '())
+                                (append (list 'fields (if fields (list-composml-fields buf row start ctx fields
+                                                                (and (pair? ps) (car (car ps)))
+                                                                (and (pair? ps) (nth 2 (car ps)))) '())
                                               'attrs (append
                                 (list (list "record-id" (let ((key (if key-of (key-of buf row) row)))
                                   (if (string? key) key (value->string key)))))
@@ -2167,12 +2184,16 @@
                                (not (equal? q (cadr previous)))))
                       (equal? ctx (caddr previous))))
          (old (if reuse? (nth 3 previous) '()))
+         (ks (let ((cl (list-ctx-column-lines ctx))) (and (pair? cl) (car cl))))
          (prepared
            (map (lambda (row)
                   (let ((hit (assoc row old)))
                     (if hit (cadr hit)
-                        (let ((cells (list-row-cells buf row ctx)))
-                          (list cells (list-row-lines buf row ctx cells))))))
+                        ;; one layout per row, kept: the lines and the
+                        ;; composml field ranges are two readings of it
+                        (let* ((cells (list-row-cells buf row ctx))
+                               (laid (and ks (list-lay-out (car cells) ks #t))))
+                          (list cells (list-row-lines buf row ctx cells laid) laid)))))
                 rows)))
     (when cache?
       (set! *list-filter-row-cache*
@@ -3972,8 +3993,15 @@
   (for-each
     (lambda (e)
       (let ((hit (assoc (car e) saved)))
-        (when hit ((car (cdr (cdr e))) (cadr hit)))))
+        (when hit (desktop-global! (car e) (cadr hit)))))
     *desktop-globals*))
+
+;; One key on its own. A restore that raises takes every global after it
+;; down with it, and the editor comes up with no groups and no layouts,
+;; so the desktop puts them back one at a time when the whole set fails.
+(define (desktop-global! key value)
+  (let ((e (assoc key *desktop-globals*)))
+    (when e ((car (cdr (cdr e))) value))))
 
 (define (desktop-globals-clear!)
   (for-each
@@ -12755,7 +12783,26 @@
             (list "p" (buffer-modeline-context buf))))
     (list (list "mode" (buffer-icon buf)))))
 
+;; Events invalidate hidden presentation. Any frame can supply a reader.
 (define (dashboard--sync! buf)
+  (when (buffer-exists? buf)
+    (desktop-skip! buf 'dashboard-dirty)
+    (if (member buf (map cadr (window-list-all)))
+        (dashboard--render! buf)
+        (unless (buffer-local buf 'dashboard-dirty)
+          (buffer-set-local! buf 'dashboard-dirty #t)))))
+
+(define (dashboard--catchup! buf)
+  (when (and (buffer-exists? buf) (buffer-local buf 'dashboard-dirty))
+    (dashboard--sync! buf)))
+
+(define (dashboard--catchup-visible!)
+  (for-each (lambda (w) (dashboard--catchup! (cadr w))) (window-list)))
+
+(add-hook! 'buffer-shown-hook 'dashboard--catchup!)
+(add-hook! 'window-configuration-change-hook 'dashboard--catchup-visible!)
+
+(define (dashboard--render! buf)
   (desktop-skip! buf 'dashboard-line)
   (desktop-skip! buf 'dashboard-line-blocks)
   (desktop-skip! buf 'modeline-name)
@@ -12765,7 +12812,8 @@
   ;; locals, so the frame refreshes once for the sync
   (let ((preset-cell (list (dash--preset buf))))
     (buffer-set-locals! buf
-      (list 'dashboard-line (dashboard-one-line buf preset-cell)
+      (list 'dashboard-dirty #f
+            'dashboard-line (dashboard-one-line buf preset-cell)
             'dashboard-line-blocks (dashboard-line-blocks buf preset-cell)
             'modeline-name (buffer-modeline-name buf)
             ;; the same name as the spans that draw it: the client shows
@@ -12775,12 +12823,9 @@
             ;; working directory in the same context slot.
             'modeline-project (buffer-modeline-context buf)))))
 
-;; Showing is the trigger, and the editor already had one. A change made
-;; while a buffer is hidden marks it dirty; filling a window with it
-;; clears the flag and rebuilds the line (buffer-group-display-refresh!,
-;; on buffer-shown-hook). A restore, a mode change, a jj change and a
-;; chat summary each rebuild it by name. Nothing here needs a second
-;; door, and a second one would build the same line twice per showing.
+;; The dirty flag is transient. Restore requests a sync again, and the
+;; window hooks materialize only pending presentation. Group catchup can
+;; call sync first; clearing the flag keeps these hooks from duplicating it.
 
 ;; The fingerprint reads locals only — never the live tool surface. It
 ;; runs after every command, and asking the surface there would start
@@ -12831,7 +12876,7 @@
     ;; keystroke derives nothing new: it was recomputed for every command
     ;; in the buffer the command ran in, at 16ms a key, and the line it
     ;; produced was almost always the line already there. It is rebuilt
-    ;; when a window shows a buffer (dashboard--sync-visible!), and the
+    ;; when a window shows a dirty buffer (dashboard--catchup!), and the
     ;; event that changes a live buffer's line -- a jj change, a summary,
     ;; a restore, a group move -- calls dashboard--sync! on it itself.
     (list-post-command! buf)

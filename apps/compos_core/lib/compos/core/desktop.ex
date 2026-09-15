@@ -394,14 +394,41 @@ defmodule Compos.Core.Desktop do
         true
 
       other ->
-        Logger.warning("desktop: the globals did not install: #{inspect(other)}")
+        install_one_at_a_time(globals, inspect(other))
+    end
+  catch
+    :exit, reason ->
+      install_one_at_a_time(globals, inspect(reason))
+  end
+
+  # The whole set goes back in one call, and one restore that raises takes
+  # every global after it down with it: the editor then comes up with no
+  # groups, no layouts and no history, and the only sign is a line in the
+  # log. So when that call fails, put them back one at a time and lose
+  # only the key that cannot restore itself.
+  defp install_one_at_a_time(globals, why) do
+    Logger.warning("desktop: the globals did not install in one call (#{why}); one at a time")
+    ok = Enum.count(globals, &install_global/1)
+    Logger.warning("desktop: #{ok} of #{length(globals)} globals went back")
+    ok > 0
+  end
+
+  defp install_global([key, value]) do
+    case Session.call_named("desktop-global!", [key, value], nil, @install_timeout) do
+      {:ok, _} ->
+        true
+
+      other ->
+        Logger.warning("desktop: the global #{inspect(key)} did not install: #{inspect(other)}")
         false
     end
   catch
     :exit, reason ->
-      Logger.warning("desktop: the globals did not install: #{inspect(reason)}")
+      Logger.warning("desktop: the global #{inspect(key)} did not install: #{inspect(reason)}")
       false
   end
+
+  defp install_global(_), do: false
 
   # A boot wakes only the buffers a window shows; the rest stay dormant and
   # rebuild when something wakes them.

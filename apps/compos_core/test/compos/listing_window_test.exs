@@ -132,7 +132,7 @@ defmodule Compos.ListingWindowTest do
     end
   end
 
-  test "the minibuffer picker has an inert card and restores its invoking buffer" do
+  test "C-x b previews in its destination pane and restores it on cancel" do
     previous = Editor.last_active_frame()
     {:ok, frame} = Editor.attach_frame(nil)
 
@@ -143,23 +143,33 @@ defmodule Compos.ListingWindowTest do
         (test-buffer! "*zz-lw-prompt-target*" "target")
         (switch-to-buffer-here! "*zz-lw-prompt-source*")
         (define *lw-prompt-window* (active-window))
+        (window-set-point! *lw-prompt-window* 3)
+        (define *lw-prompt-history* (window-prev-buffers *lw-prompt-window*))
         (global-set-key "<f9>" "ibuffer-prompt")
         """,
         frame
       )
 
-      KeyDispatch.handle_key(frame, "<f9>")
+      KeyDispatch.handle_key(frame, "C-x")
+      KeyDispatch.handle_key(frame, "b")
 
       assert eval!(
                "(minibuffer-change! \"zz-lw-prompt-target\") (list-query *mb-list-buffer*)",
                frame
              ) == "\"\""
 
-      for _ <- 1..100, eval!("(frame-local 'listing-preview-owner)", frame) == "#f",
-        do: Process.sleep(10)
-      assert eval!("(and (frame-local 'listing-preview-owner) #t)", frame) == "#t"
-      eval!("(minibuffer-cancel!)", frame)
+      Process.sleep(650)
+      KeyDispatch.handle_key(frame, "<up>")
+      Process.sleep(250)
+      assert eval!("(frame-local 'listing-preview-owner)", frame) == "#f"
+      assert eval!("(window-buffer *lw-prompt-window*)", frame) == "\"*zz-lw-prompt-target*\""
+      # Minibuffer previews never create a floating card.
+      eval!("(listing-preview! *mb-list-buffer* \"*zz-lw-prompt-target*\")", frame)
+      assert eval!("(frame-local 'listing-preview-owner)", frame) == "#f"
+      KeyDispatch.handle_key(frame, "C-g")
       assert eval!("(window-buffer *lw-prompt-window*)", frame) == "\"*zz-lw-prompt-source*\""
+      assert eval!("(window-point *lw-prompt-window*)", frame) == "3"
+      assert eval!("(equal? (window-prev-buffers *lw-prompt-window*) *lw-prompt-history*)", frame) == "#t"
       assert eval!("(popup-open?)", frame) == "#f"
     after
       eval!(

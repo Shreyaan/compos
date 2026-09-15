@@ -125,3 +125,18 @@
       (run-command "profile-cancel")
       (check-true! (not (profile-armed?)) "disarmed")
       (set! *profile-armed* was))))
+
+(deftest 'profile-site-counters-do-not-count-themselves
+  "an armed fold or remove counts its call site once and returns the builtin's value"
+  (lambda ()
+    (profile--sites-on!)
+    (let ((sum (fold (lambda (acc item) (+ acc item)) 0 '(1 2 3 4 5)))
+          (kept (remove (lambda (x) (= x 2)) '(1 2 3))))
+      (let ((sites (profile--sites-report)))
+        (profile--sites-off!)
+        (check-equal! sum 15 "the wrapped fold returns the builtin's value")
+        (check-equal! kept '(1 3) "the wrapped remove returns the builtin's value")
+        (check-equal! (length sites) 2 "one row per call site, none for the bookkeeping")
+        (check-equal! (fold (lambda (n s) (+ n (plist-get s 'calls))) 0 sites) 2
+                      "each call counts once")))
+    (check-true! (not *profile-site-busy*) "off clears the busy flag")))

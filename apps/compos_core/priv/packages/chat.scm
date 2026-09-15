@@ -994,7 +994,11 @@
 (define (chat-log-save! buf)
   (let ((text (chat-file-text buf)))
     (when text
-      (write-file! (chat-log-path buf) text))))
+      (write-file! (chat-log-path buf) text)
+      ;; the size a buffer list prints beside this chat. The writer knows
+      ;; it; without this every draw of the table stats the log file of
+      ;; every chat in the workspace to find the same number out again.
+      (buffer-set-local! buf 'chat-log-size (string-byte-length text)))))
 
 ;;; --- replay: a saved chat drives the editor again --------------------------------
 ;;; A .chat file becomes a scripted stub session: the user turns are the

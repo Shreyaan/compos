@@ -219,6 +219,23 @@
             (string-append var " is not a bare define"))))
       t--reload-persisted)))
 
+;; The desktop asks each global for its value on save and hands the same
+;; value back on boot. Nothing checked that the two halves agree: on
+;; 2026-09-16 a restore read (list? saved), a name this Scheme does not
+;; have, and the one call that installs the set died on the first entry.
+;; A round trip proves every restore can read what its own save wrote.
+(deftest 'every-persisted-global-takes-back-what-it-gave
+  "each restore accepts the value its own state fn produced"
+  (lambda ()
+    (let ((n 0))
+      (for-each
+        (lambda (e)
+          (desktop-global! (car e) ((cadr e)))
+          (set! n (+ n 1)))
+        *desktop-globals*)
+      (check-equal! n (length *desktop-globals*)
+        "every global made the round trip"))))
+
 ;;; --- a reload must not point a wrapper at itself --------------------------
 ;;;
 ;;; The editor wraps a function by capturing it under a second name and then

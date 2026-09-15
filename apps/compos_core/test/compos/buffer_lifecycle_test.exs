@@ -48,6 +48,29 @@ defmodule Compos.BufferLifecycleTest do
     Compos.Core.kill_buffer(name)
   end
 
+  test "a checkpoint carries the auto-revert base only for a buffer with unsaved work" do
+    for {label, saved?} <- [{"arb-clean", true}, {"arb-dirty", false}] do
+      name = unique(label)
+      {:ok, ^name} = Compos.Core.create_buffer(name)
+      Buffer.append(name, "one\ntwo\n", source: :editor)
+      Buffer.set_local(name, "auto-revert-base", "one\ntwo\n")
+      if saved?, do: Buffer.mark_saved(name)
+      id = Buffer.eviction_info(name).id
+
+      evict(name)
+      assert eventually(fn -> not Buffer.exists?(name) end)
+
+      cp = BufferStore.checkpoint_path(id) |> File.read!() |> :erlang.binary_to_term()
+
+      # a clean buffer agrees with its file, so waking re-seeds the base from
+      # disk and the checkpoint never writes the file into itself a second time
+      assert Map.has_key?(cp.locals, "auto-revert-base") == not saved?
+      assert Buffer.text(name) == "one\ntwo\n"
+
+      Compos.Core.kill_buffer(name)
+    end
+  end
+
   test "an immutable buffer ref survives rename, eviction, and wake" do
     old = unique("ref-old")
     new = unique("ref-new")

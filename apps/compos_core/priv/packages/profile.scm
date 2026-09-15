@@ -28,6 +28,10 @@
   "How many function rows one profile shows."
   'group 'profile 'type 'number)
 
+(defcustom 'profile-site-rows 15
+  "How many Scheme call-site rows one profile shows."
+  'group 'profile 'type 'number)
+
 (defcustom 'profile-process-rows 8
   "How many process rows one profile shows."
   'group 'profile 'type 'number)
@@ -55,12 +59,88 @@
   (let ((c (this-command)))
     (if (or (not c) (equal? c "")) "self-insert-command" c)))
 
+;;; --- the call sites ---------------------------------------------------------
+;;;
+;;; An Elixir profile names the Elixir function that ran, so every list
+;;; walk in a command arrives as one anonymous `-all/0-fun-82-` with no way
+;;; back to the Scheme that ran it. The builtin knows the lambda it was
+;;; handed, and a lambda's parameters name its call site: `fold (out
+;;; bucket)` is one place in the source and nothing else.
+;;;
+;;; The count lives here and not in the interpreter on purpose. A check in
+;;; the evaluator's builtin path costs a lookup on every builtin call --
+;;; measured at 40ms for one C-x b, paid by every command forever, to
+;;; serve a tool that is off. Instead the profiler swaps these builtins
+;;; for counting wrappers while it is armed and puts them back after, so
+;;; nothing is added to the path a command normally takes.
+
+(define *profile-site-builtins* '(map filter fold for-each remove))
+(define *profile-site-saved* '())
+(define *profile-site-counts* '())
+;; #t while a wrapper does its own bookkeeping. The bookkeeping calls
+;; fold and remove, which are wrappers too, so without this flag a fold
+;; counts itself until the recursion bound stops it.
+(define *profile-site-busy* #f)
+
+(define (profile--site-bump! name sig n)
+  (let* ((key (list name sig))
+         (cell (assoc key *profile-site-counts*)))
+    (set! *profile-site-counts*
+          (cons (list key (+ 1 (if cell (nth 1 cell) 0)) (+ n (if cell (nth 2 cell) 0)))
+                (if cell
+                    (remove (lambda (c) (equal? (car c) key)) *profile-site-counts*)
+                    *profile-site-counts*)))))
+
+;; the longest list the builtin was given is what it had to walk
+(define (profile--site-elements args)
+  (fold (lambda (n a) (if (pair? a) (max n (length a)) n)) 0 args))
+
+;; the lambda's own source, clipped: enough to find the one place in the
+;; source that wrote it, short enough to be a row
+(define (profile--site-of f)
+  (let ((src (if (procedure? f) (function-source f) "")))
+    (if (string? src)
+        (let ((one (string-trim (car (string-split src "\n")))))
+          (if (> (string-length one) 58) (string-append (substring one 0 58) "…") one))
+        "")))
+
+(define (profile--sites-on!)
+  (set! *profile-site-busy* #f)
+  (set! *profile-site-counts* '())
+  (set! *profile-site-saved*
+    (map (lambda (name) (list name (symbol-value name))) *profile-site-builtins*))
+  (for-each
+    (lambda (saved)
+      (let ((name (car saved)) (orig (nth 1 saved)))
+        (set-symbol-value! name
+          (lambda (f &rest rest)
+            (unless *profile-site-busy*
+              (set! *profile-site-busy* #t)
+              (profile--site-bump! (symbol->string name) (profile--site-of f)
+                                   (profile--site-elements rest))
+              (set! *profile-site-busy* #f))
+            (apply orig (cons f rest))))))
+    *profile-site-saved*))
+
+(define (profile--sites-off!)
+  (for-each (lambda (saved) (set-symbol-value! (car saved) (nth 1 saved)))
+            *profile-site-saved*)
+  (set! *profile-site-saved* '())
+  (set! *profile-site-busy* #f))
+
+(define (profile--sites-report)
+  (map (lambda (c)
+         (list 'name (car (car c)) 'site (nth 1 (car c))
+               'calls (nth 1 c) 'elements (nth 2 c)))
+       *profile-site-counts*))
+
 ;; first on pre-command-hook: the trace must be running before the
 ;; command, and everything after this point is the command's own cost
 (define (profile--pre!)
   (when *profile-armed*
     (set! *profile-armed* #f)
     (set! *profile-open* (list 'buffer (current-buffer)))
+    (profile--sites-on!)
     (profile-start!)))
 
 ;; last on post-command-hook
@@ -70,11 +150,14 @@
           (cmd (profile--command)))
       (set! *profile-open* #f)
       (if (profile--ignored? cmd)
-          (begin (profile-cancel!) (set! *profile-armed* #t))
-          (let ((data (profile-stop)))
+          (begin (profile--sites-off!) (profile-cancel!) (set! *profile-armed* #t))
+          (let ((data (profile-stop))
+                (sites (begin (profile--sites-off!) (profile--sites-report))))
             (when data
               (profile--show!
-                (append (list 'command cmd 'buffer (plist-get open 'buffer)) data))))))))
+                (append (list 'command cmd 'buffer (plist-get open 'buffer)
+                              'sites sites)
+                        data))))))))
 
 (add-hook! 'pre-command-hook 'profile--pre!)
 (add-hook! 'post-command-hook 'profile--post! #t)
@@ -145,6 +228,33 @@
                            'share (profile--share (plist-get f 'calls) total)))
                    fns)))))
 
+;; A builtin call counts itself against the lambda it was handed, so the
+;; list work of a command reads as the Scheme that ran it. An Elixir
+;; profile can only say `-all/0-fun-82-`; this says `fold (out bucket)`,
+;; which names one call site in the source. ELEMENTS is what the builtin
+;; walked, and it is the number that matters: a thousand folds over four
+;; things is nothing, one fold over a thousand is the command.
+(define (profile--site-rows r)
+  ;; most elements walked first: sort pairs the count in front, because
+  ;; sort orders lists by their own head
+  (let* ((all (or (plist-get r 'sites) '()))
+         (ranked (map (lambda (p) (nth 1 p))
+                      (sort (map (lambda (s) (list (- 0 (plist-get s 'elements)) s)) all))))
+         (sites (profile--take ranked profile-site-rows)))
+    (if (null? sites)
+        '()
+        (let ((total (fold (lambda (n s) (+ n (plist-get s 'elements))) 0 sites)))
+          (cons (profile--sep "what the lists walked · elements, by call site")
+                (map (lambda (s)
+                       (let ((site (plist-get s 'site)))
+                         (list 'kind "site"
+                               'what (string-append (plist-get s 'name)
+                                                    (if (equal? site "") "" (string-append "  " site)))
+                               'count (plist-get s 'elements)
+                               'value (string-append (profile--count (plist-get s 'calls)) " calls")
+                               'share (profile--share (plist-get s 'elements) total))))
+                     sites))))))
+
 (define (profile--process-rows r)
   (let ((total (plist-get r 'reductions))
         (ps (profile--take (plist-get r 'processes) profile-process-rows)))
@@ -191,7 +301,8 @@
   (let ((r (profile--report buf)))
     (if (not r)
         '()
-        (append (profile--function-rows r)
+        (append (profile--site-rows r)
+                (profile--function-rows r)
                 (profile--process-rows r)
                 (profile--layer-rows r)
                 (profile--vm-rows r)))))
@@ -216,6 +327,11 @@
        (list what
              (list (profile--count (plist-get e 'count)) "dim")
              (plist-get e 'value)
+             (list (profile--bar (plist-get e 'share)) "faint")))
+      ((equal? kind "site")
+       (list what
+             (list (profile--count (plist-get e 'count)) "dim")
+             (list (plist-get e 'value) "faint")
              (list (profile--bar (plist-get e 'share)) "faint")))
       ((equal? kind "proc")
        (list what

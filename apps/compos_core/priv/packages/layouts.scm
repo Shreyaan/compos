@@ -518,7 +518,7 @@
 (persist-global! 'hidden-windows
   (lambda () (list *hidden-window-next-id* *hidden-windows*))
   (lambda (saved)
-    (when (and (list? saved) (= (length saved) 2))
+    (when (and (pair? saved) (= (length saved) 2))
       (set! *hidden-window-next-id* (car saved))
       (set! *hidden-windows* (cadr saved)))))
 

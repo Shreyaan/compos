@@ -43,6 +43,7 @@
       (test-buffer! buf "")
       (buffer-set-local! buf 'mode-name "chat-mode")
       (buffer-set-local! buf 'default-directory dir)
+      (switch-to-buffer! buf)
       (dashboard--sync! buf)
       (check-equal! (buffer-directory buf) dir
                     "the chat has its own working directory")
@@ -165,6 +166,10 @@
       (buffer-set-local! buf 'agent-blocks '())
       (chat-summary-land! buf "Adding titles to chats.")
       (chat-summary-land! buf "Rewriting the dashboard segment.")
+      (check-equal! (buffer-local buf 'dashboard-dirty) #t
+                    "background summaries leave one pending dashboard update")
+      (check-equal! (buffer-local buf 'dashboard-line-blocks) #f
+                    "background summaries build no dashboard blocks")
       (check-equal! (buffer-local buf 'chat-title) "Adding titles to chats."
                     "the title is the label the chat wrote first")
       (check-equal! (chat-title-of buf) "Adding titles to chats."
@@ -350,8 +355,7 @@
                     "the born directory is the stamp")
       (buffer-kill! buf))))
 
-;; A silent buffer costs nothing: post-command! rebuilds the dashboard of
-;; the buffer the command ran in, and of no other buffer.
+;; Commands do not rebuild dashboard presentation.
 (deftest 'a-command-builds-no-dashboard-line
   "the line is built when a window is filled with the buffer and by the events that change it, never once per command"
   (lambda ()
@@ -359,6 +363,7 @@
           (other "*zz-modeline-other*"))
       (test-buffer! here "")
       (test-buffer! other "")
+      (switch-to-buffer! other)
       (dashboard--sync! other)
       (let ((before (buffer-local other 'dashboard-line))
             (before-here (buffer-local here 'dashboard-line)))
@@ -368,9 +373,11 @@
                       "the other buffer's line did not rebuild")
         (check-equal! (buffer-local here 'dashboard-line) before-here
                       "a command built no line, not even in the buffer it ran in")
+        (switch-to-buffer! here)
         (dashboard--sync! here)
         (check-true! (string? (buffer-local here 'dashboard-line))
                      "a sync builds it")
+        (switch-to-buffer! other)
         (dashboard--sync! other)
         (check-true! (string-contains? (buffer-local other 'dashboard-line) "zz-silent")
                      "a sync asked for by name rebuilds it"))
@@ -456,6 +463,7 @@
                     '(("bn-text" "scheme-mode"))
                     "the buffer-local format wins over buffer-name-format")
       (buffer-set-local! buf 'name-format #f)
+      (switch-to-buffer! buf)
       (dashboard--sync! buf)
       (check-equal! (buffer-local buf 'modeline-name-segments)
                     (buffer-name-segments buf)
@@ -557,3 +565,49 @@
       (check-equal! (plist-get action 'click) "summary-log" "the original action target survives")
       (check-true! (member '("title" "open the summary log") (plist-get action 'attrs))
               "the summary retains its hint"))))
+
+(deftest 'hidden-dashboard-updates-wait-for-display
+  "hidden updates retain presentation until a window shows the latest state"
+  (lambda ()
+    (let ((buf "*zz-dashboard-hidden*") (other "*zz-dashboard-visible*"))
+      (test-buffer! buf "")
+      (test-buffer! other "")
+      (switch-to-buffer! buf)
+      (window-configuration-changed!)
+      (dashboard--sync! buf)
+      (switch-to-buffer! other)
+      (let ((before (buffer-local buf 'dashboard-line-blocks)))
+        (buffer-set-local! buf 'minor-modes '("zz-first-mode"))
+        (dashboard--sync! buf)
+        (buffer-set-local! buf 'minor-modes '("zz-latest-mode"))
+        (dashboard--sync! buf)
+        (check-equal! (buffer-local buf 'dashboard-line-blocks) before
+                      "hidden sync does not materialize blocks")
+        (check-equal! (buffer-local buf 'dashboard-dirty) #t "updates remain pending")
+        (check-true! (member 'dashboard-dirty (buffer-local buf 'desktop-skip-locals))
+                     "the pending flag is transient")
+        (switch-to-buffer! buf)
+      (window-configuration-changed!)
+        (check-equal! (buffer-local buf 'dashboard-dirty) #f "showing consumes pending work")
+        (check-contains! (buffer-local buf 'dashboard-line) "zz-latest"
+                         "showing renders the latest state")
+        (buffer-set-local! buf 'minor-modes '("zz-visible-mode"))
+        (dashboard--sync! buf)
+        (check-contains! (buffer-local buf 'dashboard-line) "zz-visible"
+                         "visible events update immediately"))
+      (buffer-kill! buf)
+      (buffer-kill! other))))
+
+(deftest 'hidden-dashboard-without-presentation-catches-up
+  "restore can request presentation before any window shows the buffer"
+  (lambda ()
+    (let ((buf "*zz-dashboard-unseen*"))
+      (test-buffer! buf "")
+      (dashboard--sync! buf)
+      (check-equal! (buffer-local buf 'dashboard-line-blocks) #f
+                    "hidden restore builds no blocks")
+      (switch-to-buffer! buf)
+      (window-configuration-changed!)
+      (check-true! (pair? (buffer-local buf 'dashboard-line-blocks))
+                   "the first display supplies presentation")
+      (buffer-kill! buf))))

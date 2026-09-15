@@ -2514,6 +2514,7 @@ defmodule Compos.Core.Buffer do
 
   defp checkpoint(state) do
     {text, _} = fetch_text(state)
+    modified = state.version != state.saved_version
 
     %{
       version: 1,
@@ -2525,10 +2526,10 @@ defmodule Compos.Core.Buffer do
       mark: state.mark,
       read_only: state.read_only,
       encoding: state.encoding,
-      locals: serializable_locals(state.locals),
+      locals: checkpoint_locals(state.locals, modified),
       hidden: state.hidden,
       buffer_version: state.version,
-      modified: state.version != state.saved_version,
+      modified: modified,
       provenance: state.provenance,
       authors: state.authors,
       origins: Map.take(state.origins, Enum.map(state.authors, fn {_, _, id} -> id end))
@@ -2541,7 +2542,7 @@ defmodule Compos.Core.Buffer do
   defp metadata(state) do
     # the locals the checkpoint would hold, so the catalog and the file on
     # disk answer a dormant read alike
-    locals = serializable_locals(state.locals)
+    locals = checkpoint_locals(state.locals, state.version != state.saved_version)
 
     %{
       id: state.id,
@@ -2646,6 +2647,18 @@ defmodule Compos.Core.Buffer do
           )
     }
   end
+
+  # The auto-revert base is the text a buffer last agreed with its file on.
+  # A clean buffer agrees with its file by definition, and waking re-seeds
+  # the base from disk, so a checkpoint that carried it wrote the file into
+  # the checkpoint a second time: 21.4 MB across 294 checkpoints here, and
+  # 11.7 MB of that had drifted from the buffer's own text, so it described
+  # nothing. Only a buffer with unsaved work keeps it, because there it is
+  # the merge base and nothing on disk can rebuild it.
+  defp checkpoint_locals(locals, true), do: serializable_locals(locals)
+
+  defp checkpoint_locals(locals, false),
+    do: locals |> Map.drop(["auto-revert-base"]) |> serializable_locals()
 
   defp serializable_locals(locals) do
     skip =
