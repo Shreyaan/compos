@@ -26,6 +26,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(watch_primitives())
     |> Map.merge(telemetry_primitives())
     |> Map.merge(sysmon_primitives())
+    |> Map.merge(profiler_primitives())
     |> Map.merge(discovery_primitives())
     |> Map.merge(irc_primitives())
     |> Map.merge(google_primitives())
@@ -466,6 +467,12 @@ defmodule Compos.Core.SchemeAPI do
         "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone.",
       "vm-process-kill!" =>
         "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive.",
+      "profile-start!" =>
+        "(profile-start! [PREFIXES]) — arm the call_time tracer over every loaded module whose name starts with one of PREFIXES (default \"Elixir.Compos.\"), and take the before snapshot of the processes and the VM.",
+      "profile-stop" =>
+        "(profile-stop) — disarm and answer one profile as a plist: wall-us, at-ms, the hot functions, the busy processes, and the VM deltas; #f when nothing was armed.",
+      "profile-cancel!" =>
+        "(profile-cancel!) — disarm the tracer and forget the snapshot; #t when a profile was armed.",
       "embedding-search" =>
         "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE GEN CACHED-ONLY) — eligible cosine scores for QUERY against the vectors of catalog generation GEN. CACHED-ONLY answers #f rather than embedding a query over the network.",
       "embedding-warm!" =>
@@ -901,6 +908,22 @@ defmodule Compos.Core.SchemeAPI do
   defp sysmon_text({:sym, v}), do: v
   defp sysmon_text(false), do: ""
   defp sysmon_text(v), do: to_string(v)
+
+  defp profiler_primitives do
+    alias Compos.Core.Profiler
+
+    %{
+      "profile-start!" => fn
+        [] -> Profiler.start()
+        [prefixes] -> Profiler.start(profiler_prefixes(prefixes))
+      end,
+      "profile-stop" => fn [] -> Profiler.stop() end,
+      "profile-cancel!" => fn [] -> Profiler.cancel() end
+    }
+  end
+
+  defp profiler_prefixes(list) when is_list(list), do: Enum.map(list, &sysmon_text/1)
+  defp profiler_prefixes(v), do: [sysmon_text(v)]
 
   defp telemetry_events(limit) do
     limit = max(0, min(limit, 1_000))

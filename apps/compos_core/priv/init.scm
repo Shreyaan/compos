@@ -103,6 +103,7 @@
 (load-bundled-package "telemetry.scm")
 (load-bundled-package "chat-perf.scm")
 (load-bundled-package "perf.scm")
+(load-bundled-package "profile.scm")
 (load-bundled-package "test.scm")
 (load-bundled-package "title.scm")
 (load-bundled-package "training.scm")

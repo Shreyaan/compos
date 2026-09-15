@@ -3,24 +3,30 @@ defmodule Compos.Core.Profiler do
   One command, measured.
 
   `M-x profile` arms the editor. The next command runs with the BEAM's
-  `call_time` tracer set over every loaded `Compos.*` module, so the
-  profile says which function spent the time, how often it ran, which
-  processes did the work, and what the VM paid in reductions, garbage
-  and memory.
+  `call_count` counters set over every loaded `Compos.*` module, and with
+  a before-and-after reading of every process and of the VM. The profile
+  says what ran and how often, which processes did the work, and what the
+  command cost in reductions, garbage and memory.
 
   This module is mechanism. `priv/packages/profile.scm` owns the policy:
   when to arm, what the report says, and where it shows.
 
-  Tracing is not free. A traced command runs slower than the same command
-  untraced, so read the shares before the wall clock.
+  `call_count`, not `call_time`, and that is a decision. Call time needs
+  the `call` trace flag on every process, and with the interpreter's own
+  modules patterned in a running editor each `trace_info` read then
+  blocks for seconds: 50 reads did not return in 80 seconds. Call counts
+  need no trace flag at all. Setting the pattern over ~60 modules costs
+  about 34 ms, reading 3300 functions costs under a millisecond, and the
+  command in between runs at its own speed — so the wall clock in the
+  report is the real one.
+
+  The price of that choice: a call counter is VM-wide, not per process,
+  so anything else the editor did during the command is counted too. The
+  per-process reductions say who actually did the work.
 
   The before snapshot lives in one public ETS table that a small holder
   process owns, the way `SysMon` keeps its previous sample: a lane worker
-  that dies must not take the table with it. That holder is also the
-  tracer. The tracer is the one process a trace leaves out, and the
-  Scheme session is the process the profile is about, so the tracer has
-  to be somebody else. A `call_time` pattern sends no trace messages; the
-  holder drops anything that arrives anyway.
+  that dies must not take the table with it.
   """
 
   alias Compos.Core.SysMon
@@ -33,12 +39,12 @@ defmodule Compos.Core.Profiler do
   @prefixes ["Elixir.Compos."]
   @deny [__MODULE__]
 
-  # a profile names the functions that spent time; the long tail is noise
+  # a profile names the functions that ran; the long tail is noise
   @top_functions 300
   @top_processes 40
 
   @doc """
-  Arm the tracer and take the before snapshot.
+  Arm the counters and take the before snapshot.
 
   PREFIXES names the modules to cover by the start of their full atom
   name. Arming twice is safe: the first arming is dropped.
@@ -50,18 +56,16 @@ defmodule Compos.Core.Profiler do
   def start(prefixes) when is_list(prefixes) do
     cancel()
     mods = modules(prefixes)
-    tracer = tracer()
     put(:mods, mods)
+
+    # setting the pattern zeroes the counters, so the clock starts after
+    # the last one is set and the arming itself is not in the profile
+    Enum.each(mods, fn m -> :erlang.trace_pattern({m, :_, :_}, true, [:local, :call_count]) end)
+
     put(:procs, process_snapshot())
     put(:vm, vm_counters())
     put(:at_ms, System.os_time(:millisecond))
-
-    # setting the pattern zeroes the counters; nothing counts until the
-    # processes carry the call flag, so the flag goes on last
-    Enum.each(mods, fn m -> :erlang.trace_pattern({m, :_, :_}, true, [:local, :call_time]) end)
-
     put(:t0, System.monotonic_time(:microsecond))
-    :erlang.trace(:all, true, [:call, {:tracer, tracer}])
     :ok
   end
 
@@ -75,7 +79,6 @@ defmodule Compos.Core.Profiler do
   """
   def stop do
     t1 = System.monotonic_time(:microsecond)
-    :erlang.trace(:all, false, [:call])
     mods = get(:mods)
 
     if is_list(mods) do
@@ -83,10 +86,11 @@ defmodule Compos.Core.Profiler do
       before = get(:procs) || %{}
       vm0 = get(:vm) || vm_counters()
       at_ms = get(:at_ms) || System.os_time(:millisecond)
+      vm1 = vm_counters()
+      procs = process_rows(before)
 
       functions = Enum.flat_map(mods, &function_rows/1)
       untrace(mods)
-      procs = process_rows(before)
       clear()
 
       report(%{
@@ -96,7 +100,7 @@ defmodule Compos.Core.Profiler do
         functions: functions,
         processes: procs,
         vm0: vm0,
-        vm1: vm_counters()
+        vm1: vm1
       })
     else
       false
@@ -105,7 +109,6 @@ defmodule Compos.Core.Profiler do
 
   @doc "Disarm and forget the snapshot. True when a profile was armed."
   def cancel do
-    :erlang.trace(:all, false, [:call])
     mods = get(:mods)
     untrace(mods || [])
     clear()
@@ -115,14 +118,12 @@ defmodule Compos.Core.Profiler do
   # --- the report --------------------------------------------------------------
 
   defp report(r) do
-    traced_us = Enum.reduce(r.functions, 0, fn f, acc -> acc + f.us end)
     calls = Enum.reduce(r.functions, 0, fn f, acc -> acc + f.calls end)
-    hot = r.functions |> Enum.sort_by(fn f -> -f.us end) |> Enum.take(@top_functions)
+    hot = r.functions |> Enum.sort_by(fn f -> -f.calls end) |> Enum.take(@top_functions)
 
     SysMon.to_plist(%{
       wall_us: r.wall_us,
       at_ms: r.at_ms,
-      traced_us: traced_us,
       calls: calls,
       modules: r.modules,
       functions_seen: length(r.functions),
@@ -150,16 +151,19 @@ defmodule Compos.Core.Profiler do
   end
 
   defp untrace(mods) do
-    Enum.each(mods, fn m -> :erlang.trace_pattern({m, :_, :_}, false, [:local, :call_time]) end)
+    Enum.each(mods, fn m -> :erlang.trace_pattern({m, :_, :_}, false, [:local, :call_count]) end)
   end
 
   defp function_rows(m) do
     label = inspect(m)
 
     Enum.reduce(functions(m), [], fn {f, a}, acc ->
-      case call_time({m, f, a}) do
-        {0, _} -> acc
-        {count, us} -> [%{module: label, function: "#{f}/#{a}", calls: count, us: us} | acc]
+      case :erlang.trace_info({m, f, a}, :call_count) do
+        {:call_count, n} when is_integer(n) and n > 0 ->
+          [%{module: label, function: "#{f}/#{a}", calls: n} | acc]
+
+        _ ->
+          acc
       end
     end)
   end
@@ -168,19 +172,6 @@ defmodule Compos.Core.Profiler do
     m.module_info(:functions)
   rescue
     _ -> []
-  end
-
-  # call_time counts per traced process: one function, one row per process
-  defp call_time(mfa) do
-    case :erlang.trace_info(mfa, :call_time) do
-      {:call_time, rows} when is_list(rows) ->
-        Enum.reduce(rows, {0, 0}, fn {_pid, count, s, us}, {c, t} ->
-          {c + count, t + s * 1_000_000 + us}
-        end)
-
-      _ ->
-        {0, 0}
-    end
   end
 
   # --- the processes -----------------------------------------------------------
@@ -288,15 +279,6 @@ defmodule Compos.Core.Profiler do
     end
   end
 
-  defp tracer do
-    table()
-
-    case Process.whereis(@holder) do
-      pid when is_pid(pid) -> pid
-      _ -> self()
-    end
-  end
-
   defp start_holder do
     parent = self()
 
@@ -319,8 +301,7 @@ defmodule Compos.Core.Profiler do
     end
   end
 
-  # the table dies with the holder; the holder only sleeps, and drops the
-  # trace messages a future flag might send it
+  # the table dies with the holder; the holder only sleeps
   defp hold do
     receive do
       :stop -> :ok
