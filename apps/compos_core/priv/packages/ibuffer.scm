@@ -36,6 +36,10 @@
 
 (defgroup 'buffers "Buffer lists and buffer management.")
 
+(defcustom 'ibuffer-filter-delay-ms 300
+  "Idle milliseconds before ibuffer and chat-list filtering. Transcript search waits another 100 ms."
+  'group 'buffers 'type 'number)
+
 (defcustom 'ibuffer-compact-cols 100
   "Below this width, ibuffer drops the group column."
   'group 'buffers 'type 'number)
@@ -84,7 +88,10 @@
           (filter (lambda (v) (not (equal? (car v) buf))) *ibuffer-views*))))
 
 (define (ibuffer-view? b)
-  (and (string? b) (assoc b *ibuffer-views*) #t))
+  (and (string? b)
+       (or (assoc b *ibuffer-views*)
+           (member (buffer-local b 'mode-name) '("ibuffer-mode" "chat-list-mode")))
+       #t))
 
 (define (ibuffer-view-default buf key)
   (let ((v (assoc buf *ibuffer-views*)))
@@ -456,14 +463,34 @@
 (define (ibuffer-folded? key &optional buf)
   (if (member key (ibuffer-collapsed buf)) #t #f))
 
+(define (ibuffer-fold-source rows key folded?)
+  (cond ((null? rows) '())
+        ((and (ibuffer-heading? (car rows))
+              (equal? (ibuffer-heading-key (car rows)) key))
+         (let* ((head (car rows))
+                (updated (append (take-n head 2)
+                                 (list (if folded? "folded" "separator"))
+                                 (cdr (cdr (cdr head)))))
+                (tail (let skip ((rest (cdr rows)))
+                        (if (or (null? rest) (ibuffer-heading? (car rest))) rest
+                            (skip (cdr rest))))))
+           (append (list updated)
+                   (if folded? '() (ibuffer-heading-members head)) tail)))
+        (else (cons (car rows) (ibuffer-fold-source (cdr rows) key folded?)))))
+
 (define (ibuffer-toggle-fold! key &optional buf)
   (let* ((buf (or buf (ibuffer-view)))
-         (now (ibuffer-collapsed buf)))
+         (now (ibuffer-collapsed buf))
+         (folded? (not (member key now))))
     (buffer-set-local! buf 'ibuffer-collapsed
-      (if (member key now)
-          (filter (lambda (k) (not (equal? k key))) now)
-          (cons key now)))
-    (ibuffer-refresh! buf)))
+      (if folded? (cons key now)
+          (filter (lambda (k) (not (equal? k key))) now)))
+    ;; The source already holds ordered members and heading statistics.
+    ;; Folding changes only their visibility; do not refetch or sort them.
+    (buffer-set-local! buf 'list-source-entries
+      (ibuffer-fold-source (list-source-entries buf) key folded?))
+    (list-filter-forget! buf)
+    (list-render! buf 'view)))
 
 ;;; --- sorting ------------------------------------------------------------------
 
@@ -512,9 +539,10 @@
 ;; and the highlight steps over it. A view says which it is when it
 ;; opens; nothing said means a picker.
 (define (ibuffer-separator? buf row)
-  (and (not (buffer-local buf 'ibuffer-heading-rows))
-       (ibuffer-heading? row)
-       (equal? (nth 2 row) "separator")))
+  (and (ibuffer-heading? row)
+       (or (equal? (nth 2 row) "match")
+           (and (not (buffer-local buf 'ibuffer-heading-rows))
+                (equal? (nth 2 row) "separator")))))
 
 ;; a section: its heading, then its members in the view's order. AS-IS?
 ;; keeps the order the members came in: the saved chats come newest first
@@ -648,12 +676,13 @@
 ;; one through the 'section-note option.
 (define (ibuffer-heading-note buf row)
   (let ((own (list-opt buf 'section-note)))
+    (if (equal? (nth 2 row) "match") ""
     (if own
         (own buf (ibuffer-heading-members row))
         (let ((dirty (ibuffer-heading-modified row)))
           (if (> dirty 0)
               (string-append (number->string dirty) " modified")
-              "")))))
+              ""))))))
 
 ;; A bare digit after a name says nothing about what it counts. The
 ;; tally names the view's own noun -- "3 chats", "3 buffers" -- and the
@@ -663,7 +692,9 @@
     (string-append (ibuffer-noun buf (ibuffer-heading-count row))
                    (if (equal? note "") "" (string-append " · " note)))))
 
-(define (ibuffer-chevron row) (if (ibuffer-heading-folded? row) "▸" "▾"))
+(define (ibuffer-chevron row)
+  (cond ((equal? (nth 2 row) "match") "")
+        ((ibuffer-heading-folded? row) "▸") (else "▾")))
 
 ;;; --- columns and cells --------------------------------------------------------
 
@@ -871,7 +902,8 @@
           (else "group"))))
 
 (define (ibuffer-heading-name buf row)
-  (string-append (ibuffer-section-label row) "  " (ibuffer-section-kind buf row)))
+  (if (equal? (nth 2 row) "match") (ibuffer-section-label row)
+      (string-append (ibuffer-section-label row) "  " (ibuffer-section-kind buf row))))
 
 ;; The name cell holds the whole heading: what the section is on the
 ;; left, what it holds on the right, and the space between them is the
@@ -1113,6 +1145,31 @@
 (define (ibuffer-compact-footer buf) '())
 (define (ibuffer-wide-footer buf) '())
 
+;; Searchable marginalia is a snapshot of the list source. Query changes
+;; reuse it instead of asking every buffer process for the same fields.
+(define *ibuffer-search-cache* '())
+
+(define (ibuffer-search-forget! buf)
+  (set! *ibuffer-search-cache*
+    (remove (lambda (entry) (equal? (car entry) buf)) *ibuffer-search-cache*)))
+
+(define (ibuffer-search-row buf row)
+  (let* ((view (assoc buf *ibuffer-search-cache*))
+         (entries (if view (cadr view) '()))
+         (hit (assoc row entries)))
+    (if hit (cdr hit)
+        (let* ((mode (or (buffer-local row 'mode-name) ""))
+               (text (string-append row " " (ibuffer-row-title row) " " mode " "
+                                    (ibuffer-row-match row) " "
+                                    (or (buffer-path row) "") " "
+                                    (ibuffer-size-label row) " " (ibuffer-row-last row)))
+               (data (list mode text)))
+          (ibuffer-search-forget! buf)
+          (set! *ibuffer-search-cache*
+            (take-n (cons (list buf (take-n (cons (cons row data) entries) 2048))
+                          *ibuffer-search-cache*) 16))
+          data))))
+
 ;; what `/` reads: the name and what the row's kind adds — the mode and
 ;; the path of a buffer, the summary and the state of a chat
 (define (ibuffer-match? buf row input)
@@ -1120,9 +1177,15 @@
       (let loop ((ms (ibuffer-heading-members row)))
         (and (pair? ms)
              (or (ibuffer-match? buf (car ms) input) (loop (cdr ms)))))
-      (completion-match?
-        (string-append row " " (ibuffer-row-title row) " " (ibuffer-row-match row))
-        input 'substring)))
+      (let* ((data (ibuffer-search-row buf row))
+             (mode (car data))
+             (q (string-downcase (string-trim input))))
+        ;; A complete mode name denotes that mode, not a substring of a
+        ;; different one (chat-mode must not match whatsapp-chat-mode).
+        (if (and (string-suffix? "-mode" q) (not (string-index q " ")))
+            (equal? (string-downcase mode) q)
+            (completion-match?
+              (cadr data) input 'substring)))))
 
 ;; Put the highlight back on the section KEY names, so one key folds and
 ;; unfolds the same section. A folded heading is a row of its own and
@@ -1186,20 +1249,136 @@
 ;; refresh (the fetch and the draw), goto-first
 (define *ibuffer-open-timings* '())
 
+(effects! '(write))
+
+;; Reuse a buffer by group, never by the window displaying it.
+(define (ibuffer-group-view! mode base)
+  (let* ((group (frame-group))
+         (here (window-buffer (active-window)))
+         (fits? (lambda (b)
+                  (and (buffer-known? b)
+                       (equal? (buffer-local b 'mode-name) mode)
+                       (equal? (buffer-group b) group))))
+         (existing (filter fits? (buffer-list-mru))))
+    (cond ((fits? here) here)
+          ((pair? existing) (car existing))
+          (else
+            (let loop ((n 1))
+              (let ((name (if (= n 1) base
+                              (string-append base "<" (number->string n) ">"))))
+                (if (buffer-known? name) (loop (+ n 1))
+                    (begin
+                      (buffer-create name)
+                      (buffer-move-to-group! name group)
+                      (ibuffer-view! name)
+                      name))))))))
+
+;; Preview copies have their own point, scroll state, and popup class.
+(define (listing-preview-text target)
+  (or (and (buffer-exists? target) (buffer-text target))
+      (let ((path (buffer-path target)) (log (buffer-local target 'chat-log-id)))
+        (cond ((and (string? log) (boundp 'chat-log-dir-for))
+               (let ((file (string-append (chat-log-dir-for target) "/" log ".chat")))
+                 (and (file-exists? file) (read-file file))))
+              ((and (string? path) (file-exists? path)) (read-file path))
+              (else #f)))
+      "No saved text is available for this buffer."))
+
+(define (listing-preview! owner target)
+  (when (and (or (equal? (window-buffer (active-window)) owner)
+                       (equal? *mb-list-buffer* owner))
+             (buffer-known? target) (not (equal? owner target)))
+    (let* ((copy (string-append " *listing-preview:" (selected-frame) "*"))
+           (replacing (and (popup-open?) (equal? (popup-buffer) copy)))
+           (dismissing *popup-dismissing*))
+      (buffer-create copy)
+      (with-buffer-display-update copy (lambda ()
+      (buffer-replace-range! copy 0 (string-byte-length (buffer-text copy))
+                             (listing-preview-text target))
+      (buffer-set-local! copy 'listing-preview-source target)
+      (buffer-set-local! copy 'listing-preview-owner owner)
+      (buffer-move-to-group! copy (buffer-group owner))
+      ;; Enable the source major mode on the isolated copy. List modes
+      ;; reuse the copied surface instead of fetching their sources again.
+      (buffer-set-locals! copy '(render-mode #f agent-blocks #f agent-saved-mark #f
+                                 agent-marker-bytes #f agent-verbosity #f))
+      (buffer-set-local! copy 'default-directory (buffer-local target 'default-directory))
+      (with-layout-suppressed
+        (lambda ()
+          (with-current-buffer copy
+            (lambda ()
+              (with-list-mode-skip-render
+                (lambda () (set-mode! (or (buffer-local target 'mode-name) "fundamental-mode"))))))))
+      ;; Mode projections can depend on state beyond the text (diff cards,
+      ;; semantic lists, HTML). Preserve the source's existing presentation.
+      (for-each
+        (lambda (entry)
+          (when (string-prefix? "render-" (symbol->string (car entry)))
+            (buffer-set-local! copy (car entry) (cadr entry))))
+        (buffer-locals target))
+      (when (and (boundp 'chat-preview-project!)
+                 (equal? (buffer-local target 'mode-name) "chat-mode"))
+        (chat-preview-project! copy target))
+      (buffer-set-read-only! copy #t)
+      (enable-minor-mode! copy "peek-mode")
+      (when replacing (set! *popup-dismissing* #t))
+      (with-layout-suppressed
+        (lambda ()
+          (with-display-preview
+            (lambda () (peek-show-in-popup! copy (active-window))))))
+      (set! *popup-dismissing* dismissing)
+      (set-frame-local! 'listing-preview-owner owner)
+      (set-frame-local! 'listing-preview-buffer copy)
+      copy)))))
+
+(define (listing-preview-dismiss! owner)
+  (when (equal? owner (frame-local 'listing-preview-owner))
+    (let ((copy (frame-local 'listing-preview-buffer)) (focus (active-window)))
+      (set-frame-local! 'listing-preview-owner #f)
+      (set-frame-local! 'listing-preview-buffer #f)
+      (when (and copy (popup-open?) (equal? (popup-buffer) copy))
+        (with-layout-suppressed (lambda () (popup-dismiss!))))
+      (when (window-exists? focus) (select-window! focus))
+      (when (and copy (buffer-known? copy)) (buffer-kill! copy)))))
+
+(define (listing-quit! buf)
+  (listing-preview-dismiss! buf)
+  (when (equal? (window-buffer (active-window)) buf)
+    ;; The listing remains available for reuse. Ordinary history owns return.
+    (with-layout-suppressed
+      (lambda () (window-unwind-or-close! (active-window))))))
+
+(define (listing-visit! view target)
+  (listing-quit! view)
+  (cond ((buffer-known? target)
+         (let ((group (buffer-group target)))
+           (when (and group (not (equal? group (frame-group)))) (switch-to-group! group)))
+         (switch-to-buffer-in-group! target))
+        ((and (string? target) (file-exists? target)) (visit-in-group target (frame-group)))))
+
+(public! 'ibuffer-group-view! "(ibuffer-group-view! MODE BASE) — reuse a listing buffer owned by this group, or create one")
+(public! 'listing-preview! "(listing-preview! OWNER TARGET) — preview TARGET in the popup without moving focus")
+(public! 'listing-preview-dismiss! "(listing-preview-dismiss! OWNER) — dismiss only OWNER's current popup preview")
+(public! 'listing-visit! "(listing-visit! VIEW TARGET) — leave VIEW and visit TARGET in its owning group")
+(public! 'listing-quit! "(listing-quit! BUFFER) — return through the invoking window's history and retain the listing")
+
 ;; open (or re-open) a view on SCOPE: *ibuffer* in ibuffer-mode unless a
 ;; view and its mode are named
 (define (ibuffer-open! scope &optional view mode)
   (let* ((from (active-window))
-         (buf (or view *ibuffer-buffer*))
+         (buf (or view (ibuffer-group-view! (or mode "ibuffer-mode") *ibuffer-buffer*)))
          (t0 (monotonic-ms))
          (_a (buffer-create buf))
          (_b (buffer-set-local! buf 'ibuffer-scope scope))
          ;; Typed narrowing is temporary. Keep any mode-specific filters.
          (_c (list-clear-query! buf))
          (t1 (monotonic-ms))
-         (_d (display-buffer buf))
-         (_e (let ((w (window-showing-other buf from)))
-               (if w (select-window! w) (switch-to-buffer! buf))))
+         (_d (if (buffer-local buf 'window-shape)
+                 (begin
+                   (display-buffer buf)
+                   (let ((w (window-showing-other buf from)))
+                     (if w (select-window! w) (switch-to-buffer-here! buf))))
+                 (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))))
          (t2 (monotonic-ms))
          ;; the mode goes on the VIEW, whatever buffer is current: a prompt
          ;; can be current here, and a floated switch leaves the work buffer
@@ -1213,20 +1392,21 @@
          (t3 (monotonic-ms))
          ;; a management table's headings are rows; a picker's are not
          (_i (buffer-set-local! buf 'ibuffer-heading-rows
-                                (equal? buf *ibuffer-buffer*)))
+                                (equal? (or mode "ibuffer-mode") "ibuffer-mode")))
          (_g (ibuffer-refresh! buf))
          (t4 (monotonic-ms))
          (_h (ibuffer-goto-first-row! buf))
          (t5 (monotonic-ms)))
     (set! *ibuffer-open-timings*
       (list 'setup (- t1 t0) 'display (- t2 t1) 'set-mode (- t3 t2)
-            'refresh (- t4 t3) 'goto-first (- t5 t4)))))
+            'refresh (- t4 t3) 'goto-first (- t5 t4)))
+    buf))
 
 (define (ibuffer-open-timings) *ibuffer-open-timings*)
 
 (define (ibuffer-open-buffers! buffers)
   (ibuffer-open! (dedupe-names (filter buffer-known? buffers)))
-  (list-preview! *ibuffer-buffer*))
+  (list-preview! (ibuffer-view)))
 
 ;;; --- the minibuffer form ------------------------------------------------------
 ;;; C-x b and C-x c draw the same table in the minibuffer's form: the
@@ -1313,6 +1493,7 @@
       (window-preview-buffer! orig w))))
 
 (define (ibuffer-prompt-close! view &optional keep)
+  (listing-preview-dismiss! view)
   (ibuffer-prompt-restore-home! view keep)
   ;; a dock is a pane of the frame: deleting it gives its rows back to
   ;; the windows it took them from, and the tree is as it was
@@ -1331,11 +1512,32 @@
 ;; CLOSE! puts the table away, and PICK says when
 (define (ibuffer-prompt-line! view label pick)
   (let* ((t0 (monotonic-ms))
+         (input (list-query view))
+         (generation 0)
+         (key (string-append "ibuffer-filter:" (selected-frame)))
+         (apply-query (lambda ()
+                        (with-buffer-display-update view
+                          (lambda ()
+                            (unless (equal? input (list-query view))
+                              (list-set-query! view input)
+                              (list-goto-first-entry view)
+                              (ibuffer-preview! view))))))
+         (flush (lambda ()
+                  (set! generation (+ generation 1))
+                  (debounce-cancel! key)
+                  (apply-query)))
          (narrow (lambda (q)
-                   (list-set-query! view q)
-                   (list-goto-first-entry view)
-                   (ibuffer-preview! view)))
+                   (set! input q)
+                   (set! generation (+ generation 1))
+                   (let ((ticket generation))
+                     (debounce! key ibuffer-filter-delay-ms
+                       (lambda (ignored)
+                         (when (and (= ticket generation) (equal? (mb-list-target) view))
+                           (apply-query))) #f))))
          (done (lambda ()
+                 (set! generation (+ generation 1))
+                 (debounce-cancel! key)
+                 (set! *mb-list-flush* #f)
                  (set! *mb-list-buffer* #f)
                  (set! *mb-list-prompt* #f))))
     (set! *mb-list-buffer* view)
@@ -1344,8 +1546,9 @@
       (list (list 'change narrow)
             (list 'confirm
                   (lambda (q)
+                    (set! input q)
+                    (flush)
                     (done)
-                    (unless (equal? q (list-query view)) (narrow q))
                     (let ((row (list-current view)))
                       (cond ((ibuffer-heading? row)
                              (ibuffer-toggle-fold! (ibuffer-heading-key row) view))
@@ -1359,6 +1562,7 @@
                     (ibuffer-prompt-close! view)))
             (list 'legend *ibuffer-prompt-legend*)
             (list 'style "filter")))
+    (set! *mb-list-flush* flush)
     (set! *ibuffer-prompt-line-ms* (- (monotonic-ms) t0))))
 
 (define (ibuffer-prompt-line-ms) *ibuffer-prompt-line-ms*)
@@ -1431,12 +1635,15 @@
 ;; RET in the window form and RET in the minibuffer form are one act
 ;; (ibuffer-pick!). Only the presentation differs.
 (define-command "ibuffer-visit"
-  "Visit the selected row in the other window; on a folded heading, open the section"
+  "Enter the selected buffer's group and show it; on a heading, open the section"
   (lambda ()
-    (let ((b (ibuffer-current)))
+    (let ((b (ibuffer-current)) (view (ibuffer-view)))
       (if (ibuffer-heading? b)
           (ibuffer-toggle-fold! (ibuffer-heading-key b))
-          (ibuffer-pick! b (lambda () (run-command "quit-window")) 'other)))))
+          (listing-visit! view b)))))
+
+(define-command "ibuffer-quit" "Dismiss the preview and reveal the previous buffer here"
+  (lambda () (listing-quit! (ibuffer-view))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer table"
   (lambda () (ibuffer-refresh!)))
@@ -1472,30 +1679,32 @@
       (ibuffer-set-grouping! next)
       (message (string-append "grouped by " (symbol->string next))))))
 
-;; the row under the highlight shows in the other window, and leaves no
-;; trace. Both forms preview, and each puts the window back its own way.
-;; The minibuffer form draws its table in the popup, so it previews into
-;; the window the popup covers: dismissing the popup restores the work
-;; windows. The window form is an ordinary buffer in an ordinary window,
-;; so it peeks: the peek takes another window, takes no focus, and q
-;; gives the window back.
+;; Both listing forms preview an isolated text copy in the popup.
+(define *ibuffer-preview-generation* 0)
+(define *ibuffer-preview-requests* '())
+
 (define (ibuffer-preview! &optional buf b)
   (let* ((buf (or buf (ibuffer-view)))
          (b (or b (ibuffer-current buf)))
-         ;; the window RET will hand the pick to: the one that invoked
-         ;; the prompt. A look belongs where the pick will land, so the
-         ;; preview goes there and nowhere else
-         (home (buffer-local buf 'ibuffer-prompt-home-window)))
-    (when (and (string? b) (buffer-known? b) (not (equal? b buf)))
-      (cond
-        ((and home (window-exists? home)
-              (not (equal? (window-buffer home) buf)))
-         (unless (equal? (window-buffer home) b)
-           (window-preview-buffer! b home)))
-        ;; the window form: preview only from the table's own window,
-        ;; so a move in a table nobody looks at moves no other window
-        ((equal? (window-buffer (active-window)) buf)
-         (peek! b (lambda () b)))))))
+         (frame (selected-frame))
+         (key (string-append "ibuffer-preview:" frame))
+         (q (list-query buf)))
+    (set! *ibuffer-preview-generation* (+ 1 *ibuffer-preview-generation*))
+    (let ((ticket *ibuffer-preview-generation*))
+      (set! *ibuffer-preview-requests*
+        (cons (list frame ticket)
+              (remove (lambda (r) (equal? (car r) frame)) *ibuffer-preview-requests*)))
+      (debounce! key 150
+        (lambda (ignored)
+          (let ((pending (assoc frame *ibuffer-preview-requests*))
+                (mb (minibuffer-state)))
+            (when (and pending (= ticket (cadr pending))
+                       (buffer-known? buf) (string? b) (buffer-known? b)
+                       (not (equal? b buf)) (equal? b (ibuffer-current buf))
+                       (equal? q (list-query buf))
+                       (or (not mb) (and (equal? (mb-list-target) buf)
+                                         (equal? (plist-get mb 'input) q))))
+              (listing-preview! buf b)))) #f))))
 
 (define-command "ibuffer-next" "Move down and preview the selected buffer"
   (lambda () (list-move! 1)))
@@ -1745,7 +1954,24 @@
                  (ibuffer-set-grouping! next buf)
                  (message (string-append "grouped by " (symbol->string next)))))
     'overlays (lambda (buf b off) (ibuffer-row-overlays buf b off))
+    'incremental-query?
+      (lambda (old new)
+        (or (equal? old new)
+            (not (string-suffix? "-mode" (string-downcase (string-trim old))))))
+    'source-refreshed ibuffer-search-forget!
+    'filter-delay-ms ibuffer-filter-delay-ms
+    'filtered-heading
+      (lambda (buf head members)
+        (let* ((filters (list-filters buf))
+               (ctx (list-row-ctx buf))
+               (visible (or members
+                            (filter (lambda (b) (list-entry-kept? buf b filters ctx))
+                                    (ibuffer-heading-members head)))))
+          (if (equal? visible (ibuffer-heading-members head)) head
+              (ibuffer-heading (ibuffer-heading-label head) (ibuffer-heading-key head)
+                               (nth 2 head) visible (ibuffer-heading-face head)))))
     'local-filter #t
+    'incremental-filter #t
     'stamp (lambda (buf) (length (buffer-list-mru)))
     'layouts
       (list
@@ -1785,7 +2011,7 @@
             ("," "ibuffer-toggle-sorting-mode")
             (";" "ibuffer-toggle-grouping")
             ("G" "group-add") ("g" "ibuffer-refresh")
-            ("q" "quit-window"))
+            ("q" "ibuffer-quit"))
     ;; line movement steps over the headings and previews the row
     'remap '(("next-line" "list-next") ("previous-line" "list-prev"))))
 

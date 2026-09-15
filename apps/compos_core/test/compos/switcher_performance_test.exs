@@ -9,6 +9,17 @@ defmodule Compos.SwitcherPerformanceTest do
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
+  defp eventually(fun, attempts \\ 100)
+  defp eventually(fun, 0), do: assert(fun.())
+  defp eventually(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
+    end
+  end
+
   setup do
     Editor.minibuffer_close()
     Editor.delete_other_windows()
@@ -52,7 +63,7 @@ defmodule Compos.SwitcherPerformanceTest do
     assert eval!(~S{(map car (chat-list-search-hits "uniquequartz"))}) =~ "*zz-perf-chat*"
   end
 
-  test "C-x c filtering draws once per key and reuses the widened source" do
+  test "C-x c filtering coalesces a burst and reuses the widened source" do
     Compos.Core.create_buffer("*zz-perf-chat*", text: "zzperformance")
     Buffer.set_local("*zz-perf-chat*", "mode-name", "chat-mode")
     press(["C-x", "c"])
@@ -70,12 +81,13 @@ defmodule Compos.SwitcherPerformanceTest do
         (lambda (buf) (set! *zz-perf-fetches* (+ *zz-perf-fetches* 1)))))
     """)
 
-    press("z")
+    press(["z", "z"])
+    assert eval!(~S{(plist-get (minibuffer-state) 'input)}) == ~s("zz")
+    eventually(fn -> eval!("*zz-perf-draws*") == "1" end)
     assert eval!("*zz-perf-fetches*") == "1"
-    assert eval!("*zz-perf-draws*") == "1"
-    press("z")
+    press("DEL")
+    eventually(fn -> eval!("*zz-perf-draws*") == "2" end)
     assert eval!("*zz-perf-fetches*") == "1"
-    assert eval!("*zz-perf-draws*") == "2"
     assert Buffer.text("*chat-list*") =~ "zz-perf-chat"
   end
 

@@ -1,44 +1,21 @@
 # Chat list
 
-The chat list is an application, not a prompt and not a management table.
+## Listing buffers and transient previews
 
-## The use case
+`M-x ichat` (also `M-x chat-list`) and `M-x ibuffer` open an ordinary
+listing buffer in the window that invoked them. They reuse a matching listing
+buffer in the current group, without selecting another window that shows it.
+Different groups get separate listing buffers. The rows identify buffers.
 
-You want to switch to a chat. You half remember its name. It is one of
-the chats you used recently.
+A preview is a read-only text copy in a popup. It has its own position and popup
+class; the original keeps its group, text, position, and display state. Sleeping
+buffers are read from saved text without starting their runtime. This is a text
+snapshot, not a second running chat. Moving to another row replaces the snapshot.
 
-## One application, one state
-
-There is one chat list. It has one state and one buffer, `*chat-list*`.
-It is always in its own group. It never joins the group you came from,
-and no other group adopts it.
-
-`M-x chat-list` always arrives at that group and that layout. There are
-no exceptions and no second copy.
-
-## The layout
-
-Two panes:
-
-- the list, 2/3
-- the preview, 1/3
-
-## Behaviour
-
-- The application takes the focus when you invoke it.
-- The rows are the recent chats, most recently used first.
-- You type to filter. The filter reads the title first and the state
-  second.
-- The filter searches every chat, not only the recent ones. The recent
-  limit bounds the resting list, not the search.
-- The row under the cursor shows its chat in the preview pane.
-- Looking costs nothing. The preview shows the text of a sleeping chat
-  and never starts its runtime. Only the chat that you pick wakes.
-- RET switches to the chat. The application gives the focus back and
-  leaves.
-- C-g leaves and changes nothing.
-- Leaving hands the whole frame back: the panes the application made go,
-  and the window it stood in shows what it showed before.
+`RET` visits the original buffer in its owning group using normal placement rules.
+`q` removes the preview copy and reveals the invoking window's predecessor.
+The listing survives for reuse. No application-wide layout snapshot is restored.
+Closing the filter with `C-g` leaves its narrowing and the listing in place.
 
 ## Keyword search
 

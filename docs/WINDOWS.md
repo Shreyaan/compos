@@ -448,15 +448,30 @@ layout, hidden record, or quit route reintroduces chats into another window.
 6. Open chat-list in two frames, then quit each independently.
 
 **Expected:** each frame restores its own invoking arrangement, selection, histories,
-points, quit records, and cycle-mode settings. Re-entry preserves the original snapshot.
+points, quit records, and cycle-mode settings. Re-entry preserves the invoking window's predecessor.
 A second quit does nothing. Exit never reconstructs the layout from one remembered buffer.
 
-The implementation captures a frame-local return snapshot before app entry and consumes
-it on exit. Sessions opened before this fix may lack that snapshot.
-[The keyboard regression tests](../apps/compos_core/test/compos/chat_list_return_test.exs)
-cover these return paths. The existing chat-list Scheme suite also passes.
+Chat-list now covers only the invoking window and previews a transient copy in a popup. Ordinary window history owns return; there is no frame-wide snapshot to replay. The return tests exercise grouped and ungrouped windows, duplicate displays, re-entry, and two frames.
+
+### R07 — Buffer listings and isolated previews
+
+| Case | Commands | Action and expected result |
+|---|---|---|
+| R07a — Open here | `M-x ibuffer`; repeat with `M-x ichat` | Invoke in the right window of a group. The listing covers that window; other work windows retain their IDs, buffers, and histories. |
+| R07b — Reuse locally | `q`, `other-window`, then `M-x ibuffer` or `M-x ichat` | Reuse the group's listing buffer in the newly invoking window. Do not jump to the old window. |
+| R07c — Separate groups | `group-switch`, then `M-x ibuffer` or `M-x ichat` | Another group gets its own listing buffer. Each listing has one owner. |
+| R07d — Preview copy | `n` / `p` in either listing | Show a read-only text copy in the popup without taking focus. The original buffer remains in its group and retains its popup class and position. |
+| R07e — Repeated preview | `n`, `n`, `p`, then `q` | Replace one transient copy; remove it on quit. Do not accumulate preview buffers or permanent history entries. |
+| R07f — Foreign row | `RET` (`ibuffer-visit` / `chat-list-visit`) | Dismiss the preview, enter the original buffer's group, and make that original visible through group placement rules. Never import the foreign window into the listing's group. |
+| R07g — Quit locally | `q` (`ibuffer-quit` / `chat-list-quit`) | Reveal the predecessor here and keep the listing reusable. Changes made to other work windows while listing remain intact. |
+| R07h — Delayed preview | `n`, then `q` before the delay expires | A queued callback cannot reopen the popup after leaving the list. |
+| R07i — Sleeping source | `n` / `p` onto a sleeping chat | Read saved transcript text into the copy without starting the original runtime. |
+| R07j — Re-entry | Invoke `M-x ichat` twice, then `q` | Reuse the same listing and return once to the original predecessor. |
 
 ## 14. Applications inside a group — proposed contract
+
+**Superseded for chat-list:** ichat/chat-list is now an ordinary group-owned listing, as specified in R07. The home-workspace proposal below remains a design option for other applications, such as notmuch.
+
 
 An application provides tools and an optional workspace layout. An application
 instance belongs to one group. Its buffers inherit that instance's group.

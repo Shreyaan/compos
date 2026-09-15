@@ -3164,9 +3164,11 @@ defmodule Compos.Core.Editor do
     # the client's measured row count for this window wins over split math:
     # line height varies per buffer, so only the client knows what fits
     rows = Map.get(win_rows, id, rows)
+    previous_leaf = leaf
 
     # one round trip per leaf — this runs on every render of every window;
     # point/mark/cursor geometry are the WINDOW's (per-window points)
+    display_updating = Events.display_updating?(buffer)
     snap = safe_snapshot(buffer, id)
     %{text: text, point: point, locals: locals} = snap
 
@@ -3277,6 +3279,7 @@ defmodule Compos.Core.Editor do
       # The frame group remains separate context for the bottom bar.
       group_color: Map.get(locals, "modeline-group-color"),
       ts_lang: Map.get(locals, "ts-lang"),
+      display_updating: display_updating or Events.display_updating?(buffer),
       overlays: snap.overlays,
       overlay_gen: snap.overlay_gen,
       hidden_lines: hidden_lines,
@@ -3328,7 +3331,9 @@ defmodule Compos.Core.Editor do
       window_style: Map.get(locals, "window-style") || nil
     }
 
-    {%{leaf | top: top}, rendered}
+    # Measuring incomplete text must not recenter the saved window either.
+    # The completed presentation will compute geometry once from final point.
+    {if(rendered.display_updating, do: previous_leaf, else: %{leaf | top: top}), rendered}
   end
 
   # {visible line count, cursor's visible-line index, MapSet of hidden

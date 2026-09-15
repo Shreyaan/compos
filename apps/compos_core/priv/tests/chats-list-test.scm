@@ -61,6 +61,7 @@
     (chats-test-chat! "*zz-chats-b*" one)
     (chats-test-chat! "*zz-chats-c*" two)
     (run-command "chat-list")
+    (set! *chat-list* (chat-list-buffer))
     (buffer-set-locals! *chat-list*
       (list 'ibuffer-grouping grouping 'ibuffer-sort sort 'ibuffer-collapsed '()))
     (list-set-filters! *chat-list* (list (list "match" "zz-chats-")))
@@ -107,19 +108,14 @@
     (check-equal! (list-key-lines *chat-list*) '() "no key bar stands over the rows")
     (chats-test-reset!)))
 
-(deftest 'the-application-arrives-in-its-own-group
-  "one arrival: the chat list's own group, two panes, and the focus on the list"
+(deftest 'the-list-arrives-in-the-invoking-group
+  "one arrival: the current window and group, with preview supplied separately"
   (lambda ()
     (chats-test-open! 'group 'name)
-    (check-equal! (frame-group) (chat-list-group) "the frame stands in the chat list's group")
-    (check-true! (and (member (chat-list-group) (buffer-groups *chat-list*)) #t)
-                 "and the buffer belongs to it")
-    (check-equal! (group-pinned) (chat-list-group)
-                  "the group is pinned, so previewing a chat does not move the frame")
-    (check-equal! (length (window-list)) 2 "two panes: the list and the preview")
-    (check-equal! (window-buffer (active-window)) *chat-list*
-                  "the application holds the focus")
-    (check-true! (and (chat-list-preview-window) #t) "the preview pane is the other one")
+    (check-equal! (buffer-group *chat-list*) (frame-group) "the listing belongs here")
+    (check-equal! (length (window-list)) 1 "opening creates no companion window")
+    (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
+    (check-equal! (chat-list-preview-window) #f "preview is created only when shown")
     (chats-test-reset!)))
 
 (deftest 'the-row-at-point-previews-its-chat
@@ -139,6 +135,7 @@
     (chats-test-chat! "*zz-chats-b*" #f)
     (chats-test-chat! "*zz-chats-c*" #f)
     (run-command "chat-list")
+    (set! *chat-list* (chat-list-buffer))
     (check-equal! (ibuffer-grouping *chat-list*) 'group "a chat belongs to the work it was opened for")
     (check-equal! (ibuffer-sort *chat-list*) 'recent "most recently used first")
     (list-set-filters! *chat-list* (list (list "match" "zz-chats-")))
@@ -233,6 +230,7 @@
   "the grouping cycles none, group, state, model; a chat with no runtime sits under idle"
   (lambda ()
     (chats-test-open! 'none 'name)
+    (define *chats-other-grouping* (ibuffer-grouping "*ibuffer*"))
     (run-command "chat-list-regroup")
     (check-equal! (ibuffer-grouping *chat-list*) 'group "none then group")
     (run-command "chat-list-regroup")
@@ -244,23 +242,21 @@
     (check-equal! (chats-test-heading-labels) '("no model") "a chat with no model says so")
     (run-command "chat-list-regroup")
     (check-equal! (ibuffer-grouping *chat-list*) 'none "model then none, and round again")
-    (check-equal! (ibuffer-grouping "*ibuffer*") 'group "the *ibuffer* view keeps its own")
+    (check-equal! (ibuffer-grouping "*ibuffer*") *chats-other-grouping* "the *ibuffer* view keeps its own")
     (chats-test-reset!)))
 
-(deftest 'a-word-nobody-titled-finds-its-chat
-  "the filter line reads the text of every alive chat, and the row shows the words it found"
+(deftest 'a-word-nobody-titled-schedules-a-search
+  "the filter schedules transcript work instead of scanning on the key lane"
   (lambda ()
     (chats-test-open! 'none 'name)
     (buffer-append! "*zz-chats-c*" "we settled on the zzhaystack budget in the end")
     (run-command "chat-list-filter")
     (minibuffer-change! "zzhaystack")
-    (check-equal! (filter (lambda (b) (string-prefix? "*zz-chats-" b)) (chats-test-names))
-                  '("*zz-chats-c*") "only the chat that says the word")
-    (check-contains! (chat-list-hit "*zz-chats-c*") "zzhaystack"
-                     "the row shows the words around the hit")
+    (check-equal! (plist-get (minibuffer-state) 'input) "zzhaystack" "input is immediate")
+    (check-false! (chat-list-hit "*zz-chats-c*") "no synchronous transcript scan")
     (minibuffer-cancel!)
-    (check-false! (chat-list-hit "*zz-chats-c*") "closing the filter forgets the search")
-    (check-equal! (list-query *chat-list*) "" "and the list stands unnarrowed")
+    (check-equal! (cadr *chat-list-search-request*) "zzhaystack" "closing keeps the search")
+    (check-equal! (list-query *chat-list*) "zzhaystack" "closing preserves narrowing")
     (chats-test-reset!)))
 
 (deftest 'chats-narrowing-reads-the-summary

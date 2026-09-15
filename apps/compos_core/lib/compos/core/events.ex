@@ -16,6 +16,22 @@ defmodule Compos.Core.Events do
 
   def registry, do: @registry
 
+  @doc "Keep a buffer's previous presentation visible while FUN updates its display."
+  def with_display_update(name, fun) do
+    token = make_ref()
+    {:ok, _} = Registry.register(@registry, {:display_update, name}, token)
+
+    try do
+      fun.()
+    after
+      Registry.unregister_match(@registry, {:display_update, name}, token)
+      broadcast_display(name)
+    end
+  end
+
+  @doc "Whether a live process is assembling this buffer's next presentation."
+  def display_updating?(name), do: Registry.lookup(@registry, {:display_update, name}) != []
+
   def subscribe(buffer_name) do
     {:ok, _} = Registry.register(@registry, {:buffer_change, buffer_name}, nil)
     :ok

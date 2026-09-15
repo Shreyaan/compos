@@ -50,4 +50,22 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 
 ## Chat previews
 
-C-x C-c and C-x c share the chat list. Filtering and row navigation update the selection immediately; the preview waits for 150 ms of idle time (`chat-list-preview-delay-ms`). Both paths use the same per-frame debounce. Leaving cancels the pending request, and callbacks recheck the selected row and preview window before loading it. Timer bookkeeping stays outside display state.
+C-x C-c and C-x c share the chat list. Row navigation updates selection immediately; the preview waits for 150 ms of idle time (`chat-list-preview-delay-ms`). Both paths use the same per-frame debounce. Leaving cancels the pending request, and callbacks recheck the selected row and preview window before loading it. Timer bookkeeping stays outside display state.
+
+### Chat filtering
+
+Typing updates the minibuffer without rebuilding the table on the key handler. Table updates coalesce over 60 ms; transcript search starts after 150 ms idle in a cancellable Scheme task. New input cancels the old task, and callbacks check the request generation and actual minibuffer input before publishing results. RET and row navigation apply pending table filtering before choosing a row. C-g closes the entry while retaining the typed query and results; `\` pops the filter. This is the shared list-filter contract, including ibuffer. Pending redraws cannot reset selection after navigation.
+
+While a chat search filter is active, results use Title matches, Metadata matches, and Transcript matches sections, in that order. Each chat appears only in its highest-priority matching section; empty sections are omitted. These count-bearing headings replace normal group separators during search and are skipped by row navigation. Closing the entry keeps the sections. Metadata matching includes title, summary, model, state and slug. Queries of at least three characters also search live chat text and dormant chat logs without waking chats. Transcript matching is a case-insensitive literal substring, with a snippet displayed on matching rows.
+
+Ibuffer and chat lists reuse the previous candidate set when a substring query grows, and reuse prepared cells across query changes. Backspace, replacement queries and refresh use the source snapshot again. Transcript completion invalidates candidate reuse so newly found rows can appear. These caches are bounded and kept outside display state.
+
+Group folding edits the cached section heading and toggles its already-sorted members. It does not fetch the source or recompute group statistics. The redraw reuses prepared cells for unchanged rows when the layout context still matches.
+
+Ibuffer also coalesces filter redraws over 60 ms while input updates immediately. A complete mode name such as `chat-mode` matches that exact major mode; ordinary text remains a substring search across name, title, mode and metadata. Filtered group counts and membership describe the matching subset, while the source retains all rows for widening and unfolding.
+
+Chat peek copies retain the rich renderer's block ranges and input boundary from live sources. Saved transcript files are projected into user/status/prose blocks without restoring chat identity or a runtime. Preview buffers enable the source major mode and remain read-only through peek-mode. Source render projections are preserved for rich modes; list modes skip refetching during preview setup. Switching modes clears the old chat rendering locals.
+
+Ibuffer's searchable marginalia includes the row title/name, mode, path, kind metadata, size and age. It excludes transcript hits from chat-list. Search data is cached per source snapshot (up to 16 views, 2048 rows each); changing the query reuses it and refreshing the source invalidates it. Chat-list adds transcript snippets through its own matcher.
+
+The minibuffer picker also defers its table draw by 60 ms and flushes before selection. Ibuffer previews wait 150 ms and validate the row and query again before loading a buffer, so typing and navigation do not synchronously initialize a preview on every key.

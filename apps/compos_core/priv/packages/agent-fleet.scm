@@ -10,6 +10,10 @@
 ;; one list over the chats: the application's buffer, which every fleet
 ;; action reads its targets from. docs/CHAT-LIST.md is the contract.
 (define *chat-list-buffer* "*chat-list*")
+(define (chat-list-buffer)
+  (let ((here (window-buffer (active-window))))
+    (if (equal? (buffer-local here 'mode-name) "chat-list-mode") here
+        (or (frame-local 'chat-list-view) *chat-list-buffer*))))
 
 
 (define (agent-threads)
@@ -219,16 +223,17 @@
       (string-append "! " (chats-title b))
       (chats-title b)))
 
-(define (chats-match-text b)
-  ;; the name filter reads the title first and the state second; a chat the
-  ;; keyword search found carries its snippet here as well, so one filter
-  ;; line keeps both the chats named like this and the chats that say it
+(define (chats-metadata-text b)
+  ;; Keep metadata separate from transcript snippets so search results can
+  ;; explain which source matched without scanning the text again.
   (string-append (chats-title b) " "
                  (or (chats-summary b) "") " "
                  (chats-model b) " "
                  (chats-state-label (chat-row-status b)) " "
-                 (or (buffer-local b 'agent-slug) "") " "
-                 (or (chat-list-hit b) "")))
+                 (or (buffer-local b 'agent-slug) "")))
+
+(define (chats-match-text b)
+  (string-append (chats-metadata-text b) " " (or (chat-list-hit b) "")))
 
 (ibuffer-kind! 'chat
   (list 'when? (lambda (b) (and (buffer-known? b) (chat-buffer? b)))
@@ -252,7 +257,7 @@
                   (if t (chats-age-label t) (ibuffer-last-label b))))
         ;; by name, not by value: a reload redefines chats-match-text after
         ;; this form runs, and a captured procedure would stay the old one
-        'match (lambda (b) (chats-match-text b))
+        'match (lambda (b) (chats-metadata-text b))
         'face (lambda (b)
                 (if (equal? (chat-row-status b) 'needs_attention) "alert" "accent"))
         'modified? (lambda (b) #f)))
@@ -277,14 +282,14 @@
 ;; reading. So no event ever draws it. The modeline carries the news
 ;; instead, and g draws the list again when the reader asks for it.
 (define (agents-refresh!)
-  (when (buffer-known? *chat-list-buffer*)
-    (list-refresh! *chat-list-buffer*)))
+  (when (buffer-known? (chat-list-buffer))
+    (list-refresh! (chat-list-buffer))))
 
 ;; a verb ran on the chat at point, so the row it acted on is stale and so
 ;; is the pane that previews it: the list draws again and looks again
 (define (agents-relist!)
-  (when (buffer-known? *chat-list-buffer*)
-    (list-refresh! *chat-list-buffer*)
+  (when (buffer-known? (chat-list-buffer))
+    (list-refresh! (chat-list-buffer))
     (chat-list-preview!)))
 
 ;; the fleet's surfaces after an event batch: the modeline answers, and
@@ -294,7 +299,7 @@
   (agents-modeline-refresh!))
 
 (define (agents-current-buf)
-  (let ((row (list-current *chat-list-buffer*)))
+  (let ((row (list-current (chat-list-buffer))))
     (and (string? row) row)))
 
 (define (agents-current-slug)
@@ -304,7 +309,7 @@
 ;; the chats a verb acts on: the row at point, or every chat under it
 ;; when that row is a group
 (define (agents-targets)
-  (filter (lambda (b) (buffer-exists? b)) (ibuffer-targets *chat-list-buffer*)))
+  (filter (lambda (b) (buffer-exists? b)) (ibuffer-targets (chat-list-buffer))))
 
 (define (agents-report verb bs)
   (message (if (= (length bs) 1)
@@ -313,7 +318,7 @@
 
 (define-command "chats-retitle" "Give the chat at point a title"
   (lambda ()
-    (let ((b (ibuffer-current *chat-list-buffer*)))
+    (let ((b (ibuffer-current (chat-list-buffer))))
       (if (not (and (string? b) (buffer-exists? b)))
           (message "no chat here")
           (minibuffer-read
@@ -639,7 +644,7 @@
 (category! 'chat)
 (effects! '(write display))
 
-(define *chat-list-buffer* "*chat-list*")
+;; chat-list-buffer resolves the invoking group's view (defined above).
 (define *chat-list-group-name* "chat-list")
 (define *chat-list-groupings* '(none group state model))
 
@@ -647,8 +652,8 @@
   "How many chats the chat list shows at rest. A search reads every chat.")
 
 (define (chat-list-query)
-  (if (buffer-known? *chat-list-buffer*)
-      (or (buffer-local *chat-list-buffer* 'chat-list-search) (list-query *chat-list-buffer*))
+  (if (buffer-known? (chat-list-buffer))
+      (list-query (chat-list-buffer))
       ""))
 
 ;; at rest the list is the recent chats; the moment you type, the scope is
@@ -667,17 +672,20 @@
 (define *chat-list-hits* '())        ; (QUERY (BUF SNIPPET) ...)
 (define *chat-list-text-cache* '())  ; (BUF TEXT), lowercase, one search burst
 
+(define (chat-list--read-text b)
+  (let* ((id (buffer-local b 'chat-log-id))
+         (raw (if (buffer-exists? b)
+                  (buffer-text b)
+                  (and (string? id)
+                       (let ((path (string-append (chat-log-dir-for b) "/" id ".chat")))
+                         (and (file-exists? path)
+                              (ignore-errors (lambda () (read-file path)))))))))
+    (string-downcase (if (string? raw) raw ""))))
+
 (define (chat-list-text b)
   (let ((memo (assoc b *chat-list-text-cache*)))
-    (if memo
-        (cadr memo)
-        (let* ((raw (if (buffer-exists? b)
-                        (buffer-text b)
-                        (let ((path (ignore-errors (lambda () (chat-log-path b)))))
-                          (and (string? path)
-                               (file-exists? path)
-                               (ignore-errors (lambda () (read-file path)))))))
-               (text (string-downcase (if (string? raw) raw ""))))
+    (if memo (cadr memo)
+        (let ((text (chat-list--read-text b)))
           (set! *chat-list-text-cache* (cons (list b text) *chat-list-text-cache*))
           text))))
 
@@ -716,8 +724,74 @@
     (and e (cadr e))))
 
 (define (chat-list-search-reset!)
+  (when (boundp 'chat-list--cancel-search!) (chat-list--cancel-search!))
   (set! *chat-list-hits* '())
   (set! *chat-list-text-cache* '()))
+
+;; Full transcripts never run on the key-dispatch lane. The worker reads
+;; immutable inputs and returns data; only the accepted callback publishes it.
+(define *chat-list-search-generation* 0)
+(define *chat-list-search-request* #f)
+(define *chat-list-search-task* #f)
+
+(define (chat-list--cancel-search!)
+  (set! *chat-list-search-request* #f)
+  (debounce-cancel! "chat-list-search")
+  (when *chat-list-search-task* (task-cancel! *chat-list-search-task*))
+  (set! *chat-list-search-task* #f))
+
+(define (chat-list--scan q cache)
+  (let loop ((rows (chat-list-bufs)) (texts cache) (hits '()))
+    (if (null? rows) (list (reverse hits) texts)
+        (let* ((b (car rows))
+               (memo (assoc b texts))
+               (text (if memo (cadr memo) (chat-list--read-text b)))
+               (at (string-index text q)))
+          (loop (cdr rows)
+                (if memo texts (cons (list b text) texts))
+                (if at (cons (list b (chat-list-snippet text at)) hits) hits))))))
+
+(define (chat-list--search-current? request)
+  (and (equal? request *chat-list-search-request*)
+       (let ((mb (minibuffer-state)))
+         (or (not mb)
+             (and (equal? *mb-list-buffer* (chat-list-buffer))
+                  (equal? (cadr request)
+                          (string-downcase (string-trim (plist-get mb 'input)))))))
+       (window-showing (chat-list-buffer))
+       (equal? (cadr request) (string-downcase (string-trim (list-query (chat-list-buffer)))))))
+
+(define (chat-list--search-start! request)
+  (when (chat-list--search-current? request)
+    (let ((q (cadr request)) (cache *chat-list-text-cache*))
+      (set! *chat-list-search-task*
+        (task-run!
+          (lambda () (chat-list--scan q cache))
+          (lambda (ok result)
+            (when (chat-list--search-current? request)
+              (set! *chat-list-search-task* #f)
+              (when ok
+                (set! *chat-list-text-cache* (cadr result))
+                (set! *chat-list-hits* (cons q (car result)))
+                ;; Transcript matches can add rows that the title filter
+                ;; rejected. Start from the source and keep the selected row.
+                (list-filter-forget! (chat-list-buffer))
+                (list-redraw! (chat-list-buffer))
+                (chat-list-preview!)))))))))
+
+(define (chat-list--search-later! q)
+  (chat-list--cancel-search!)
+  (let ((q (string-downcase (string-trim q))))
+    ;; Old snippets must not participate in this query's immediate matches
+    ;; or survive as cached display cells after their search was cleared.
+    (when (pair? *chat-list-hits*) (list-filter-row-forget! (chat-list-buffer)))
+    (set! *chat-list-hits* '())
+    (when (>= (string-length q) 3)
+      (set! *chat-list-search-generation* (+ 1 *chat-list-search-generation*))
+      (let ((request (list *chat-list-search-generation* q)))
+        (set! *chat-list-search-request* request)
+        (debounce! "chat-list-search" (+ ibuffer-filter-delay-ms 100)
+                   chat-list--search-start! request)))))
 
 ;; a section is a group, a state or a model, and none is the flat list in
 ;; most recently used order: the order you last used a chat is the one the
@@ -730,6 +804,38 @@
                                      (member (chat-row-status b) '(running starting))))
                               (filter string? members)))))
     (if (> live 0) (string-append (number->string live) " live") "")))
+
+;; Search headings only describe match provenance, not mutable groups.
+;; Avoid collecting per-buffer sizes/status just to label search results.
+(define (chat-list-match-section label key rows)
+  (if (null? rows) '()
+      (cons (list label "" "match" key (length rows) 0 0 "faint" rows) rows)))
+
+(define (chat-list-match? buf row input)
+  (if (ibuffer-heading? row)
+      (let loop ((members (ibuffer-heading-members row)))
+        (and (pair? members)
+             (or (chat-list-match? buf (car members) input) (loop (cdr members)))))
+      (or (ibuffer-match? buf row input)
+          (let ((hit (chat-list-hit row)))
+            (and hit (completion-match? hit input 'substring))))))
+
+(define (chat-list-rank buf rows)
+  (let ((q (list-query buf)))
+    (if (or (equal? q "") (not (buffer-local buf 'chat-list-search))) rows
+        (let split ((rest (filter string? rows)) (titles '()) (metadata '()) (transcripts '()))
+          (if (null? rest)
+              (append
+                (chat-list-match-section "Title matches" "match:title" (reverse titles))
+                (chat-list-match-section "Metadata matches" "match:metadata" (reverse metadata))
+                (chat-list-match-section "Transcript matches" "match:transcript" (reverse transcripts)))
+              (let ((b (car rest)))
+                (cond ((completion-match? (ibuffer-row-title b) q 'substring)
+                       (split (cdr rest) (cons b titles) metadata transcripts))
+                      ((completion-match?
+                         (string-append b " " (chats-metadata-text b)) q 'substring)
+                       (split (cdr rest) titles (cons b metadata) transcripts))
+                      (else (split (cdr rest) titles metadata (cons b transcripts))))))))))
 
 (define (chat-list-rows buf)
   (ibuffer-columns-clear!)
@@ -759,7 +865,7 @@
       'composml-root (lambda (buf) (list 'tag "chat-list"))
       'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
       'doc (string-append
-             "The chat list: one application, one state, one group. The rows "
+             "The chat list opens here and previews in a popup. The rows "
              "are the recent chats, most recently used first. The list has the "
              "focus, so n and p move and the row under the cursor shows its "
              "chat in the preview pane. / opens the filter line: the filter "
@@ -778,7 +884,7 @@
              "list again and + starts a new chat. The last section holds "
              "the newest saved conversations; RET on one reads its file "
              "back and revives the chat.")
-      'buffer *chat-list-buffer*
+      'buffer (chat-list-buffer)
       'category 'chat
       'title (lambda (buf) "Chats")
       'noun "chat"
@@ -786,6 +892,8 @@
       ;; many of them are running right now
       'section-note (lambda (buf members) (chats-live-note members))
       'rows (lambda (buf) (chat-list-rows buf))
+      'order-filtered chat-list-rank
+      'match chat-list-match?
       'preview (lambda (buf row) (chat-list-preview!))
       ;; The table stamps itself with the buffer count and redraws after
       ;; any command that moved it, so a buffer opened anywhere -- by a
@@ -810,69 +918,23 @@
 ;; The list rests in sections, one per group: a chat belongs to the work
 ;; it was opened for, and the group it sits in says which. ; cycles that
 ;; away for a flat table when you want one.
-(ibuffer-view! *chat-list-buffer* 'sort 'recent 'grouping 'group)
+(ibuffer-view! (chat-list-buffer) 'sort 'recent 'grouping 'group)
 
 ;; ---- the application
 
 (define (chat-list-group) (group-ensure-record! *chat-list-group-name*))
 
-;; one arrival: the list at two thirds, the preview at one third, the focus
-;; on the list. The application is always in its own group and never joins
-;; the group you came from.
-;; A return belongs to the invoking frame, not the shared list buffer.
-;; Save before the application changes any group, pin, or window.
 (define (chat-list-arrive!)
-  (if (and (frame-local 'chat-list-return) (window-showing *chat-list-buffer*))
-      (begin (chat-list-focus!) (chat-list-preview-window))
-      (begin
-        (set-frame-local! 'chat-list-return
-          (list (window-tree) (frame-group) (group-pinned) (layout-target)
-                (frame-local 'previous-group)
-                (map (lambda (row)
-                       (let ((w (car row)))
-                         (list (equal? w (active-window)) (window-point w)
-                               (window-quit-restore w) (window-cycle-mode w))))
-                     (window-list))))
-        (chat-list-arrive-raw!))))
-
-(define (chat-list-arrive-raw!)
-  (let ((from (frame-group))
-        ;; what the frame showed before the application took it: leaving
-        ;; puts this back, so the list is never left standing
-        (was (let ((b (window-buffer (active-window))))
-               (if (equal? b *chat-list-buffer*)
-                   (buffer-local *chat-list-buffer* 'chat-list-from-buffer)
-                   b)))
-        (held (or (group-pinned) 'none)))
-    (buffer-create *chat-list-buffer*)
-    (buffer-add-group! *chat-list-buffer* (chat-list-group))
-    (switch-to-group! (chat-list-group))
-    ;; the preview pane shows a chat this group does not hold, and the
-    ;; frame's group is derived from the buffers its windows show: without
-    ;; a pin, looking at a row would move the frame into that chat's group
-    (set-frame-local! 'pinned-group (chat-list-group))
-    (delete-other-windows!)
-    (switch-to-buffer! *chat-list-buffer*)
-    (split-window! 'h 0.67)
-    (let ((preview (other-work-window-id (active-window))))
-      (buffer-set-locals! *chat-list-buffer*
-        (list 'chat-list-from-group from
-              'chat-list-from-buffer was
-              'chat-list-from-pin held
-              'chat-list-preview-window preview
-              'line-numbers "off"))
-      preview)))
-
-;; the pin is the application's, so it goes back the way it was found
-(define (chat-list-unpin!)
-  (let ((held (buffer-local *chat-list-buffer* 'chat-list-from-pin)))
-    (when (equal? (group-pinned) (chat-list-group))
-      (set-frame-local! 'pinned-group (if (or (not held) (equal? held 'none)) #f held)))
-    (buffer-set-local! *chat-list-buffer* 'chat-list-from-pin #f)))
+  (let ((buf (ibuffer-group-view! "chat-list-mode" *chat-list-buffer*)))
+    (ibuffer-view! buf 'sort 'recent 'grouping 'group)
+    (set-frame-local! 'chat-list-view buf)
+    (buffer-set-local! buf 'window-preference-cover #t)
+    (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))
+    #f))
 
 (define (chat-list-preview-window)
-  (let ((w (buffer-local *chat-list-buffer* 'chat-list-preview-window)))
-    (and w (window-exists? w) w)))
+  (and (equal? (frame-local 'listing-preview-owner) (chat-list-buffer))
+       (popup-open?) (popup-window)))
 
 (defcustom 'chat-list-preview-delay-ms 150
   "Milliseconds of idle time before the chat list previews the selected row."
@@ -882,6 +944,43 @@
 ;; frame updates. Keep one pending request per frame on the Scheme lane.
 (define *chat-list-preview-requests* '())
 (define *chat-list-preview-generation* 0)
+
+;; A peek owns its display state, never a chat runtime or identity.
+(define (chat-preview-project! copy source)
+  (let ((mark (buffer-local source 'agent-saved-mark)))
+    (if (and (buffer-exists? source) (number? mark))
+        (buffer-set-locals! copy
+          (list 'render-mode "agent"
+                'agent-blocks (or (buffer-local source 'agent-blocks) '())
+                'agent-saved-mark mark
+                'agent-marker-bytes (or (buffer-local source 'agent-marker-bytes) 0)
+                'agent-verbosity (or (buffer-local source 'agent-verbosity) "info")))
+        ;; Saved chat files contain a header and an optional wire record.
+        ;; Reconstruct only the presentation, without reopening the chat.
+        (let* ((raw (buffer-text copy))
+               (nl (string-index raw "\n"))
+               (header (chat-parse-header (if nl (substring-bytes raw 0 nl) raw)))
+               (end (or (chat-file-record-at raw) (string-byte-length raw)))
+               (turns (if header (chat-parse-transcript (substring-bytes raw 0 end))
+                          (list (list "assistant" raw)))))
+          (let loop ((rest turns) (offset 0) (texts '()) (blocks '()))
+            (if (null? rest)
+                (begin
+                  (buffer-replace-range! copy 0 (buffer-size copy)
+                    (string-join (reverse texts) ""))
+                  (buffer-set-locals! copy
+                    (list 'render-mode "agent" 'agent-blocks blocks
+                          'agent-saved-mark offset 'agent-marker-bytes 0)))
+                (let* ((turn (car rest)) (role (car turn)) (body (cadr turn))
+                       (text (if (equal? role "user")
+                                 (string-append "\n>>> you: " body "\n\n")
+                                 (string-append body "\n")))
+                       (next (+ offset (string-byte-length text)))
+                       (kind (cond ((equal? role "user") "user")
+                                   ((equal? role "status") "status") (else "prose"))))
+                  (loop (cdr rest) next (cons text texts)
+                    (cons (append (list offset next kind)
+                                  (if (equal? role "user") (list body) '())) blocks)))))))))
 
 (define (chat-list--preview-request)
   (let ((entry (assoc (selected-frame) *chat-list-preview-requests*)))
@@ -902,26 +1001,23 @@
 (define (chat-list--preview-now! request)
   (when (equal? request (chat-list--preview-request))
     (chat-list--cancel-preview!)
-    (let ((b (cadr request)) (win (caddr request)))
-      (when (and (window-showing *chat-list-buffer*)
-                 (member win (map car (window-list)))
-                 (equal? win (chat-list-preview-window))
-                 (equal? b (list-current *chat-list-buffer*))
-                 (buffer-known? b)
-                 (not (equal? (window-buffer win) b)))
-        (window-preview-buffer! b win)))))
+    (let ((b (cadr request)) (owner (caddr request)))
+      (when (and (equal? (window-buffer (active-window)) owner)
+                 (equal? b (list-current owner)) (buffer-known? b))
+        (listing-preview! owner b)))))
 
 ;; Filtering and row motion stay immediate; only the last selection of a
 ;; burst loads a transcript. Each frame owns its timer and pending request.
 (define (chat-list-preview!)
   (chat-list--cancel-preview!)
-  (let ((b (list-current *chat-list-buffer*))
-        (win (chat-list-preview-window)))
-    (when (and win (string? b) (buffer-known? b)
-               (not (equal? b *chat-list-buffer*))
-               (not (equal? (window-buffer win) b)))
+  (let ((b (list-current (chat-list-buffer)))
+        (owner (chat-list-buffer)))
+    (when (and (equal? (window-buffer (active-window)) owner) (string? b) (buffer-known? b)
+               (not (equal? b (chat-list-buffer)))
+               (not (and (chat-list-preview-window)
+                         (equal? (buffer-local (popup-buffer) 'listing-preview-source) b))))
       (let* ((generation (+ 1 *chat-list-preview-generation*))
-             (request (list generation b win)))
+             (request (list generation b owner)))
         (set! *chat-list-preview-generation* generation)
         (set! *chat-list-preview-requests*
           (cons (list (selected-frame) request) *chat-list-preview-requests*))
@@ -934,90 +1030,24 @@
 (define (chat-list-clear-search!)
   (chat-list--cancel-preview!)
   (chat-list-search-reset!)
-  (when (buffer-known? *chat-list-buffer*)
-    (buffer-set-local! *chat-list-buffer* 'chat-list-search #f)
-    (list-clear-query! *chat-list-buffer*)))
+  (when (buffer-known? (chat-list-buffer))
+    (buffer-set-local! (chat-list-buffer) 'chat-list-search #f)
+    (list-clear-query! (chat-list-buffer))))
 
 ;; the list owns the focus, so every way back into it is the same move
 (define (chat-list-focus!)
-  (let ((w (window-showing *chat-list-buffer*)))
+  (let ((w (if (equal? (window-buffer (active-window)) (chat-list-buffer))
+               (active-window) (window-showing (chat-list-buffer)))))
     (when (and w (window-exists? w)) (select-window! w))))
 
-;; a chat is pinned to the pane its mode owns, so keeping one is never a
-;; switch in the window you are standing in: enter the chat's own group and
-;; raise the window that already holds it
-;; a chat is pinned to the pane its mode owns, so the window that already
-;; holds it comes first, then the group's own chat pane, and the active
-;; window only when the group shows no chat at all
-(define (chat-list-chat-window keep)
-  (or (window-showing keep)
-      (let loop ((ws (window-list)))
-        (cond ((null? ws) #f)
-              ((and (string? (cadr (car ws)))
-                    (not (equal? (cadr (car ws)) *chat-list-buffer*))
-                    (chat-buffer? (cadr (car ws))))
-               (car (car ws)))
-              (else (loop (cdr ws)))))))
-
-;; keeping a chat is never a switch in the window you are standing in:
-;; leave the application's pin behind, enter the chat's own group, and
-;; raise the window that holds it
 (define (chat-list-keep! keep)
   (chat-list-clear-search!)
-  (unless (chat-list-release-frame!) (chat-list-unpin!))
-  (let ((id (group-home-of keep)))
-    (when (and id (not (equal? id (frame-group)))) (switch-to-group! id)))
-  (let ((w (chat-list-chat-window keep)))
-    (if (and w (window-exists? w))
-        (begin
-          (select-window! w)
-          (unless (equal? (window-buffer w) keep) (switch-to-buffer-here! keep)))
-        (switch-to-buffer! keep)))
+  (listing-visit! (chat-list-buffer) keep)
   (when (equal? (window-buffer (active-window)) keep) (end-of-buffer!)))
-
-(define (chat-list-release-frame!)
-  (let ((saved (frame-local 'chat-list-return)))
-    (when saved
-      ;; Consume before restoring: a second close cannot unwind another layer.
-      (set-frame-local! 'chat-list-return #f)
-      (let ((inhibited *group-current-inhibit*)
-            (winner *winner-inhibit*))
-        (set! *group-current-inhibit* #t)
-        (set! *winner-inhibit* #t)
-        (with-layout-suppressed
-          (lambda ()
-            (layout-target-set! #f)
-            (set-frame-local! 'current-group (nth 1 saved))
-            (set-frame-local! 'pinned-group (nth 2 saved))
-            (set-frame-local! 'previous-group (nth 4 saved))
-            (window-tree-preview! (car saved))
-            ;; Match by pane order, not buffer name: duplicate views have
-            ;; separate points, return records, and selection.
-            (let loop ((rows (window-list)) (views (nth 5 saved)))
-              (when (and (pair? rows) (pair? views))
-                (let ((w (car (car rows))) (view (car views)))
-                  (when (number? (nth 1 view)) (window-set-point! w (nth 1 view)))
-                  (window-quit-restore-forget! w)
-                  (let ((quit (nth 2 view)))
-                    (when quit (window-quit-restore-note! w (cadr quit) (caddr quit))))
-                  (window-cycle-mode! w (nth 3 view))
-                  (when (car view) (select-window! w)))
-                (loop (cdr rows) (cdr views))))
-            (layout-target-set! (nth 3 saved))))
-        (set! *group-current-inhibit* inhibited)
-        (set! *winner-inhibit* winner)
-        (frame-group-label-refresh!)
-        #t))))
 
 (define (chat-list-back!)
   (chat-list-clear-search!)
-  (unless (chat-list-release-frame!)
-    ;; A list opened before this definition loaded has no frame snapshot.
-    ;; Use its saved group without deleting any restored panes.
-    (when (window-showing *chat-list-buffer*)
-      (chat-list-unpin!)
-      (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
-        (when from (switch-to-group! from))))))
+  (listing-quit! (chat-list-buffer)))
 
 ;; a saved conversation is a file and has no group of its own, so reading
 ;; it back lands it where you stood when you asked for it
@@ -1034,62 +1064,93 @@
 ;; one filter line over one list: what you type reads the titles, and the
 ;; same words read the text of every alive chat
 (define (chat-list-filter-line! &optional standing)
-  (let* ((narrow (lambda (q)
-                   (chat-list-search-hits q)
+  (let* ((input (list-query (chat-list-buffer)))
+         (apply-query (lambda (q)
+                 (with-buffer-display-update (chat-list-buffer) (lambda ()
+                   (buffer-set-local! (chat-list-buffer) 'chat-list-search q)
                    ;; Only crossing between the recent scope and all chats
                    ;; changes the source. Subsequent keys filter that snapshot.
-                   (let ((was-empty (equal? (list-query *chat-list-buffer*) "")))
-                     (list-set-query! *chat-list-buffer* q
+                   (let ((was-empty (equal? (list-query (chat-list-buffer)) "")))
+                     (list-set-query! (chat-list-buffer) q
                        (not (equal? was-empty (equal? q "")))))
-                   (ibuffer-goto-first-row! *chat-list-buffer*)
-                   (chat-list-preview!)))
-         (done (lambda () (set! *mb-list-buffer* #f) (set! *mb-list-prompt* #f))))
+                   (ibuffer-goto-first-row! (chat-list-buffer))
+                   (chat-list-preview!)))))
+         (generation 0)
+         (narrow (lambda (q)
+                   (set! input q)
+                   ;; Input itself is already in the minibuffer. Coalesce the
+                   ;; expensive table draw, not the characters the user types.
+                   (set! generation (+ generation 1))
+                   (chat-list--search-later! q)
+                   (chat-list--cancel-preview!)
+                   (let ((ticket generation))
+                     (debounce! "chat-list-filter" ibuffer-filter-delay-ms
+                       (lambda (input)
+                         (let ((mb (minibuffer-state)))
+                           (when (and (= ticket generation) mb
+                                      (equal? *mb-list-buffer* (chat-list-buffer))
+                                      (equal? (plist-get mb 'input) input))
+                             (apply-query input)))) q))))
+         (done (lambda (&optional keep-search)
+                 (set! generation (+ generation 1))
+                 (debounce-cancel! "chat-list-filter")
+                 (unless keep-search (chat-list--cancel-search!))
+                 (set! *mb-list-flush* #f)
+                 (set! *mb-list-buffer* #f) (set! *mb-list-prompt* #f))))
     (when (and (string? standing) (not (equal? standing "")))
-      (buffer-set-local! *chat-list-buffer* 'chat-list-search standing)
-      (narrow standing))
-    (set! *mb-list-buffer* *chat-list-buffer*)
+      (set! input standing)
+      (apply-query standing))
+    (set! *mb-list-buffer* (chat-list-buffer))
     (set! *mb-list-prompt* "Chat: ")
     (minibuffer-read* "Chat: " '()
       (list (list 'change narrow)
             (list 'confirm
                   (lambda (q)
+                    (unless (equal? q (list-query (chat-list-buffer))) (apply-query q))
                     (done)
-                    (unless (equal? q (list-query *chat-list-buffer*)) (narrow q))
-                    (let ((row (list-current *chat-list-buffer*)))
+                    (let ((row (list-current (chat-list-buffer))))
                       (if (ibuffer-heading? row)
                           (begin
-                            (ibuffer-toggle-fold! (ibuffer-heading-key row) *chat-list-buffer*)
+                            (ibuffer-toggle-fold! (ibuffer-heading-key row) (chat-list-buffer))
                             (chat-list-focus!))
                           (chat-list-leave! row)))))
             ;; the filter is one line over the list, not the life of the
             ;; application: closing it hands the list back its focus
             (list 'cancel
                   (lambda ()
-                    (done)
-                    (chat-list-clear-search!)
-                    ;; the rows widen again under the same cursor: closing
-                    ;; the filter is not a move
-                    (ibuffer-refresh! *chat-list-buffer*)
+                    ;; Closing the editor keeps its value. Only the filter
+                    ;; pop command removes the narrowing from the list.
+                    (unless (equal? input (list-query (chat-list-buffer)))
+                      (apply-query input))
+                    (done #t)
                     (chat-list-preview!)
                     (chat-list-focus!)))
             (list 'legend *ibuffer-prompt-legend*)
-            (list 'style "filter")))))
+            (list 'style "filter")))
+    ;; Motion must act on the typed query, even inside the redraw delay.
+    ;; Invalidate the pending draw so it cannot move selection back later.
+    (set! *mb-list-flush*
+      (lambda ()
+        (set! generation (+ generation 1))
+        (debounce-cancel! "chat-list-filter")
+        (unless (equal? input (list-query (chat-list-buffer))) (apply-query input))))
+    (unless (equal? input "") (minibuffer-change! input))))
 
 (define (chat-list-open! &optional standing)
   (let ((preview (chat-list-arrive!)))
-    (buffer-set-local! *chat-list-buffer* 'ibuffer-scope 'chat-list)
-    (buffer-set-local! *chat-list-buffer* 'ibuffer-prompt-home-window preview)
-    (list-clear-query! *chat-list-buffer*)
-    (with-current-buffer *chat-list-buffer*
+    (buffer-set-local! (chat-list-buffer) 'ibuffer-scope 'chat-list)
+    (buffer-set-local! (chat-list-buffer) 'ibuffer-prompt-home-window preview)
+    (list-clear-query! (chat-list-buffer))
+    (with-current-buffer (chat-list-buffer)
       (lambda () (with-list-mode-skip-render (lambda () (set-mode! "chat-list-mode")))))
     ;; the chat list is a table, not a picker: a group row takes the
     ;; highlight and the verbs read it as every chat under it
-    (buffer-set-local! *chat-list-buffer* 'ibuffer-heading-rows #t)
-    (ibuffer-refresh! *chat-list-buffer*)
+    (buffer-set-local! (chat-list-buffer) 'ibuffer-heading-rows #t)
+    (ibuffer-refresh! (chat-list-buffer))
     ;; the list keeps the row it was left on; only a list that holds no
     ;; row yet starts at the top
-    (unless (list-current *chat-list-buffer*)
-      (ibuffer-goto-first-row! *chat-list-buffer*))
+    (unless (list-current (chat-list-buffer))
+      (ibuffer-goto-first-row! (chat-list-buffer)))
     (chat-list-preview!)
     ;; the list stands on its own keys; a filter line only opens when you
     ;; ask for one, by / or by arriving with words already typed
@@ -1104,14 +1165,17 @@
 (define-command "chat-list-visit"
   "Enter the chat at point in its own group; on a heading, open the section"
   (lambda ()
-    (let ((row (list-current *chat-list-buffer*)))
+    (let ((row (list-current (chat-list-buffer))))
       (if (ibuffer-heading? row)
-          (ibuffer-toggle-fold! (ibuffer-heading-key row) *chat-list-buffer*)
+          (ibuffer-toggle-fold! (ibuffer-heading-key row) (chat-list-buffer))
           (chat-list-leave! row)))))
 
 (define-command "chat-list-quit"
   "Leave the chat list and change nothing"
   (lambda () (chat-list-leave! #f)))
+
+(define-command "ichat" "Open the chat buffer listing here"
+  (lambda () (chat-list-open!)))
 
 (define-command "chat-list"
   "Switch to a chat, by its name or by a word somebody said in it"
@@ -1127,17 +1191,17 @@
 (define-command "chat-list-regroup"
   "Cycle what a section of the chat list is: none, group, state, model"
   (lambda ()
-    (let ((next (ibuffer-cycle-after (ibuffer-grouping *chat-list-buffer*)
+    (let ((next (ibuffer-cycle-after (ibuffer-grouping (chat-list-buffer))
                                      *chat-list-groupings*)))
-      (ibuffer-set-grouping! next *chat-list-buffer*)
+      (ibuffer-set-grouping! next (chat-list-buffer))
       (message (string-append "grouped by " (symbol->string next))))))
 
 (define-command "chat-list-resort"
   "Cycle the order inside a section: recent, name, size on disk"
   (lambda ()
-    (let ((next (ibuffer-cycle-after (ibuffer-sort *chat-list-buffer*)
+    (let ((next (ibuffer-cycle-after (ibuffer-sort (chat-list-buffer))
                                      '(recent name size))))
-      (ibuffer-set-sort! next *chat-list-buffer*)
+      (ibuffer-set-sort! next (chat-list-buffer))
       (message (string-append "sorted by " (symbol->string next))))))
 
 (category! 'chat)

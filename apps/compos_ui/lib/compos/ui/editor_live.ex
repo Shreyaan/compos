@@ -648,7 +648,13 @@ defmodule Compos.Ui.EditorLive do
     caret_owner = if state.minibuffer, do: nil, else: state.active
 
     {tree, line_cache} =
-      decorate(state.tree, socket.assigns.line_cache, state.faces, caret_owner)
+      decorate_display(
+        state.tree,
+        previous_leaves(socket.assigns[:state] && socket.assigns.state.tree),
+        socket.assigns.line_cache,
+        state.faces,
+        caret_owner
+      )
 
     state = %{state | tree: tree}
 
@@ -774,6 +780,32 @@ defmodule Compos.Ui.EditorLive do
   # two-level cache: the raw line split is keyed by buffer VERSION only, so
   # cursor motion never re-splits the buffer; span decoration (cursor/region/
   # hl-line) is recomputed per render but only for lines it actually touches
+  defp previous_leaves(%{type: :leaf, id: id} = leaf), do: %{id => leaf}
+
+  defp previous_leaves(%{type: :split, children: children}) do
+    Enum.reduce(children, %{}, fn child, leaves -> Map.merge(leaves, previous_leaves(child)) end)
+  end
+
+  defp previous_leaves(_), do: %{}
+
+  defp decorate_display(%{type: :split} = split, previous, cache, faces, active) do
+    {children, cache} =
+      Enum.map_reduce(split.children, cache, &decorate_display(&1, previous, &2, faces, active))
+
+    {%{split | children: children}, cache}
+  end
+
+  defp decorate_display(%{type: :leaf} = leaf, previous, cache, faces, active) do
+    old = previous[leaf.id]
+
+    if old && old.buffer == leaf.buffer &&
+         (Map.get(leaf, :display_updating, false) || Events.display_updating?(leaf.buffer)) do
+      {old, cache}
+    else
+      decorate(leaf, cache, faces, active)
+    end
+  end
+
   defp decorate(%{type: :split} = split, cache, faces, active) do
     {children, cache} =
       Enum.map_reduce(split.children, cache, &decorate(&1, &2, faces, active))
@@ -1725,7 +1757,7 @@ defmodule Compos.Ui.EditorLive do
   defp label_row(%{style: "filter"} = mb),
     do:
       "#{String.trim_trailing(mb.prompt, ": ")} · type to narrow · DEL widens · " <>
-        "empty removes it · RET keeps it · C-g drops it"
+        "empty removes it · RET / C-g close · \\ removes filter"
 
   defp label_row(mb),
     do:
@@ -2752,10 +2784,17 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp semantic_line(assigns) do
-    {segments, _} = Enum.map_reduce(assigns.segs, assigns.start, fn {txt, cls}, at ->
-      {{at, at + byte_size(txt), txt, cls}, at + byte_size(txt)}
-    end)
-    stop = case List.last(segments) do nil -> assigns.start; {_, b, _, _} -> b end
+    {segments, _} =
+      Enum.map_reduce(assigns.segs, assigns.start, fn {txt, cls}, at ->
+        {{at, at + byte_size(txt), txt, cls}, at + byte_size(txt)}
+      end)
+
+    stop =
+      case List.last(segments) do
+        nil -> assigns.start
+        {_, b, _, _} -> b
+      end
+
     fields = Enum.filter(assigns.fields, fn {a, b, _} -> a < stop and b > assigns.start end)
     # A field range is bytes, and it can end inside a multi-byte character:
     # a list row draws box characters, and the column the block declares

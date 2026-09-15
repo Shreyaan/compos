@@ -142,6 +142,34 @@ defmodule Compos.LoadTest do
     assert {:ok, "2"} = Session.eval("zz-reload-value")
   end
 
+  test "changed list options reach the registered mode without resetting package state" do
+    path = Path.join(System.tmp_dir!(), "zz-list-options-reload.scm")
+    on_exit(fn -> File.rm(path) end)
+
+    source = fn delay ->
+      """
+      (define zz-reload-list-state 0)
+      (define zz-reload-list-opts (list 'filter-delay-ms #{delay}))
+      (define-list-mode! "zz-reload-list-mode" zz-reload-list-opts)
+      """
+    end
+
+    File.write!(path, source.(0))
+    assert {:ok, _} = Session.reload_files([path])
+    assert {:ok, _} = Session.eval("(set! zz-reload-list-state 7)")
+
+    File.write!(path, source.(60))
+    assert {:ok, %{forms: 2}} = Session.reload_files([path])
+
+    assert {:ok, "(60 7)"} =
+             Session.eval("""
+             (list (plist-get (list-mode-opts "zz-reload-list-mode") 'filter-delay-ms)
+                   zz-reload-list-state)
+             """)
+
+    assert {:ok, %{forms: 0}} = Session.reload_files([path])
+  end
+
   test "the reload prompt completes over stdlib, bundled, and user packages" do
     home_pkg = Path.join([Compos.Core.home(), "packages"])
     File.mkdir_p!(home_pkg)

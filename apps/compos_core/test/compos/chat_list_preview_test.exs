@@ -42,17 +42,19 @@ defmodule Compos.ChatListPreviewTest do
       (list-set-query! "*chat-list*" "zz-dp-" #t)
       (ibuffer-goto-first-row! "*chat-list*")
       (chat-list--cancel-preview!)
-      (window-preview-buffer! "*scratch*" (chat-list-preview-window))
+      (listing-preview-dismiss! (chat-list-buffer))
       (define *zz-dp-calls* '())
-      (advice-add! 'window-preview-buffer! 'before 'zz-dp
-        (lambda (b &optional win) (set! *zz-dp-calls* (cons b *zz-dp-calls*)))))
+      (advice-add! 'listing-preview! 'before 'zz-dp
+        (lambda (owner b) (set! *zz-dp-calls* (cons b *zz-dp-calls*)))))
     """)
 
     on_exit(fn ->
       eval!(~S"""
       (begin
         (chat-list--cancel-preview!)
-        (advice-remove! 'window-preview-buffer! 'zz-dp)
+        (chat-list--cancel-search!)
+        (advice-remove! 'chat-list--scan 'zz-search-gate)
+        (advice-remove! 'listing-preview! 'zz-dp)
         (set! chat-list-preview-delay-ms 150)
         (when (window-showing "*chat-list*") (chat-list-back!))
         (set! *mb-list-buffer* #f)
@@ -77,13 +79,14 @@ defmodule Compos.ChatListPreviewTest do
     assert eval!(~S{(list-current "*chat-list*")}) == ~s("*zz-dp-b*")
     assert eval!("*zz-dp-calls*") == "()"
     eventually(fn -> eval!("*zz-dp-calls*") == ~s{("*zz-dp-b*")} end)
-    assert eval!("(window-buffer (chat-list-preview-window))") == ~s("*zz-dp-b*")
+    assert eval!("(buffer-local (popup-buffer) 'listing-preview-source)") == ~s("*zz-dp-b*")
   end
 
-  test "typing filters immediately and delays the preview" do
-    press("/")
+  test "typing updates input before drawing the filtered list and preview" do
+    press(["/", "C-a", "C-k"])
     press(String.graphemes("zz-dp-c"))
-    assert eval!(~S{(list-current "*chat-list*")}) == ~s("*zz-dp-c*")
+    assert eval!(~S{(plist-get (minibuffer-state) 'input)}) == ~s("zz-dp-c")
+    eventually(fn -> eval!(~S{(list-current "*chat-list*")}) == ~s("*zz-dp-c*") end)
     assert eval!("*zz-dp-calls*") == "()"
     eventually(fn -> eval!("*zz-dp-calls*") == ~s{("*zz-dp-c*")} end)
   end
@@ -100,4 +103,76 @@ defmodule Compos.ChatListPreviewTest do
     assert Editor.render_state().tree == tree
     assert eval!("*zz-dp-calls*") == "()"
   end
+
+  test "transcript-only matches arrive asynchronously without refetching the list" do
+    Buffer.append("*zz-dp-c*", " hiddenneedle", source: :editor)
+    press(["/", "C-a", "C-k"])
+    press(String.graphemes("hiddenneedle"))
+    assert eval!(~S{(plist-get (minibuffer-state) 'input)}) == ~s("hiddenneedle")
+    eventually(fn -> eval!(~S{(list-current "*chat-list*")}) == ~s("*zz-dp-c*") end)
+    assert eval!(~S{(chat-list-hit "*zz-dp-c*")}) =~ "hiddenneedle"
+    press("C-g")
+    assert eval!(~S{(list-query "*chat-list*")}) == ~s("hiddenneedle")
+    assert eval!(~S{(chat-list-hit "*zz-dp-c*")}) =~ "hiddenneedle"
+  end
+
+  test "typing cancels a blocked transcript scan and rejects its old results" do
+    Buffer.append("*zz-dp-c*", " hiddenneedle", source: :editor)
+
+    eval!(~S"""
+    (begin
+      (define *zz-search-started* #f)
+      (define *zz-search-release* #f)
+      (advice-add! 'chat-list--scan 'before 'zz-search-gate
+        (lambda (q cache)
+          (set! *zz-search-started* q)
+          (wait-until (lambda () *zz-search-release*) 2000))))
+    """)
+
+    press(["/", "C-a", "C-k"])
+    press(String.graphemes("hiddenneedle"))
+    eventually(fn -> eval!("*zz-search-started*") == ~s("hiddenneedle") end)
+    eval!("(define *zz-old-search-task* *chat-list-search-task*)")
+    # This key must finish while the worker remains blocked on its gate.
+    press("x")
+    assert eval!("(task-alive? *zz-old-search-task*)") == "#f"
+    assert eval!(~S{(plist-get (minibuffer-state) 'input)}) == ~s("hiddenneedlex")
+    eval!("(set! *zz-search-release* #t)")
+
+    eventually(fn ->
+      eval!("(and (pair? *chat-list-hits*) (car *chat-list-hits*))") == ~s("hiddenneedlex")
+    end)
+
+    assert eval!(~S{(list-entries "*chat-list*")}) == "()"
+    press("C-g")
+  end
+  test "title matches precede transcript hits and a finished scan keeps the query" do
+    Buffer.set_local("*zz-dp-c*", "chat-summary", "rankingneedle")
+    Buffer.append("*zz-dp-a*", " rankingneedle", source: :editor)
+    press(["/", "C-a", "C-k"])
+    press(String.graphemes("rankingneedle"))
+    eventually(fn -> eval!(~S{(chat-list-hit "*zz-dp-a*")}) != "#f" end)
+    assert eval!(~S{(list-query "*chat-list*")}) == ~s("rankingneedle")
+    assert eval!(~S{(filter string? (list-entries "*chat-list*"))}) == ~s{("*zz-dp-c*" "*zz-dp-a*")}
+    press("C-g")
+  end
+
+  test "closing applies the pending query and retains it" do
+    press(["/", "C-a", "C-k"])
+    press(String.graphemes("nothingmatches"))
+    press("C-g")
+    Process.sleep(300)
+    assert eval!(~S{(list-query "*chat-list*")}) == ~s("nothingmatches")
+    assert eval!(~S{(list-query "*chat-list*")}) == ~s("nothingmatches")
+  end
+
+  test "RET flushes pending title filtering before choosing a chat" do
+    Buffer.set_local("*zz-dp-c*", "chat-summary", "pendingneedle")
+    press(["/", "C-a", "C-k"])
+    press(String.graphemes("pendingneedle"))
+    press("RET")
+    assert eval!("(current-buffer)") == ~s("*zz-dp-c*")
+    assert eval!("*chat-list-search-request*") == "#f"
+  end
+
 end

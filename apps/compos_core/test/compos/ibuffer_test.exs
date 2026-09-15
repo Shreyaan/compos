@@ -210,20 +210,13 @@ defmodule Compos.IbufferTest do
 
     eval!(~s{(ibuffer-open-buffers! (list "*zz-collected-one*"))})
     assert Editor.current_buffer() == "*ibuffer*"
-    # the table is a buffer in a window, not the popup
-    assert eval!("(popup-open?)") == "#f"
+    # The work window holds the listing; the popup holds a separate copy.
+    assert eval!("(popup-open?)") == "#t"
     refute tree.() == before
-    # the row under the highlight previews beside the table
-    assert eval!("(peek-shown)") == ~s{"*zz-collected-one*"}
-    assert tree.() =~ "*zz-collected-one*"
+    assert eval!("(buffer-local (popup-buffer) 'listing-preview-source)") == ~s{"*zz-collected-one*"}
+    refute eval!("(popup-buffer)") == ~s{"*zz-collected-one*"}
 
-    # q takes the look first, and the previewed window shows what it showed
-    eval!(~s[(run-command "quit-window")])
-    assert Editor.current_buffer() == "*ibuffer*"
-    refute tree.() =~ "*zz-collected-one*"
-
-    # q again takes the table, and the layout is what it was
-    eval!(~s[(run-command "quit-window")])
+    press("q")
 
     assert tree.() == before
     refute Editor.current_buffer() == "*ibuffer*"
@@ -276,8 +269,7 @@ defmodule Compos.IbufferTest do
 
     # The window form previews too: the row under the highlight shows in
     # another window as a peek, and q gives that window back.
-    assert eval!("(window-list)") =~ "*zz-collected-one*"
-    assert eval!("(peek-shown)") == ~s{"*zz-collected-one*"}
+    assert eval!("(buffer-local (popup-buffer) 'listing-preview-source)") == ~s{"*zz-collected-one*"}
 
     # The reused ibuffer owns ordinary marks and moves the whole marked set.
     eval!(~s{(local-set-key* "*ibuffer*" "<f8>" "list-mark")})

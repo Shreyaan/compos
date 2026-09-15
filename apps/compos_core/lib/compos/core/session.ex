@@ -670,9 +670,11 @@ defmodule Compos.Core.Session do
   @impl true
   def handle_info({:scheme_debounce, key, generation}, state) do
     case :ets.lookup(@escaped, key) do
-      [{^key, {^generation, _timer, callback, arg, fid}}] ->
-        :ets.delete(@escaped, key)
-        Lane.cast(:ui, fn _from -> exec_apply(callback, [arg], fid) end, "debounce")
+      [{^key, {^generation, _timer, _callback, _arg, _fid}}] ->
+        # Keep the generation rooted while waiting for the UI lane. A new
+        # keystroke may cancel/replace it after the timer fires but before
+        # the lane is free to run this callback.
+        Lane.cast(:ui, fn _from -> exec_debounce(key, generation) end, "debounce")
 
       _ ->
         :ok
@@ -702,6 +704,20 @@ defmodule Compos.Core.Session do
 
     Process.send_after(self(), :gc_tick, @gc_interval)
     {:noreply, state}
+  end
+
+  defp exec_debounce(key, generation) do
+    case :ets.lookup(@escaped, key) do
+      [{^key, {^generation, _timer, callback, arg, fid}}] ->
+        # Delete only this generation; concurrent rescheduling must survive.
+        case :ets.select_delete(@escaped, [{{key, {generation, :_, :_, :_, :_}}, [], [true]}]) do
+          1 -> exec_apply(callback, [arg], fid)
+          0 -> {:reply, :ok}
+        end
+
+      _ ->
+        {:reply, :ok}
+    end
   end
 
   # every place a live closure can be held outside the store: the commands
@@ -775,8 +791,11 @@ defmodule Compos.Core.Session do
           changed =
             case Map.fetch(manifest, expanded) do
               {:ok, previous} ->
+                package_changed? = fingerprints != previous
+
                 Enum.filter(forms, fn form ->
-                  reload_context?(form) or not MapSet.member?(previous, form_fingerprint(form))
+                  reload_context?(form) or not MapSet.member?(previous, form_fingerprint(form)) or
+                    (package_changed? and reload_registration?(form))
                 end)
 
               :error ->
@@ -854,6 +873,13 @@ defmodule Compos.Core.Session do
 
   defp reload_context?([{:sym, name} | _]), do: name in @reload_context
   defp reload_context?(_), do: false
+
+  # A list registration captures its options by value. Updating the options
+  # definition alone leaves the live mode on its old callbacks/settings even
+  # though the registration's own source is unchanged. Replay registrations
+  # in source order when their package changes, without resetting other state.
+  defp reload_registration?([{:sym, "define-list-mode!"} | _]), do: true
+  defp reload_registration?(_), do: false
 
   defp form_fingerprints(forms), do: MapSet.new(forms, &form_fingerprint/1)
   defp form_fingerprint(form), do: :crypto.hash(:sha256, :erlang.term_to_binary(form))
@@ -1195,6 +1221,8 @@ defmodule Compos.Core.Session do
         "(current-edit-author) — the caller process's edit author string, or #f",
       "with-current-buffer" =>
         "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window.",
+      "with-buffer-display-update" =>
+        "(with-buffer-display-update BUF THUNK) — keep the previous presentation visible until THUNK finishes updating text, styling and selection; release on errors too.",
       "buffer-context?" =>
         "(buffer-context?) — #t inside a logical current-buffer binding; window placement must not change the frame there.",
       "with-frame-windows" =>
@@ -2053,7 +2081,9 @@ defmodule Compos.Core.Session do
         images =
           case rest do
             [_, list | _] when is_list(list) ->
-              for [mime, path] <- list, is_binary(mime), is_binary(path),
+              for [mime, path] <- list,
+                  is_binary(mime),
+                  is_binary(path),
                   do: %{mime: mime, path: path}
 
             _ ->
@@ -2380,6 +2410,11 @@ defmodule Compos.Core.Session do
         end
 
         Compos.Core.Frame.with_buffer(buffer, fn ->
+          Compos.Scheme.Eval.apply_fn(thunk, [], store)
+        end)
+      end,
+      "with-buffer-display-update" => fn [buffer, thunk], store ->
+        Compos.Core.Events.with_display_update(to_string(buffer), fn ->
           Compos.Scheme.Eval.apply_fn(thunk, [], store)
         end)
       end,

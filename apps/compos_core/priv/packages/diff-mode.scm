@@ -458,9 +458,9 @@
              (subject (or (diff--get h 'subject) ""))
              (where (if (string? branch) branch "detached"))
              (at (string-trim (string-append sha " " subject))))
-        ;; ui/kv carries no class of its own, and this line needs one to be
-;; styled and found. A tagged block with a class is what every other
-;; line of this view uses.
+        ;; ui/kv carries no class of its own, and this line needs one to
+        ;; be styled and found. A tagged block with a class is what every
+        ;; other line of this view uses.
         (list (list 'tag "div" 'class "diff-head"
                     'text (string-trim (string-append "Head:  " where "  " at)))))))) 
 

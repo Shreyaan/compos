@@ -170,4 +170,44 @@ defmodule Compos.ListPerformanceTest do
     assert eval!("*zz-scope-fetches*") == "2"
     assert eval!("*zz-scope-draws*") == "2"
   end
+
+  test "incremental filtering reuses candidates and cells, but backspace and refresh widen" do
+    eval!(~S"""
+    (begin
+      (define *zz-match-calls* 0)
+      (define *zz-filter-cells* 0)
+      (define-list-mode! "zz-incremental-mode"
+        (list 'buffer "*zz-list-performance*"
+              'rows (lambda (buf) '("apple" "apricot" "banana" "berry"))
+              'columns (lambda (buf) '(("name" 20)))
+              'cells (lambda (buf row)
+                       (set! *zz-filter-cells* (+ *zz-filter-cells* 1)) (list row))
+              'match (lambda (buf row q)
+                       (set! *zz-match-calls* (+ *zz-match-calls* 1))
+                       (completion-match? row q 'substring))
+              'title (lambda (buf) "Incremental")
+              'no-marks #t 'local-filter #t 'incremental-filter #t))
+      (list-mode-show! "zz-incremental-mode")
+      (set! *zz-match-calls* 0)
+      (set! *zz-filter-cells* 0))
+    """)
+
+    press("/")
+    press("a")
+    assert eval!("*zz-match-calls*") == "4"
+    assert eval!("*zz-filter-cells*") == "0"
+    press("p")
+    assert eval!("*zz-match-calls*") == "7"
+    assert eval!("*zz-filter-cells*") == "0"
+    assert eval!(~S{(list-entries "*zz-list-performance*")}) == ~s{("apple" "apricot")}
+    press("p")
+    assert eval!("*zz-match-calls*") == "9"
+    assert eval!(~S{(list-entries "*zz-list-performance*")}) == ~s{("apple")}
+    eval!(~S{(list-set-query! "*zz-list-performance*" "b")})
+    assert eval!("*zz-match-calls*") == "13"
+    assert eval!(~S{(list-entries "*zz-list-performance*")}) == ~s{("banana" "berry")}
+    eval!(~S{(list-refresh! "*zz-list-performance*")})
+    assert eval!("*zz-match-calls*") == "17"
+    assert eval!("*zz-filter-cells*") == "4"
+  end
 end

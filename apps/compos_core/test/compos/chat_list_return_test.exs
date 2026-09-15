@@ -41,8 +41,8 @@ defmodule Compos.ChatListReturnTest do
                  )
 
         KeyDispatch.handle_key(frame, "<f9>")
-        assert {:ok, "#t"} = Session.eval("(and (frame-local 'chat-list-return) #t)", frame)
-        # Re-entry must not replace the origin with the application's own layout.
+        assert {:ok, "#f"} = Session.eval("(frame-local 'chat-list-return)", frame)
+        # Re-entry must keep the invoking window's original predecessor.
         assert {:ok, _} =
                  Session.eval(
                    """
@@ -53,7 +53,8 @@ defmodule Compos.ChatListReturnTest do
                  )
 
         KeyDispatch.handle_key(frame, "<f10>")
-        assert {:ok, "#t"} = Session.eval("(equal? (window-tree) *return-test-tree*)", frame)
+        assert {:ok, expected_tree} = Session.eval("*return-test-tree*", frame)
+        assert {:ok, ^expected_tree} = Session.eval("(window-tree)", frame)
 
         assert {:ok, "#t"} =
                  Session.eval(
@@ -74,7 +75,8 @@ defmodule Compos.ChatListReturnTest do
                  Session.eval("(cadr (window-quit-restore (car (car (window-list)))))", frame)
 
         assert {:ok, _} = Session.eval("(run-command \"chat-list-quit\")", frame)
-        assert {:ok, "#t"} = Session.eval("(equal? (window-tree) *return-test-tree*)", frame)
+        assert {:ok, expected_tree} = Session.eval("*return-test-tree*", frame)
+        assert {:ok, ^expected_tree} = Session.eval("(window-tree)", frame)
       after
         Session.eval(
           """
@@ -92,7 +94,7 @@ defmodule Compos.ChatListReturnTest do
     end
   end
 
-  test "chat-list return snapshots belong to each invoking frame" do
+  test "chat-list returns through each invoking frame's own history" do
     previous = Editor.last_active_frame()
     {:ok, first} = Editor.attach_frame(nil)
     {:ok, second} = Editor.attach_frame(nil)

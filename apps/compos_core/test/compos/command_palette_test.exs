@@ -137,6 +137,57 @@ defmodule Compos.CommandPaletteTest do
     assert Session.eval("*zz-debounce-value*") == {:ok, ~s{"new"}}
   end
 
+  for action <- ["cancel", "replace"] do
+    @action action
+    test "debounce #{@action} invalidates a callback already queued behind UI work" do
+      eval = fn code -> Session.eval(code, nil, 5_000, {:rpc, self()}) end
+      parent = self()
+
+      blocker =
+        Task.async(fn ->
+          Compos.Core.Lane.run(:ui, fn _ ->
+            send(parent, {:lane_blocked, self()})
+            receive do: (:release -> {:reply, :ok})
+          end)
+        end)
+
+      assert_receive {:lane_blocked, worker}
+      on_exit(fn -> send(worker, :release) end)
+
+      assert {:ok, _} =
+               eval.("""
+               (define *zz-queued-debounce* '())
+               (debounce! "zz-queued" 60000
+                 (lambda (v) (set! *zz-queued-debounce* (cons v *zz-queued-debounce*))) "old")
+               """)
+
+      key = {:debounce, "zz-queued"}
+      [{^key, {generation, _, _, _, _}}] = :ets.lookup(:compos_escaped_closures, key)
+      send(Session, {:scheme_debounce, key, generation})
+      :sys.get_state(Session)
+
+      if @action == "cancel" do
+        assert {:ok, _} = eval.(~s{(debounce-cancel! "zz-queued")})
+      else
+        assert {:ok, _} =
+                 eval.("""
+                 (debounce! "zz-queued" 60000
+                   (lambda (v) (set! *zz-queued-debounce* (cons v *zz-queued-debounce*))) "new")
+                 """)
+
+        [{^key, {next, _, _, _, _}}] = :ets.lookup(:compos_escaped_closures, key)
+        send(Session, {:scheme_debounce, key, next})
+        :sys.get_state(Session)
+      end
+
+      send(worker, :release)
+      Task.await(blocker)
+      Compos.Core.Lane.run(:ui, fn _ -> {:reply, :ok} end)
+      expected = if @action == "cancel", do: "()", else: ~s{("new")}
+      assert eval.("*zz-queued-debounce*") == {:ok, expected}
+    end
+  end
+
   test "recipe inputs are quoted as data, never evaluated as source" do
     {:ok, _} =
       Session.eval(

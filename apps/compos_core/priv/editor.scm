@@ -854,7 +854,7 @@
 ;;; One filter, for every list. You press `/` and type; the list narrows
 ;;; on every keystroke to the rows that match. The arrows move the rows
 ;;; while you type, so you type and then you select. RET keeps the
-;;; narrowing and the row you chose, C-g drops the narrowing, `/` again
+;;; narrowing and the row you chose, C-g closes the entry, `/` again
 ;;; narrows the narrowing — the filters stack, and the stack persists with
 ;;; the buffer. `\` widens by one.
 ;;;
@@ -911,13 +911,17 @@
   (let ((kept (filter (lambda (e) (list-entry-kept? buf e filters ctx))
                       (reverse rows))))
     (cond ((pair? kept)
-           (append out (if heading (cons heading kept) kept)))
+           (let ((project (list-opt buf 'filtered-heading)))
+             (append out (if heading
+                             (cons (if project (project buf heading kept) heading) kept)
+                             kept))))
           ;; a heading that is a row of its own (a folded section) stays
           ;; when it matches by itself
           ((and heading
                 (list-selectable? buf heading)
                 (list-entry-kept? buf heading filters ctx))
-           (append out (list heading)))
+           (let ((project (list-opt buf 'filtered-heading)))
+             (append out (list (if project (project buf heading #f) heading)))))
           (else out))))
 
 ;; a row that starts a section: a heading, or a folded section standing
@@ -952,14 +956,46 @@
 (define (list-source-entries buf)
   (or (buffer-local buf 'list-source-entries) '()))
 
+;; A substring filter can only lose matches as the query grows. Keep the
+;; previous candidate set outside display state; backspace starts from source.
+(define *list-filter-history* '())
+
+(define (list-filter-forget! buf)
+  (set! *list-filter-history*
+    (filter (lambda (entry) (not (equal? (car entry) buf))) *list-filter-history*)))
+
+(define (list-filter-cached! buf source fetch)
+  (let* ((filters (list-filters buf))
+         (previous (assoc buf *list-filter-history*))
+         (query (assoc "match" filters))
+         (old-query (and previous (assoc "match" (cadr previous))))
+         (can-extend (list-opt buf 'incremental-query?))
+         (extend? (and (not fetch) previous query old-query
+                       (or (not can-extend) (can-extend (cadr old-query) (cadr query)))
+                       (equal? source (caddr previous))
+                       (not (equal? (cadr old-query) ""))
+                       (string-prefix? (string-downcase (cadr old-query))
+                                       (string-downcase (cadr query)))
+                       (equal? (remove (lambda (f) (equal? (car f) "match")) filters)
+                               (remove (lambda (f) (equal? (car f) "match")) (cadr previous)))))
+         (rows (list-keep buf (if extend? (nth 3 previous) source))))
+    (list-filter-forget! buf)
+    (set! *list-filter-history*
+      (take-n (cons (list buf filters source rows) *list-filter-history*) 32))
+    rows))
+
 (define (list-render-rows! buf fetch)
   (if (list-opt buf 'local-filter)
       (begin
         (when (or (equal? fetch #t)
                   (not (buffer-local buf 'list-source-entries)))
           (buffer-set-local! buf 'list-source-entries
-                             ((list-opt buf 'rows) buf)))
-        (list-keep buf (list-source-entries buf)))
+                             ((list-opt buf 'rows) buf))
+          (let ((updated (list-opt buf 'source-refreshed)))
+            (when updated (updated buf))))
+        (if (list-opt buf 'incremental-filter)
+            (list-filter-cached! buf (list-source-entries buf) fetch)
+            (list-keep buf (list-source-entries buf))))
       ;; 'cached is the wake path: the rows already in 'list-entries ARE
       ;; the view, and calling the source again would pay its cost (the
       ;; network, for sentry) inside a switcher preview. A filter redraw
@@ -1751,6 +1787,7 @@
 ;; the label of the prompt that stands in front of *mb-list-buffer*: the
 ;; filter's own, or the one a table's prompt form chose
 (define *mb-list-prompt* #f)
+(define *mb-list-flush* #f)
 
 ;; #t means the arrows moved a list. #f means no list stands behind this
 ;; prompt, so the minibuffer keeps its own arrows. The prompt line is the
@@ -1766,7 +1803,9 @@
 (define (mb-list-move! step)
   (let ((buf (mb-list-target)))
     (if buf
-        (begin (with-invoking-buffer (lambda () (list-move-in! buf step))) #t)
+        (begin
+          (when *mb-list-flush* (*mb-list-flush*))
+          (with-invoking-buffer (lambda () (list-move-in! buf step))) #t)
         #f)))
 
 ;; The prompt in front of a list drives that list. Each of these answers
@@ -1828,32 +1867,50 @@
 ;; The narrowing is live, and the input IS it. The prompt opens holding
 ;; the query the list already has, so `/` edits the narrowing instead of
 ;; stacking a second one on top of it. Every keystroke narrows, every
-;; DEL widens, and an empty input means no query at all — that is how
-;; you remove one. C-g puts back the query you came in with.
+;; DEL widens, and an empty input means no query at all. C-g closes
+;; the entry while keeping its query; the filter-pop command removes it.
 (define-command "list-filter"
   "Narrow this list to the rows that match what you type"
   (lambda ()
     (let* ((buf (current-buffer))
-           (before (list-query buf))
+           (input (list-query buf))
+           (delay (or (list-opt buf 'filter-delay-ms) 0))
+           (key (string-append "list-filter:" (selected-frame)))
+           (generation 0)
+           (apply-query (lambda ()
+                          (with-buffer-display-update buf
+                            (lambda ()
+                              (unless (equal? input (list-query buf))
+                                (list-set-query! buf input)
+                                (list-goto-first-entry buf))))))
+           (flush (lambda ()
+                    (set! generation (+ generation 1))
+                    (debounce-cancel! key)
+                    (apply-query)))
            (narrow (lambda (q)
-                     (list-set-query! buf q)
-                     (list-goto-first-entry buf)))
-           (done (lambda () (set! *mb-list-buffer* #f) (set! *mb-list-prompt* #f))))
+                     (set! input q)
+                     (set! generation (+ generation 1))
+                     (if (= delay 0) (apply-query)
+                         (let ((ticket generation))
+                           (debounce! key delay
+                             (lambda (ignored)
+                               (when (and (= ticket generation)
+                                          (equal? (mb-list-target) buf))
+                                 (apply-query))) #f)))))
+           (done (lambda ()
+                   (flush)
+                   (set! *mb-list-flush* #f)
+                   (set! *mb-list-buffer* #f)
+                   (set! *mb-list-prompt* #f))))
       (set! *mb-list-buffer* buf)
       (set! *mb-list-prompt* *list-filter-prompt*)
       (minibuffer-read* *list-filter-prompt* '()
         (list (list 'change narrow)
-              ;; RET keeps the narrowing AND the row: the arrows moved the
-              ;; highlight to the row you want, so confirm must not send it
-              ;; back to the first one. A query the change handler did not
-              ;; apply yet still narrows here.
-              (list 'confirm (lambda (q)
-                               (done)
-                               (if (equal? q (list-query buf)) #t (narrow q))))
-              (list 'cancel (lambda () (done) (narrow before)))
+              (list 'confirm (lambda (q) (set! input q) (done)))
+              (list 'cancel done)
               (list 'style "filter")))
-      ;; the prompt starts where the list is: editing beats retyping
-      (unless (equal? before "") (minibuffer-input! before)))))
+      (set! *mb-list-flush* flush)
+      (unless (equal? input "") (minibuffer-input! input)))))
 
 (define-command "list-filter-pop" "Drop the most recent filter on this list"
   (lambda ()
@@ -2077,7 +2134,49 @@
                                     block)
                                   out)))))))))))))
 
+(define (list-zip-prepared rows prepared)
+  (if (null? rows) '()
+      (cons (list (car rows) (car prepared))
+            (list-zip-prepared (cdr rows) (cdr prepared)))))
+
+(define *list-filter-row-cache* '())
+
+(define (list-filter-row-forget! buf)
+  (set! *list-filter-row-cache*
+    (remove (lambda (entry) (equal? (car entry) buf)) *list-filter-row-cache*)))
+
+;; During a narrowing burst the source is a snapshot. Reuse the previous
+;; draw's rows when their layout/marks agree; widening computes missing rows.
+;; Same-query redraws (such as fresh transcript hits) recompute their cells.
+(define (list-prepare-rows! buf rows ctx fetch)
+  (let* ((cache? (list-opt buf 'incremental-filter))
+         (previous (and cache? (assoc buf *list-filter-row-cache*)))
+         (q (list-query buf))
+         (reuse? (and previous
+                      (or (equal? fetch 'view)
+                          (and (not fetch) (not (equal? q ""))
+                               (not (equal? q (cadr previous)))))
+                      (equal? ctx (caddr previous))))
+         (old (if reuse? (nth 3 previous) '()))
+         (prepared
+           (map (lambda (row)
+                  (let ((hit (assoc row old)))
+                    (if hit (cadr hit)
+                        (let ((cells (list-row-cells buf row ctx)))
+                          (list cells (list-row-lines buf row ctx cells))))))
+                rows)))
+    (when cache?
+      (set! *list-filter-row-cache*
+        (take-n
+          (cons (list buf q ctx (list-zip-prepared rows prepared))
+                (remove (lambda (entry) (equal? (car entry) buf)) *list-filter-row-cache*))
+          32)))
+    prepared))
+
 (define (list-render! buf fetch)
+  (with-buffer-display-update buf (lambda () (list-render-content! buf fetch))))
+
+(define (list-render-content! buf fetch)
   (when (buffer-exists? buf)
     ;; the layout cache needs no reset here: it names the width it was
     ;; laid out for, and a new width misses it
@@ -2091,7 +2190,9 @@
            (was (list-index buf))
            ;; each window's own row, before the rows move under it
            (places (list-window-places buf))
-           (rows (list-render-rows! buf fetch))
+           (filtered (list-render-rows! buf fetch))
+           (order (list-opt buf 'order-filtered))
+           (rows (if order (order buf filtered) filtered))
            (cur? (equal? (current-buffer) buf))
            ;; the buffer's own point: a refresh runs while another buffer
            ;; is current (a hook, a prompt), and that list keeps its place
@@ -2131,10 +2232,7 @@
                ;; Cells and laid-out lines belong to this draw. The semantic
                ;; projection reuses them instead of calling the row again.
                (ctx (list-row-ctx buf))
-               (prepared (map (lambda (row)
-                                (let ((cells (list-row-cells buf row ctx)))
-                                  (list cells (list-row-lines buf row ctx cells))))
-                              shown))
+               (prepared (list-prepare-rows! buf shown ctx fetch))
                (base (list-write! buf (list-view-lines buf shown head prepared)
                                   (length head) (length shown)
                                   (list-row-height buf) extra)))
@@ -2909,6 +3007,8 @@
   (when (minibuffer-active?)
     (minibuffer-cancel!)
     (message "Quit the outer prompt"))
+  ;; A deferred list draw belongs to this prompt only.
+  (set! *mb-list-flush* #f)
   ;; a rail belongs to one prompt: the next one starts without it
   (mb-rail-reset!)
   (let ((r (minibuffer-read*--raw prompt cands handlers)))
