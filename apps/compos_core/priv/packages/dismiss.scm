@@ -231,8 +231,13 @@
         #f
         (apply next args))))
 (add-hook! 'buffer-renamed-hook 'dismiss--renamed!)
+;; Every cause of a change already says so: a window shows a different
+;; buffer, a mode is set, a read-only flag is flipped, a child is claimed
+;; or released, a buffer is renamed or dismissed. A keystroke is not one
+;; of them, so this does not run per command: asking every visible buffer
+;; whether it is dismissible cost 19ms of every key, and the answer never
+;; changed.
 (add-hook! 'window-configuration-change-hook 'dismiss-sync-visible!)
-(add-hook! 'post-command-hook 'dismiss-sync-visible!)
 
 (public! 'dismiss-keep-caret! "(dismiss-keep-caret! MODE) — MODE's dismissible buffers show the text cursor, because they navigate by point")
 (public! 'buffer-child! "(buffer-child! PARENT CHILD) — register a child for child-first dismissal; reject ownership cycles")

@@ -352,21 +352,25 @@
 
 ;; A silent buffer costs nothing: post-command! rebuilds the dashboard of
 ;; the buffer the command ran in, and of no other buffer.
-(deftest 'post-command-syncs-the-dashboard-of-the-current-buffer-only
-  "an inactive buffer's dashboard line stays as it was after a command elsewhere"
+(deftest 'a-command-builds-no-dashboard-line
+  "the line is built when a window is filled with the buffer and by the events that change it, never once per command"
   (lambda ()
     (let ((here "*zz-modeline-here*")
           (other "*zz-modeline-other*"))
       (test-buffer! here "")
       (test-buffer! other "")
       (dashboard--sync! other)
-      (let ((before (buffer-local other 'dashboard-line)))
+      (let ((before (buffer-local other 'dashboard-line))
+            (before-here (buffer-local here 'dashboard-line)))
         (buffer-set-local! other 'minor-modes '("zz-silent-mode"))
         (with-current-buffer here (lambda () (post-command!)))
         (check-equal! (buffer-local other 'dashboard-line) before
                       "the other buffer's line did not rebuild")
+        (check-equal! (buffer-local here 'dashboard-line) before-here
+                      "a command built no line, not even in the buffer it ran in")
+        (dashboard--sync! here)
         (check-true! (string? (buffer-local here 'dashboard-line))
-                     "the current buffer's line did")
+                     "a sync builds it")
         (dashboard--sync! other)
         (check-true! (string-contains? (buffer-local other 'dashboard-line) "zz-silent")
                      "a sync asked for by name rebuilds it"))

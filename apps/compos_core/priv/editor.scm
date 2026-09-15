@@ -12750,6 +12750,13 @@
             ;; working directory in the same context slot.
             'modeline-project (buffer-modeline-context buf)))))
 
+;; Showing is the trigger, and the editor already had one. A change made
+;; while a buffer is hidden marks it dirty; filling a window with it
+;; clears the flag and rebuilds the line (buffer-group-display-refresh!,
+;; on buffer-shown-hook). A restore, a mode change, a jj change and a
+;; chat summary each rebuild it by name. Nothing here needs a second
+;; door, and a second one would build the same line twice per showing.
+
 ;; The fingerprint reads locals only — never the live tool surface. It
 ;; runs after every command, and asking the surface there would start
 ;; MCP servers on a cursor move. The frozen list and the presets are the
@@ -12795,10 +12802,13 @@
 ;; buffer rebuilds itself — modes, group, model all change under it
 (define (post-command!)
   (let ((buf (current-buffer)))
-    ;; the dashboard of the buffer the command ran in. A silent buffer
-    ;; costs nothing here: the event that changes its dashboard (a jj
-    ;; line, a summary, a restore) calls dashboard--sync! on it itself.
-    (dashboard--sync! buf)
+    ;; The dashboard is not rebuilt here. It is derived state, and a
+    ;; keystroke derives nothing new: it was recomputed for every command
+    ;; in the buffer the command ran in, at 16ms a key, and the line it
+    ;; produced was almost always the line already there. It is rebuilt
+    ;; when a window shows a buffer (dashboard--sync-visible!), and the
+    ;; event that changes a live buffer's line -- a jj change, a summary,
+    ;; a restore, a group move -- calls dashboard--sync! on it itself.
     (list-post-command! buf)
     ;; a list on screen shows what is, not what was: the command may have
     ;; killed a buffer the list beside it still names
