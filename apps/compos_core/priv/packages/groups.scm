@@ -698,7 +698,27 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; dashboard apiece is what made a keystroke cost 175ms once.
 (define (buffer-group-display-refresh! b)
   (buffer-modeline-group-refresh! b)
-  (when (boundp 'dashboard--sync!) (dashboard--sync! b)))
+  ;; A compound move refreshes after entering its final group. A hidden
+  ;; buffer catches up when shown, rather than building an unseen dashboard.
+  (if (or (and (boundp '*group-current-inhibit*) *group-current-inhibit*)
+          (not (member b (map cadr (window-list-all)))))
+      (begin
+        (desktop-skip! b 'group-display-dirty)
+        (buffer-set-local! b 'group-display-dirty #t))
+      (begin
+        (buffer-set-local! b 'group-display-dirty #f)
+        (when (boundp 'dashboard--sync!) (dashboard--sync! b)))))
+
+(define (group--display-catchup! b)
+  (when (buffer-local b 'group-display-dirty)
+    (buffer-group-display-refresh! b)))
+
+(define (group--visible-displays-catchup!)
+  (unless (and (boundp '*group-current-inhibit*) *group-current-inhibit*)
+    (for-each (lambda (w) (group--display-catchup! (cadr w))) (window-list))))
+
+(add-hook! 'buffer-shown-hook 'group--display-catchup!)
+(add-hook! 'window-configuration-change-hook 'group--visible-displays-catchup!)
 
 (define (modeline-groups-refresh!)
   ;; the list can name a buffer that sleeps or died: a local set there exits
@@ -719,13 +739,10 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (chat-set-group! b value)
   (let ((id (and value (group-ensure-record! value))))
-    (buffer-set-local! b 'group-id id)
-    ;; A chat has ownership, not ordinary work-buffer memberships. Remove
-    ;; any creation-time membership before the chat mode declared its type.
-    (buffer-set-local! b 'group-ids '())
-    (buffer-set-local! b 'group-roles '())
-    (buffer-set-local! b 'group #f)
-    (buffer-set-local! b 'companion-of #f)
+    ;; Publish ownership atomically; readers never see half a move.
+    (buffer-set-locals! b
+      (list 'group-id id 'group-ids '() 'group-roles '()
+            'group #f 'companion-of #f))
     (buffer-group-display-refresh! b)
     (when (boundp 'group-current-recalculate!)
       (group-current-recalculate!))
@@ -804,11 +821,9 @@ is forgotten and that group falls back to creation order in the switcher."
     (if (chat-buffer? b)
         (chat-set-group! b id)
         (begin
-          (buffer-set-local! b 'group-ids (if id (list id) '()))
-          (buffer-set-local! b 'group-roles '())
-          (buffer-set-local! b 'group #f)
-          (buffer-set-local! b 'group-inherited #f)
-          (buffer-set-local! b 'companion-of #f)
+          (buffer-set-locals! b
+            (list 'group-ids (if id (list id) '()) 'group-roles '()
+                  'group #f 'group-inherited #f 'companion-of #f))
           (buffer-group-display-refresh! b)))
     (when (boundp 'group-current-recalculate!)
       (group-current-recalculate!))
@@ -1116,7 +1131,7 @@ is forgotten and that group falls back to creation order in the switcher."
                     (filter (lambda (candidate)
                               (not (member candidate shown)))
                             pool)))
-              (let ((blank (and (boundp 'group-blank-buffer)
+              (let ((blank (and (null? hidden) (boundp 'group-blank-buffer)
                                 (group-blank-buffer id))))
                 (cond ((pair? hidden)
                        (window-set-buffer! win (car hidden))
@@ -3064,15 +3079,18 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (group-migrate-live!)
   (let ((live (buffer-list)))
-    (for-each
-      (lambda (buf)
-        (unless (member buf *group-migrated-buffers*)
-          (if (chat-buffer? buf)
-              (chat-group-id buf)
-              (buffer-group-ids buf))
-          (buffer-modeline-group-refresh! buf)))
-      live)
-    (set! *group-migrated-buffers* live))
+    ;; Most calls see exactly the same catalog. Avoid N membership scans
+    ;; through the N-entry migration list when no buffer was added or lost.
+    (unless (equal? live *group-migrated-buffers*)
+      (for-each
+        (lambda (buf)
+          (unless (member buf *group-migrated-buffers*)
+            (if (chat-buffer? buf)
+                (chat-group-id buf)
+                (buffer-group-ids buf))
+            (buffer-modeline-group-refresh! buf)))
+        live)
+      (set! *group-migrated-buffers* live)))
   #t)
 
 (define (group-ids)
@@ -4163,12 +4181,14 @@ is forgotten and that group falls back to creation order in the switcher."
   (define-key "group-map" "C-g" "group-switch-last")
   (define-key "group-map" "b" "group-members")
   (define-key "group-map" "l" "groups")
+  (define-key "group-map" "n" "group-new")
   (define-key "group-map" "s" "tile-all")
   (define-key "group-map" "p" "group-pin")
 
   ;; C-x C-g — the buffer is the subject; its groups are the object.
   (define-key "buffer-group-map" "a" "group-add")
   (define-key "buffer-group-map" "m" "group-move")
+  (define-key "buffer-group-map" "n" "group-new")
   (define-key "buffer-group-map" "r" "remove-group-from-buffer")
   (define-key "buffer-group-map" "v" "group-new-from-visible"))
 

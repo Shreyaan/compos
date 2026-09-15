@@ -1,5 +1,8 @@
 # Windows and buffer history
 
+> Historical audit: the current acceptance contract is [docs/WINDOWS.md](../docs/WINDOWS.md).
+> Its group-owned window model supersedes conflicting requirements below.
+
 This is the intended behavior and acceptance specification, not a claim that
 the current implementation satisfies it. The central requirement is:
 

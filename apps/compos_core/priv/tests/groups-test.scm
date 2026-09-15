@@ -14,6 +14,36 @@
 
 (define (t--drop! id) (when id (group-record-delete! id)))
 
+(deftest 'a-work-buffer-has-only-one-group-owner
+  "joining another group replaces ownership before any removal command"
+  (lambda ()
+    (let ((buf (test-buffer! "*zztest-single-owner*" ""))
+          (a (t--group "owner-a"))
+          (b (t--group "owner-b")))
+      (buffer-add-group-as! buf a 'source)
+      (buffer-add-group! buf b)
+      (check-equal! (buffer-group-ids buf) (list b) "only the destination owns the buffer")
+      (check-equal! (buffer-local buf 'group-ids) (list b) "storage also holds one owner")
+      (check-false! (buffer-in-group? buf a) "the former owner loses membership immediately")
+      (check-false! (buffer-group-role buf a) "the former role does not survive the move")
+      (buffer-kill! buf)
+      (t--drop! a)
+      (t--drop! b))))
+
+(deftest 'legacy-multiple-memberships-normalize-to-one-owner
+  "old desktop memberships retain the first owner when all records resolve"
+  (lambda ()
+    (let ((buf (test-buffer! "*zztest-legacy-owners*" ""))
+          (a (t--group "legacy-owner-a"))
+          (b (t--group "legacy-owner-b")))
+      (buffer-set-local! buf 'group-ids (list a b))
+      (check-equal! (buffer-group-ids buf) (list a) "the first legacy owner is retained")
+      (check-equal! (buffer-local buf 'group-ids) (list a) "the old storage is normalized")
+      (check-false! (buffer-in-group? buf b) "no second membership remains")
+      (buffer-kill! buf)
+      (t--drop! a)
+      (t--drop! b))))
+
 (deftest 'group-rename-keeps-the-id
   "a rename moves the display name and leaves the identity alone"
   (lambda ()

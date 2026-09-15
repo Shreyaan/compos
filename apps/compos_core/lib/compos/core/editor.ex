@@ -3173,20 +3173,36 @@ defmodule Compos.Core.Editor do
     # folds put top/cursor/total in VISIBLE-line space; the scroll and
     # auto-follow math below then works unchanged. Line *numbers* stay
     # logical (folds show numbering gaps, like Emacs). The no-fold case is
-    # O(log n) rope lookups from the snapshot; folds still scan.
-    {total_lines, cl, hidden_lines, narrow_lines} =
+    # O(log n) rope lookups from the snapshot. Fold geometry is cached per
+    # window: a filter key in another pane must not rescan this buffer.
+    {geometry, leaf} =
       cond do
         # the rich transcript renders blocks, not lines — fold geometry
         # is the plain view's cost, not this one's (S16)
         Map.get(locals, "render-mode") == "agent" ->
-          {snap.total_lines, snap.cursor_line, MapSet.new(), nil}
+          {{snap.total_lines, snap.cursor_line, MapSet.new(), nil},
+           Map.delete(leaf, :fold_geometry)}
 
         snap.hidden == [] and is_nil(snap.narrow_range) ->
-          {snap.total_lines, snap.cursor_line, MapSet.new(), nil}
+          {{snap.total_lines, snap.cursor_line, MapSet.new(), nil},
+           Map.delete(leaf, :fold_geometry)}
 
         true ->
-          visible_geometry(text, point, snap.hidden, snap.narrow_range)
+          # The immutable rope distinguishes replacement buffers with the
+          # same name/version; locals and overlays do not invalidate geometry.
+          key = {buffer, Map.get(snap, :rope, text), point, snap.hidden, snap.narrow_range}
+
+          case Map.get(leaf, :fold_geometry) do
+            {^key, geometry} ->
+              {geometry, leaf}
+
+            _ ->
+              geometry = visible_geometry(text, point, snap.hidden, snap.narrow_range)
+              {geometry, Map.put(leaf, :fold_geometry, {key, geometry})}
+          end
       end
+
+    {total_lines, cl, hidden_lines, narrow_lines} = geometry
 
     # Clamped to the last SCREENFUL, not the last line. Scrolling had no upper
     # bound of its own, and clamping to total-1 still let a short buffer end up
@@ -3197,12 +3213,16 @@ defmodule Compos.Core.Editor do
 
     top =
       cond do
-        leaf.manual -> top
+        leaf.manual ->
+          top
+
         cl < top or cl >= top + rows ->
           # Crossing the viewport edge recenters point, leaving room to
           # keep moving instead of pushing the window one line per key.
           max(0, min(cl - div(rows, 2), max(total_lines - rows, 0)))
-        true -> top
+
+        true ->
+          top
       end
 
     rendered = %{

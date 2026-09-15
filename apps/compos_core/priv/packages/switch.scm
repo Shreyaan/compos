@@ -567,7 +567,9 @@
 (define (switch--membership-hook!)
     (when (buffer-known? *switch-buffer*)
       (list-clear-marks! *switch-buffer*)
-      (list-refresh! *switch-buffer*)))
+      ;; Opening the switcher fetches fresh rows. Hidden tables need no draw.
+      (when (member *switch-buffer* (map cadr (window-list-all)))
+        (list-refresh! *switch-buffer*))))
 
 (add-hook! 'group-membership-hook 'switch--membership-hook!)
 

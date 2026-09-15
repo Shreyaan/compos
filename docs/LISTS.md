@@ -5,7 +5,7 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 ## One draw
 
 1. A draw reads the mode once. The row context (`list-row-ctx`) carries the mark column, the column lines, the mode's `cells`, `row-cells`, `render`, and `key` fns, and the marks. Every row reads the context. No row calls `list-opt` or reads a buffer-local: a buffer-local read is a call into the buffer's process (0.16 ms), and a row that asked ten times cost 6 ms.
-2. The header is computed once per draw and passed down with its line count.
+2. The header is computed once per draw and passed down with its line count. Each displayed row computes its cells and text lines once; semantic records reuse both. Selection overlays use the saved row offsets, so cursor movement never recomputes cells.
 3. The chip (the narrowing and its count) is computed only while the list is narrowed. Counting asks the mode about every row.
    The key bar (the mode's `'footer` keys) is a header line under the counts, where the eye lands on an open; at the foot of the text it scrolled away with the rows.
 4. A draw is few buffer changes: one `buffer-replace-range!` of the whole text, one `buffer-set-locals!` for the offsets, the head count, the row height, the width, and the stamp, one overlay set, one goto. Every change is a frame refresh and a render. A delete and then an append let a render between them see an empty buffer, reset the window's top, and write it back; the view jumped. `list_draw_test.exs` holds a redraw at eight changes or fewer.
@@ -36,7 +36,8 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 ## Narrowing
 
 1. `/` narrows on every keystroke; `\` widens by one. The filters stack and persist with the buffer; an open clears the typed query and keeps the mode's own kinds.
-2. A mode's own filter kinds (`'filter (buf entry f)`) ride the same stack. The telemetry's `t`, `k`, and `s` are such kinds, and the same key again widens.
+2. Repeating an unchanged query does nothing. `(list-set-query! BUF QUERY #t)` changes the query and fetches its source in one draw. C-x c uses this only when crossing between the recent and full chat scopes; later keys reuse the source. Closing a disposable prompt clears the query without redrawing a table that is about to be killed.
+3. A mode's own filter kinds (`'filter (buf entry f)`) ride the same stack. The telemetry's `t`, `k`, and `s` are such kinds, and the same key again widens.
 
 ## The telemetry list
 
@@ -46,3 +47,7 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 4. The list follows the work the user causes. The collector sends Scheme one notice per burst of rows, once a second at most, and never waits. Scheme redraws only while the list shows and only when a row the user caused arrived since the last draw: a keystroke or an intent (a traced row) or a Scheme job. The list's own refresh leaves live rows, browser rows, and a lane job named after the package; those are not causes, so a quiet editor draws nothing.
 5. The editor's own untraced `refresh` and `render` rows are hidden by default. Every buffer change makes one pair, and they say nothing a traced row does not. `a` shows them; the meta line says "quiet" while they are hidden.
 6. 60 rows a page; 400 events retained in the view.
+
+## Chat previews
+
+C-x C-c and C-x c share the chat list. Filtering and row navigation update the selection immediately; the preview waits for 150 ms of idle time (`chat-list-preview-delay-ms`). Both paths use the same per-frame debounce. Leaving cancels the pending request, and callbacks recheck the selected row and preview window before loading it. Timer bookkeeping stays outside display state.

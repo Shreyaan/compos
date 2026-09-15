@@ -814,12 +814,15 @@
   (let ((f (assoc "match" (list-filters buf))))
     (if f (car (cdr f)) "")))
 
-(define (list-set-query! buf q)
-  (let ((rest (filter (lambda (f) (not (equal? (car f) "match")))
-                      (list-filters buf))))
-    (buffer-set-local! buf 'list-filters
-      (if (equal? q "") rest (cons (list "match" q) rest)))
-    (list-redraw! buf)))
+(define (list-set-query! buf q &optional fetch)
+  ;; A source whose scope depends on the query can fetch and draw once.
+  ;; Repeating the same local query has no work to do.
+  (when (or fetch (not (equal? q (list-query buf))))
+    (let ((rest (filter (lambda (f) (not (equal? (car f) "match")))
+                        (list-filters buf))))
+      (buffer-set-local! buf 'list-filters
+        (if (equal? q "") rest (cons (list "match" q) rest)))
+      (list-render! buf fetch))))
 
 ;; drop the typed query and keep the mode's own kinds (dired's dotfiles).
 ;; No refresh: the caller is opening the list and draws it next.
@@ -883,7 +886,7 @@
 ;; every term a substring of the row, and a "(" in the input is a
 ;; character, not half of a regexp
 (define (list-match? buf e input &optional ctx)
-  (let ((m (list-opt buf 'match)))
+  (let ((m (if ctx (nth 7 ctx) (list-opt buf 'match))))
     (if m (m buf e input) (completion-match? (list-row-text buf e ctx) input 'substring))))
 
 ;; every list gets the "match" kind; the mode's own 'filter fn reads the
@@ -891,7 +894,7 @@
 (define (list-filter-match? buf e f &optional ctx)
   (if (equal? (car f) "match")
       (list-match? buf e (car (cdr f)) ctx)
-      (let ((m (list-opt buf 'filter)))
+      (let ((m (if ctx (nth 8 ctx) (list-opt buf 'filter))))
         (if m (m buf e f) #t))))
 
 ;; the rows that survive the stack — the loop each list wrote by hand.
@@ -1370,7 +1373,8 @@
 (define (list-row-ctx buf)
   (list (list-marks-column? buf) (list-column-lines buf)
         (list-opt buf 'cells) (list-opt buf 'row-cells) (list-opt buf 'render)
-        (list-marks buf) (list-opt buf 'key)))
+        (list-marks buf) (list-opt buf 'key)
+        (list-opt buf 'match) (list-opt buf 'filter)))
 
 (define (list-ctx-marks? ctx) (car ctx))
 (define (list-ctx-column-lines ctx) (nth 1 ctx))
@@ -1384,7 +1388,7 @@
 ;; three renders were each prepending their own. The mark goes on the
 ;; first line, and the lines under it start where it does.
 
-(define (list-row-lines buf e &optional ctx)
+(define (list-row-lines buf e &optional ctx cells)
   (let* ((ctx (or ctx (list-row-ctx buf)))
          (marks? (list-ctx-marks? ctx))
          (column-lines (list-ctx-column-lines ctx))
@@ -1392,7 +1396,7 @@
     (if (pair? column-lines)
         (let* ((head (string-append mark " "))
                (blank (string-repeat " " (string-length head))))
-          (let loop ((cs (list-row-cells buf e ctx))
+          (let loop ((cs (or cells (list-row-cells buf e ctx)))
                      (ks column-lines)
                      (first? #t)
                      (out '()))
@@ -1418,10 +1422,12 @@
 ;; the view: the header, then the rows. The key bar is in the header,
 ;; under the counts, where the eye lands on an open: at the foot of the
 ;; text it scrolled away with the rows.
-(define (list-view-lines buf rows &optional head)
+(define (list-view-lines buf rows &optional head prepared)
   (let ((ctx (list-row-ctx buf)))
     (append (or head (list-head-lines buf))
-            (fold (lambda (acc e) (append acc (list-row-lines buf e ctx))) '() rows))))
+            (apply append
+              (if prepared (map cadr prepared)
+                  (map (lambda (e) (list-row-lines buf e ctx)) rows))))))
 
 ;; write the lines, answer their overlays, and leave every row's byte
 ;; offset on the buffer — motion and the mode's own overlays then read
@@ -1583,9 +1589,10 @@
     (if (and i (< i (length entries)) (< i (length offsets)))
         (let* ((entry (nth i entries))
                (start (nth i offsets))
-               (size (fold (lambda (n line)
-                             (+ n (string-byte-length (car line)) 1))
-                           0 (list-row-lines buf entry))))
+               ;; Selection uses the geometry already written. Re-rendering
+               ;; a row here did expensive cell work on every cursor move.
+               (end (if (< (+ i 1) (length offsets))
+                        (nth (+ i 1) offsets) (buffer-size buf))))
           ;; the key is a change, and a change is a refresh: write it
           ;; only when the selection moved
           (let ((key (list-key buf entry)))
@@ -1593,7 +1600,7 @@
               (buffer-set-local! buf 'list-selection-key key)))
           (if face
               (overlay-set! buf 'list-selection
-                (list (list start (+ start size) face)))
+                (list (list start end face)))
               (overlay-clear! buf 'list-selection)))
         ;; Keep the saved key when rows are temporarily empty. An async reload
         ;; can use it when the rows arrive again.
@@ -1982,12 +1989,12 @@
 ;; Optional semantic projection of the same selectable rows. Text offsets stay
 ;; authoritative for commands, search, marks, and per-window selection.
 ;; Field boundaries come from the same layout operation that wrote the text.
-(define (list-composml-fields buf row start &optional ctx fields)
+(define (list-composml-fields buf row start &optional ctx fields cells)
   (let ((fields (or fields (list-opt buf 'composml-fields))))
     (if (not fields) '()
       (let* ((ctx (or ctx (list-row-ctx buf)))
              (prefix (+ (string-byte-length (if (list-ctx-marks? ctx) (list-mark-of buf row ctx) "")) 1))
-             (laid (list-lay-out (car (list-row-cells buf row ctx))
+             (laid (list-lay-out (car (or cells (list-row-cells buf row ctx)))
                                 (car (list-ctx-column-lines ctx)) #t)))
         (let loop ((ranges (nth 2 laid)) (descs (fields buf row)) (out '()))
           (if (or (null? ranges) (null? descs)) (reverse out)
@@ -1996,7 +2003,7 @@
                 (if (> (cadr r) 0) (cons (list a (+ a (cadr r)) (car descs)) out) out)))))))))
 
 ;; Semantic text records keep the existing text, faces and line geometry.
-(define (list-composml-text! buf rows)
+(define (list-composml-text! buf rows &optional prepared)
   (let ((record (or (list-opt buf 'composml-record)
                     (lambda (b row) (list 'tag "c-item"))))
         (root (or (list-opt buf 'composml-root)
@@ -2013,15 +2020,15 @@
         (list-set-locals! buf
           (list 'render-text-root (root buf)
                 'render-records
-                (let loop ((rs rows) (offsets (list-offsets buf)) (out '()))
+                (let loop ((rs rows) (offsets (list-offsets buf)) (ps prepared) (out '()))
                   (if (or (null? rs) (null? offsets)) (reverse out)
                     (let* ((row (car rs)) (start (car offsets))
                            (size (fold (lambda (n ln) (+ n (string-byte-length (car ln)) 1))
-                                       0 (list-row-lines buf row ctx)))
+                                       0 (if (pair? ps) (cadr (car ps)) (list-row-lines buf row ctx))))
                            (block (record buf row)))
-                      (loop (cdr rs) (cdr offsets)
+                      (loop (cdr rs) (cdr offsets) (and (pair? ps) (cdr ps))
                         (cons (list start (+ start size)
-                                (append (list 'fields (if fields (list-composml-fields buf row start ctx fields) '())
+                                (append (list 'fields (if fields (list-composml-fields buf row start ctx fields (and (pair? ps) (car (car ps)))) '())
                                               'attrs (append
                                 (list (list "record-id" (let ((key (if key-of (key-of buf row) row)))
                                   (if (string? key) key (value->string key)))))
@@ -2121,14 +2128,21 @@
                             (list 'list-width (list-view-width buf))
                             '())
                         (if stamp-fn (list 'list-stamp (stamp-fn buf)) '())))
-               (base (list-write! buf (list-view-lines buf shown head)
+               ;; Cells and laid-out lines belong to this draw. The semantic
+               ;; projection reuses them instead of calling the row again.
+               (ctx (list-row-ctx buf))
+               (prepared (map (lambda (row)
+                                (let ((cells (list-row-cells buf row ctx)))
+                                  (list cells (list-row-lines buf row ctx cells))))
+                              shown))
+               (base (list-write! buf (list-view-lines buf shown head prepared)
                                   (length head) (length shown)
                                   (list-row-height buf) extra)))
           ;; the tag's old ranges go with this set: one change, not a
           ;; clear and then a set
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
           (list-composml! buf shown head)
-          (list-composml-text! buf shown)))
+          (list-composml-text! buf shown prepared)))
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
             (last (- (list-shown-count buf) 1)))
         ;; Restore the buffer's point without moving every window that

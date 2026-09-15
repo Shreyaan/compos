@@ -693,7 +693,7 @@
   (let* ((q (string-downcase (string-trim q)))
          (last (if (pair? *chat-list-hits*) (car *chat-list-hits*) ""))
          ;; a longer query can only match where the shorter one did
-         (pool (if (and (not (equal? last ""))
+         (pool (if (and (>= (string-length last) 3)
                         (string-prefix? last q))
                    (map car (cdr *chat-list-hits*))
                    (chat-list-bufs))))
@@ -786,6 +786,7 @@
       ;; many of them are running right now
       'section-note (lambda (buf members) (chats-live-note members))
       'rows (lambda (buf) (chat-list-rows buf))
+      'preview (lambda (buf row) (chat-list-preview!))
       ;; The table stamps itself with the buffer count and redraws after
       ;; any command that moved it, so a buffer opened anywhere -- by a
       ;; chat you are not even reading -- rebuilt this list under the
@@ -818,7 +819,23 @@
 ;; one arrival: the list at two thirds, the preview at one third, the focus
 ;; on the list. The application is always in its own group and never joins
 ;; the group you came from.
+;; A return belongs to the invoking frame, not the shared list buffer.
+;; Save before the application changes any group, pin, or window.
 (define (chat-list-arrive!)
+  (if (and (frame-local 'chat-list-return) (window-showing *chat-list-buffer*))
+      (begin (chat-list-focus!) (chat-list-preview-window))
+      (begin
+        (set-frame-local! 'chat-list-return
+          (list (window-tree) (frame-group) (group-pinned) (layout-target)
+                (frame-local 'previous-group)
+                (map (lambda (row)
+                       (let ((w (car row)))
+                         (list (equal? w (active-window)) (window-point w)
+                               (window-quit-restore w) (window-cycle-mode w))))
+                     (window-list))))
+        (chat-list-arrive-raw!))))
+
+(define (chat-list-arrive-raw!)
   (let ((from (frame-group))
         ;; what the frame showed before the application took it: leaving
         ;; puts this back, so the list is never left standing
@@ -857,23 +874,69 @@
   (let ((w (buffer-local *chat-list-buffer* 'chat-list-preview-window)))
     (and w (window-exists? w) w)))
 
-;; looking costs nothing: the preview shows the transcript of a sleeping
-;; chat and never starts its runtime. Only the chat you pick wakes.
+(defcustom 'chat-list-preview-delay-ms 150
+  "Milliseconds of idle time before the chat list previews the selected row."
+  'group 'chat 'type 'number)
+
+;; Timer bookkeeping is not display state: changing it must not emit
+;; frame updates. Keep one pending request per frame on the Scheme lane.
+(define *chat-list-preview-requests* '())
+(define *chat-list-preview-generation* 0)
+
+(define (chat-list--preview-request)
+  (let ((entry (assoc (selected-frame) *chat-list-preview-requests*)))
+    (and entry (cadr entry))))
+
+(define (chat-list--preview-key)
+  (string-append "chat-list-preview:" (selected-frame)))
+
+(define (chat-list--cancel-preview!)
+  (let ((frame (selected-frame)))
+    (set! *chat-list-preview-requests*
+      (filter (lambda (entry) (not (equal? (car entry) frame)))
+              *chat-list-preview-requests*)))
+  (debounce-cancel! (chat-list--preview-key)))
+
+;; A timer can already be queued on the UI lane when it is cancelled.
+;; Check the request as well as the row and panes before touching a window.
+(define (chat-list--preview-now! request)
+  (when (equal? request (chat-list--preview-request))
+    (chat-list--cancel-preview!)
+    (let ((b (cadr request)) (win (caddr request)))
+      (when (and (window-showing *chat-list-buffer*)
+                 (member win (map car (window-list)))
+                 (equal? win (chat-list-preview-window))
+                 (equal? b (list-current *chat-list-buffer*))
+                 (buffer-known? b)
+                 (not (equal? (window-buffer win) b)))
+        (window-preview-buffer! b win)))))
+
+;; Filtering and row motion stay immediate; only the last selection of a
+;; burst loads a transcript. Each frame owns its timer and pending request.
 (define (chat-list-preview!)
+  (chat-list--cancel-preview!)
   (let ((b (list-current *chat-list-buffer*))
         (win (chat-list-preview-window)))
     (when (and win (string? b) (buffer-known? b)
-               (not (equal? b *chat-list-buffer*)))
-      (window-preview-buffer! b win))))
+               (not (equal? b *chat-list-buffer*))
+               (not (equal? (window-buffer win) b)))
+      (let* ((generation (+ 1 *chat-list-preview-generation*))
+             (request (list generation b win)))
+        (set! *chat-list-preview-generation* generation)
+        (set! *chat-list-preview-requests*
+          (cons (list (selected-frame) request) *chat-list-preview-requests*))
+        (debounce! (chat-list--preview-key) chat-list-preview-delay-ms
+                   chat-list--preview-now! request)))))
 
 ;; the application leaves the way it arrived: with one move. RET lands you
 ;; in the chat, in the chat's own group, because switching to a chat is
 ;; switching to where that chat lives. C-g puts the frame back.
 (define (chat-list-clear-search!)
+  (chat-list--cancel-preview!)
   (chat-list-search-reset!)
   (when (buffer-known? *chat-list-buffer*)
     (buffer-set-local! *chat-list-buffer* 'chat-list-search #f)
-    (list-set-query! *chat-list-buffer* "")))
+    (list-clear-query! *chat-list-buffer*)))
 
 ;; the list owns the focus, so every way back into it is the same move
 (define (chat-list-focus!)
@@ -901,8 +964,7 @@
 ;; raise the window that holds it
 (define (chat-list-keep! keep)
   (chat-list-clear-search!)
-  (chat-list-unpin!)
-  (chat-list-release-frame!)
+  (unless (chat-list-release-frame!) (chat-list-unpin!))
   (let ((id (group-home-of keep)))
     (when (and id (not (equal? id (frame-group)))) (switch-to-group! id)))
   (let ((w (chat-list-chat-window keep)))
@@ -913,25 +975,49 @@
         (switch-to-buffer! keep)))
   (when (equal? (window-buffer (active-window)) keep) (end-of-buffer!)))
 
-;; the application took the whole frame on arrival, so it hands the whole
-;; frame back: the panes it made go, and the window it stood in shows what
-;; it showed before. A group that keeps its own layout has already put that
-;; back, and then no window shows the list and there is nothing to undo.
 (define (chat-list-release-frame!)
-  (let ((w (window-showing *chat-list-buffer*))
-        (was (buffer-local *chat-list-buffer* 'chat-list-from-buffer)))
-    (when (and w (window-exists? w))
-      (select-window! w)
-      (delete-other-windows!)
-      (switch-to-buffer-here!
-        (if (and (string? was) (buffer-known? was)) was "*scratch*")))))
+  (let ((saved (frame-local 'chat-list-return)))
+    (when saved
+      ;; Consume before restoring: a second close cannot unwind another layer.
+      (set-frame-local! 'chat-list-return #f)
+      (let ((inhibited *group-current-inhibit*)
+            (winner *winner-inhibit*))
+        (set! *group-current-inhibit* #t)
+        (set! *winner-inhibit* #t)
+        (with-layout-suppressed
+          (lambda ()
+            (layout-target-set! #f)
+            (set-frame-local! 'current-group (nth 1 saved))
+            (set-frame-local! 'pinned-group (nth 2 saved))
+            (set-frame-local! 'previous-group (nth 4 saved))
+            (window-tree-preview! (car saved))
+            ;; Match by pane order, not buffer name: duplicate views have
+            ;; separate points, return records, and selection.
+            (let loop ((rows (window-list)) (views (nth 5 saved)))
+              (when (and (pair? rows) (pair? views))
+                (let ((w (car (car rows))) (view (car views)))
+                  (when (number? (nth 1 view)) (window-set-point! w (nth 1 view)))
+                  (window-quit-restore-forget! w)
+                  (let ((quit (nth 2 view)))
+                    (when quit (window-quit-restore-note! w (cadr quit) (caddr quit))))
+                  (window-cycle-mode! w (nth 3 view))
+                  (when (car view) (select-window! w)))
+                (loop (cdr rows) (cdr views))))
+            (layout-target-set! (nth 3 saved))))
+        (set! *group-current-inhibit* inhibited)
+        (set! *winner-inhibit* winner)
+        (frame-group-label-refresh!)
+        #t))))
 
 (define (chat-list-back!)
   (chat-list-clear-search!)
-  (chat-list-unpin!)
-  (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
-    (when from (switch-to-group! from)))
-  (chat-list-release-frame!))
+  (unless (chat-list-release-frame!)
+    ;; A list opened before this definition loaded has no frame snapshot.
+    ;; Use its saved group without deleting any restored panes.
+    (when (window-showing *chat-list-buffer*)
+      (chat-list-unpin!)
+      (let ((from (buffer-local *chat-list-buffer* 'chat-list-from-group)))
+        (when from (switch-to-group! from))))))
 
 ;; a saved conversation is a file and has no group of its own, so reading
 ;; it back lands it where you stood when you asked for it
@@ -950,10 +1036,11 @@
 (define (chat-list-filter-line! &optional standing)
   (let* ((narrow (lambda (q)
                    (chat-list-search-hits q)
-                   (list-set-query! *chat-list-buffer* q)
-                   ;; the scope widens the moment you type, so the rows are
-                   ;; built again and not only filtered
-                   (ibuffer-refresh! *chat-list-buffer*)
+                   ;; Only crossing between the recent scope and all chats
+                   ;; changes the source. Subsequent keys filter that snapshot.
+                   (let ((was-empty (equal? (list-query *chat-list-buffer*) "")))
+                     (list-set-query! *chat-list-buffer* q
+                       (not (equal? was-empty (equal? q "")))))
                    (ibuffer-goto-first-row! *chat-list-buffer*)
                    (chat-list-preview!)))
          (done (lambda () (set! *mb-list-buffer* #f) (set! *mb-list-prompt* #f))))

@@ -99,12 +99,75 @@ defmodule Compos.ListPerformanceTest do
 
     # a wake re-runs the mode setup (this is what the buffer switcher's
     # preview and desktop restore do) — cached rows redraw, no fetch
-    eval!(~S{(with-current-buffer "*zz-list-performance*" (lambda () (set-mode! "zz-list-wake-mode")))})
+    eval!(
+      ~S{(with-current-buffer "*zz-list-performance*" (lambda () (set-mode! "zz-list-wake-mode")))}
+    )
+
     assert eval!("*zz-wake-fetches*") == "1"
     assert Buffer.text("*zz-list-performance*") =~ "alpha"
 
     # an explicit re-open asks for current rows
     eval!(~S{(list-mode-show! "zz-list-wake-mode")})
     assert eval!("*zz-wake-fetches*") == "2"
+  end
+
+  test "semantic rows compute cells once and repeated queries do no work" do
+    eval!(~S"""
+    (begin
+      (define *zz-render-cells* 0)
+      (define-list-mode! "zz-render-cells-mode"
+        (list 'buffer "*zz-list-performance*"
+              'rows (lambda (buf) '("alpha" "beta" "gamma"))
+              'columns (lambda (buf) '(("name" #f)))
+              'cells (lambda (buf row)
+                       (set! *zz-render-cells* (+ *zz-render-cells* 1))
+                       (list row))
+              'composml-fields (lambda (buf row) '("name"))
+              'match (lambda (buf row q) (completion-match? row q 'substring))
+              'title (lambda (buf) "Cells")
+              'no-marks #t 'local-filter #t))
+      (list-mode-show! "zz-render-cells-mode")
+      (set! *zz-render-cells* 0)
+      (list-redraw! "*zz-list-performance*"))
+    """)
+
+    assert eval!("*zz-render-cells*") == "3"
+    assert length(Buffer.get_local("*zz-list-performance*", "render-records")) == 3
+
+    eval!(~S{(list-set-query! "*zz-list-performance*" "beta")})
+    assert eval!("*zz-render-cells*") == "4"
+    eval!(~S{(list-set-query! "*zz-list-performance*" "beta")})
+    assert eval!("*zz-render-cells*") == "4"
+    assert Buffer.text("*zz-list-performance*") =~ "beta"
+    refute Buffer.text("*zz-list-performance*") =~ "alpha"
+  end
+
+  test "a scope-changing query fetches and draws just once" do
+    eval!(~S"""
+    (begin
+      (define *zz-scope-fetches* 0)
+      (define *zz-scope-draws* 0)
+      (define-list-mode! "zz-scope-mode"
+        (list 'buffer "*zz-list-performance*"
+              'rows (lambda (buf)
+                      (set! *zz-scope-fetches* (+ *zz-scope-fetches* 1))
+                      (if (equal? (list-query buf) "") '("alpha") '("alpha" "beta")))
+              'columns (lambda (buf) '(("name" #f)))
+              'cells (lambda (buf row) (list row))
+              'title (lambda (buf)
+                       (set! *zz-scope-draws* (+ *zz-scope-draws* 1)) "Scope")
+              'match (lambda (buf row q) (completion-match? row q 'substring))
+              'no-marks #t 'local-filter #t))
+      (list-mode-show! "zz-scope-mode")
+      (set! *zz-scope-draws* 0)
+      (list-set-query! "*zz-list-performance*" "b" #t))
+    """)
+
+    assert eval!("*zz-scope-fetches*") == "2"
+    assert eval!("*zz-scope-draws*") == "1"
+    assert Buffer.text("*zz-list-performance*") =~ "beta"
+    eval!(~S{(list-set-query! "*zz-list-performance*" "be")})
+    assert eval!("*zz-scope-fetches*") == "2"
+    assert eval!("*zz-scope-draws*") == "2"
   end
 end

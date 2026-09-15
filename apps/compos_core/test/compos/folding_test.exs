@@ -70,4 +70,48 @@ defmodule Compos.FoldingTest do
     assert leaf.total_lines == 1
     assert leaf.hidden_lines == MapSet.new([1, 2])
   end
+
+  test "repeated renders keep fold geometry current across edits and narrowing" do
+    buf = fresh_buffer("* a\nbody1\nbody2\n* b\ntail")
+    on_exit(fn -> Compos.Core.kill_buffer(buf) end)
+    Buffer.set_hidden(buf, [{3, 15}])
+    first = leaf_for(buf)
+    Buffer.set_local(buf, "modeline-info", "changed elsewhere")
+    assert leaf_for(buf).hidden_lines == first.hidden_lines
+    assert leaf_for(buf).total_lines == 3
+
+    Buffer.set_hidden(buf, [{3, 9}])
+    assert leaf_for(buf).hidden_lines == MapSet.new([1])
+    assert leaf_for(buf).total_lines == 4
+    Buffer.narrow(buf, 10, 24)
+    assert leaf_for(buf).total_lines == 3
+    Buffer.widen(buf)
+    Buffer.append(buf, "\nmore", source: :editor)
+    assert leaf_for(buf).total_lines == 5
+    Buffer.set_hidden(buf, [])
+    assert leaf_for(buf).total_lines == 6
+    assert leaf_for(buf).hidden_lines == MapSet.new()
+  end
+
+  test "an unchanged folded window does not rescan geometry on another redraw" do
+    buf = fresh_buffer(String.duplicate("line\n", 1000))
+    Buffer.set_hidden(buf, [{4, 499}])
+    mfa = {Editor, :visible_geometry, 4}
+    :erlang.trace_pattern(mfa, true, [:local, :call_count])
+
+    try do
+      leaf_for(buf)
+      assert :erlang.trace_info(mfa, :call_count) == {:call_count, 1}
+      Buffer.set_local(buf, "modeline-info", "updated")
+      leaf_for(buf)
+      leaf_for(buf)
+      assert :erlang.trace_info(mfa, :call_count) == {:call_count, 1}
+      Buffer.goto(buf, 500)
+      leaf_for(buf)
+      assert :erlang.trace_info(mfa, :call_count) == {:call_count, 2}
+    after
+      :erlang.trace_pattern(mfa, false, [:local, :call_count])
+      Compos.Core.kill_buffer(buf)
+    end
+  end
 end

@@ -97,7 +97,7 @@ defmodule Compos.GroupSwitchCommandTest do
     assert eval!("(current-buffer)") == ~s("#{first}")
   end
 
-  test "a move rewrites the headline of every buffer it moved", %{
+  test "a move refreshes visible headlines and catches up hidden ones when shown", %{
     first: first,
     second: second
   } do
@@ -114,8 +114,10 @@ defmodule Compos.GroupSwitchCommandTest do
     # a real command, so the headline exists to go stale in the first place
     Session.run_command("beginning-of-buffer")
 
-    eval!(~s{(define-command "zz-headline-move"
-               (lambda () (group-move-buffers-to! (list "#{first}" "#{second}") "#{destination}")))})
+    eval!(
+      ~s{(define-command "zz-headline-move"
+               (lambda () (group-move-buffers-to! (list "#{first}" "#{second}") "#{destination}")))}
+    )
 
     Session.run_command("zz-headline-move")
 
@@ -123,10 +125,14 @@ defmodule Compos.GroupSwitchCommandTest do
       assert eval!(~s{(map group-label (dashboard--group-ids "#{buffer}"))}) =~ "headline-dest",
              "#{buffer} did not move"
 
-      assert eval!(
-               ~s{(equal? (buffer-local "#{buffer}" 'dashboard-line-blocks)
-                          (dashboard-line-blocks "#{buffer}"))}
-             ) == "#t",
+      unless Enum.any?(leaves(Editor.render_state().tree), &(&1.buffer == buffer)) do
+        assert eval!(~s{(buffer-local "#{buffer}" 'group-display-dirty)}) == "#t"
+        Editor.set_window_buffer(buffer)
+        eval!("(windows-shown-catchup!)")
+      end
+
+      assert eval!(~s{(equal? (buffer-local "#{buffer}" 'dashboard-line-blocks)
+                          (dashboard-line-blocks "#{buffer}"))}) == "#t",
              "#{buffer} kept a headline from before the move"
     end
   end
@@ -273,7 +279,9 @@ defmodule Compos.GroupSwitchCommandTest do
     assert Editor.render_state().minibuffer == nil
   end
 
-  test "remove-group-from-buffer stages the only membership before C-g applies it", %{first: first} do
+  test "remove-group-from-buffer stages the only membership before C-g applies it", %{
+    first: first
+  } do
     only = group_id("remove-only-on-close")
 
     eval!("""
@@ -346,8 +354,15 @@ defmodule Compos.GroupSwitchCommandTest do
 
     rendered = Editor.render_state()
     leaf = rendered.tree |> leaves() |> Enum.find(&(&1.buffer == second))
-    docs_color = eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{docs}")))]) |> Jason.decode!()
-    mail_color = eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{mail}")))]) |> Jason.decode!()
+
+    docs_color =
+      eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{docs}")))])
+      |> Jason.decode!()
+
+    mail_color =
+      eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{mail}")))])
+      |> Jason.decode!()
+
     docs_face = eval!(~s[(group-color-face "#{docs}")]) |> Jason.decode!()
 
     assert rendered.frame_group == "color-docs"

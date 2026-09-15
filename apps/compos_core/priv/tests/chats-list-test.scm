@@ -123,12 +123,12 @@
     (chats-test-reset!)))
 
 (deftest 'the-row-at-point-previews-its-chat
-  "looking is free: the row under the cursor shows in the preview pane"
+  "the row under the cursor schedules its preview after the navigation burst"
   (lambda ()
     (chats-test-open! 'none 'name)
     (chat-list-preview!)
-    (check-equal! (window-buffer (chat-list-preview-window)) (list-current *chat-list*)
-                  "the preview pane shows the row at point")
+    (check-equal! (cadr (chat-list--preview-request)) (list-current *chat-list*)
+                  "the pending preview names the row at point")
     (chats-test-reset!)))
 
 (deftest 'the-resting-list-is-flat-and-most-recent-first

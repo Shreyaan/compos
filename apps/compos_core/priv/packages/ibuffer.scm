@@ -1350,12 +1350,12 @@
                       (cond ((ibuffer-heading? row)
                              (ibuffer-toggle-fold! (ibuffer-heading-key row) view))
                             (else
-                             (list-set-query! view "")
+                             (list-clear-query! view)
                              (pick row (lambda () (ibuffer-prompt-close! view row))))))))
             (list 'cancel
                   (lambda ()
                     (done)
-                    (list-set-query! view "")
+                    (list-clear-query! view)
                     (ibuffer-prompt-close! view)))
             (list 'legend *ibuffer-prompt-legend*)
             (list 'style "filter")))
@@ -1490,7 +1490,8 @@
       (cond
         ((and home (window-exists? home)
               (not (equal? (window-buffer home) buf)))
-         (window-preview-buffer! b home))
+         (unless (equal? (window-buffer home) b)
+           (window-preview-buffer! b home)))
         ;; the window form: preview only from the table's own window,
         ;; so a move in a table nobody looks at moves no other window
         ((equal? (window-buffer (active-window)) buf)
