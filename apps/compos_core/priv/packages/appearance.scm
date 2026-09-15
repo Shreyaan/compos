@@ -108,7 +108,17 @@
   'set (lambda (on)
          (set-face-attribute! 'chrome 'anim (animation-css on))))
 
-(set-face-attribute! 'chrome 'anim (animation-css ui-animation))
+;; A theme load clears every face attribute it is about to set, and this
+;; one is set by hand rather than from *face-defaults*, so it was cleared
+;; and never restored: --chrome-anim went missing and every
+;; var(--chrome-anim, DURATION) fell back to its duration. Motion came
+;; back on with the theme, whatever the setting said. Re-apply it after a
+;; theme, and keep every fallback in the stylesheets at zero, so a
+;; missing variable can only ever mean no motion.
+(define (appearance--anim-apply!)
+  (set-face-attribute! 'chrome 'anim (animation-css ui-animation)))
+(add-hook! 'theme-change-hook 'appearance--anim-apply!)
+(appearance--anim-apply!)
 
 ;; The size of buffer text is the default face's size. 13px was the
 ;; design size; the reading size is larger. A defface! default survives a

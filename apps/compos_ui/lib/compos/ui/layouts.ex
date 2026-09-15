@@ -141,7 +141,7 @@ defmodule Compos.Ui.Layouts do
           .split.v { flex-direction: column; }
           .split-child {
             display: flex; min-width: 0; min-height: 0;
-            transition: flex-grow var(--chrome-anim, 140ms) ease-out;
+            transition: flex-grow var(--chrome-anim, 0ms) ease-out;
           }
           .split-child > * { flex: 1; min-width: 0; min-height: 0; }
           /* A popup stays in the window tree, so editor commands can reach it.
@@ -365,7 +365,7 @@ defmodule Compos.Ui.Layouts do
             content: ""; width: .9em; height: .9em; flex: 0 0 auto;
             border: 2px solid color-mix(in srgb, var(--accent-fg, #26356b) 24%, transparent);
             border-top-color: var(--accent-fg, #26356b); border-radius: 50%;
-            animation: llm-thinking-spin var(--chrome-anim, .72s) linear infinite;
+            animation: llm-thinking-spin var(--chrome-anim, 0s) linear infinite;
           }
           @keyframes llm-thinking-spin { to { transform: rotate(360deg); } }
           @media (prefers-reduced-motion: reduce) {
@@ -782,7 +782,7 @@ defmodule Compos.Ui.Layouts do
           .ag-chevron {
             width: 11px; flex: 0 0 11px; color: var(--agent-meta-fg, #8a8577);
             font-family: var(--font-sans); font-size: calc(var(--ag-base) * 1.0); line-height: 1;
-            transform: rotate(0deg); transition: transform var(--chrome-anim, 100ms) ease;
+            transform: rotate(0deg); transition: transform var(--chrome-anim, 0ms) ease;
           }
           .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
           .ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-meta-fg, #999); }
@@ -1055,7 +1055,7 @@ defmodule Compos.Ui.Layouts do
             background: color-mix(in srgb, var(--border-bg, #cbc4b1) 30%, transparent);
             border: 1px solid transparent;
             max-width: 20ch; overflow: hidden; text-overflow: ellipsis;
-            transition: background var(--chrome-anim, 90ms) ease, color var(--chrome-anim, 90ms) ease;
+            transition: background var(--chrome-anim, 0ms) ease, color var(--chrome-anim, 0ms) ease;
           }
           .ml-tab:hover {
             color: var(--fg, #2b2723);

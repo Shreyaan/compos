@@ -470,7 +470,7 @@
     (if dark?
         "#status[data-state=error]{color:#ffb4ab;border-color:#8c4a45;background:#321d1b}"
         "#status[data-state=error]{color:#b42318;border-color:#f3b7b2;background:#fff3f2}")
-    "#status[data-state=saved]{opacity:0;transition:opacity .8s 1.2s}"
+    "#status[data-state=saved]{opacity:0;transition:opacity 0s 2s}"
     ".compos-chart{width:100%;height:100%;min-width:1px;min-height:1px;overflow:hidden;"
     (if dark?
         "border:1px solid rgba(201,198,190,.22);border-radius:8px;background:#252625;box-shadow:0 2px 10px rgba(0,0,0,.32)}"

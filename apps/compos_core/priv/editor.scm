@@ -907,22 +907,22 @@
 
 ;; Split at heading rows before filtering. A heading owns every row up to the
 ;; next heading. It stays only when at least one row in its section stays.
-(define (list-keep-section-emit buf heading rows filters ctx out)
+(define (list-keep-section-emit buf heading rows filters ctx)
   (let ((kept (filter (lambda (e) (list-entry-kept? buf e filters ctx))
                       (reverse rows))))
     (cond ((pair? kept)
            (let ((project (list-opt buf 'filtered-heading)))
-             (append out (if heading
-                             (cons (if project (project buf heading kept) heading) kept)
-                             kept))))
+             (if heading
+                 (cons (if project (project buf heading kept) heading) kept)
+                 kept)))
           ;; a heading that is a row of its own (a folded section) stays
           ;; when it matches by itself
           ((and heading
                 (list-selectable? buf heading)
                 (list-entry-kept? buf heading filters ctx))
            (let ((project (list-opt buf 'filtered-heading)))
-             (append out (list (if project (project buf heading #f) heading)))))
-          (else out))))
+             (list (if project (project buf heading #f) heading))))
+          (else '()))))
 
 ;; a row that starts a section: a heading, or a folded section standing
 ;; as one selectable row. The mode's 'section? says which; without it,
@@ -932,12 +932,17 @@
     (if f (f buf e) (list-separator? buf e))))
 
 (define (list-keep-sections buf entries filters ctx)
+  ;; Each section answers with its own kept rows and the whole is joined
+  ;; once. Threading the result so far through append copied every section
+  ;; already kept onto the next one, so a table of 41 sections paid for its
+  ;; own length again and again -- docs/LISTS.md rule 1.
   (let walk ((rest entries) (heading #f) (rows '()) (out '()))
     (cond ((null? rest)
-           (list-keep-section-emit buf heading rows filters ctx out))
+           (apply append
+             (reverse (cons (list-keep-section-emit buf heading rows filters ctx) out))))
           ((list-section-start? buf (car rest))
            (walk (cdr rest) (car rest) '()
-                 (list-keep-section-emit buf heading rows filters ctx out)))
+                 (cons (list-keep-section-emit buf heading rows filters ctx) out)))
           (else (walk (cdr rest) heading (cons (car rest) rows) out)))))
 
 (define (list-keep buf entries)

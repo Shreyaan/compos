@@ -42,6 +42,20 @@ defmodule Compos.ListingPeekCardTest do
         eval!("(listing-preview-schedule! *card-owner* \"*zz-card-target*\")", frame)
         Process.sleep(250)
         assert eval!("(popup-open?)", frame) == "#f"
+        if @command == "ibuffer" do
+          # Even up at the first row is an explicit request to look again.
+          KeyDispatch.handle_key(frame, "<up>")
+          Process.sleep(250)
+          assert eval!("(popup-open?)", frame) == "#t"
+          KeyDispatch.handle_key(frame, "p")
+          assert eval!("(popup-open?)", frame) == "#f"
+          KeyDispatch.handle_key(frame, "<up>")
+          Process.sleep(250)
+          assert eval!("(popup-open?)", frame) == "#f"
+          KeyDispatch.handle_key(frame, "p")
+          assert eval!("(popup-open?)", frame) == "#t"
+          KeyDispatch.handle_key(frame, "q")
+        end
         KeyDispatch.handle_key(frame, "q")
         assert eval!("(current-buffer)", frame) == "\"*zz-card-source*\""
       after

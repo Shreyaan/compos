@@ -609,11 +609,13 @@
             (if (null? rest) '() (list (list "ungrouped" "group:" rest "faint"))))))
 
 (define (ibuffer-group-sections buf rows current)
-  (fold (lambda (out bucket)
-          (append out
-            (ibuffer-section buf (car bucket) (nth 1 bucket) (nth 2 bucket) (nth 3 bucket))))
-        '()
-        (ibuffer-group-buckets rows current ibuffer-memberships)))
+  ;; One pass, no growing prefix. Folding with append copied every section
+  ;; built so far onto each new one, so the last of 41 buckets paid for the
+  ;; 40 before it -- docs/LISTS.md rule 1, in the source this time.
+  (apply append
+    (map (lambda (bucket)
+           (ibuffer-section buf (car bucket) (nth 1 bucket) (nth 2 bucket) (nth 3 bucket)))
+         (ibuffer-group-buckets rows current ibuffer-memberships))))
 
 ;; the rows bucketed by a key fn, one section per key, keys by name;
 ;; LAST names the key that goes at the end whatever its name
@@ -1327,7 +1329,7 @@
 (define (listing-preview! owner target)
   (let ((source (if (equal? (window-buffer (active-window)) owner)
                     (active-window) (window-showing owner))))
-    (when (and source (buffer-known? target) (not (equal? owner target))
+    (when (and source (not (buffer-local owner 'listing-peek-disabled)) (buffer-known? target) (not (equal? owner target))
                (or (equal? (active-window) source) (equal? (mb-list-target) owner))
                (not (equal? (buffer-local owner 'listing-peek-dismissed-row) target)))
       (let* ((copy (string-append " *listing-preview:" (selected-frame) "*"))
@@ -1401,13 +1403,25 @@
       (buffer-set-local! owner 'listing-peek-dismissed-row #f))
     (unless (and (string? target) (buffer-known? target))
       (listing-preview-dismiss! owner))
-    (when (and (string? target) (buffer-known? target))
+    (when (and (not (buffer-local owner 'listing-peek-disabled))
+               (string? target) (buffer-known? target))
       (unless (equal? target (buffer-local owner 'listing-peek-dismissed-row))
         (buffer-set-local! owner 'listing-peek-dismissed-row #f)
         (debounce! key 180 (lambda (ignored)
           (when (and (= ticket (or (frame-local 'listing-peek-ticket) 0))
                      (buffer-known? owner) (equal? (list-current owner) target))
             (listing-preview! owner target))) #f)))))
+
+(define-command "ibuffer-toggle-preview" "Toggle automatic previews in this listing"
+  (lambda ()
+    (let* ((owner (ibuffer-view))
+           (disabled (not (buffer-local owner 'listing-peek-disabled))))
+      (buffer-set-local! owner 'listing-peek-disabled disabled)
+      (listing-preview-dismiss! owner)
+      (unless disabled
+        (buffer-set-local! owner 'listing-peek-dismissed-row #f)
+        (listing-preview! owner (list-current owner)))
+      (message (if disabled "Previews off" "Previews on")))))
 
 (define (listing-peek-dismiss!)
   (let ((owner (frame-local 'listing-preview-owner))
@@ -1546,11 +1560,9 @@
   box-shadow: inset 3px 0 var(--accent-fg, #7aa2f7);
 }
 
-/* A chat that is running says so without a word: its dot breathes. */
-@keyframes ibuffer-live-dot { 0%, 100% { opacity: 1 } 50% { opacity: 0.25 } }
-:is(buffers, chat-list) c-text.chat-live {
-  animation: ibuffer-live-dot 1.4s ease-in-out infinite;
-}
+/* A chat that is running says so without a word, and says it by colour.
+   The dot does not breathe: a table is a thing to read, and nothing in
+   it moves on its own. */
 
 /* A heading leaves the grid: it is the line that opens a section, not a
    row of it, so it can wear its own tracking and weight. The tracking
@@ -1788,6 +1800,8 @@
 ;; Row motion schedules an isolated card; it never visits the source buffer.
 (define (ibuffer-preview! &optional buf b)
   (let ((owner (or buf (ibuffer-view))))
+    ;; Explicit row navigation can reopen a dismissed card, even at a boundary.
+    (buffer-set-local! owner 'listing-peek-dismissed-row #f)
     (listing-preview-schedule! owner (or b (ibuffer-current owner)))))
 
 (define-command "ibuffer-next" "Move down to the next buffer"
@@ -2047,12 +2061,17 @@
     'source-filter ibuffer-narrow-source
     'filter-delay-ms ibuffer-filter-delay-ms
     'filtered-heading
+      ;; The filters and the row context are only wanted when MEMBERS is #f
+      ;; and this has to work the visible rows out itself. Reading them
+      ;; eagerly built one row context per section and threw it away: 41
+      ;; sections at about 1.7ms each, on every draw of the table, which is
+      ;; the same waste docs/LISTS.md rule 1 names.
       (lambda (buf head members)
-        (let* ((filters (list-filters buf))
-               (ctx (list-row-ctx buf))
-               (visible (or members
-                            (filter (lambda (b) (list-entry-kept? buf b filters ctx))
-                                    (ibuffer-heading-members head)))))
+        (let* ((visible (or members
+                            (let ((filters (list-filters buf))
+                                  (ctx (list-row-ctx buf)))
+                              (filter (lambda (b) (list-entry-kept? buf b filters ctx))
+                                      (ibuffer-heading-members head))))))
           (if (equal? visible (ibuffer-heading-members head)) head
               (ibuffer-heading (ibuffer-heading-label head) (ibuffer-heading-key head)
                                (nth 2 head) visible (ibuffer-heading-face head)))))
@@ -2093,6 +2112,7 @@
     'preview (lambda (buf b) (ibuffer-preview! buf b))
     'keys '(("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
             ("RET" "ibuffer-visit") ("SPC" "list-toggle-mark")
+            ("p" "ibuffer-toggle-preview")
             ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
             ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")
             ("TAB" "ibuffer-toggle-filter-group")

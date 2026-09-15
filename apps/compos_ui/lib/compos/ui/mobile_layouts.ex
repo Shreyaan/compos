@@ -155,7 +155,7 @@ defmodule Compos.Ui.MobileLayouts do
           .ag-tool, .ag-thought { margin: 8px 0; border: 1px solid var(--rule); background: var(--panel); font-size: 11px; }
           .ag-tool summary, .ag-thought summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; }
           .ag-tool summary::-webkit-details-marker { display: none; }
-          .ag-chevron { color: var(--faint); transition: transform var(--chrome-anim, .12s); }
+          .ag-chevron { color: var(--faint); transition: transform var(--chrome-anim, 0s); }
           .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
           .ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
           .ag-dot.running { background: var(--amber); }
@@ -189,7 +189,7 @@ defmodule Compos.Ui.MobileLayouts do
           .ag-queued-row { margin: 4px 14px; }
           .ag-activity { display: flex; align-items: center; gap: 8px; padding: 6px 14px 8px; font-size: 10.5px; color: var(--faint); }
           .ag-activity-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .hh-blink { display: inline-block; width: 7px; height: 14px; background: var(--indigo); animation: hh-blink var(--chrome-anim, .9s) step-end infinite; }
+          .hh-blink { display: inline-block; width: 7px; height: 14px; background: var(--indigo); animation: hh-blink var(--chrome-anim, 0s) step-end infinite; }
 
           /* ── the composer ───────────────────────────────────────── */
           .hh-composer { flex: none; background: var(--panel); border-top: 1px solid var(--rule); z-index: 6; }

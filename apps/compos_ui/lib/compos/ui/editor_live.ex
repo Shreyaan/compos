@@ -3675,7 +3675,7 @@ defmodule Compos.Ui.EditorLive do
        measure rows the caret itself moved. The negative margin keeps the
        border from pushing the text along. */
     .pt{display:inline;border-left:2px solid #{accent};margin:0 -1px;
-        animation:ptb var(--chrome-anim, 1.1s) step-end infinite}
+        animation:ptb var(--chrome-anim, 0s) step-end infinite}
     /* a zero-width character gives the caret a line box of its own after a
        trailing break: RET at the end of a paragraph shows the new line */
     .pt::after{content:"\\200B"}

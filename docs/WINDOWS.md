@@ -589,3 +589,17 @@ This supersedes older cases describing `C-x b` as following a mode window.
 | E10 — Rich mode | `n` / `p` onto chats and block views | Preserve source mode and rich presentation without copying chat runtime identity. |
 
 Normal mode-driven opens continue to use mode attraction.
+
+### Preview toggle
+
+In ibuffer, `p` toggles automatic previews for that listing. Turning previews
+off dismisses the card and cancels pending previews. Arrow navigation does not
+reopen it until previews are enabled again. Turning previews on immediately
+previews the selected buffer. With previews enabled, `q` dismisses the current
+card, and the next arrow movement may reopen it, including at a list boundary.
+
+| Case | Commands | Expected result |
+| --- | --- | --- |
+| E11 — Toggle off | `p`, then `<up>` / `<down>` | Navigate without creating a preview. |
+| E12 — Toggle on | `p` again | Immediately preview the selected buffer. |
+| E13 — Resume after dismissal | `q`, then `<up>` | Show the selected buffer's preview again; keep focus in ibuffer. |
