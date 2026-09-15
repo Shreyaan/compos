@@ -195,12 +195,21 @@
         (buffer-set-local! buf 'diff-layout-cache l)
         l)))
 
-(define (diff--section-before-line buf target)
-  (let loop ((ls (split-lines (buffer-text buf))) (line 1) (section ""))
-    (if (or (null? ls) (>= line target))
-        section
+;; -> ((LINE SECTION) ...), the section label lines in reverse document
+;; order. The layout scans the text once and asks this list for every card.
+(define (diff--section-marks buf)
+  (let loop ((ls (split-lines (buffer-text buf))) (line 1) (marks '()))
+    (if (null? ls)
+        marks
         (let ((next (diff--section-line? buf (car ls))))
-          (loop (cdr ls) (+ line 1) (if next next section))))))
+          (loop (cdr ls) (+ line 1)
+                (if next (cons (list line next) marks) marks))))))
+
+(define (diff--section-before-line marks target)
+  (let loop ((ms marks))
+    (cond ((null? ms) "")
+          ((< (car (car ms)) target) (cadr (car ms)))
+          (else (loop (cdr ms))))))
 
 (define (diff--layout-hunks buf section file hunks)
   (let loop ((hs hunks) (n 0) (acc '()))
@@ -222,12 +231,12 @@
                         'lines (diff--get h 'lines))
                   acc))))))
 
-(define (diff--layout-card buf f overrides)
+(define (diff--layout-card buf f overrides marks)
   (let* ((start (diff--line-number buf (diff--get f 'start-byte)))
          (stop-byte (max (diff--get f 'start-byte)
                          (- (diff--get f 'end-byte) 1)))
          (end (diff--line-number buf stop-byte))
-         (section (diff--section-before-line buf start))
+         (section (diff--section-before-line marks start))
          (name (diff--name f))
          (key (diff--key section name))
          (override (assoc key overrides)))
@@ -238,8 +247,9 @@
                                     (or (diff--get f 'hunks) '())))))
 
 (define (diff--layout-parse buf)
-  (let ((overrides (or (buffer-local buf 'diff-overrides) '())))
-    (map (lambda (f) (diff--layout-card buf f overrides))
+  (let ((overrides (or (buffer-local buf 'diff-overrides) '()))
+        (marks (diff--section-marks buf)))
+    (map (lambda (f) (diff--layout-card buf f overrides marks))
          (diff-parse (buffer-text buf)))))
 
 ;; cur while scanning: (SECTION FILEPLIST START-LINE HUNK-LINES-reversed)
@@ -809,11 +819,12 @@
 
 ;;; --- where point is -----------------------------------------------------------
 
+;; The rope answers from its line index. A walk over split-lines costs the
+;; whole text per call, and the layout calls this for every file and hunk.
+;; A newline byte counts as the start of the next line: a card's end-byte
+;; is exclusive, and the fold ranges read the line after it.
 (define (diff--line-number buf pos)
-  (let loop ((ls (split-lines (buffer-text buf))) (n 1) (at 0))
-    (cond ((null? ls) n)
-          ((> (+ at (string-byte-length (car ls))) pos) n)
-          (else (loop (cdr ls) (+ n 1) (+ at (string-byte-length (car ls)) 1))))))
+  (with-current-buffer buf (lambda () (line-number-at-pos (+ pos 1)))))
 
 (define (diff--card-at layout line)
   (let loop ((cs layout))

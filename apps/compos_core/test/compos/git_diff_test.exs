@@ -828,4 +828,43 @@ defmodule Compos.GitDiffTest do
     assert Buffer.hidden(buf, "diff") != []
     assert Buffer.read_only?(buf)
   end
+
+  # A 225 KB revision of 149 files once cost more than the 1024 MB Scheme heap
+  # limit: every card and every hunk split the whole text again to find its
+  # line. Desktop restore re-runs the mode setup, so the editor died at boot.
+  test "diff-show lays out a large revision and restores it" do
+    buf = "*git show: large-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> if Buffer.exists?(buf), do: Compos.Core.kill_buffer(buf) end)
+
+    body = Enum.map_join(1..40, fn n -> "+added line number #{n} of this hunk\n" end)
+
+    files =
+      Enum.map_join(1..150, fn i ->
+        "diff --git a/f#{i}.txt b/f#{i}.txt\n--- a/f#{i}.txt\n+++ b/f#{i}.txt\n" <>
+          "@@ -0,0 +1,40 @@\n" <> body
+      end)
+
+    path = Path.join(System.tmp_dir!(), "compos-large-show-#{System.unique_integer([:positive])}.diff")
+    File.write!(path, "commit 1\n\n    big\n\n" <> files)
+    on_exit(fn -> File.rm(path) end)
+
+    {:ok, _} = Session.eval(~s[(diff-show! "#{buf}" (read-file "#{path}"))])
+
+    layout = cards(buf)
+    assert length(layout) == 150
+    lines = String.split(Buffer.text(buf), "\n")
+
+    first = hd(layout)
+    assert Enum.at(lines, first.start - 1) == "diff --git a/f1.txt b/f1.txt"
+    assert Enum.at(lines, hd(first.hunks).line - 1) =~ "@@ -0,0 +1,40 @@"
+
+    last = List.last(layout)
+    assert Enum.at(lines, last.start - 1) == "diff --git a/f150.txt b/f150.txt"
+    assert Enum.at(lines, last.end - 1) == "+added line number 40 of this hunk"
+
+    {:ok, _} = Session.eval(~s[(buffer-set-local! "#{buf}" 'diff-layout-cache #f)])
+    {:ok, _} = Session.eval(~s[(restore-buffer-runtime! "#{buf}")])
+    assert Buffer.get_local(buf, "mode-name") == "diff-show"
+    assert length(Buffer.get_local(buf, "diff-open-cards")) == 150
+  end
 end
