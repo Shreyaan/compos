@@ -12855,6 +12855,9 @@
     (append
       (dash--ruled
         (map cadr
+           ;; a cell that built no block says nothing, so it takes no slot and
+           ;; no rule beside it: outside a group there is no badge
+           (filter (lambda (cell) (cadr cell))
            ;; the group badge leads at every width, the chat title follows it,
            ;; and the metadata comes after both
            (let* ((group? (lambda (cell) (equal? (car cell) 'group)))
@@ -12866,7 +12869,7 @@
                                        tail))))
              (if keep
                  (filter (lambda (cell) (member (car cell) keep)) ordered)
-                 ordered))))
+                 ordered)))))
       (list (dash--state-mark buf)))))
 
 (define (dash--wide-seg key text &optional title-class)
