@@ -12842,16 +12842,13 @@
                                  (dash--seg "lane"
                                    (list (list "f-ok dseg-strong" (dash--lane buf)))
                                    'right "dseg-inline"))))))
-             ;; one wide segment at the end, wrapping to two lines with the key
-             ;; inline: a chat says what it is doing, and every other buffer of
-             ;; the repo names the open jj change, kept fresh by jj.scm
-             ;; A click on it opens the log of every line it showed.
-             (cond (summary
-                    (append (list (list 'wide (dash--wide-seg #f summary "dseg-chat-title")))
-                            (if (and vcs (not (dash--summary buf)))
-                                (list (list 'wide (dash--wide-seg "jj" vcs))) '())))
-                   (vcs (list (list 'wide (dash--wide-seg "jj" vcs))))
-                   (else '()))))
+             ;; the wide segments wrap to two lines with the key inline. The
+             ;; title leads; the open jj change of the repo follows it, kept
+             ;; fresh by jj.scm, and steps back when a chat writes a summary.
+             ;; A click on either opens the log of every line it showed.
+             (append (list (list 'wide (dash--wide-seg #f title "dseg-chat-title")))
+                     (if (and vcs (not (dash--summary buf)))
+                         (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
          (keep (dash--headline-keep buf (buffer-cols buf))))
     ;; the state marker rides after the ruled segments: it draws nothing, so
     ;; it takes no rule beside it, and no keep list can drop it
