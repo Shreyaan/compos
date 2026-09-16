@@ -160,11 +160,14 @@
         ((equal? level "debug") "dim")
         (else "accent")))
 
+;; #f, not "default": the default face is the one the buffer's own font
+;; size and background come from, so a span wearing it re-states both and
+;; ignores the text scale. An ordinary message wants no face at all.
 (define (messages--text-face level)
   (cond ((equal? level "error") "error")
         ((equal? level "warning") "warn")
         ((equal? level "debug") "dim")
-        (else "default")))
+        (else #f)))
 
 (define (messages--level-label level)
   (cond ((equal? level "error") "error")

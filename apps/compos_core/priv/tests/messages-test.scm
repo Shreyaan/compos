@@ -95,8 +95,8 @@
                    (list 'level "info" 'source "a.scm" 'group "" 'project ""
                          'text "ordinary"))))
       (check-equal! (nth 1 (nth 1 cells)) "accent" "the info chip is the accent")
-      (check-equal! (nth 1 (nth 3 cells)) "default"
-                    "and the text stays in the default face"))
+      (check-false! (nth 1 (nth 3 cells))
+                    "and the text wears no face"))
     (let ((cells (messages--cells "*unused*"
                    (list 'level "debug" 'source "a.scm" 'group "" 'project ""
                          'text "detail"))))
