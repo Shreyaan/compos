@@ -2096,16 +2096,17 @@ defmodule Compos.Ui.EditorLive do
                 :if={@node.ag_input.cur != "" && Map.get(@node, :cursor_visible, true)}
                 class="cursor"
               >{@node.ag_input.cur}</c-cursor>{@node.ag_input.post}</c-input>
-<%!-- completion-at-point, at the prompt. The transcript is not drawn
-                 from .line rows, so the popup the line renderer carries never
-                 reaches a chat: this is the same card, anchored to the input
-                 row and opening upward, because the row sits at the window's
-                 foot and there is no room below it. --%><%= if @active? && @completion do %><c-text
+            <%!-- completion-at-point, at the prompt. The transcript is not
+                 drawn from .line rows, so the popup the line renderer carries
+                 never reaches a chat: this is the same card, anchored to the
+                 input row and opening upward, because the row sits at the
+                 window's foot and there is no room below it. --%>
+            <%= if @active? && @completion do %><c-text
               class="cap-pop cap-pop-up"
               contenteditable="false"
             ><c-text class="cap-title">completion-at-point · {@completion.total}</c-text><c-text
               :for={c <- @completion.candidates}
-              class={"cap-row \#{if c.selected, do: "selected"}"}
+              class={"cap-row #{if c.selected, do: "selected"}"}
             ><c-text class="cap-label">{c.label}</c-text><c-text class="cap-kind">{c.hint}</c-text></c-text><c-text
               :for={c <- @completion.candidates}
               :if={c.selected}
@@ -2114,7 +2115,7 @@ defmodule Compos.Ui.EditorLive do
               role="note"
               aria-label="Completion documentation"
             ><c-text class="cap-doc-name">{c.label}</c-text><c-text class="cap-doc-body">{completion_doc(c)}</c-text></c-text></c-text><% end %>
-                        <c-key-hints
+            <c-key-hints
               :if={@node.ag_input.pre == "" and @node.ag_input.post == ""}
               class="ag-hint"
             >RET sends · C-RET interrupts</c-key-hints>
