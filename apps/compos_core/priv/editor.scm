@@ -13339,6 +13339,35 @@
 ;;; command called?". Apropos supplies task-language matches from command
 ;;; docs and recipes; the palette projects that broad catalog down to things
 ;;; a reader can act on here.
+;; A plain sentence can bind a key: "bind C-x C-g k to group-kill". The
+;; palette recognizes it, offers it first, and runs it on RET.
+(define (command-palette--bind-parse query)
+  (let* ((q (string-trim (or query "")))
+         (words (remove (lambda (w) (equal? w "")) (string-split q " "))))
+    (and (>= (length words) 4)
+         (equal? (string-downcase (car words)) "bind")
+         (let loop ((ws (cdr words)) (keys '()))
+           (cond
+             ((null? ws) #f)
+             ((equal? (string-downcase (car ws)) "to")
+              (and (not (null? keys))
+                   (pair? (cdr ws))
+                   (null? (cddr ws))
+                   (let ((command (cadr ws))
+                         (seq (string-join (reverse keys) " ")))
+                     (and (not (equal? seq ""))
+                          (command-fn command)
+                          (list seq command)))))
+             (else (loop (cdr ws) (cons (car ws) keys))))))))
+
+(define (command-palette--bind-hit query)
+  (let ((parsed (command-palette--bind-parse query)))
+    (and parsed
+         (list 'kind "intent"
+               'name (string-append "bind " (car parsed) " to " (cadr parsed))
+               'keys (car parsed)
+               'command (cadr parsed)))))
+
 (define (command-palette--candidate hit)
   (let ((kind (plist-get hit 'kind))
         (name (or (plist-get hit 'name) (plist-get hit 'task))))
@@ -13356,6 +13385,11 @@
                    (string-append "recipe  asks for "
                                   (number->string (length inputs))
                                   (if (= (length inputs) 1) " input" " inputs"))))))
+      ((equal? kind "intent")
+       (list name
+             (string-append "bind  " (plist-get hit 'keys)
+                            " → " (plist-get hit 'command)
+                            "  everywhere")))
       (else #f))))
 
 ;; A command the palette can draw: name, key and doc, in apropos hit shape.
@@ -13370,6 +13404,8 @@
 (define (command-palette--search query)
   (let ((words (apropos-query-words query)))
     (append
+      (let ((bind (command-palette--bind-hit query)))
+        (if bind (list bind) '()))
       (if (boundp (quote recipe-search)) (recipe-search query) '())
       (map command-palette--command-hit
            (filter (lambda (name)
@@ -13430,13 +13466,16 @@
   (command-palette--collect-recipe recipe (caddr recipe) '()))
 
 (define (command-palette--run choice)
-  (cond
-    ((command-fn choice)
-     (history-push! 'M-x choice)
-     (run-command choice))
-    ((and (boundp (quote *recipes*)) (assoc choice *recipes*))
-     (command-palette--run-recipe (assoc choice *recipes*)))
-    (else (message (string-append "No command or recipe named " choice)))))
+  (let ((bind (command-palette--bind-parse choice)))
+    (cond
+      ((command-fn choice)
+       (history-push! 'M-x choice)
+       (run-command choice))
+      ((and bind (boundp (quote keys-bind-intent)))
+       (keys-bind-intent (car bind) (cadr bind)))
+      ((and (boundp (quote *recipes*)) (assoc choice *recipes*))
+       (command-palette--run-recipe (assoc choice *recipes*)))
+      (else (message (string-append "No command or recipe named " choice))))))
 
 (domain! 'interaction)
 (effects! '(write execute))

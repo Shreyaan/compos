@@ -428,6 +428,26 @@
 (define-key "help-map" "B" "keys")
 
 (category! 'commands)
+(effects! '(write))
+
+;; A palette sentence "bind C-x C-g k to group-kill" lands here: one
+;; record, one custom.scm write, and the setter applies it at once.
+(define (keys-bind-intent keys command)
+  (if (command-fn command)
+      (begin
+        (keys--record!
+          (list (list "global" keys command (keys--lookup "global" keys))))
+        (keys--redraw!)
+        (message (string-append keys " runs " command " everywhere"))
+        #t)
+      (begin
+        (message (string-append "No command named " command))
+        #f)))
+
+(public! 'keys-bind-intent
+  "(keys-bind-intent KEYS COMMAND) — bind COMMAND to KEYS everywhere and persist; #f when the command does not exist")
+
+
 
 (defrecipe! "change a key" "(run-command \"keys\")")
 (defrecipe! "see every key in force here" "(run-command \"keys\")")

@@ -211,4 +211,37 @@ defmodule Compos.CommandPaletteTest do
     Process.sleep(120)
     assert Editor.render_state().minibuffer.prompt == "M-x "
   end
+
+  test "a bind sentence in Cmd-p binds the key everywhere" do
+    {:ok, _} =
+      Session.eval(
+        ~s{(define-command "zz-palette-bind" "Test: a palette bind target" (lambda () #t))}
+      )
+
+    custom = Path.join(Compos.Core.home(), "custom.scm")
+    File.rm(custom)
+
+    press("s-p")
+    type("bind <f9> z to zz-palette-bind")
+
+    wait_for(fn ->
+      Enum.any?(
+        Editor.render_state().minibuffer.candidates,
+        &(&1.label == "bind <f9> z to zz-palette-bind")
+      )
+    end)
+
+    press("RET")
+
+    assert Session.eval(~s{(key-binding "<f9> z")}) == {:ok, ~s{"zz-palette-bind"}}
+    assert File.read!(custom) =~ "user-key-bindings"
+    assert File.read!(custom) =~ "zz-palette-bind"
+
+    on_exit(fn ->
+      Session.eval(~s{(global-unset-key "<f9> z")})
+      Session.eval(~s{(customize-set! 'user-key-bindings '())})
+      File.rm(custom)
+    end)
+  end
+
 end
