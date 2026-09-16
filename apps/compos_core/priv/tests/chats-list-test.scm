@@ -39,7 +39,6 @@
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b))) *chats-test-bufs*)
   (chats-test-drop-group! "zz-chats-one")
   (chats-test-drop-group! "zz-chats-two")
-  (chats-test-drop-group! "zz-elsewhere")
   (delete-other-windows!))
 
 ;; a chat with no runtime: the api state, which the row calls idle
@@ -113,29 +112,25 @@
     (check-equal! (list-key-lines *chat-list*) '() "no key bar stands over the rows")
     (chats-test-reset!)))
 
-(deftest 'the-list-arrives-in-its-own-group
-  "one arrival, always the same one: the singleton buffer in the chat-list group"
+(deftest 'the-list-arrives-in-the-invoking-group
+  "one arrival: the current window and group, with preview supplied separately"
   (lambda ()
-    (let ((groups (chats-test-open! 'group 'name))
-          ;; a group named outside the test filter, so its own group chat
-          ;; does not turn up as a row in the next test
-          (elsewhere (group-record-create! "zz-elsewhere")))
-      (check-equal! *chat-list* "*chat-list*" "one buffer, never a per-group clone")
-      (check-equal! (buffer-group *chat-list*) (chat-list-group) "its own group")
-      (check-equal! (frame-group) (chat-list-group) "and the frame arrives there")
-      ;; invoke it from somewhere else: it must come back here, not be
-      ;; adopted by the group you were standing in
-      (switch-to-group! elsewhere)
+    (chats-test-open! 'group 'name)
+    (check-equal! (buffer-group *chat-list*) (frame-group) "the listing belongs here")
+    (check-equal! (length (window-list)) 1 "opening creates no companion window")
+    (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
+    (check-equal! (chat-list-preview-window) #f "preview is created only when shown")
+    (chats-test-reset!)))
+
+(deftest 'arriving-is-a-request-to-look
+  "a card dismissed before you left does not keep the preview shut when you come back"
+  (lambda ()
+    (chats-test-open! 'none 'name)
+    (let ((row (list-current *chat-list*)))
+      (buffer-set-local! *chat-list* 'listing-peek-dismissed-row row)
       (run-command "chat-list")
-      (check-equal! (chat-list-buffer) "*chat-list*" "still the one buffer")
-      (check-equal! (buffer-group "*chat-list*") (chat-list-group) "still its own group")
-      (check-equal! (frame-group) (chat-list-group) "the frame followed it there")
-      (check-equal! (length (window-list)) 1 "opening creates no companion window")
-      (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
-      (check-equal! (chat-list-preview-window) #f "preview is created only when shown")
-      ;; and leaving owes back the group the arrival crossed from
-      (chat-list-back!)
-      (check-equal! (frame-group) elsewhere "q hands the group back"))
+      (check-equal! (buffer-local *chat-list* 'listing-peek-dismissed-row) #f
+                    "arrival clears the dismissal, so the row can be looked at again"))
     (chats-test-reset!)))
 
 (deftest 'the-two-surfaces-are-bound-apart

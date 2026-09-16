@@ -1036,32 +1036,15 @@
 (define (chat-list-group) (group-ensure-record! *chat-list-group-name*))
 
 (define (chat-list-arrive!)
-  ;; one application, one state: the same buffer every time, in its own
-  ;; group. a per-group view cloned the app into whatever group you were
-  ;; standing in, so *chat-list* itself never existed and the clones
-  ;; piled up as *chat-list*<2>, <3>, <4>.
-  (let ((buf *chat-list-buffer*)
-        (group (chat-list-group))
-        (from (frame-group))
-        (was (window-buffer (active-window))))
-    (unless (buffer-known? buf) (buffer-create buf))
-    (buffer-move-to-group! buf group)
+  ;; one list per group, as ibuffer is one per group: the list opens in
+  ;; the group you called it from and stays there. A single application
+  ;; buffer in a group of its own was tried and reverted — arriving had
+  ;; to cross groups, which dragged the frame through that group's whole
+  ;; layout and left the list alone in it with nothing to preview into.
+  (let ((buf (ibuffer-group-view! "chat-list-mode" *chat-list-buffer*)))
     (ibuffer-view! buf 'sort 'recent 'grouping 'group)
     (set-frame-local! 'chat-list-view buf)
     (buffer-set-local! buf 'window-preference-cover #t)
-    ;; the group is named here, not inferred from the buffer:
-    ;; group-home-of answers #f for a special buffer, so leaving the
-    ;; arrival to switch-to-buffer-in-group! strands the frame where it
-    ;; stood and the application opens outside its own group
-    (cond ((equal? from group)
-           (set-frame-local! 'chat-list-from-group #f)
-           (set-frame-local! 'chat-list-from-buffer #f))
-          (else
-           ;; arriving crossed a group, so leaving owes back both the
-           ;; group and the buffer this took the window from
-           (set-frame-local! 'chat-list-from-group from)
-           (set-frame-local! 'chat-list-from-buffer (and (not (equal? was buf)) was))
-           (switch-to-group! group)))
     (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))
     #f))
 
@@ -1151,34 +1134,14 @@
                (active-window) (window-showing (chat-list-buffer)))))
     (when (and w (window-exists? w)) (select-window! w))))
 
-(define (chat-list-restore-group!)
-  (let ((from (frame-local 'chat-list-from-group))
-        (was (frame-local 'chat-list-from-buffer)))
-    (set-frame-local! 'chat-list-from-group #f)
-    (set-frame-local! 'chat-list-from-buffer #f)
-    (when (and from (group-resolve-id from) (not (equal? from (frame-group))))
-      (switch-to-group! from))
-    ;; the group's saved arrangement need not hold the buffer this took
-    ;; the window from, so put that back by name
-    (when (and (string? was) (buffer-known? was)
-               (not (equal? (window-buffer (active-window)) was)))
-      (with-layout-suppressed (lambda () (switch-to-buffer-here! was))))))
-
 (define (chat-list-keep! keep)
   (chat-list-clear-search!)
-  ;; a pick goes to the chat's own group, so the group and buffer the
-  ;; arrival crossed from are no longer owed anything
-  (set-frame-local! 'chat-list-from-group #f)
-  (set-frame-local! 'chat-list-from-buffer #f)
   (listing-visit! (chat-list-buffer) keep)
   (when (equal? (window-buffer (active-window)) keep) (end-of-buffer!)))
 
 (define (chat-list-back!)
   (chat-list-clear-search!)
-  (listing-quit! (chat-list-buffer))
-  ;; the arrival crossed into the application's group, so leaving hands
-  ;; the group you came from back; otherwise q strands you here
-  (chat-list-restore-group!))
+  (listing-quit! (chat-list-buffer)))
 
 ;; a saved conversation is a file and has no group of its own, so reading
 ;; it back lands it where you stood when you asked for it
@@ -1282,6 +1245,11 @@
     ;; row yet starts at the top
     (unless (list-current (chat-list-buffer))
       (ibuffer-goto-first-row! (chat-list-buffer)))
+    ;; arriving is an explicit request to look. A card dismissed with q
+    ;; shuts the preview for that row until the selection changes, and
+    ;; that local outlives leaving — so coming back to the row you left
+    ;; on showed no preview at all until you moved off it and back
+    (buffer-set-local! (chat-list-buffer) 'listing-peek-dismissed-row #f)
     (chat-list-preview!)
     ;; the list stands on its own keys; a filter line only opens when you
     ;; ask for one, by / or by arriving with words already typed
