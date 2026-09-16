@@ -1918,6 +1918,12 @@ defmodule Compos.Ui.EditorLive do
         read_only: assigns.node.read_only,
         dismissible?: Map.get(assigns.node, :dismissible, false),
         peek?: String.contains?(assigns.node.window_class || "", "listing-peek"),
+        # the transcript's reader mode, hoisted out of the transcript: the
+        # headerline draws it, and a preview card draws no controls at all
+        verbosity?:
+          assigns.node.render_mode == "agent" and
+            not String.contains?(assigns.node.window_class || "", "listing-peek"),
+        verbosity: Map.get(Map.get(assigns.node, :agent) || %{}, :verbosity, "info"),
         active?: assigns.node.id == assigns.active
       )
 
@@ -1972,7 +1978,7 @@ defmodule Compos.Ui.EditorLive do
         phx-value-win={@node.id} phx-value-cmd="dismiss-buffer"
         aria-label="Dismiss child or go back (q)"><kbd>q</kbd></button>
       <c-headerline :if={@node.header_line} class="buffer-header">{@node.header_line}</c-headerline>
-      <c-group :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
+      <c-group :if={@node.dash || @node.dashboard_line_blocks || @verbosity?} class="dash-top">
         <c-headerline
           :if={@node.dashboard_line_blocks}
           class="dash-persistent"
@@ -1983,6 +1989,16 @@ defmodule Compos.Ui.EditorLive do
         >
           <.blk :for={b <- @node.dashboard_line_blocks} b={block_view(b)} line={-1} win={@node.id} />
         </c-headerline>
+        <%!-- How much of the transcript to show is a fact about this window,
+               so it rides the headerline with the rest of them. Inside the
+               scroll it moved with the reader and covered the conversation;
+               it is also a sibling of the header line, not a child, because
+               the header line itself opens the dashboard on a click. --%>
+        <c-toolbar :if={@verbosity?} class="ag-verbosity" role="group" aria-label="Transcript verbosity">
+          <button type="button" class={if @verbosity == "info", do: "active"} phx-click="ui_cmd" phx-value-win={@node.id} phx-value-cmd="agent-verbosity-info">info</button>
+          <button type="button" class={if @verbosity == "log", do: "active"} phx-click="ui_cmd" phx-value-win={@node.id} phx-value-cmd="agent-verbosity-log">log</button>
+          <button type="button" class={if @verbosity == "debug", do: "active"} phx-click="ui_cmd" phx-value-win={@node.id} phx-value-cmd="agent-verbosity-debug">debug</button>
+        </c-toolbar>
         <c-group :if={@node.dash} class="dash-live">
           <c-text>L{@line}:C{@col}</c-text>
           <c-text>point {@node.point}</c-text>
