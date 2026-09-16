@@ -324,7 +324,7 @@
                       "summary rows do not repeat the summary label")
         (check-true! (string-contains? markdown "** jj")
                      "jj rows keep their distinguishing label"))
-      (check-equal! (plist-get (car (reverse (dashboard-line-blocks buf))) 'click)
+      (check-equal! (plist-get (car (dashboard-line-blocks buf)) 'click)
                     "summary-log"
                     "the wide segment opens the log")
       (set! *jj-lines* lines)

@@ -12168,6 +12168,20 @@
 .dash-persistent:has(.dseg-chat-title) .dseg { max-width: 100%; }
 .dash-persistent:has(.dseg-chat-title) .dseg-v { white-space: normal; overflow-wrap: anywhere; }
 
+/* Each pane responds to its own width, including two views of one chat. */
+.dash-top { container-type: inline-size; container-name: chat-header; }
+@container chat-header (min-width: 1100px) {
+  .dash-persistent:has(.dseg-chat-title) { flex-wrap: nowrap; gap: 16px; }
+  .dash-persistent .dseg-chat-title { flex: 1 1 0; }
+  .dash-persistent:has(.dseg-chat-title) .dseg,
+  .dash-persistent:has(.dseg-chat-title) .dseg-stack {
+    flex-direction: row; align-items: baseline; gap: 6px; }
+  .dash-persistent:has(.dseg-chat-title) .dseg-stack { gap: 16px; }
+  .dash-persistent:has(.dseg-chat-title) .dseg-v { white-space: nowrap; }
+  .dash-persistent .dseg-chat-title .dseg-v {
+    overflow: hidden; text-overflow: ellipsis; }
+}
+
 .dseg-wide .dseg-v { white-space: normal; overflow: hidden; text-overflow: ellipsis;
                      display: -webkit-box; -webkit-box-orient: vertical;
                      -webkit-line-clamp: 2; }
@@ -12537,24 +12551,10 @@
 (define (dash--seg-gap)
   (list 'tag "span" 'class "dseg-gap"))
 
-;; the major mode carries the weight; the minor modes trail it
+;; The header names the major mode. The expanded modes card lists minors.
 (define (dash--mode-segs buf)
-  (let* ((major (dashboard--mode-name (or (buffer-local buf 'mode-name) "Fundamental")))
-         (minors (or (buffer-local buf 'minor-modes) '()))
-         ;; a rendered preview is a mode the reader can see. It rides
-         ;; 'render-mode, not the minor-mode list, so read it here.
-         (render (buffer-local buf 'render-mode))
-         ;; preview-mode already names itself when it is on; the render
-         ;; mode fills in only for a page some other route rendered
-         (extra (if (and (string? render)
-                         (member render '("html" "markdown"))
-                         (not (member "preview-mode" minors)))
-                    (list "preview")
-                    '())))
-    (cons (list "dseg-strong" major)
-          (map (lambda (m)
-                 (list "f-dim" (string-append " · " (dashboard--mode-name m))))
-               (append minors extra)))))
+  (list (list "dseg-strong"
+              (dashboard--mode-name (or (buffer-local buf 'mode-name) "Fundamental")))))
 
 ;; the last group is where you are; the ones before it are the path
 (define (dash--group-segs buf)

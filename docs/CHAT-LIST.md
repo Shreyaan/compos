@@ -1,11 +1,25 @@
 # Chat list
 
+## Two surfaces, one table
+
+`C-x c` is the minibuffer form — a popup under the work with its filter
+line already open, its own view buffer ` *chats*`, and nothing kept
+after the pick. It is the surface for "switch to that chat, the one
+whose name I half remember". `C-x b` is the same form over the buffers.
+
+`C-x C-c` (also `M-x chat-list`) opens the application. One buffer,
+`*chat-list*`, always in its own `chat-list` group — never a per-group
+clone of whatever group you were standing in. The application owns the
+verbs, the grouping and the state; the minibuffer form borrows none of
+it, so the sort and folds you set in one stay where you left them.
+
 ## Listing buffers and floating peek cards
 
-`M-x ichat` (also `M-x chat-list`) and `M-x ibuffer` open an ordinary
-listing buffer in the window that invoked them. They reuse a matching listing
-buffer in the current group, without selecting another window that shows it.
-Different groups get separate listing buffers. The rows identify buffers.
+`M-x ibuffer` opens an ordinary listing buffer in the window that invoked
+it. It reuses a matching listing buffer in the current group, without
+selecting another window that shows it. Different groups get separate
+`*ibuffer*` buffers; the chat list does not — it is one application.
+The rows identify buffers.
 
 Row navigation shows a **Preview** card after a short pause. The card is inset
 from the window borders, raised with a soft shadow, and connected by a line
@@ -90,7 +104,9 @@ The grouping is part of the one state.
 
 A buffer switch changes the group. You go to where the buffer lives, and
 the buffer does not come to where you are. This is the default for `C-x
-b`, `C-x c` and their control counterparts.
+b`, `C-x c` and their control counterparts. The chat list's own arrival
+obeys it too: the application enters the `chat-list` group, and a pick
+from either surface enters the chat's group.
 
 ## Switch to the chat where
 

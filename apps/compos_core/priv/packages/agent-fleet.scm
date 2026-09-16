@@ -11,9 +11,13 @@
 ;; action reads its targets from. docs/CHAT-LIST.md is the contract.
 (define *chat-list-buffer* "*chat-list*")
 (define (chat-list-buffer)
-  (let ((here (window-buffer (active-window))))
-    (if (equal? (buffer-local here 'mode-name) "chat-list-mode") here
-        (or (frame-local 'chat-list-view) *chat-list-buffer*))))
+  (let ((here (window-buffer (active-window)))
+        (view (frame-local 'chat-list-view)))
+    (cond ((equal? (buffer-local here 'mode-name) "chat-list-mode") here)
+          ;; a frame that saw the app before this session can still hold a
+          ;; view name that no longer exists; the singleton is the truth
+          ((and (string? view) (buffer-known? view)) view)
+          (else *chat-list-buffer*))))
 
 
 (define (agent-threads)
@@ -621,9 +625,12 @@
 
 (define-key "agent-map" "a" "agent-goto-attention")
 
-;; C-x b is the buffers; C-x c is the chats. chat-switch-prompt, the
-;; candidate prompt, stays for the surfaces that draw only a prompt.
-(global-set-key "C-x c" "chat-list")
+;; C-x b is the buffers; C-x c is the chats — each the minibuffer form
+;; of its own table. The control counterparts open the applications:
+;; C-x C-b the buffers in a window, C-x C-c the chat list in its group.
+;; chat-switch-prompt, the candidate prompt, stays for the surfaces that
+;; draw only a prompt.
+(global-set-key "C-x c" "chat-prompt")
 
 (category! 'chat)
 (catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))
@@ -1028,10 +1035,22 @@
 (define (chat-list-group) (group-ensure-record! *chat-list-group-name*))
 
 (define (chat-list-arrive!)
-  (let ((buf (ibuffer-group-view! "chat-list-mode" *chat-list-buffer*)))
+  ;; one application, one state: the same buffer every time, in its own
+  ;; group. a per-group view cloned the app into whatever group you were
+  ;; standing in, so *chat-list* itself never existed and the clones
+  ;; piled up as *chat-list*<2>, <3>, <4>.
+  (let ((buf *chat-list-buffer*)
+        (group (chat-list-group)))
+    (unless (buffer-known? buf) (buffer-create buf))
+    (buffer-move-to-group! buf group)
     (ibuffer-view! buf 'sort 'recent 'grouping 'group)
     (set-frame-local! 'chat-list-view buf)
     (buffer-set-local! buf 'window-preference-cover #t)
+    ;; the group is named here, not inferred from the buffer:
+    ;; group-home-of answers #f for a special buffer, so leaving the
+    ;; arrival to switch-to-buffer-in-group! strands the frame where it
+    ;; stood and the application opens outside its own group
+    (unless (equal? (frame-group) group) (switch-to-group! group))
     (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))
     #f))
 
@@ -1263,6 +1282,31 @@
 (define-command "chat-list"
   "Switch to a chat, by its name or by a word somebody said in it"
   (lambda () (chat-list-open!)))
+
+;;; --- the minibuffer form ------------------------------------------------------
+;;; C-x c is these rows in the minibuffer's form, the way C-x b is the
+;;; buffers': a popup under the work with its filter line already open.
+;;; You type, the rows narrow, RET takes the row and the popup goes.
+;;; The form keeps its own view buffer, so the sort, folds and grouping
+;;; of the application on C-x C-c stay what you set them to — the
+;;; application has one state and this borrows none of it.
+
+(define *chat-prompt-buffer* " *chats*")
+(add-display-rule! *chat-prompt-buffer* 'shaped '(side bottom size 0.4))
+(ibuffer-view! *chat-prompt-buffer* 'sort 'recent 'grouping 'group)
+
+(define (chat-prompt-open!)
+  ;; a heading is folded by the prompt line itself, so PICK only ever
+  ;; sees a chat: a live one by name, an archived one by its .chat path
+  (ibuffer-prompt! 'chat-list *chat-prompt-buffer* "chat-list-mode" "Chat: "
+    (lambda (row close!)
+      (ibuffer-pick! row close!)
+      (group-current-recalculate!))
+    "minibuffer"))
+
+(define-command "chat-prompt"
+  "Switch to a chat with the plain minibuffer list"
+  (lambda () (chat-prompt-open!)))
 
 ;; the name is gone but the words are not: you remember what the chat said
 (define-command "chat-where"

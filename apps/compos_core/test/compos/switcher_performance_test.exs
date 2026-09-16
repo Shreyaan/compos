@@ -67,7 +67,6 @@ defmodule Compos.SwitcherPerformanceTest do
     Compos.Core.create_buffer("*zz-perf-chat*", text: "zzperformance")
     Buffer.set_local("*zz-perf-chat*", "mode-name", "chat-mode")
     press(["C-x", "c"])
-    press("/")
 
     eval!(~S"""
     (begin
@@ -75,7 +74,7 @@ defmodule Compos.SwitcherPerformanceTest do
       (define *zz-perf-fetches* 0)
       (advice-add! 'list-render! 'before 'zz-perf
         (lambda (buf fetch)
-          (when (equal? buf "*chat-list*")
+          (when (equal? buf " *chats*")
             (set! *zz-perf-draws* (+ *zz-perf-draws* 1)))))
       (advice-add! 'chat-list-rows 'before 'zz-perf
         (lambda (buf) (set! *zz-perf-fetches* (+ *zz-perf-fetches* 1)))))
@@ -84,11 +83,13 @@ defmodule Compos.SwitcherPerformanceTest do
     press(["z", "z"])
     assert eval!(~S{(plist-get (minibuffer-state) 'input)}) == ~s("zz")
     eventually(fn -> eval!("*zz-perf-draws*") == "1" end)
-    assert eval!("*zz-perf-fetches*") == "1"
+    # the prompt widened its source when it opened, before the advice went
+    # on, so the burst proving reuse is the one that fetches nothing
+    assert eval!("*zz-perf-fetches*") == "0"
     press("DEL")
     eventually(fn -> eval!("*zz-perf-draws*") == "2" end)
-    assert eval!("*zz-perf-fetches*") == "1"
-    assert Buffer.text("*chat-list*") =~ "zz-perf-chat"
+    assert eval!("*zz-perf-fetches*") == "0"
+    assert Buffer.text(" *chats*") =~ "zz-perf-chat"
   end
 
   test "repeating the buffer preview preserves its scroll position" do

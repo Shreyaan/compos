@@ -108,15 +108,33 @@
     (check-equal! (list-key-lines *chat-list*) '() "no key bar stands over the rows")
     (chats-test-reset!)))
 
-(deftest 'the-list-arrives-in-the-invoking-group
-  "one arrival: the current window and group, with preview supplied separately"
+(deftest 'the-list-arrives-in-its-own-group
+  "one arrival, always the same one: the singleton buffer in the chat-list group"
   (lambda ()
-    (chats-test-open! 'group 'name)
-    (check-equal! (buffer-group *chat-list*) (frame-group) "the listing belongs here")
-    (check-equal! (length (window-list)) 1 "opening creates no companion window")
-    (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
-    (check-equal! (chat-list-preview-window) #f "preview is created only when shown")
+    (let ((groups (chats-test-open! 'group 'name)))
+      (check-equal! *chat-list* "*chat-list*" "one buffer, never a per-group clone")
+      (check-equal! (buffer-group *chat-list*) (chat-list-group) "its own group")
+      (check-equal! (frame-group) (chat-list-group) "and the frame arrives there")
+      ;; invoke it from somewhere else: it must come back here, not be
+      ;; adopted by the group you were standing in
+      (switch-to-group! (car groups))
+      (run-command "chat-list")
+      (check-equal! (chat-list-buffer) "*chat-list*" "still the one buffer")
+      (check-equal! (buffer-group "*chat-list*") (chat-list-group) "still its own group")
+      (check-equal! (frame-group) (chat-list-group) "the frame followed it there")
+      (check-equal! (length (window-list)) 1 "opening creates no companion window")
+      (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
+      (check-equal! (chat-list-preview-window) #f "preview is created only when shown"))
     (chats-test-reset!)))
+
+(deftest 'the-two-surfaces-are-bound-apart
+  "C-x c is the minibuffer form, C-x C-c the application; neither is the other"
+  (lambda ()
+    (check-equal! (key-binding "C-x c") "chat-prompt" "the minibuffer form")
+    (check-equal! (key-binding "C-x C-c") "chat-list" "the application")
+    (check-true! (not (equal? *chat-prompt-buffer* *chat-list-buffer*))
+                 "the form keeps its own view, so neither state leaks into the other")
+    (check-true! (ibuffer-view? *chat-prompt-buffer*) "the form's view is registered")))
 
 (deftest 'the-row-at-point-previews-its-chat
   "the row under the cursor schedules its preview after the navigation burst"
