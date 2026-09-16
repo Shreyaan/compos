@@ -13150,21 +13150,46 @@
           (and chat (buffer-local chat 'chat-presets))
           (and chat (map car (or (buffer-local chat 'chat-tool-specs) '()))))))
 
+(define (dashboard-panel-open! buf)
+  (desktop-skip! buf 'modeline-expanded)
+  (desktop-skip! buf 'modeline-dash-blocks)
+  (desktop-skip! buf 'modeline-dash-fp)
+  (buffer-set-locals! buf
+    (list 'modeline-dash-fp (dash--fingerprint buf)
+          'modeline-dash-blocks (dashboard-blocks buf)
+          'modeline-expanded #t)))
+
+;; #t when a panel was open and is not any more, so a caller that closes
+;; one of several things -- keyboard-quit does -- knows it closed this.
+(define (dashboard-panel-close! buf)
+  (and (buffer-local buf 'modeline-expanded)
+       (begin
+         (buffer-set-locals! buf
+           (list 'modeline-expanded #f 'modeline-dash-blocks #f))
+         #t)))
+
 (define-command "modeline-expand"
   "Toggle this buffer's expanded modeline panel"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (buffer-local buf 'modeline-expanded)
-          (begin
-            (buffer-set-local! buf 'modeline-expanded #f)
-            (buffer-set-local! buf 'modeline-dash-blocks #f))
-          (begin
-            (desktop-skip! buf 'modeline-expanded)
-            (desktop-skip! buf 'modeline-dash-blocks)
-            (desktop-skip! buf 'modeline-dash-fp)
-            (buffer-set-local! buf 'modeline-dash-fp (dash--fingerprint buf))
-            (buffer-set-local! buf 'modeline-dash-blocks (dashboard-blocks buf))
-            (buffer-set-local! buf 'modeline-expanded #t))))))
+      (unless (dashboard-panel-close! buf)
+        (dashboard-panel-open! buf)))))
+
+;; The headerline and the panel are derived state, rebuilt only when
+;; something says it changed. When something forgot to say so, this is
+;; the way to make the buffer say it again.
+(define-command "buffer-dashboard-refresh"
+  "Rebuild this buffer's dashboard line and panel from scratch"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (dashboard--render! buf)
+      (when (buffer-local buf 'modeline-expanded)
+        (buffer-set-locals! buf
+          (list 'modeline-dash-fp (dash--fingerprint buf)
+                'modeline-dash-blocks (dashboard-blocks buf))))
+      (message "Dashboard refreshed"))))
+
+(catalog-meta! 'command "buffer-dashboard-refresh" 'domain 'buffers 'effects '(write))
 
 ;; before every command and every self-insert: packages that must act
 ;; before the buffer changes (the chat keeps point in its input) hang
@@ -13786,13 +13811,16 @@
 (domain! 'unknown)
 (effects! '(unknown))
 
-(define-command "keyboard-quit" "Quit the current operation; close the active popup or clear the mark"
+(define-command "keyboard-quit" "Quit the current operation; close the active popup or the dashboard, or clear the mark"
   (lambda ()
     (editing-quit!)
     (set-mark! #f)
     (if (and (popup-open?) (equal? (active-window) (popup-window)))
         (popup-close!)
-        (message "Quit"))))
+        ;; C-g closes the dashboard panel too, so the key that opened it
+        ;; is not the only key that puts it away
+        (begin (dashboard-panel-close! (current-buffer))
+               (message "Quit")))))
 (catalog-meta! 'command "keyboard-quit" 'domain 'interaction 'effects '(write))
 
 ;;; --- tiling windows --------------------------------------------------------

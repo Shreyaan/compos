@@ -1990,33 +1990,13 @@ defmodule Compos.Ui.EditorLive do
           <c-text>{pct(@node)}</c-text>
           <c-text :if={@node.modified} class="dash-live-mod">modified</c-text>
         </c-group>
+        <%!-- The modes card is the dashboard's own, built in Scheme beside
+               the group, tools and llm cards. A second one drawn here said
+               the same thing twice. --%>
         <%= case @node.dash do %>
           <% [head | cards] -> %>
             <.blk b={block_view(head)} line={0} win={@node.id} />
             <c-group class="dash-grid">
-              <c-group class="dash-cell">
-                <c-group class="dash-title">modes</c-group>
-                <c-group
-                  class="dash-big dash-toggle"
-                  title={"toggle #{@node.mode}"}
-                  phx-click="ui_cmd"
-                  phx-value-win={@node.id}
-                  phx-value-cmd={"mode:" <> @node.mode}
-                >{@node.mode}</c-group>
-                <c-group :if={@node.minor_modes != []} class="dash-chips">
-                  <c-text
-                    :for={m <- @node.minor_modes}
-                    class="dash-chip dash-chip-on"
-                    title={"toggle #{m}"}
-                    phx-click="ui_cmd"
-                    phx-value-win={@node.id}
-                    phx-value-cmd={"mode:" <> m}
-                  >{m}</c-text>
-                </c-group>
-                <c-group class="dash-row">
-                  <c-text class="dash-k">read-only</c-text><c-text class="dash-sp"></c-text><c-text class="dash-v">{if @node.read_only, do: "yes", else: "no"}</c-text>
-                </c-group>
-              </c-group>
               <.blk :for={b <- Enum.map(cards, &block_view/1)} b={b} line={0} win={@node.id} />
             </c-group>
           <% _ -> %>
