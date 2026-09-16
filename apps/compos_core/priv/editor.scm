@@ -12718,10 +12718,14 @@
 ;; the buffer says about itself. The key stays in the markup for a reader and
 ;; goes away in the paint — the colour is the label. The segment keeps the
 ;; name 'group, so a narrow window still drops or keeps it by that name.
+;; A buffer in no group gets no badge: the headline says nothing rather than
+;; saying none, and the title takes the corner instead.
 (define (dash--group-badge buf)
-  (list 'tag "div" 'class "dseg-group-badge"
-        'children
-        (list (dash--seg "group" (dash--group-segs buf) 'left "dseg-inline"))))
+  (let ((segs (dash--group-segs buf)))
+    (and (pair? segs)
+         (list 'tag "div" 'class "dseg-group-badge"
+               'children
+               (list (dash--seg "group" segs 'left "dseg-inline"))))))
 
 ;; "openrouter:sonnet" reads as one word until the provider steps back
 (define (dash--model-segs buf)
