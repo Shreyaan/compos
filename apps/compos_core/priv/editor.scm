@@ -12374,10 +12374,10 @@
                            (map dash--map-mode maps)))))
     (dash--section "modes"
       (append
-        (list (list 'tag "div" 'class "dash-big" 'text (dashboard--mode-name major)))
+        (list (dash--mode-toggle major "dash-big dash-toggle"))
         (list (dash--chip-row "shown"
                 (if (pair? minors)
-                    (map (lambda (m) (dash--chip (dashboard--mode-name m))) minors)
+                    (map (lambda (m) (dash--mode-toggle m "dash-chip dash-chip-on")) minors)
                     (list (dash--chip "none")))))
         (if (pair? hidden)
             (list (dash--chip-row "hidden"
@@ -12386,7 +12386,8 @@
                                  'text (dashboard--mode-name m)))
                          hidden)))
             '())
-        (list (dash--row "state" (dash--state buf)))))))
+        (list (dash--row "read-only" (if (buffer-read-only? buf) "yes" "no"))
+              (dash--row "state" (dash--state buf)))))))
 
 (define (dash--group buf)
   (let* ((ids (if (chat-buffer? buf)
