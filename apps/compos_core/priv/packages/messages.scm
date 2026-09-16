@@ -13,8 +13,6 @@
   "Text size of *Messages*, as a step on the 1.2 ladder; 0 is the normal size."
   'group 'messages 'type 'number)
 
-
-
 ;; A log is read in bulk, so it wears a smaller face than a document. The
 ;; step is the one C-+ and C-_ move, and the buffer's own value wins once
 ;; it has one: a reader who resized this list keeps their size, including
