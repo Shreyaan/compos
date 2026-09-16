@@ -35,6 +35,11 @@ indented lines below them explain what to do. For example:
 
 The sections, in order.
 
+To jump to a section, type C-s and search for its heading, including the two
+hash marks. For example, search for "## Agents", then press RET to keep point
+there. Type C-r instead when the heading is above you. Type C-g to cancel the
+search and return to where you started.
+
   Why Compos
   Key notation
   Named commands
@@ -491,10 +496,41 @@ and the same state.
 The commands in this section are optional. They need a model provider, and
 your provider may charge for the requests they send.
 
+  M-x chat-new             Start a new chat buffer
+  M-x agent-switch         Choose this chat's connector and model
+  C-c b                    Configure its model, effort, tools and permissions
   C-c w                    Switch between a work buffer and its chat
   M-x chat-companion-ask   Ask the companion a question without leaving the
                            work buffer
   M-|                      Send the active region through an LLM
+
+A connector is how Compos reaches an agent or model. The connector picker
+shows the supported connectors below. A connector works when its program and
+credentials are available on this machine.
+
+  codex-app-server  Codex through codex app-server. It uses the Codex CLI's
+                    existing ChatGPT login; it needs no API key.
+  claude-code       Claude Code through ACP. It needs a configured adapter and
+                    a Claude login.
+  opencode          OpenCode through ACP. It uses the providers configured in
+                    OpenCode.
+  deepseek          DeepSeek Harness through ACP. It needs an installed and
+                    configured DSH profile.
+  api               Direct model APIs for providers whose keys you configured
+                    in Compos.
+  gemini-nano       The local browser model, when the browser provides it.
+
+ACP is the Agent Client Protocol. It lets Compos start an external coding
+agent as a process and exchange structured messages, tools and permissions
+with it. Codex now uses its app-server protocol instead. The older codex-acp
+connector is deprecated and is not shown in the picker.
+
+>> Type M-x chat-new. In the new chat, type M-x agent-switch and choose
+   codex-app-server. Choose a model, or submit an empty model for the connector
+   default. Type a message and press RET to send it.
+
+If codex login status says you are logged in using ChatGPT, that chat uses the
+same account. Otherwise, run codex login in a terminal first.
 
 >> From TUTORIAL, type M-x chat-companion-ask and ask: "What is the main idea
    of the section named Windows?"
