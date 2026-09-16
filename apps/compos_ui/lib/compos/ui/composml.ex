@@ -11,7 +11,7 @@ defmodule Compos.Ui.ComposML do
   @elements ~w(frame windows split window buffer line modeline headerline
     buffer-name mode position headline statusbar status progress tabs tab field
     label metric key-hints minibuffer completions completion which-key transcript
-    message user agent toolcall info summary permission plan tool-call arguments result activity prompt input cursor toolbar echo
+    message user agent toolcall info summary permission plan tool-call arguments result eval activity prompt input cursor toolbar echo
     action value group text row card preview empty properties list item message-body question answers hint)
 
   @mail_elements ~w(mailboxes mailbox mailbox-name unread-count message-count

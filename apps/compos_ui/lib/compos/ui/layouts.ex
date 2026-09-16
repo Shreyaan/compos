@@ -918,6 +918,18 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-status .ag-label { margin: 0; color: var(--accent-fg, #26356b); font-weight: 750; letter-spacing: .08em; }
           .ag-status-text { min-width: 0; font-size: calc(var(--ag-base) * .94); line-height: 1.55; font-weight: 500; }
+          /* what the chat prompt evaluated, and what it printed: code, so
+             it keeps its columns and scrolls sideways rather than wrapping */
+          .ag-eval {
+            display: block; margin: 10px 0; padding: 10px 13px; border-radius: 8px;
+            border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
+            background: color-mix(in srgb, var(--accent-fg, #26356b) 5%, var(--window-bg, #fdfcf8));
+          }
+          .ag-eval-text {
+            margin: 0; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.84);
+            line-height: 1.5; color: var(--window-fg, inherit);
+            white-space: pre; overflow-x: auto;
+          }
           .ag-meta { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.8); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
           .ag-inputrow {
             display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;

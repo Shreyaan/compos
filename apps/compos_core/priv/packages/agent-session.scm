@@ -62,7 +62,8 @@
               acc
               (let ((b (car bs)))
                 (loop (cdr bs)
-                      (if (member (caddr b) (list "meta" "status" "waiting" "permission" "question" "queued"))
+                      (if (member (caddr b) (list "meta" "status" "waiting" "permission"
+                                                  "question" "queued" "eval"))
                           acc
                           (string-append acc
                             (substring-bytes text (car b)
@@ -186,13 +187,67 @@
 ;; Prose that must start with an open paren escapes it with a backslash.
 
 (defcustom 'chat-scheme-input #t
-  "Run a chat input that is a parenthesised Scheme expression instead of sending it to the agent. Set #f to send every input."
+  "Run a chat input that opens with a paren as Scheme instead of sending it to the agent. Set #f to send every input."
   'group 'chat 'type 'boolean)
 
+(defcustom 'chat-scheme-width 84
+  "How wide a printed value may be before it breaks across lines."
+  'group 'chat 'type 'number)
+
 (define (chat-scheme-input? text)
-  (and chat-scheme-input
-       (string-prefix? "(" text)
-       (string-suffix? ")" text)))
+  (and chat-scheme-input (string-prefix? "(" text)))
+
+;; Tree-sitter owns the question, so a broken string and a stray closer
+;; count too, not only an unclosed paren. RET never evaluates malformed
+;; Scheme and never lets it leave as a message: it takes a newline and
+;; waits for the expression to close.
+(define (chat-scheme-well-formed? text)
+  (null? (ts-query-string "scheme" text "(ERROR) @err")))
+
+;;; Pretty printing. (apropos "windows") answers a list of plists, and one
+;;; long line of it is unreadable. A value that fits stays on its line; one
+;;; that does not breaks, and a plist breaks a key and its value per line.
+
+(define (chat-scheme--proper? v)
+  (let loop ((x v))
+    (cond ((null? x) #t) ((pair? x) (loop (cdr x))) (else #f))))
+
+(define (chat-scheme--plist? v)
+  (and (pair? v) (chat-scheme--proper? v)
+       (let loop ((x v))
+         (cond ((null? x) #t)
+               ((not (pair? (cdr x))) #f)
+               ((not (symbol? (car x))) #f)
+               (else (loop (cdr (cdr x))))))))
+
+(define (chat-scheme--pairs v indent pad)
+  (string-join
+    (let loop ((x v) (out '()))
+      (if (null? x)
+          (reverse out)
+          (let ((k (value->string (car x))))
+            (loop (cdr (cdr x))
+                  (cons (string-append
+                          k " "
+                          (chat-scheme-pp (car (cdr x))
+                                          (+ indent 2 (string-byte-length k))))
+                        out)))))
+    pad))
+
+(define (chat-scheme-pp v indent)
+  (let ((flat (value->string v)))
+    (cond ((<= (+ indent (string-byte-length flat)) chat-scheme-width) flat)
+          ((not (pair? v)) flat)
+          ((not (chat-scheme--proper? v)) flat)
+          (else
+           (let ((pad (string-append "\n" (string-repeat " " (+ indent 1)))))
+             (string-append
+               "("
+               (if (chat-scheme--plist? v)
+                   (chat-scheme--pairs v indent pad)
+                   (string-join (map (lambda (x) (chat-scheme-pp x (+ indent 1))) v)
+                                pad))
+               ")"))))))
 
 (define (chat-scheme-unescape text)
   (if (string-prefix? "\\(" text)
@@ -200,21 +255,38 @@
       text))
 
 (define (chat-scheme-report src result)
-  (string-append "\nλ " src "\n"
+  (string-append "λ " src "\n"
                  (if (equal? (car result) 'ok)
-                     (value->string (cadr result))
-                     (string-append "error: " (cadr result)))
-                 "\n"))
+                     (chat-scheme-pp (cadr result) 0)
+                     (string-append "error: " (cadr result)))))
 
-(define (chat-scheme-run! buf src)
+(define *chat-scheme-buffer* "*chat-eval*")
+
+;; C-u RET sends the value to its own window instead of the transcript: an
+;; apropos answer is a list to read and scroll, not a thing to bury the
+;; conversation under. The chat keeps the focus.
+(define (chat-scheme-other-window! text)
+  (let ((b *chat-scheme-buffer*))
+    (unless (buffer-known? b) (buffer-create b))
+    (buffer-delete-range! b 0 (buffer-size b))
+    (buffer-append! b text)
+    (display-buffer-other-window! b)
+    b))
+
+(define (chat-scheme-run! buf src other?)
   (let* ((result (eval-string-safe src))
          (ok (equal? (car result) 'ok))
-         (text (chat-scheme-report src result)))
+         (body (chat-scheme-report src result))
+         (shown (if (and other? ok)
+                    (string-append "λ " src "\n→ " *chat-scheme-buffer*)
+                    body))
+         (text (string-append "\n" shown "\n")))
     (chat-history-reset! buf)
     (chat-clear-input! buf)
-    ;; status, not conversation: it lands in the transcript and in the saved
-    ;; log, and every model-facing path filters a status row out. The agent
-    ;; is not told what you evaluated and never sees the value.
+    (when (and other? ok) (chat-scheme-other-window! body))
+    ;; status, not conversation: it is saved with the chat, and every
+    ;; model-facing path filters a status row out. The agent is not told
+    ;; what you evaluated and never sees the value.
     (chat-record-push! buf "status" (list (list "text" (string-trim text))) #f)
     ;; chat-render! writes at the saved mark, so a chat with no runtime —
     ;; restored, or never sent to — is a REPL too
@@ -222,11 +294,9 @@
       (when (boundp 'agent-adopt-prose-tail!) (agent-adopt-prose-tail! buf))
       (let* ((start (chat-render! buf text))
              (end (+ start (string-byte-length text))))
-        (chat-blocks-push! buf start end "status" '())
-        (when (boundp 'agent-add-overlay!)
-          (agent-add-overlay! buf start end "agent-meta"))))
+        (chat-blocks-push! buf start end "eval" '())))
     (end-of-buffer!)
-    (message (if ok (value->string (cadr result)) (cadr result)))))
+    (message (if ok "ok" (cadr result)))))
 
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
@@ -234,9 +304,12 @@
            (chat? (equal? (buffer-local buf 'mode-name) "chat-mode"))
            (typed (string-trim (chat-input-text buf))))
       (if (and chat? (chat-scheme-input? typed))
-          ;; the prompt is a REPL before it is a conversation: run the
-          ;; expression here and leave the turn unspent
-          (chat-scheme-run! buf typed)
+          ;; the prompt is a REPL before it is a conversation. Malformed
+          ;; Scheme goes nowhere: not to the reader, not to the model.
+          (if (chat-scheme-well-formed? typed)
+              (chat-scheme-run! buf typed (and (current-prefix-arg) #t))
+              (begin (insert! "\n")
+                     (message "unbalanced expression — RET runs it once it closes")))
           (let* (;; say something the moment RET lands: the first send spawns a
                  ;; backend and mounts MCP servers, seconds with nothing moving
                  (feedback (when chat?
@@ -293,6 +366,38 @@
                                    (message (if (equal? result 'answered)
                                                 "answered"
                                                 "sent")))))))))))))))
+
+;;; Completion at the chat prompt.
+;;
+;; The vocabulary is the editor's own, so the source is scheme-mode's: one
+;; catalog, one orderless matcher, the same answers M-/ gives in a .scm
+;; file. It answers only inside an expression. While you write prose it
+;; answers with nothing and stops the collect there, because dabbrev
+;; popping up mid-sentence is worse than no completion at all.
+(define (chat-scheme--capf)
+  (let ((buf (current-buffer)))
+    (if (and chat-scheme-input
+             (boundp 'scheme-ide--capf)
+             (>= (point) (chat-input-start buf))
+             (string-prefix? "(" (string-trim (chat-input-text buf))))
+        (scheme-ide--capf)
+        (list (point) (point) '()))))
+
+(define (chat-scheme--mode-hook!)
+  (let ((buf (current-buffer)))
+    (let ((cur (or (buffer-local buf 'capf-sources) '())))
+      (unless (member chat-scheme--capf cur)
+        (buffer-set-local! buf 'capf-sources (cons chat-scheme--capf cur))))
+    (desktop-skip! buf 'capf-sources)
+    (when (boundp 'capf-auto-watch!) (capf-auto-watch! buf))))
+
+(add-hook! 'chat-mode-hook 'chat-scheme--mode-hook!)
+
+;; the chats already open never ran the hook
+(for-each (lambda (b)
+            (when (equal? (buffer-local b 'mode-name) "chat-mode")
+              (with-current-buffer b chat-scheme--mode-hook!)))
+          (buffer-list))
 
 (define *chat-history-limit* 200)
 

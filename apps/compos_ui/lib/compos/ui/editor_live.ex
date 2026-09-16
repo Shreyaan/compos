@@ -2637,6 +2637,11 @@ defmodule Compos.Ui.EditorLive do
   defp ag_block([_s, _e, "image", path | _], _text, _open),
     do: %{kind: :image, src: Compos.Ui.LocalImage.url(path), name: Path.basename(path)}
 
+  # the chat prompt is a REPL: the expression and the value it printed are
+  # code, so they keep their own spacing instead of reflowing as prose
+  defp ag_block([s, e, "eval" | _], text, _open),
+    do: %{kind: :eval, text: String.trim(safe_slice(text, s, e))}
+
   defp ag_block([s, e, "meta" | _], text, _open),
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
 

@@ -116,6 +116,8 @@ defmodule Compos.Ui.AgentTranscript do
             <c-summary kind={b.kind} data-ag-index={block_index} class="ag-status"><c-label class="ag-label">SUMMARY</c-label><c-group class="ag-status-text">{b.text}</c-group></c-summary>
           <% :image -> %>
             <c-user author="user" kind={b.kind} data-ag-index={block_index} class="ag-user ag-image"><c-label class="ag-label">YOU</c-label><img class="ag-image-img" src={b.src} alt={b.name} title={b.name} loading="lazy" /></c-user>
+          <% :eval -> %>
+            <c-eval kind={b.kind} data-ag-index={block_index} class="ag-eval"><pre class="ag-eval-text">{b.text}</pre></c-eval>
           <% :meta -> %>
             <c-info kind={b.kind} data-ag-index={block_index} class="ag-meta">{b.text}</c-info>
         <% end %>

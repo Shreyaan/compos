@@ -24,10 +24,53 @@
   (lambda ()
     (check-true! (chat-scheme-input? "(+ 1 2)") "a bare expression runs")
     (check-false! (chat-scheme-input? "what does (foo) do?") "prose is prose")
-    (check-false! (chat-scheme-input? "(foo) and then?") "a tail after it is prose")
     (check-false! (chat-scheme-input? "\\(+ 1 2)") "a backslash sends it as text")
     (check-equal! (chat-scheme-unescape "\\(+ 1 2)") "(+ 1 2)"
                   "and the backslash never reaches the model")))
+
+(deftest 'malformed-scheme-goes-nowhere
+  "an unbalanced expression is neither evaluated nor sent"
+  (lambda ()
+    (check-false! (chat-scheme-well-formed? "(+ 1 1") "an unterminated list")
+    (check-false! (chat-scheme-well-formed? "(foo))") "a stray closer")
+    (check-true! (chat-scheme-well-formed? "(+ 1 1)") "a whole expression")
+    (let ((buf (t--cs-chat! "(+ 1 1")))
+      (with-current-buffer buf (lambda () (run-command "agent-send")))
+      (check-equal! (buffer-text buf) "transcript\n(+ 1 1\n"
+                    "RET took a newline and left the text where it was typed")
+      (buffer-kill! buf))))
+
+(deftest 'a-value-is-pretty-printed
+  "a plist too wide for one line breaks a key and its value per line"
+  (lambda ()
+    (check-equal! (chat-scheme-pp '(a 1 b 2) 0) "(a 1 b 2)"
+                  "what fits stays on its line")
+    (check-true! (string-contains?
+                   (chat-scheme-pp (list 'kind "command" 'name "agent-send"
+                                         'doc "Send the input to the agent, reviving it if dead")
+                                   0)
+                   "\n name \"agent-send\"")
+                 "a wide plist breaks, one key to a line")))
+
+(deftest 'completion-at-the-prompt-is-the-editors-own-vocabulary
+  "inside an expression it completes orderless; in prose it offers nothing"
+  (lambda ()
+    (let ((buf (t--cs-chat! "(buf-tex")))
+      (with-current-buffer buf
+        (lambda ()
+          (chat-scheme--mode-hook!)
+          (end-of-buffer!)
+          (check-equal! (car (car (caddr (chat-scheme--capf)))) "buffer-text"
+                        "buf-tex finds buffer-text, terms in any order")))
+      (buffer-kill! buf))
+    (let ((buf (t--cs-chat! "what does buf")))
+      (with-current-buffer buf
+        (lambda ()
+          (chat-scheme--mode-hook!)
+          (end-of-buffer!)
+          (check-equal! (caddr (capf-collect (capf-sources))) '()
+                        "prose offers nothing, and dabbrev is not asked either")))
+      (buffer-kill! buf))))
 
 (deftest 'ret-on-an-expression-prints-its-value
   "the value lands in the transcript and the input clears"
@@ -36,6 +79,8 @@
       (with-current-buffer buf (lambda () (run-command "agent-send")))
       (check-equal! (buffer-text buf) "transcript\n\nλ (+ 1 2)\n3\n"
                     "the expression and its value are in the transcript")
+      (check-equal! (caddr (car (buffer-local buf 'agent-blocks))) "eval"
+                    "the block is its own kind: the reader is shown code, not a summary")
       (check-equal! (chat-input-text buf) "" "the input is clear")
       (buffer-kill! buf))))
 

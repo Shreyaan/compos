@@ -172,25 +172,53 @@
     ((equal? name "set!") "(set! NAME VALUE)\n\nChange the value of an existing binding.")
     (else #f)))
 
-(define (scheme-ide--complete prefix)
-  (let ((syn (filter (lambda (s) (string-prefix? prefix s)) *scheme-ide-syntax*))
-        (prims (filter (lambda (e) (string-prefix? prefix (car e)))
-                       (scheme-ide--prims)))
-        (cat (filter (lambda (e)
-                       (string-prefix? prefix (catalog--get e 'name)))
-                     (catalog))))
-    (let ((prim-names (map car prims)))
-      (append
-        (map (lambda (s) (scheme-ide--completion-row s "syntax" (scheme-ide--syntax-doc s))) syn)
-        (map (lambda (e) (scheme-ide--completion-row (car e) "primitive" (cadr e)))
-             (filter (lambda (e) (not (member (car e) syn))) prims))
-        (map (lambda (e)
-               (let ((sig (catalog--get e 'sig)) (doc (catalog--get e 'doc)))
-                 (scheme-ide--completion-row (catalog--get e 'name) (catalog--get e 'kind)
-                   (string-append (if (string? sig) (string-append sig "\n\n") "")
-                                  (if (string? doc) doc "")))))
-             (filter (lambda (e) (not (member (catalog--get e 'name) prim-names)))
-                     cat))))))
+;; Orderless, the way every other list in this editor narrows. The text
+;; before point is terms split on '-', and a name matches when it holds
+;; every term, in any order and in any case: "buf-text" finds
+;; buffer-text, and so does "text-buf". A prefix match is still what you
+;; meant when you typed a prefix, so prefixes lead the list.
+(define (scheme-ide--terms text)
+  (filter (lambda (t) (not (equal? t "")))
+          (string-split (string-downcase text) "-")))
+
+(define (scheme-ide--orderless? terms name)
+  (let ((lower (string-downcase name)))
+    (null? (filter (lambda (t) (not (string-contains? lower t))) terms))))
+
+(define (scheme-ide--rows match?)
+  (let* ((syn (filter match? *scheme-ide-syntax*))
+         (prims (filter (lambda (e) (match? (car e))) (scheme-ide--prims)))
+         (cat (filter (lambda (e) (match? (catalog--get e 'name))) (catalog)))
+         (prim-names (map car prims)))
+    (append
+      (map (lambda (s) (scheme-ide--completion-row s "syntax" (scheme-ide--syntax-doc s)))
+           syn)
+      (map (lambda (e) (scheme-ide--completion-row (car e) "primitive" (cadr e)))
+           (filter (lambda (e) (not (member (car e) syn))) prims))
+      (map (lambda (e)
+             (let ((sig (catalog--get e 'sig))
+                   (doc (catalog--get e 'doc)))
+               (scheme-ide--completion-row
+                 (catalog--get e 'name)
+                 (catalog--get e 'kind)
+                 (string-append (if (string? sig) (string-append sig "\n\n") "")
+                                (if (string? doc) doc "")))))
+           (filter (lambda (e) (not (member (catalog--get e 'name) prim-names))) cat)))))
+
+(define (scheme-ide--complete text)
+  (let* ((lead (scheme-ide--rows (lambda (n) (string-prefix? text n))))
+         (led (map car lead))
+         (terms (scheme-ide--terms text))
+         (rest (filter (lambda (r) (not (member (car r) led)))
+                       (scheme-ide--rows
+                         (lambda (n) (scheme-ide--orderless? terms n))))))
+    ;; the prefix band keeps the catalog's own order. The orderless band is
+    ;; ranked shortest name first: a short name holding every term is nearly
+    ;; always the one meant, and buffer-context? is not buffer-text.
+    (append lead
+            (map caddr
+                 (sort (map (lambda (r) (list (string-byte-length (car r)) (car r) r))
+                            rest))))))
 
 (define (scheme-ide--capf)
   (let* ((buf (current-buffer))
