@@ -1296,10 +1296,12 @@
     ;; highlight and the verbs read it as every chat under it
     (buffer-set-local! (chat-list-buffer) 'ibuffer-heading-rows #t)
     (ibuffer-refresh! (chat-list-buffer))
-    ;; the list keeps the row it was left on; only a list that holds no
-    ;; row yet starts at the top
-    (unless (list-current (chat-list-buffer))
-      (ibuffer-goto-first-row! (chat-list-buffer)))
+    ;; the list keeps the row it was left on, but a heading is not a
+    ;; chat: arriving on one leaves the pane with nothing to show, and
+    ;; grouping by group puts a heading first. Fall through to a real row
+    (let ((row (list-current (chat-list-buffer))))
+      (unless (and (string? row) (not (ibuffer-heading? row)))
+        (ibuffer-goto-first-row! (chat-list-buffer))))
     ;; arriving is an explicit request to look. A card dismissed with q
     ;; shuts the preview for that row until the selection changes, and
     ;; that local outlives leaving — so coming back to the row you left
