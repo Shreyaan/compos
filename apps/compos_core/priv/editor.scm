@@ -12705,7 +12705,7 @@
 (define (dash--group-segs buf)
   (let ((labels (map group-label (dashboard--group-ids buf))))
     (if (null? labels)
-        (list (list "f-faint" "none"))
+        '()
         (let loop ((rest labels) (out '()))
           (if (null? (cdr rest))
               (reverse (cons (list "dseg-strong dseg-group-current" (car rest)) out))
