@@ -1041,7 +1041,8 @@
   ;; piled up as *chat-list*<2>, <3>, <4>.
   (let ((buf *chat-list-buffer*)
         (group (chat-list-group))
-        (from (frame-group)))
+        (from (frame-group))
+        (was (window-buffer (active-window))))
     (unless (buffer-known? buf) (buffer-create buf))
     (buffer-move-to-group! buf group)
     (ibuffer-view! buf 'sort 'recent 'grouping 'group)
@@ -1051,10 +1052,14 @@
     ;; group-home-of answers #f for a special buffer, so leaving the
     ;; arrival to switch-to-buffer-in-group! strands the frame where it
     ;; stood and the application opens outside its own group
-    (cond ((equal? from group) (set-frame-local! 'chat-list-from-group #f))
+    (cond ((equal? from group)
+           (set-frame-local! 'chat-list-from-group #f)
+           (set-frame-local! 'chat-list-from-buffer #f))
           (else
-           ;; arriving crossed a group, so leaving owes that group back
+           ;; arriving crossed a group, so leaving owes back both the
+           ;; group and the buffer this took the window from
            (set-frame-local! 'chat-list-from-group from)
+           (set-frame-local! 'chat-list-from-buffer (and (not (equal? was buf)) was))
            (switch-to-group! group)))
     (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))
     #f))
@@ -1145,14 +1150,34 @@
                (active-window) (window-showing (chat-list-buffer)))))
     (when (and w (window-exists? w)) (select-window! w))))
 
+(define (chat-list-restore-group!)
+  (let ((from (frame-local 'chat-list-from-group))
+        (was (frame-local 'chat-list-from-buffer)))
+    (set-frame-local! 'chat-list-from-group #f)
+    (set-frame-local! 'chat-list-from-buffer #f)
+    (when (and from (group-resolve-id from) (not (equal? from (frame-group))))
+      (switch-to-group! from))
+    ;; the group's saved arrangement need not hold the buffer this took
+    ;; the window from, so put that back by name
+    (when (and (string? was) (buffer-known? was)
+               (not (equal? (window-buffer (active-window)) was)))
+      (with-layout-suppressed (lambda () (switch-to-buffer-here! was))))))
+
 (define (chat-list-keep! keep)
   (chat-list-clear-search!)
+  ;; a pick goes to the chat's own group, so the group and buffer the
+  ;; arrival crossed from are no longer owed anything
+  (set-frame-local! 'chat-list-from-group #f)
+  (set-frame-local! 'chat-list-from-buffer #f)
   (listing-visit! (chat-list-buffer) keep)
   (when (equal? (window-buffer (active-window)) keep) (end-of-buffer!)))
 
 (define (chat-list-back!)
   (chat-list-clear-search!)
-  (listing-quit! (chat-list-buffer)))
+  (listing-quit! (chat-list-buffer))
+  ;; the arrival crossed into the application's group, so leaving hands
+  ;; the group you came from back; otherwise q strands you here
+  (chat-list-restore-group!))
 
 ;; a saved conversation is a file and has no group of its own, so reading
 ;; it back lands it where you stood when you asked for it
