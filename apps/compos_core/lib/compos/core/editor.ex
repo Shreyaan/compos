@@ -3294,9 +3294,6 @@ defmodule Compos.Core.Editor do
       # the same line as keyed segments: Scheme names the classes,
       # the client draws the blocks it already knows how to draw
       dashboard_line_blocks: Map.get(locals, "dashboard-line-blocks"),
-      # the width verdict Scheme already reached for the line: the header's
-      # own controls wear icons alone at that width
-      dash_narrow: Map.get(locals, "dashboard-narrow") == true,
       # persistent buffer-owned context above the content. Scheme supplies
       # the text; the client only renders this generic header mechanism.
       header_line: Map.get(locals, "header-line"),
