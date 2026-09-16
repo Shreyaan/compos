@@ -281,6 +281,9 @@
                     (string-append "λ " src "\n→ " *chat-scheme-buffer*)
                     body))
          (text (string-append "\n" shown "\n")))
+    ;; the expression joins the prompt history before it runs: up-arrow
+    ;; reaches the last thing you evaluated, from any chat
+    (chat-history-push! src)
     (chat-history-reset! buf)
     (chat-clear-input! buf)
     (when (and other? ok) (chat-scheme-other-window! body))
@@ -344,7 +347,9 @@
                                (insert! "\n")))
                          (begin
                            ;; the message itself lands in the record when its
-                           ;; turn starts; only the walk position resets here
+                           ;; turn starts; here it only joins the prompt history
+                           ;; and the walk position resets
+                           (chat-history-push! input)
                            (chat-history-reset! buf)
                            (let ((result (agent-send-msg! slug input)))
                              (if (equal? result 'queued)
@@ -401,14 +406,23 @@
 
 (define *chat-history-limit* 200)
 
-(define (chat-history buf)
-  (chat-take
-    (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
-      (cond ((null? ts) (reverse acc))
-            ((equal? (car (car ts)) "user")
-             (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
-            (else (loop (cdr ts) acc))))
-    *chat-history-limit*))
+;; One history for every prompt in the session: the expressions you ran and
+;; the messages you sent, newest first. A REPL's history belongs to the
+;; person, not the buffer — you reach for the apropos call you just made
+;; from whichever chat you are in now. It lives in memory only: a restart
+;; starts you clean, and the transcripts still hold what was said.
+(define *chat-input-history* '())
+
+(define (chat-history) *chat-input-history*)
+
+;; consecutive repeats collapse, the way a shell's history does
+(define (chat-history-push! text)
+  (let ((t (string-trim text)))
+    (unless (or (equal? t "")
+                (and (pair? *chat-input-history*)
+                     (equal? t (car *chat-input-history*))))
+      (set! *chat-input-history*
+        (chat-take (cons t *chat-input-history*) *chat-history-limit*)))))
 
 (define (chat-history-reset! buf)
   (buffer-set-local! buf 'chat-history-pos #f)
@@ -430,7 +444,7 @@
          "\n")))
 
 (define (chat-history-recall! buf dir)
-  (let* ((h (chat-history buf))
+  (let* ((h (chat-history))
          (pos (or (buffer-local buf 'chat-history-pos) -1))
          (next (if (< dir 0) (+ pos 1) (- pos 1))))
     (cond ((>= next (length h)) (message "no earlier message"))
@@ -450,7 +464,7 @@
          (motion (if (< dir 0) "previous-line" "next-line")))
     (if (or (not (buffer-local buf 'agent-saved-mark))
             (not (chat-in-input? buf))
-            (null? (chat-history buf))
+            (null? (chat-history))
             ;; inside a multi-line input, up and down are still motion
             (if (< dir 0)
                 (not (chat-on-first-input-line? buf))
@@ -458,10 +472,10 @@
         (run-command motion)
         (chat-history-recall! buf dir))))
 
-(define-command "chat-history-previous" "Recall the previous message you sent"
+(define-command "chat-history-previous" "Recall the previous thing you typed at a prompt"
   (lambda () (chat-history-move! -1)))
 
-(define-command "chat-history-next" "Recall the next message you sent"
+(define-command "chat-history-next" "Recall the next thing you typed at a prompt"
   (lambda () (chat-history-move! 1)))
 
 (define-command "agent-interrupt-send" "Revive, cancel, or hard-reset the agent"

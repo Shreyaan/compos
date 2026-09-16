@@ -521,6 +521,9 @@ defmodule Compos.Ui.Layouts do
 
             white-space: nowrap;
           }
+          /* the prompt's own card: the input row is the window's last
+             line, so the card opens above it and hangs off its left edge */
+          .cap-pop-up { top: auto; bottom: calc(100% + 3px); left: 0; }
           .cap-title {
             display: flex; padding: 4px 10px 5px;
             border-bottom: 1px solid var(--border-bg, #e2dbc9);
@@ -938,6 +941,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-meta { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.8); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
           .ag-inputrow {
+            position: relative;
             display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;
             border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
             border-radius: 10px; padding: 9px 14px;

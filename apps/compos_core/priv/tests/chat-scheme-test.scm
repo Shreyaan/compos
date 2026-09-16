@@ -120,3 +120,37 @@
       (check-false! (chat-scheme-input? "(+ 1 2)") "nothing runs locally")
       (customize-set! 'chat-scheme-input saved)
       (check-true! (chat-scheme-input? "(+ 1 2)") "and it comes back"))))
+
+(deftest 'prompt-history-is-one-ring-for-every-chat
+  "what you ran in one chat, up-arrow reaches from another"
+  (lambda ()
+    (let ((saved *chat-input-history*))
+      (set! *chat-input-history* '())
+      (let ((a (t--cs-chat! "(+ 3 4)")))
+        (with-current-buffer a (lambda () (run-command "agent-send")))
+        (buffer-kill! a))
+      (check-equal! (car (chat-history)) "(+ 3 4)"
+                    "the expression joined the history")
+      (let ((b (t--cs-chat! "")))
+        (with-current-buffer b
+          (lambda ()
+            (end-of-buffer!)
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "(+ 3 4)"
+                          "a prompt in another chat recalls it")
+            (run-command "chat-history-next")
+            (check-equal! (chat-input-text b) ""
+                          "and down comes back to the draft")))
+        (buffer-kill! b))
+      (set! *chat-input-history* saved))))
+
+(deftest 'the-history-collapses-consecutive-repeats
+  "the same input twice running takes one slot, and blanks take none"
+  (lambda ()
+    (let ((saved *chat-input-history*))
+      (set! *chat-input-history* '())
+      (chat-history-push! "(foo)")
+      (chat-history-push! "(foo)")
+      (chat-history-push! "   ")
+      (check-equal! (length (chat-history)) 1 "one entry")
+      (set! *chat-input-history* saved))))
