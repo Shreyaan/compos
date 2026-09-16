@@ -12268,7 +12268,12 @@
 .dseg-group-badge { flex: 0 0 auto; display: flex; align-items: center;
                     margin-left: -18px; padding: 3px 13px 4px 18px;
                     border-radius: 0 999px 999px 0; min-width: 0;
-                    background: var(--buffer-group-color, var(--accent-fg, #26356b)); }
+                    background: var(--buffer-group-color, var(--accent-fg, #26356b));
+                    /* the chip lifts a little off the headline, in its own
+                       colour rather than in grey, so the shadow belongs to
+                       the group as much as the fill does */
+                    box-shadow: 0 2px 8px color-mix(in srgb,
+                      var(--buffer-group-color, var(--accent-fg, #26356b)) 32%, transparent); }
 .dseg-group-badge .dseg { flex: 0 1 auto; min-width: 0; }
 .dseg-group-badge .dseg-k { display: none; }
 .dseg-group-badge .dseg-v { font-size: 13px; color: var(--window-bg, #fdfcf8);
