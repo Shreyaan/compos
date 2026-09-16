@@ -737,31 +737,8 @@ defmodule Compos.Ui.Layouts do
              keeps only the last title row in each live tool burst, log keeps
              every compact card, and debug opens the call contents visually.
              Thought is supporting machinery, not a fourth reader mode.
-             The control sits in the window headerline, above the scroll, so
-             it never rides over the conversation. It is outside .agent-view,
-             so --ag-base needs its fallback here. */
-          .ag-verbosity {
-            display: flex; justify-content: flex-end;
-            gap: 2px; width: max-content; margin: 5px 18px 6px auto; padding: 2px;
-            border: 1px solid var(--agent-card-border, rgba(0,0,0,0.12)); border-radius: 0;
-            background: var(--window-bg, #fdfcf8);
-            font: 600 calc(var(--ag-base, 13px) * 0.62)/1 var(--font-sans); text-transform: uppercase;
-            letter-spacing: .045em;
-          }
-          .ag-verbosity button {
-            display: flex; align-items: center; gap: 5px;
-            padding: 5px 8px; border: 0; border-radius: 0; background: transparent;
-            color: var(--agent-meta-fg, #8a8577); font: inherit; text-transform: inherit;
-            letter-spacing: inherit; cursor: pointer;
-          }
-          .ag-vb-icon { font-family: var(--font-mono); line-height: 1; }
-          /* a narrow window keeps the icons and drops the words: the same
-             verdict the headerline's segments trim themselves by */
-          .ag-verbosity.icons-only .ag-vb-label { display: none; }
-          .ag-verbosity.icons-only button { gap: 0; padding: 5px 7px; }
-          .ag-verbosity button.active {
-            background: var(--agent-tool-fg, #26356b); color: var(--window-bg, #fdfcf8);
-          }
+             The picker itself is .dash-verbosity, drawn in the dashboard
+             headline (editor.scm); only these reader rules live here. */
           .ag-thought { display: none; }
           .ag-scroll.ag-verbosity-info > c-toolcall:has(+ c-toolcall) { display: none; }
           .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool {
