@@ -4002,6 +4002,15 @@
   (let ((e (and name (assoc name *mode-icons*))))
     (if e (car (cdr e)) *default-mode-icon*)))
 
+;; The icon MODE registered for itself, or #f. A mode that never registered
+;; one answers #f rather than the generic default, and a mode that registered
+;; the empty string has said it wants no glyph. A caller that means to show
+;; the icon INSTEAD of the name must ask this one: the default glyph says
+;; nothing, so it can never stand in for a name.
+(define (mode-own-icon name)
+  (let ((e (and name (assoc name *mode-icons*))))
+    (and e (not (equal? (car (cdr e)) "")) (car (cdr e)))))
+
 ;; the icon a buffer wears is its mode's
 (define (buffer-icon b)
   (mode-icon (buffer-local b 'mode-name)))
@@ -12235,18 +12244,21 @@
           color: var(--faint-fg, #b3ac9c); white-space: nowrap; }
 .dseg-v { font-size: 14px; color: var(--default-fg, #1b1a17); white-space: nowrap; }
 .dseg-strong { font-weight: 600; }
-/* The window you are in says where the Cmd-arrows go. In focus, where
-   they move the window, the state reads as a filled badge in the group's
-   colour and a rule runs down the left edge of the headline; in editing,
-   where they move the caret, both are gone. The rule is an inset shadow,
-   so no segment moves when the state turns. Only the selected window is
-   marked, because only it answers the arrows. */
-.window.active .dash-persistent:has(.dash-state-focus) {
-  box-shadow: inset 3px 0 0 var(--buffer-group-color, var(--accent-fg, #26356b)); }
-.window.active .dash-persistent .dash-state-focus .dseg-strong {
-  background: var(--buffer-group-color, var(--accent-fg, #26356b));
-  color: var(--window-bg, #fdfcf8);
-  border-radius: 999px; padding: 1px 9px 2px; font-size: 12.5px; }
+/* The window you are in says where the Cmd-arrows go. In focus, where they
+   move the window itself, the whole window lights up: its full border wears
+   the group's colour, so the window looks like the thing you are about to
+   move. In editing, where the arrows move the caret, the ring is gone. The
+   ring is an inset shadow over the window's own one, so no pixel of the
+   layout shifts when the state turns, and only the selected window wears
+   it, because only it answers the arrows. The border says the state, so the
+   headline spends no segment on the word. */
+.window.active:has(.dash-state-focus) {
+  box-shadow: inset 0 0 0 2px var(--buffer-group-color, var(--accent-fg, #26356b)); }
+/* the state itself draws nothing; it is in the headline so the border rule
+   above has a class to read */
+.dash-state-mark { display: none; }
+/* a mode that gave itself a glyph shows the glyph at the size of a word */
+.dseg-glyph { font-size: 16px; line-height: 1; }
 .dseg-group-current { color: var(--buffer-group-color, var(--default-fg, #1b1a17)); }
 /* The group leads the headline from the window's own edge. The negative left
    margin cancels the headline padding, so the chip touches the border and
@@ -12679,8 +12691,15 @@
 
 ;; The header names the major mode. The expanded modes card lists minors.
 (define (dash--mode-segs buf)
-  (list (list "dseg-strong"
-              (dashboard--mode-name (or (buffer-local buf 'mode-name) "Fundamental")))))
+  (let* ((mode (buffer-local buf 'mode-name))
+         (icon (mode-own-icon mode)))
+    ;; A mode that gave itself a glyph shows the glyph alone. The key above
+    ;; it already says MODE, so the word underneath was saying it twice, and
+    ;; the room it took belongs to the segments that carry a value.
+    (if icon
+        (list (list "dseg-strong dseg-glyph" icon))
+        (list (list "dseg-strong"
+                    (dashboard--mode-name (or mode "Fundamental")))))))
 
 ;; the last group is where you are; the ones before it are the path
 (define (dash--group-segs buf)
@@ -12727,6 +12746,14 @@
 ;; buffer never leaves focus.
 (define (dash--state buf)
   (if (member "editing-caret-map" (buffer-minor-maps buf)) "editing" "focus"))
+
+;; The state draws nothing now: the window border is the cue. This marker
+;; carries the state's name as a class so the border rule can read it, and
+;; it sits outside the narrow-window keep list, because a window too narrow
+;; for the metadata still has to say whether the arrows move it.
+(define (dash--state-mark buf)
+  (list 'tag "div"
+        'class (string-append "dash-state-mark dash-state-" (dash--state buf))))
 
 (define (dash--preset buf)
   (and (boundp (quote llm-config-preset-name))
@@ -12796,14 +12823,6 @@
            (append
              (list
                (list 'mode (dash--seg "mode" (dash--mode-segs buf) 'left))
-               ;; which keys the buffer answers: focus moves the window,
-               ;; editing moves the caret
-               ;; the state also names itself as a class, so the headline
-               ;; of the window you are in can wear the colour of the state
-               (list 'state (let ((state (dash--state buf)))
-                              (dash--seg "state"
-                                (list (list "dseg-strong" state)) 'left
-                                (string-append "dash-state-" state))))
                (list 'group (dash--group-badge buf))
                ;; the preset names the whole setup, so it stands alone: the model
                ;; and the lane are what it chose, and repeating them says nothing
@@ -12827,8 +12846,11 @@
                    (vcs (list (list 'wide (dash--wide-seg "jj" vcs))))
                    (else '()))))
          (keep (dash--headline-keep buf (buffer-cols buf))))
-    (dash--ruled
-      (map cadr
+    ;; the state marker rides after the ruled segments: it draws nothing, so
+    ;; it takes no rule beside it, and no keep list can drop it
+    (append
+      (dash--ruled
+        (map cadr
            ;; the group badge leads at every width, the chat title follows it,
            ;; and the metadata comes after both
            (let* ((group? (lambda (cell) (equal? (car cell) 'group)))
@@ -12840,7 +12862,8 @@
                                        tail))))
              (if keep
                  (filter (lambda (cell) (member (car cell) keep)) ordered)
-                 ordered))))))
+                 ordered))))
+      (list (dash--state-mark buf)))))
 
 (define (dash--wide-seg key text &optional title-class)
   (let ((base (dash--seg key (list (list (if title-class "dseg-strong" "f-dim") text))

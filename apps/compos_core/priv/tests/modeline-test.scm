@@ -545,27 +545,66 @@
       (editing-state-off! buf)
       (buffer-kill! buf))))
 
-(deftest 'the-headline-says-which-state-the-buffer-is-in
+;; The class of the headline's state marker, which draws nothing.
+(define (t--dash-state-class blocks)
+  (let loop ((rest blocks))
+    (cond ((null? rest) #f)
+          ((let ((c (plist-get (car rest) 'class)))
+             (and (string? c) (string-contains? c "dash-state-mark") c)))
+          (else (loop (cdr rest))))))
+
+(deftest 'the-headline-marks-which-state-the-buffer-is-in-without-saying-it
   "focus gives the Cmd-arrows to the window, editing gives them to the caret"
   (lambda ()
     (let ((buf "*zz-modeline-state*"))
       (test-buffer! buf "")
       (buffer-set-local! buf 'mode-name "text-mode")
       (editing-state-off! buf)
-      (check-equal! (t--dseg-value (dashboard-line-blocks buf) "state") "focus"
+      (check-false! (t--dseg-value (dashboard-line-blocks buf) "state")
+                    "the headline spends no segment on the word")
+      ;; the window border wears the colour of the state, so the marker only
+      ;; has to carry the name as a class for the border rule to read
+      (check-equal! (t--dash-state-class (dashboard-line-blocks buf))
+                    "dash-state-mark dash-state-focus"
                     "a landing answers the arrows with the window focus")
-      ;; the segment also names the state as a class, so the headline of
-      ;; the window you are in can wear the colour of the state
-      (check-equal! (t--dseg-class (dashboard-line-blocks buf) "state")
-                    "dseg dash-state-focus"
-                    "and the headline can colour itself from it")
       (editing-state-on! buf)
-      (check-equal! (t--dseg-value (dashboard-line-blocks buf) "state") "editing"
+      (check-equal! (t--dash-state-class (dashboard-line-blocks buf))
+                    "dash-state-mark dash-state-editing"
                     "a buffer you are editing keeps them for the caret")
-      (check-equal! (t--dseg-class (dashboard-line-blocks buf) "state")
-                    "dseg dash-state-editing"
-                    "and the editing state leaves the headline plain")
       (editing-state-off! buf)
+      (buffer-kill! buf))))
+
+(deftest 'the-state-marker-survives-a-window-too-narrow-for-the-metadata
+  "a window with no room for segments still has to say whether the arrows move it"
+  (lambda ()
+    (let ((buf "*zz-modeline-narrow*"))
+      (test-buffer! buf "")
+      (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
+      (buffer-set-local! buf 'cols 20)
+      (editing-state-off! buf)
+      (check-equal! (t--dash-state-class (dashboard-line-blocks buf))
+                    "dash-state-mark dash-state-focus"
+                    "the marker rides outside the keep list")
+      (buffer-kill! buf))))
+
+(deftest 'a-mode-with-its-own-glyph-shows-the-glyph-instead-of-its-name
+  "the key above already says MODE; the word under it was saying it twice"
+  (lambda ()
+    (let ((buf "*zz-modeline-glyph*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "text-mode")
+      (let ((seg (car (dash--mode-segs buf))))
+        (check-equal! (car seg) "dseg-strong dseg-glyph" "the glyph names itself")
+        (check-equal! (string-length (cadr seg)) 1 "and it is one glyph wide"))
+      ;; a mode that registered the empty string has asked for no glyph, and a
+      ;; mode that registered nothing would only get the generic default, which
+      ;; says less than the name it would replace
+      (buffer-set-local! buf 'mode-name "chat-perf-mode")
+      (check-equal! (dash--mode-segs buf) '(("dseg-strong" "chat-perf"))
+                    "an empty registration keeps the name")
+      (buffer-set-local! buf 'mode-name "zz-no-such-mode")
+      (check-equal! (dash--mode-segs buf) '(("dseg-strong" "zz-no-such"))
+                    "and so does no registration at all")
       (buffer-kill! buf))))
 
 ;; A chat refuses the caret map, so the Cmd-arrows stay on the window
@@ -578,8 +617,9 @@
       (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
       (editing-state-on! buf)
       (check-true! (editing-state? buf) "the chat is in the editing state")
-      (check-equal! (t--dseg-value (dashboard-line-blocks buf) "state") "focus"
-                    "and its headline still says focus")
+      (check-equal! (t--dash-state-class (dashboard-line-blocks buf))
+                    "dash-state-mark dash-state-focus"
+                    "and its window border still says focus")
       (editing-state-off! buf)
       (buffer-kill! buf))))
 
