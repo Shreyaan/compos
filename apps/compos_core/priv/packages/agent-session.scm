@@ -424,6 +424,21 @@
       (set! *chat-input-history*
         (chat-take (cons t *chat-input-history*) *chat-history-limit*)))))
 
+;; A reload and a restart both start the ring empty, and a chat you had
+;; been talking in all morning would answer the first up-arrow with
+;; nothing. The first walk in such a session seeds the ring from the chat
+;; you are standing in, newest first; from then on it is one ring again.
+(define (chat-history-seed! buf)
+  (when (null? *chat-input-history*)
+    (set! *chat-input-history*
+      (chat-take
+        (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
+          (cond ((null? ts) (reverse acc))
+                ((equal? (car (car ts)) "user")
+                 (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
+                (else (loop (cdr ts) acc))))
+        *chat-history-limit*))))
+
 (define (chat-history-reset! buf)
   (buffer-set-local! buf 'chat-history-pos #f)
   (buffer-set-local! buf 'chat-history-draft #f))
