@@ -13,6 +13,10 @@
   "Text size of *Messages*, as a step on the 1.2 ladder; 0 is the normal size."
   'group 'messages 'type 'number)
 
+(defcustom 'messages-wide-cols 92
+  "From this width, *Messages* adds the mode and source columns."
+  'group 'messages 'type 'number)
+
 ;; A log is read in bulk, so it wears a smaller face than a document. The
 ;; step is the one C-+ and C-_ move, and the buffer's own value wins once
 ;; it has one: a reader who resized this list keeps their size, including
@@ -128,6 +132,45 @@
       *messages-watches*)
     (set! *messages-watching* #f)))
 
+;; The mode a buffer was in when it spoke. The list cannot ask each source
+;; buffer for its mode while it draws: that is a call into every buffer's
+;; process, once per row, which is the cost docs/LISTS.md rule 1 names —
+;; and a buffer that has since changed mode, or been killed, could not
+;; answer honestly anyway. So the mode is read once, on the message, and
+;; kept here by name. The map is bounded: a long session names more
+;; buffers than a log keeps rows.
+(define *messages-modes* '())
+(define *messages-modes-limit* 256)
+
+(define (messages--first n xs)
+  (if (or (= n 0) (null? xs)) '() (cons (car xs) (messages--first (- n 1) (cdr xs)))))
+
+(define (messages--note-mode! source)
+  (let ((mode (and (buffer-known? source) (buffer-local source 'mode-name))))
+    (when mode
+      (set! *messages-modes*
+            (messages--first *messages-modes-limit*
+              (cons (list source mode)
+                    (filter (lambda (e) (not (equal? (car e) source)))
+                            *messages-modes*)))))))
+
+(define (messages--mode-of source)
+  (let ((e (assoc source *messages-modes*)))
+    (and e (nth 1 e))))
+
+;; A column says "scheme", not "scheme-mode": every row would carry the
+;; same five characters, and the icon already says it is a mode.
+(define (messages--short-mode mode)
+  (if (and mode (string-suffix? "-mode" mode))
+      (substring mode 0 (- (string-length mode) 5))
+      (or mode "")))
+
+(define (messages--mode-label row)
+  (let ((mode (messages--mode-of (or (plist-get row 'source) ""))))
+    (if mode
+        (string-append (mode-icon mode) " " (messages--short-mode mode))
+        "")))
+
 ;; Keep the Emacs name. The wrapper adds editor context before the primitive
 ;; records the event and updates the echo area.
 (define (message text &optional level)
@@ -142,6 +185,7 @@
                            (buffer-known? source))
                       (buffer-project-label source)
                       "")))
+    (messages--note-mode! source)
     (messages--primitive text (or level 'info) source group project)
     (messages--sync!)
     (messages--notify! (messages-newest))))
@@ -178,12 +222,11 @@
 (define (messages--one-line text)
   (string-join (string-split text "\n") " ↵ "))
 
+;; The buffer that spoke. The group and the project are one value for
+;; almost every row of a session, so a column spent on them said nothing;
+;; they are still on the event, and `G` and `P` still filter by them.
 (define (messages--source row)
-  (let ((group (or (plist-get row 'group) ""))
-        (project (or (plist-get row 'project) "")))
-    (cond ((not (equal? group "")) group)
-          ((not (equal? project "")) project)
-          (else (or (plist-get row 'source) "")))))
+  (or (plist-get row 'source) ""))
 
 (define (messages--time row)
   (let ((ms (plist-get row 'time-ms)))
@@ -194,7 +237,19 @@
     (list
       (list (messages--time row) "dim")
       (list (messages--level-label level) (messages--level-face level))
+      (list (messages--mode-label row) "dim")
       (list (messages--source row) "dim")
+      (list (messages--one-line (plist-get row 'text))
+            (messages--text-face level)))))
+
+;; Four columns of provenance in front of a message is three too many in a
+;; narrow window: the message is what the reader came for, and it collapsed
+;; to an ellipsis. Below messages-wide-cols the mode and the source go.
+(define (messages--narrow-cells buf row)
+  (let ((level (plist-get row 'level)))
+    (list
+      (list (messages--time row) "dim")
+      (list (messages--level-label level) (messages--level-face level))
       (list (messages--one-line (plist-get row 'text))
             (messages--text-face level)))))
 
@@ -273,8 +328,9 @@
 (define-list-mode! "messages-mode"
   (list
     'doc (string-append
-           "*Messages* is the editor message log, newest line first. Source prefers the "
-           "group, then project, then buffer. The level column carries the colour code: "
+           "*Messages* is the editor message log, newest line first. Mode and source name "
+           "the buffer that spoke, in the mode it was in then. The level column carries "
+           "the colour code: "
            "error red, warning amber, debug grey, info accent. `l`, `G`, and `P` filter "
            "context. `/` filters all visible text. `\\` removes the newest filter. `w` "
            "says which watches are in force.")
@@ -284,11 +340,24 @@
     ;; just happened, so the order is turned over after the filters have
     ;; run and before the page is cut: the newest message is the top row.
     'order-filtered (lambda (buf rows) (reverse rows))
-    'columns (lambda (buf)
-               (list (list "time" 8)
-                     (list "level" 5)
-                     (list "source" 16 #f 'end)
-                     (list "message" #f)))
+    'layouts
+      (list
+        (list 'name 'narrow
+              'max-cols (lambda (buf) (- messages-wide-cols 1))
+              'columns (lambda (buf)
+                         (list (list "time" 8)
+                               (list "level" 5)
+                               (list "message" #f)))
+              'cells messages--narrow-cells)
+        (list 'name 'wide
+              'default #t
+              'columns (lambda (buf)
+                         (list (list "time" 8)
+                               (list "level" 5)
+                               (list "mode" 11)
+                               (list "source" 16 #f 'end)
+                               (list "message" #f)))
+              'cells messages--cells))
     'cells messages--cells
     'title (lambda (buf) "Messages")
     'meta messages--meta

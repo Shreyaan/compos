@@ -73,35 +73,61 @@
       (check-equal! (plist-get (car blocks) 'tag) "c-key-hints"
                     "and those blocks are the keymap component"))))
 
-(deftest 'messages-cells-use-group-source-and-level-color
-  "the source prefers the group and the level colour is worn by chip and text"
+(deftest 'messages-cells-name-the-buffer-and-colour-the-level
+  "the source is the buffer that spoke, not its group"
   (lambda ()
     (let ((cells
             (messages--cells "*unused*"
               (list 'level "error" 'source "buffer.scm"
                     'group "editor" 'project "compos.el" 'text "failed"))))
-      (check-equal! (length cells) 4 "time, level, source, message")
+      (check-equal! (length cells) 5 "time, level, mode, source, message")
       (check-equal! (car (nth 1 cells)) "error" "the level chip names the level")
       (check-equal! (nth 1 (nth 1 cells)) "error" "and wears the error colour")
-      (check-equal! (car (nth 2 cells)) "editor" "the source shows the group")
-      (check-equal! (car (nth 3 cells)) "failed" "the message keeps its text")
-      (check-equal! (nth 1 (nth 3 cells)) "error"
+      (check-equal! (car (nth 3 cells)) "buffer.scm"
+                    "the source names the buffer, not the group")
+      (check-equal! (car (nth 4 cells)) "failed" "the message keeps its text")
+      (check-equal! (nth 1 (nth 4 cells)) "error"
                     "the message text takes the error colour too"))))
 
-(deftest 'an-info-message-leaves-its-text-in-the-default-face
-  "only the chip is coloured on the ordinary case, so a colour means something"
+(deftest 'the-mode-column-reads-the-mode-the-buffer-spoke-in
+  "the mode is read on the message, not asked of the buffer on every draw"
+  (lambda ()
+    (messages-clear!)
+    (let ((buf "*messages-mode-test*"))
+      (buffer-create buf)
+      (with-current-buffer buf (lambda () (set-mode! "scheme-mode")))
+      (with-current-buffer buf (lambda () (message "from a scheme buffer" 'info)))
+      (let* ((row (car (messages-events)))
+             (label (messages--mode-label row)))
+        (check-true! (string-contains? label "scheme")
+                     "the column names the mode")
+        (check-false! (string-contains? label "-mode")
+                      "without the five characters every row would repeat")
+        (check-true! (string-contains? label (mode-icon "scheme-mode"))
+                     "and carries the mode icon"))
+      ;; the buffer is gone, and the label still answers
+      (buffer-kill! buf)
+      (check-true! (string-contains? (messages--mode-label (car (messages-events)))
+                                     "scheme")
+                   "a killed buffer's mode is still the mode it spoke in"))))
+
+(deftest 'an-info-message-puts-no-face-on-its-text
+  "only the chip is coloured on the ordinary case, so a colour means something.
+   The text wears no face at all: the default face is where the buffer's own
+   size and background come from, and a span wearing it re-states both and
+   ignores the text scale."
   (lambda ()
     (let ((cells (messages--cells "*unused*"
                    (list 'level "info" 'source "a.scm" 'group "" 'project ""
                          'text "ordinary"))))
       (check-equal! (nth 1 (nth 1 cells)) "accent" "the info chip is the accent")
-      (check-false! (nth 1 (nth 3 cells))
+      (check-false! (nth 1 (nth 4 cells))
                     "and the text wears no face"))
     (let ((cells (messages--cells "*unused*"
                    (list 'level "debug" 'source "a.scm" 'group "" 'project ""
                          'text "detail"))))
       (check-equal! (nth 1 (nth 1 cells)) "dim" "debug is grey")
-      (check-equal! (nth 1 (nth 3 cells)) "dim" "in the chip and in the text"))))
+      (check-equal! (nth 1 (nth 4 cells)) "dim" "in the chip and in the text"))))
 
 (deftest 'messages-level-filter-narrows-the-list
   "the messages list filters exact log levels"
@@ -204,3 +230,17 @@
       (check-equal! n 2 "the good watch kept running")
       (check-true! (string-contains? (messages-text) "second")
                    "and the log kept recording"))))
+
+(deftest 'a-narrow-messages-window-keeps-the-message-and-drops-the-provenance
+  "the message is what the reader came for; mode and source go first"
+  (lambda ()
+    (let* ((row (list 'level "error" 'source "buffer.scm" 'group "editor"
+                      'project "compos.el" 'text "failed"))
+           (wide (messages--cells "*unused*" row))
+           (narrow (messages--narrow-cells "*unused*" row)))
+      (check-equal! (length wide) 5 "wide keeps time, level, mode, source, message")
+      (check-equal! (length narrow) 3 "narrow keeps time, level, message")
+      (check-equal! (car (nth 2 narrow)) "failed"
+                    "and the message is still the last column")
+      (check-equal! (nth 1 (nth 1 narrow)) "error"
+                    "with its level colour intact"))))
