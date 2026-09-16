@@ -78,6 +78,16 @@
            (plist-get (car bs) 'class))
           (else (loop (cdr bs))))))
 
+;; The group badge leads the headline, so the wide block is no longer the
+;; first one. Find it by its class instead of by its position.
+(define (t--dash-wide blocks)
+  (let loop ((bs blocks))
+    (cond ((null? bs) #f)
+          ((and (pair? (car bs))
+                (string-contains? (or (plist-get (car bs) 'class) "") "dseg-wide"))
+           (car bs))
+          (else (loop (cdr bs))))))
+
 (deftest 'a-chat-shows-its-running-summary-in-the-dashboard-line
   "the summary segment carries the chat-summary local; a chat without one shows no segment"
   (lambda ()
@@ -88,7 +98,7 @@
                     "no summary yet, no segment")
       (buffer-set-local! buf 'chat-summary "The user is testing the bar.")
       (let* ((blocks (dashboard-line-blocks buf))
-             (wide (car blocks))
+             (wide (t--dash-wide blocks))
              (kids (plist-get wide 'children)))
         (check-equal! (length kids) 1
                       "the summary has no redundant label")
@@ -152,10 +162,14 @@
       (test-buffer! buf "")
       (buffer-set-local! buf 'mode-name "chat-mode")
       (let* ((blocks (dashboard-line-blocks buf))
-             (title (car blocks))
+             (badge (car blocks))
+             ;; the group badge leads, a rule follows it, then the title
+             (title (t--dash-wide blocks))
              (value (car (plist-get title 'children))))
+        (check-equal! (plist-get badge 'class) "dseg-group-badge"
+                      "the group leads the headline")
         (check-true! (string-contains? (plist-get title 'class) "dseg-chat-title")
-                     "the first block is the prominent title")
+                     "the title comes next, ahead of the metadata")
         (check-equal! (cadr (car (plist-get value 'segs))) buf
                       "an untitled chat uses its buffer name")
         (check-equal! (car (car (plist-get value 'segs))) "dseg-strong"
@@ -194,7 +208,7 @@
       (check-equal! (buffer-local buf 'chat-summary) "Rewriting the dashboard segment."
                     "the running summary is still the latest")
       (let* ((blocks (dashboard-line-blocks buf))
-             (wide (car blocks))
+             (wide (t--dash-wide blocks))
              (kids (plist-get wide 'children)))
         (check-equal! (cadr (car (plist-get (car kids) 'segs)))
                       "Adding titles to chats."
@@ -324,7 +338,7 @@
                       "summary rows do not repeat the summary label")
         (check-true! (string-contains? markdown "** jj")
                      "jj rows keep their distinguishing label"))
-      (check-equal! (plist-get (car (dashboard-line-blocks buf)) 'click)
+      (check-equal! (plist-get (t--dash-wide (dashboard-line-blocks buf)) 'click)
                     "summary-log"
                     "the wide segment opens the log")
       (set! *jj-lines* lines)

@@ -12248,6 +12248,25 @@
   color: var(--window-bg, #fdfcf8);
   border-radius: 999px; padding: 1px 9px 2px; font-size: 12.5px; }
 .dseg-group-current { color: var(--buffer-group-color, var(--default-fg, #1b1a17)); }
+/* The group leads the headline from the window's own edge. The negative left
+   margin cancels the headline padding, so the chip touches the border and
+   nothing sits left of it. It is filled with the group's own colour, so its
+   text takes the window background to stay legible, and the key goes away in
+   the paint: the colour is the label. */
+.dseg-group-badge { flex: 0 0 auto; display: flex; align-items: center;
+                    margin-left: -18px; padding: 3px 13px 4px 18px;
+                    border-radius: 0 999px 999px 0; min-width: 0;
+                    background: var(--buffer-group-color, var(--accent-fg, #26356b)); }
+.dseg-group-badge .dseg { flex: 0 1 auto; min-width: 0; }
+.dseg-group-badge .dseg-k { display: none; }
+.dseg-group-badge .dseg-v { font-size: 13px; color: var(--window-bg, #fdfcf8);
+                            white-space: nowrap; overflow: hidden;
+                            text-overflow: ellipsis; }
+.dseg-group-badge .dseg-group-current { color: var(--window-bg, #fdfcf8); }
+.dseg-group-badge .f-dim, .dseg-group-badge .f-faint {
+  color: var(--window-bg, #fdfcf8); opacity: .7; }
+/* the chip is its own edge; a rule beside it says nothing */
+.dash-persistent .dseg-group-badge + .dseg-rule { display: none; }
 .dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
              background: var(--border-bg, #cbc4b1); opacity: .5; }
 .dseg-gap { flex: 1 1 auto; }
@@ -12255,21 +12274,31 @@
 .dseg-wide { flex: 1 1 0; min-width: 0; }
 /* Chat title owns the first row. Metadata wraps independently in each pane. */
 .dash-persistent:has(.dseg-chat-title) { flex-wrap: wrap; gap: 8px 16px; }
-.dash-persistent .dseg-chat-title { flex: 1 0 100%; min-width: 0; }
-.dash-persistent .dseg-chat-title + .dseg-rule { display: none; }
+.dash-persistent .dseg-chat-title { flex: 1 1 0; min-width: 0; }
 .dash-persistent .dseg-chat-title .dseg-v {
   display: block; font-size: 18px; font-weight: 700; line-height: 1.3;
   color: var(--default-fg, #1b1a17); white-space: normal; overflow: visible;
   overflow-wrap: anywhere; -webkit-line-clamp: unset; }
 .dash-persistent:has(.dseg-chat-title) .dseg-rule { display: none; }
+/* The badge shares the title's row; the metadata must not. The rule that
+   follows the title is not a rule here, it is the line break that keeps the
+   metadata below, so the group and the title own the first row alone. */
+.dash-persistent .dseg-chat-title + .dseg-rule {
+  display: block; flex: 0 0 100%; width: 100%; height: 0;
+  background: none; opacity: 1; }
 .dash-persistent:has(.dseg-chat-title) .dseg { max-width: 100%; }
 .dash-persistent:has(.dseg-chat-title) .dseg-v { white-space: normal; overflow-wrap: anywhere; }
+/* the chip is a label, not a column: it never wraps and never grows */
+.dash-persistent .dseg-group-badge .dseg-v {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24ch; }
 
 /* Each pane responds to its own width, including two views of one chat. */
 .dash-top { container-type: inline-size; container-name: chat-header; }
 @container chat-header (min-width: 1100px) {
   .dash-persistent:has(.dseg-chat-title) { flex-wrap: nowrap; gap: 16px; }
   .dash-persistent .dseg-chat-title { flex: 1 1 0; }
+  /* one row: nothing to break, and a 100% break item would eat it */
+  .dash-persistent .dseg-chat-title + .dseg-rule { display: none; }
   .dash-persistent:has(.dseg-chat-title) .dseg,
   .dash-persistent:has(.dseg-chat-title) .dseg-stack {
     flex-direction: row; align-items: baseline; gap: 6px; }
@@ -12665,6 +12694,16 @@
                     (cons (list "f-faint" " / ")
                           (cons (list "f-dim" (car rest)) out))))))))
 
+;; The group owns the top-left corner of the headline: a filled badge in the
+;; group's own colour, flush with the window's left edge, ahead of everything
+;; the buffer says about itself. The key stays in the markup for a reader and
+;; goes away in the paint — the colour is the label. The segment keeps the
+;; name 'group, so a narrow window still drops or keeps it by that name.
+(define (dash--group-badge buf)
+  (list 'tag "div" 'class "dseg-group-badge"
+        'children
+        (list (dash--seg "group" (dash--group-segs buf) 'left "dseg-inline"))))
+
 ;; "openrouter:sonnet" reads as one word until the provider steps back
 (define (dash--model-segs buf)
   (let* ((model (dash--model buf))
@@ -12765,7 +12804,7 @@
                               (dash--seg "state"
                                 (list (list "dseg-strong" state)) 'left
                                 (string-append "dash-state-" state))))
-               (list 'group (dash--seg "group" (dash--group-segs buf) 'left))
+               (list 'group (dash--group-badge buf))
                ;; the preset names the whole setup, so it stands alone: the model
                ;; and the lane are what it chose, and repeating them says nothing
                (list 'llm
@@ -12790,10 +12829,15 @@
          (keep (dash--headline-keep buf (buffer-cols buf))))
     (dash--ruled
       (map cadr
-           (let ((ordered (if summary
-                              (append (filter (lambda (cell) (equal? (car cell) 'wide)) cells)
-                                      (filter (lambda (cell) (not (equal? (car cell) 'wide))) cells))
-                              cells)))
+           ;; the group badge leads at every width, the chat title follows it,
+           ;; and the metadata comes after both
+           (let* ((group? (lambda (cell) (equal? (car cell) 'group)))
+                  (wide? (lambda (cell) (equal? (car cell) 'wide)))
+                  (tail (remove group? cells))
+                  (ordered (append (filter group? cells)
+                                   (if summary
+                                       (append (filter wide? tail) (remove wide? tail))
+                                       tail))))
              (if keep
                  (filter (lambda (cell) (member (car cell) keep)) ordered)
                  ordered))))))
