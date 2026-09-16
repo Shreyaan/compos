@@ -178,3 +178,89 @@
                    "and spells the call out"))
     (check-equal! (chat-scheme-hint "unbound variable: not-a-command-anywhere") ""
                   "a name no command table knows gets no hint")))
+
+(deftest 'an-open-paren-walks-the-expressions-only
+  "what you have typed is the search: a paren reaches the expressions only"
+  (lambda ()
+    (let ((saved *chat-input-history*))
+      (set! *chat-input-history* '())
+      (chat-history-push! "(+ 1 2)")
+      (chat-history-push! "write me a haiku")
+      (chat-history-push! "(buffer-list)")
+      (let ((b (t--cs-chat! "(")))
+        (with-current-buffer b
+          (lambda ()
+            (end-of-buffer!)
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "(buffer-list)"
+                          "the last expression, not the last message")
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "(+ 1 2)"
+                          "the prose between them is skipped")
+            (run-command "chat-history-next")
+            (run-command "chat-history-next")
+            (check-equal! (chat-input-text b) "("
+                          "and down comes back to the half-typed draft")))
+        (buffer-kill! b))
+      (let ((b (t--cs-chat! "")))
+        (with-current-buffer b
+          (lambda ()
+            (end-of-buffer!)
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "(buffer-list)" "prose walks the whole ring")
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "write me a haiku" "including the messages")))
+        (buffer-kill! b))
+      (set! *chat-input-history* saved))))
+
+(deftest 'the-popup-keeps-the-arrows-while-it-shows
+  "a word to complete owns the arrows; the space that ends it hands them back"
+  (lambda ()
+    (check-equal! (keymap-lookup " *completion*" '("<up>")) "completion-prev"
+                  "the popup moves with up")
+    (check-equal! (keymap-lookup " *completion*" '("<down>")) "completion-next"
+                  "and with down")
+    (let ((b (t--cs-chat! "(load ")))
+      (with-current-buffer b
+        (lambda ()
+          (end-of-buffer!)
+          (check-equal! (chat-scheme--capf) #f
+                        "after a space there is no word, so no popup to swallow them")))
+      (buffer-kill! b))))
+
+(deftest 'the-history-walks-only-what-you-have-typed
+  "up searches by prefix, the way a shell's history search does"
+  (lambda ()
+    (let ((saved *chat-input-history*))
+      (set! *chat-input-history* '())
+      (chat-history-push! "(load \"one.scm\")")
+      (chat-history-push! "(buffer-list)")
+      (chat-history-push! "(load \"two.scm\")")
+      (chat-history-push! "ship it")
+      (let ((b (t--cs-chat! "(load ")))
+        (with-current-buffer b
+          (lambda ()
+            (end-of-buffer!)
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "(load \"two.scm\")"
+                          "the last load, not the last expression")
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "(load \"one.scm\")"
+                          "and the one before it, the buffer-list skipped")
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "(load \"one.scm\")"
+                          "there is no third, so nothing moves")
+            (run-command "chat-history-next")
+            (run-command "chat-history-next")
+            (check-equal! (chat-input-text b) "(load "
+                          "down comes back to what you had typed")))
+        (buffer-kill! b))
+      (let ((b (t--cs-chat! "sh")))
+        (with-current-buffer b
+          (lambda ()
+            (end-of-buffer!)
+            (run-command "chat-history-previous")
+            (check-equal! (chat-input-text b) "ship it"
+                          "prose searches by prefix too")))
+        (buffer-kill! b))
+      (set! *chat-input-history* saved))))

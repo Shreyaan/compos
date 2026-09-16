@@ -469,7 +469,8 @@
 
 (define (chat-history-reset! buf)
   (buffer-set-local! buf 'chat-history-pos #f)
-  (buffer-set-local! buf 'chat-history-draft #f))
+  (buffer-set-local! buf 'chat-history-draft #f)
+  (buffer-set-local! buf 'chat-history-prefix #f))
 
 (define (chat-in-input? buf)
   (>= (point) (or (buffer-local buf 'agent-saved-mark) 0)))
@@ -486,17 +487,41 @@
          (substring-bytes (buffer-text buf) (point) (buffer-size buf))
          "\n")))
 
+; What you have already typed is the search. Up walks only the entries
+; that start with it, the way a shell's history search does, so "(load "
+; reaches the last thing you loaded and "(" reaches every expression
+; without the prose in between. An empty draft walks everything. The
+; prefix is taken once, when you step off the draft, and held for the
+; walk: recall rewrites the input, and reading it again would change the
+; ring underfoot.
+(define (chat-history-for prefix)
+  (if (equal? prefix "")
+      *chat-input-history*
+      (filter (lambda (s) (string-prefix? prefix s)) *chat-input-history*)))
+
+(define (chat-history-prefix-of buf)
+  (or (buffer-local buf 'chat-history-prefix)
+      (let ((prefix (chat-input-text buf)))
+        (buffer-set-local! buf 'chat-history-prefix prefix)
+        prefix)))
+
 (define (chat-history-recall! buf dir)
-  (let* ((h (chat-history))
+  (let* ((prefix (chat-history-prefix-of buf))
+         (h (chat-history-for prefix))
          (pos (or (buffer-local buf 'chat-history-pos) -1))
          (next (if (< dir 0) (+ pos 1) (- pos 1))))
-    (cond ((>= next (length h)) (message "no earlier message"))
+    (cond ((>= next (length h))
+           (message (if (equal? prefix "")
+                        "no earlier input"
+                        (string-append "no earlier input starting with " prefix))))
           ((< next -1) #f)
           (else
             ;; hold the draft the first time you step off it
             (when (= pos -1)
               (buffer-set-local! buf 'chat-history-draft (chat-input-text buf)))
             (buffer-set-local! buf 'chat-history-pos (if (= next -1) #f next))
+            ;; back on the draft, the next walk takes its prefix afresh
+            (when (= next -1) (buffer-set-local! buf 'chat-history-prefix #f))
             (chat-replace-input! buf
               (if (= next -1)
                   (or (buffer-local buf 'chat-history-draft) "")
