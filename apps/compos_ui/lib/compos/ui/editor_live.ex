@@ -65,6 +65,7 @@ defmodule Compos.Ui.EditorLive do
           tabs_key: nil,
           wk_timer: nil,
           wk_shown: false,
+          wk_pending: [],
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           instance_name: identity.name,
           instance_accent: identity.accent
@@ -590,22 +591,35 @@ defmodule Compos.Ui.EditorLive do
     do: {state, cancel_which_key(socket)}
 
   defp hold_which_key(state, socket) do
+    pending = Map.get(state, :pending, [])
+
     cond do
+      # up already: it follows the pending keys without flickering
       socket.assigns[:wk_shown] ->
         {state, socket}
 
-      socket.assigns[:wk_timer] ->
+      # the delay is idle time, not time since the chord began: while the
+      # panel is still held back, every further prefix key restarts it. A
+      # chord typed steadily but not fast — C-x, then r — used to spend the
+      # first key's leftover delay and pop the panel a breath after the
+      # second key, which reads as the key having summoned it.
+      socket.assigns[:wk_pending] == pending and socket.assigns[:wk_timer] ->
         {%{state | which_key: nil}, socket}
 
       true ->
-        timer = Process.send_after(self(), :which_key_show, which_key_delay_ms(state))
-        {%{state | which_key: nil}, assign(socket, wk_timer: timer)}
+        {%{state | which_key: nil}, arm_which_key(state, socket, pending)}
     end
+  end
+
+  defp arm_which_key(state, socket, pending) do
+    if t = socket.assigns[:wk_timer], do: Process.cancel_timer(t)
+    timer = Process.send_after(self(), :which_key_show, which_key_delay_ms(state))
+    assign(socket, wk_timer: timer, wk_shown: false, wk_pending: pending)
   end
 
   defp cancel_which_key(socket) do
     if t = socket.assigns[:wk_timer], do: Process.cancel_timer(t)
-    assign(socket, wk_timer: nil, wk_shown: false)
+    assign(socket, wk_timer: nil, wk_shown: false, wk_pending: [])
   end
 
   @which_key_default_ms 500

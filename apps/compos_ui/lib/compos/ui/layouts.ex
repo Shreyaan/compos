@@ -3028,6 +3028,14 @@ defmodule Compos.Ui.Layouts do
                 this.handler = (e) => {
                   if (e.target.closest && e.target.closest(".terminal-view")) return;
                   const panel = document.querySelector(".which-key");
+                  // the filter dies with the panel it belonged to. A query
+                  // left standing swallowed the next chord's second key as
+                  // filter text instead of dispatching it.
+                  if (!panel && (this.whichKeyFiltering || this.whichKeyQuery)) {
+                    this.whichKeyFiltering = false;
+                    this.whichKeyQuery = "";
+                    this.whichKeyHeld.clear();
+                  }
                   const modifier = WHICH_KEY_MODIFIERS[e.key];
                   if (modifier && panel && !this.whichKeyFiltering) {
                     e.preventDefault();
