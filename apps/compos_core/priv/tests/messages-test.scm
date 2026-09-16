@@ -72,17 +72,34 @@
                     "and those blocks are the keymap component"))))
 
 (deftest 'messages-cells-use-group-source-and-level-color
-  "the source prefers the group and the message color carries the level"
+  "the source prefers the group and the level colour is worn by chip and text"
   (lambda ()
     (let ((cells
             (messages--cells "*unused*"
               (list 'level "error" 'source "buffer.scm"
                     'group "editor" 'project "compos.el" 'text "failed"))))
-      (check-equal! (length cells) 2 "the row has only source and message")
-      (check-equal! (car (car cells)) "editor" "the source shows the group")
-      (check-equal! (car (car (cdr cells))) "failed" "the message keeps its text")
-      (check-equal! (car (cdr (car (cdr cells)))) "alert"
-                    "the message uses the error color"))))
+      (check-equal! (length cells) 4 "time, level, source, message")
+      (check-equal! (car (nth 1 cells)) "error" "the level chip names the level")
+      (check-equal! (nth 1 (nth 1 cells)) "error" "and wears the error colour")
+      (check-equal! (car (nth 2 cells)) "editor" "the source shows the group")
+      (check-equal! (car (nth 3 cells)) "failed" "the message keeps its text")
+      (check-equal! (nth 1 (nth 3 cells)) "error"
+                    "the message text takes the error colour too"))))
+
+(deftest 'an-info-message-leaves-its-text-in-the-default-face
+  "only the chip is coloured on the ordinary case, so a colour means something"
+  (lambda ()
+    (let ((cells (messages--cells "*unused*"
+                   (list 'level "info" 'source "a.scm" 'group "" 'project ""
+                         'text "ordinary"))))
+      (check-equal! (nth 1 (nth 1 cells)) "accent" "the info chip is the accent")
+      (check-equal! (nth 1 (nth 3 cells)) "default"
+                    "and the text stays in the default face"))
+    (let ((cells (messages--cells "*unused*"
+                   (list 'level "debug" 'source "a.scm" 'group "" 'project ""
+                         'text "detail"))))
+      (check-equal! (nth 1 (nth 1 cells)) "dim" "debug is grey")
+      (check-equal! (nth 1 (nth 3 cells)) "dim" "in the chip and in the text"))))
 
 (deftest 'messages-level-filter-narrows-the-list
   "the messages list filters exact log levels"
@@ -130,3 +147,58 @@
     (message "live row" 'info)
     (check-true! (string-contains? (buffer-text "*Messages*") "live row")
                  "the shown list follows the log")))
+
+(deftest 'a-watch-reacts-to-the-messages-its-grammar-matches
+  "the grammar's captures reach the reaction; other messages do not"
+  (lambda ()
+    (messages-clear!)
+    (let ((seen '()))
+      (messages-watch! "test-deploys" '(level "error" match "deploy ([a-z-]+)")
+        (lambda (row caps) (set! seen (cons (nth 1 caps) seen))))
+      (message "deploy web-front" 'error)
+      (message "deploy web-front" 'info)
+      (message "nothing here" 'error)
+      (messages-unwatch! "test-deploys")
+      (check-equal! seen '("web-front")
+                    "only the matching level and text fired, with its capture")
+      (message "after the unwatch" 'error)
+      (check-equal! seen '("web-front") "and an unwatched name stops firing"))))
+
+(deftest 'an-empty-grammar-watches-every-message
+  "an absent field matches anything"
+  (lambda ()
+    (messages-clear!)
+    (let ((n 0))
+      (messages-watch! "test-all" '() (lambda (row caps) (set! n (+ n 1))))
+      (message "one" 'info)
+      (message "two" 'debug)
+      (messages-unwatch! "test-all")
+      (check-equal! n 2 "both messages reached the watch"))))
+
+(deftest 'a-reaction-that-logs-does-not-re-enter-the-watches
+  "the dispatch is closed while a reaction runs"
+  (lambda ()
+    (messages-clear!)
+    (let ((n 0))
+      (messages-watch! "test-loop" '()
+        (lambda (row caps)
+          (set! n (+ n 1))
+          (when (< n 10) (message "the reaction's own message" 'info))))
+      (message "the cause" 'info)
+      (messages-unwatch! "test-loop")
+      (check-equal! n 1 "the reaction ran once, not forever"))))
+
+(deftest 'a-raising-reaction-does-not-stop-the-log
+  "one bad watch cannot close the dispatch on the others"
+  (lambda ()
+    (messages-clear!)
+    (let ((n 0))
+      (messages-watch! "test-bad" '() (lambda (row caps) (error "boom")))
+      (messages-watch! "test-good" '() (lambda (row caps) (set! n (+ n 1))))
+      (message "first" 'info)
+      (message "second" 'info)
+      (messages-unwatch! "test-bad")
+      (messages-unwatch! "test-good")
+      (check-equal! n 2 "the good watch kept running")
+      (check-true! (string-contains? (messages-text) "second")
+                   "and the log kept recording"))))
