@@ -12354,6 +12354,16 @@
       (substring name 0 (- (string-length name) 4))
       name))
 
+;; A mode name in the card is that mode's switch. The panel used to name the
+;; modes and the window template drew a second, clickable modes card beside
+;; it -- two cards, one subject. The card is built here now, and the name
+;; carries the toggle the second card had.
+(define (dash--mode-toggle name class)
+  (list 'tag "c-action" 'class class
+        'text (dashboard--mode-name name)
+        'click (string-append "dash-mode:" name)
+        'attrs (list (list "title" (string-append "toggle " name)))))
+
 ;; Every mode that answers here. The modeline shows the major mode and the
 ;; buffer's minor modes; other maps answer with nothing said -- cua-mode's,
 ;; the editing state's, a global minor map -- and the card names those as
