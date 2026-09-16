@@ -12819,7 +12819,10 @@
 
 (define (dashboard-line-blocks buf &optional preset-cell)
   (let* ((vcs (dash--vcs buf))
-         (summary (if (chat-buffer? buf) (or (dash--summary buf) buf) #f))
+         ;; every buffer names itself: a chat's own title when it wrote one,
+         ;; and the buffer's name when it has none. The name comes through
+         ;; whole, so a system buffer is *Messages* and never messages.
+         (title (or (dash--summary buf) (buffer-modeline-name buf)))
          (preset (if preset-cell (car preset-cell) (dash--preset buf)))
          ;; every segment carries its name, so a narrow window keeps the
          ;; ones its mode declared and drops the rest
