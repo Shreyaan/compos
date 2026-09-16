@@ -17,20 +17,30 @@
 (define (chat-perf--rows buf)
   (chat-perf--events (buffer-local buf 'chat-perf-path)))
 
+(define (chat-perf--text v)
+  (cond ((string? v) v)
+        ((number? v) (number->string v))
+        ((symbol? v) (symbol->string v))
+        (else "")))
+
 (define (chat-perf--duration row)
   (let ((us (plist-get row 'duration_us)) (ms (plist-get row 'duration_ms)))
-    (cond (us (string-append (number->string (/ us 1000)) "ms"))
-          (ms (string-append (number->string ms) "ms"))
+    (cond ((number? us) (string-append (number->string (/ us 1000)) "ms"))
+          ((number? ms) (string-append (number->string ms) "ms"))
           (else ""))))
 
 (define (chat-perf--detail row)
-  (or (plist-get row 'title) (plist-get row 'backend) (plist-get row 'model) ""))
+  (let loop ((keys '(title backend model)))
+    (if (null? keys)
+        ""
+        (let ((v (chat-perf--text (plist-get row (car keys)))))
+          (if (equal? v "") (loop (cdr keys)) v)))))
 
 (define (chat-perf--cells buf row)
-  (list (or (plist-get row 'epoch) "")
-        (or (plist-get row 'kind) "")
-        (or (plist-get row 'type) "")
-        (or (plist-get row 'status) "")
+  (list (chat-perf--text (plist-get row 'epoch))
+        (chat-perf--text (plist-get row 'kind))
+        (chat-perf--text (plist-get row 'type))
+        (chat-perf--text (plist-get row 'status))
         (chat-perf--duration row)
         (chat-perf--detail row)))
 
