@@ -1980,33 +1980,37 @@ defmodule Compos.Ui.EditorLive do
       <c-headerline :if={@node.header_line} class="buffer-header">{@node.header_line}</c-headerline>
       <c-group :if={@node.dash || @node.dashboard_line_blocks || @verbosity?} class="dash-top">
         <c-headerline
-          :if={@node.dashboard_line_blocks}
+          :if={@node.dashboard_line_blocks || @verbosity?}
           class="dash-persistent"
           title="open dashboard"
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
         >
-          <.blk :for={b <- @node.dashboard_line_blocks} b={block_view(b)} line={-1} win={@node.id} />
+          <.blk :for={b <- @node.dashboard_line_blocks || []} b={block_view(b)} line={-1} win={@node.id} />
+          <%!-- How much of the transcript to show is a fact about this window,
+                 so it rides the headline itself, at the end of the row, as the
+                 three states of one radio. Inside the scroll it moved with the
+                 reader and covered the conversation, and a bar of its own spent
+                 a whole row on three glyphs. The headline opens the dashboard
+                 on a click and these do not: the nearest phx-click to the
+                 target is the one that fires, so a press on a state never
+                 reaches the row underneath it. --%>
+          <c-group :if={@verbosity?} class="dash-verbosity" role="radiogroup" aria-label="Transcript verbosity">
+            <button
+              :for={{level, icon} <- [{"info", "ⓘ"}, {"log", "≡"}, {"debug", "⌗"}]}
+              type="button"
+              role="radio"
+              class={"dvb #{if @verbosity == level, do: "on"}"}
+              title={level}
+              aria-label={level}
+              aria-checked={to_string(@verbosity == level)}
+              phx-click="ui_cmd"
+              phx-value-win={@node.id}
+              phx-value-cmd={"agent-verbosity-" <> level}
+            >{icon}</button>
+          </c-group>
         </c-headerline>
-        <%!-- How much of the transcript to show is a fact about this window,
-               so it rides the headerline with the rest of them. Inside the
-               scroll it moved with the reader and covered the conversation;
-               it is also a sibling of the header line, not a child, because
-               the header line itself opens the dashboard on a click. --%>
-        <c-toolbar :if={@verbosity?} class={"ag-verbosity #{if @node.dash_narrow, do: "icons-only"}"} role="group" aria-label="Transcript verbosity">
-          <button
-            :for={{level, icon} <- [{"info", "ⓘ"}, {"log", "≡"}, {"debug", "⌗"}]}
-            type="button"
-            class={if @verbosity == level, do: "active"}
-            title={level}
-            aria-label={level}
-            aria-pressed={to_string(@verbosity == level)}
-            phx-click="ui_cmd"
-            phx-value-win={@node.id}
-            phx-value-cmd={"agent-verbosity-" <> level}
-          ><c-text class="ag-vb-icon" aria-hidden="true">{icon}</c-text><c-text class="ag-vb-label">{level}</c-text></button>
-        </c-toolbar>
         <c-group :if={@node.dash} class="dash-live">
           <c-text>L{@line}:C{@col}</c-text>
           <c-text>point {@node.point}</c-text>
