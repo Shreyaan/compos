@@ -1994,10 +1994,18 @@ defmodule Compos.Ui.EditorLive do
                scroll it moved with the reader and covered the conversation;
                it is also a sibling of the header line, not a child, because
                the header line itself opens the dashboard on a click. --%>
-        <c-toolbar :if={@verbosity?} class="ag-verbosity" role="group" aria-label="Transcript verbosity">
-          <button type="button" class={if @verbosity == "info", do: "active"} phx-click="ui_cmd" phx-value-win={@node.id} phx-value-cmd="agent-verbosity-info">info</button>
-          <button type="button" class={if @verbosity == "log", do: "active"} phx-click="ui_cmd" phx-value-win={@node.id} phx-value-cmd="agent-verbosity-log">log</button>
-          <button type="button" class={if @verbosity == "debug", do: "active"} phx-click="ui_cmd" phx-value-win={@node.id} phx-value-cmd="agent-verbosity-debug">debug</button>
+        <c-toolbar :if={@verbosity?} class={"ag-verbosity #{if @node.dash_narrow, do: "icons-only"}"} role="group" aria-label="Transcript verbosity">
+          <button
+            :for={{level, icon} <- [{"info", "ⓘ"}, {"log", "≡"}, {"debug", "⌗"}]}
+            type="button"
+            class={if @verbosity == level, do: "active"}
+            title={level}
+            aria-label={level}
+            aria-pressed={to_string(@verbosity == level)}
+            phx-click="ui_cmd"
+            phx-value-win={@node.id}
+            phx-value-cmd={"agent-verbosity-" <> level}
+          ><c-text class="ag-vb-icon" aria-hidden="true">{icon}</c-text><c-text class="ag-vb-label">{level}</c-text></button>
         </c-toolbar>
         <c-group :if={@node.dash} class="dash-live">
           <c-text>L{@line}:C{@col}</c-text>

@@ -13109,6 +13109,7 @@
 (define (dashboard--render! buf)
   (desktop-skip! buf 'dashboard-line)
   (desktop-skip! buf 'dashboard-line-blocks)
+  (desktop-skip! buf 'dashboard-narrow)
   (desktop-skip! buf 'modeline-name)
   (desktop-skip! buf 'modeline-name-segments)
   (desktop-skip! buf 'modeline-project)
@@ -13119,6 +13120,10 @@
       (list 'dashboard-dirty #f
             'dashboard-line (dashboard-one-line buf preset-cell)
             'dashboard-line-blocks (dashboard-line-blocks buf preset-cell)
+            ;; the same width the line trimmed itself by. The headerline's
+            ;; own controls drop their words at that width, and only Scheme
+            ;; knows a window's columns.
+            'dashboard-narrow (< (buffer-cols buf) narrow-cols)
             'modeline-name (buffer-modeline-name buf)
             ;; the same name as the spans that draw it: the client shows
             ;; these and falls back to the plain string only without them

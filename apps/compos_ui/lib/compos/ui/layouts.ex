@@ -746,10 +746,16 @@ defmodule Compos.Ui.Layouts do
             letter-spacing: .045em;
           }
           .ag-verbosity button {
+            display: flex; align-items: center; gap: 5px;
             padding: 5px 8px; border: 0; border-radius: 0; background: transparent;
             color: var(--agent-meta-fg, #8a8577); font: inherit; text-transform: inherit;
             letter-spacing: inherit; cursor: pointer;
           }
+          .ag-vb-icon { font-family: var(--font-mono); line-height: 1; }
+          /* a narrow window keeps the icons and drops the words: the same
+             verdict the headerline's segments trim themselves by */
+          .ag-verbosity.icons-only .ag-vb-label { display: none; }
+          .ag-verbosity.icons-only button { gap: 0; padding: 5px 7px; }
           .ag-verbosity button.active {
             background: var(--agent-tool-fg, #26356b); color: var(--window-bg, #fdfcf8);
           }
