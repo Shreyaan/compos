@@ -12286,6 +12286,23 @@
 .dash-persistent .dseg-group-badge + .dseg-rule { display: none; }
 .dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
              background: var(--border-bg, #cbc4b1); opacity: .5; }
+/* How much of the transcript to show is a fact about this window, so it
+   rides the end of the headline rather than a bar of its own. Three states
+   of one radio, joined into a single pill: at this size the glyph is the
+   whole control, and the word it stands for is on the button's title. The
+   chosen one is filled with the group's colour, the same paint the headline
+   already wears on its bottom edge, so the row reads as one thing. */
+.dash-verbosity { display: flex; flex: 0 0 auto; margin-left: auto;
+                  border: 1px solid var(--border-bg, #cbc4b1); border-radius: 999px;
+                  overflow: hidden; background: var(--window-bg, #fdfcf8); }
+.dvb { display: flex; align-items: center; justify-content: center;
+       width: 32px; height: 27px; padding: 0; border: 0; border-radius: 0;
+       background: transparent; cursor: pointer;
+       font: 400 17px/1 var(--font-mono); color: var(--faint-fg, #b3ac9c); }
+.dvb + .dvb { border-left: 1px solid var(--border-bg, #cbc4b1); }
+.dvb:hover { color: var(--default-fg, #1b1a17); }
+.dvb.on { background: var(--buffer-group-color, var(--accent-fg, #26356b));
+          color: var(--window-bg, #fdfcf8); }
 .dseg-gap { flex: 1 1 auto; }
 .dseg-stack { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
 .dseg-wide { flex: 1 1 0; min-width: 0; }
@@ -13109,7 +13126,6 @@
 (define (dashboard--render! buf)
   (desktop-skip! buf 'dashboard-line)
   (desktop-skip! buf 'dashboard-line-blocks)
-  (desktop-skip! buf 'dashboard-narrow)
   (desktop-skip! buf 'modeline-name)
   (desktop-skip! buf 'modeline-name-segments)
   (desktop-skip! buf 'modeline-project)
@@ -13120,10 +13136,6 @@
       (list 'dashboard-dirty #f
             'dashboard-line (dashboard-one-line buf preset-cell)
             'dashboard-line-blocks (dashboard-line-blocks buf preset-cell)
-            ;; the same width the line trimmed itself by. The headerline's
-            ;; own controls drop their words at that width, and only Scheme
-            ;; knows a window's columns.
-            'dashboard-narrow (< (buffer-cols buf) narrow-cols)
             'modeline-name (buffer-modeline-name buf)
             ;; the same name as the spans that draw it: the client shows
             ;; these and falls back to the plain string only without them
