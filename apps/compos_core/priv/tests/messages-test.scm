@@ -33,12 +33,43 @@
                   "messages-mode" "the buffer records its mode")
     (check-true! (string-contains? (buffer-text "*Messages*") "SOURCE")
                  "the list shows one source column")
-    (check-false! (string-contains? (buffer-text "*Messages*") "LEVEL")
-                  "the list does not spend space on a level column")
-    (check-false! (string-contains? (buffer-text "*Messages*") "TIME")
-                  "the list does not spend space on time")
+    (check-true! (string-contains? (buffer-text "*Messages*") "LEVEL")
+                 "the level column carries the colour code")
     (check-true! (string-contains? (buffer-text "*Messages*") "failed event")
                  "the list renders message text")))
+
+(deftest 'the-messages-list-puts-the-newest-line-on-top
+  "the log arrives oldest first and the list turns it over"
+  (lambda ()
+    (messages-clear!)
+    (message "older event" 'info)
+    (message "newer event" 'info)
+    (run-command "view-messages")
+    (let ((text (buffer-text "*Messages*")))
+      (check-true! (< (car (isearch-matches "newer event"))
+                      (car (isearch-matches "older event")))
+                   "the newest message is the higher row")
+      (check-true! (string-contains? text "older event")
+                   "and the older one is still there"))))
+
+(deftest 'the-messages-list-wears-a-smaller-face
+  "a log is read in bulk, so *Messages* sits a step below the default size"
+  (lambda ()
+    (messages-clear!)
+    (message "a row" 'info)
+    (check-equal! (buffer-local "*Messages*" 'text-scale) messages-text-scale
+                  "the buffer carries the configured step")))
+
+(deftest 'the-messages-list-pins-its-keys-in-the-keymap-component
+  "the key bar is the shared ui/keymap component, not a header line"
+  (lambda ()
+    (messages-clear!)
+    (message "a row" 'info)
+    (run-command "view-messages")
+    (let ((blocks (buffer-local "*Messages*" 'footer-line-blocks)))
+      (check-true! (pair? blocks) "the footer carries blocks")
+      (check-equal! (plist-get (car blocks) 'tag) "c-key-hints"
+                    "and those blocks are the keymap component"))))
 
 (deftest 'messages-cells-use-group-source-and-level-color
   "the source prefers the group and the message color carries the level"

@@ -7,6 +7,26 @@
 (define *messages-limit* 2000)
 (define messages--primitive message-emit)
 
+(defgroup 'messages "The editor message log, its list, and its watches.")
+
+(defcustom 'messages-text-scale -1
+  "Text size of *Messages*, as a step on the 1.2 ladder; 0 is the normal size."
+  'group 'messages 'type 'number)
+
+(define *messages-scaled* #f)
+
+;; A log is read in bulk, so it wears a smaller face than a document. The
+;; step is the one C-+ and C-_ move, so a reader who wants this list
+;; bigger just presses the key and their own buffer-local wins. The flag
+;; keeps the common path a Scheme read: this runs once per message, and a
+;; buffer-local read is a call into the buffer's process.
+(define (messages--scale! name)
+  (unless (or *messages-scaled* (not (boundp 'text-scale-sync!)))
+    (set! *messages-scaled* #t)
+    (unless (buffer-local name 'text-scale)
+      (buffer-set-local! name 'text-scale messages-text-scale)
+      (text-scale-sync! name))))
+
 ;; Remove the pre-Emacs spelling when this package first loads.
 (when (buffer-exists? "*messages*") (buffer-kill! "*messages*"))
 
@@ -15,11 +35,13 @@
 ;; it go; this adoption puts messages-mode on the name at load and each
 ;; time the name is created again, so no path shows the raw buffer.
 (define (messages--adopt! name)
-  (when (and (equal? name *messages-buffer*)
-             (not (equal? (buffer-local name 'mode-name) "messages-mode")))
-    (buffer-set-local! name 'mode-name "messages-mode")
-    (list-mode-init! name "messages-mode")
-    (list-refresh! name)))
+  (when (equal? name *messages-buffer*)
+    (unless (equal? (buffer-local name 'mode-name) "messages-mode")
+      (buffer-set-local! name 'mode-name "messages-mode")
+      (list-mode-init! name "messages-mode")
+      (set! *messages-scaled* #f)
+      (list-refresh! name))
+    (messages--scale! name)))
 
 (define (messages--shown? name)
   (let loop ((ws (window-list)))
@@ -47,6 +69,70 @@
          (map (lambda (row) (string-append (plist-get row 'text) "\n"))
               (messages-events))))
 
+;; --- Watches ---------------------------------------------------------
+;;
+;; A watch is a name, a grammar, and a reaction. Every message the log
+;; records is offered to every watch; a watch whose grammar matches runs
+;; its reaction on the event.
+;;
+;; The grammar is a plist over the event's own fields. 'level, 'source,
+;; 'group and 'project match a field exactly. 'match is a regular
+;; expression over the message text, and what it captures is handed to the
+;; reaction as a second argument. An absent field matches anything, so the
+;; empty grammar watches every message.
+;;
+;;   (messages-watch! "deploys" '(level "error" match "deploy ([a-z-]+)")
+;;     (lambda (row caps) (chat-notify (nth 1 caps))))
+;;
+;; A reaction that logs its own message does not re-enter the watches: the
+;; dispatch is closed while it runs. A reaction that raises is ignored, so
+;; one bad watch cannot stop the log.
+(define *messages-watches* '())
+(define *messages-watching* #f)
+
+(define (messages--watch-others name)
+  (filter (lambda (w) (not (equal? (car w) name))) *messages-watches*))
+
+(define (messages--field-match? row key wanted)
+  (or (not wanted) (equal? (or (plist-get row key) "") wanted)))
+
+;; #f when the grammar does not match. A grammar that matches answers its
+;; regexp captures, or the empty list when it has no regexp.
+(define (messages-watch-captures row grammar)
+  (and (messages--field-match? row 'level (plist-get grammar 'level))
+       (messages--field-match? row 'source (plist-get grammar 'source))
+       (messages--field-match? row 'group (plist-get grammar 'group))
+       (messages--field-match? row 'project (plist-get grammar 'project))
+       (let ((re (plist-get grammar 'match)))
+         (if re (re-match re (or (plist-get row 'text) "")) '()))))
+
+(define (messages-watch! name grammar fn)
+  (set! *messages-watches*
+        (append (messages--watch-others name) (list (list name grammar fn))))
+  name)
+
+(define (messages-unwatch! name)
+  (set! *messages-watches* (messages--watch-others name))
+  name)
+
+(define (messages-watches)
+  (map (lambda (w) (list (car w) (nth 1 w))) *messages-watches*))
+
+(define (messages-newest)
+  (let ((rows (messages-snapshot 1)))
+    (and (pair? rows) (car rows))))
+
+(define (messages--notify! row)
+  (when (and row (pair? *messages-watches*) (not *messages-watching*))
+    (set! *messages-watching* #t)
+    (for-each
+      (lambda (w)
+        (let ((caps (messages-watch-captures row (nth 1 w))))
+          (when caps
+            (ignore-errors (lambda () ((nth 2 w) row caps) #t)))))
+      *messages-watches*)
+    (set! *messages-watching* #f)))
+
 ;; Keep the Emacs name. The wrapper adds editor context before the primitive
 ;; records the event and updates the echo area.
 (define (message text &optional level)
@@ -62,16 +148,34 @@
                       (buffer-project-label source)
                       "")))
     (messages--primitive text (or level 'info) source group project)
-    (messages--sync!)))
+    (messages--sync!)
+    (messages--notify! (messages-newest))))
 
 (define (messages-events)
   (messages-snapshot *messages-limit*))
 
+;; The colour code. A level is one colour, worn by the level chip and by
+;; the message text alike: error red, warning amber, debug grey, info the
+;; accent. Info is the ordinary case, so only its chip is coloured and its
+;; text stays in the default face — the colours mean something because
+;; most lines have none.
 (define (messages--level-face level)
-  (cond ((equal? level "error") "alert")
+  (cond ((equal? level "error") "error")
         ((equal? level "warning") "warn")
         ((equal? level "debug") "dim")
         (else "accent")))
+
+(define (messages--text-face level)
+  (cond ((equal? level "error") "error")
+        ((equal? level "warning") "warn")
+        ((equal? level "debug") "dim")
+        (else "default")))
+
+(define (messages--level-label level)
+  (cond ((equal? level "error") "error")
+        ((equal? level "warning") "warn")
+        ((equal? level "debug") "debug")
+        (else "info")))
 
 (define (messages--one-line text)
   (string-join (string-split text "\n") " ↵ "))
@@ -91,9 +195,10 @@
   (let ((level (plist-get row 'level)))
     (list
       (list (messages--time row) "dim")
+      (list (messages--level-label level) (messages--level-face level))
       (list (messages--source row) "dim")
       (list (messages--one-line (plist-get row 'text))
-            (messages--level-face level)))))
+            (messages--text-face level)))))
 
 (define (messages--filter buf row filter-value)
   (let ((kind (car filter-value))
@@ -142,6 +247,16 @@
     (messages-clear!)
     (list-refresh! *messages-buffer*)))
 
+(define-command "messages-watch-list" "Say which message watches are in force"
+  (lambda ()
+    (let ((ws (messages-watches)))
+      (message
+        (if (null? ws)
+            "no message watches"
+            (string-append
+              "watching: "
+              (string-join (map (lambda (w) (car w)) ws) ", ")))))))
+
 (define (messages--meta buf)
   (let ((rows (list-entries buf)))
     (string-append (number->string (length rows)) " messages")))
@@ -160,13 +275,20 @@
 (define-list-mode! "messages-mode"
   (list
     'doc (string-append
-           "*Messages* is the editor message log. Source prefers the group, then project, "
-           "then buffer. Message color shows the level. `l`, `G`, and `P` filter context. "
-           "`/` filters all visible text. `\\` removes the newest filter.")
+           "*Messages* is the editor message log, newest line first. Source prefers the "
+           "group, then project, then buffer. The level column carries the colour code: "
+           "error red, warning amber, debug grey, info accent. `l`, `G`, and `P` filter "
+           "context. `/` filters all visible text. `\\` removes the newest filter. `w` "
+           "says which watches are in force.")
     'buffer *messages-buffer*
     'rows (lambda (buf) (messages-events))
+    ;; The log arrives oldest first. A reader opens this list to see what
+    ;; just happened, so the order is turned over after the filters have
+    ;; run and before the page is cut: the newest message is the top row.
+    'order-filtered (lambda (buf rows) (reverse rows))
     'columns (lambda (buf)
                (list (list "time" 8)
+                     (list "level" 5)
                      (list "source" 16 #f 'end)
                      (list "message" #f)))
     'cells messages--cells
@@ -178,14 +300,19 @@
     'local-filter #t
     'stamp messages--stamp
     'no-marks #t
+    ;; The keys live in the shared ui/keymap component, pinned under the
+    ;; rows: it wraps at the window width instead of dropping hints off
+    ;; the end of a header line.
+    'keymap-component #t
     'footer (lambda (buf)
               '(("l" "level") ("G" "group") ("P" "project")
                 ("/" "filter") ("\\" "widen") ("g" "refresh")
-                ("c" "clear") ("q" "quit")))
+                ("w" "watches") ("c" "clear") ("q" "quit")))
     'keys '(("l" "messages-filter-level")
             ("G" "messages-filter-group")
             ("P" "messages-filter-project")
             ("g" "messages-refresh")
+            ("w" "messages-watch-list")
             ("c" "messages-clear")
             ("q" "quit-window"))))
 
@@ -211,3 +338,14 @@
 (effects! '(write display))
 (public! 'message
   "(message TEXT [LEVEL]) — log TEXT with source context and show it in the echo area")
+
+(effects! '(read))
+(public! 'messages-watches
+  "(messages-watches) — every watch in force, as (NAME GRAMMAR) pairs")
+(public! 'messages-newest
+  "(messages-newest) — the newest logged message as an event plist, or #f")
+(effects! '(write))
+(public! 'messages-watch!
+  "(messages-watch! NAME GRAMMAR FN) — run (FN EVENT CAPTURES) on every message GRAMMAR matches; GRAMMAR is a plist of 'level 'source 'group 'project and a 'match regexp, and an absent field matches anything")
+(public! 'messages-unwatch!
+  "(messages-unwatch! NAME) — drop the watch named NAME")
