@@ -178,65 +178,121 @@
 (public! 'agent-continue!
   "(agent-continue! THREAD TEXT) — send to a durable chat buffer or live slug, reviving and replaying it after restart")
 
+;;; Scheme at the chat prompt.
+;;
+;; A chat buffer is a REPL as well as a conversation. An input that reads
+;; as a parenthesised expression runs right here: it prints its value into
+;; the transcript, spends no turn, and the model never learns it happened.
+;; Prose that must start with an open paren escapes it with a backslash.
+
+(defcustom 'chat-scheme-input #t
+  "Run a chat input that is a parenthesised Scheme expression instead of sending it to the agent. Set #f to send every input."
+  'group 'chat 'type 'boolean)
+
+(define (chat-scheme-input? text)
+  (and chat-scheme-input
+       (string-prefix? "(" text)
+       (string-suffix? ")" text)))
+
+(define (chat-scheme-unescape text)
+  (if (string-prefix? "\\(" text)
+      (substring-bytes text 1 (string-byte-length text))
+      text))
+
+(define (chat-scheme-report src result)
+  (string-append "\nλ " src "\n"
+                 (if (equal? (car result) 'ok)
+                     (value->string (cadr result))
+                     (string-append "error: " (cadr result)))
+                 "\n"))
+
+(define (chat-scheme-run! buf src)
+  (let* ((result (eval-string-safe src))
+         (ok (equal? (car result) 'ok))
+         (text (chat-scheme-report src result)))
+    (chat-history-reset! buf)
+    (chat-clear-input! buf)
+    ;; status, not conversation: it lands in the transcript and in the saved
+    ;; log, and every model-facing path filters a status row out. The agent
+    ;; is not told what you evaluated and never sees the value.
+    (chat-record-push! buf "status" (list (list "text" (string-trim text))) #f)
+    ;; chat-render! writes at the saved mark, so a chat with no runtime —
+    ;; restored, or never sent to — is a REPL too
+    (when (buffer-local buf 'agent-saved-mark)
+      (when (boundp 'agent-adopt-prose-tail!) (agent-adopt-prose-tail! buf))
+      (let* ((start (chat-render! buf text))
+             (end (+ start (string-byte-length text))))
+        (chat-blocks-push! buf start end "status" '())
+        (when (boundp 'agent-add-overlay!)
+          (agent-add-overlay! buf start end "agent-meta"))))
+    (end-of-buffer!)
+    (message (if ok (value->string (cadr result)) (cadr result)))))
+
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
     (let* ((buf (current-buffer))
-           ;; say something the moment RET lands: the first send spawns a
-           ;; backend and mounts MCP servers, seconds with nothing moving
-           (feedback (when (equal? (buffer-local buf 'mode-name) "chat-mode")
-                       (chat-activity! buf
-                         (if (agent-slug-of buf) "sending…" "starting agent…"))))
-           ;; a chat without a runtime gets one on first send, on its own
-           ;; connector; RET is agent-send on EVERY chat
-           (slug (or (agent-slug-of buf)
-                     (and (equal? (buffer-local buf 'mode-name) "chat-mode")
-                          (buffer-local buf 'agent-saved-mark)
-                          (chat-ensure-runtime! buf)))))
-      (cond ((not slug) (message "not an agent buffer"))
-            (else
-             ;; a preset changed under a live ACP session: its tool list is
-             ;; fixed at session/new, so reattach before sending
-             (when (boundp (quote chat-apply-pending-presets!))
-               (chat-apply-pending-presets! buf))
-             (when (equal? (agent-status slug) 'dead)
-               (agent-revive! slug))
-             (let ((input (string-trim (chat-input-text buf))))
-               (if (equal? input "")
-                   ;; A blank RET commits the oldest queued message as
-                   ;; steering. Non-empty RET only adds to the queue.
-                   (let ((info (agent-info slug)))
-                     (if (and (plist-get info 'steering)
-                              (> (plist-get info 'queued) 0)
-                              (member (plist-get info 'status)
-                                      (list 'running 'needs_attention)))
-                         (if (agent-steer! slug)
-                             (message "steering the oldest queued message")
-                             (message "the queued message could not steer this turn"))
-                         (insert! "\n")))
-                   (begin
-                     ;; the message itself lands in the record when its
-                     ;; turn starts; only the walk position resets here
-                     (chat-history-reset! buf)
-                     (let ((result (agent-send-msg! slug input)))
-                       (if (equal? result 'queued)
-                           ;; mid-turn: the message moves up into the
-                           ;; transcript at once, muted, and the input clears
-                           ;; for the next one. Blank RET can explicitly steer
-                           ;; the oldest row; otherwise it runs after this turn.
-                           (begin
-                             (agent-echo-queued! slug input)
-                             (chat-clear-input! buf)
-                             (end-of-buffer!)
-                             (message
-                               (if (plist-get (agent-info slug) 'steering)
-                                   "queued — press RET again to steer"
-                                   "queued — runs when this turn ends")))
-                           (begin
-                             (chat-clear-input! buf)
-                             (end-of-buffer!)
-                             (message (if (equal? result 'answered)
-                                          "answered"
-                                          "sent")))))))))))))
+           (chat? (equal? (buffer-local buf 'mode-name) "chat-mode"))
+           (typed (string-trim (chat-input-text buf))))
+      (if (and chat? (chat-scheme-input? typed))
+          ;; the prompt is a REPL before it is a conversation: run the
+          ;; expression here and leave the turn unspent
+          (chat-scheme-run! buf typed)
+          (let* (;; say something the moment RET lands: the first send spawns a
+                 ;; backend and mounts MCP servers, seconds with nothing moving
+                 (feedback (when chat?
+                             (chat-activity! buf
+                               (if (agent-slug-of buf) "sending…" "starting agent…"))))
+                 ;; a chat without a runtime gets one on first send, on its own
+                 ;; connector; RET is agent-send on EVERY chat
+                 (slug (or (agent-slug-of buf)
+                           (and chat?
+                                (buffer-local buf 'agent-saved-mark)
+                                (chat-ensure-runtime! buf)))))
+            (cond ((not slug) (message "not an agent buffer"))
+                  (else
+                   ;; a preset changed under a live ACP session: its tool list is
+                   ;; fixed at session/new, so reattach before sending
+                   (when (boundp (quote chat-apply-pending-presets!))
+                     (chat-apply-pending-presets! buf))
+                   (when (equal? (agent-status slug) 'dead)
+                     (agent-revive! slug))
+                   (let ((input (chat-scheme-unescape typed)))
+                     (if (equal? input "")
+                         ;; A blank RET commits the oldest queued message as
+                         ;; steering. Non-empty RET only adds to the queue.
+                         (let ((info (agent-info slug)))
+                           (if (and (plist-get info 'steering)
+                                    (> (plist-get info 'queued) 0)
+                                    (member (plist-get info 'status)
+                                            (list 'running 'needs_attention)))
+                               (if (agent-steer! slug)
+                                   (message "steering the oldest queued message")
+                                   (message "the queued message could not steer this turn"))
+                               (insert! "\n")))
+                         (begin
+                           ;; the message itself lands in the record when its
+                           ;; turn starts; only the walk position resets here
+                           (chat-history-reset! buf)
+                           (let ((result (agent-send-msg! slug input)))
+                             (if (equal? result 'queued)
+                                 ;; mid-turn: the message moves up into the
+                                 ;; transcript at once, muted, and the input clears
+                                 ;; for the next one. Blank RET can explicitly steer
+                                 ;; the oldest row; otherwise it runs after this turn.
+                                 (begin
+                                   (agent-echo-queued! slug input)
+                                   (chat-clear-input! buf)
+                                   (end-of-buffer!)
+                                   (message
+                                     (if (plist-get (agent-info slug) 'steering)
+                                         "queued — press RET again to steer"
+                                         "queued — runs when this turn ends")))
+                                 (begin
+                                   (chat-clear-input! buf)
+                                   (end-of-buffer!)
+                                   (message (if (equal? result 'answered)
+                                                "answered"
+                                                "sent")))))))))))))))
 
 (define *chat-history-limit* 200)
 
