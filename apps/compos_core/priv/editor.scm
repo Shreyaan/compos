@@ -12296,6 +12296,16 @@
   color: var(--window-bg, #fdfcf8); opacity: .7; }
 /* the chip is its own edge; a rule beside it says nothing */
 .dash-persistent .dseg-group-badge + .dseg-rule { display: none; }
+/* The metadata in the headline is about the window you are working in: the
+   mode, the model, the lane, the open jj change are all answers to questions
+   you can only be asking of the window you are in. A window you are not in
+   says which group it belongs to and what it holds, and stops there. The rest
+   keeps its place in the row and comes back the instant the window takes
+   focus, so selecting a window reflows nothing. */
+.window.inactive .dash-persistent > * { display: none; }
+.window.inactive .dash-persistent > .dseg-group-badge,
+.window.inactive .dash-persistent > .dseg-chat-title { display: flex; }
+.window.inactive .dash-persistent > .dseg-group-badge .dseg { display: flex; }
 .dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
              background: var(--border-bg, #cbc4b1); opacity: .5; }
 /* How much of the transcript to show is a fact about this window, so it

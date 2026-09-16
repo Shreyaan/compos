@@ -1978,9 +1978,9 @@ defmodule Compos.Ui.EditorLive do
         phx-value-win={@node.id} phx-value-cmd="dismiss-buffer"
         aria-label="Dismiss child or go back (q)"><kbd>q</kbd></button>
       <c-headerline :if={@node.header_line} class="buffer-header">{@node.header_line}</c-headerline>
-      <c-group :if={@node.dash || @node.dashboard_line_blocks || @verbosity?} class="dash-top">
+      <c-group :if={@node.dash || @node.dashboard_line_blocks || (@verbosity? && @active?)} class="dash-top">
         <c-headerline
-          :if={@node.dashboard_line_blocks || @verbosity?}
+          :if={@node.dashboard_line_blocks || (@verbosity? && @active?)}
           class="dash-persistent"
           title="open dashboard"
           phx-click="ui_cmd"
@@ -1995,8 +1995,10 @@ defmodule Compos.Ui.EditorLive do
                  a whole row on three glyphs. The headline opens the dashboard
                  on a click and these do not: the nearest phx-click to the
                  target is the one that fires, so a press on a state never
-                 reaches the row underneath it. --%>
-          <c-group :if={@verbosity?} class="dash-verbosity" role="radiogroup" aria-label="Transcript verbosity">
+                 reaches the row underneath it. It answers for the window you
+                 are in, so an inactive one draws no buttons and puts none in
+                 the tab order. --%>
+          <c-group :if={@verbosity? && @active?} class="dash-verbosity" role="radiogroup" aria-label="Transcript verbosity">
             <button
               :for={{level, icon} <- [{"info", "ⓘ"}, {"log", "≡"}, {"debug", "⌗"}]}
               type="button"
