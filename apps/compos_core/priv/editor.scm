@@ -12864,9 +12864,8 @@
                   (wide? (lambda (cell) (equal? (car cell) 'wide)))
                   (tail (remove group? cells))
                   (ordered (append (filter group? cells)
-                                   (if summary
-                                       (append (filter wide? tail) (remove wide? tail))
-                                       tail))))
+                                   (filter wide? tail)
+                                   (remove wide? tail))))
              (if keep
                  (filter (lambda (cell) (member (car cell) keep)) ordered)
                  ordered)))))

@@ -162,14 +162,15 @@
       (test-buffer! buf "")
       (buffer-set-local! buf 'mode-name "chat-mode")
       (let* ((blocks (dashboard-line-blocks buf))
-             (badge (car blocks))
-             ;; the group badge leads, a rule follows it, then the title
              (title (t--dash-wide blocks))
              (value (car (plist-get title 'children))))
-        (check-equal! (plist-get badge 'class) "dseg-group-badge"
-                      "the group leads the headline")
-        (check-true! (string-contains? (plist-get title 'class) "dseg-chat-title")
-                     "the title comes next, ahead of the metadata")
+        ;; this buffer belongs to no group, so it wears no badge and says
+        ;; nothing in its place: the title takes the corner itself
+        (check-equal! (dash--group-badge buf) #f
+                      "no group, no badge")
+        (check-true! (string-contains? (plist-get (car blocks) 'class)
+                                       "dseg-chat-title")
+                     "so the title leads the headline")
         (check-equal! (cadr (car (plist-get value 'segs))) buf
                       "an untitled chat uses its buffer name")
         (check-equal! (car (car (plist-get value 'segs))) "dseg-strong"
