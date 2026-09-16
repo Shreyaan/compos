@@ -113,13 +113,16 @@
     (chats-test-reset!)))
 
 (deftest 'the-list-arrives-in-the-invoking-group
-  "one arrival: the current window and group, with preview supplied separately"
+  "one arrival: the invoking group, two panes, the list holding the focus"
   (lambda ()
     (chats-test-open! 'group 'name)
     (check-equal! (buffer-group *chat-list*) (frame-group) "the listing belongs here")
-    (check-equal! (length (window-list)) 1 "opening creates no companion window")
+    (check-equal! (length (window-list)) 2 "the list and the pane it previews into")
     (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
-    (check-equal! (chat-list-preview-window) #f "preview is created only when shown")
+    (let ((pane (chat-list-preview-window)))
+      (check-true! (and pane (window-exists? pane)) "the preview is a real window")
+      (check-true! (not (equal? pane (active-window)))
+                   "and it is the other one, so the list keeps the cursor"))
     (chats-test-reset!)))
 
 (deftest 'arriving-is-a-request-to-look
@@ -143,11 +146,31 @@
     (check-true! (ibuffer-view? *chat-prompt-buffer*) "the form's view is registered")))
 
 (deftest 'the-row-at-point-previews-its-chat
-  "the row under the cursor schedules its preview after the navigation burst"
+  "the row under the cursor is the buffer in the other pane, not a card over the rows"
   (lambda ()
     (chats-test-open! 'none 'name)
     (chat-list-preview!)
-    (check-equal! (chat-list--preview-request) #f "row navigation schedules no preview")
+    (let ((pane (chat-list-preview-window))
+          (row (list-current *chat-list*)))
+      (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
+      (check-equal! (window-buffer pane) row "the pane shows it")
+      (check-equal! (popup-open?) #f "and no card was floated to do it"))
+    (chats-test-reset!)))
+
+(deftest 'leaving-hands-the-frame-back
+  "the list covers the frame, so q restores the arrangement it covered"
+  (lambda ()
+    (chats-test-reset!)
+    (chats-test-chat! "*zz-chats-a*" #f)
+    (delete-other-windows!)
+    (switch-to-buffer-here! "*zz-chats-a*")
+    (let ((before (length (window-list))))
+      (run-command "chat-list")
+      (check-equal! (length (window-list)) 2 "the list covered it with two panes")
+      (run-command "chat-list-quit")
+      (check-equal! (length (window-list)) before "and gave the arrangement back")
+      (check-equal! (window-buffer (active-window)) "*zz-chats-a*"
+                    "showing what it covered"))
     (chats-test-reset!)))
 
 (deftest 'the-resting-list-is-flat-and-most-recent-first
