@@ -733,13 +733,16 @@ defmodule Compos.Ui.Layouts do
           /* Transcript verbosity is deliberately local and CSS-driven: info
              keeps only the last title row in each live tool burst, log keeps
              every compact card, and debug opens the call contents visually.
-             Thought is supporting machinery, not a fourth reader mode. */
+             Thought is supporting machinery, not a fourth reader mode.
+             The control sits in the window headerline, above the scroll, so
+             it never rides over the conversation. It is outside .agent-view,
+             so --ag-base needs its fallback here. */
           .ag-verbosity {
-            position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end;
-            gap: 2px; width: max-content; margin: 0 0 8px auto; padding: 2px;
+            display: flex; justify-content: flex-end;
+            gap: 2px; width: max-content; margin: 5px 18px 6px auto; padding: 2px;
             border: 1px solid var(--agent-card-border, rgba(0,0,0,0.12)); border-radius: 0;
-            background: color-mix(in srgb, var(--window-bg, #fdfcf8) 92%, transparent);
-            font: 600 calc(var(--ag-base) * 0.62)/1 var(--font-sans); text-transform: uppercase;
+            background: var(--window-bg, #fdfcf8);
+            font: 600 calc(var(--ag-base, 13px) * 0.62)/1 var(--font-sans); text-transform: uppercase;
             letter-spacing: .045em;
           }
           .ag-verbosity button {
