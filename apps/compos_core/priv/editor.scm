@@ -12231,9 +12231,20 @@
 .dash-chipkey { flex: 0 0 auto; font-family: var(--font-mono); font-size: 9.5px;
                 letter-spacing: .14em; text-transform: uppercase;
                 color: var(--dim-fg, #8a857a); }
-.dash-persistent { display: flex; align-items: center; gap: 20px; min-width: 0;
+/* The headline wears the group's colour, but not at full strength: the row
+   sits over every line of the buffer, and a saturated fill there shouts down
+   the text it heads. --dash-ink is the group's colour bent towards the page's
+   own grey, so the badge, the bottom edge and the chosen verbosity still read
+   as the group's paint while standing a step back. The window's focus ring
+   below keeps the pure colour, because that one has to carry across the
+   frame. */
+.dash-persistent { --dash-ink: color-mix(in srgb,
+                     var(--buffer-group-color, var(--accent-fg, #26356b)) 58%,
+                     var(--dim-fg, #8a857a));
+                   display: flex; align-items: center; gap: 20px; min-width: 0;
                    overflow: hidden;
-                   padding: 7px 18px 8px; border-bottom: 2px solid var(--buffer-group-color, var(--accent-fg, #26356b));
+                   padding: 7px 18px 8px;
+                   border-bottom: 2px solid var(--dash-ink, var(--buffer-group-color, var(--accent-fg, #26356b)));
                    background: var(--window-bg, #fdfcf8); cursor: pointer; }
 /* every keyed segment shows its whole value; only the wide one gives way */
 .dseg { display: flex; flex-direction: column; gap: 1px; flex: 0 0 auto;
@@ -12259,7 +12270,7 @@
 .dash-state-mark { display: none; }
 /* a mode that gave itself a glyph shows the glyph at the size of a word */
 .dseg-glyph { font-size: 16px; line-height: 1; }
-.dseg-group-current { color: var(--buffer-group-color, var(--default-fg, #1b1a17)); }
+.dseg-group-current { color: var(--dash-ink, var(--buffer-group-color, var(--default-fg, #1b1a17))); }
 /* The group leads the headline from the window's own edge. The negative left
    margin cancels the headline padding, so the chip touches the border and
    nothing sits left of it. It is filled with the group's own colour, so its
@@ -12268,12 +12279,13 @@
 .dseg-group-badge { flex: 0 0 auto; display: flex; align-items: center;
                     margin-left: -18px; padding: 3px 13px 4px 18px;
                     border-radius: 0 999px 999px 0; min-width: 0;
-                    background: var(--buffer-group-color, var(--accent-fg, #26356b));
+                    background: var(--dash-ink, var(--buffer-group-color, var(--accent-fg, #26356b)));
                     /* the chip lifts a little off the headline, in its own
                        colour rather than in grey, so the shadow belongs to
                        the group as much as the fill does */
                     box-shadow: 0 2px 8px color-mix(in srgb,
-                      var(--buffer-group-color, var(--accent-fg, #26356b)) 32%, transparent); }
+                      var(--dash-ink, var(--buffer-group-color, var(--accent-fg, #26356b)))
+                      26%, transparent); }
 .dseg-group-badge .dseg { flex: 0 1 auto; min-width: 0; }
 .dseg-group-badge .dseg-k { display: none; }
 .dseg-group-badge .dseg-v { font-size: 13px; color: var(--window-bg, #fdfcf8);
@@ -12290,8 +12302,9 @@
    rides the end of the headline rather than a bar of its own. Three states
    of one radio, joined into a single pill: at this size the glyph is the
    whole control, and the word it stands for is on the button's title. The
-   chosen one is filled with the group's colour, the same paint the headline
-   already wears on its bottom edge, so the row reads as one thing. */
+   chosen one is filled with --dash-ink, the same muted paint the headline
+   already wears on its badge and its bottom edge, so the row reads as one
+   thing. */
 .dash-verbosity { display: flex; flex: 0 0 auto; margin-left: auto;
                   border: 1px solid var(--border-bg, #cbc4b1); border-radius: 999px;
                   overflow: hidden; background: var(--window-bg, #fdfcf8); }
@@ -12301,7 +12314,7 @@
        font: 400 17px/1 var(--font-mono); color: var(--faint-fg, #b3ac9c); }
 .dvb + .dvb { border-left: 1px solid var(--border-bg, #cbc4b1); }
 .dvb:hover { color: var(--default-fg, #1b1a17); }
-.dvb.on { background: var(--buffer-group-color, var(--accent-fg, #26356b));
+.dvb.on { background: var(--dash-ink, var(--buffer-group-color, var(--accent-fg, #26356b)));
           color: var(--window-bg, #fdfcf8); }
 .dseg-gap { flex: 1 1 auto; }
 .dseg-stack { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
