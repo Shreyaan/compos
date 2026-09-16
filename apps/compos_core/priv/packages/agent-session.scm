@@ -462,6 +462,7 @@
 (define (chat-history-move! dir)
   (let* ((buf (current-buffer))
          (motion (if (< dir 0) "previous-line" "next-line")))
+    (chat-history-seed! buf)
     (if (or (not (buffer-local buf 'agent-saved-mark))
             (not (chat-in-input? buf))
             (null? (chat-history))
