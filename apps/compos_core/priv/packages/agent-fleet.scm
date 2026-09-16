@@ -1004,7 +1004,9 @@
       'match chat-list-match?
       'regroup (lambda (buf) (run-command "chat-list-regroup"))
       'resort (lambda (buf) (run-command "chat-list-resort"))
-      'preview (lambda (buf b) (listing-preview-schedule! buf b))
+      ;; row movement fills the pane the list opened beside itself; the
+      ;; minibuffer form, which has no pane, still gets its card
+      'preview (lambda (buf b) (chat-list-preview-row! buf b))
       ;; The table stamps itself with the buffer count and redraws after
       ;; any command that moved it, so a buffer opened anywhere -- by a
       ;; chat you are not even reading -- rebuilt this list under the
@@ -1062,10 +1064,16 @@
             (set-frame-local! 'chat-list-preview-window preview)
             preview))))))
 
-(define (chat-list-preview-window)
-  (let ((win (frame-local 'chat-list-preview-window))
-        (list-win (window-showing (chat-list-buffer))))
-    (and win (window-exists? win) (not (equal? win list-win)) win)))
+(define (chat-list-preview-window &optional owner)
+  (let ((view (or owner (chat-list-buffer)))
+        (win (frame-local 'chat-list-preview-window)))
+    (and win (window-exists? win)
+         ;; the pane belongs to the window form. The minibuffer form runs
+         ;; the same mode over its own view buffer and has no pane beside
+         ;; it, so it must not be handed this one
+         (equal? view (frame-local 'chat-list-view))
+         (not (equal? win (window-showing view)))
+         win)))
 
 (defcustom 'chat-list-pane-share 0.667
   "The chat list's share of the frame; the rest previews the selected chat."
@@ -1133,16 +1141,22 @@
 
 ;; Compatibility callbacks cannot resurrect previews after a live reload.
 (define (chat-list--preview-now! request) #f)
-(define (chat-list-preview!)
+(define (chat-list-preview-row! owner row)
   ;; the row at point goes into the other pane. A heading is not a chat
   ;; and an archived row is a path, not a buffer: both leave the pane
-  ;; showing whatever it last held rather than blanking it
-  (let ((win (chat-list-preview-window))
-        (row (list-current (chat-list-buffer))))
-    (and win (string? row) (buffer-known? row)
-         (not (equal? (window-buffer win) row))
-         (with-layout-suppressed
-           (lambda () (display-buffer-in-window! win row))))))
+  ;; showing what it last held rather than blanking it. With no pane —
+  ;; the minibuffer form — the card is still the right answer.
+  (let ((win (chat-list-preview-window owner)))
+    (cond ((not win) (listing-preview-schedule! owner row))
+          ((and (string? row) (buffer-known? row)
+                (not (equal? (window-buffer win) row)))
+           (with-layout-suppressed
+             (lambda () (display-buffer-in-window! win row))))
+          (else #f))))
+
+(define (chat-list-preview!)
+  (let ((owner (chat-list-buffer)))
+    (chat-list-preview-row! owner (list-current owner))))
 
 ;; the application leaves the way it arrived: with one move. RET lands you
 ;; in the chat, in the chat's own group, because switching to a chat is
