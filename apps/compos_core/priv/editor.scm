@@ -12284,45 +12284,27 @@
 .dseg-gap { flex: 1 1 auto; }
 .dseg-stack { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
 .dseg-wide { flex: 1 1 0; min-width: 0; }
-/* Chat title owns the first row. Metadata wraps independently in each pane. */
-.dash-persistent:has(.dseg-chat-title) { flex-wrap: wrap; gap: 8px 16px; }
+/* The headline is one row at every width. Nothing wraps and nothing breaks
+   to a second line: the badge and the metadata keep their natural size, and
+   the title is the one thing that gives way, ellipsising into what is left.
+   Every segment reads inline, key beside value, so the row stays one line
+   tall however narrow the pane gets. */
+.dash-persistent { flex-wrap: nowrap; gap: 16px; }
+.dash-persistent .dseg,
+.dash-persistent .dseg-stack { flex-direction: row; align-items: baseline; gap: 6px; }
+.dash-persistent .dseg-stack { gap: 16px; }
+.dash-persistent .dseg-v { white-space: nowrap; }
 .dash-persistent .dseg-chat-title { flex: 1 1 0; min-width: 0; }
 .dash-persistent .dseg-chat-title .dseg-v {
   display: block; font-size: 18px; font-weight: 700; line-height: 1.3;
-  color: var(--default-fg, #1b1a17); white-space: normal; overflow: visible;
-  overflow-wrap: anywhere; -webkit-line-clamp: unset; }
+  color: var(--default-fg, #1b1a17); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
 .dash-persistent:has(.dseg-chat-title) .dseg-rule { display: none; }
-/* The badge shares the title's row; the metadata must not. The rule that
-   follows the title is not a rule here, it is the line break that keeps the
-   metadata below, so the group and the title own the first row alone. */
-.dash-persistent .dseg-chat-title + .dseg-rule {
-  display: block; flex: 0 0 100%; width: 100%; height: 0;
-  background: none; opacity: 1; }
-.dash-persistent:has(.dseg-chat-title) .dseg { max-width: 100%; }
-.dash-persistent:has(.dseg-chat-title) .dseg-v { white-space: normal; overflow-wrap: anywhere; }
 /* the chip is a label, not a column: it never wraps and never grows */
 .dash-persistent .dseg-group-badge .dseg-v {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24ch; }
 
-/* Each pane responds to its own width, including two views of one chat. */
-.dash-top { container-type: inline-size; container-name: chat-header; }
-@container chat-header (min-width: 1100px) {
-  .dash-persistent:has(.dseg-chat-title) { flex-wrap: nowrap; gap: 16px; }
-  .dash-persistent .dseg-chat-title { flex: 1 1 0; }
-  /* one row: nothing to break, and a 100% break item would eat it */
-  .dash-persistent .dseg-chat-title + .dseg-rule { display: none; }
-  .dash-persistent:has(.dseg-chat-title) .dseg,
-  .dash-persistent:has(.dseg-chat-title) .dseg-stack {
-    flex-direction: row; align-items: baseline; gap: 6px; }
-  .dash-persistent:has(.dseg-chat-title) .dseg-stack { gap: 16px; }
-  .dash-persistent:has(.dseg-chat-title) .dseg-v { white-space: nowrap; }
-  .dash-persistent .dseg-chat-title .dseg-v {
-    overflow: hidden; text-overflow: ellipsis; }
-}
-
-.dseg-wide .dseg-v { white-space: normal; overflow: hidden; text-overflow: ellipsis;
-                     display: -webkit-box; -webkit-box-orient: vertical;
-                     -webkit-line-clamp: 2; }
+.dseg-wide .dseg-v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 ")
 
 (define (dash--row k v &optional cls)
