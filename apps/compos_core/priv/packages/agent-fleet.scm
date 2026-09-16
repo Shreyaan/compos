@@ -1040,7 +1040,8 @@
   ;; standing in, so *chat-list* itself never existed and the clones
   ;; piled up as *chat-list*<2>, <3>, <4>.
   (let ((buf *chat-list-buffer*)
-        (group (chat-list-group)))
+        (group (chat-list-group))
+        (from (frame-group)))
     (unless (buffer-known? buf) (buffer-create buf))
     (buffer-move-to-group! buf group)
     (ibuffer-view! buf 'sort 'recent 'grouping 'group)
@@ -1050,7 +1051,11 @@
     ;; group-home-of answers #f for a special buffer, so leaving the
     ;; arrival to switch-to-buffer-in-group! strands the frame where it
     ;; stood and the application opens outside its own group
-    (unless (equal? (frame-group) group) (switch-to-group! group))
+    (cond ((equal? from group) (set-frame-local! 'chat-list-from-group #f))
+          (else
+           ;; arriving crossed a group, so leaving owes that group back
+           (set-frame-local! 'chat-list-from-group from)
+           (switch-to-group! group)))
     (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))
     #f))
 
