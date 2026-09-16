@@ -394,3 +394,8 @@
               (when click (click buf (nth i (list-entries buf))))))
           #t)
         #f)))
+
+;; The dashboard is core chrome, and core loads before this registry exists.
+;; Its handler is defined there and registered here.
+(when (boundp 'dashboard-block-click)
+  (on-block-click! 'dashboard dashboard-block-click))

@@ -12625,6 +12625,16 @@
         (dash--tools buf)
         (dash--llm buf)))
 
+;; The card's mode names are switches. The click arrives through the block
+;; registry, which components.scm owns: core loads first, so that package
+;; registers this handler once the registry exists.
+(define (dashboard-block-click buf id)
+  (and (string? id)
+       (string-prefix? "dash-mode:" id)
+       (begin
+         (modeline-toggle-mode! (substring id 10 (string-length id)))
+         #t)))
+
 (define (dashboard--group-ids buf)
   (if (chat-buffer? buf)
       (let ((g (chat-group-id buf))) (if g (list g) '()))
