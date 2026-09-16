@@ -126,14 +126,14 @@
     (chats-test-reset!)))
 
 (deftest 'arriving-is-a-request-to-look
-  "a card dismissed before you left does not keep the preview shut when you come back"
+  "a preview dismissed before you left does not keep the pane shut when you come back"
   (lambda ()
     (chats-test-open! 'none 'name)
     (let ((row (list-current *chat-list*)))
       (buffer-set-local! *chat-list* 'listing-peek-dismissed-row row)
       (run-command "chat-list")
-      (check-equal! (buffer-local *chat-list* 'listing-peek-dismissed-row) #f
-                    "arrival clears the dismissal, so the row can be looked at again"))
+      (check-equal! (window-buffer (chat-list-preview-window)) row
+                    "arriving looks again at the row you left on"))
     (chats-test-reset!)))
 
 (deftest 'the-two-surfaces-are-bound-apart
