@@ -1160,6 +1160,17 @@
                (active-window) (window-showing (chat-list-buffer)))))
     (when (and w (window-exists? w)) (select-window! w))))
 
+(define (chat-list-uncover!)
+  ;; the list covered the frame, so leaving hands the whole arrangement
+  ;; back. With nothing recorded there is nothing to restore and the
+  ;; ordinary listing quit reveals whatever the window held before.
+  (let ((tree (frame-local 'chat-list-covered)))
+    (set-frame-local! 'chat-list-covered #f)
+    (set-frame-local! 'chat-list-preview-window #f)
+    (if tree
+        (with-layout-suppressed (lambda () (window-tree-set! tree)))
+        (listing-quit! (chat-list-buffer)))))
+
 (define (chat-list-keep! keep)
   (chat-list-clear-search!)
   ;; the frame goes back to what the list covered, and the chat you
