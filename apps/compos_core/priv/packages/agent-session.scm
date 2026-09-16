@@ -254,11 +254,36 @@
       (substring-bytes text 1 (string-byte-length text))
       text))
 
+; An M-x command is not a Scheme variable, so a bare (previous-buffer) at the
+; prompt would read as an unbound name. A one-word call whose name the command
+; table knows, and the environment does not, is the command: run it.
+(define (chat-scheme-command src)
+  (let* ((n (string-byte-length src))
+         (inner (if (and (> n 1) (string-prefix? "(" src) (string-suffix? ")" src))
+                    (string-trim (substring-bytes src 1 (- n 1)))
+                    "")))
+    (and (not (equal? inner ""))
+         (not (string-index inner "("))
+         (not (string-index inner " "))
+         (not (string-index inner "\n"))
+         (not (boundp (string->symbol inner)))
+         (member inner (command-names))
+         inner)))
+
+; nested, the rewrite above cannot help — say where the name lives instead
+(define (chat-scheme-hint msg)
+  (let ((name (and (string-prefix? "unbound variable: " msg)
+                   (string-trim (substring-bytes msg 18 (string-byte-length msg))))))
+    (if (and name (member name (command-names)))
+        (string-append "\n" name " is an M-x command: (run-command \"" name "\")")
+        "")))
+
 (define (chat-scheme-report src result)
   (string-append "λ " src "\n"
                  (if (equal? (car result) 'ok)
                      (chat-scheme-pp (cadr result) 0)
-                     (string-append "error: " (cadr result)))))
+                     (string-append "error: " (cadr result)
+                                    (chat-scheme-hint (cadr result))))))
 
 (define *chat-scheme-buffer* "*chat-eval*")
 
@@ -274,7 +299,10 @@
     b))
 
 (define (chat-scheme-run! buf src other?)
-  (let* ((result (eval-string-safe src))
+  (let* ((cmd (chat-scheme-command src))
+         (result (eval-string-safe (if cmd
+                                       (string-append "(run-command \"" cmd "\")")
+                                       src)))
          (ok (equal? (car result) 'ok))
          (body (chat-scheme-report src result))
          (shown (if (and other? ok)

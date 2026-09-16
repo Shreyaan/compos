@@ -154,3 +154,27 @@
       (chat-history-push! "   ")
       (check-equal! (length (chat-history)) 1 "one entry")
       (set! *chat-input-history* saved))))
+
+(deftest 'a-bare-command-call-runs-the-command
+  "an M-x command is not a variable, so (name) reads as the command"
+  (lambda ()
+    (check-equal! (chat-scheme-command "(previous-buffer)") "previous-buffer"
+                  "a command name the environment does not bind")
+    (check-equal! (chat-scheme-command "(buffer-list)") #f
+                  "a bound function stays a function")
+    (check-equal! (chat-scheme-command "(+ 1 2)") #f
+                  "an ordinary expression is left alone")
+    (check-equal! (chat-scheme-command "(apropos \"windows\")") #f
+                  "only a one-word call qualifies")))
+
+(deftest 'an-unbound-command-name-says-where-it-lives
+  "nested, the rewrite cannot help, so the error names the command table"
+  (lambda ()
+    (let ((body (chat-scheme-report "(list (previous-buffer))"
+                                    (eval-string-safe "(list (previous-buffer))"))))
+      (check-true! (string-index body "is an M-x command")
+                   "the hint follows the error")
+      (check-true! (string-index body "(run-command \"previous-buffer\")")
+                   "and spells the call out"))
+    (check-equal! (chat-scheme-hint "unbound variable: not-a-command-anywhere") ""
+                  "a name no command table knows gets no hint")))
