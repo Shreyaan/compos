@@ -45,12 +45,12 @@
     (message "older event" 'info)
     (message "newer event" 'info)
     (run-command "view-messages")
-    (let ((text (buffer-text "*Messages*")))
-      (check-true! (< (car (isearch-matches "newer event"))
-                      (car (isearch-matches "older event")))
-                   "the newest message is the higher row")
-      (check-true! (string-contains? text "older event")
-                   "and the older one is still there"))))
+    (let ((newer (isearch-matches "newer event"))
+          (older (isearch-matches "older event")))
+      (check-true! (and (pair? newer) (pair? older))
+                   "both messages are drawn")
+      (check-true! (< (car (car newer)) (car (car older)))
+                   "the newest message is the higher row"))))
 
 (deftest 'the-messages-list-wears-a-smaller-face
   "a log is read in bulk, so *Messages* sits a step below the default size"
