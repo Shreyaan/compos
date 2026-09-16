@@ -857,7 +857,7 @@
   (list
     'doc (string-append
            "Persistent named locations. RET visits and o uses another window. "
-           "m marks rows and v previews the targets. d flags deletion and x "
+           "SPC marks rows and v previews the targets. d flags deletion and x "
            "executes it. r renames, R relocates, e edits an annotation, and a "
            "shows it. t hides locations, s cycles sorting, and / filters rows.")
     'buffer *bookmark-list-buffer*
@@ -870,7 +870,7 @@
     'meta bookmark--meta
     'total (lambda (buf) (length (bookmark--ensure-loaded!)))
     'footer (lambda (buf)
-              '(("RET" "visit") ("o" "other window") ("m" "mark")
+              '(("RET" "visit") ("o" "other window") ("SPC" "mark")
                 ("v" "view targets") ("d" "flag delete") ("x" "execute")
                 ("a/e" "annotation") ("r/R" "rename/relocate")
                 ("s" "sort") ("t" "locations") ("/" "filter")

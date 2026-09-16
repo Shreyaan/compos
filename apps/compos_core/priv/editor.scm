@@ -783,11 +783,26 @@
 (define-keymap! "list-mode-map")
 (for-each (lambda (p) (define-key "list-mode-map" (car p) (cadr p)))
   '(("?" "describe-mode")
-    ("/" "list-filter") ("\\" "list-filter-pop")
+    ("/" "list-cycle-grouping") (">" "list-cycle-sorting")
+    ("f" "list-filter") ("\\" "list-filter-pop")
     ("n" "list-next") ("p" "list-prev")
     ("SPC" "list-mark") ("m" "list-mark")
     ("u" "list-unmark") ("U" "list-unmark-all") ("*" "list-mark-all")
     ("x" "list-execute") ("g" "list-revert")))
+
+;; These keys are the grammar of every markable list, not suggestions inherited from
+;; the parent map. Install them on each child too, so a mode cannot keep an
+;; older local meaning. SPC always marks the row at point.
+(define (list-mode-standard-keys! name)
+  (let ((opts (list-mode-opts name)))
+    (define-key (mode-keymap name) "/" "list-cycle-grouping")
+    (define-key (mode-keymap name) ">" "list-cycle-sorting")
+    (unless (plist-get opts 'no-marks)
+      (define-key (mode-keymap name) "SPC"
+        (or (plist-get opts 'mark-command) "list-mark")))))
+
+;; A hot reload does not re-run the packages that registered their modes.
+(for-each (lambda (entry) (list-mode-standard-keys! (car entry))) *list-modes*)
 
 ;; the flag keys of one list: (KEY FLAG-CHAR ...) rows become bindings
 ;; on MAP, buffer or mode
@@ -1946,6 +1961,19 @@
       (set! *mb-list-flush* flush)
       (unless (equal? input "") (minibuffer-input! input)))))
 
+(define (list-cycle-declared! option absent)
+  (let* ((buf (current-buffer))
+         (cycle (list-opt buf option)))
+    (if cycle (cycle buf) (message absent))))
+
+(define-command "list-cycle-grouping"
+  "Cycle through the grouping mechanisms declared by this list"
+  (lambda () (list-cycle-declared! 'regroup "this list has no grouping")))
+
+(define-command "list-cycle-sorting"
+  "Cycle through the sorting mechanisms declared by this list"
+  (lambda () (list-cycle-declared! 'resort "this list has no sorting")))
+
 (define-command "list-filter-pop" "Drop the most recent filter on this list"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -2579,6 +2607,7 @@
   (mode-keys! name (or (plist-get opts 'keys) '()))
   (list-flag-keys! (lambda (k c) (define-key (mode-keymap name) k c))
                    (or (plist-get opts 'flags) '()))
+  (list-mode-standard-keys! name)
   name)
 
 ;; open (or re-open) a list buffer in its mode
@@ -3337,8 +3366,58 @@
 ;; COMPLETE, when given, runs on TAB with (INPUT SELECTED) and can
 ;; answer (list NEW-INPUT CANDIDATES) to replace the pool.
 ;; COLLECT, when given, receives the candidate rows left after narrowing.
+(define *mb-shortcuts* '())
+
+(define (mb-candidate-name cand)
+  (if (pair? cand) (car cand) cand))
+
+(define (mb-shortcut-command key)
+  (let ((name (string-append "minibuffer-shortcut-" key)))
+    (define-command name (string-append "Choose minibuffer shortcut M-" key)
+      (lambda ()
+        (let ((hit (assoc key *mb-shortcuts*)))
+          (cond (hit ((car (cdr hit))))
+                ((equal? key "g") (run-command "minibuffer-regroup"))
+                ((equal? key "p") (run-command "minibuffer-previous-section"))
+                ((equal? key "n") (run-command "minibuffer-next-section"))
+                (else #f)))))
+    name))
+
+(define (mb-preview-shortcut-rows cands declared)
+  (if declared
+    declared
+    (let loop ((xs cands) (n 1) (out '()))
+      (if (or (null? xs) (> n 9))
+        (reverse out)
+        (loop (cdr xs) (+ n 1)
+              (cons (list (number->string n)
+                          (mb-candidate-name (car xs)))
+                    out))))))
+
+(define (mb-preview-shortcuts rows on-confirm)
+  (map (lambda (row)
+         (let ((key (car row)) (value (car (cdr row))))
+           (list key
+                 (lambda ()
+                   (set! *mb-shortcuts* '())
+                   (minibuffer-cancel!)
+                   (with-invoking-buffer (lambda () (on-confirm value)))))))
+       rows))
+
+(define (mb-preview-shortcut-hint cands shortcuts)
+  (map (lambda (cand)
+         (let* ((name (mb-candidate-name cand))
+                (hit (let loop ((xs shortcuts))
+                       (cond ((null? xs) #f)
+                             ((equal? name (car (cdr (car xs)))) (car (car xs)))
+                             (else (loop (cdr xs)))))))
+           (if (and hit (pair? cand))
+             (list name (string-append "M-" hit "  " (car (cdr cand))))
+             cand)))
+       cands))
+
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
-                                 &optional match-hint style complete collect)
+                                 &optional match-hint style complete collect shortcuts)
   ;; the outer prompt's cancel handler clears *mb-select-fn*, so let it run
   ;; BEFORE this prompt installs its own. minibuffer-read* would quit the
   ;; outer prompt for us, but by then the new hook is already in place and
@@ -3347,20 +3426,25 @@
   (when (minibuffer-active?)
     (minibuffer-cancel!)
     (message "Quit the outer prompt"))
-  (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
-  (minibuffer-read* prompt cands
-    (append
-      (list (list 'confirm (lambda (v)
-                              (set! *mb-select-fn* #f)
-                              (with-invoking-buffer (lambda () (on-confirm v)))))
-            (list 'cancel  (lambda ()
-                              (set! *mb-select-fn* #f)
-                              (with-invoking-buffer on-cancel)))
-            (list 'change  (lambda (input) (mb-select-notify!)))
-            (list 'match-hint (if match-hint match-hint #f))
-            (list 'style style))
-      (if complete (list (list 'complete complete)) '())
-      (if collect (list (list 'collect collect)) '()))))
+  (let* ((rows (mb-preview-shortcut-rows cands shortcuts))
+         (bindings (mb-preview-shortcuts rows on-confirm)))
+    (set! *mb-shortcuts* bindings)
+    (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
+    (minibuffer-read* prompt (mb-preview-shortcut-hint cands rows)
+      (append
+        (list (list 'confirm (lambda (v)
+                                (set! *mb-shortcuts* '())
+                                (set! *mb-select-fn* #f)
+                                (with-invoking-buffer (lambda () (on-confirm v)))))
+              (list 'cancel  (lambda ()
+                                (set! *mb-shortcuts* '())
+                                (set! *mb-select-fn* #f)
+                                (with-invoking-buffer on-cancel)))
+              (list 'change  (lambda (input) (mb-select-notify!)))
+              (list 'match-hint (if match-hint match-hint #f))
+              (list 'style style))
+        (if complete (list (list 'complete complete)) '())
+        (if collect (list (list 'collect collect)) '())))))
 
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
 ;;; A hook is a name and a list of functions. add-hook! puts a function on
@@ -5012,12 +5096,10 @@
     ("C-p" "minibuffer-previous-candidate")
     ("<up>" "minibuffer-previous-candidate")
     ;; the palette's two lists: <right> steps into the one on the right,
-    ;; <left> steps back. With no rail they are the point motion they have
-    ;; always been, and C-f/C-b move point either way
+    ;; <left> steps back. With no rail they are point motion.
     ("<right>" "minibuffer-rail-enter")
     ("<left>" "minibuffer-rail-exit")
-    ;; a list behind the prompt takes these first; with no list they are
-    ;; the history walk they have always been
+    ;; with no shortcut, these keep their section-navigation behavior
     ("M-p" "minibuffer-previous-section")
     ("M-n" "minibuffer-next-section")
     ("M-<up>" "minibuffer-previous-section")
@@ -5028,9 +5110,18 @@
     ("C-r" "isearch-repeat-backward")
     ;; the prompt continues as a buffer — see minibuffer-collect
     ("C-c C-o" "minibuffer-collect")
-    ;; the same prompt as the bar, the popup, or the modal, while it is up
+    ;; the same prompt as the bar, popup, or modal while it is up
     ("C-c C-t" "minibuffer-cycle-shape")
     ("DEL" "minibuffer-delete-backward")))
+
+(for-each
+  (lambda (key)
+    (define-key "minibuffer-mode-map" (string-append "M-" key)
+      (mb-shortcut-command key)))
+  '("1" "2" "3" "4" "5" "6" "7" "8" "9"
+    "a" "b" "c" "d" "e" "f" "g" "h" "i" "j"
+    "k" "l" "m" "n" "o" "p" "q" "r" "s" "t"
+    "u" "v" "w" "x" "y" "z"))
 
 (define (minibuffer-buffer? buf)
   (if (and buf (buffer-known? buf) (buffer-derived-mode? buf "minibuffer-mode")) #t #f))
@@ -9159,22 +9250,28 @@
         (window-tree-set! saved)
         (layout-target-note-slots! saved-panes))
       (minibuffer-read-preview "Window layout: "
-        '( ("adaptive" "choose from usable monitor width")
-           ("two-pane" "2/3 + 1/3 side by side")
-           ("columns" "3 columns")
-           ("rows" "equal rows")
-           ("grid" "balanced grid")
-           ("main-right" "companion view (companion on the right)")
-           ("main-left" "2/3 + 1/3 (companion on the left)")
-           ("main-bottom" "2/3 + 1/3 (companion below)")
-           ("main-top" "2/3 + 1/3 (companion above)")
-           ("free" "no target: a display may split a window"))
+        '(("adaptive" "choose from usable monitor width")
+          ("two-pane" "2/3 + 1/3 side by side")
+          ("columns" "3 columns")
+          ("rows" "equal rows")
+          ("grid" "balanced grid")
+          ("main-right" "companion view (companion on the right)")
+          ("main-left" "2/3 + 1/3 (companion on the left)")
+          ("main-bottom" "2/3 + 1/3 (companion below)")
+          ("main-top" "2/3 + 1/3 (companion above)")
+          ("free" "no target: a display may split a window"))
         (lambda (name)
           (restore-preview!)
           (unless (equal? name "free")
             (window-layout-preview-without-history! name saved-order)))
         (lambda (name) (restore-preview!) (window-layout-choose! saved name saved-order))
-        (lambda () (restore-preview!))))))
+        (lambda () (restore-preview!))
+        #f #f #f #f
+        '(("a" "adaptive") ("2" "two-pane")
+          ("c" "columns") ("r" "rows") ("g" "grid")
+          ("l" "main-left") ("i" "main-right")
+          ("t" "main-top") ("b" "main-bottom")
+          ("f" "free"))))))
 
 (define-command "window-layout-free"
   "Drop the frame's target layout: a display may split a window again"
@@ -14466,7 +14563,7 @@
 (global-set-key "C-x e" "window-eat")
 (global-set-key "C-x o" "other-window")
 ;; Layout selection has its own prefix; l retains the preview chooser.
-(bind-prefix! "ctl-x-map" "l" "layout-map")
+(define-key "ctl-x-map" "l" "window-layout")
 (for-each
   (lambda (binding) (define-key "layout-map" (car binding) (cadr binding)))
   '(("l" "window-layout")
@@ -14701,7 +14798,7 @@
 (catalog-meta! 'function "name-text" 'domain 'interaction 'effects '(pure))
 (catalog-meta! 'function "name-icon!" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "buffer-name-segments" 'domain 'interaction 'effects '(read))
-(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT STYLE COMPLETE COLLECT) — preview candidates and optionally route collected rows")
+(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT STYLE COMPLETE COLLECT SHORTCUTS) — preview candidates; SHORTCUTS maps keys to candidate names, otherwise M-1..M-9 choose by position")
 (public! 'minibuffer-buffer? "(minibuffer-buffer? BUF) — whether BUF is a prompt's input buffer, i.e. in minibuffer-mode")
 (public! 'minibuffer-mode-ensure! "(minibuffer-mode-ensure! &optional BUF) — put minibuffer-mode on this frame's prompt buffer; answers the buffer")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
@@ -14752,7 +14849,7 @@
 (public! 'buffer-derived-mode? "(buffer-derived-mode? BUF NAME) — #t when the buffer's major mode is NAME or descends from it")
 (public! 'mode-setup! "(mode-setup! NAME) — run NAME's setup in the current buffer, the way a derived mode inherits it")
 (public! 'define-list-mode!
-  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Set transient to #f for persistent app buffers (default #t). Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
+  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Set transient to #f for persistent app buffers (default #t). Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact. SPC calls the optional mark-command, or list-mark by default. The reserved / and > keys call optional regroup and resort callbacks; f opens the text filter. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
   'ui)
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 (public! 'marginalia! "(marginalia! CATEGORY FN) — FN turns one candidate of CATEGORY ('file 'buffer 'command) into the text beside it; replaces the annotator for that category")

@@ -630,11 +630,9 @@
 (define *switch-keys*
   (append
     (map (lambda (ch) (list ch "switch-self-insert")) *switch-printables*)
-    (list (list "SPC" "switch-self-insert")
-          (list "DEL" "switch-del")
+    (list (list "DEL" "switch-del")
           (list "RET" "switch-visit")
           (list "C-RET" "switch-visit-context")
-          (list "C-SPC" "switch-mark")
           ;; select all: every row the narrowing shows; again unmarks
           (list "C-a" "list-mark-all")
           (list "C-k" "switch-kill")
@@ -662,7 +660,7 @@
            "previews its row "
            "in the window you came from. RET visits the row; with no match, "
            "RET founds a group named what you typed. C-RET enters the "
-           "row's group or project. C-SPC marks; C-a marks every shown "
+           "row's group or project. SPC marks; C-a marks every shown "
            "row, and again unmarks them; C-k kills the marked "
            "buffers or the row at point; C-t adds them to another group. "
            "C-o shows groups and "
@@ -691,6 +689,7 @@
     'separator? switch-separator?
     'markable? (lambda (buf e)
                  (and (not (switch-container? e)) (buffer-known? (car e))))
+    'mark-command "switch-mark"
     'noun "buffer"
     'preview switch-preview!
     'keys *switch-keys*))

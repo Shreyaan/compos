@@ -9,7 +9,7 @@
 ;;; carries its counts. A row shows a dot, the icon, the directory in dim
 ;;; and the name in the colour of its kind, and on the right the size,
 ;;; the mode, and the time since the buffer was last seen. The keys
-;;; follow traditional Emacs ibuffer: m marks, * marks all rows, d flags
+;;; use the shared list keys: SPC marks, * marks all rows, and d flags
 ;;; for killing, x executes, u and U unmark, RET visits, g refreshes, and
 ;;; q quits. / narrows the table by name, mode, or path. RET takes you to
 ;;; the row's buffer where it lives: the frame enters the group that
@@ -1185,11 +1185,11 @@
 ;; mode's own words, and the meta line says so.
 (define (ibuffer-compact-footer buf) (ibuffer-wide-footer buf))
 (define (ibuffer-wide-footer buf)
-  '(("RET" "visit") ("p" "preview") ("m" "mark") ("u" "unmark") ("U" "unmark all")
+  '(("RET" "visit") ("p" "preview") ("SPC" "mark") ("u" "unmark") ("U" "unmark all")
     ("d" "flag") ("x" "execute") ("k" "kill") ("K" "kill group")
-    ("g" "refresh") (";" "group") ("," "sort") ("TAB" "fold")
+    ("g" "refresh") ("/" "group") (">" "sort") ("TAB" "fold")
     ("M-↓/↑" "next/previous group") ("G" "add to group")
-    ("C-x n n/w" "narrow/widen") ("/" "filter") ("q" "quit") ("?" "all bindings")))
+    ("C-x n n/w" "narrow/widen") ("f" "filter") ("q" "quit") ("?" "all bindings")))
 
 ;; Searchable marginalia is a snapshot of the list source. Query changes
 ;; reuse it instead of asking every buffer process for the same fields.
@@ -2154,13 +2154,13 @@
     'composml-fields (lambda (buf entry) (ibuffer-composml-fields buf entry))
     'doc (string-append
            "A traditional buffer management table. A section is a group, "
-           "a mode, or a directory; ; cycles the grouping. Rows inside a "
-           "section sort by name, recency, or size; , cycles the sort. "
+           "a mode, or a directory; / cycles the grouping. Rows inside a "
+           "section sort by name, recency, or size; > cycles the sort. "
            "TAB folds the section at point. A narrow window shows the "
            "name and the age; a wider one adds the size and the mode, and "
-           "a wide one the group. / narrows the table by name, mode, or path, "
+           "a wide one the group. f narrows the table by name, mode, or path, "
            "and \\ widens it. C-x n n narrows to the group at point; C-x n w shows all groups. "
-           "m marks one row, SPC toggles the mark, * marks all shown rows, u "
+           "SPC marks one row, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "
            "in a group, and K kills the group at point. RET enters the "
@@ -2191,6 +2191,11 @@
                                                 *ibuffer-groupings*)))
                  (ibuffer-set-grouping! next buf)
                  (message (string-append "grouped by " (symbol->string next)))))
+    'resort (lambda (buf)
+              (let ((next (ibuffer-cycle-after (ibuffer-sort buf)
+                                               *ibuffer-sorts*)))
+                (ibuffer-set-sort! next buf)
+                (message (string-append "sorted by " (symbol->string next)))))
     'overlays (lambda (buf b off ctx) (ibuffer-row-overlays buf b off ctx))
     'incremental-query?
       (lambda (old new)
@@ -2256,13 +2261,11 @@
             ("M-n" "ibuffer-next-group") ("M-p" "ibuffer-previous-group")
             ("C-c i" "ibuffer-toggle-info") ("C-c p" "ibuffer-toggle-pretty")
             ("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
-            ("RET" "ibuffer-visit") ("SPC" "list-toggle-mark")
+            ("RET" "ibuffer-visit")
             ("p" "ibuffer-toggle-preview")
             ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
             ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")
             ("TAB" "ibuffer-toggle-filter-group")
-            ("," "ibuffer-toggle-sorting-mode")
-            (";" "ibuffer-toggle-grouping")
             ("G" "group-add") ("g" "ibuffer-refresh")
             ("q" "ibuffer-quit"))
     ;; line movement steps over the headings and previews the row

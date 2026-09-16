@@ -91,6 +91,7 @@
 (load-bundled-package "peek.scm")
 (load-bundled-package "scratch.scm")
 (load-bundled-package "sentry.scm")
+(load-bundled-package "substack.scm")
 (load-bundled-package "setup.scm")
 (load-bundled-package "skills.scm")
 (load-bundled-package "prompts.scm")

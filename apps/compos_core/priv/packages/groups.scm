@@ -2053,18 +2053,14 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; instead of the name index, which answers with the first group of that
   ;; name and so showed another group's buffers. The rail rows are built with
   ;; them: moving the highlight is then a lookup and no scan.
-  (let* ((current (or (frame-group) (buffer-group (current-buffer))))
+  (let* ((current (frame-group))
          (all (group-ids-mru))
-         ;; a group another live frame owns is still reachable: it comes
-         ;; last, marked, and picking it raises the frame that holds it
          (away (filter group-elsewhere-frame (group-ids-mru-all)))
-         ;; Pin the current context and creation action. Only the remaining
-         ;; destinations are sorted by recency. In a mixed frame the selected
-         ;; buffer supplies the context; an ungrouped buffer supplies none.
-         (here (filter (lambda (id) (equal? id current)) all))
-         (recent (filter (lambda (id) (not (equal? id current))) all))
-         (action (group-switch-new-action))
-         (action-row (list (car action) "new context"))
+         (recent (append (filter (lambda (id) (not (equal? id current))) all)
+                         (filter (lambda (id) (equal? id current)) all)))
+         (mine (group-buffer-memberships (current-buffer)))
+         (mine-recent (filter (lambda (id) (member id mine)) recent))
+         (others (filter (lambda (id) (not (member id mine))) recent))
          (index (group-members-index))
          (seen '())
          (rows '())
@@ -2078,8 +2074,9 @@ is forgotten and that group falls back to creation order in the switcher."
                (set! seen (cons name seen))
                (set! rows (cons (list label g (group-switch-rail-rows index g)) rows))
                (group-switch-candidate-in index g label))))
-         (here-candidates (append (map candidate here) (list action-row)
-                                  (map candidate recent)))
+         (here-candidates
+           (map candidate (if (group-visible-homogeneous? current)
+                              recent (append mine-recent others))))
          (candidates
            (append here-candidates
                    (map (lambda (g) (group-switch-away-candidate (candidate g)))
@@ -2269,6 +2266,16 @@ is forgotten and that group falls back to creation order in the switcher."
 (local-set-key* (minibuffer-buffer) "M-m" "group-switch-move-buffer")
 (local-set-key* (minibuffer-buffer) "C-k" "group-switch-kill")
 
+(define-command "group-switch-new" "Create a group from the group switcher"
+  (lambda ()
+    (let ((action (frame-local 'group-switch-new-action)))
+      (when (and (minibuffer-state) action)
+        ;; Cancel restores the invoking arrangement before the name prompt.
+        (minibuffer-cancel!)
+        (group-switch-run-new-action! action)))))
+
+(define-key "group-switch-modal-map" "C-n" "group-switch-new")
+
 (define-command "group-switch" "Switch to a group and restore its layout"
   (lambda ()
     (if (in-groups-board?)
@@ -2310,6 +2317,10 @@ is forgotten and that group falls back to creation order in the switcher."
                (close!
                  (lambda ()
                    (set! open #f)
+                   (set-frame-local! 'group-switch-new-action #f)
+                   (buffer-minor-maps! (minibuffer-buffer)
+                     (remove (lambda (m) (equal? m "group-switch-modal-map"))
+                             (buffer-minor-maps (minibuffer-buffer))))
                    (set! *group-switch-rows* '())
                    (set! *group-switch-restore* #f)
                    (group-preview-forget!)))
@@ -2321,8 +2332,7 @@ is forgotten and that group falls back to creation order in the switcher."
                            (begin
                              (set! drew #t)
                              (set! woken (append (group-preview-draw! index id) woken)))
-                           ;; the new-context row previews nothing: it names
-                           ;; no group yet, so the windows stay as they were
+                           ;; An unmatched filter leaves the invoking windows intact.
                            (show-here!))))))
                ;; RET in the rail goes to that buffer, in its own group.
                ;; The prompt closes the way C-g closes it, so the look it
@@ -2355,9 +2365,8 @@ is forgotten and that group falls back to creation order in the switcher."
                                 peek-now! name)))))
           (set! *group-switch-rows* (cdr prompt-rows))
           (set! *group-switch-restore* restore!)
-          (if (null? candidates)
-              (message "No groups")
-              (minibuffer-read-preview "Switch group: " candidates
+          (begin
+              (minibuffer-read-preview "Switch group (C-n new): " candidates
                 peek!
                 (lambda (name)
                   (let ((id (group-switch-id name)))
@@ -2371,8 +2380,6 @@ is forgotten and that group falls back to creation order in the switcher."
                            ;; rather than pull its windows into this one
                            (group-frame-raise! (group-elsewhere-frame id)))
                           (id (switch-to-group! id))
-                          ((equal? name (car action))
-                           (group-switch-run-new-action! action))
                           (else (message "No such group"))))
                   (sleep-woken!))
                 (lambda ()
@@ -2380,7 +2387,11 @@ is forgotten and that group falls back to creation order in the switcher."
                   (show-here!)
                   (sleep-woken!))
                 #f
-                group-switch-style))))))
+                group-switch-style)
+              (set-frame-local! 'group-switch-new-action action)
+              (buffer-minor-maps! (minibuffer-buffer)
+                (cons "group-switch-modal-map"
+                      (buffer-minor-maps (minibuffer-buffer)))))))))
 
 (defcustom 'group-switch-peek-ms 120
   "How long the highlight rests on a group before the switcher previews it, in milliseconds. 0 turns the look off and leaves the frame still; the rail still names every buffer."
@@ -2867,7 +2878,7 @@ is forgotten and that group falls back to creation order in the switcher."
            "Every buffer group as a table: members, companion noise, "
            "metadata. RET switches to the group and restores its layout; "
            "d writes its description with the LLM; n cycles noise; "
-           "x dissolves; K kills the members. `m` marks a group, `*` marks "
+           "x dissolves; K kills the members. `SPC` marks a group, `*` marks "
            "every one, and the verbs act on the marked groups — or on the "
            "row at point when nothing is marked. `/` narrows as you type "
            "and `\\` widens by one.")
@@ -2884,7 +2895,7 @@ is forgotten and that group falls back to creation order in the switcher."
     'meta groups-meta
     'total (lambda (buf) (length (group-names)))
     'footer (lambda (buf)
-              '(("RET" "switch") ("m" "mark") ("*" "all") ("r" "rename")
+              '(("RET" "switch") ("SPC" "mark") ("*" "all") ("r" "rename")
                 ("d" "describe") ("n" "noise") ("x" "dissolve")
                 ("K" "kill buffers") ("b" "members") ("/" "filter")
                 ("g" "refresh") ("q" "quit")))
@@ -3706,7 +3717,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-all-work-buffers)
   (filter buffer-user-switchable? (buffer-list)))
 
-;; The selection a membership verb acts on: C-SPC marks in the switcher,
+;; The selection a membership verb acts on: SPC marks in every list,
 ;; marks in ibuffer, and `buffer-select` are views of one selection. A
 ;; command invoked from a list must not lose selections made on ordinary
 ;; buffers, and a repeated name is acted on once.

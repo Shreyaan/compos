@@ -12,9 +12,9 @@
 ;;; a message has no text/plain part.
 ;;;
 ;;; Search buffer keys (ported from the user's Emacs config):
-;;;   n/p next/prev (n marks read; both auto-preview) · RET open · SPC preview
+;;;   n/p next/prev (n marks read; both auto-preview) · RET open · v preview
 ;;;   a archive · d trash · u smart-untag · . toggle unread · @ by sender
-;;;   m mark+advance · M or * mark all (again unmarks) · U unmark all · F show marked
+;;;   SPC mark+advance · M or * mark all (again unmarks) · U unmark all · F show marked
 ;;;   a archive marked · d trash marked · t tag marked · T tag this thread
 ;;;   / custom query filter · l add a tag filter · \ remove the last filter
 ;;;   s new search · g refresh · q quit
@@ -467,10 +467,10 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-list-mode! "notmuch-mode"
   (list
     'doc (string-append
-           "One notmuch search as a list of threads. `RET` opens, `SPC` "
+           "One notmuch search as a list of threads. `RET` opens, `v` "
            "previews, `a`/`d` tag, `t` classifies with the mailbox's own tags, "
            "`L` files a thread for the agent (+liked -inbox), "
-           "`0` strips every tag, `m` marks and the capital keys act "
+           "`0` strips every tag, `SPC` marks and the capital keys act "
            "on every marked thread. Selection is local and clears after bulk actions or filter changes. `/` adds a custom query filter. "
            "`l` adds a tag filter; `\\` removes it. "
            "`s` starts a new search; `q` removes the last filter, "
@@ -486,6 +486,7 @@ when a message has no text/plain part." 'group 'notmuch)
     'rows (lambda (buf) (nm--search-rows buf))
     'key (lambda (buf th) (nm--th-id th))
     'selection-face "select"
+    'mark-command "notmuch-mark-toggle"
     'row-columns (lambda (buf) (nm--search-columns buf))
     'row-cells (lambda (buf th) (nm--search-cells buf th))
     'title (lambda (buf)
@@ -518,7 +519,7 @@ when a message has no text/plain part." 'group 'notmuch)
                       ("notmuch-refresh" "refresh")
                       (("notmuch-back" "dismiss-buffer") "back")))))
     'keys '(("n" "notmuch-next") ("p" "notmuch-prev")
-            ("RET" "notmuch-open-thread") ("SPC" "notmuch-preview")
+            ("RET" "notmuch-open-thread") ("v" "notmuch-preview")
             ("M-<" "notmuch-first-thread") ("M->" "notmuch-last-thread")
             ("r" "notmuch-reply") ("a" "notmuch-archive") ("d" "notmuch-trash")
             ("u" "notmuch-smart-untag") ("." "notmuch-toggle-unread")

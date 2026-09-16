@@ -109,5 +109,7 @@
   (lambda ()
     (check-equal! (keymap-parent (mode-keymap "ibuffer-mode")) "list-mode-map" "the parent")
     (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "d") "list-flag-D" "a declared flag key")
-    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "/") "list-filter" "the filter, through the parent")
+    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "/") "list-cycle-grouping" "grouping is reserved")
+    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") ">") "list-cycle-sorting" "sorting is reserved")
+    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "f") "list-filter" "the filter, through the parent")
     (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "?") "describe-mode" "help, through the parent")))

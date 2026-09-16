@@ -259,7 +259,7 @@
   (filter (lambda (row) (not (google--get row 'google-up))) (list-targets buf)))
 (define-list-mode! "google-drive-mode"
   (list 'special #f
-    'doc "Google file index. RET opens, ^ goes up, C copies, R renames or moves, + creates a folder. m marks, u unmarks, d flags, x trashes. s sorts and / filters."
+    'doc "Google file index. RET opens, ^ goes up, C copies, R renames or moves, + creates a folder. SPC marks, u unmarks, d flags, x trashes. s sorts and / filters."
     'rows (lambda (buf) (cons google--up-row (filter (lambda (row) (not (google--get row 'google-up))) (list-entries buf))))
     'markable? (lambda (buf row) (not (google--get row 'google-up))) 'cache-fetch google--fetch 'cache-ttl 120
     'columns (lambda (buf) '(("Name" #f) ("Size" 12 right) ("Modified" 20) ("Type" 24)))
@@ -276,7 +276,7 @@
             ("C" "dired-copy") ("d" "google-drive-flag") ("+" "dired-mkdir") ("SPC" "list-mark") ("x" "google-drive-trash")
             ("g" "dired-revert") ("]" "google-next-page") ("[" "google-first-page")
             ("s" "dired-sort-cycle") ("f" "google-search") ("o" "google-operation"))
-    'footer (lambda (buf) '(("RET" "open") ("^" "up") ("m" "mark") ("u" "unmark")
+    'footer (lambda (buf) '(("RET" "open") ("^" "up") ("SPC" "mark") ("u" "unmark")
        ("d" "flag") ("x" "trash") ("C" "copy") ("R" "rename/move") ("+" "new folder") ("/" "filter") ("s" "sort") ("g" "refresh") ("]" "next page")))))
 
 (define-command "google-drive-sort" "Toggle Google file sorting between name and modification time"

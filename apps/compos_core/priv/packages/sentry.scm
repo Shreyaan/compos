@@ -905,7 +905,7 @@
     'doc (string-append
            "Unresolved Sentry issues for the configured project and environment. "
            "RET opens structured issue details. `g` refreshes the list. "
-           "`m` marks rows; `a`, `o` and `R` act on the marked rows, or the "
+           "`SPC` marks rows; `a`, `o` and `R` act on the marked rows, or the "
            "row at point — ask the agent, open in Sentry, resolve.")
     'buffer *sentry-buffer*
     'rows sentry--issue-rows
@@ -920,7 +920,7 @@
     'meta sentry--issue-meta
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
-              '(("RET" "detail") ("m" "mark") ("a" "agent") ("o" "web")
+              '(("RET" "detail") ("SPC" "mark") ("a" "agent") ("o" "web")
                 ("R" "resolve") ("/" "filter") ("g" "refresh") ("q" "quit")))
     'key (lambda (buf issue) (sentry--get issue 'id))
     'keys '(("RET" "sentry-open") ("g" "sentry-refresh") ("q" "quit-window")

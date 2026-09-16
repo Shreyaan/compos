@@ -1416,13 +1416,13 @@
       (check-true! (group-visible-homogeneous? here) "the shared predicate sees one group")
       (define *t-sw-new-label* (car (group-switch-new-action)))
       (run-command "group-switch")
-      (check-equal! (t--sw-selected) "zzsw-here" "the current group leads")
-      (check-equal! (t--sw-at *t-sw-new-label*) 1 "new group is second")
+      (check-equal! (t--sw-selected) "zzsw-recent" "the recent destination leads")
+      (check-equal! (t--sw-at *t-sw-new-label*) -1 "creation is a command, not a row")
       (check-true! (< (t--sw-at "zzsw-recent") (t--sw-at "zzsw-older"))
                    "the other groups keep MRU order")
       (check-true! (and (member "zzsw-here" (t--sw-labels)) #t)
                    "the group you stand in is a row too: the list shows them all")
-      (check-equal! (t--sw-at "zzsw-here") 0 "current group stays first"))
+      (check-equal! (t--sw-at "zzsw-here") 2 "current group stays last"))
     (t--sw-done!)))
 
 (deftest 'group-mru-outranks-the-shared-history-ring
@@ -1448,7 +1448,7 @@
     (t--sw-done!)))
 
 (deftest 'group-switch-preserves-mru-in-a-mixed-frame
-  "current buffer context leads, then new group, then other groups by recency"
+  "current buffer context leads, then other groups by recency"
   (lambda ()
     (t--sw-setup!)
     (let ((here (group-record-create! "zzsw-here"))
@@ -1470,7 +1470,7 @@
       (define *t-sw-new-label* (car (group-switch-new-action)))
       (run-command "group-switch")
       (check-equal! (t--sw-selected) "zzsw-target" "the selected buffer supplies the current context")
-      (check-equal! (t--sw-at *t-sw-new-label*) 1 "new group is second")
+      (check-equal! (t--sw-at *t-sw-new-label*) -1 "creation is a command, not a row")
       (check-true! (< (t--sw-at "zzsw-here") (t--sw-at "zzsw-recent"))
                    "the remaining groups keep MRU order"))
     (t--sw-done!)))
@@ -1809,8 +1809,7 @@
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group source)
       (run-command "group-switch")
-      (t--sw-type! "Move this buffer into a new group")
-      (t--sw-key! "confirm")
+      (run-command "group-switch-new")
       (t--sw-type! "zzsw-moved")
       (t--sw-key! "confirm")
 

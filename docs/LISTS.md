@@ -22,12 +22,12 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 ## Order
 
 1. A list with `'local-filter` fetches its rows on an open and on `g`, and a mark, a flag, or a narrowing redraws the rows it has. A source in MRU order changes under a row's preview; a table that refetched on every mark moved the row under the cursor.
-2. `ibuffer` sections its rows by group, by mode, or by directory (`ibuffer-toggle-grouping`). Under the group sectioning the frame's group comes first, then the other groups by name, then the ungrouped rows. Inside a section the rows sort by name, by recency (MRU), or by size (`ibuffer-toggle-sorting-mode`); the defaults are `ibuffer-default-grouping` and `ibuffer-default-sorting-mode`.
-3. A folded section (`ibuffer-toggle-filter-group`) is one heading row that carries the member count, the modified count, and the bytes. It is not a separator: the narrowing keeps it while a member matches, the highlight can rest on it, and RET opens it. The meta line counts folded members.
-4. A right-aligned last column pads on its left, so its text ends at the column's edge; its face span starts after the padding.
-5. The key bar fits the window. A key that does not fit is dropped from the end, and a bar that dropped any ends in `? keys`, where `?` shows them all. A bar that wrapped took two lines and pushed the rows down.
-6. A mode's `'meta` answers a string, or `(TEXT SPANS)` with its own faces. The ibuffer wide head says the grouping and the sort as chips this way, the current one lit.
-
+2. `SPC` marks the row at point in every markable list mode. `/` cycles the declared grouping mechanisms. `>` cycles the declared sorting mechanisms. These keys are reserved by every list mode. A list without the corresponding declaration reports that it has none.
+3. `ibuffer` sections its rows by group, by mode, or by directory. Under the group sectioning the frame's group comes first, then the other groups by name, then the ungrouped rows. Inside a section the rows sort by name, by recency (MRU), or by size; the defaults are `ibuffer-default-grouping` and `ibuffer-default-sorting-mode`.
+4. A folded section (`ibuffer-toggle-filter-group`) is one heading row that carries the member count, the modified count, and the bytes. It is not a separator: the narrowing keeps it while a member matches, the highlight can rest on it, and RET opens it. The meta line counts folded members.
+5. A right-aligned last column pads on its left, so its text ends at the column's edge; its face span starts after the padding.
+6. The key bar fits the window. A key that does not fit is dropped from the end, and a bar that dropped any ends in `? keys`, where `?` shows them all. A bar that wrapped took two lines and pushed the rows down.
+7. A mode's `'meta` answers a string, or `(TEXT SPANS)` with its own faces. The ibuffer wide head says the grouping and the sort as chips this way, the current one lit.
 ## Point
 
 1. The point belongs to the reader. No process moves it: a draw restores the row by its key, a peek popup opening or closing beside the listing moves nothing (docs/POPUPS.md rule 10), an open of a list you already have keeps the row you left it on. A narrowing lands on the first row because the old row may be gone; that is the reader's own act.
@@ -35,10 +35,9 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 
 ## Narrowing
 
-1. `/` narrows on every keystroke; `\` widens by one. The filters stack and persist with the buffer; an open clears the typed query and keeps the mode's own kinds.
+1. `f` narrows on every keystroke; `\` widens by one. The filters stack and persist with the buffer; an open clears the typed query and keeps the mode's own kinds.
 2. Repeating an unchanged query does nothing. `(list-set-query! BUF QUERY #t)` changes the query and fetches its source in one draw. C-x c uses this only when crossing between the recent and full chat scopes; later keys reuse the source. Closing a disposable prompt clears the query without redrawing a table that is about to be killed.
 3. A mode's own filter kinds (`'filter (buf entry f)`) ride the same stack. The telemetry's `t`, `k`, and `s` are such kinds, and the same key again widens.
-
 ## The telemetry list
 
 1. `C-t` shows `*Telemetry*` in the popup, on the right (docs/POPUPS.md). `C-t` on it dismisses it: a popup buffer under it comes back, else the popup closes.

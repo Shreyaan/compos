@@ -976,14 +976,14 @@
              "The chat list opens here with inert floating peek cards. The rows "
              "are the recent chats, most recently used first. The list has the "
              "focus; n and p select rows and preview read-only snapshots. "
-             "/ opens the filter line: the filter "
+             "f opens the filter line: the filter "
              "reads the title first and the state second, and it reads every "
              "chat, not only the recent ones. A word that nobody put in a "
              "title is found in the text of every alive chat, and the row "
              "shows the words around it. C-g closes the filter and leaves the "
              "list standing. RET enters the chat's own group and raises the "
-             "window that holds it; q leaves and changes nothing. ; cycles "
-             "what a section is: none, group, state, model. , cycles the "
+             "window that holds it; q leaves and changes nothing. / cycles "
+             "what a section is: none, group, state, model. > cycles the "
              "order inside a section: most recent first, by name, or by the "
              "size of the transcript on disk. The verbs act on the chat at point "
              "and leave the list standing: s steers it, y and d answer the "
@@ -1002,6 +1002,8 @@
       'rows (lambda (buf) (chat-list-rows buf))
       'order-filtered chat-list-rank
       'match chat-list-match?
+      'regroup (lambda (buf) (run-command "chat-list-regroup"))
+      'resort (lambda (buf) (run-command "chat-list-resort"))
       'preview (lambda (buf b) (listing-preview-schedule! buf b))
       ;; The table stamps itself with the buffer count and redraws after
       ;; any command that moved it, so a buffer opened anywhere -- by a
@@ -1017,9 +1019,8 @@
       ;; runtime without touching the transcript the way the table's k
       ;; would kill the buffer outright
       'keys '(("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
-              (";" "chat-list-regroup") ("," "chat-list-resort")
               ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
-              ("/" "chat-list-filter") ("RET" "chat-list-visit")
+              ("f" "chat-list-filter") ("RET" "chat-list-visit")
               ("q" "chat-list-quit")
               ("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
               ("a" "chats-archive") ("r" "chats-retitle")
