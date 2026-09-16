@@ -13,19 +13,17 @@
   "Text size of *Messages*, as a step on the 1.2 ladder; 0 is the normal size."
   'group 'messages 'type 'number)
 
-(define *messages-scaled* #f)
+
 
 ;; A log is read in bulk, so it wears a smaller face than a document. The
-;; step is the one C-+ and C-_ move, so a reader who wants this list
-;; bigger just presses the key and their own buffer-local wins. The flag
-;; keeps the common path a Scheme read: this runs once per message, and a
-;; buffer-local read is a call into the buffer's process.
+;; step is the one C-+ and C-_ move, and the buffer's own value wins once
+;; it has one: a reader who resized this list keeps their size, including
+;; the 0 that text-scale-reset writes.
 (define (messages--scale! name)
-  (unless (or *messages-scaled* (not (boundp 'text-scale-sync!)))
-    (set! *messages-scaled* #t)
-    (unless (buffer-local name 'text-scale)
-      (buffer-set-local! name 'text-scale messages-text-scale)
-      (text-scale-sync! name))))
+  (when (and (boundp 'text-scale-sync!)
+             (not (number? (buffer-local name 'text-scale))))
+    (buffer-set-local! name 'text-scale messages-text-scale)
+    (text-scale-sync! name)))
 
 ;; Remove the pre-Emacs spelling when this package first loads.
 (when (buffer-exists? "*messages*") (buffer-kill! "*messages*"))
@@ -39,7 +37,6 @@
     (unless (equal? (buffer-local name 'mode-name) "messages-mode")
       (buffer-set-local! name 'mode-name "messages-mode")
       (list-mode-init! name "messages-mode")
-      (set! *messages-scaled* #f)
       (list-refresh! name))
     (messages--scale! name)))
 

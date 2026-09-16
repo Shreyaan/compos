@@ -45,8 +45,10 @@
     (message "older event" 'info)
     (message "newer event" 'info)
     (run-command "view-messages")
-    (let ((newer (isearch-matches "newer event"))
-          (older (isearch-matches "older event")))
+    (let* ((at (lambda (q) (with-current-buffer "*Messages*"
+                             (lambda () (isearch-matches q)))))
+           (newer (at "newer event"))
+           (older (at "older event")))
       (check-true! (and (pair? newer) (pair? older))
                    "both messages are drawn")
       (check-true! (< (car (car newer)) (car (car older)))
