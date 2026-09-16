@@ -64,7 +64,10 @@ defmodule Compos.ListingPeekCardTest do
     end
   end
 
-  for command <- ["ibuffer", "ichat"] do
+  # Only ibuffer previews with a floating card. The chat list previews
+  # into a real pane it opens beside itself, so it floats nothing — see
+  # the-row-at-point-previews-its-chat in chats-list-test.scm.
+  for command <- ["ibuffer"] do
     @command command
     test "#{command} floats an isolated nonfocusable card and q only dismisses it" do
       previous = Editor.last_active_frame()

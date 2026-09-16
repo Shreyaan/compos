@@ -15,15 +15,37 @@ The window form is one list per group, the way `ibuffer` is: it opens in
 the group you called it from and stays there, and different groups get
 separate `*chat-list*` buffers. A single list in a group of its own was
 tried and reverted — arriving had to cross groups, which dragged the
-frame through that group's whole layout and left the list alone in it
-with nothing beside it to preview into.
+frame through that group's whole layout.
+
+## Two panes, and the frame comes back
+
+The window form covers the frame with two panes: the list in
+`chat-list-pane-share` of it (2/3 by default) and the selected chat in
+the rest. The preview is a **real window over the real chat buffer**, not
+a card floated on the rows — you read it the way you read a chat
+anywhere, and `C-x o` into it works.
+
+Row movement fills that pane. A heading is not a chat and an archived row
+is a path rather than a buffer, so both leave the pane showing what it
+last held instead of blanking it. Arriving never lands on a heading:
+grouping by group puts one first, so arrival falls through to the first
+real row, which is what gives you a preview immediately.
+
+Covering the frame is only fair if the frame comes back. The arrangement
+the list covers is recorded on arrival and restored when the list leaves
+— by `q`, and by `RET` too, so the chat you pick lands in the
+arrangement you were working in rather than in the list's two panes.
+
+The minibuffer form has no pane of its own and keeps the floating card.
 
 ## Listing buffers and floating peek cards
 
-`M-x ibuffer` and `M-x chat-list` open an ordinary listing buffer in the
-window that invoked them. They reuse a matching listing buffer in the
-current group, without selecting another window that shows it. Different
-groups get separate listing buffers. The rows identify buffers.
+`M-x ibuffer` opens an ordinary listing buffer in the window that invoked
+it, reusing a matching one in the current group without selecting another
+window that shows it. Different groups get separate listing buffers. The
+rows identify buffers. The card described below is ibuffer's preview and
+the chat prompt's; the chat list's window form previews into a pane
+instead, as above.
 
 Row navigation shows a **Preview** card after a short pause. The card is inset
 from the window borders, raised with a soft shadow, and connected by a line

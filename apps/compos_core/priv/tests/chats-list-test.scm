@@ -115,8 +115,14 @@
 (deftest 'the-list-arrives-in-the-invoking-group
   "one arrival: the invoking group, two panes, the list holding the focus"
   (lambda ()
-    (chats-test-open! 'group 'name)
-    (check-equal! (buffer-group *chat-list*) (frame-group) "the listing belongs here")
+    (let ((groups (chats-test-open! 'group 'name)))
+      ;; a frame with no group yet cannot say where the list belongs, so
+      ;; stand in a real group before asking
+      (switch-to-group! (car groups))
+      (run-command "chat-list")
+      (set! *chat-list* (chat-list-buffer))
+      (check-equal! (buffer-group *chat-list*) (frame-group)
+                    "the listing belongs to the group it opened in"))
     (check-equal! (length (window-list)) 2 "the list and the pane it previews into")
     (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
     (let ((pane (chat-list-preview-window)))

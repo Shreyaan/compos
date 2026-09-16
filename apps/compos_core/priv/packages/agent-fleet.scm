@@ -1053,16 +1053,25 @@
     (buffer-set-local! buf 'window-preference-cover #t)
     (unless (frame-local 'chat-list-covered)
       (set-frame-local! 'chat-list-covered (window-tree)))
-    (with-layout-suppressed
-      (lambda ()
-        (switch-to-buffer-here! buf)
-        (delete-other-windows!)
-        (let ((home (active-window)))
-          (split-window! 'h chat-list-pane-share)
-          (let ((preview (other-window-id home)))
-            (select-window! home)
-            (set-frame-local! 'chat-list-preview-window preview)
-            preview))))))
+    (let ((preview
+           (with-layout-suppressed
+             (lambda ()
+               (switch-to-buffer-here! buf)
+               (delete-other-windows!)
+               (let ((home (active-window)))
+                 (split-window! 'h chat-list-pane-share)
+                 (let ((pane (other-window-id home)))
+                   (select-window! home)
+                   pane))))))
+      (set-frame-local! 'chat-list-preview-window preview)
+      ;; the group is settled only now: a frame with no group yet gets one
+      ;; as the windows change, and a list left ownerless is a list no
+      ;; group ever reuses. It belongs to the group you opened it in
+      (when (boundp 'group-current-recalculate!) (group-current-recalculate!))
+      (let ((group (frame-group)))
+        (when (and group (not (equal? (buffer-group buf) group)))
+          (buffer-move-to-group! buf group)))
+      preview)))
 
 (define (chat-list-preview-window &optional owner)
   (let ((view (or owner (chat-list-buffer)))
