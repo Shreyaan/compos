@@ -1037,20 +1037,39 @@
 
 (define (chat-list-arrive!)
   ;; one list per group, as ibuffer is one per group: the list opens in
-  ;; the group you called it from and stays there. A single application
-  ;; buffer in a group of its own was tried and reverted — arriving had
-  ;; to cross groups, which dragged the frame through that group's whole
-  ;; layout and left the list alone in it with nothing to preview into.
+  ;; the group you called it from and stays there.
+  ;;
+  ;; The list covers the frame and lays out two panes: itself in the
+  ;; larger one and the selected chat in the smaller. The preview is a
+  ;; real window over a real buffer, not a card floated on the rows — you
+  ;; read a chat in it the way you read a chat anywhere. Covering the
+  ;; frame is only fair if the frame comes back, so the arrangement the
+  ;; list covers is kept whole here and restored when the list leaves.
   (let ((buf (ibuffer-group-view! "chat-list-mode" *chat-list-buffer*)))
     (ibuffer-view! buf 'sort 'recent 'grouping 'group)
     (set-frame-local! 'chat-list-view buf)
     (buffer-set-local! buf 'window-preference-cover #t)
-    (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))
-    #f))
+    (unless (frame-local 'chat-list-covered)
+      (set-frame-local! 'chat-list-covered (window-tree)))
+    (with-layout-suppressed
+      (lambda ()
+        (switch-to-buffer-here! buf)
+        (delete-other-windows!)
+        (let ((home (active-window)))
+          (split-window! 'h chat-list-pane-share)
+          (let ((preview (other-window-id home)))
+            (select-window! home)
+            (set-frame-local! 'chat-list-preview-window preview)
+            preview))))))
 
 (define (chat-list-preview-window)
-  (and (equal? (frame-local 'listing-preview-owner) (chat-list-buffer))
-       (popup-open?) (popup-window)))
+  (let ((win (frame-local 'chat-list-preview-window))
+        (list-win (window-showing (chat-list-buffer))))
+    (and win (window-exists? win) (not (equal? win list-win)) win)))
+
+(defcustom 'chat-list-pane-share 0.667
+  "The chat list's share of the frame; the rest previews the selected chat."
+  'group 'chat 'type 'number)
 
 (defcustom 'chat-list-preview-delay-ms 150
   "Milliseconds of idle time before the chat list previews the selected row."
@@ -1115,8 +1134,15 @@
 ;; Compatibility callbacks cannot resurrect previews after a live reload.
 (define (chat-list--preview-now! request) #f)
 (define (chat-list-preview!)
-  (let ((owner (chat-list-buffer)))
-    (listing-preview-schedule! owner (list-current owner))))
+  ;; the row at point goes into the other pane. A heading is not a chat
+  ;; and an archived row is a path, not a buffer: both leave the pane
+  ;; showing whatever it last held rather than blanking it
+  (let ((win (chat-list-preview-window))
+        (row (list-current (chat-list-buffer))))
+    (and win (string? row) (buffer-known? row)
+         (not (equal? (window-buffer win) row))
+         (with-layout-suppressed
+           (lambda () (display-buffer-in-window! win row))))))
 
 ;; the application leaves the way it arrived: with one move. RET lands you
 ;; in the chat, in the chat's own group, because switching to a chat is
@@ -1136,12 +1162,16 @@
 
 (define (chat-list-keep! keep)
   (chat-list-clear-search!)
+  ;; the frame goes back to what the list covered, and the chat you
+  ;; picked lands in it — you leave in the arrangement you were working
+  ;; in, not in the list's two panes
+  (chat-list-uncover!)
   (listing-visit! (chat-list-buffer) keep)
   (when (equal? (window-buffer (active-window)) keep) (end-of-buffer!)))
 
 (define (chat-list-back!)
   (chat-list-clear-search!)
-  (listing-quit! (chat-list-buffer)))
+  (chat-list-uncover!))
 
 ;; a saved conversation is a file and has no group of its own, so reading
 ;; it back lands it where you stood when you asked for it
