@@ -803,9 +803,12 @@
     (define-key (mode-keymap name) "/" "list-filter")
     (define-key (mode-keymap name) "<" "list-cycle-grouping")
     (define-key (mode-keymap name) ">" "list-cycle-sorting")
+    ;; SPC toggles: a marked row loses its mark, any other row gets one,
+    ;; and point moves down. m marks only. A mode's mark-command replaces
+    ;; the toggle.
     (unless (plist-get opts 'no-marks)
       (define-key (mode-keymap name) "SPC"
-        (or (plist-get opts 'mark-command) "list-mark")))))
+        (or (plist-get opts 'mark-command) "list-toggle-mark")))))
 
 ;; A hot reload does not re-run the packages that registered their modes.
 (for-each (lambda (entry) (list-mode-standard-keys! (car entry))) *list-modes*)

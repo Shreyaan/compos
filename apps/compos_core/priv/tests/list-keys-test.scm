@@ -40,3 +40,22 @@
         (check-equal! (plist-get (car blocks) 'tag) "c-keys-bar"
                       "and those blocks are the keys bar")))
     (buffer-kill! "*zz-keybar*")))
+
+;; The standard keys bind SPC on every list's map after the mode's own
+;; keys. Whatever they bind there must toggle: ibuffer once listed a
+;; toggle under SPC in its keys and got a mark-only command on top of it.
+(deftest 'the-standard-mark-key-toggles
+  "the command the standard keys put on SPC marks a row, and clears it the second time"
+  (lambda ()
+    (list-mode-show! "zz-keybar-mode")
+    (let* ((buf "*zz-keybar*")
+           (cmd (cadr (assoc "SPC" (keymap-bindings (mode-keymap "zz-keybar-mode"))))))
+      (with-current-buffer buf
+        (lambda ()
+          (list-goto-index! buf 0)
+          (run-command cmd)
+          (check-equal! (list-mark-of buf "one") "*" "the first press marks")
+          (list-goto-index! buf 0)
+          (run-command cmd)
+          (check-equal! (list-mark-of buf "one") " " "the second press clears"))))
+    (buffer-kill! "*zz-keybar*")))
