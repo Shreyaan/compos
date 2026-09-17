@@ -87,7 +87,7 @@
   ;; directly (no bundle) resolves to just itself, so toggling a bare
   ;; server in the picker starts exactly that server.
   (let ((e (assoc name *chat-presets*)))
-    (cond (e (custom--plist-get (car (cdr e)) 'servers))
+    (cond (e (plist-get (car (cdr e)) 'servers))
           ((assoc name *mcp-registry*) (list name))
           (else '()))))
 
@@ -284,7 +284,7 @@
                  (let ((name (car e)))
                    (list (symbol->string name)
                          (string-append (if (member name loaded) "● " "○ ")
-                                        (custom--plist-get (car (cdr e)) 'description)))))
+                                        (plist-get (car (cdr e)) 'description)))))
                *chat-presets*))
          (servers
           (map (lambda (srv)

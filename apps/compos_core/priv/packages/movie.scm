@@ -13,7 +13,7 @@
 (define *movie-stream-buffer* "*movie-stream*")
 
 (define (movie-get value key)
-  (and (pair? value) (plist-get value key)))
+  (plist-get value key))
 
 (define (movie-clamp n low high) (max low (min n high)))
 

@@ -152,11 +152,11 @@ nonstandard install out of the built-in connector catalog."
 ;; would choose by name, and a colon would break "provider:model" routing.
 (define (llm-catalog-parse text)
   (let* ((doc (and text (not (equal? (string-trim text) "")) (json-parse text)))
-         (data (and (pair? doc) (plist-get doc 'data))))
+         (data (plist-get doc 'data)))
     (if (not (pair? data))
         '()
         (fold (lambda (acc m)
-                (let ((id (and (pair? m) (plist-get m 'id))))
+                (let ((id (plist-get m 'id)))
                   (if (and (string? id)
                            (not (string-contains? id ":"))
                            (not (string-prefix? "~" id)))

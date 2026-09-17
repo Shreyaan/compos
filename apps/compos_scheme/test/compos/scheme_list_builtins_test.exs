@@ -42,11 +42,13 @@ defmodule Compos.Scheme.ListBuiltinsTest do
     assert run("(assq 'a '((a 1)))") == [{:sym, "a"}, 1]
   end
 
-  test "plist-get reads a flat plist and answers false past an odd tail" do
+  test "plist-get reads a flat plist and answers false past an odd tail or a non-list" do
     assert run("(plist-get '(a 1 b 2) 'b)") == 2
     assert run("(plist-get '(a 1 b) 'b)") == false
     assert run("(plist-get '() 'b)") == false
-    assert {:error, _} = Scheme.eval_string(Scheme.new(), "(plist-get #f 'b)")
+    # a missing lookup hands #f on; the caller never guards it
+    assert run("(plist-get #f 'b)") == false
+    assert run("(plist-get (plist-get '(a 1) 'z) 'b)") == false
   end
 
   test "a predicate error reaches the caller as a Scheme error" do

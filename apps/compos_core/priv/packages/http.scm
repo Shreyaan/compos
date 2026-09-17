@@ -50,9 +50,6 @@
 
 ;; plist-get stops the interpreter when it is handed #f, and these read a
 ;; reply that a caller did not check the shape of first.
-(define (http--get pl key)
-  (if (pair? pl) (plist-get pl key) #f))
-
 (define (http--text v)
   (if (symbol? v) (symbol->string v) v))
 
@@ -62,22 +59,22 @@
         (if (> (string-length line) 200) (substring line 0 200) line))
       ""))
 
-(define (http-ok? reply) (if (http--get reply 'ok) #t #f))
+(define (http-ok? reply) (if (plist-get reply 'ok) #t #f))
 
-(define (http-status reply) (http--get reply 'status))
+(define (http-status reply) (plist-get reply 'status))
 
-(define (http-body reply) (or (http--get reply 'body) ""))
+(define (http-body reply) (or (plist-get reply 'body) ""))
 
 ;; The parsed JSON of a JSON answer, or #f. The body is always the bytes
 ;; that arrived, so nothing needs to parse them a second time.
-(define (http-json reply) (http--get reply 'json))
+(define (http-json reply) (plist-get reply 'json))
 
-(define (http-error reply) (http--get reply 'error))
+(define (http-error reply) (plist-get reply 'error))
 
 ;; Header names arrive lower-cased, the way HTTP/2 writes them, so a
 ;; caller asking for Content-Type means content-type.
 (define (http-header reply name)
-  (http--get (http--get reply 'headers)
+  (plist-get (plist-get reply 'headers)
              (string->symbol (string-downcase (http--text name)))))
 
 ;; One line for a person or a log: what went wrong, or #f when nothing
@@ -99,7 +96,7 @@
 ;; because a plist answers with the first pair it meets. A header set
 ;; written as pairs, (("X-Trace-Id" "7")), is left exactly as it is.
 (define (http--headers opts)
-  (let ((given (http--get opts 'headers)))
+  (let ((given (plist-get opts 'headers)))
     (cond ((not (pair? given)) (list 'user-agent http-user-agent))
           ((symbol? (car given)) (append given (list 'user-agent http-user-agent)))
           (else given))))
@@ -189,7 +186,7 @@
   (string-append
     "HTTP " (http--text (or (http-status reply) "no answer")) "\n"
     (let ((e (http-error reply))) (if e (string-append e "\n") ""))
-    (let ((h (http--get reply 'headers)))
+    (let ((h (plist-get reply 'headers)))
       (if (pair? h) (string-append "\n" (http--headers-text h) "\n") ""))
     "\n" (http-body reply) "\n"))
 

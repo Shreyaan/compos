@@ -50,9 +50,6 @@
 ;; object, a type with no fields, a schema with no mutation. plist-get wants
 ;; a list and stops the interpreter when it gets #f, so nothing here reads a
 ;; plist any other way.
-(define (graphql--get pl key)
-  (if (pair? pl) (plist-get pl key) #f))
-
 (define (graphql--replace s from to)
   (string-join (string-split s from) to))
 
@@ -79,8 +76,8 @@
 (define (graphql-register! name url &rest opts)
   (set! *graphql-endpoints*
     (cons (list name url
-                (or (graphql--get opts 'headers) '())
-                (or (graphql--get opts 'doc) ""))
+                (or (plist-get opts 'headers) '())
+                (or (plist-get opts 'doc) ""))
           (remove (lambda (e) (equal? (car e) name)) *graphql-endpoints*)))
   name)
 
@@ -214,13 +211,13 @@
 
 ;; Readable text for every error in REPLY, or #f when there are none.
 (define (graphql-errors reply)
-  (let ((es (graphql--get reply 'errors)))
+  (let ((es (plist-get reply 'errors)))
     (if (or (not es) (null? es))
         #f
         (string-trim
           (fold (lambda (acc e)
-                  (let ((path (graphql--get e 'path)))
-                    (string-append acc (or (graphql--get e 'message) "error")
+                  (let ((path (plist-get e 'path)))
+                    (string-append acc (or (plist-get e 'message) "error")
                                    (if (pair? path)
                                        (string-append "  (at " (graphql--path->string path) ")")
                                        "")
@@ -240,7 +237,7 @@
          (err (graphql-errors reply)))
     (set! *graphql-last-error* err)
     (when err (message (string-append "graphql: " (graphql--first-line err))))
-    (graphql--get reply 'data)))
+    (plist-get reply 'data)))
 
 ;;; --- the schema ---------------------------------------------------------------
 ;;; Introspection is one query and the answer is large, so it is fetched
@@ -296,7 +293,7 @@
                #f)
         (let* ((reply (graphql-post name (cadr (car qs))))
                (e (graphql-errors reply))
-               (schema (graphql--get (graphql--get reply 'data) '__schema)))
+               (schema (plist-get (plist-get reply 'data) '__schema)))
           (if (and (not e) (pair? schema))
               (list (car (car qs)) schema)
               (loop (cdr qs) e))))))
@@ -311,7 +308,7 @@
           (if (not got)
               #f
               (let* ((schema (cadr got))
-                     (types (or (graphql--get schema 'types) '())))
+                     (types (or (plist-get schema 'types) '())))
                 (set! *graphql-schemas*
                   (cons (list name types schema (car got)) *graphql-schemas*))
                 types))))))
@@ -336,47 +333,47 @@
 ;; "?!" — the mark goes away with the level that would have carried it.
 (define (graphql--type-name t)
   (cond ((not (pair? t)) "?")
-        ((and (equal? (graphql--get t 'kind) "NON_NULL") (pair? (graphql--get t 'ofType)))
-         (string-append (graphql--type-name (graphql--get t 'ofType)) "!"))
-        ((and (equal? (graphql--get t 'kind) "LIST") (pair? (graphql--get t 'ofType)))
-         (string-append "[" (graphql--type-name (graphql--get t 'ofType)) "]"))
-        (else (or (graphql--get t 'name) "?"))))
+        ((and (equal? (plist-get t 'kind) "NON_NULL") (pair? (plist-get t 'ofType)))
+         (string-append (graphql--type-name (plist-get t 'ofType)) "!"))
+        ((and (equal? (plist-get t 'kind) "LIST") (pair? (plist-get t 'ofType)))
+         (string-append "[" (graphql--type-name (plist-get t 'ofType)) "]"))
+        (else (or (plist-get t 'name) "?"))))
 
 (define (graphql--args-string f)
-  (let ((args (graphql--get f 'args)))
+  (let ((args (plist-get f 'args)))
     (if (or (not (pair? args)) (null? args))
         ""
         (string-append "("
           (string-join
             (map (lambda (a)
-                   (string-append (or (graphql--get a 'name) "?") ": "
-                                  (graphql--type-name (graphql--get a 'type))))
+                   (string-append (or (plist-get a 'name) "?") ": "
+                                  (graphql--type-name (plist-get a 'type))))
                  args)
             ", ")
           ")"))))
 
 (define (graphql--type-line ty)
-  (string-append (or (graphql--get ty 'name) "?")
-                 "  (" (string-downcase (or (graphql--get ty 'kind) "?")) ")"
-                 (graphql--dash (graphql--get ty 'description))))
+  (string-append (or (plist-get ty 'name) "?")
+                 "  (" (string-downcase (or (plist-get ty 'kind) "?")) ")"
+                 (graphql--dash (plist-get ty 'description))))
 
 (define (graphql--field-line ty f)
-  (string-append (or (graphql--get ty 'name) "?") "." (or (graphql--get f 'name) "?")
+  (string-append (or (plist-get ty 'name) "?") "." (or (plist-get f 'name) "?")
                  (graphql--args-string f)
-                 ": " (graphql--type-name (graphql--get f 'type))
-                 (graphql--dash (graphql--get f 'description))))
+                 ": " (graphql--type-name (plist-get f 'type))
+                 (graphql--dash (plist-get f 'description))))
 
 ;; Introspection describes itself as well: __Type, __Field and the rest.
 ;; Nobody searches for those, so they stay out of the lines.
 (define (graphql--own-type? ty)
-  (string-prefix? "__" (or (graphql--get ty 'name) "")))
+  (string-prefix? "__" (or (plist-get ty 'name) "")))
 
 (define (graphql--type-lines ty)
   (append (list (graphql--type-line ty))
           (map (lambda (f) (graphql--field-line ty f))
-               (or (graphql--get ty 'fields) '()))
+               (or (plist-get ty 'fields) '()))
           (map (lambda (f) (graphql--field-line ty f))
-               (or (graphql--get ty 'inputFields) '()))))
+               (or (plist-get ty 'inputFields) '()))))
 
 (define (graphql--schema-lines types)
   (fold (lambda (acc ty)
@@ -418,7 +415,7 @@
   (let ((wanted (string-downcase (graphql--text name))))
     (let loop ((ts types))
       (cond ((null? ts) #f)
-            ((equal? (string-downcase (or (graphql--get (car ts) 'name) "")) wanted) (car ts))
+            ((equal? (string-downcase (or (plist-get (car ts) 'name) "")) wanted) (car ts))
             (else (loop (cdr ts)))))))
 
 ;; One type in full: what it is, what it says, and every field it answers for.
@@ -446,8 +443,8 @@
         (or *graphql-last-error* "no schema")
         (let ((schema (nth 2 (assoc name *graphql-schemas*))))
           (string-append
-            "query:    " (or (graphql--get (graphql--get schema 'queryType) 'name) "none") "\n"
-            "mutation: " (or (graphql--get (graphql--get schema 'mutationType) 'name) "none") "\n")))))
+            "query:    " (or (plist-get (plist-get schema 'queryType) 'name) "none") "\n"
+            "mutation: " (or (plist-get (plist-get schema 'mutationType) 'name) "none") "\n")))))
 
 ;;; --- reading the answer -------------------------------------------------------
 ;;; JSON in, Scheme out: an object becomes a plist and an array becomes a
@@ -524,7 +521,7 @@
   (let* ((buf (graphql--buffer name))
          (reply (graphql-post name query variables))
          (err (graphql-errors reply))
-         (data (graphql--get reply 'data)))
+         (data (plist-get reply 'data)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (buffer-delete-range! buf 0 (buffer-size buf))
     (buffer-append! buf (string-append (string-trim query) "\n\n"))

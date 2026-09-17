@@ -42,7 +42,7 @@
 
 ;; plist-get throws on #f, so every read of a revision field goes through here
 (define (prov-get plist key)
-  (and (pair? plist) (plist-get plist key)))
+  (plist-get plist key))
 
 (define (prov-status)
   (and *buffer-log-target*

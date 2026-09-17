@@ -500,10 +500,10 @@
       '(input 0 output 0 cache-read 0 cache-write 0)))
 
 (define (chat-usage-add total u key)
-  (+ (or (plist-get total key) 0) (or (custom--plist-get u key) 0)))
+  (+ (or (plist-get total key) 0) (or (plist-get u key) 0)))
 
 (define (chat-usage-note! buf u)
-  (let ((cost (custom--plist-get u 'cost))
+  (let ((cost (plist-get u 'cost))
         (total (chat-usage-total buf)))
     (buffer-set-local! buf 'chat-last-usage u)
     (buffer-set-local! buf 'chat-usage-total

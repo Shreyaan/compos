@@ -105,9 +105,6 @@
 
 ;; plist-get stops the interpreter when it is handed #f, and JSON answers
 ;; leave out what they have nothing to say about
-(define (models--field obj key)
-  (if (pair? obj) (plist-get obj key) #f))
-
 (define (models--text v) (if (string? v) v ""))
 
 ;;; --- what the host holds ----------------------------------------------------------
@@ -120,11 +117,11 @@
         'loaded loaded 'vram vram 'until until))
 
 (define (models--name obj)
-  (let ((n (or (models--field obj 'name) (models--field obj 'model))))
+  (let ((n (or (plist-get obj 'name) (plist-get obj 'model))))
     (models--text n)))
 
 (define (models--models json)
-  (let ((ms (models--field json 'models)))
+  (let ((ms (plist-get json 'models)))
     (if (pair? ms) ms '())))
 
 ;; "2026-09-17T18:04:33.12+05:30" -> "18:04", the host clock. A person
@@ -136,17 +133,17 @@
 
 (define (models--loaded-row obj)
   (list (models--name obj)
-        (models--field obj 'size_vram)
-        (models--clock (models--field obj 'expires_at))))
+        (plist-get obj 'size_vram)
+        (models--clock (plist-get obj 'expires_at))))
 
 (define (models--installed-entry m loaded)
   (let* ((name (models--name m))
-         (d (models--field m 'details))
+         (d (plist-get m 'details))
          (r (assoc name loaded)))
     (models--entry name
-                   (models--field m 'size)
-                   (models--text (models--field d 'parameter_size))
-                   (models--text (models--field d 'quantization_level))
+                   (plist-get m 'size)
+                   (models--text (plist-get d 'parameter_size))
+                   (models--text (plist-get d 'quantization_level))
                    (if r #t #f)
                    (if r (nth 1 r) #f)
                    (if r (nth 2 r) ""))))
@@ -367,15 +364,15 @@
       ""))
 
 (define (models--detail-text name json)
-  (let ((d (models--field json 'details)))
+  (let ((d (plist-get json 'details)))
     (string-append
       name "\n\n"
-      (models--line "family" (models--field d 'family))
-      (models--line "parameters" (models--field d 'parameter_size))
-      (models--line "quantization" (models--field d 'quantization_level))
-      (models--line "format" (models--field d 'format))
-      (models--block "parameters" (models--field json 'parameters))
-      (models--block "template" (models--field json 'template)))))
+      (models--line "family" (plist-get d 'family))
+      (models--line "parameters" (plist-get d 'parameter_size))
+      (models--line "quantization" (plist-get d 'quantization_level))
+      (models--line "format" (plist-get d 'format))
+      (models--block "parameters" (plist-get json 'parameters))
+      (models--block "template" (plist-get json 'template)))))
 
 (define (models--show-detail! name json)
   (unless (buffer-exists? *models-detail-buffer*)

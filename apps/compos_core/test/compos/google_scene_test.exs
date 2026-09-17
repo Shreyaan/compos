@@ -265,7 +265,7 @@ defmodule Compos.GoogleSceneTest do
     assert Buffer.text(buf) =~ ".."
     eval!(~S[(set-mode! "Dired")])
     eval!(~S[(list-goto-index! (current-buffer) 0)])
-    assert eval!(~S[(google--get (list-current (current-buffer)) 'google-up)]) == "#t"
+    assert eval!(~S[(plist-get (list-current (current-buffer)) 'google-up)]) == "#t"
     KeyDispatch.handle_key("m")
     assert eval!(~S[(list-marks (current-buffer))]) == "()"
     eval!(~S[(list-goto-index! (current-buffer) 0)])

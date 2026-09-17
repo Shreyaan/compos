@@ -18,12 +18,6 @@
 ;;; --- plists ------------------------------------------------------------------
 ;;; packages/custom.scm loads after this file, so we can't lean on its getter
 
-(define (chrome--get pl key)
-  (cond ((null? pl) #f)
-        ((null? (cdr pl)) #f)
-        ((equal? (car pl) key) (car (cdr pl)))
-        (else (chrome--get (cdr (cdr pl)) key))))
-
 ;;; --- what a tab may ask us ---------------------------------------------------
 
 ;; M-x in a page is the editor's own execute-extended-command — the extension
@@ -81,8 +75,8 @@
 (define *chrome-tab-mark* "🌐 ")
 
 (define (chrome--tab-candidate t)
-  (list (string-append *chrome-tab-mark* (or (chrome--get t 'title) "(untitled)"))
-        (or (chrome--get t 'url) "")))
+  (list (string-append *chrome-tab-mark* (or (plist-get t 'title) "(untitled)"))
+        (or (plist-get t 'url) "")))
 
 (define (chrome--tab-by-label label tabs)
   (let loop ((ts tabs))
@@ -99,13 +93,13 @@
 (define (chrome--here-tabs tabs)
   (let ((w (chrome-window)))
     (if w
-        (filter (lambda (t) (equal? (chrome--get t 'window) w)) tabs)
+        (filter (lambda (t) (equal? (plist-get t 'window) w)) tabs)
         tabs)))
 
 (define (chrome--tab-by-id id tabs)
   (let loop ((ts tabs))
     (cond ((null? ts) #f)
-          ((equal? (chrome--get (car ts) 'id) id) (car ts))
+          ((equal? (plist-get (car ts) 'id) id) (car ts))
           (else (loop (cdr ts))))))
 
 ;;; --- one list, most recently used first --------------------------------------
@@ -273,12 +267,12 @@
         ((equal? spec "<up>") (minibuffer-prev!) (chrome--with-mb '()))
         ((equal? spec "DEL")
          (minibuffer-del!)
-         (minibuffer-change! (chrome--get (minibuffer-state) 'input))
+         (minibuffer-change! (plist-get (minibuffer-state) 'input))
          (chrome--with-mb '()))
         ;; anything one character wide is text
         ((= (string-length spec) 1)
          (minibuffer-change!
-           (string-append (chrome--get (minibuffer-state) 'input) spec))
+           (string-append (plist-get (minibuffer-state) 'input) spec))
          (chrome--with-mb '()))
         (else (chrome--with-mb '()))))
 
@@ -286,11 +280,11 @@
 (define (chrome--mb-state) (chrome--with-mb '()))
 
 (define (chrome--serve op args)
-  (let ((w (chrome--get args 'window)))
+  (let ((w (plist-get args 'window)))
     (when w (set-frame-local! 'chrome-window w)))
   ;; the overlay is disabled on the editor's own page, so any request that
   ;; names a tab came from a real web page — that is the place to come back to
-  (let ((tb (chrome--get args 'tab)))
+  (let ((tb (plist-get args 'tab)))
     (when tb
       (set-frame-local! 'chrome-tab tb)
       (let ((t (chrome--tab-by-id tb *chrome-tab-cache*)))
@@ -305,9 +299,9 @@
         ;; the editor's own page, naming the browser window it sits in. The
         ;; prologue above stores it; this frame now knows where its tabs go.
         ((equal? op "register") (list 'ok #t))
-        ((equal? op "run") (chrome--run (chrome--get args 'name)))
-        ((equal? op "chord") (chrome--chord (or (chrome--get args 'keys) '())))
-        ((equal? op "mb-key") (chrome--mb-key (chrome--get args 'spec)))
+        ((equal? op "run") (chrome--run (plist-get args 'name)))
+        ((equal? op "chord") (chrome--chord (or (plist-get args 'keys) '())))
+        ((equal? op "mb-key") (chrome--mb-key (plist-get args 'spec)))
         ((equal? op "mb-state") (chrome--mb-state))
         (else (list 'error (string-append "unknown op: " op)))))
 
@@ -323,10 +317,10 @@
 ;; then wrote #f over the tab cache, and every filter after that died on a
 ;; value that was no longer a list.
 (define (chrome--report reply)
-  (if (chrome--get reply 'ok)
+  (if (plist-get reply 'ok)
       #t
       (begin
-        (message (string-append "browser: " (or (chrome--get reply 'error) "failed")))
+        (message (string-append "browser: " (or (plist-get reply 'error) "failed")))
         #f)))
 
 ;; this Scheme has no rest arguments, so every call takes an explicit handler
@@ -351,7 +345,7 @@
 ;; "no compos in tab [object Object]", once per retry, until the tool loop hit
 ;; its turn limit. Being liberal here is cheaper than being right about it.
 (define (chrome--tab-id t)
-  (if (number? t) t (chrome--get t 'id)))
+  (if (number? t) t (plist-get t 'id)))
 
 (define (chrome-call op args k)
   (if (chrome--tool-allowed?)
@@ -362,7 +356,7 @@
         "browser category denied in code-mode; use compos state, or ask the user to enable M-x browser-mode as a last resort")))
 
 (define (tab-list k)
-  (chrome-call "tabs" '() (lambda (r) (k (chrome--get r 'tabs)))))
+  (chrome-call "tabs" '() (lambda (r) (k (plist-get r 'tabs)))))
 
 ;; the reader's fetch, THROUGH the browser: the user's cookies and
 ;; Chrome's http cache ride along, so a page that knows them logged in
@@ -376,9 +370,9 @@
   (if (browser-connected?)
       (browser-call "fetch" (list 'url url)
         (lambda (reply)
-          (k (let ((type (chrome--get reply 'type))
-                   (html (chrome--get reply 'html))
-                   (body (chrome--get reply 'body)))
+          (k (let ((type (plist-get reply 'type))
+                   (html (plist-get reply 'html))
+                   (body (plist-get reply 'body)))
                (cond ((and (string? html) (not (equal? html ""))) (list type html #f))
                      ((and (string? body) (not (equal? body ""))) (list type #f body))
                      (else #f))))))
@@ -392,18 +386,18 @@
   (if (browser-connected?)
       (browser-call "snapshot" (list 'url url)
         (lambda (reply)
-          (k (let ((h (chrome--get reply 'html)))
+          (k (let ((h (plist-get reply 'html)))
                (and (string? h) (not (equal? h "")) h)))))
       (k #f)))
 
 (define (tab-eval tab code k)
   (chrome-call "eval" (list 'tab (chrome--tab-id tab) 'code code)
-    (lambda (r) (k (chrome--get r 'value)))))
+    (lambda (r) (k (plist-get r 'value)))))
 
 ;; world "main" reaches the page's own globals; the default sees the DOM only
 (define (tab-eval-main tab code k)
   (chrome-call "eval" (list 'tab (chrome--tab-id tab) 'code code 'world "main")
-    (lambda (r) (k (chrome--get r 'value)))))
+    (lambda (r) (k (plist-get r 'value)))))
 
 (define (tab-read tab k)
   (chrome-call "read" (list 'tab (chrome--tab-id tab)) k))
@@ -440,22 +434,22 @@
 ;; answer; any compos tab is a better guess than none.
 (define (chrome--frames-sync)
   (if (and (browser-connected?) (chrome--tool-allowed?))
-      (or (chrome--get (browser-call-sync "frames" '() 3000) 'frames) '())
+      (or (plist-get (browser-call-sync "frames" '() 3000) 'frames) '())
       '()))
 
 (define (chrome-window-resolve!)
   (or (chrome-window)
       (let* ((rows (chrome--frames-sync))
              (here (selected-frame))
-             (mine (filter (lambda (e) (equal? (chrome--get e 'frame) here)) rows)))
+             (mine (filter (lambda (e) (equal? (plist-get e 'frame) here)) rows)))
         (cond ((pair? mine)
                ;; this frame's own tab: worth remembering
-               (let ((w (chrome--get (car mine) 'window)))
+               (let ((w (plist-get (car mine) 'window)))
                  (when w (set-frame-local! 'chrome-window w))
                  w))
               ;; another frame's editor tab: the reader's browser window, but
               ;; not this frame's, so answer without claiming it
-              ((pair? rows) (chrome--get (car rows) 'window))
+              ((pair? rows) (plist-get (car rows) 'window))
               (else #f)))))
 
 (define (tab-open url &optional window)
@@ -475,7 +469,7 @@
 ;; The extension probes every localhost tab, so a background editor tab
 ;; still reports its frame.
 (define (browser-frames k)
-  (chrome-call "frames" '() (lambda (r) (k (chrome--get r 'frames)))))
+  (chrome-call "frames" '() (lambda (r) (k (plist-get r 'frames)))))
 
 ;;; --- commands ----------------------------------------------------------------
 
@@ -491,7 +485,7 @@
           (for-each
             (lambda (t)
               (buffer-append! buf (string-append (car (chrome--tab-candidate t)) "\n"
-                                                 "    " (or (chrome--get t 'url) "") "\n")))
+                                                 "    " (or (plist-get t 'url) "") "\n")))
             tabs)
           (display-buffer buf)
           (message (string-append (number->string (length tabs)) " tabs")))))))
@@ -513,7 +507,7 @@
     (let ((here (selected-frame)))
       (browser-frames
         (lambda (bound)
-          (let* ((live (cons here (map (lambda (e) (chrome--get e 'frame)) bound)))
+          (let* ((live (cons here (map (lambda (e) (plist-get e 'frame)) bound)))
                  (dead (filter (lambda (f) (not (member f live))) (frame-list))))
             (for-each (lambda (f) (delete-frame! f)) dead)
             (message (string-append "frames: dropped "
@@ -573,15 +567,15 @@
 ;; the tab that shows this frame; any editor tab when no row names it
 (define (dom--editor-tab)
   (let* ((r (dom--call "frames" '() 3000))
-         (rows (or (chrome--get r 'frames) '()))
+         (rows (or (plist-get r 'frames) '()))
          (here (selected-frame))
-         (mine (filter (lambda (e) (equal? (chrome--get e 'frame) here)) rows)))
-    (cond ((pair? mine) (chrome--get (car mine) 'tab))
-          ((pair? rows) (chrome--get (car rows) 'tab))
+         (mine (filter (lambda (e) (equal? (plist-get e 'frame) here)) rows)))
+    (cond ((pair? mine) (plist-get (car mine) 'tab))
+          ((pair? rows) (plist-get (car rows) 'tab))
           (else (error "no editor tab: is the compos extension attached?")))))
 
 (define (dom-eval js)
-  (chrome--get (dom--call "eval" (list 'tab (dom--editor-tab) 'code js) 5000)
+  (plist-get (dom--call "eval" (list 'tab (dom--editor-tab) 'code js) 5000)
                'value))
 
 ;; the probe is pure policy: one string, tested without a browser

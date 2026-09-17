@@ -35,20 +35,20 @@
 (define (llm-tool-specs)
   (map (lambda (t)
          (list (symbol->string (car t))
-               (custom--plist-get (cadr t) 'description)
-               (custom--plist-get (cadr t) 'params)
-               (custom--plist-get (cadr t) 'effects)))
+               (plist-get (cadr t) 'description)
+               (plist-get (cadr t) 'params)
+               (plist-get (cadr t) 'effects)))
        (reverse *llm-tools*)))
 
 (define (llm-tool-call name args)
   (let ((t (assoc (string->symbol name) *llm-tools*)))
     (if t
-        ((custom--plist-get (cadr t) 'handler) args)
+        ((plist-get (cadr t) 'handler) args)
         (string-append "no such tool: " name))))
 
 (define (llm-tool-read-only? name)
   (let* ((tool (assoc (string->symbol name) *llm-tools*))
-         (effects (and tool (custom--plist-get (cadr tool) 'effects))))
+         (effects (and tool (plist-get (cadr tool) 'effects))))
     (and (pair? effects) (member (car effects) '(pure read)) #t)))
 
 (define (llm-with-tools prompt handler)
@@ -71,12 +71,12 @@
         (list 'id "string" "target id")
         (list 'action "string" "the verb to run"))
   (lambda (args)
-    (let* ((type (string->symbol (custom--plist-get args 'type)))
-           (raw (custom--plist-get args 'id))
+    (let* ((type (string->symbol (plist-get args 'type)))
+           (raw (plist-get args 'id))
            (id (if (string-prefix? "thread:" raw)
                    (substring raw 7 (string-length raw))
                    raw))
-           (a (assoc (custom--plist-get args 'action) (actions-for type))))
+           (a (assoc (plist-get args 'action) (actions-for type))))
       ;; the action's own return is the report — a hardcoded "done" here
       ;; would mean this tool call, whatever the action actually did
       (if a
@@ -173,7 +173,7 @@
   "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos first. Returns the printed value; on an unbound name the error suggests the nearest real API. Evaluation runs with this chat as the logical current buffer, so switch-to-buffer! retargets that context and changes no window; to change or observe the frame's real windows, wrap the code in (with-frame-windows (lambda () ...))."
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
-    (let* ((code (custom--plist-get args 'code))
+    (let* ((code (plist-get args 'code))
            (previous-tool-buffer *llm-tool-buffer*)
            ;; A tool has a logical current buffer, never a claim on the
            ;; user's selected window. Inside this binding switch-to-buffer!
@@ -208,7 +208,7 @@
   "Read a function's actual implementation. Userland functions and M-x commands return their full Scheme source (most of the editor — dired, org, chat, modes — is userland); builtins are Elixir and return only a marker. Use it to understand how something works before changing it."
   (list (list 'name "string" "Function or command name, e.g. chat-send or face-remap!"))
   (lambda (args)
-    (describe-function (string->symbol (custom--plist-get args 'name))))
+    (describe-function (string->symbol (plist-get args 'name))))
   '(read))
 
 ;;; --- apropos: one search over everything ---------------------------------------
@@ -414,7 +414,7 @@
 (define (apropos--var v words index)
   (let* ((rec (cadr v))
          (name (symbol->string (car v)))
-         (doc (or (custom--plist-get rec 'doc) "")))
+         (doc (or (plist-get rec 'doc) "")))
     (and (apropos--hit? (string-append name " " doc) words)
          (apropos--enrich (list 'kind "variable" 'name name 'doc doc)
                           "setting" index))))
@@ -1017,15 +1017,15 @@
         (list 'category "string" "deprecated alias for domain" 'optional)
         (list 'scope "string" "\"public\" (default) or \"all\"" 'optional))
   (lambda (args)
-    (let ((q (or (custom--plist-get args 'query) ""))
-          (cat (custom--plist-get args 'category))
-          (kind (custom--plist-get args 'kind))
-          (package (custom--plist-get args 'package))
-          (namespace (custom--plist-get args 'namespace))
-          (domain (custom--plist-get args 'domain))
-          (effect (custom--plist-get args 'effect))
-          (include-display (custom--plist-get args 'include-display))
-          (scope (or (custom--plist-get args 'scope) "public")))
+    (let ((q (or (plist-get args 'query) ""))
+          (cat (plist-get args 'category))
+          (kind (plist-get args 'kind))
+          (package (plist-get args 'package))
+          (namespace (plist-get args 'namespace))
+          (domain (plist-get args 'domain))
+          (effect (plist-get args 'effect))
+          (include-display (plist-get args 'include-display))
+          (scope (or (plist-get args 'scope) "public")))
       (let ((filters
               (append (if kind (list 'kind kind) '())
                       (if package (list 'package package) '())
@@ -1111,8 +1111,8 @@
   (list (list 'path "string" "absolute or workspace-relative source file path")
         (list 'line_numbers "boolean" "add stable line numbers" 'optional))
   (lambda (args)
-    (let ((result (read-file (custom--plist-get args 'path)
-                             (custom--plist-get args 'line_numbers))))
+    (let ((result (read-file (plist-get args 'path)
+                             (plist-get args 'line_numbers))))
       (if result result "error: file does not exist or cannot be read")))
   '(read))
 
@@ -1371,7 +1371,7 @@
 (define (mcp-proxy--shell-code args-json)
   (let ((args (json-parse args-json)))
     (and args
-         (let ((code (custom--plist-get args 'code)))
+         (let ((code (plist-get args 'code)))
            (and (string? code) (mcp-proxy--shell-parts code))))))
 
 (define (mcp-proxy--shell-parts code)

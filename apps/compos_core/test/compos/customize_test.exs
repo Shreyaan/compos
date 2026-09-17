@@ -47,7 +47,7 @@ defmodule Compos.CustomizeTest do
     test "customize-apropos matches names and docs" do
       eval!("(defcustom 'cz-needle-var 1 \"Plain.\")")
       eval!("(defcustom 'cz-other 2 \"Contains needle in doc.\")")
-      names = eval!("(map (lambda (d) (custom--plist-get d 'name)) (customize-apropos \"needle\"))")
+      names = eval!("(map (lambda (d) (plist-get d 'name)) (customize-apropos \"needle\"))")
       assert names =~ "cz-needle-var"
       assert names =~ "cz-other"
     end

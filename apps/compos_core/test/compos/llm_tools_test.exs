@@ -39,7 +39,7 @@ defmodule Compos.LLMToolsTest do
     test "define-tool! + llm-tool-call round trip" do
       eval!("""
       (define-tool! 'zz-echo "Echo a value." (list (list 'v "string" "value"))
-        (lambda (args) (string-append "echo:" (custom--plist-get args 'v))))
+        (lambda (args) (string-append "echo:" (plist-get args 'v))))
       """)
 
       assert eval!(~s{(llm-tool-call "zz-echo" (list 'v "hi"))}) == ~s{"echo:hi"}
@@ -229,7 +229,7 @@ defmodule Compos.LLMToolsTest do
         (list (list 'v "string" "value"))
         (lambda (args)
           (wait-until (lambda () #f) 250 250)
-          (custom--plist-get args 'v))
+          (plist-get args 'v))
         '(read))
       """)
 
@@ -288,7 +288,7 @@ defmodule Compos.LLMToolsTest do
       (define-tool! 'zz-serial-write "Ordered write."
         (list (list 'v "string" "value"))
         (lambda (args)
-          (buffer-append! #{inspect(name)} (custom--plist-get args 'v))
+          (buffer-append! #{inspect(name)} (plist-get args 'v))
           "ok")
         '(write))
       """)

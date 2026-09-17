@@ -317,8 +317,8 @@
 
 (define (spreadsheet--charts workbook)
   (let* ((extensions (plist-get workbook 'extensions))
-         (compos (and (pair? extensions) (plist-get extensions 'compos)))
-         (charts (and (pair? compos) (plist-get compos 'charts))))
+         (compos (plist-get extensions 'compos))
+         (charts (plist-get compos 'charts)))
     (if (pair? charts) charts '())))
 
 (define (spreadsheet--put-charts workbook charts)

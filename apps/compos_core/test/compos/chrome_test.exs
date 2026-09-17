@@ -114,7 +114,7 @@ defmodule Compos.ChromeTest do
     test "a reply reaches the Scheme handler" do
       stub_socket()
       eval!(~s[(tab-read 7 (lambda (r) (buffer-create "*chrome-test*")
-                             (buffer-append! "*chrome-test*" (chrome--get r 'title))))])
+                             (buffer-append! "*chrome-test*" (plist-get r 'title))))])
 
       assert_receive {:frame, %{"op" => "read", "id" => id}}
 
@@ -159,8 +159,8 @@ defmodule Compos.ChromeTest do
 
       # and it filters with the editor's matcher, not one of the overlay's
       eval!(~s[(minibuffer-input! "listtab")])
-      assert eval!(~s[(map (lambda (c) (chrome--get c 'label))
-                           (chrome--get (minibuffer-state) 'candidates))]) =~ "list-tabs"
+      assert eval!(~s[(map (lambda (c) (plist-get c 'label))
+                           (plist-get (minibuffer-state) 'candidates))]) =~ "list-tabs"
     end
 
     test "picking a command runs it here, in the daemon" do
@@ -303,7 +303,7 @@ defmodule Compos.ChromeTest do
 
       Session.eval(~s[(run-command "switch-to-buffer-prompt")])
       # a prompt opened rather than the command dying on the missing browser
-      assert eval!(~s[(chrome--get (minibuffer-state) 'prompt)]) =~ "Switch to"
+      assert eval!(~s[(plist-get (minibuffer-state) 'prompt)]) =~ "Switch to"
       Session.eval("(minibuffer-cancel!)")
     end
 

@@ -13541,9 +13541,9 @@
               (if rate (string-append " · " rate " of input cached") "")
               (if u
                   (string-append " · last turn "
-                    (number->string (or (custom--plist-get u 'input) 0)) "→"
-                    (number->string (or (custom--plist-get u 'output) 0)) " tokens"
-                    (let ((tc (custom--plist-get u 'cost)))
+                    (number->string (or (plist-get u 'input) 0)) "→"
+                    (number->string (or (plist-get u 'output) 0)) " tokens"
+                    (let ((tc (plist-get u 'cost)))
                       (if tc (string-append " (" (format-usd tc) ")") "")))
                   "")))))))
 
@@ -13556,19 +13556,19 @@
       (buffer-append! buf
         (fold (lambda (acc r)
                 (string-append acc
-                  (custom--plist-get r 'day) "  "
-                  (format-usd (custom--plist-get r 'cost)) "  "
-                  (number->string (custom--plist-get r 'requests)) " reqs  "
-                  (number->string (custom--plist-get r 'input)) "→"
-                  (number->string (custom--plist-get r 'output)) "  "
+                  (plist-get r 'day) "  "
+                  (format-usd (plist-get r 'cost)) "  "
+                  (number->string (plist-get r 'requests)) " reqs  "
+                  (number->string (plist-get r 'input)) "→"
+                  (number->string (plist-get r 'output)) "  "
                   ;; the cache columns: read is what the prefix cost a tenth
                   ;; of, written is what it cost a quarter more than usual
-                  "cache " (number->string (custom--plist-get r 'cache-read)) "r/"
-                  (number->string (custom--plist-get r 'cache-write)) "w  "
-                  (let ((h (custom--plist-get r 'hit-rate)))
+                  "cache " (number->string (plist-get r 'cache-read)) "r/"
+                  (number->string (plist-get r 'cache-write)) "w  "
+                  (let ((h (plist-get r 'hit-rate)))
                     (string-pad-right
                       (if h (string-append (number->string h) "% cached") "") 12))
-                  "  " (custom--plist-get r 'model) "\n"))
+                  "  " (plist-get r 'model) "\n"))
               (string-append
                 "LLM spend · ledger ~/.compos/llm-usage.jsonl · per-chat: C-c $\n"
                 "hit rate is cached input over billed input: low means the "

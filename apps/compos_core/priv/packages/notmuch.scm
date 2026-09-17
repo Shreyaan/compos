@@ -254,7 +254,6 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--json args)
   (json-parse (nm--run args)))
 
-(define (nm--get pl key) (custom--plist-get pl key))
 
 (define (nm--fit s n)
   (let ((s (or s "")))
@@ -308,11 +307,11 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define (nm--search-rows buf)
   (let* ((query (nm--query-of buf))
-         (rows (map (lambda (th) (list (nm--get th 'thread)
-                                      (or (nm--get th 'subject) "")
-                                      (or (nm--get th 'authors) "")
-                                      (or (nm--get th 'tags) '())
-                                      (or (nm--get th 'date_relative) "")))
+         (rows (map (lambda (th) (list (plist-get th 'thread)
+                                      (or (plist-get th 'subject) "")
+                                      (or (plist-get th 'authors) "")
+                                      (or (plist-get th 'tags) '())
+                                      (or (plist-get th 'date_relative) "")))
                     (nm--search-json query notmuch-search-limit))))
     (nm--draw-marks! buf rows)
     ;; the tag column measures itself against the threads this search
@@ -1594,7 +1593,7 @@ than a wrong tag, so phishing sits lower than the rest.")
                      '())))
          (from (if (null? msgs)
                    ""
-                   (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
+                   (or (plist-get (plist-get (car msgs) 'headers) 'From) "")))
          (parts (string-split from "<")))
     (if (null? (cdr parts))
         (string-trim from)
@@ -1769,7 +1768,7 @@ them the address is live, so a purge never follows one."
                              '())))
                  (from (if (null? msgs)
                            ""
-                           (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
+                           (or (plist-get (plist-get (car msgs) 'headers) 'From) "")))
                  (email (let ((parts (string-split from "<")))
                           (if (null? (cdr parts))
                               (string-trim from)
@@ -1947,25 +1946,25 @@ them the address is live, so a purge never follows one."
 (define (nm--attachment-parts parts)
   (fold (lambda (acc part)
           (append acc
-            (cond ((and (nm--get part 'filename) (number? (nm--get part 'id))) (list part))
-                  ((pair? (nm--get part 'content))
-                   (nm--attachment-parts (nm--get part 'content)))
+            (cond ((and (plist-get part 'filename) (number? (plist-get part 'id))) (list part))
+                  ((pair? (plist-get part 'content))
+                   (nm--attachment-parts (plist-get part 'content)))
                   (else '()))))
         '() parts))
 
 (define (nm--attachment-text msg)
-  (let ((parts (nm--attachment-parts (nm--get msg 'body))))
+  (let ((parts (nm--attachment-parts (plist-get msg 'body))))
     (if (null? parts) ""
         (string-append "Attachments (C-c a to open):\n"
-          (string-join (map (lambda (p) (string-append "  " (nm--get p 'filename))) parts) "\n")
+          (string-join (map (lambda (p) (string-append "  " (plist-get p 'filename))) parts) "\n")
           "\n\n"))))
 
 (define (nm--attachment-html msg)
-  (let ((parts (nm--attachment-parts (nm--get msg 'body))))
+  (let ((parts (nm--attachment-parts (plist-get msg 'body))))
     (if (null? parts) ""
         (string-append "<mail-attachments><strong>Attachments</strong>"
           (string-join (map (lambda (p)
-                             (string-append "<mail-attachment part-id=\"" (number->string (nm--get p 'id)) "\">" (nm--html-escape (nm--get p 'filename)) "</mail-attachment>"))
+                             (string-append "<mail-attachment part-id=\"" (number->string (plist-get p 'id)) "\">" (nm--html-escape (plist-get p 'filename)) "</mail-attachment>"))
                            parts) "")
           "<small>C-c a to open an attachment</small></mail-attachments>"))))
 
@@ -1975,11 +1974,11 @@ them the address is live, so a purge never follows one."
   (fold (lambda (acc msg)
           (append acc
             (map (lambda (part)
-                   (list (nm--get part 'filename)
+                   (list (plist-get part 'filename)
                          (nm--cmd (string-append "show --format=raw --part="
-                           (number->string (nm--get part 'id)) " -- "
-                           (nm--quote (string-append "id:" (nm--get msg 'id)))))))
-                 (nm--attachment-parts (nm--get msg 'body)))))
+                           (number->string (plist-get part 'id)) " -- "
+                           (nm--quote (string-append "id:" (plist-get msg 'id)))))))
+                 (nm--attachment-parts (plist-get msg 'body)))))
         '() msgs))
 
 (define (nm--attachment-filename name)
@@ -2037,13 +2036,13 @@ them the address is live, so a purge never follows one."
 ;; Body text excludes attachments, which have their own visible list.
 ;; multipart/alternative prefers its text/plain child.
 (define (nm--part-text part)
-  (let ((ct (or (nm--get part 'content-type) ""))
-        (content (nm--get part 'content)))
-    (cond ((nm--get part 'filename) "")
+  (let ((ct (or (plist-get part 'content-type) ""))
+        (content (plist-get part 'content)))
+    (cond ((plist-get part 'filename) "")
           ((and (string-prefix? "multipart/alternative" ct) (pair? content))
            (let ((plains (filter (lambda (p)
                                    (string-prefix? "text/plain"
-                                     (or (nm--get p 'content-type) "")))
+                                     (or (plist-get p 'content-type) "")))
                                  content)))
              (if (null? plains)
                  (nm--parts-text content)
@@ -2058,9 +2057,9 @@ them the address is live, so a purge never follows one."
 
 ;; first text/html part's content, or #f
 (define (nm--part-html part)
-  (let ((ct (or (nm--get part 'content-type) ""))
-        (content (nm--get part 'content)))
-    (cond ((nm--get part 'filename) #f)
+  (let ((ct (or (plist-get part 'content-type) ""))
+        (content (plist-get part 'content)))
+    (cond ((plist-get part 'filename) #f)
           ((and (string-prefix? "text/html" ct) (string? content)) content)
           ((pair? content) (nm--parts-html content))
           (else #f))))
@@ -2078,7 +2077,7 @@ them the address is live, so a purge never follows one."
       '()
       (append
         (let ((entry (car forest)))
-          (if (and (pair? entry) (nm--get (car entry) 'id))
+          (if (and (pair? entry) (plist-get (car entry) 'id))
               (cons (car entry) (nm--flatten-msgs (cadr entry)))
               (nm--flatten-msgs entry)))
         (nm--flatten-msgs (cdr forest)))))
@@ -2093,18 +2092,18 @@ them the address is live, so a purge never follows one."
 ;; text body of one message; falls back to the html part through
 ;; notmuch-html-renderer when there is no text/plain
 (define (nm--msg-body-text msg)
-  (let ((plain (nm--parts-text (nm--get msg 'body))))
+  (let ((plain (nm--parts-text (plist-get msg 'body))))
     (if (equal? (string-trim plain) "")
-        (let ((html (nm--parts-html (nm--get msg 'body))))
+        (let ((html (nm--parts-html (plist-get msg 'body))))
           (if html (nm--html->text html) plain))
         plain)))
 
 (define (nm--msg-render msg)
-  (let ((h (nm--get msg 'headers)))
+  (let ((h (plist-get msg 'headers)))
     (string-append
-      "From: " (or (nm--get h 'From) "") "\n"
-      "Date: " (or (nm--get h 'Date) "") "\n"
-      (let ((to (nm--get h 'To)))
+      "From: " (or (plist-get h 'From) "") "\n"
+      "Date: " (or (plist-get h 'Date) "") "\n"
+      (let ((to (plist-get h 'To)))
         (if to (string-append "To: " to "\n") ""))
       "\n"
       (nm--attachment-text msg)
@@ -2126,24 +2125,24 @@ them the address is live, so a purge never follows one."
               (loop (cdr ms) (+ n 1)
                     (string-append text header (nm--msg-render (car ms)))
                     (cons (list (string-byte-length text)
-                                (nm--get (car ms) 'id)
-                                (nm--get (car ms) 'filename))
+                                (plist-get (car ms) 'id)
+                                (plist-get (car ms) 'filename))
                           offsets)))))))
 
 ;; the whole thread as one HTML document for the sandboxed iframe:
 ;; our headers, their bodies (plain text becomes <pre>)
 (define (nm--msg-html msg)
-  (let* ((h (nm--get msg 'headers))
-         (html (nm--parts-html (nm--get msg 'body)))
+  (let* ((h (plist-get msg 'headers))
+         (html (nm--parts-html (plist-get msg 'body)))
          (body (or html
                    (string-append "<pre style=\"white-space:pre-wrap;font:inherit\">"
-                                  (nm--html-escape (nm--parts-text (nm--get msg 'body)))
+                                  (nm--html-escape (nm--parts-text (plist-get msg 'body)))
                                   "</pre>"))))
     (string-append
-      "<mail-message message-id=\"" (nm--html-escape (or (nm--get msg 'id) "")) "\">"
-      "<header><mail-from>" (nm--html-escape (or (nm--get h 'From) "")) "</mail-from> · "
-      "<mail-date>" (nm--html-escape (or (nm--get h 'Date) "")) "</mail-date>"
-      (let ((to (nm--get h 'To)))
+      "<mail-message message-id=\"" (nm--html-escape (or (plist-get msg 'id) "")) "\">"
+      "<header><mail-from>" (nm--html-escape (or (plist-get h 'From) "")) "</mail-from> · "
+      "<mail-date>" (nm--html-escape (or (plist-get h 'Date) "")) "</mail-date>"
+      (let ((to (plist-get h 'To)))
         (if to (string-append " · to <mail-to>" (nm--html-escape to) "</mail-to>") ""))
       "</header>" (nm--attachment-html msg) "<mail-body>" body "</mail-body></mail-message>")))
 
@@ -2166,20 +2165,20 @@ them the address is live, so a purge never follows one."
 ;; The plain-text view keeps the text buffer's message offsets for commands,
 ;; but renders records rather than asking the client to infer mail from lines.
 (define (nm--msg-composml msg)
-  (let ((h (nm--get msg 'headers)))
+  (let ((h (plist-get msg 'headers)))
     (list 'tag "mail-message" 'class "semantic-document-section"
-          'attrs (list (list "message-id" (or (nm--get msg 'id) "")))
+          'attrs (list (list "message-id" (or (plist-get msg 'id) "")))
           'children
-          (list (nm--field "mail-from" (or (nm--get h 'From) ""))
-                (nm--field "mail-date" (or (nm--get h 'Date) ""))
-                (nm--field "mail-to" (or (nm--get h 'To) ""))
+          (list (nm--field "mail-from" (or (plist-get h 'From) ""))
+                (nm--field "mail-date" (or (plist-get h 'Date) ""))
+                (nm--field "mail-to" (or (plist-get h 'To) ""))
                 (list 'tag "mail-attachments" 'children
                       (map (lambda (part)
                              (list 'tag "mail-attachment"
-                                   'attrs (list (list "part-id" (nm--get part 'id))
-                                                (list "content-type" (or (nm--get part 'content-type) "")))
-                                   'text (nm--get part 'filename)))
-                           (nm--attachment-parts (nm--get msg 'body))))
+                                   'attrs (list (list "part-id" (plist-get part 'id))
+                                                (list "content-type" (or (plist-get part 'content-type) "")))
+                                   'text (plist-get part 'filename)))
+                           (nm--attachment-parts (plist-get msg 'body))))
                 (list 'tag "mail-body" 'children
                       (list (list 'tag "pre" 'text (nm--msg-body-text msg))))))))
 
@@ -2196,7 +2195,7 @@ them the address is live, so a purge never follows one."
                                            (first (length (string-split (substring-bytes (buffer-text buf) 0 start) "\n")))
                                            (last (length (string-split (substring-bytes (buffer-text buf) 0 stop) "\n"))))
                                       (loop (cdr ms) (cdr offsets)
-                                        (cons (append (list 'anchor (string-append "message:" (url-encode (or (nm--get (car ms) 'id) "")))
+                                        (cons (append (list 'anchor (string-append "message:" (url-encode (or (plist-get (car ms) 'id) "")))
                                                             'lines (list first (max first (- last 1)))
                                                             'mark "current-message")
                                                       (nm--msg-composml (car ms))) out)))))))))
@@ -2205,7 +2204,7 @@ them the address is live, so a purge never follows one."
 (define (nm--any-html? msgs)
   (let loop ((ms msgs))
     (cond ((null? ms) #f)
-          ((nm--parts-html (nm--get (car ms) 'body)) #t)
+          ((nm--parts-html (plist-get (car ms) 'body)) #t)
           (else (loop (cdr ms))))))
 
 (mode-doc! "notmuch-show-mode"
@@ -2249,8 +2248,8 @@ them the address is live, so a purge never follows one."
                       (if (null? ms)
                           (reverse acc)
                           (loop (cdr ms) (+ i 1)
-                                (cons (list i (nm--get (car ms) 'id)
-                                            (nm--get (car ms) 'filename))
+                                (cons (list i (plist-get (car ms) 'id)
+                                            (plist-get (car ms) 'filename))
                                       acc))))))
                 (let ((rendered (nm--render-text subject msgs)))
                   (buffer-append! buf (car rendered))
@@ -2382,13 +2381,13 @@ them the address is live, so a purge never follows one."
 
 (define (nm--compose-reply! msg-id)
   (let* ((j (nm--json (string-append "reply --format=json id:" (nm--quote msg-id))))
-         (rh (and j (nm--get j 'reply-headers)))
-         (orig (and j (nm--get j 'original))))
+         (rh (and j (plist-get j 'reply-headers)))
+         (orig (and j (plist-get j 'original))))
     (if (not rh)
         (message "notmuch reply failed")
         (let* ((buf "*compose*")
                (hdr (lambda (name key)
-                      (let ((v (nm--get rh key)))
+                      (let ((v (plist-get rh key)))
                         (if v (string-append name ": " v "\n") ""))))
                (head (string-append
                        (hdr "From" 'From) (hdr "To" 'To) (hdr "Cc" 'Cc)
@@ -2396,9 +2395,9 @@ them the address is live, so a purge never follows one."
                        (hdr "In-Reply-To" 'In-reply-to)
                        (hdr "References" 'References)
                        *mail-header-separator* "\n"))
-               (attrib (let ((h (and orig (nm--get orig 'headers))))
-                         (if (and h (nm--get h 'From))
-                             (string-append (nm--get h 'From) " writes:\n\n")
+               (attrib (let ((h (and orig (plist-get orig 'headers))))
+                         (if (and h (plist-get h 'From))
+                             (string-append (plist-get h 'From) " writes:\n\n")
                              "")))
                ;; quote the RENDERED text (nm--msg-body-text goes through the
                ;; html renderer when there is no text/plain) — never raw html
@@ -2557,11 +2556,11 @@ would let a word in the body pick the account the mail goes out from."
         "no matches"
         (fold (lambda (acc th)
                 (string-append acc
-                  (nm--get th 'date_relative) " | "
-                  (nm--get th 'authors) " | "
-                  (nm--get th 'subject) " | "
-                  (string-join (nm--get th 'tags) ",") " | thread:"
-                  (nm--get th 'thread) "\n"))
+                  (plist-get th 'date_relative) " | "
+                  (plist-get th 'authors) " | "
+                  (plist-get th 'subject) " | "
+                  (string-join (plist-get th 'tags) ",") " | thread:"
+                  (plist-get th 'thread) "\n"))
               "" threads))))
 
 (define (mail-read-thread raw)

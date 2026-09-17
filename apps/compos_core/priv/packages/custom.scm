@@ -15,7 +15,6 @@
 ;; one plist-get, in editor.scm. This name stays — 27 call sites use it —
 ;; but the implementation does not: the copy here crashed on an
 ;; odd-length plist where the original returns #f.
-(define (custom--plist-get pl key) (plist-get pl key))
 
 (define (custom--alist-put alist key val)
   (cons (list key val)
@@ -42,7 +41,7 @@
     (cond (saved (set-symbol-value! name (cadr saved)))
           ((not (boundp name)) (set-symbol-value! name default))))
   (catalog-register! 'setting name doc
-    'domain (or (custom--plist-get opts 'group) 'customize)
+    'domain (or (plist-get opts 'group) 'customize)
     'effects '(write)
     'default default
     'use (string-append "(customize-save! '" (symbol->string name) " VALUE)"))
@@ -60,11 +59,11 @@
   (map (lambda (v) (describe-variable-data (car v)))
        (filter (lambda (v)
                  (or (re-match? pattern (symbol->string (car v)))
-                     (re-match? pattern (custom--plist-get (cadr v) 'doc))))
+                     (re-match? pattern (plist-get (cadr v) 'doc))))
                *custom-vars*)))
 
 (define (custom-group-variables group)
-  (filter (lambda (v) (equal? (custom--plist-get (cadr (assoc v *custom-vars*)) 'group) group))
+  (filter (lambda (v) (equal? (plist-get (cadr (assoc v *custom-vars*)) 'group) group))
           (map car *custom-vars*)))
 
 ;;; --- setting and saving ------------------------------------------------------
@@ -72,7 +71,7 @@
 (define (customize-set! name value)
   (set-symbol-value! name value)
   (let* ((rec (assoc name *custom-vars*))
-         (setter (and rec (custom--plist-get (cadr rec) 'set))))
+         (setter (and rec (plist-get (cadr rec) 'set))))
     (when setter (setter value)))
   value)
 
@@ -172,7 +171,7 @@
 (define (custom--var-candidates)
   (map (lambda (v)
          (list (symbol->string (car v))
-               (let ((doc (custom--plist-get (cadr v) 'doc))) (or doc ""))))
+               (let ((doc (plist-get (cadr v) 'doc))) (or doc ""))))
        (reverse *custom-vars*)))
 
 (define (custom--read-value name save)
@@ -206,8 +205,8 @@
         (let ((d (describe-variable-data name)))
           (message (string-append
                      (symbol->string name) " = "
-                     (value->string (custom--plist-get d 'value))
-                     " — " (or (custom--plist-get d 'doc) "undocumented"))))))))
+                     (value->string (plist-get d 'value))
+                     " — " (or (plist-get d 'doc) "undocumented"))))))))
 
 ;; the supported customize surface
 (category! 'customize)

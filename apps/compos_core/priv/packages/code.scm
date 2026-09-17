@@ -910,7 +910,7 @@
   "List every definition in a live source buffer as (LINE KIND NAME DOC). Use this before code-read; independent read tools can run concurrently."
   (list (list 'buffer "string" "live source buffer name"))
   (lambda (args)
-    (value->string (code-outline (custom--plist-get args 'buffer))))
+    (value->string (code-outline (plist-get args 'buffer))))
   '(read))
 
 (define-tool! 'code-read
@@ -918,8 +918,8 @@
   (list (list 'buffer "string" "live source buffer name")
         (list 'line "number" "1-based line from code-outline"))
   (lambda (args)
-    (code-read (custom--plist-get args 'buffer)
-               (custom--plist-get args 'line)))
+    (code-read (plist-get args 'buffer)
+               (plist-get args 'line)))
   '(read))
 
 (effects! '(write))

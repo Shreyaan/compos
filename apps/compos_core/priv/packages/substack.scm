@@ -13,7 +13,6 @@
 (define *substack-buffer* "*substack*")
 (define *substack-log* "*substack-log*")
 
-(define (substack--get value key) (and (pair? value) (plist-get value key)))
 (define (substack--text value)
   (if (string? value) value (if value (value->string value) "")))
 (define (substack--contains? text needle)
@@ -22,8 +21,8 @@
   (let ((s (substack--text value)))
     (if (>= (string-length s) 10) (substring s 0 10) s)))
 (define (substack--base-url publication)
-  (let ((custom (substack--get publication 'custom_domain))
-        (subdomain (substack--get publication 'subdomain)))
+  (let ((custom (plist-get publication 'custom_domain))
+        (subdomain (plist-get publication 'subdomain)))
     (cond ((and (string? custom) (not (equal? custom "")))
            (string-append "https://" custom))
           ((and (string? subdomain) (not (equal? subdomain "")))
@@ -45,34 +44,34 @@
                            (car (cdr (car pairs))))))))
 
 (define (substack--subscription payload publication-id)
-  (let loop ((rows (or (substack--get payload 'subscriptions) '())))
+  (let loop ((rows (or (plist-get payload 'subscriptions) '())))
     (cond ((null? rows) #f)
-          ((equal? (substack--get (car rows) 'publication_id) publication-id) (car rows))
+          ((equal? (plist-get (car rows) 'publication_id) publication-id) (car rows))
           (else (loop (cdr rows))))))
 (define (substack--own-ids payload)
-  (map (lambda (entry) (substack--get entry 'publication_id))
-       (or (substack--get payload 'publicationUsers) '())))
+  (map (lambda (entry) (plist-get entry 'publication_id))
+       (or (plist-get payload 'publicationUsers) '())))
 (define (substack--publication-row payload publication)
-  (let* ((id (substack--get publication 'id))
+  (let* ((id (plist-get publication 'id))
          (subscription (substack--subscription payload id)))
     (list 'id id
-          'name (substack--text (substack--get publication 'name))
+          'name (substack--text (plist-get publication 'name))
           'author (substack--text
-                    (or (substack--get publication 'author_name)
-                        (substack--get publication 'primary_profile_name)))
+                    (or (plist-get publication 'author_name)
+                        (plist-get publication 'primary_profile_name)))
           'url (substack--base-url publication)
           'membership (substack--text
-                        (and subscription (substack--get subscription 'membership_state)))
+                        (and subscription (plist-get subscription 'membership_state)))
           'last-post "")))
 (define (substack-parse-subscriptions payload)
   "Return subscription rows and exclude publications owned by the account."
   (let ((own (substack--own-ids payload)))
     (filter (lambda (row)
-              (and (substack--get row 'id)
-                   (not (member (substack--get row 'id) own))))
+              (and (plist-get row 'id)
+                   (not (member (plist-get row 'id) own))))
             (map (lambda (publication)
                    (substack--publication-row payload publication))
-                 (or (substack--get payload 'publications) '())))))
+                 (or (plist-get payload 'publications) '())))))
 
 (effects! '(write display))
 (define (substack-home-group!)
@@ -98,9 +97,9 @@
     (lambda (tabs)
       (let loop ((rest tabs))
         (cond ((null? rest) (k #f))
-              ((substack--contains? (substack--get (car rest) 'url)
+              ((substack--contains? (plist-get (car rest) 'url)
                                     "substack.com/settings")
-               (k (substack--get (car rest) 'id)))
+               (k (plist-get (car rest) 'id)))
               (else (loop (cdr rest))))))))
 (define (substack--fetch-authenticated! k)
   (substack--tab
@@ -139,15 +138,15 @@
 (define (substack--row-by-id id)
   (let loop ((rows (substack--rows *substack-buffer*)))
     (cond ((null? rows) #f)
-          ((equal? (substack--get (car rows) 'id) id) (car rows))
+          ((equal? (plist-get (car rows) 'id) id) (car rows))
           (else (loop (cdr rows))))))
 (define (substack--remove-row! id)
   (substack--set-rows!
-    (filter (lambda (row) (not (equal? (substack--get row 'id) id)))
+    (filter (lambda (row) (not (equal? (plist-get row 'id) id)))
             (substack--rows *substack-buffer*))))
 (define (substack--unsubscribe-key! buf id)
   (let* ((row (substack--row-by-id id))
-         (name (if row (substack--get row 'name) (number->string id))))
+         (name (if row (plist-get row 'name) (number->string id))))
     (substack--tab
       (lambda (tab)
         (if (not tab)
@@ -172,15 +171,15 @@
 
 (effects! '(read write external display))
 (define (substack--detail-buffer row)
-  (string-append "*substack:" (number->string (substack--get row 'id)) "*"))
+  (string-append "*substack:" (number->string (plist-get row 'id)) "*"))
 (define (substack--archive-url row)
-  (string-append (substack--get row 'url)
+  (string-append (plist-get row 'url)
                  "/api/v1/archive?sort=new&search=&offset=0&limit="
                  (number->string substack-post-limit)))
 (define (substack--post-author post)
-  (let ((bylines (or (substack--get post 'publishedBylines) '())))
+  (let ((bylines (or (plist-get post 'publishedBylines) '())))
     (if (pair? bylines)
-        (substack--text (substack--get (car bylines) 'name))
+        (substack--text (plist-get (car bylines) 'name))
         "")))
 (define (substack--plist-set plist key value)
   (cond ((null? plist) (list key value))
@@ -194,26 +193,26 @@
              (author (substack--post-author first))
              (row1 (substack--plist-set
                      row 'author
-                     (if (equal? author "") (substack--get row 'author) author)))
+                     (if (equal? author "") (plist-get row 'author) author)))
              (row2 (substack--plist-set
                      row1 'last-post
-                     (substack--date (substack--get first 'post_date))))
-             (id (substack--get row 'id)))
+                     (substack--date (plist-get first 'post_date))))
+             (id (plist-get row 'id)))
         (substack--set-rows!
           (map (lambda (old)
-                 (if (equal? (substack--get old 'id) id) row2 old))
+                 (if (equal? (plist-get old 'id) id) row2 old))
                (substack--rows *substack-buffer*)))
         row2)))
 (define (substack--fetch-posts! buf)
   (let ((row (buffer-local buf 'substack-publication)))
     (when row
-      (message (string-append "Reading " (substack--get row 'name) "..."))
+      (message (string-append "Reading " (plist-get row 'name) "..."))
       (*substack-json-fetch* (substack--archive-url row)
         (lambda (posts)
           (if (not (list? posts))
               (begin
                 (substack-log! (string-append "Archive failed: "
-                                             (substack--get row 'name)))
+                                             (plist-get row 'name)))
                 (message "Could not read this publication"))
               (begin
                 (buffer-set-local! buf 'substack-posts posts)
@@ -223,7 +222,7 @@
                 (list-refresh! buf)
                 (message (string-append (number->string (length posts))
                                         " posts · "
-                                        (substack--get row 'name))))))))))
+                                        (plist-get row 'name))))))))))
 (define (substack-show-detail! row)
   "Show ROW in one publication buffer beside the listing."
   (when row
@@ -245,28 +244,28 @@
 (define substack-reader-css
   "<style>:root{color-scheme:light dark}html{font-size:clamp(14px,.72vw,32px)}body{margin:0 auto;padding:2rem;max-width:46rem;font:1rem/1.65 Georgia,serif}h1{font:700 2rem/1.15 system-ui,sans-serif}.meta{color:#777;font:.86rem/1.4 system-ui,sans-serif;margin-bottom:2rem}img{max-width:100%;height:auto}pre{overflow:auto}a{color:#2f7d62}</style>")
 (define (substack--reader-buffer post)
-  (string-append "*substack-read:" (number->string (substack--get post 'id)) "*"))
+  (string-append "*substack-read:" (number->string (plist-get post 'id)) "*"))
 (define (substack--post-url publication post)
-  (or (substack--get post 'canonical_url)
-      (string-append (substack--get publication 'url) "/p/"
-                     (substack--get post 'slug))))
+  (or (plist-get post 'canonical_url)
+      (string-append (plist-get publication 'url) "/p/"
+                     (plist-get post 'slug))))
 (define (substack--post-api-url publication post)
-  (string-append (substack--get publication 'url) "/api/v1/posts/"
-                 (substack--get post 'slug)))
+  (string-append (plist-get publication 'url) "/api/v1/posts/"
+                 (plist-get post 'slug)))
 (define (substack--reader-html publication post)
-  (let ((body (or (substack--get post 'body_html)
-                  (substack--get post 'truncated_body_text)
+  (let ((body (or (plist-get post 'body_html)
+                  (plist-get post 'truncated_body_text)
                   "<p>This post did not return a readable body.</p>"))
         (author (substack--post-author post)))
     (string-append
       substack-reader-css "<article><h1>"
-      (substack--html-escape (substack--get post 'title))
+      (substack--html-escape (plist-get post 'title))
       "</h1><div class='meta'>"
       (substack--html-escape
         (string-append
-          (if (equal? author "") (substack--get publication 'author) author)
-          " · " (substack--date (substack--get post 'post_date))
-          " · " (substack--get publication 'name)))
+          (if (equal? author "") (plist-get publication 'author) author)
+          " · " (substack--date (plist-get post 'post_date))
+          " · " (plist-get publication 'name)))
       "</div>" body "</article>")))
 (define (substack--apply-reader! buf publication post)
   (substack--replace-buffer! buf (substack--reader-html publication post))
@@ -285,10 +284,10 @@
           (if full
               (begin
                 (substack--apply-reader! buf publication full)
-                (message (substack--get full 'title)))
+                (message (plist-get full 'title)))
               (begin
                 (substack-log! (string-append "Post failed: "
-                                             (substack--get post 'title)))
+                                             (plist-get post 'title)))
                 (message "Could not read this post"))))))))
 (define (substack-show-reader! owner post)
   "Show POST in one reader buffer beside publication OWNER."
@@ -304,7 +303,7 @@
           (lambda () (set-mode! "substack-reader-mode"))))
       (when (= (buffer-size buf) 0)
         (substack--replace-buffer! buf
-          (string-append (substack--get post 'title) "\n\nLoading...\n"))
+          (string-append (plist-get post 'title) "\n\nLoading...\n"))
         (substack--fetch-reader! buf))
       (buffer-set-local! *substack-buffer* 'substack-current-reader buf)
       (display-buffer-detail! buf owner)
@@ -343,20 +342,20 @@
            (url (and publication
                      (if post
                          (substack--post-url publication post)
-                         (substack--get publication 'url)))))
+                         (plist-get publication 'url)))))
       (if url (tab-open url) (message "No Substack URL on this row")))))
 
 ;;; --- modes ---------------------------------------------------------------
 
 (define (substack--publication-cells buf row)
-  (list (substack--get row 'name)
-        (list (substack--get row 'author) "dim")
-        (list (substack--get row 'last-post) "dim")
-        (list (substack--get row 'membership) "dim")))
+  (list (plist-get row 'name)
+        (list (plist-get row 'author) "dim")
+        (list (plist-get row 'last-post) "dim")
+        (list (plist-get row 'membership) "dim")))
 (define (substack--post-cells buf post)
-  (list (list (substack--date (substack--get post 'post_date)) "dim")
-        (substack--get post 'title)
-        (list (substack--text (substack--get post 'audience)) "dim")))
+  (list (list (substack--date (plist-get post 'post_date)) "dim")
+        (plist-get post 'title)
+        (list (substack--text (plist-get post 'audience)) "dim")))
 
 (define-list-mode! "substack-mode"
   (list
@@ -369,7 +368,7 @@
     'rows substack--rows
     'cache-fetch substack--fetch-subscriptions!
     'cache-ttl 60
-    'key (lambda (buf row) (substack--get row 'id))
+    'key (lambda (buf row) (plist-get row 'id))
     'columns (lambda (buf)
       (list (list "publication" #f) (list "author" 28)
             (list "last post" 10) (list "membership" 12)))
@@ -394,18 +393,18 @@
       "One publication and its recent posts. Moving previews a post. RET reads it. g refreshes. o opens the publication. q quits."
     'transient #f
     'rows (lambda (buf) (or (buffer-local buf 'substack-posts) '()))
-    'key (lambda (buf post) (substack--get post 'id))
+    'key (lambda (buf post) (plist-get post 'id))
     'columns (lambda (buf)
       (list (list "date" 10) (list "post" #f) (list "audience" 12)))
     'cells substack--post-cells
     'title (lambda (buf)
       (let ((row (buffer-local buf 'substack-publication)))
-        (if row (substack--get row 'name) "Substack")))
+        (if row (plist-get row 'name) "Substack")))
     'meta (lambda (buf)
       (let ((row (buffer-local buf 'substack-publication)))
         (if row
-            (string-append (substack--get row 'author) " · "
-                           (substack--get row 'url))
+            (string-append (plist-get row 'author) " · "
+                           (plist-get row 'url))
             "")))
     'total (lambda (buf)
       (length (or (buffer-local buf 'substack-posts) '())))
@@ -429,11 +428,11 @@
 (detail-name! "substack-detail-mode"
   (lambda (buf)
     (let ((row (buffer-local buf 'substack-publication)))
-      (string-append "*" (if row (substack--get row 'name) "Substack") "*"))))
+      (string-append "*" (if row (plist-get row 'name) "Substack") "*"))))
 (detail-name! "substack-reader-mode"
   (lambda (buf)
     (let ((post (buffer-local buf 'substack-post)))
-      (string-append "*" (if post (substack--get post 'title) "Substack post") "*"))))
+      (string-append "*" (if post (plist-get post 'title) "Substack post") "*"))))
 
 (mode-icon! "substack-mode" "")
 (mode-icon! "substack-detail-mode" "")

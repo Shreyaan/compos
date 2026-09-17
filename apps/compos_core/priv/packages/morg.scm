@@ -309,7 +309,7 @@
   "List a live Markdown document as (LINE LEVEL TITLE). Always call this first, then read only relevant sections."
   (list (list 'buffer "string" "live Markdown buffer name"))
   (lambda (args)
-    (value->string (markdown-outline (custom--plist-get args 'buffer))))
+    (value->string (markdown-outline (plist-get args 'buffer))))
   '(read))
 
 (define-tool! 'markdown-read
@@ -318,9 +318,9 @@
         (list 'line "number" "1-based line from markdown-outline")
         (list 'subtree "boolean" "include child sections" 'optional))
   (lambda (args)
-    (markdown-read (custom--plist-get args 'buffer)
-                   (custom--plist-get args 'line)
-                   (custom--plist-get args 'subtree)))
+    (markdown-read (plist-get args 'buffer)
+                   (plist-get args 'line)
+                   (plist-get args 'subtree)))
   '(read))
 
 ;;; --- block geometry ----------------------------------------------------------

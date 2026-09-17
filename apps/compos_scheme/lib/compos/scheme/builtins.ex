@@ -249,7 +249,9 @@ defmodule Compos.Scheme.Builtins do
           _ -> false
         end)
       end,
-      "plist-get" => fn [pl, key] when is_list(pl) -> plist_get(pl, key) end,
+      # a non-list (#f from a missing lookup) answers #f, so a caller never
+      # guards it: 25 packages wrote that guard when this raised
+      "plist-get" => fn [pl, key] -> plist_get(pl, key) end,
       # native: an interpreted walk paid one frame per element, and a read
       # into a list of 3000 lines per definition made an outline take seconds
       "list-ref" => fn [l, i] when is_list(l) and is_integer(i) ->
@@ -422,7 +424,7 @@ defmodule Compos.Scheme.Builtins do
       "assoc" =>
         "(assoc KEY ALIST) — return the first element of ALIST whose car equals KEY, or false.",
       "plist-get" =>
-        "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST, or false.",
+        "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST; false when KEY is absent or PLIST is not a list.",
       "list-ref" => "(list-ref LST I) — return the element of LST at the 0-based index I; an error past the end.",
       "list-head" => "(list-head LST K) — return the first K elements of LST; an error past the end.",
       "list-tail" => "(list-tail LST K) — return LST without its first K elements; an error past the end.",

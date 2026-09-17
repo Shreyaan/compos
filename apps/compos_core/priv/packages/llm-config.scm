@@ -431,7 +431,7 @@
       (else
         (let ((d (mcp-server-detail server)))
           (map (lambda (t) (if (pair? t) (car t) t))
-               (or (and (pair? d) (plist-get d 'tools)) '())))))))
+               (or (plist-get d 'tools) '())))))))
 
 (define (llm-config--tools-groups buf)
   (let* ((session (llm-config--session buf))

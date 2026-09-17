@@ -999,8 +999,8 @@ is forgotten and that group falls back to creation order in the switcher."
             (let loop ((rest bound))
               (cond ((null? rest)
                      (message "That group is open in another window"))
-                    ((equal? (chrome--get (car rest) 'frame) frame)
-                     (tab-activate (chrome--get (car rest) 'tab)))
+                    ((equal? (plist-get (car rest) 'frame) frame)
+                     (tab-activate (plist-get (car rest) 'tab)))
                     (else (loop (cdr rest)))))))
         #t)))
 

@@ -220,8 +220,8 @@ defmodule Compos.MCPTest do
       assert eval!("zz-mcp-reply") == ~s{"got echo:loop"}
 
       # usage callback saw the summed rounds
-      assert eval!("(custom--plist-get zz-mcp-usage 'input)") == "15"
-      assert eval!("(custom--plist-get zz-mcp-usage 'output)") == "9"
+      assert eval!("(plist-get zz-mcp-usage 'input)") == "15"
+      assert eval!("(plist-get zz-mcp-usage 'output)") == "9"
     end
   end
 

@@ -17,7 +17,7 @@
 ;;; --- finding the tab ----------------------------------------------------------
 
 (define (spotify--tab? t)
-  (let ((u (chrome--get t 'url)))
+  (let ((u (plist-get t 'url)))
     (and (string? u) (string-prefix? "https://open.spotify.com" u))))
 
 ;; Every command starts here. With no player tab open we open one and say so,
@@ -50,8 +50,8 @@
 
 (define (spotify--tab-id-sync)
   (let ((r (browser-call-sync "tabs" '() 2000)))
-    (if (chrome--get r 'ok)
-        (let ((hits (filter spotify--tab? (or (chrome--get r 'tabs) '()))))
+    (if (plist-get r 'ok)
+        (let ((hits (filter spotify--tab? (or (plist-get r 'tabs) '()))))
           (if (null? hits) #f (chrome--tab-id (car hits))))
         #f)))
 
@@ -60,10 +60,10 @@
     (if (not id)
         (begin (tab-open spotify-url) "No Spotify tab was open. I opened one — sign in, then ask again.")
         (let ((r (browser-call-sync "eval" (list 'tab id 'code code 'world "main") 4000)))
-          (if (chrome--get r 'ok)
-              (let ((v (chrome--get r 'value))) (if (string? v) v "done"))
+          (if (plist-get r 'ok)
+              (let ((v (plist-get r 'value))) (if (string? v) v "done"))
               (string-append "the player did not answer: "
-                             (or (chrome--get r 'error) "unknown error")))))))
+                             (or (plist-get r 'error) "unknown error")))))))
 
 ;;; --- the buttons --------------------------------------------------------------
 ;;; One JS expression per verb. Each one reports back in words, so the echo
@@ -250,9 +250,9 @@
     (query "string" "the music to find, in words" optional)
     (level "number" "volume from 0 to 100" optional))
   (lambda (args)
-    (spotify--do (or (custom--plist-get args 'action) "now-playing")
-                 (custom--plist-get args 'query)
-                 (custom--plist-get args 'level)))
+    (spotify--do (or (plist-get args 'action) "now-playing")
+                 (plist-get args 'query)
+                 (plist-get args 'level)))
   '(write external))
 
 ;;; --- keys ---------------------------------------------------------------------

@@ -219,7 +219,7 @@
 (define (sentry--error-message reply)
   (if (not (sentry--error? reply))
       #f
-      (or (sentry--get (car (sentry--get reply 'errors)) 'message)
+      (or (plist-get (car (plist-get reply 'errors)) 'message)
           "Sentry request failed")))
 
 ;; Parse every result into JSON or one stable error plist. Do not include an
@@ -265,24 +265,24 @@
 ;; Reduce API objects at the boundary. Callers cannot accidentally print user
 ;; objects, request payloads, breadcrumbs, stack traces, or issue metadata.
 (define (sentry--safe-issue issue)
-  (list 'id (sentry--get issue 'id)
-        'shortId (sentry--get issue 'shortId)
-        'title (sentry--redact (sentry--get issue 'title))
-        'status (sentry--get issue 'status)
-        'level (sentry--get issue 'level)
-        'culprit (sentry--redact (sentry--get issue 'culprit))
-        'count (sentry--get issue 'count)
-        'userCount (sentry--get issue 'userCount)
-        'firstSeen (sentry--get issue 'firstSeen)
-        'lastSeen (sentry--get issue 'lastSeen)
-        'permalink (sentry--get issue 'permalink)))
+  (list 'id (plist-get issue 'id)
+        'shortId (plist-get issue 'shortId)
+        'title (sentry--redact (plist-get issue 'title))
+        'status (plist-get issue 'status)
+        'level (plist-get issue 'level)
+        'culprit (sentry--redact (plist-get issue 'culprit))
+        'count (plist-get issue 'count)
+        'userCount (plist-get issue 'userCount)
+        'firstSeen (plist-get issue 'firstSeen)
+        'lastSeen (plist-get issue 'lastSeen)
+        'permalink (plist-get issue 'permalink)))
 
 (define (sentry--safe-event event)
-  (list 'eventID (sentry--get event 'eventID)
-        'dateCreated (sentry--get event 'dateCreated)
-        'environment (sentry--get event 'environment)
-        'platform (sentry--get event 'platform)
-        'culprit (sentry--redact (sentry--get event 'culprit))))
+  (list 'eventID (plist-get event 'eventID)
+        'dateCreated (plist-get event 'dateCreated)
+        'environment (plist-get event 'environment)
+        'platform (plist-get event 'platform)
+        'culprit (sentry--redact (plist-get event 'culprit))))
 
 (define (sentry--issues-url query environment time-range count)
   (sentry--url
@@ -358,15 +358,15 @@
   buf)
 
 (define (sentry--issue-cells buf issue)
-  (let ((level (sentry--get issue 'level)))
+  (let ((level (plist-get issue 'level)))
     (list
-      (list (sentry--get issue 'shortId) "accent")
+      (list (plist-get issue 'shortId) "accent")
       (list level (cond ((equal? level "error") "alert")
                         ((equal? level "warning") "warn")
                         (else "dim")))
-      (list (sentry--get issue 'count) "dim")
-      (list (sentry--get issue 'lastSeen) "dim")
-      (sentry--redact (sentry--get issue 'title)))))
+      (list (plist-get issue 'count) "dim")
+      (list (plist-get issue 'lastSeen) "dim")
+      (sentry--redact (plist-get issue 'title)))))
 
 (define (sentry--issue-meta buf)
   (string-append
@@ -407,44 +407,44 @@
     (re-replace-all "\"" value "&quot;")))
 
 (define (sentry--issue-title issue)
-  (let* ((title (string-trim (sentry--text (sentry--get issue 'title))))
-         (metadata (sentry--get issue 'metadata))
-         (kind (string-trim (sentry--text (sentry--get metadata 'type)))))
+  (let* ((title (string-trim (sentry--text (plist-get issue 'title))))
+         (metadata (plist-get issue 'metadata))
+         (kind (string-trim (sentry--text (plist-get metadata 'type)))))
     (cond ((not (equal? title "")) (sentry--redact title))
           ((not (equal? kind "")) kind)
-          (else (sentry--text (sentry--get issue 'shortId))))))
+          (else (sentry--text (plist-get issue 'shortId))))))
 
 (define (sentry--summary-pairs issue)
   (list
-    (list "Status" (sentry--text (sentry--get issue 'status)))
-    (list "Priority" (sentry--text (sentry--get issue 'priority)))
-    (list "Level" (sentry--text (sentry--get issue 'level)))
-    (list "Events" (sentry--text (sentry--get issue 'count)))
-    (list "Users" (sentry--text (sentry--get issue 'userCount)))
-    (list "First seen" (sentry--text (sentry--get issue 'firstSeen)))
-    (list "Last seen" (sentry--text (sentry--get issue 'lastSeen)))
-    (list "Platform" (sentry--text (sentry--get issue 'platform)))))
+    (list "Status" (sentry--text (plist-get issue 'status)))
+    (list "Priority" (sentry--text (plist-get issue 'priority)))
+    (list "Level" (sentry--text (plist-get issue 'level)))
+    (list "Events" (sentry--text (plist-get issue 'count)))
+    (list "Users" (sentry--text (plist-get issue 'userCount)))
+    (list "First seen" (sentry--text (plist-get issue 'firstSeen)))
+    (list "Last seen" (sentry--text (plist-get issue 'lastSeen)))
+    (list "Platform" (sentry--text (plist-get issue 'platform)))))
 
 (define (sentry--location-pairs issue)
-  (let ((metadata (sentry--get issue 'metadata)))
+  (let ((metadata (plist-get issue 'metadata)))
     (list
-      (list "Culprit" (sentry--text (sentry--get issue 'culprit)))
-      (list "Exception" (sentry--text (sentry--get metadata 'type)))
-      (list "Function" (sentry--text (sentry--get metadata 'function)))
-      (list "File" (sentry--text (sentry--get metadata 'filename)))
-      (list "Issue URL" (sentry--text (sentry--get issue 'permalink))))))
+      (list "Culprit" (sentry--text (plist-get issue 'culprit)))
+      (list "Exception" (sentry--text (plist-get metadata 'type)))
+      (list "Function" (sentry--text (plist-get metadata 'function)))
+      (list "File" (sentry--text (plist-get metadata 'filename)))
+      (list "Issue URL" (sentry--text (plist-get issue 'permalink))))))
 
 (define (sentry--tag-lines issue)
   (map (lambda (tag)
          (list 'tag "div" 'class "sentry-tag"
                'segs (list
-                       (list "c-kv-key" (sentry--text (sentry--get tag 'name)))
+                       (list "c-kv-key" (sentry--text (plist-get tag 'name)))
                        (list "c-kv-value"
                              (string-append
                                "  "
-                               (sentry--text (sentry--get tag 'totalValues))
+                               (sentry--text (plist-get tag 'totalValues))
                                " values")))))
-       (or (sentry--get issue 'tags) '())))
+       (or (plist-get issue 'tags) '())))
 
 (define sentry--detail-actions
   '(("sentry:ask" "Ask agent" "a")
@@ -454,15 +454,15 @@
     ("sentry:refresh" "Refresh" "g")))
 
 (define (sentry--issue-blocks issue raw-open?)
-  (let* ((metadata (sentry--get issue 'metadata))
-         (exception (sentry--text (sentry--get metadata 'value)))
-         (status (sentry--text (sentry--get issue 'status)))
-         (priority (sentry--text (sentry--get issue 'priority))))
+  (let* ((metadata (plist-get issue 'metadata))
+         (exception (sentry--text (plist-get metadata 'value)))
+         (status (sentry--text (plist-get issue 'status)))
+         (priority (sentry--text (plist-get issue 'priority))))
     (list
       (component 'ui/section
         (list 'title
           (string-append
-            (sentry--text (sentry--get issue 'shortId))
+            (sentry--text (plist-get issue 'shortId))
             " — "
             (sentry--issue-title issue))))
       (list 'tag "div" 'class "sentry-state"
@@ -478,7 +478,7 @@
         (list 'actions sentry--detail-actions 'class "sentry-actions"))
       (component 'ui/card
         (list 'title "Error" 'open? #t
-              'badge (sentry--text (sentry--get metadata 'type))
+              'badge (sentry--text (plist-get metadata 'type))
               'body
               (list (list 'tag "pre" 'class "sentry-exception"
                           'text (if (equal? exception "")
@@ -502,10 +502,10 @@
                           'text (sentry--pretty-json issue))))))))
 
 (define (sentry--issue-text issue)
-  (let* ((metadata (sentry--get issue 'metadata))
-         (exception (sentry--text (sentry--get metadata 'value))))
+  (let* ((metadata (plist-get issue 'metadata))
+         (exception (sentry--text (plist-get metadata 'value))))
     (string-append
-      (sentry--text (sentry--get issue 'shortId)) "  "
+      (sentry--text (plist-get issue 'shortId)) "  "
       (sentry--issue-title issue) "\n\n"
       "Exception\n"
       (if (equal? exception "") "No exception message was returned." exception)
@@ -546,7 +546,7 @@
          (parts (string-split text "\n\nRaw issue JSON\n"))
          (issue (or (buffer-local source 'sentry-detail-issue)
                     (and (> (length parts) 1) (json-parse (cadr parts))))))
-    (when (and (pair? issue) (sentry--get issue 'id))
+    (when (and (pair? issue) (plist-get issue 'id))
       (buffer-set-locals! copy
         (list 'render-mode "blocks"
               'render-blocks (sentry--issue-blocks issue #f))))))
@@ -588,10 +588,10 @@
 
 (define (sentry--event-line event)
   (string-append
-    (string-pad-right (sentry--truncate (sentry--get event 'dateCreated) 24) 24) "  "
-    (string-pad-right (sentry--truncate (sentry--get event 'environment) 10) 10) "  "
-    (string-pad-right (sentry--truncate (sentry--get event 'platform) 12) 12) "  "
-    (sentry--truncate (sentry--get event 'eventID) 40)))
+    (string-pad-right (sentry--truncate (plist-get event 'dateCreated) 24) 24) "  "
+    (string-pad-right (sentry--truncate (plist-get event 'environment) 10) 10) "  "
+    (string-pad-right (sentry--truncate (plist-get event 'platform) 12) 12) "  "
+    (sentry--truncate (plist-get event 'eventID) 40)))
 
 (define (sentry--events-text events)
   (if (null? events)
@@ -625,7 +625,7 @@
 (define (sentry--agent-prompt buf issue)
   (string-append
     "Investigate Sentry issue "
-    (sentry--text (sentry--get issue 'shortId))
+    (sentry--text (plist-get issue 'shortId))
     ". Read the complete issue in buffer "
     buf
     ". Find the cause, inspect the related source, and propose or implement a fix. "
@@ -640,7 +640,7 @@
 
 (define (sentry--open-in-sentry! buf)
   (let* ((issue (buffer-local buf 'sentry-detail-issue))
-         (url (and issue (sentry--get issue 'permalink))))
+         (url (and issue (plist-get issue 'permalink))))
     (when url (*sentry-open-url* url))))
 
 (define (sentry--resolve-now! buf issue-id)
@@ -656,7 +656,7 @@
 (define (sentry--confirm-resolve! buf)
   (let* ((issue-id (buffer-local buf 'sentry-issue-id))
          (issue (buffer-local buf 'sentry-detail-issue))
-         (short-id (sentry--text (sentry--get issue 'shortId))))
+         (short-id (sentry--text (plist-get issue 'shortId))))
     (when issue-id
       (y-or-n
         (string-append "Resolve " short-id " in Sentry?")
@@ -681,7 +681,7 @@
 ;; the short ids of ISSUES, joined for a message or a prompt
 (define (sentry--short-ids issues)
   (string-join
-    (map (lambda (i) (sentry--text (sentry--get i 'shortId))) issues)
+    (map (lambda (i) (sentry--text (plist-get i 'shortId))) issues)
     ", "))
 
 (define (sentry--agent-prompt-lines issues)
@@ -691,9 +691,9 @@
         (let ((i (car is)))
           (loop (cdr is)
                 (cons (string-append
-                        "- " (sentry--text (sentry--get i 'shortId))
+                        "- " (sentry--text (plist-get i 'shortId))
                         " — read the complete issue in buffer "
-                        (sentry--detail-buffer (sentry--text (sentry--get i 'id))))
+                        (sentry--detail-buffer (sentry--text (plist-get i 'id))))
                       acc))))))
 
 (define-command "sentry-list-ask-agent"
@@ -702,13 +702,13 @@
     (let ((issues (list-targets *sentry-buffer*)))
       (unless (null? issues)
         (for-each (lambda (i)
-                    (sentry--ensure-detail! (sentry--text (sentry--get i 'id))))
+                    (sentry--ensure-detail! (sentry--text (plist-get i 'id))))
                   issues)
         (let ((chat (group-chat *sentry-group*)))
           (*sentry-agent-send* chat
             (if (null? (cdr issues))
                 (sentry--agent-prompt
-                  (sentry--detail-buffer (sentry--text (sentry--get (car issues) 'id)))
+                  (sentry--detail-buffer (sentry--text (plist-get (car issues) 'id)))
                   (car issues))
                 (string-append
                   "Investigate these Sentry issues:\n"
@@ -722,7 +722,7 @@
   "Open the marked issues, or the one at point, in Sentry"
   (lambda ()
     (for-each (lambda (i)
-                (let ((url (sentry--get i 'permalink)))
+                (let ((url (plist-get i 'permalink)))
                   (when url (*sentry-open-url* url))))
               (list-targets *sentry-buffer*))))
 
@@ -733,7 +733,7 @@
   (let* ((stale (map sentry--detail-buffer resolved-ids))
          (shown (filter (lambda (w) (member (cadr w) stale)) (window-list)))
          (rest (filter (lambda (e)
-                         (not (member (sentry--text (sentry--get e 'id))
+                         (not (member (sentry--text (plist-get e 'id))
                                       resolved-ids)))
                        (list-entries *sentry-buffer*)))
          (i (or (list-index *sentry-buffer*) 0))
@@ -741,7 +741,7 @@
                     (nth (min i (- (length rest) 1)) rest))))
     (when (and (pair? shown) next)
       (display-buffer-detail!
-        (sentry--ensure-detail! (sentry--get next 'id)) *sentry-buffer*))
+        (sentry--ensure-detail! (plist-get next 'id)) *sentry-buffer*))
     (for-each (lambda (b)
                 (when (and (buffer-exists? b)
                            (not (member b (map cadr (window-list)))))
@@ -762,7 +762,7 @@
                     (message (string-append "Resolved " (number->string done)
                                             " Sentry issue(s)"))
                     (sentry--advance-details! (reverse ok)))
-                  (let* ((id (sentry--text (sentry--get (car is) 'id)))
+                  (let* ((id (sentry--text (plist-get (car is) 'id)))
                          (reply (sentry-resolve-issue id)))
                     (if (sentry--error? reply)
                         (begin (message (sentry--error-message reply))
@@ -820,7 +820,7 @@
 (register-context-provider! "sentry-detail-mode"
   (lambda (buf)
     (let* ((issue (buffer-local buf 'sentry-detail-issue))
-           (short-id (and issue (sentry--get issue 'shortId))))
+           (short-id (and issue (plist-get issue 'shortId))))
       (and short-id
            (string-append
              "Sentry issue "
@@ -855,7 +855,7 @@
   (lambda ()
     (let ((issue (list-current *sentry-buffer*)))
       (when issue
-        (let* ((issue-id (sentry--get issue 'id))
+        (let* ((issue-id (plist-get issue 'id))
                (buf (sentry--detail-buffer issue-id)))
           (buffer-create buf)
           (buffer-set-local! buf 'sentry-issue-id issue-id)
@@ -922,7 +922,7 @@
     'footer (lambda (buf)
               '(("RET" "detail") ("SPC" "mark") ("a" "agent") ("o" "web")
                 ("R" "resolve") ("/" "filter") ("g" "refresh") ("q" "quit")))
-    'key (lambda (buf issue) (sentry--get issue 'id))
+    'key (lambda (buf issue) (plist-get issue 'id))
     'keys '(("RET" "sentry-open") ("g" "sentry-refresh") ("q" "quit-window")
             ("a" "sentry-list-ask-agent") ("o" "sentry-list-open-web")
             ("R" "sentry-list-resolve"))))
