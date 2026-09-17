@@ -2281,11 +2281,14 @@ defmodule Compos.Ui.EditorLive do
           <c-field :for={{k, v, tone, rank} <- @facts} name={k} class="ml-fact" tone={tone} rank={rank}><c-label class="ml-fact-k">{k}</c-label><c-value class={"ml-fact-v #{tone}"}>{v}</c-value></c-field>
         </c-group>
         <c-text class="mb-spacer"></c-text>
+        <%!-- the position sheds by rank too: the size first, then the
+               percentage, then the whole of it. The name is identity and
+               is the last thing on the line to give way. --%>
         <c-position class="ml-pos" line={@line} column={@col}>
           <%= if @node.render_mode == "terminal" do %>
-            PTY · transcript {ml_bytes(@node.text)}
+            PTY · <c-text class="ml-pos-size">transcript {ml_bytes(@node.text)}</c-text>
           <% else %>
-            {ml_bytes(@node.text)} · L{@line}:C{@col} · {pct(@node)}
+            <c-text class="ml-pos-size">{ml_bytes(@node.text)} · </c-text>L{@line}:C{@col}<c-text class="ml-pos-pct"> · {pct(@node)}</c-text>
           <% end %>
         </c-position>
       </c-modeline>

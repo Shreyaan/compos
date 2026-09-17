@@ -1275,6 +1275,14 @@ defmodule Compos.Ui.Layouts do
           @container (max-width: 700px) { .modeline .ml-fact[rank="2"] { display: none; } }
           @container (max-width: 620px) { .modeline .ml-fact[rank="1"] { display: none; } }
           @container (max-width: 400px) { .modeline .ml-fact { display: none; } }
+          /* the name is the last thing on the mode line to give way: the
+             position sheds its size, then its percentage, then itself,
+             before the name loses a character */
+          .modeline .name { flex: 0 1 auto; min-width: 6ch; }
+          @container (max-width: 560px) { .modeline .ml-pos-size { display: none; } }
+          @container (max-width: 460px) { .modeline .ml-project { display: none; } }
+          @container (max-width: 460px) { .modeline .ml-pos-pct { display: none; } }
+          @container (max-width: 360px) { .modeline .ml-pos { display: none; } }
           /* The frame's header line. It carries the furniture: the wordmark,
              the group tabs, the frame's path, the facts, the key legend. It
              is chrome, so it is square, hairlined, mono and quiet, and it
