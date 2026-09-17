@@ -12,6 +12,12 @@
 
 (define *default-connector* "claude-code")
 
+(defcustom 'agent-connector-command-overrides '()
+  "Per-user adapter commands as ((CONNECTOR COMMAND) ...).
+For example, ((\"claude-code\" \"/opt/acp/claude-agent-acp\")) keeps a
+nonstandard install out of the built-in connector catalog."
+  'group 'chat 'type 'list)
+
 (define (define-connector! name config)
   (set! *agent-connectors*
     (cons (list name config)
@@ -21,16 +27,19 @@
                   (else (loop (cdr cs) (cons (car cs) acc))))))))
 
 (define (connector-config name)
-  (let ((e (assoc name *agent-connectors*)))
-    (if e (car (cdr e)) '())))
+  (let* ((e (assoc name *agent-connectors*))
+         (config (if e (car (cdr e)) '()))
+         (override (assoc name agent-connector-command-overrides)))
+    (if (and override (pair? (cdr override))
+             (string? (cadr override))
+             (not (equal? (cadr override) "")))
+        (append (list 'cmd (cadr override)) config)
+        config)))
 
 (define-connector! "claude-code"
-  ;; npm's @zed-industries/claude-code-acp lags upstream (pins an old
-  ;; claude-agent-sdk with a stale model catalog: no Sonnet 5/Opus 5/Fable,
-  ;; no pricing) — bare "claude-code-acp" resolves the stale global npm
-  ;; install via PATH, so point at a from-source build instead:
-  ;; ~/src/claude-code-acp, `npm run build` with node >=22.
-  '(cmd "/Users/svs/.asdf/installs/nodejs/24.0.2/bin/node /Users/svs/src/claude-code-acp/dist/index.js"
+  ;; @agentclientprotocol/claude-agent-acp ships this executable. Resolve it
+  ;; through PATH so npm, pnpm, bun, asdf, and other installers all work.
+  '(cmd "claude-agent-acp"
     ;; The editor names every tool through MCP and writes the whole
     ;; system prompt, so the adapter's own tools have no place in an
     ;; editor thread: everything goes through Scheme. settingSources and
@@ -79,12 +88,12 @@
   ;; DeepSeek Harness over ACP. The direct API lane bills every request for
   ;; the whole prefix; the harness keeps one session, so DeepSeek's context
   ;; cache serves the prefix and only the new turn is full price.
-  ;; Install: `npm install @deepseek-ai/dsh` in ~/src/dsh-acp. The provider
-  ;; key lives in ~/.dsh/.credentials.yaml, which the harness writes.
+  ;; @deepseek-ai/dsh ships the `dsh` executable. The provider key lives in
+  ;; ~/.dsh/.credentials.yaml, which the harness writes.
   ;; The shipped adapter cannot steer a running turn: reapply
   ;; docs/dsh-acp-steering.patch after every install, or blank RET only ever
   ;; queues on this lane.
-  '(cmd "/Users/svs/.asdf/installs/nodejs/24.0.2/bin/node /Users/svs/src/dsh-acp/node_modules/@deepseek-ai/dsh/lib/bin.js --profile acp"
+  '(cmd "dsh --profile acp"
     ;; the session reports model and reasoning effort as ACP config
     ;; options, so the model rides in protocol config, not the command line
     model-config #t

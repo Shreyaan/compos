@@ -116,3 +116,48 @@
   (lambda ()
     (check-equal! *default-connector* "claude-code"
                   "the boot default the user did not change")))
+
+(deftest 'agent-connectors-resolve-portable-default-commands
+  "built-in ACP commands resolve through PATH instead of an author's checkout"
+  (lambda ()
+    (check-equal!
+      (plist-get (agent-resolve-config '(connector "claude-code")) 'cmd)
+      "claude-agent-acp"
+      "the maintained Claude ACP executable")
+    (check-equal!
+      (plist-get (agent-resolve-config '(connector "deepseek")) 'cmd)
+      "dsh --profile acp"
+      "the DeepSeek Harness ACP profile")))
+
+(deftest 'agent-connector-command-has-a-per-user-override
+  "a nonstandard adapter install can replace one connector command"
+  (lambda ()
+    (let ((old agent-connector-command-overrides))
+      (set! agent-connector-command-overrides
+        '(("deepseek" "zz-dsh --profile acp")))
+      (check-equal!
+        (plist-get (agent-resolve-config '(connector "deepseek")) 'cmd)
+        "zz-dsh --profile acp"
+        "the configured command")
+      (set! agent-connector-command-overrides old))))
+
+(deftest 'setup-never-restores-an-unavailable-default
+  "missing connectors stay visible in the scan but cannot become the default"
+  (lambda ()
+    (let ((old-connectors *agent-connectors*)
+          (old-saved setup-default-connector)
+          (old-default *default-connector*))
+      (set! *agent-connectors*
+        '(("zz-missing" (cmd "zz-compos-missing-adapter"))
+          ("gemini-nano" (backend "chrome-gemini-nano"))))
+      (set! setup-default-connector "zz-missing")
+      (set! *default-connector* "zz-missing")
+      (let ((missing (assoc "zz-missing" (setup-inference-scan))))
+        (check-true! missing "the missing connector is reported")
+        (check-false! (list-ref missing 2) "the missing connector is unavailable"))
+      (setup-apply-default-connector!)
+      (check-equal! *default-connector* "gemini-nano"
+                    "the first runnable connector is the fallback")
+      (set! *agent-connectors* old-connectors)
+      (set! setup-default-connector old-saved)
+      (set! *default-connector* old-default))))
