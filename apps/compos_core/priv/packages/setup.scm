@@ -665,10 +665,17 @@
 (define (setup-apply-default-connector!)
   "Put the saved choice back. Custom values load after this package, and
    *default-connector* is a plain global that a reload resets, so the choice
-   has to be applied once the user's custom.scm is in."
-  (if (and (not (equal? setup-default-connector ""))
-           (member setup-default-connector (connector-names)))
-      (set! *default-connector* setup-default-connector)))
+   has to be applied once the user's custom.scm is in. A declared connector
+   is not necessarily runnable on this machine, so never restore or retain an
+   unavailable default."
+  (let ((available (setup-inference-available)))
+    (cond
+      ((and (not (equal? setup-default-connector ""))
+            (member setup-default-connector available))
+       (set! *default-connector* setup-default-connector))
+      ((member *default-connector* available) *default-connector*)
+      ((pair? available) (set! *default-connector* (car available)))
+      (else #f))))
 
 (add-hook! 'frame-attach-hook 'setup-apply-default-connector!)
 
