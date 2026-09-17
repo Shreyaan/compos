@@ -592,11 +592,21 @@ a{color:var(--accent);text-decoration:none}
              (message (string-append "Opened " asin " in the browser")))
       (message "No browser is connected")))
 
-;; the page's own buttons, pressed in Scheme
-(on-preview-link! "amazon-cart" (lambda (asin) (amazon-cart-add! asin)))
-(on-preview-link! "amazon-open" (lambda (asin) (amazon-open-external! asin)))
-(on-preview-link! "amazon-save" (lambda (asin) (amazon-save-toggle! asin)))
-(on-preview-link! "amazon-note" (lambda (asin) (amazon-ask-note! asin)))
+;; the page's own blocks, pressed in Scheme
+(on-block-click! 'amazon
+  (lambda (buf id)
+    (let ((row (buffer-local buf 'amazon-row)))
+      (and row
+           (let ((asin (plist-get row 'asin)))
+             (cond ((equal? id "overview") (amazon-tab-set! buf "overview"))
+                   ((equal? id "specs") (amazon-tab-set! buf "specs"))
+                   ((equal? id "reviews") (amazon-tab-set! buf "reviews"))
+                   ((equal? id "amazon-cart") (amazon-cart-add! asin))
+                   ((equal? id "amazon-save") (amazon-save-toggle! asin))
+                   ((equal? id "amazon-note") (amazon-ask-note! asin))
+                   ((equal? id "amazon-open") (amazon-open-external! asin))
+                   (else #f))
+             #t)))))
 
 ;;; --- actions, on the listing and on the page -----------------------------
 ;;; The same verb under the same key in both places: the listing reads the
@@ -778,7 +788,14 @@ a{color:var(--accent);text-decoration:none}
 ;;; answers the same keys as the row it came from.
 
 (define-mode "amazon-detail-mode"
-  (lambda () (buffer-set-read-only! (current-buffer) #t)))
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-read-only! buf #t)
+      (buffer-set-local! buf 'desktop-skip-locals '(render-blocks))
+      (buffer-set-local! buf 'render-mode "blocks")
+      (let ((row (buffer-local buf 'amazon-row)))
+        (when row
+          (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))))
 (mode-parent! "amazon-detail-mode" "special-mode")
 (mode-doc! "amazon-detail-mode"
   "One product, as its own page. m saves it and marks it in the listing, N writes a note that stays on this page, n and p walk the listing's pages, c adds it to the cart, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
