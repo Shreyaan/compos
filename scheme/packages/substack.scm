@@ -6,9 +6,8 @@
 (defcustom 'substack-group-name "*substack*"
   "The group that owns the Substack listing, publication pages, and readers."
   'group 'substack)
-(defcustom 'substack-post-limit 20
-  "How many recent posts each publication page lists."
-  'group 'substack 'type 'number)
+;; How many recent posts each publication page lists.
+(define substack-post-limit 20)
 
 (define *substack-buffer* "*substack*")
 (define *substack-log* "*substack-log*")

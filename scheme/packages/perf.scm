@@ -28,9 +28,8 @@
   "How many samples each chart keeps."
   'group 'perf 'type 'number)
 
-(defcustom 'perf-process-rows 20
-  "How many process rows the table shows."
-  'group 'perf 'type 'number)
+;; How many process rows the table shows.
+(define perf-process-rows 20)
 
 (define *perf-sorts* '("reds" "memory" "queue" "name"))
 (define *perf-heat-layers* '("scheme" "live" "browser"))
@@ -1001,9 +1000,8 @@
   "Seconds between two memory readings in the frame modeline."
   'group 'perf 'type 'number)
 
-(defcustom 'display-memory-format "%t vm · %h host"
-  "The memory segment. %t total VM memory, %p processes, %b binaries, %e ets, %n process count, %h host memory in use as a percent, %c host cpu percent."
-  'group 'perf 'type 'string)
+;; The memory segment. %t total VM memory, %p processes, %b binaries, %e ets, %n process count, %h host memory in use as a percent, %c host cpu percent.
+(define display-memory-format "%t vm · %h host")
 
 ;; the format with every token replaced from SAMPLE
 (define (display-memory-text format sample)

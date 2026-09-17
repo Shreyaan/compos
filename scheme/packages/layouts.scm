@@ -11,13 +11,11 @@
 
 (defgroup 'windows "Window layout and responsive popup policy.")
 
-(defcustom 'window-layout-compact-cols 100
-  "Below this usable frame width, layouts stack and popups use the bottom."
-  'group 'windows 'type 'number)
+;; Below this usable frame width, layouts stack and popups use the bottom.
+(define window-layout-compact-cols 100)
 
-(defcustom 'window-layout-wide-cols 200
-  "At this usable frame width, three panes become columns and four become a grid."
-  'group 'windows 'type 'number)
+;; At this usable frame width, three panes become columns and four become a grid.
+(define window-layout-wide-cols 200)
 
 ;; peek! and the ripgrep preview (editor.scm) read this one.
 (defcustom 'peek-max-file-size 1048576

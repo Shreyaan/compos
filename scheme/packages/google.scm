@@ -7,7 +7,8 @@
   "Downloaded Google Desktop OAuth client JSON." 'group 'google)
 (defcustom 'google-default-account ""
   "Google account subject used when opening a new workspace." 'group 'google)
-(defcustom 'google-page-size 25 "Rows per Google list page." 'group 'google)
+;; Rows per Google list page.
+(define google-page-size 25)
 (defcustom 'google-scopes
   '("https://www.googleapis.com/auth/gmail.modify"
     "https://www.googleapis.com/auth/calendar"

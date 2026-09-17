@@ -43,9 +43,8 @@
   "The Recruiter page the messages tab is read from."
   'group 'linkedin)
 
-(defcustom 'linkedin-narrow-cols 90
-  "Under this width the listing drops the message snippet and the project id, and gives the room to the name. The app's own layout puts the listing in one of three columns, which is always under it."
-  'group 'linkedin 'type 'number)
+;; Under this width the listing drops the message snippet and the project id, and gives the room to the name. The app's own layout puts the listing in one of three columns, which is always under it.
+(define linkedin-narrow-cols 90)
 
 (defcustom 'linkedin-fetch-tries 40
   "How many times the app looks for the projects page before giving up. Each look is 500ms, and a rendered reading costs a real background tab."

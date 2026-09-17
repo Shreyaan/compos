@@ -7,17 +7,14 @@
 
 (defgroup 'whatsapp "Read and reply to WhatsApp chats through the whatsapp MCP server.")
 
-(defcustom 'whatsapp-cache-ttl 30
-  "Seconds before the chat list refreshes from WhatsApp."
-  'group 'whatsapp 'type 'number)
+;; Seconds before the chat list refreshes from WhatsApp.
+(define whatsapp-cache-ttl 30)
 
-(defcustom 'whatsapp-chat-limit 30
-  "Maximum recent chats to show."
-  'group 'whatsapp 'type 'number)
+;; Maximum recent chats to show.
+(define whatsapp-chat-limit 30)
 
-(defcustom 'whatsapp-message-limit 50
-  "Maximum recent messages to show in one conversation."
-  'group 'whatsapp 'type 'number)
+;; Maximum recent messages to show in one conversation.
+(define whatsapp-message-limit 50)
 
 (define *whatsapp-buffer* "*WhatsApp*")
 (defcustom 'whatsapp-group "*WhatsApp*"

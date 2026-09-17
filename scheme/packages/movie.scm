@@ -6,9 +6,8 @@
 
 (defgroup 'movie "Provenance playback inside an editor frame.")
 
-(defcustom 'movie-speed 20
-  "Playback speed relative to the recorded Provenance timeline."
-  'group 'movie 'type 'number)
+;; Playback speed relative to the recorded Provenance timeline.
+(define movie-speed 20)
 
 (define *movie-stream-buffer* "*movie-stream*")
 

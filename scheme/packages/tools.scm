@@ -355,9 +355,8 @@
   "The maximum semantic results that apropos reads from the embedding index."
   'group 'discovery)
 
-(defcustom 'apropos-semantic-threshold 0.30
-  "The minimum cosine similarity for an apropos semantic result."
-  'group 'discovery)
+;; The minimum cosine similarity for an apropos semantic result.
+(define apropos-semantic-threshold 0.30)
 
 (define (apropos--raw-words q)
   (filter

@@ -27,9 +27,8 @@
   "The default number of CSV lines that morg-babel previews."
   'group 'writing 'type 'number)
 
-(defcustom 'morg-babel-scheme-result-width 88
-  "The maximum line width for a Scheme Babel result when a list can wrap."
-  'group 'writing 'type 'number)
+;; The maximum line width for a Scheme Babel result when a list can wrap.
+(define morg-babel-scheme-result-width 88)
 
 ;; Markdown language -> the interpreter that runs the temporary file, and
 ;; the tree-sitter language that paints the body. Each row becomes one

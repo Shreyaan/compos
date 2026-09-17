@@ -21,11 +21,11 @@
 
 (defgroup 'feeds "Feeds: read RSS and Atom subscriptions in the editor.")
 
-(defcustom 'feeds-cache-ttl 900
-  "Seconds before the feeds list refetches on wake." 'group 'feeds)
+;; Seconds before the feeds list refetches on wake.
+(define feeds-cache-ttl 900)
 
-(defcustom 'feeds-max-items 200
-  "The maximum number of items the feeds list shows." 'group 'feeds)
+;; The maximum number of items the feeds list shows.
+(define feeds-max-items 200)
 
 ;;; --- subscriptions --------------------------------------------------------------
 

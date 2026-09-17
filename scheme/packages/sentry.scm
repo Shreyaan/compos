@@ -30,8 +30,8 @@
 (defcustom 'sentry-query "is:unresolved"
   "The default Sentry issue search." 'group 'sentry)
 
-(defcustom 'sentry-limit 20
-  "The maximum rows one Sentry request returns." 'group 'sentry)
+;; The maximum rows one Sentry request returns.
+(define sentry-limit 20)
 
 (defcustom 'sentry-timeout 30
   "Seconds to wait for one Sentry request." 'group 'sentry)

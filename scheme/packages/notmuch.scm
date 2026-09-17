@@ -48,8 +48,8 @@
   "How a remote mail host is reached; one multiplexed connection keeps a call cheap."
   'group 'notmuch)
 
-(defcustom 'notmuch-search-limit 50
-  "How many threads a search buffer shows." 'group 'notmuch)
+;; How many threads a search buffer shows.
+(define notmuch-search-limit 50)
 (defcustom 'notmuch-default-query "tag:inbox"
   "The query the notmuch command opens with." 'group 'notmuch)
 (defcustom 'notmuch-prefer-html #t
@@ -1269,13 +1269,13 @@ when a message has no text/plain part." 'group 'notmuch)
     "replied" "trash" "flagged" "compos-mark")
   "Tags notmuch-autotag never offers. These say delivery state, not subject.")
 
-(defcustom 'notmuch-autotag-limit 6000
-  "How much of a thread's text notmuch-autotag sends to the model.")
+;; How much of a thread's text notmuch-autotag sends to the model.
+(define notmuch-autotag-limit 6000)
 ;; A tag name alone is a thin description, and a thin description is what makes
 ;; a classifier miss. These say what the tag covers. A tag with no entry here is
 ;; described by its own name.
-(defcustom 'notmuch-autotag-hints
-  '("banking" "Anything from a bank, card issuer, or payment network: account and card statements, transaction and card alerts, balance and credit notices, loan and EMI notices, cheque and transfer confirmations, KYC and account-service mail. Mail from a bank belongs here even when it also looks like a bill, a receipt, or marketing. A broker, depository, demat provider, or fund house is not a bank."
+;; Per-tag descriptions notmuch-autotag sends JEV. A tag with no entry is described by its own name.
+(define notmuch-autotag-hints '("banking" "Anything from a bank, card issuer, or payment network: account and card statements, transaction and card alerts, balance and credit notices, loan and EMI notices, cheque and transfer confirmations, KYC and account-service mail. Mail from a bank belongs here even when it also looks like a bill, a receipt, or marketing. A broker, depository, demat provider, or fund house is not a bank."
     "newsletter" "A recurring bulk mailing the reader subscribed to and that anyone on the list receives unchanged: a newsletter, digest, roundup, briefing, or new-post notification from a blog or publication. The giveaway is an unsubscribe link plus editorial content addressed to a list, not to this reader. A one-off promotion, an order receipt, or a service notice is not a newsletter."
     "bills" "A bill or payment request from an ordinary vendor: a utility, a landlord, a telco, a subscription. Not a bank's own statement or fee, and not a broker's account or maintenance charge."
     "invoice" "An invoice the reader issued or received for work or goods, with line items and an amount."
@@ -1283,8 +1283,7 @@ when a message has no text/plain part." 'group 'notmuch)
     "investments" "Anything from a broker, depository, demat provider, exchange, fund house, or wealth platform: holdings and portfolio statements, contract notes, trade confirmations, dividends, capital-gains statements, and that provider's own account and maintenance charges. Mail from a broker or a depository belongs here and not under banking, even when it reads as a bank alert or a bill."
     "taxes" "Tax filings, tax notices, and tax authority correspondence."
     "gov" "Mail from a government body or public authority: visas, licences, registrations, official notices."
-    "spam" "Unsolicited bulk mail from a sender the reader has no relationship with.")
-  "Per-tag descriptions notmuch-autotag sends JEV. A tag with no entry is described by its own name.")
+    "spam" "Unsolicited bulk mail from a sender the reader has no relationship with."))
 ;; These three are not subjects, so they are not options in the one choice: a
 ;; thread can be about investments AND be phishing. Each is its own yes/no
 ;; question, and the answer is a probability, so the threshold lives here too.
@@ -1400,10 +1399,10 @@ when a message has no text/plain part." 'group 'notmuch)
               (append out (list (nm--autotag-flag-key i)
                                 (jev-noul (car (cdr xs)))))))))
 
-(defcustom 'notmuch-autotag-thresholds '("phishing" 0.5)
-  "Per-tag override of notmuch-autotag-threshold, as tag then number. A tag with
-no entry answers to the general threshold. A missed phishing mail costs more
-than a wrong tag, so phishing sits lower than the rest.")
+;; Per-tag override of notmuch-autotag-threshold, as tag then number. A tag with
+;; no entry answers to the general threshold. A missed phishing mail costs more
+;; than a wrong tag, so phishing sits lower than the rest.
+(define notmuch-autotag-thresholds '("phishing" 0.5))
 
 (define (nm--autotag-threshold-for tag)
   "How sure JEV must be before TAG is applied."

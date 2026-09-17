@@ -246,16 +246,14 @@
 (defgroup 'project "Projects: a project is a git checkout.")
 
 (defcustom 'project-ripgrep-program "rg" "The ripgrep executable." 'group 'project)
-(defcustom 'project-ripgrep-args
-  "--line-number --no-heading --color never --smart-case --sort path --max-columns 240 --max-columns-preview"
-  "Flags for every project-ripgrep run. --sort path makes the result order
-the same on every run: without it ripgrep answers in the order its threads
-finish, so \"the first match\" is whichever file the disk offered first.
---max-columns truncates a match on a long line: one minified or generated
-line can hold megabytes, and a match list is not the place to carry them."
-  'group 'project)
-(defcustom 'project-ripgrep-limit 500
-  "How many matches one search offers." 'group 'project)
+;; Flags for every project-ripgrep run. --sort path makes the result order
+;; the same on every run: without it ripgrep answers in the order its threads
+;; finish, so "the first match" is whichever file the disk offered first.
+;; --max-columns truncates a match on a long line: one minified or generated
+;; line can hold megabytes, and a match list is not the place to carry them.
+(define project-ripgrep-args "--line-number --no-heading --color never --smart-case --sort path --max-columns 240 --max-columns-preview")
+;; How many matches one search offers.
+(define project-ripgrep-limit 500)
 (defcustom 'project-ripgrep-max-text 300
   "The longest match text one row keeps. The cap holds for every caller,
 with or without --max-columns in project-ripgrep-args." 'group 'project)

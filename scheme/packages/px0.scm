@@ -25,9 +25,8 @@
   "The first port a root is offered. A root that finds it held takes the next free one."
   'integer 'px0)
 
-(defcustom 'px0-port-span 20
-  "How many ports past px0-first-port a root may try before it gives up."
-  'integer 'px0)
+;; How many ports past px0-first-port a root may try before it gives up.
+(define px0-port-span 20)
 
 ;;; --- where a root's files live -------------------------------------------
 

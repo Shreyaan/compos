@@ -35,8 +35,8 @@
 (defcustom 'graphql-curl-program "curl"
   "The curl executable the GraphQL client shells out to." 'group 'graphql)
 
-(defcustom 'graphql-timeout 30
-  "Seconds to wait for one GraphQL response." 'group 'graphql)
+;; Seconds to wait for one GraphQL response.
+(define graphql-timeout 30)
 
 (defcustom 'graphql-apropos-limit 60
   "The most schema lines one graphql-apropos prints." 'group 'graphql)

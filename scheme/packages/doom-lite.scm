@@ -38,9 +38,8 @@
   "How many rays the renderer casts. More columns give a sharper wall and cost more per frame."
   'group 'doom-lite 'type 'number)
 
-(defcustom 'doom-lite-turn-step 7
-  "How far one turn key turns, in units of a 256 unit circle."
-  'group 'doom-lite 'type 'number)
+;; How far one turn key turns, in units of a 256 unit circle.
+(define doom-lite-turn-step 7)
 
 (defcustom 'doom-lite-move-step 190
   "How far one move key moves, in fixed point units of 1024 per map cell."

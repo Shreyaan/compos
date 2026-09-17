@@ -38,11 +38,11 @@
 (defcustom 'models-keep-alive "10m"
   "How long a model you load stays in the host memory." 'group 'models)
 
-(defcustom 'models-cache-ttl 15
-  "Seconds before the model list asks the host again." 'group 'models)
+;; Seconds before the model list asks the host again.
+(define models-cache-ttl 15)
 
-(defcustom 'models-pull-timeout 3600
-  "Seconds to wait for an install. A large model takes minutes." 'group 'models)
+;; Seconds to wait for an install. A large model takes minutes.
+(define models-pull-timeout 3600)
 
 (defface! 'models-loaded 'fg "#2e6b45" 'weight "600")
 (defface! 'models-name 'fg "#26356b" 'weight "600")

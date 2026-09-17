@@ -15,13 +15,11 @@
 
 (define *subagents-buffer* "*subagents*")
 
-(defcustom 'subagents-last-line-width 72
-  "How much of a child chat's last line a row shows."
-  'group 'chat 'type 'integer)
+;; How much of a child chat's last line a row shows.
+(define subagents-last-line-width 72)
 
-(defcustom 'subagents-tail-bytes 2000
-  "How many bytes at the end of a child chat the last line is read from."
-  'group 'chat 'type 'integer)
+;; How many bytes at the end of a child chat the last line is read from.
+(define subagents-tail-bytes 2000)
 
 ;;; --- the edges ---------------------------------------------------------
 ;;;

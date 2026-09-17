@@ -24,21 +24,17 @@
 
 (define *profile-buffer* "*Profile*")
 
-(defcustom 'profile-function-rows 30
-  "How many function rows one profile shows."
-  'group 'profile 'type 'number)
+;; How many function rows one profile shows.
+(define profile-function-rows 30)
 
-(defcustom 'profile-site-rows 15
-  "How many Scheme call-site rows one profile shows."
-  'group 'profile 'type 'number)
+;; How many Scheme call-site rows one profile shows.
+(define profile-site-rows 15)
 
-(defcustom 'profile-process-rows 8
-  "How many process rows one profile shows."
-  'group 'profile 'type 'number)
+;; How many process rows one profile shows.
+(define profile-process-rows 8)
 
-(defcustom 'profile-layer-rows 14
-  "How many telemetry rows one profile shows."
-  'group 'profile 'type 'number)
+;; How many telemetry rows one profile shows.
+(define profile-layer-rows 14)
 
 ;;; --- arming -----------------------------------------------------------------
 ;;; The prompt that armed the profile is still closing when the profile

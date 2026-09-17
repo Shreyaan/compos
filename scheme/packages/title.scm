@@ -31,9 +31,8 @@
 (defcustom 'title-server-port 8127
   "The loopback port the card writer answers on." 'group 'title 'type 'integer)
 
-(defcustom 'title-max-tokens 96
-  "The token cap on one card. It stops a degenerate run, a real failure mode for a small instruct model given unusual input."
-  'group 'title 'type 'integer)
+;; The token cap on one card. It stops a degenerate run, a real failure mode for a small instruct model given unusual input.
+(define title-max-tokens 96)
 
 ;;; --- the address ----------------------------------------------------------------
 
