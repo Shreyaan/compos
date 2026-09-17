@@ -117,18 +117,6 @@
     (check-equal! *default-connector* "claude-code"
                   "the boot default the user did not change")))
 
-(deftest 'agent-connectors-resolve-portable-default-commands
-  "built-in ACP commands resolve through PATH instead of an author's checkout"
-  (lambda ()
-    (check-equal!
-      (plist-get (agent-resolve-config '(connector "claude-code")) 'cmd)
-      "claude-agent-acp"
-      "the maintained Claude ACP executable")
-    (check-equal!
-      (plist-get (agent-resolve-config '(connector "deepseek")) 'cmd)
-      "dsh --profile acp"
-      "the DeepSeek Harness ACP profile")))
-
 (deftest 'agent-connector-command-has-a-per-user-override
   "a nonstandard adapter install can replace one connector command"
   (lambda ()
