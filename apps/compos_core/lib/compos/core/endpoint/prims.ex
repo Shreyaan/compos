@@ -2,7 +2,6 @@ defmodule Compos.Core.Endpoint.Prims do
   @moduledoc "The Scheme primitives of this mechanism; the policy is in Scheme."
 
   import Compos.Core.Prims
-  alias Compos.Core.{Endpoint}
   alias Compos.Core.Session
 
   @escaped :compos_escaped_closures
