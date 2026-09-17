@@ -173,7 +173,7 @@
     (when mode (with-current-buffer buf (lambda () (set-mode! mode))))
     buf))
 
-(define t--ga-insert-target (string-append (compos-priv-dir) "/packages/preview.scm"))
+(define t--ga-insert-target (string-append (compos-priv-dir) "/editor.scm"))
 
 (deftest 'file-relative-name-walks-up-then-down
   "the path from DIR to TARGET, and . for the directory itself"
@@ -194,7 +194,7 @@
           (run-command "insert-file-link")
           (t--ga-confirm! t--ga-insert-target)))
       (check-false! (minibuffer-active?) "no second prompt")
-      (check-equal! (buffer-text buf) "see ../packages/preview.scm here"
+      (check-equal! (buffer-text buf) "see ../editor.scm here"
                     "the relative path stands at point")
       (buffer-kill! buf))))
 
@@ -208,7 +208,7 @@
           (set-mark! 0)
           (run-command "insert-file-link")
           (t--ga-confirm! t--ga-insert-target)))
-      (check-equal! (buffer-text buf) "[[file:../packages/preview.scm][Read]] this"
+      (check-equal! (buffer-text buf) "[[file:../editor.scm][Read]] this"
                     "the selection became the label")
       (buffer-kill! buf))))
 
@@ -221,10 +221,10 @@
           (set-mark! #f)
           (run-command "insert-file-link")
           (t--ga-confirm! t--ga-insert-target)))
-      (check-contains! (plist-get (minibuffer-state) 'prompt) "(default preview.scm)"
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "(default editor.scm)"
                        "the prompt names the default")
       (t--ga-confirm! "")
-      (check-equal! (buffer-text buf) "[[file:../packages/preview.scm][preview.scm]]"
+      (check-equal! (buffer-text buf) "[[file:../editor.scm][editor.scm]]"
                     "the file name is the label")
       (buffer-kill! buf))))
 

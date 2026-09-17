@@ -491,7 +491,7 @@ defmodule Compos.ProjectSearchTest do
             (lambda (candidate) "#{target}"))
           (project-remember! "#{root}"))})
 
-      project_package = Application.app_dir(:compos_core, "priv/packages/project.scm")
+      project_package = Path.join(Compos.Core.project_dir(), "scheme/packages/project.scm")
       assert {:ok, %{files: 1}} = Session.reload_files([project_package])
       assert eval!(~s{(project-group-target "#{root}")}) == ~s{"#{target}"}
 

@@ -27,7 +27,7 @@
 (deftest 'locate-library-finds-a-bundled-package-by-bare-name
   "a bare name resolves to the package file, with or without .scm"
   (lambda ()
-    (let ((advice (string-append (compos-priv-dir) "/packages/advice.scm")))
+    (let ((advice (string-append (compos-project-dir) "/scheme/packages/advice.scm")))
       (check-equal! (locate-library "advice.scm") advice "with .scm")
       (check-equal! (locate-library "advice") advice "without .scm")
       (check-equal! (locate-library advice) advice "an absolute path is itself")
@@ -55,7 +55,9 @@
 (deftest 'load-stamps-the-editor-trees-as-bundled
   "a file under priv or the project is bundled; a file in the home is the user's"
   (lambda ()
-    (check-equal! (load--origin (string-append (compos-priv-dir) "/packages/advice.scm"))
+    (check-equal! (load--origin (string-append (compos-priv-dir) "/editor.scm"))
                   'bundled "priv is bundled")
+    (check-equal! (load--origin (string-append (compos-project-dir) "/scheme/packages/advice.scm"))
+                  'bundled "the project's packages are bundled")
     (check-equal! (load--origin (string-append (compos-home) "/x.scm"))
                   'user "the home is the user's")))

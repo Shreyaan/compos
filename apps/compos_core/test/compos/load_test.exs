@@ -13,35 +13,32 @@ defmodule Compos.LoadTest do
     init = File.read!(Path.join(priv, "init.scm"))
     load_pattern = ~r/\(load\s+"([^"]+)"\)/
 
+    # the bundled load-path: scheme/packages at the project root, then priv
+    dirs = [Path.join(Compos.Core.project_dir(), "scheme/packages"), Path.join(priv, "packages")]
+    locate = fn name -> Enum.find(Enum.map(dirs, &Path.join(&1, name)), &File.regular?/1) end
+
     # init.scm also loads editor/blocks and editor/goto-address by name;
-    # only the entries under packages/ are packages
+    # only the entries a package directory holds are packages
     top_level =
       load_pattern
       |> Regex.scan(init, capture: :all_but_first)
       |> Enum.map(&hd/1)
-      |> Enum.filter(&File.regular?(Path.join([priv, "packages", &1])))
+      |> Enum.filter(locate)
 
     nested =
       Enum.flat_map(top_level, fn package ->
-        path = Path.join([priv, "packages", package])
-
-        if File.regular?(path) do
-          path
-          |> File.read!()
-          |> then(&Regex.scan(load_pattern, &1, capture: :all_but_first))
-          |> Enum.map(&hd/1)
-        else
-          []
-        end
+        locate.(package)
+        |> File.read!()
+        |> then(&Regex.scan(load_pattern, &1, capture: :all_but_first))
+        |> Enum.map(&hd/1)
       end)
 
     loaded = top_level ++ nested
 
     packages =
-      priv
-      |> Path.join("packages/**/*.scm")
-      |> Path.wildcard()
-      |> Enum.map(&Path.relative_to(&1, Path.join(priv, "packages")))
+      Enum.flat_map(dirs, fn dir ->
+        dir |> Path.join("**/*.scm") |> Path.wildcard() |> Enum.map(&Path.relative_to(&1, dir))
+      end)
 
     assert Enum.sort(loaded) == Enum.sort(packages)
     assert length(loaded) == length(Enum.uniq(loaded))
@@ -50,8 +47,8 @@ defmodule Compos.LoadTest do
     refute "agent-transcript.scm" in top_level
 
     agent_modules =
-      priv
-      |> Path.join("packages/agent.scm")
+      "agent.scm"
+      |> locate.()
       |> File.read!()
       |> then(&Regex.scan(load_pattern, &1, capture: :all_but_first))
       |> Enum.map(&hd/1)

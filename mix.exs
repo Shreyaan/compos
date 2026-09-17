@@ -27,7 +27,7 @@ defmodule Compos.MixProject do
           compos_rpc: :permanent
         ],
         include_executables_for: [:unix],
-        steps: [:assemble, &Burrito.wrap/1],
+        steps: [:assemble, &copy_scheme_packages/1, &Burrito.wrap/1],
         burrito: [
           targets: [
             macos_arm: [os: :darwin, cpu: :aarch64]
@@ -35,6 +35,17 @@ defmodule Compos.MixProject do
         ]
       ]
     ]
+  end
+
+  # The packages live at the project root, and a release has no checkout:
+  # they ride in compos_core's priv/packages, the load-path entry that
+  # stays in a release, so the Scheme side needs no release branch.
+  defp copy_scheme_packages(release) do
+    vsn = release.applications[:compos_core][:vsn]
+    dest = Path.join([release.path, "lib", "compos_core-#{vsn}", "priv", "packages"])
+    File.mkdir_p!(dest)
+    File.cp_r!("scheme/packages", dest)
+    release
   end
 
   # Dependencies listed here are available only for this

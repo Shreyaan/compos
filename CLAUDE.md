@@ -11,7 +11,8 @@ current state, queue, and landmines (open it in the editor: `C-x C-f`, then
 
 Before adding Elixir code, ask: *can this be Scheme plus one small primitive?*
 Usually yes. Commands, keybindings, modes, hooks, themes, dired, chat, display
-rules — all live in `apps/compos_core/priv/*.scm`. Elixir grows only for NIFs,
+rules — all live in `scheme/packages/*.scm`; the kernel is
+`apps/compos_core/priv/editor.scm`. Elixir grows only for NIFs,
 sockets, PTYs, parsers, schedulers, and raw buffer mechanics.
 
 ## Dev loop
@@ -25,12 +26,12 @@ Before an RL benchmark run or benchmark harness change, load
 bin/test-fast                               # the suite in 4 partitions; all four apps must stay green
 mix test                                    # one lane — use it when one readable log matters
 SCHEME_TESTS=morg mix test apps/compos_core/test/compos/scheme_suite_test.exs   # one priv/tests file
-mix compos.reload apps/compos_core/priv/packages/foo.scm   # a file outside the watched roots
+mix compos.reload scheme/packages/foo.scm   # a file outside the watched roots
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 ```
 
 **Do not restart to see a change.** `Compos.Core.Hotload` watches `apps/*/lib`,
-`apps/compos_core/priv`, and the config home. Saving a `.scm` reloads only the
+`apps/compos_core/priv`, `scheme/`, and the config home. Saving a `.scm` reloads only the
 top-level forms whose text changed, then re-runs mode setup on the buffers
 wearing a mode the reload redefined. Saving an `.ex` compiles in a child
 `mix compile` and swaps the changed modules into the VM with no gap; a compile
@@ -150,7 +151,8 @@ loader; call `namespace!` only when the public vocabulary differs.
 ```
 apps/compos_scheme   interpreter (values are BEAM terms; symbols are {:sym, _})
 apps/compos_core     buffers, editor state, primitives, NIF, procs, LLM, desktop
-  priv/*.scm        the editor itself: commands, keymaps, modes, dired, themes
+  priv/*.scm        the kernel: editor.scm, dired, themes, transient, init.scm
+scheme/packages      every package: commands, modes, apps, chat, groups, dired verbs
   native/compos_ts   tree-sitter Rustler NIF
 apps/compos_ui       LiveView frontend (a client — no editor logic)
 apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")

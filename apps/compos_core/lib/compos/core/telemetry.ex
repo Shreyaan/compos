@@ -15,7 +15,7 @@ defmodule Compos.Core.Telemetry do
 
   The telemetry handler only sends a message. It never calls Scheme or blocks
   the process that emitted the event. Scheme owns presentation and policy in
-  `priv/packages/telemetry.scm`.
+  `scheme/packages/telemetry.scm`.
   """
 
   use GenServer

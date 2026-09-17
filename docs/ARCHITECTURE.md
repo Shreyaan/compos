@@ -6,7 +6,8 @@
 
 If it loops over bytes, parses, talks to an OS or a network — Elixir primitive.
 If it decides what a key means, what a command does, how a buffer is presented —
-Scheme, in `priv/*.scm` or your `~/.compos/*.scm`.
+Scheme, in `apps/compos_core/priv/editor.scm` (the kernel), `scheme/packages/*.scm`
+(every package), or your `~/.compos/*.scm`.
 
 Policy is a convenience, not a security boundary. compos runs for a user who
 already controls the machine; that user, their init file, and their agents can

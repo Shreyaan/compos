@@ -8,7 +8,7 @@ defmodule Compos.Core.Profiler do
   says what ran and how often, which processes did the work, and what the
   command cost in reductions, garbage and memory.
 
-  This module is mechanism. `priv/packages/profile.scm` owns the policy:
+  This module is mechanism. `scheme/packages/profile.scm` owns the policy:
   when to arm, what the report says, and where it shows.
 
   `call_count`, not `call_time`, and that is a decision. Call time needs

@@ -3,7 +3,7 @@ defmodule Compos.Core.Git do
   Git as mechanism: run the command, parse the bytes, return structured data.
 
   This module holds no policy. It does not know about buffers, windows, or
-  modes. `priv/packages/git.scm` decides what a diff looks like and what `RET`
+  modes. `scheme/packages/git.scm` decides what a diff looks like and what `RET`
   does on a line. Parsers are mechanism, so the porcelain and unified-diff
   parsers live here.
 

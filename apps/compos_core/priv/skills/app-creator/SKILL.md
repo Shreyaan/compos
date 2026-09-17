@@ -23,7 +23,7 @@ built. This skill owns what makes a mode an app.
 
 1. `(apropos "WORDS")` for every verb the app needs, `(apropos-components
    "WORDS")` for every part of the view.
-2. Read `priv/packages/detail.scm`. It is short and it is the whole detail
+2. Read `scheme/packages/detail.scm`. It is short and it is the whole detail
    contract.
 3. Read one existing app end to end: `notmuch.scm` for the group, `sentry.scm`
    or `whatsapp.scm` for a listing whose rows are their own buffers.

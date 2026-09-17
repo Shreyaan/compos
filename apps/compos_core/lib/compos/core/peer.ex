@@ -1,7 +1,7 @@
 defmodule Compos.Core.Peer do
   @moduledoc """
   Another replica, reached over its own JSON-RPC socket. Mechanism only: what
-  to sync, when, and with whom is Scheme (`priv/packages/peers.scm`).
+  to sync, when, and with whom is Scheme (`scheme/packages/peers.scm`).
 
   A peer is a home, so it is named by the socket that home listens on. A local
   path reaches a daemon on this machine; `host:/path` reaches one over ssh,

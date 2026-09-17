@@ -121,15 +121,15 @@
   (lambda ()
     (let ((source (visit (string-append (compos-priv-dir) "/tests/preview-test.scm"))))
       (check-equal!
-        (preview--file-target source "../packages/preview.scm")
-        (string-append (compos-priv-dir) "/packages/preview.scm")
+        (preview--file-target source "../editor.scm")
+        (string-append (compos-priv-dir) "/editor.scm")
         "the target is beside the source and not the process directory")
       (check-equal! (document-link--encode-target "../notes/a draft.md")
                     "../notes/a%20draft.md"
                     "the link keeps path separators and encodes spaces"))))
 
 (define (t--preview-link-target)
-  (string-append (compos-priv-dir) "/packages/preview.scm"))
+  (string-append (compos-priv-dir) "/editor.scm"))
 
 ;; a Markdown document standing in the tests directory
 (define (t--preview-link-buffer name text)
@@ -153,7 +153,7 @@
           (set-mark! 0)
           (run-command "insert-file-link")
           (t--preview-link-confirm! (t--preview-link-target))))
-      (check-equal! (buffer-text buf) "[Read](../packages/preview.scm) this"
+      (check-equal! (buffer-text buf) "[Read](../editor.scm) this"
                     "the selection becomes the label")
       (buffer-kill! buf))))
 
@@ -167,11 +167,11 @@
           (set-mark! #f)
           (run-command "insert-file-link")
           (t--preview-link-confirm! (t--preview-link-target))))
-      (check-contains! (plist-get (minibuffer-state) 'prompt) "Link text (default preview.scm):"
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "Link text (default editor.scm):"
                        "the second prompt asks for the label and offers the file name")
       (t--preview-link-confirm! "Preview package")
       (check-equal! (buffer-text buf)
-                    "Start [Preview package](../packages/preview.scm)here"
+                    "Start [Preview package](../editor.scm)here"
                     "the typed label appears at point")
       (buffer-kill! buf))))
 

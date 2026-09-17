@@ -6,7 +6,7 @@ defmodule Compos.Core.Agent do
   Turn execution lives behind `Compos.Core.Agent.Backend` (ACP subprocess,
   in-process LLM, test stub). Everything visible (transcript rendering,
   keybindings, presets, the *agents* list) is Scheme in
-  `priv/packages/agent.scm`.
+  `scheme/packages/agent.scm`.
 
   Events are delivered to Scheme in ordered batches through the owning
   `LLMSession` callback (or the default registered by chat), via

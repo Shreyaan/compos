@@ -44,7 +44,7 @@ there (`M-x <mode-name>` twice, or `M-x normal-mode`) to see it.
 ## Asking for a reload by name
 
 ```sh
-mix compos.reload apps/compos_core/priv/packages/notmuch.scm
+mix compos.reload scheme/packages/notmuch.scm
 mix compos.reload --all
 ```
 
