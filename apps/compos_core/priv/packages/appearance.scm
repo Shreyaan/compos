@@ -69,8 +69,8 @@
 
 ;; The frame echo area can sit at the top or bottom of the frame.
 ;; The CSS order is a face variable, so the choice persists with custom.scm.
-(defcustom 'echo-area-position 'top
-  "Position of the frame echo area: 'top or 'bottom."
+(defcustom 'echo-area-position 'bottom
+  "Position of the frame echo area: 'top or 'bottom. The design puts it at the bottom, under every window."
   'group 'appearance
   'type 'choice
   'set (lambda (position)
