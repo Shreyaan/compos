@@ -5,17 +5,12 @@ defmodule Compos.DesktopRestoreTest do
   round-trip here.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Buffer, Desktop, Editor, KeyDispatch, Session}
 
   defp leaves(%{type: :leaf} = leaf), do: [leaf]
   defp leaves(%{type: :split, children: children}), do: Enum.flat_map(children, &leaves/1)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
 
   defp eventually(fun, tries \\ 50) do
     cond do
@@ -710,7 +705,7 @@ defmodule Compos.DesktopRestoreTest do
 end
 
 defmodule Compos.DesktopBackupTest do
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.Desktop
 

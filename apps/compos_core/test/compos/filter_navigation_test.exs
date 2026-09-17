@@ -1,13 +1,6 @@
 defmodule Compos.FilterNavigationTest do
-  use ExUnit.Case, async: false
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(code) do
-    {:ok, result} = Session.eval(code, nil, 30_000)
-    result
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  use Compos.Case, async: false
+  alias Compos.Core.{Buffer, Editor}
 
   setup do
     Editor.minibuffer_close()

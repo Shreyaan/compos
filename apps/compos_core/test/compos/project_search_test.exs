@@ -6,16 +6,9 @@ defmodule Compos.ProjectSearchTest do
   directory you enter lists itself and its children.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp eval!(src) do
-    {:ok, out} = Session.eval(src)
-    out
-  end
+  alias Compos.Core.{Editor, Session}
 
   defp window_buffer, do: eval!("(window-buffer (active-window))")
 
@@ -785,14 +778,9 @@ defmodule Compos.ProjectScopeTest do
   only be asserted here, because Scheme has no catch form.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.Session
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code, nil, 30_000)
-    out
-  end
 
   test "the focused Scheme project-search tests pass" do
     for name <- [

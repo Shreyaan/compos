@@ -7,16 +7,9 @@ defmodule Compos.ChatNameTest do
   the buffer ref its session holds. The other presses C-c s.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Agent, Buffer, Editor}
 
   defp buffer(name, text) do
     {:ok, _} = Compos.Core.create_buffer(name, text: text)

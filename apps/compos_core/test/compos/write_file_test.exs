@@ -1,7 +1,7 @@
 defmodule Compos.WriteFileTest do
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{Editor, KeyDispatch, Session}
+  alias Compos.Core.{Editor, Session}
 
   @file_ Path.join([:code.priv_dir(:compos_core), "tests", "write-file-test.scm"])
   @lane {:scheme_suite, __MODULE__}
@@ -10,9 +10,6 @@ defmodule Compos.WriteFileTest do
     Regex.scan(~r/\(deftest '([^\s()]+)/, File.read!(@file_))
     |> Enum.map(fn [_, name] -> name end)
   end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
 
   # A verb by its name. Which key reaches it is a preference that moves.
   defp run(command), do: {:ok, _} = Session.eval(~s[(run-command "#{command}")])

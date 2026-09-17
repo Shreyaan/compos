@@ -10,12 +10,9 @@ defmodule Compos.MarginaliaProjectTest do
   and in every baseline, so it is kept as the record rather than ported.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+  alias Compos.Core.{Editor, Session}
 
   setup do
     Editor.minibuffer_close()
@@ -56,7 +53,6 @@ defmodule Compos.MarginaliaProjectTest do
       assert {:ok, ~s{"*mp-ga*"}} = Session.eval(~s{(car (list-current "*switch*"))})
       press(["ESC"])
     end
-
 
   end
 

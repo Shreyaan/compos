@@ -1,19 +1,11 @@
 defmodule Compos.CustomizeTest do
   @moduledoc "defcustom registry, custom file persistence, buffer-face remapping."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+  alias Compos.Core.{Buffer, Editor}
 
   # Session.eval returns the value printed write-style
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
   defp custom_file, do: Path.join(Compos.Core.home(), "custom.scm")
 
   setup do

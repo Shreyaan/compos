@@ -11,9 +11,9 @@ defmodule Compos.EndpointRedisTest do
   Skipped when redis-server is absent.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Endpoint, Session}
+  alias Compos.Core.{Endpoint}
 
   @port 6399
   @sentinel "__compos_end__"
@@ -34,21 +34,6 @@ defmodule Compos.EndpointRedisTest do
       {:ok, redis: true}
     else
       :ok
-    end
-  end
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp wait_until(fun, tries \\ 400) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(10)
-        wait_until(fun, tries - 1)
     end
   end
 

@@ -9,14 +9,9 @@ defmodule Compos.ChatCompactTest do
   chat-compact is the user's to run.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Editor, Session}
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
 
   defp eventually(f, tries \\ 60) do
     cond do

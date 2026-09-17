@@ -11,16 +11,9 @@ defmodule Compos.BufferLogTest do
   version before the delete.
   """
 
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Buffer, Editor}
 
   defp log_text, do: Buffer.text("*buffer-log*")
 

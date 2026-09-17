@@ -12,16 +12,11 @@ defmodule Compos.PeerSyncTest do
   process can say about a two-process protocol.
   """
 
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{Buffer, BufferHistory, Peer, Session}
+  alias Compos.Core.{Buffer, BufferHistory, Peer}
 
   defp sock, do: Application.get_env(:compos_rpc, :socket_path)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
 
   defp buffer(text) do
     name = "peer-#{System.unique_integer([:positive])}"

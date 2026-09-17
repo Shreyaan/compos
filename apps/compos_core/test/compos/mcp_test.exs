@@ -15,26 +15,11 @@ defmodule Compos.MCPTest do
   docs/BUG-escaped-closure-handlers.md; when that is fixed this one moves.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{MCP, Session}
 
   @fixture Path.expand("../support/fake_mcp_server.exs", __DIR__)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp wait_until(fun, tries \\ 300) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(20)
-        wait_until(fun, tries - 1)
-    end
-  end
 
   defp connect!(name) do
     on_exit(fn -> MCP.disconnect(name) end)

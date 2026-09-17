@@ -6,13 +6,11 @@ defmodule Compos.ChatInputGuardTest do
   mark that drifted past the end never breaks reading the input.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Agent, Buffer, Editor, Session}
 
   @marker "\n>>> you: "
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   setup do
     Editor.minibuffer_close()

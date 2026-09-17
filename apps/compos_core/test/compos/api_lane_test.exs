@@ -6,17 +6,9 @@ defmodule Compos.ApiLaneTest do
   didn't have, on the same code path ACP uses.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Agent, Buffer, Editor, Session}
 
   defp focus(buf),
     do: {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!))])

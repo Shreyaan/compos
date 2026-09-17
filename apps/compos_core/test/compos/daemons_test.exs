@@ -1,16 +1,9 @@
 defmodule Compos.DaemonsTest do
   @moduledoc "Daemon registry, workspace ownership, and the C-x d list."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Browser, Editor, KeyDispatch, Session}
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Browser, Editor, Session}
 
   defp stub_browser do
     test = self()

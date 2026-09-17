@@ -5,14 +5,7 @@ defmodule Compos.KeysTest do
   way every caller does, through the session.
   """
 
-  use ExUnit.Case
-
-  alias Compos.Core.Session
-
-  defp eval!(src) do
-    {:ok, out} = Session.eval(src)
-    out
-  end
+  use Compos.Case
 
   setup do
     eval!("(key-forget-all!)")

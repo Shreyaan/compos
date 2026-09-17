@@ -8,14 +8,11 @@ defmodule Compos.ChatInputMarkerTest do
   key path and read the invariant back.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Agent, Buffer, Editor}
 
   @marker "\n>>> you: "
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp eval!(src), do: (fn {:ok, p} -> p end).(Session.eval(src))
 
   setup do
     Editor.minibuffer_close()

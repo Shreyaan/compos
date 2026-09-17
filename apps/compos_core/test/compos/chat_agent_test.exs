@@ -1,26 +1,3 @@
-defmodule Compos.ChatAgentTest.FakeTransport do
-  @moduledoc "Same seam as Compos.AgentTest.FakeTransport (that one lives in its test file)."
-
-  @behaviour Compos.Core.Agent.Transport
-
-  @impl true
-  def open(cmd, _opts, owner) do
-    test = :persistent_term.get(:agent_test_pid)
-    send(test, {:transport_open, owner})
-    send(test, {:transport_cmd, cmd})
-    {:ok, test}
-  end
-
-  @impl true
-  def send_frame(test, data) do
-    send(test, {:frame, Jason.decode!(IO.iodata_to_binary(data))})
-    :ok
-  end
-
-  @impl true
-  def close(_test), do: :ok
-end
-
 defmodule Compos.ChatAgentTest do
   @moduledoc """
   Chat/agent unification: a chat buffer hosts an ACP thread
@@ -52,8 +29,8 @@ defmodule Compos.ChatAgentTest do
   end
 
   setup do
-    :persistent_term.put(:agent_test_pid, self())
-    Application.put_env(:compos_core, :acp_transport, Compos.ChatAgentTest.FakeTransport)
+    Compos.Test.FakeTransport.own!()
+    Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
     System.put_env("ZZ_TEST_KEY", "sekrit")
 
     on_exit(fn ->

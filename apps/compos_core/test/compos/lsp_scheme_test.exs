@@ -5,28 +5,11 @@ defmodule Compos.LSPSchemeTest do
   motion — against the fake server, on a real file in a temp project.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, LSP, Session}
+  alias Compos.Core.{Buffer, Editor, LSP}
 
   @fixture Path.expand("../support/fake_lsp_server.exs", __DIR__)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp wait_until(fun, tries \\ 300) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(20)
-        wait_until(fun, tries - 1)
-    end
-  end
 
   # a temp git project with one file; a fake server registered for a
   # fresh synthetic mode, so real registrations stay untouched

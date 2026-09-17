@@ -4,27 +4,12 @@ defmodule Compos.LSPPrimitivesTest do
   lsp-on-event! pipe, and lsp-buffer-request — against the fake server.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, LSP, Session}
+  alias Compos.Core.{Buffer, LSP}
 
   @fixture Path.expand("../support/fake_lsp_server.exs", __DIR__)
   @root "/tmp"
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp wait_until(fun, tries \\ 300) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(20)
-        wait_until(fun, tries - 1)
-    end
-  end
 
   defp start!(name) do
     on_exit(fn ->

@@ -12,14 +12,9 @@ defmodule Compos.ChromeTest do
   priv/tests/chrome-test.scm.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Browser, Buffer, Editor, Session}
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
 
   # stands in for the extension's WebSocket transport: every frame the daemon
   # pushes is forwarded here, so we can assert on the protocol itself

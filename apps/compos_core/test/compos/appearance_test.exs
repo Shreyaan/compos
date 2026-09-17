@@ -6,14 +6,9 @@ defmodule Compos.AppearanceTest do
   a chord is a preference.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Buffer, Editor, Session}
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
-  end
 
   defp run!(command), do: {:ok, _} = Session.eval(~s{(run-command "#{command}")})
 

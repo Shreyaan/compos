@@ -11,12 +11,9 @@ defmodule Compos.MorgTest do
   passes here only because of how this file builds its buffer.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(text), do: text |> String.graphemes() |> press()
+  alias Compos.Core.{Buffer, Editor, Session}
 
   defp morg_buffer(text) do
     name = "morg-#{System.unique_integer([:positive])}.md"

@@ -11,22 +11,15 @@ defmodule Compos.AnnotateTest do
   way in, which is what makes it the bridge.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Buffer, Editor}
 
   @buf "annotate-test.txt"
   @list "*annotations*"
 
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
   # Session.eval returns the PRINTED value: strings keep their quotes,
   # numbers print bare. eval_s! unwraps one printed string.
-  defp eval!(code) do
-    {:ok, v} = Session.eval(code)
-    v
-  end
-
   defp eval_s!(code), do: eval!(code) |> String.trim("\"")
 
   setup do
@@ -91,7 +84,6 @@ defmodule Compos.AnnotateTest do
              eval_s!(~s[(window-buffer (active-window))]) == @buf
            end)
   end
-
 
   defp eventually(fun, tries \\ 40) do
     cond do

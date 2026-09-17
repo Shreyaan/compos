@@ -8,14 +8,9 @@ defmodule Compos.ModeToggleTest do
   What stays here reads a grammar through Buffer, or a rendered window.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, Session}
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Buffer, Editor}
 
   defp fresh_buffer(text) do
     name = "mode-toggle-#{System.unique_integer([:positive])}"

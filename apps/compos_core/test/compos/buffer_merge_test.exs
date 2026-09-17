@@ -14,13 +14,11 @@ defmodule Compos.BufferMergeTest do
   follow the history, and both sides must agree afterwards.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, BufferHistory, KeyDispatch}
+  alias Compos.Core.{Buffer, BufferHistory}
 
   @peer 424_242
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   defp buffer(text) do
     name = "merge-#{System.unique_integer([:positive])}"

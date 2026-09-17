@@ -6,16 +6,9 @@ defmodule Compos.BookmarkTest do
   This test proves the Emacs chords and list visit command dispatch correctly.
   """
 
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(source) do
-    {:ok, printed} = Session.eval(source)
-    printed
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Buffer, Editor}
 
   setup do
     id = System.unique_integer([:positive])

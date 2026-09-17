@@ -5,23 +5,13 @@ defmodule Compos.LSPConnTest do
   against a real subprocess (the fake server in test/support).
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Buffer, LSP}
   alias Compos.Core.LSP.Conn
 
   @fixture Path.expand("../support/fake_lsp_server.exs", __DIR__)
   @root "/tmp"
-
-  defp wait_until(fun, tries \\ 300) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(20)
-        wait_until(fun, tries - 1)
-    end
-  end
 
   defp spec(env, extra) do
     Map.merge(

@@ -1,12 +1,7 @@
 defmodule Compos.MessagesTest do
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
   alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(source) do
-    {:ok, printed} = Session.eval(source)
-    printed
-  end
 
   setup do
     Editor.minibuffer_close()

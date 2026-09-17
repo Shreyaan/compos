@@ -5,19 +5,14 @@ defmodule Compos.WindowFollowTest do
   and places point asks every window on it to follow point again.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, Session}
+  alias Compos.Core.{Editor}
 
   setup do
     Editor.minibuffer_close()
     Editor.delete_other_windows()
     :ok
-  end
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
   end
 
   defp active_leaf do

@@ -1,17 +1,9 @@
 defmodule Compos.IbufferTest do
   @moduledoc "The traditional ibuffer table remains separate from the modal switcher."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(code) do
-    {:ok, value} = Session.eval(code)
-    value
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(text), do: text |> String.graphemes() |> press()
+  alias Compos.Core.{Buffer, Editor, Session}
 
   setup do
     Editor.minibuffer_close()

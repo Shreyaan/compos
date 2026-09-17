@@ -9,9 +9,9 @@ defmodule Compos.OccurTsTest do
   minibuffer before any list exists.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch}
+  alias Compos.Core.{Buffer, Editor}
 
   @json """
   {
@@ -21,8 +21,6 @@ defmodule Compos.OccurTsTest do
   """
 
   @query ~S[(pair key: (string) @key)]
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   setup do
     source = "occur-ts-source-#{System.unique_integer([:positive])}"

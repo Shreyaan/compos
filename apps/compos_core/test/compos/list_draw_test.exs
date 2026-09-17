@@ -6,14 +6,9 @@ defmodule Compos.ListDrawTest do
   window's top.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Events, Session}
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
-  end
+  alias Compos.Core.{Buffer, Events}
 
   defp count_changes(ref, n \\ 0) do
     receive do

@@ -7,14 +7,12 @@ defmodule Compos.BufferHistoryMirrorTest do
   shares the user's undo stack, so C-/ walks agent-added text back too.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   import ExUnit.CaptureLog
 
-  alias Compos.Core.{Buffer, KeyDispatch}
+  alias Compos.Core.{Buffer}
   alias Compos.Core.BufferHistory, as: History
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   defp new_buffer(text) do
     name = "weave-mirror-#{System.unique_integer([:positive])}"

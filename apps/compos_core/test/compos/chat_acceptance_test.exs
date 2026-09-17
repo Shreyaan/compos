@@ -15,12 +15,10 @@ defmodule Compos.ChatAcceptanceTest do
   no card, a turn the record lost — which is the affordance to build next.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Agent, Buffer, Editor}
 
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp eval!(src), do: (fn {:ok, p} -> p end).(Session.eval(src))
   defp focus(buf), do: eval!(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!) #t)])
 
   # eval a string-valued expression: the printed value is a quoted string

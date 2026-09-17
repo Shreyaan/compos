@@ -1,12 +1,7 @@
 defmodule Compos.NotmuchMailboxesTest do
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{KeyDispatch, Session}
-
-  defp eval!(code) do
-    {:ok, result} = Session.eval(code)
-    result
-  end
+  alias Compos.Core.{KeyDispatch}
 
   setup do
     eval!(~S"""

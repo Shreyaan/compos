@@ -1,24 +1,3 @@
-defmodule Compos.SwitchTest.FakeTransport do
-  @moduledoc "ACP seam: frames land in the test process."
-  @behaviour Compos.Core.Agent.Transport
-
-  @impl true
-  def open(cmd, _opts, owner) do
-    test = :persistent_term.get(:switch_test_pid)
-    send(test, {:transport_open, owner, cmd})
-    {:ok, test}
-  end
-
-  @impl true
-  def send_frame(test, data) do
-    send(test, {:frame, Jason.decode!(IO.iodata_to_binary(data))})
-    :ok
-  end
-
-  @impl true
-  def close(_test), do: :ok
-end
-
 defmodule Compos.SwitchTest do
   @moduledoc """
   W7's done-when: ONE chat walks api -> codex -> claude-code -> api.
@@ -27,20 +6,18 @@ defmodule Compos.SwitchTest do
   and the modeline names the backend actually running at every step.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Agent, Buffer, Editor, Session}
 
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
   defp inject(agent, frame), do: send(agent, {:acp_data, Jason.encode!(frame) <> "\n"})
 
   defp focus(buf),
     do: {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!))])
 
   setup do
-    :persistent_term.put(:switch_test_pid, self())
-    Application.put_env(:compos_core, :acp_transport, Compos.SwitchTest.FakeTransport)
+    Compos.Test.FakeTransport.own!()
+    Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     Editor.minibuffer_close()
     Editor.delete_other_windows()
@@ -147,7 +124,8 @@ defmodule Compos.SwitchTest do
     press(["RET"])
     press(["C-g"])
 
-    assert_receive {:transport_open, codex, cmd}, 1_000
+    assert_receive {:transport_open, codex}, 1_000
+    assert_receive {:transport_cmd, cmd}, 1_000
     # the codex connector is the native App Server now, not the ACP bridge
     assert cmd =~ "codex app-server"
 

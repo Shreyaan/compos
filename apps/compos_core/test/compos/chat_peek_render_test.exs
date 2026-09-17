@@ -1,11 +1,6 @@
 defmodule Compos.ChatPeekRenderTest do
-  use ExUnit.Case, async: false
-  alias Compos.Core.{Buffer, Editor, Session}
-
-  defp eval!(code) do
-    {:ok, result} = Session.eval(code)
-    result
-  end
+  use Compos.Case, async: false
+  alias Compos.Core.{Buffer, Editor}
 
   defp leaves(%{buffer: _} = leaf), do: [leaf]
   defp leaves(map) when is_map(map), do: map |> Map.values() |> Enum.flat_map(&leaves/1)

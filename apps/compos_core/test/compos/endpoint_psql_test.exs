@@ -10,9 +10,9 @@ defmodule Compos.EndpointPsqlTest do
   Skipped when no local PostgreSQL answers.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Endpoint, Session}
+  alias Compos.Core.{Endpoint}
 
   @sentinel "__compos_end__"
 
@@ -24,21 +24,6 @@ defmodule Compos.EndpointPsqlTest do
         match?({_, 0}, System.cmd("pg_isready", [], stderr_to_stdout: true))
 
     if ready?, do: {:ok, psql_path: psql}, else: :ok
-  end
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp wait_until(fun, tries \\ 400) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(10)
-        wait_until(fun, tries - 1)
-    end
   end
 
   @tag :psql

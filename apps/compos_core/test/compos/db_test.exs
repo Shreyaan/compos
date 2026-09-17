@@ -8,7 +8,7 @@ defmodule Compos.DBTest do
   their column names, and errors that carry SQLSTATE.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{DB, Session}
 
@@ -17,25 +17,6 @@ defmodule Compos.DBTest do
     if ready?, do: {:ok, pg: true}, else: :ok
   rescue
     _ -> :ok
-  end
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp wait_until(fun, tries \\ 400) do
-    cond do
-      fun.() ->
-        :ok
-
-      tries == 0 ->
-        flunk("condition never became true")
-
-      true ->
-        Process.sleep(10)
-        wait_until(fun, tries - 1)
-    end
   end
 
   defp ask!(name, sql, params, var) do

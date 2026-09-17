@@ -1,16 +1,9 @@
 defmodule Compos.AppPreviewTest do
   @moduledoc "C-c C-a runs a buffer as an app; a save reloads it."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp eval!(src) do
-    {:ok, out} = Session.eval(src)
-    out
-  end
+  alias Compos.Core.{Editor}
 
   setup do
     Editor.minibuffer_close()

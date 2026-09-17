@@ -7,14 +7,9 @@ defmodule Compos.WindowConfigHookTest do
   command involved.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Editor, Session}
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
-  end
 
   defp eventually(fun, tries \\ 50) do
     cond do

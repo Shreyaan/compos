@@ -8,17 +8,9 @@ defmodule Compos.CacheEconomicsTest do
   is recorded on every way out of it, not only the happy one.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, LLMDb, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Agent, Buffer, Editor, LLMDb, Session}
 
   defp focus(buf),
     do: {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!))])

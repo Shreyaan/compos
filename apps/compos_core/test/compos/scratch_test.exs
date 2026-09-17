@@ -1,11 +1,9 @@
 defmodule Compos.ScratchTest do
   @moduledoc "The editor-wide plain scratch buffer command."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Buffer, Editor}
 
   # the verb by name. Which key reaches it is a preference that moves.
   defp run(command), do: eval!(~s[(run-command "#{command}")])
@@ -18,11 +16,6 @@ defmodule Compos.ScratchTest do
       "#f" -> nil
       quoted -> String.trim(quoted, ~s{"})
     end
-  end
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
   end
 
   defp fresh_buffer(name, text) do

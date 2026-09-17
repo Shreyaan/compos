@@ -1,17 +1,9 @@
 defmodule Compos.GroupSwitchPreviewTest do
   @moduledoc "C-x b previews the selected buffer in the invoking window."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, KeyDispatch, Session}
-
-  defp eval!(code) do
-    {:ok, value} = Session.eval(code)
-    value
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(text), do: text |> String.graphemes() |> press()
+  alias Compos.Core.{Editor}
 
   setup do
     Editor.minibuffer_close()

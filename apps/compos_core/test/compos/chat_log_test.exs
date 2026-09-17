@@ -6,11 +6,9 @@ defmodule Compos.ChatLogTest do
   the next conversation starts a new file.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(src), do: (fn {:ok, p} -> p end).(Session.eval(src))
+  alias Compos.Core.{Agent, Buffer, Editor}
 
   # eval a string-valued expression: the printed value is a quoted string
   # literal with JSON-compatible escapes, so one decode recovers it
@@ -184,8 +182,6 @@ defmodule Compos.ChatLogTest do
 
     Compos.Core.kill_buffer(path)
   end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   defp eventually(fun, tries \\ 40) do
     cond do

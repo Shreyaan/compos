@@ -7,14 +7,9 @@ defmodule Compos.NotmuchSceneTest do
   it by the scene's `show` role, without asserting the production binding.
   """
 
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
   alias Compos.Core.{KeyDispatch, Session}
-
-  defp eval!(source) do
-    {:ok, printed} = Session.eval(source)
-    printed
-  end
 
   setup do
     eval!(~S"""

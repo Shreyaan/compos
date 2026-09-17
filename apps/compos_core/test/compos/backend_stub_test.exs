@@ -21,11 +21,9 @@ defmodule Compos.BackendStubTest do
   card, and a permission round-trip land in a real buffer with no wire.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Agent, Buffer, Editor, Session}
 
   setup do
     :persistent_term.put(:stub_test_pid, self())

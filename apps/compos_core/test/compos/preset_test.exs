@@ -1,25 +1,3 @@
-defmodule Compos.PresetTest.FakeTransport do
-  @moduledoc "Same ACP seam as agent_test: frames land in the test process."
-  @behaviour Compos.Core.Agent.Transport
-
-  @impl true
-  def open(cmd, _opts, owner) do
-    test = :persistent_term.get(:preset_test_pid)
-    send(test, {:transport_open, owner})
-    send(test, {:transport_cmd, cmd})
-    {:ok, test}
-  end
-
-  @impl true
-  def send_frame(test, data) do
-    send(test, {:frame, Jason.decode!(IO.iodata_to_binary(data))})
-    :ok
-  end
-
-  @impl true
-  def close(_test), do: :ok
-end
-
 defmodule Compos.PresetTest do
   @moduledoc """
   W6: optional presets are the single source of truth for a chat's extra
@@ -28,18 +6,15 @@ defmodule Compos.PresetTest do
   reattach — never silently do nothing.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+  alias Compos.Core.{Agent, Buffer, Editor, Session}
 
   defp inject(agent, frame), do: send(agent, {:acp_data, Jason.encode!(frame) <> "\n"})
 
   setup do
-    :persistent_term.put(:preset_test_pid, self())
-    Application.put_env(:compos_core, :acp_transport, Compos.PresetTest.FakeTransport)
+    Compos.Test.FakeTransport.own!()
+    Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     Editor.minibuffer_close()
     Editor.delete_other_windows()

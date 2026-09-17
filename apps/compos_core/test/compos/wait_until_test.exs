@@ -9,14 +9,9 @@ defmodule Compos.WaitUntilTest do
   all — which it could not until the read cache was cleared between polls.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.Session
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
 
   test "a predicate that is already true answers at once" do
     assert eval!("(wait-until (lambda () #t))") == "#t"

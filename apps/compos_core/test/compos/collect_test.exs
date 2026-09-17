@@ -4,11 +4,9 @@ defmodule Compos.CollectTest do
   behaviour: n/p preview, RET confirms, q cancels — same closures.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Editor, Session}
 
   defp log do
     {:ok, s} = Session.eval("*zz-log*")

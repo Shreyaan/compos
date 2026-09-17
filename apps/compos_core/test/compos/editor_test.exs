@@ -1,12 +1,9 @@
 defmodule Compos.EditorTest do
   @moduledoc "Drives the editor purely through key events — the same path the GUI uses."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+  alias Compos.Core.{Buffer, Editor}
 
   # A verb by its name. Which key reaches it is a preference that moves.
   defp run(command) do
@@ -4534,12 +4531,10 @@ end
 defmodule Compos.MinibufferEditingTest do
   @moduledoc "The minibuffer is a buffer: real editing commands work in prompts."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch}
+  alias Compos.Core.{Buffer, Editor}
 
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
   defp input, do: Editor.render_state().minibuffer.input
 
   setup do

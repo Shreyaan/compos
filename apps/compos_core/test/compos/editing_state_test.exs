@@ -5,18 +5,11 @@ defmodule Compos.EditingStateTest do
   commands they need; no test names a production key.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Buffer, Editor, Session}
 
   @buf "zz-editing-state.txt"
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp eval!(code) do
-    {:ok, v} = Session.eval(code)
-    v
-  end
 
   defp editing?, do: eval!(~s{(editing-state? "#{@buf}")}) == "#t"
 

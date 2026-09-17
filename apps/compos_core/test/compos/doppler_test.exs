@@ -1,16 +1,9 @@
 defmodule Compos.DopplerTest do
   @moduledoc "The Doppler app lists names and changes only explicit secrets."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, KeyDispatch, SchemeAPI, Session}
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Editor, SchemeAPI}
 
   setup do
     dir = Path.join(System.tmp_dir!(), "compos-doppler-#{System.unique_integer([:positive])}")

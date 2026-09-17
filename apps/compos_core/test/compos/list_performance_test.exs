@@ -1,16 +1,9 @@
 defmodule Compos.ListPerformanceTest do
   @moduledoc "Shared list rendering avoids source work during local UI changes."
 
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Buffer, Editor}
 
   setup do
     Editor.minibuffer_close()

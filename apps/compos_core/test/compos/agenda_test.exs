@@ -6,13 +6,11 @@ defmodule Compos.AgendaTest do
   and the block tree.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, SchemeAPI, Session}
+  alias Compos.Core.{Buffer, Editor, SchemeAPI, Session}
 
   @agenda "*Agenda*"
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   setup do
     dir = Path.join(System.tmp_dir!(), "compos-agenda-#{System.unique_integer([:positive])}")

@@ -1,16 +1,9 @@
 defmodule Compos.HelpTest do
   @moduledoc "Help is a rendered markdown page: ? in a list, C-h m anywhere."
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp eval!(src) do
-    {:ok, out} = Session.eval(src)
-    out
-  end
 
   setup do
     Editor.minibuffer_close()

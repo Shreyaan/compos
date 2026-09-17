@@ -1,25 +1,7 @@
-defmodule Compos.ChatResetTest.FakeTransport do
-  @behaviour Compos.Core.Agent.Transport
-
-  @impl true
-  def open(cmd, _opts, owner) do
-    test = :persistent_term.get(:chat_reset_test_pid)
-    send(test, {:transport_open, owner})
-    send(test, {:transport_cmd, cmd})
-    {:ok, test}
-  end
-
-  @impl true
-  def send_frame(_test, _data), do: :ok
-
-  @impl true
-  def close(_test), do: :ok
-end
-
 defmodule Compos.ChatResetTest do
   @moduledoc "chat-reset wipes the conversation but keeps the surface."
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Buffer, KeyDispatch, Session}
 
@@ -29,11 +11,6 @@ defmodule Compos.ChatResetTest do
   # here", which is Emacs' rule.
   defp type_over_prefill(path),
     do: ("/" <> path) |> String.graphemes() |> Enum.each(&KeyDispatch.handle_key/1)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
 
   test "a stale legacy waiting range is discarded without touching the chat" do
     name = "*chat:stale-waiting*"
@@ -195,8 +172,8 @@ defmodule Compos.ChatResetTest do
   end
 
   test "C-c m on an ACP chat reconnects on the new model" do
-    :persistent_term.put(:chat_reset_test_pid, self())
-    Application.put_env(:compos_core, :acp_transport, Compos.ChatResetTest.FakeTransport)
+    Compos.Test.FakeTransport.own!()
+    Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :acp_transport)
@@ -223,8 +200,8 @@ defmodule Compos.ChatResetTest do
   end
 
   test "a stale cross-connector model is dropped on revive" do
-    :persistent_term.put(:chat_reset_test_pid, self())
-    Application.put_env(:compos_core, :acp_transport, Compos.ChatResetTest.FakeTransport)
+    Compos.Test.FakeTransport.own!()
+    Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :acp_transport)
@@ -281,8 +258,8 @@ defmodule Compos.ChatResetTest do
   describe "the locals partition (W8)" do
     # every kind of chat resets to the identical clean state
     setup do
-      :persistent_term.put(:chat_reset_test_pid, self())
-      Application.put_env(:compos_core, :acp_transport, Compos.ChatResetTest.FakeTransport)
+      Compos.Test.FakeTransport.own!()
+      Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
       on_exit(fn ->
         Application.delete_env(:compos_core, :acp_transport)

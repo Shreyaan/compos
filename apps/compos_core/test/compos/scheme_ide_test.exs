@@ -7,16 +7,9 @@ defmodule Compos.SchemeIdeTest do
   is quiet, are Scheme policy and live in priv/tests/scheme-ide-test.scm.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Buffer, Editor}
 
   defp scheme_buffer(text) do
     name = "/tmp/scheme-ide-#{System.unique_integer([:positive])}.scm"

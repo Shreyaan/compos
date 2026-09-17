@@ -6,14 +6,9 @@ defmodule Compos.PromptShapeTest do
   panel and the modal float.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Editor, Session}
-
-  defp eval!(code) do
-    {:ok, value} = Session.eval(code)
-    value
-  end
 
   defp rects, do: eval!("(window-rects)")
 

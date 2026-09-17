@@ -13,7 +13,7 @@ defmodule Compos.SubagentResultTest do
     * subagent-wait answers a parent that fanned out to several children.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Agent, Buffer, Editor, Session}
 
@@ -35,11 +35,6 @@ defmodule Compos.SubagentResultTest do
     end)
 
     :ok
-  end
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code, nil, 30_000)
-    out
   end
 
   defp slug(out), do: String.trim(out, "\"")

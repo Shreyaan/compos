@@ -9,11 +9,9 @@ defmodule Compos.GitDiffTest do
   tests wait for it rather than assume it already happened.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, Git, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Buffer, Editor, Git, Session}
 
   defp unstaged(file), do: "Unstaged changes|#{file}"
 

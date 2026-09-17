@@ -1,25 +1,3 @@
-defmodule Compos.ChatImageTest.FakeTransport do
-  @moduledoc "Same seam as Compos.ChatAgentTest.FakeTransport."
-
-  @behaviour Compos.Core.Agent.Transport
-
-  @impl true
-  def open(_cmd, _opts, owner) do
-    test = :persistent_term.get(:agent_test_pid)
-    send(test, {:transport_open, owner})
-    {:ok, test}
-  end
-
-  @impl true
-  def send_frame(test, data) do
-    send(test, {:frame, Jason.decode!(IO.iodata_to_binary(data))})
-    :ok
-  end
-
-  @impl true
-  def close(_test), do: :ok
-end
-
 defmodule Compos.ChatImageTest do
   @moduledoc """
   A pasted image is a file, a block, and a content block on the wire: the
@@ -61,8 +39,8 @@ defmodule Compos.ChatImageTest do
   defp pending, do: Buffer.get_local(@buf, "chat-pending-images") || []
 
   setup do
-    :persistent_term.put(:agent_test_pid, self())
-    Application.put_env(:compos_core, :acp_transport, Compos.ChatImageTest.FakeTransport)
+    Compos.Test.FakeTransport.own!()
+    Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :acp_transport)

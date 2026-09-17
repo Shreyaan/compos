@@ -4,14 +4,9 @@ defmodule Compos.ListPromptFollowTest do
   showing the list takes the row's point and drops its scroll pin.
   """
 
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{Editor, Session}
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code, nil, 30_000)
-    out
-  end
+  alias Compos.Core.{Editor}
 
   defp leaf(tree, name) do
     Regex.run(~r/\{:leaf, "#{Regex.escape(name)}", \d+, (\d+), (true|false), (\d+)/, tree)

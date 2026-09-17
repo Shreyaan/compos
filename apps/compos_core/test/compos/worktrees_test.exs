@@ -1,11 +1,9 @@
 defmodule Compos.WorktreesTest do
   @moduledoc "Worktree create/list/list-buffer/remove, and the isolated-attach opts."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.Editor
 
   # chat-name-test.scm owns the naming policy. These tests are about what a
   # workspace chat inherits and does, so they ask for the name rather than
@@ -13,11 +11,6 @@ defmodule Compos.WorktreesTest do
   # other chats exist when the test runs.
   defp chat_name!(group) do
     eval!(~s{(group-chat-name "#{group}")}) |> String.trim(~s("))
-  end
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
   end
 
   defp sh!(cmd, dir) do

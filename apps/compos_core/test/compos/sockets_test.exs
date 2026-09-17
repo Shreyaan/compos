@@ -5,26 +5,9 @@ defmodule Compos.SocketsTest do
   driven the way a person drives it — through KeyDispatch.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Daemon, Editor, KeyDispatch, Proc, Session}
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp wait_until(fun, tries \\ 300) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(20)
-        wait_until(fun, tries - 1)
-    end
-  end
+  alias Compos.Core.{Daemon, Editor, Proc}
 
   defp start_proc!(name, cmd) do
     {:ok, pid} = Proc.start(name, cmd)

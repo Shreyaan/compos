@@ -9,13 +9,10 @@ defmodule Compos.ChatRecordTest do
   reconstruct a prefix it never held.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Agent, Buffer, Editor, Session}
   alias Compos.Core.Agent.Backend
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
 
   # The save prompt arrives prefilled with a suggested file name. To choose a
   # different absolute path, a user types it over the prefill: the leading

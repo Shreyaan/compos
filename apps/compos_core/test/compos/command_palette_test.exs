@@ -1,10 +1,7 @@
 defmodule Compos.CommandPaletteTest do
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+  alias Compos.Core.{Buffer, Editor, Session}
 
   defp wait_for(fun, tries \\ 100)
   defp wait_for(fun, 0), do: assert(fun.())

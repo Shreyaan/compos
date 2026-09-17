@@ -1,7 +1,7 @@
 defmodule Compos.FileViewTest do
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, KeyDispatch, Session}
+  alias Compos.Core.{Buffer, KeyDispatch}
 
   @json "zz-file-view-command.json"
 
@@ -42,8 +42,4 @@ defmodule Compos.FileViewTest do
     assert Buffer.text(@json) == "{\n  \"b\": false\n}\n"
   end
 
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
-  end
 end

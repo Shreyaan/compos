@@ -6,14 +6,9 @@ defmodule Compos.BufferReplaceTest do
   primitive, so one command must equal one undo.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Session}
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Buffer}
 
   defp buffer(text) do
     name = "zz-replace-#{System.unique_integer([:positive])}"

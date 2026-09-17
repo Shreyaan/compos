@@ -5,17 +5,9 @@ defmodule Compos.EvilTest do
   visual, registers, undo boundaries, search, ex, and passthrough.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Buffer, Editor}
 
   defp fresh_evil_buffer(text) do
     name = "evil-#{System.unique_integer([:positive])}"

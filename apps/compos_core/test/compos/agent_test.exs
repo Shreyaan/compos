@@ -1,39 +1,10 @@
-defmodule Compos.AgentTest.FakeTransport do
-  @moduledoc """
-  The ACP test seam: frames the Agent sends arrive in the test process as
-  `{:frame, decoded_map}`; the test injects adapter output with
-  `send(agent, {:acp_data, json <> "\n"})`.
-  """
-
-  @behaviour Compos.Core.Agent.Transport
-
-  @impl true
-  def open(cmd, _opts, owner) do
-    test = :persistent_term.get(:agent_test_pid)
-    send(test, {:transport_open, owner})
-    send(test, {:transport_cmd, cmd})
-    {:ok, test}
-  end
-
-  @impl true
-  def send_frame(test, data) do
-    send(test, {:frame, Jason.decode!(IO.iodata_to_binary(data))})
-    :ok
-  end
-
-  @impl true
-  def close(_test), do: :ok
-end
-
 defmodule Compos.AgentTest do
   @moduledoc "Drives agent threads through keys + the FakeTransport — no adapter binary."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Agent, Buffer, Editor, Session}
   alias Compos.Core.Agent.Backend
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   # the live input: everything past the mark. The input carries no marker
   # bytes, so an empty input means the buffer ends at the mark.
@@ -42,8 +13,6 @@ defmodule Compos.AgentTest do
     mark = min(Buffer.get_local(buf, "agent-saved-mark") || byte_size(text), byte_size(text))
     binary_part(text, mark, byte_size(text) - mark)
   end
-  defp type(str), do: str |> String.graphemes() |> press()
-
   defp evict(name) do
     :ok = Buffer.checkpoint_now(name)
     [{pid, _}] = Registry.lookup(Compos.Core.BufferRegistry, name)
@@ -57,8 +26,8 @@ defmodule Compos.AgentTest do
     Compos.Core.Session.eval(
       "(begin (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
     )
-    :persistent_term.put(:agent_test_pid, self())
-    Application.put_env(:compos_core, :acp_transport, Compos.AgentTest.FakeTransport)
+    Compos.Test.FakeTransport.own!()
+    Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     Editor.minibuffer_close()
     Editor.delete_other_windows()

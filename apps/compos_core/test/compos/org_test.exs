@@ -1,12 +1,9 @@
 defmodule Compos.OrgTest do
   @moduledoc "Drives org-mode through the same key/command path the GUI uses."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+  alias Compos.Core.{Buffer, Editor, Session}
 
   defp org_buffer(text) do
     name = "org-#{System.unique_integer([:positive])}.org"

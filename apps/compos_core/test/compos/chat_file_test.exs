@@ -1,24 +1,3 @@
-defmodule Compos.ChatFileTest.FakeTransport do
-  @moduledoc "ACP seam: frames land in the test process."
-  @behaviour Compos.Core.Agent.Transport
-
-  @impl true
-  def open(cmd, _opts, owner) do
-    test = :persistent_term.get(:chat_file_test_pid)
-    send(test, {:transport_open, owner, cmd})
-    {:ok, test}
-  end
-
-  @impl true
-  def send_frame(test, data) do
-    send(test, {:frame, Jason.decode!(IO.iodata_to_binary(data))})
-    :ok
-  end
-
-  @impl true
-  def close(_test), do: :ok
-end
-
 defmodule Compos.ChatFileTest do
   @moduledoc """
   W9: a saved .chat is a conversation, not just text. One optional header
@@ -26,12 +5,9 @@ defmodule Compos.ChatFileTest do
   ran — same backend, same model, same presets — with its turns intact.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+  alias Compos.Core.{Buffer, Editor, Session}
 
   # The save prompt arrives prefilled with a suggested file name. To choose a
   # different absolute path, a user types it over the prefill: the leading
@@ -39,16 +15,11 @@ defmodule Compos.ChatFileTest do
   # here", which is Emacs' rule.
   defp type_over_prefill(path), do: type("/" <> path)
 
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
   defp inject(agent, frame), do: send(agent, {:acp_data, Jason.encode!(frame) <> "\n"})
 
   setup do
-    :persistent_term.put(:chat_file_test_pid, self())
-    Application.put_env(:compos_core, :acp_transport, Compos.ChatFileTest.FakeTransport)
+    Compos.Test.FakeTransport.own!()
+    Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     Editor.minibuffer_close()
     Editor.delete_other_windows()
@@ -161,7 +132,8 @@ defmodule Compos.ChatFileTest do
     press(["RET"])
 
     # it spawned the connector the FILE named, not the default
-    assert_receive {:transport_open, agent, cmd}, 1_000
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:transport_cmd, cmd}, 1_000
     assert cmd =~ "codex-acp"
     assert cmd =~ "gpt-5.5"
 

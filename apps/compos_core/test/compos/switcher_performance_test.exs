@@ -1,13 +1,6 @@
 defmodule Compos.SwitcherPerformanceTest do
-  use ExUnit.Case, async: false
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code, nil, 30_000)
-    out
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  use Compos.Case, async: false
+  alias Compos.Core.{Buffer, Editor}
 
   defp eventually(fun, attempts \\ 100)
   defp eventually(fun, 0), do: assert(fun.())

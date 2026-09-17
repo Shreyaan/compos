@@ -1,15 +1,7 @@
 defmodule Compos.UniversalArgumentTest do
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(text), do: text |> String.graphemes() |> press()
-
-  defp eval!(source) do
-    {:ok, value} = Session.eval(source)
-    value
-  end
+  alias Compos.Core.{Buffer, Editor}
 
   setup do
     name = "*zz-prefix-#{System.unique_integer([:positive])}*"

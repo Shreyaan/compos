@@ -8,27 +8,12 @@ defmodule Compos.EndpointTest do
   The framing functions are tested directly, since a package never sees them.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Endpoint, Session}
+  alias Compos.Core.{Endpoint}
   alias Compos.Core.Endpoint.Conn
 
   @fixture Path.expand("../support/fake_endpoint.exs", __DIR__)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  defp wait_until(fun, tries \\ 300) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
-      true ->
-        Process.sleep(10)
-        wait_until(fun, tries - 1)
-    end
-  end
 
   defp start_fake(name) do
     elixir = System.find_executable("elixir")

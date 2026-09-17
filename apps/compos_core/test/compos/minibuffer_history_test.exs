@@ -1,12 +1,9 @@
 defmodule Compos.MinibufferHistoryTest do
   @moduledoc "Vertico-style: previously chosen candidates lead the list."
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Editor, KeyDispatch}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+  alias Compos.Core.{Editor}
 
   setup do
     Editor.minibuffer_close()

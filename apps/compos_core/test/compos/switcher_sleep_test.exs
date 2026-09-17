@@ -9,19 +9,11 @@ defmodule Compos.SwitcherSleepTest do
   command and pass.
   """
 
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{Buffer, BufferStore, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Buffer, Editor}
 
   @switch "*switch*"
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code)
-    out
-  end
 
   defp eventually(fun, tries \\ 100) do
     cond do

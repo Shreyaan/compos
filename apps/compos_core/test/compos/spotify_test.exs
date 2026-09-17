@@ -4,16 +4,9 @@ defmodule Compos.SpotifyTest do
   ops the commands put on it, and answer the way the extension would.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Browser, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Browser, Session}
 
   defp stub_socket do
     test = self()

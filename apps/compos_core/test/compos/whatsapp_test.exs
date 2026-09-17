@@ -4,19 +4,12 @@ defmodule Compos.WhatsappTest do
   conversation, refresh, and reply paths without external traffic.
   """
 
-  use ExUnit.Case, async: false
+  use Compos.Case, async: false
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Buffer, Editor, KeyDispatch}
 
   @list_buffer "*WhatsApp*"
   @chat_buffer "*WhatsApp conversation*"
-
-  defp eval!(source) do
-    {:ok, printed} = Session.eval(source)
-    printed
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   defp open_chat do
     eval!(~S|(run-command "whatsapp")|)

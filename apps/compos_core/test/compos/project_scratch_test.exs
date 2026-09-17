@@ -4,11 +4,9 @@ defmodule Compos.ProjectScratchTest do
   beside the one each file already has.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Buffer, Editor}
 
   # the verbs by name. Which key reaches one is a preference that moves.
   defp run(command), do: eval!(~s[(run-command "#{command}")])
@@ -21,11 +19,6 @@ defmodule Compos.ProjectScratchTest do
       "#f" -> nil
       quoted -> String.trim(quoted, ~s{"})
     end
-  end
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
   end
 
   # a real project: a directory with .git, holding two files

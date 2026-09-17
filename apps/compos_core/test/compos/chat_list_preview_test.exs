@@ -1,13 +1,6 @@
 defmodule Compos.ChatListPreviewTest do
-  use ExUnit.Case, async: false
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp eval!(code) do
-    {:ok, value} = Session.eval(code, nil, 30_000)
-    value
-  end
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  use Compos.Case, async: false
+  alias Compos.Core.{Buffer, Editor}
 
   defp eventually(fun, tries \\ 150)
   defp eventually(fun, 0), do: assert(fun.())

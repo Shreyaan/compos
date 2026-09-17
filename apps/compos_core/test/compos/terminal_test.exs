@@ -1,22 +1,8 @@
 defmodule Compos.TerminalTest do
-  use ExUnit.Case
+  use Compos.Case
 
   alias Compos.Core.{Buffer, Session, Terminal}
   alias Compos.Core.Terminal.Transcript
-
-  defp wait_until(fun, tries \\ 300) do
-    cond do
-      fun.() ->
-        :ok
-
-      tries == 0 ->
-        flunk("condition never became true")
-
-      true ->
-        Process.sleep(20)
-        wait_until(fun, tries - 1)
-    end
-  end
 
   defp start_terminal!(command) do
     name = "*terminal-test-#{System.unique_integer([:positive])}*"

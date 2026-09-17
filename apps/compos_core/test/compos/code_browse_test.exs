@@ -5,16 +5,9 @@ defmodule Compos.CodeBrowseTest do
   tree-sitter for a buffer with a grammar, indentation for every other.
   """
 
-  use ExUnit.Case
+  use Compos.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
+  alias Compos.Core.{Buffer, Editor}
 
   defp fresh_buffer(text, lang) do
     name = "code-#{System.unique_integer([:positive])}"
