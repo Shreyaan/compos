@@ -106,7 +106,10 @@ defmodule Compos.Core.MCP.Conn do
   @impl true
   def handle_continue(:connect, %{spec: %{"url" => url} = spec} = state) do
     headers =
-      [{"accept", "application/json, text/event-stream"} | resolve_headers(spec["headers"] || %{})]
+      [
+        {"accept", "application/json, text/event-stream"}
+        | resolve_headers(spec["headers"] || %{})
+      ]
 
     state = %{state | transport: {:http, url, headers, nil}}
     {:noreply, send_req(state, "initialize", initialize_params(), :initialize)}
@@ -173,14 +176,17 @@ defmodule Compos.Core.MCP.Conn do
 
   @impl true
   def handle_info({port, {:data, chunk}}, %{transport: {:stdio, port}} = state) do
-    {lines, buf} = split_lines(state.buf <> chunk)
+    {lines, buf} = Compos.Core.JsonRpc.split_lines(state.buf <> chunk)
     state = Enum.reduce(lines, %{state | buf: buf}, &handle_line/2)
     {:noreply, state}
   end
 
   def handle_info({port, {:exit_status, code}}, %{transport: {:stdio, port}} = state) do
     Session.message("mcp: #{state.name} exited (#{code})")
-    for {_, {:reply, from}} <- state.pending, do: GenServer.reply(from, {:error, "mcp server exited"})
+
+    for {_, {:reply, from}} <- state.pending,
+        do: GenServer.reply(from, {:error, "mcp server exited"})
+
     :persistent_term.erase({:compos_mcp, state.name})
     state = log(state, :note, "process exited (#{code})")
     {:stop, :normal, if(code == 0, do: state, else: %{state | status: :error})}
@@ -449,12 +455,6 @@ defmodule Compos.Core.MCP.Conn do
     Session.message("mcp: #{state.name} failed — #{msg}")
     send(self(), :stop_conn)
     %{log(state, :note, "failed — #{msg}") | status: :error}
-  end
-
-  defp split_lines(buf) do
-    parts = String.split(buf, "\n")
-    {lines, [rest]} = Enum.split(parts, -1)
-    {Enum.reject(lines, &(&1 == "")), rest}
   end
 
   defp port_alive?(port), do: Port.info(port) != nil

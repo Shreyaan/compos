@@ -11,6 +11,7 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
 
   use GenServer, restart: :temporary
 
+  alias Compos.Core.JsonRpc
   alias Compos.Core.Agent.Backend
 
   @impl Backend
@@ -196,55 +197,34 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
   end
 
   defp ingest(state, data) do
-    {lines, partial} = split_lines(state.partial <> data)
-    state = %{state | partial: partial}
-
-    Enum.reduce(lines, state, fn line, acc ->
-      case Jason.decode(line) do
-        {:ok, frame} -> handle_frame(acc, frame)
-        {:error, _} -> acc
-      end
-    end)
-  end
-
-  defp split_lines(data) do
-    parts = String.split(data, "\n")
-    {partial, lines} = List.pop_at(parts, -1)
-    {Enum.reject(lines, &(String.trim(&1) == "")), partial}
+    {frames, partial} = JsonRpc.decode_lines(state.partial <> data)
+    Enum.reduce(frames, %{state | partial: partial}, &handle_frame(&2, &1))
   end
 
   # App Server uses JSON-RPC semantics but intentionally omits the
   # `jsonrpc: "2.0"` header on the wire.
+  @wire [header: false]
+
   defp request(state, method, params, pending_method \\ nil) do
     id = state.next_id
-    send_frame(state, %{"id" => id, "method" => method, "params" => params})
+    send_frame(state, JsonRpc.request(id, method, params, @wire))
 
     pending_method = pending_method || method
-
-    %{
-      state
-      | next_id: id + 1,
-        pending_rpc: Map.put(state.pending_rpc, id, pending_method)
-    }
+    %{state | next_id: id + 1, pending_rpc: Map.put(state.pending_rpc, id, pending_method)}
   end
 
-  defp notify(state, method, params \\ %{}) do
-    send_frame(state, %{"method" => method, "params" => params})
+  defp notify(state, method, params \\ %{}),
+    do: send_frame(state, JsonRpc.notification(method, params, @wire))
+
+  defp respond(state, id, result), do: send_frame(state, JsonRpc.response(id, result, @wire))
+
+  defp respond_error(state, id, code, message),
+    do: send_frame(state, JsonRpc.error(id, code, message, @wire))
+
+  defp send_frame(state, frame) do
+    state.transport.send_frame(state.tp, JsonRpc.encode(frame))
     state
   end
-
-  defp respond(state, id, result) do
-    send_frame(state, %{"id" => id, "result" => result})
-    state
-  end
-
-  defp respond_error(state, id, code, message) do
-    send_frame(state, %{"id" => id, "error" => %{"code" => code, "message" => message}})
-    state
-  end
-
-  defp send_frame(state, frame),
-    do: state.transport.send_frame(state.tp, [Jason.encode!(frame), "\n"])
 
   # Map.get/Map.put, not the struct-update syntax: a backend process
   # started before a hot reload carries a state map without the key

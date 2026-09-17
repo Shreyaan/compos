@@ -12,6 +12,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
 
   use GenServer, restart: :temporary
 
+  alias Compos.Core.JsonRpc
   alias Compos.Core.Agent.Backend
 
   # --- behaviour --------------------------------------------------------------
@@ -250,57 +251,29 @@ defmodule Compos.Core.Agent.Backend.ACP do
   # --- framing ----------------------------------------------------------------
 
   defp ingest(state, data) do
-    {lines, partial} = split_lines(state.partial <> data)
-    state = %{state | partial: partial}
-
-    Enum.reduce(lines, state, fn line, state ->
-      case Jason.decode(line) do
-        {:ok, frame} -> handle_frame(state, frame)
-        # not JSON — adapter chatter on stdout; ignore
-        {:error, _} -> state
-      end
-    end)
-  end
-
-  defp split_lines(data) do
-    parts = String.split(data, "\n")
-    {partial, lines} = List.pop_at(parts, -1)
-    {Enum.reject(lines, &(String.trim(&1) == "")), partial}
+    {frames, partial} = JsonRpc.decode_lines(state.partial <> data)
+    Enum.reduce(frames, %{state | partial: partial}, &handle_frame(&2, &1))
   end
 
   # --- json-rpc ---------------------------------------------------------------
 
   defp request(state, method, params, pending_method \\ nil) do
     id = state.next_id
-    frame = %{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params}
-    send_frame(state, frame)
+    send_frame(state, JsonRpc.request(id, method, params))
 
     pending_method = pending_method || method
     %{state | next_id: id + 1, pending_rpc: Map.put(state.pending_rpc, id, pending_method)}
   end
 
-  defp notify(state, method, params) do
-    send_frame(state, %{"jsonrpc" => "2.0", "method" => method, "params" => params})
-    state
-  end
+  defp notify(state, method, params), do: send_frame(state, JsonRpc.notification(method, params))
+  defp respond(state, id, result), do: send_frame(state, JsonRpc.response(id, result))
 
-  defp respond(state, id, result) do
-    send_frame(state, %{"jsonrpc" => "2.0", "id" => id, "result" => result})
-    state
-  end
-
-  defp respond_error(state, id, code, message) do
-    send_frame(state, %{
-      "jsonrpc" => "2.0",
-      "id" => id,
-      "error" => %{"code" => code, "message" => message}
-    })
-
-    state
-  end
+  defp respond_error(state, id, code, message),
+    do: send_frame(state, JsonRpc.error(id, code, message))
 
   defp send_frame(state, frame) do
-    state.transport.send_frame(state.tp, [Jason.encode!(frame), "\n"])
+    state.transport.send_frame(state.tp, JsonRpc.encode(frame))
+    state
   end
 
   # Map.get/Map.put, not the struct-update syntax: a backend process
@@ -715,7 +688,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
   defp model_ids(wires) do
     ids = Enum.map(wires, &model_id/1)
     ambiguous = ids -- Enum.uniq(ids)
-    for {wire, id} <- Enum.zip(wires, ids), do: if(id in ambiguous, do: model_path(wire), else: id)
+
+    for {wire, id} <- Enum.zip(wires, ids),
+        do: if(id in ambiguous, do: model_path(wire), else: id)
   end
 
   defp model_id(wire) do

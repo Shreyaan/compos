@@ -56,6 +56,9 @@ defmodule Compos.Core.Session do
   # whether that has happened.
   @primitive_modules [Compos.Core.SchemeAPI, Compos.Scheme.Builtins, __MODULE__]
   @pt_stamp {__MODULE__, :primitive_stamp}
+  # the merged doc map, derived once per primitive generation: the entries
+  # build closures, and apropos asks for a doc per global name
+  @pt_docs {__MODULE__, :primitive_docs}
 
   # how long a waiting mcp-call! waits. The RPC layer gives an eval 30s, so
   # the call must give up first and say so.
@@ -1029,10 +1032,6 @@ defmodule Compos.Core.Session do
   end
 
   # one merged map: the three registration modules' docs
-  # The entries build closures, so the merged doc map is derived once per
-  # primitive generation: apropos asks for a doc per global name.
-  @pt_docs {__MODULE__, :primitive_docs}
-
   defp primitive_docs do
     :persistent_term.get(@pt_docs, nil) ||
       (
