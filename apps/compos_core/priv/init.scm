@@ -70,6 +70,7 @@
 (load-bundled-package "lsp.scm")
 (load-bundled-package "mcp-hub.scm")
 (load-bundled-package "mcp.scm")
+(load-bundled-package "models.scm")
 (load-bundled-package "whatsapp.scm")
 (load-bundled-package "morg/morg-kinds.scm")
 (load-bundled-package "morg.scm")
