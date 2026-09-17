@@ -2867,7 +2867,7 @@ defmodule Compos.Ui.EditorLive do
   # outside the list draws as a div, an attribute outside it is dropped.
   @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre kbd p h1 h2 h3 h4 table thead tbody tr th td ul ol li
                  svg g path rect circle ellipse line polyline polygon text tspan title img)
-  @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target style d viewBox preserveAspectRatio fill stroke stroke-width
+  @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target glyph style d viewBox preserveAspectRatio fill stroke stroke-width
                   stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
                   stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
                   width height points transform vector-effect text-anchor font-size

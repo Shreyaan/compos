@@ -12326,7 +12326,7 @@
                      var(--dim-fg, #8a857a));
                    display: flex; align-items: center; gap: var(--s9); min-width: 0;
                    overflow: hidden;
-                   padding: 7px var(--s8) 7px var(--s6);
+                   padding: 5px var(--s8) 5px var(--s6);
                    border-top: 1px solid transparent;
                    border-bottom: var(--border);
                    background: var(--surface-chrome); cursor: pointer; }
@@ -12349,9 +12349,7 @@
    line. The window's ground says the same thing (layouts.ex): a current cua
    window sits, a current focus window floats. The tag keeps the state's
    name as a class so that rule can read it. */
-.dash-state-mark { flex: 0 0 auto; margin-left: auto;
-                   font-size: var(--fs-label); letter-spacing: var(--ls-label);
-                   text-transform: uppercase; color: var(--text-faint); }
+
 /* The one switcher: a square action cell, no fill, dim until the pointer
    is on it. Same shape as every other action in the frame. */
 .dseg-action { display: inline-flex; align-items: center; justify-content: center;
@@ -12411,27 +12409,36 @@
    it, and the title keeps growing to fill the top row. */
 .dash-persistent { flex-wrap: nowrap; column-gap: 16px; }
 .dash-persistent:has(.dseg-meta) { flex-wrap: wrap; row-gap: 4px; }
-.dash-state-mark, .dseg-action { order: 1; }
+.dseg-fill, .dseg-verbosity, .dash-state-mark, .dseg-action { order: 1; }
 .dseg-meta { order: 2; flex: 0 1 100%; display: flex; align-items: baseline;
              gap: 16px; min-width: 0; }
 .dash-persistent .dseg,
 .dash-persistent .dseg-stack { flex-direction: row; align-items: baseline; gap: 6px; }
 .dash-persistent .dseg-stack { gap: 16px; }
 .dash-persistent .dseg-v { white-space: nowrap; }
-.dash-persistent .dseg-chat-title { flex: 1 1 0; min-width: 0; }
-/* A title is set in the face that matches what the name IS. A chat topic
-   is a sentence a human wrote, so it takes the serif face at reading size.
-   A file name or a starred buffer is a machine name, so it keeps the mono
-   face and its exact characters. Neither is bold: the size is the weight. */
+/* The title is a name in a bar, not a heading: mono at the UI size,
+   semibold, one line, its exact characters. The mode's glyph leads it in
+   the accent, and a hairline carries the eye from the name to the tail. */
+.dash-persistent .dseg-chat-title { flex: 0 1 auto; min-width: 8ch; display: flex; align-items: baseline; gap: var(--s4); }
+.dash-persistent .dseg-chat-title[glyph]::before {
+  content: attr(glyph); flex: none; font-family: var(--font-mono);
+  font-size: var(--fs-ui); color: var(--accent); }
 .dash-persistent .dseg-chat-title .dseg-v {
-  display: block; font-weight: var(--fw-reg); line-height: 1.3;
-  font-family: var(--font-serif); font-size: 19px; letter-spacing: -0.15px;
+  display: block; font-weight: var(--fw-semi); line-height: 1.3;
+  font-family: var(--font-mono); font-size: var(--fs-ui); letter-spacing: 0.01em;
   color: var(--text-strong); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
-.dash-persistent .dseg-chat-title .dseg-strong { font-weight: var(--fw-reg); }
-.dash-persistent .dseg-title-mono .dseg-v {
-  font-family: var(--font-mono); font-size: 14px;
-  letter-spacing: var(--ls-code); }
+.dash-persistent .dseg-chat-title .dseg-strong { font-weight: var(--fw-semi); }
+.dseg-fill { flex: 1 1 auto; min-width: 8px; height: var(--hair); background: var(--edge-soft); align-self: center; }
+/* the state needs no word: a floating window says it */
+.dash-state-mark { display: none; }
+/* the verbosity switch: three tracked words, the current one in ink with
+   an accent seam under it. Square, no fill, no icon. */
+.dseg-verbosity { display: inline-flex; align-items: baseline; gap: var(--s6); flex: none;
+                  font-size: var(--fs-micro); letter-spacing: var(--ls-label); text-transform: uppercase; }
+.dseg-verb { color: var(--text-dim); padding: 1px 0 2px; border-bottom: 1px solid transparent; cursor: default; }
+.dseg-verb:hover { color: var(--text-strong); }
+.dseg-verb.on { color: var(--text-strong); border-bottom-color: var(--accent); }
 .dash-persistent:has(.dseg-chat-title) .dseg-rule { display: none; }
 /* the chip is a label, not a column: it never wraps and never grows */
 .dash-persistent .dseg-group-badge .dseg-v {
@@ -12770,6 +12777,10 @@
              ((equal? id "buffer-switcher")
               (with-current-buffer buf (lambda () (run-command "buffer-switcher")))
               #t)
+             ;; a verbosity word in the header line
+             ((string-prefix? "agent-verbosity-" id)
+              (with-current-buffer buf (lambda () (run-command id)))
+              #t)
              ;; the keys card's `?` grows or folds it
              ((equal? id "list-keys-toggle")
               (with-current-buffer buf (lambda () (run-command "list-keys-toggle")))
@@ -12911,7 +12922,7 @@
 ;; The one switcher: a single action at the end of the header line that
 ;; opens a narrow about this buffer. The design keeps one icon, not three.
 (define (dash--switcher buf)
-  (list 'tag "c-action" 'class "dseg-action" 'text "ⓘ"
+  (list 'tag "c-action" 'class "dseg-action" 'text "≡"
         'click "buffer-switcher"
         'attrs (list (list "target" "buffer-switcher")
                      (list "title" "about this buffer"))))
@@ -13037,14 +13048,14 @@
              ;; title leads; the open jj change of the repo follows it, kept
              ;; fresh by jj.scm, and steps back when a chat writes a summary.
              ;; A click on either opens the log of every line it showed.
-             ;; the title's face follows what the name is: a chat's own
-             ;; summary is a sentence and takes the serif face, a buffer
-             ;; name is a machine name and keeps the mono face
+             ;; the title is a name in a bar: mono, one line, led by the
+             ;; mode's own glyph in the accent
              (append (list (list 'wide
                              (dash--wide-seg #f title
                                (if (dash--summary buf)
                                    "dseg-chat-title"
-                                   "dseg-chat-title dseg-title-mono"))))
+                                   "dseg-chat-title dseg-title-mono")
+                               (mode-own-icon (buffer-local buf 'mode-name)))))
                      (if (and vcs (not (dash--summary buf)))
                          (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
          (width (buffer-cols buf))
@@ -13077,8 +13088,29 @@
 ;; TOP is the badge and the title; META is mode/model/lane. A narrow window
 ;; stacks META on a second row beneath the title (dseg-meta); a wide window
 ;; keeps every surviving segment on one row, ruled together.
+;; How much of an agent transcript to show: three tracked words at the
+;; end of the header line, the current one in ink with an accent seam.
+;; Any other buffer has no such switch and draws nothing here.
+(define (dash--verbosity buf)
+  (and (equal? (buffer-local buf 'render-mode) "agent")
+       (let ((now (or (buffer-local buf 'agent-verbosity) "info")))
+         (list 'tag "div" 'class "dseg-verbosity"
+               'children
+               (map (lambda (level)
+                      (list 'tag "div"
+                            'class (string-append "dseg-verb" (if (equal? level now) " on" ""))
+                            'text level
+                            'click (string-append "agent-verbosity-" level)
+                            'attrs (list (list "title" (string-append "show " level)))))
+                    '("info" "log" "debug"))))))
+
+;; the hairline that carries the eye from the title to the tail
+(define (dash--fill) (list 'tag "div" 'class "dseg-fill"))
+
 (define (dash--assemble-headline top meta narrow? buf)
-  (let ((tail (list (dash--state-mark buf) (dash--switcher buf))))
+  (let ((tail (filter (lambda (b) b)
+                      (list (dash--fill) (dash--verbosity buf)
+                            (dash--state-mark buf) (dash--switcher buf)))))
     (if narrow?
         (append
           (dash--ruled (map cadr top))
@@ -13090,7 +13122,7 @@
           (dash--ruled (append (map cadr top) (map cadr meta)))
           tail))))
 
-(define (dash--wide-seg key text &optional title-class)
+(define (dash--wide-seg key text &optional title-class glyph)
   (let ((base (dash--seg key (list (list (if title-class "dseg-strong" "f-dim") text))
                          'left (string-append "dseg-inline dseg-wide"
                                   (if title-class (string-append " " title-class) "")))))
@@ -13099,6 +13131,7 @@
           'children (plist-get base 'children)
           'click "summary-log"
           'attrs (append (if key (list (list "name" key)) '())
+                         (if glyph (list (list "glyph" glyph)) '())
                          (list (list "target" "summary-log")
                                (list "title" "open the summary log"))))))
 

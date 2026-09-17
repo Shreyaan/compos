@@ -104,7 +104,10 @@
   (agent-card-set-open! buf id (not (agent-card-open? buf id))))
 
 (define (agent-set-verbosity! level)
-  (buffer-set-local! (current-buffer) 'agent-verbosity level))
+  (let ((buf (current-buffer)))
+    (buffer-set-local! buf 'agent-verbosity level)
+    ;; the header line's switch says the level: redraw it
+    (when (boundp 'dashboard--sync!) (dashboard--sync! buf))))
 
 (define-command "agent-verbosity-info" "Show summaries and only the latest tool title in each burst"
   (lambda () (agent-set-verbosity! "info")))
