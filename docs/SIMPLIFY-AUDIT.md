@@ -672,6 +672,10 @@ found 20 unreferenced primitives, not 52; introspection reads that tests
 use to assert state (face-list, keymap-parent, buffer-local-map, lsp-log,
 task-alive?, unbind-global!) stay. One test support module (b59e22e6):
 96 files use Compos.Case, one FakeTransport; 31 files keep a custom helper.
+The package move (0e96750d): 92 packages in scheme/packages; agenda,
+agent-transcript, annotate, appearance, diff-mode, paredit wait in
+priv/packages for another session's commit, then one rename and the
+priv/packages entry leaves load-path.
 
 **Next three steps, in order.**
 
