@@ -305,24 +305,6 @@
 
 (effects! '(read))
 
-(define-tool! 'markdown-outline
-  "List a live Markdown document as (LINE LEVEL TITLE). Always call this first, then read only relevant sections."
-  (list (list 'buffer "string" "live Markdown buffer name"))
-  (lambda (args)
-    (value->string (markdown-outline (plist-get args 'buffer))))
-  '(read))
-
-(define-tool! 'markdown-read
-  "Read one Markdown section. Call markdown-outline first. The default excludes child sections; set subtree true only when descendants are required."
-  (list (list 'buffer "string" "live Markdown buffer name")
-        (list 'line "number" "1-based line from markdown-outline")
-        (list 'subtree "boolean" "include child sections" 'optional))
-  (lambda (args)
-    (markdown-read (plist-get args 'buffer)
-                   (plist-get args 'line)
-                   (plist-get args 'subtree)))
-  '(read))
-
 ;;; --- block geometry ----------------------------------------------------------
 
 ;; open-fence start of the block containing pos, or #f. A pos on the

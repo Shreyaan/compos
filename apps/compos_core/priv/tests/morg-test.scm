@@ -548,12 +548,12 @@
     (check-equal! (markdown-find t--morg-buf "Child")
                   '((3 2 "Child")) "the search")
     (check-contains!
-      (llm-tool-call "markdown-outline" (list 'buffer t--morg-buf))
-      "(3 2 \"Child\")" "the agent can outline without prompt instructions")
+      (value->string (markdown-outline t--morg-buf))
+      "(3 2 \"Child\")" "an agent outlines through eval, as text")
     (check-equal!
-      (llm-tool-call "markdown-read" (list 'buffer t--morg-buf 'line 3))
+      (markdown-read t--morg-buf 3)
       "## Child\ntext\n```sh\n# not a heading\n```\n"
-      "the agent reads one relevant section")
+      "and reads one relevant section")
     (t--morg-done!)))
 
 (deftest 'the-markdown-api-reads-the-section-that-holds-a-body-line
@@ -566,14 +566,8 @@
     (check-equal! (markdown-read t--morg-buf 1 #t)
                   "# One\nbody\n## Child\ntext\n"
                   "an explicit subtree includes the child")
-    (check-equal!
-      (llm-tool-call "markdown-read" (list 'buffer t--morg-buf 'line 1))
-      "# One\nbody\n" "the tool also defaults to the shallow section")
-    (check-equal!
-      (llm-tool-call "markdown-read"
-                     (list 'buffer t--morg-buf 'line 1 'subtree #t))
-      "# One\nbody\n## Child\ntext\n"
-      "the tool requires an explicit subtree request")
+    (check-equal! (markdown-read t--morg-buf 1 #f)
+                  "# One\nbody\n" "an explicit #f is the shallow section too")
     (t--morg-done!)))
 
 (deftest 'the-markdown-api-replaces-one-duplicate-section-by-line
