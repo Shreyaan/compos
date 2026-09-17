@@ -491,6 +491,27 @@
       '() "every doc names a live primitive")))
 
 
+(deftest 'the-primitives-answer-the-same-search-as-the-catalog
+  "an Elixir builtin is a name an agent can call, so the search must know it"
+  (lambda ()
+    (let ((hits (apropos "string-repeat" 'lexical #t)))
+      (check-true! (member "string-repeat" (t--ap-names hits)) "the builtin answers")
+      (let ((hit (car (filter (lambda (h) (equal? (plist-get h 'name) "string-repeat"))
+                              hits))))
+        (check-equal! (plist-get hit 'sig) "(string-repeat S N)" "the signature")
+        (check-equal! (plist-get hit 'package) "builtins" "the package")
+        (check-equal! (plist-get hit 'effects) '("unknown")
+                      "and it admits it cannot state its effects")))))
+
+(deftest 'a-declared-primitive-keeps-its-declaration
+  "a declaration states domain and effects, so the builtin row must not shadow it"
+  (lambda ()
+    (let ((hits (filter (lambda (h) (equal? (plist-get h 'name) "buffer-text"))
+                        (apropos "buffer-text" 'lexical #t))))
+      (check-equal! (length hits) 1 "one row, not two")
+      (check-equal! (plist-get (car hits) 'package) "editor" "the declaration answers")
+      (check-equal! (plist-get (car hits) 'effects) '("read") "with its real effects"))))
+
 (deftest 'apropos-results-hide-ranking-metadata
   "ranking details stay private after apropos orders the hits"
   (lambda ()

@@ -419,6 +419,34 @@
          (apropos--enrich (list 'kind "variable" 'name name 'doc doc)
                           "setting" index))))
 
+;; The sixth registry. car, string-append, regex-match, db-query and 450
+;; more are Elixir, and the interpreter's own doc map was the only place
+;; that knew them: apropos answered nothing for a name every caller can
+;; already use. A primitive a Scheme declaration covers keeps that entry,
+;; because a declaration states domain and effects and this cannot. The
+;; rest say builtin, and say they do not know.
+(define (apropos--primitive p words index)
+  (let ((name (car p))
+        (doc (nth 1 p)))
+    (and (not (apropos--lookup index 'function name))
+         (apropos--hit? (string-append name " " doc) words)
+         (let ((parts (public--split doc)))
+           (list 'kind "function" 'name name
+                 'sig (or (car parts) (string-append "(" name ")"))
+                 'doc (nth 1 parts)
+                 'package "builtins"
+                 'namespace "core"
+                 'origin "builtin"
+                 'domain "unknown"
+                 'effects '("unknown")
+                 'metadata-source "unknown")))))
+
+(define (apropos--primitives words index)
+  (if (boundp 'primitive-docs)
+      (apropos--compact
+        (map (lambda (p) (apropos--primitive p words index)) (primitive-docs)))
+      '()))
+
 (define (apropos--compact xs) (filter (lambda (x) x) xs))
 
 (define (apropos--enrich hit &optional catalog-kind index)
@@ -456,6 +484,8 @@
 ;; One row is (LOWERCASED-SEARCH-TEXT HIT). The original registry order is
 ;; retained because it is the stable fallback order after ranking buckets.
 (define (apropos--rows index)
+  ;; One row is (LOWERCASED-SEARCH-TEXT HIT). The original registry order is
+  ;; kept, so ranking decides the answer and not the build order.
   (let ((hits
           (append
             (apropos--compact
@@ -467,7 +497,8 @@
             (apropos--compact
               (map (lambda (v) (apropos--var v '() index)) *custom-vars*))
             (apropos--compact
-              (map (lambda (e) (apropos--catalog-entry e '())) (catalog))))))
+              (map (lambda (e) (apropos--catalog-entry e '())) (catalog)))
+            (apropos--primitives '() index))))
     (map (lambda (hit) (list (string-downcase (value->string hit)) hit)) hits)))
 
 (define (apropos--row-hit? row words)
@@ -961,8 +992,10 @@
 (define-tool! 'apropos
   (string-append
     "Search the editor by intent, not by regex: public functions with their "
-    "signatures, M-x commands with their docstrings, keybindings, and "
-    "settings. Literal matches rank first. OpenAI embeddings add semantic matches, so "
+    "signatures, the Elixir primitives the interpreter binds, M-x commands "
+    "with their docstrings, keybindings, and settings. A primitive with no "
+    "Scheme declaration says package \"builtins\" and unknown effects. "
+    "Literal matches rank first. OpenAI embeddings add semantic matches, so "
     "\"split window\" finds the window splitters and \"chat cost\" finds "
     "the cost commands. This is the supported surface and the place to "
     "start. Nothing matched? You get the closest names instead. Pass "
