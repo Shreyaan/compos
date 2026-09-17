@@ -129,3 +129,53 @@
       (check-true! (member 'dashboard-line (buffer-local buf 'desktop-skip-locals))
                    "the line is runtime state the desktop skips")
       (buffer-kill! buf))))
+
+;;; --- transient frames -------------------------------------------------------
+
+(deftest 'a-transient-frame-gives-back-exactly-what-it-found
+  "the arrangement a transient frame mode found is the arrangement it leaves"
+  (lambda ()
+    (test-buffer! "*zz-tf-a*" "a")
+    (test-buffer! "*zz-tf-b*" "b")
+    (test-buffer! "*zz-tf-over*" "over")
+    (switch-to-buffer-here! "*zz-tf-a*")
+    (delete-other-windows!)
+    (split-window! 'h 0.5)
+    (display-buffer-in-window! (other-window-id (active-window)) "*zz-tf-b*")
+    (let ((before (map (lambda (w) (nth 1 w)) (window-list))))
+      (check-true! (transient-frame-enter! 'zz-tf) "entering records the arrangement")
+      (check-true! (transient-frame-standing? 'zz-tf) "and the mode stands")
+      ;; the mode takes the frame whole: one window over its own buffer
+      (switch-to-buffer-here! "*zz-tf-over*")
+      (delete-other-windows!)
+      (check-equal! (length (window-list)) 1 "the mode covered the frame")
+      (check-true! (transient-frame-exit! 'zz-tf) "leaving gives the frame back")
+      (check-equal! (map (lambda (w) (nth 1 w)) (window-list)) before
+                    "the same buffers in the same panes")
+      (check-false! (transient-frame-standing? 'zz-tf) "and nothing is left standing")
+      (check-false! (transient-frame-exit! 'zz-tf) "leaving twice restores nothing"))
+    (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
+              '("*zz-tf-a*" "*zz-tf-b*" "*zz-tf-over*"))
+    (delete-other-windows!)))
+
+(deftest 'a-transient-frame-that-stopped-standing-re-arms
+  "a record whose buffer left the screen is stale: arriving records what is there now"
+  (lambda ()
+    (test-buffer! "*zz-tf-a*" "a")
+    (test-buffer! "*zz-tf-over*" "over")
+    (switch-to-buffer-here! "*zz-tf-a*")
+    (delete-other-windows!)
+    (transient-frame-enter! 'zz-tf)
+    (switch-to-buffer-here! "*zz-tf-over*")
+    ;; the mode's buffer is gone from the screen, so its record is stale
+    (test-buffer! "*zz-tf-b*" "b")
+    (switch-to-buffer-here! "*zz-tf-b*")
+    (check-true! (transient-frame-rearm! 'zz-tf "*zz-tf-over*")
+                 "re-arming records the arrangement in front of you")
+    (switch-to-buffer-here! "*zz-tf-over*")
+    (transient-frame-exit! 'zz-tf)
+    (check-equal! (window-buffer (active-window)) "*zz-tf-b*"
+                  "not the arrangement from the first entry")
+    (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
+              '("*zz-tf-a*" "*zz-tf-b*" "*zz-tf-over*"))
+    (delete-other-windows!)))

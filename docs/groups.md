@@ -580,7 +580,7 @@ Rename and restart never change a group's ID.
 
 These are not in this specification. The design leaves room for them.
 
-- **Transient layouts.** A frame holds a base layout and, optionally, one transient layout on top. Save-on-leave saves the base. Leaving the transient restores the base. The `tile-all` overview carries its own base save and restore; a general mechanism is still open.
+- **Transient layouts.** A frame holds a base layout and, optionally, one transient layout on top. Save-on-leave saves the base. Leaving the transient restores the base. The general mechanism is `transient-frame-enter!` / `transient-frame-exit!` (layouts.scm): a mode records the arrangement and group it found, by name, and leaving puts them back exactly. The chat list and the `ibuffer` window form use it. `tile-all` still carries its own base save and restore and could move onto it.
 - **Landing.** `switch G` may take an optional landing layout to show instead of the saved one, without saving it.
 - **Narrow.** A hard scope on top of the soft sections is parked.
 

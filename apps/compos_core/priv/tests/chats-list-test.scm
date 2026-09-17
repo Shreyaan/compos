@@ -163,6 +163,33 @@
       (check-equal! (popup-open?) #f "and no card was floated to do it"))
     (chats-test-reset!)))
 
+(deftest 'previewing-another-group-holds-the-frame-still
+  "the pane reads a chat from some other group; the frame does not follow it there"
+  (lambda ()
+    (chats-test-open! 'none 'name)
+    (let ((home (frame-group))
+          (view *chat-list*))
+      (let loop ((n 0))
+        (when (and (< n 8) (not (equal? (list-current view) "*zz-chats-c*")))
+          (list-move-in! view 1)
+          (loop (+ n 1))))
+      (check-equal! (list-current view) "*zz-chats-c*" "the cursor reached the other group's chat")
+      (check-equal! (window-buffer (chat-list-preview-window)) "*zz-chats-c*" "the pane shows it")
+      (check-equal! (frame-group) home "the frame stayed in the group the list opened in")
+      (check-equal! (chat-list-buffer) view "so the list is still the one on screen"))
+    (chats-test-reset!)))
+
+(deftest 'the-held-group-goes-back-when-the-list-leaves
+  "the list holds the frame's group while it covers the frame, and no longer"
+  (lambda ()
+    (chats-test-reset!)
+    (let ((before (frame-local 'pinned-group)))
+      (chats-test-open! 'none 'name)
+      (check-equal! (frame-local 'pinned-group) (frame-group) "held while the list stands")
+      (run-command "chat-list-quit")
+      (check-equal! (frame-local 'pinned-group) before "and the frame's own pin comes back"))
+    (chats-test-reset!)))
+
 (deftest 'leaving-hands-the-frame-back
   "the list covers the frame, so q restores the arrangement it covered"
   (lambda ()
@@ -338,4 +365,25 @@
                     "one heading per group, its chats under it")
       (check-true! (chat-prompt-separator? (car mine)) "the heading is a separator row")
       (check-equal! (length (car mine)) 3 "a heading has label, annotation, kind"))
+    (chats-test-reset!)))
+
+(deftest 'the-prompt-reads-the-chat-itself-in-the-other-window
+  "C-x c: the row under the cursor is the chat buffer in the window you came
+   from, not an isolated copy floated over the rows"
+  (lambda ()
+    (chats-test-reset!)
+    (chats-test-chat! "*zz-chats-a*" (group-record-create! "zz-chats-one"))
+    (chats-test-chat! "*zz-chats-b*" (group-record-by-name "zz-chats-one"))
+    (run-command "chat-prompt")
+    (let ((view *chat-prompt-buffer*))
+      (list-set-filters! view (list (list "match" "zz-chats-")))
+      (list-refresh! view)
+      (ibuffer-goto-first-row! view)
+      (ibuffer-preview! view)
+      (let ((home (buffer-local view 'ibuffer-prompt-home-window))
+            (row (list-current view)))
+        (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
+        (check-equal! (window-buffer home) row "the window it was invoked from holds that chat")
+        (check-equal! (popup-open?) #f "and no card was floated to do it")))
+    (run-command "minibuffer-cancel")
     (chats-test-reset!)))

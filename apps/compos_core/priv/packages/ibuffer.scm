@@ -1584,6 +1584,14 @@
          ;; Typed narrowing is temporary. Keep any mode-specific filters.
          (_c (list-clear-query! buf))
          (t1 (monotonic-ms))
+         ;; the window form is a transient frame mode: it takes the window
+         ;; it was invoked in and gives the whole arrangement back on the
+         ;; way out. Window history could not do that — quitting put the
+         ;; history's buffer in this pane and lost what stood beside it.
+         ;; The minibuffer form floats a shaped popup and takes no window,
+         ;; so it records nothing.
+         (_t (unless (buffer-local buf 'window-shape)
+               (transient-frame-rearm! 'ibuffer buf)))
          (_d (if (buffer-local buf 'window-shape)
                  (begin
                    (display-buffer buf)
@@ -1866,12 +1874,24 @@
     (let ((b (ibuffer-current)) (view (ibuffer-view)))
       (if (ibuffer-heading? b)
           (ibuffer-toggle-fold! (ibuffer-heading-key b))
-          (listing-visit! view b)))))
+          (begin
+            ;; leaving is leaving, by RET as much as by q: the frame goes
+            ;; back to what the table covered and the buffer you picked
+            ;; lands in the arrangement you were working in
+            (listing-preview-dismiss! view)
+            (transient-frame-exit! 'ibuffer)
+            (listing-visit! view b))))))
 
-(define-command "ibuffer-quit" "Dismiss the preview and reveal the previous buffer here"
+(define-command "ibuffer-quit" "Dismiss the preview, else give the frame back"
   (lambda ()
     (if (equal? (frame-local 'listing-preview-owner) (ibuffer-view))
-        (listing-peek-dismiss!) (listing-quit! (ibuffer-view)))))
+        (listing-peek-dismiss!)
+        (begin (listing-preview-dismiss! (ibuffer-view))
+               ;; a transient frame mode gives the arrangement back whole;
+               ;; with nothing recorded — the minibuffer form, or a table
+               ;; that stopped standing — the ordinary quit still answers
+               (unless (transient-frame-exit! 'ibuffer)
+                 (listing-quit! (ibuffer-view)))))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer table"
   (lambda () (ibuffer-refresh!)))

@@ -973,9 +973,10 @@
       'composml-root (lambda (buf) (list 'tag "chat-list"))
       'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
       'doc (string-append
-             "The chat list opens here with inert floating peek cards. The rows "
+             "The chat list opens here. The rows "
              "are the recent chats, most recently used first. The list has the "
-             "focus; n and p select rows and preview read-only snapshots. "
+             "focus; n and p select rows and read the chat itself in the other "
+             "window — the buffer, not a copy of it. "
              "f opens the filter line: the filter "
              "reads the title first and the state second, and it reads every "
              "chat, not only the recent ones. A word that nobody put in a "
@@ -1044,15 +1045,21 @@
   ;; The list covers the frame and lays out two panes: itself in the
   ;; larger one and the selected chat in the smaller. The preview is a
   ;; real window over a real buffer, not a card floated on the rows — you
-  ;; read a chat in it the way you read a chat anywhere. Covering the
-  ;; frame is only fair if the frame comes back, so the arrangement the
-  ;; list covers is kept whole here and restored when the list leaves.
+  ;; read a chat in it the way you read a chat anywhere.
+  ;;
+  ;; Covering the frame is only fair if the frame comes back, so the list
+  ;; is a transient frame mode (layouts.scm): it records the arrangement
+  ;; it found and gives that back whole when it leaves. Re-arming rather
+  ;; than entering matters because the list can stop covering the frame
+  ;; without leaving through q — a listing takes its window, a layout is
+  ;; applied — and the tree it promised to restore is then a tree of
+  ;; windows that no longer exist.
   (let ((buf (ibuffer-group-view! "chat-list-mode" *chat-list-buffer*)))
+    (unless (transient-frame-standing? 'chat-list) (chat-list-release-hold!))
+    (transient-frame-rearm! 'chat-list (frame-local 'chat-list-view))
     (ibuffer-view! buf 'sort 'recent 'grouping 'group)
     (set-frame-local! 'chat-list-view buf)
     (buffer-set-local! buf 'window-preference-cover #t)
-    (unless (frame-local 'chat-list-covered)
-      (set-frame-local! 'chat-list-covered (window-tree)))
     (let ((preview
            (with-layout-suppressed
              (lambda ()
@@ -1070,7 +1077,21 @@
       (when (boundp 'group-current-recalculate!) (group-current-recalculate!))
       (let ((group (frame-group)))
         (when (and group (not (equal? (buffer-group buf) group)))
-          (buffer-move-to-group! buf group)))
+          (buffer-move-to-group! buf group))
+        ;; the pane shows a chat that usually lives in some other group,
+        ;; and the frame derives its current group from what it displays
+        ;; — so previewing pulled the frame into the previewed chat's
+        ;; group. One view per group then resolved to a different clone
+        ;; than the one on screen: the pane stopped following the cursor
+        ;; and a second list appeared. The list owns the frame while it
+        ;; covers it, so it holds the group still until it leaves
+        (unless (frame-local 'chat-list-pinned)
+          (set-frame-local! 'chat-list-prior-pin (frame-local 'pinned-group))
+          (set-frame-local! 'chat-list-pinned #t))
+        ;; a frame standing in no group has nothing to pin, so the held
+        ;; group — #f and all — is put back by hand after every preview
+        (set-frame-local! 'chat-list-held-group group)
+        (set-frame-local! 'pinned-group group))
       preview)))
 
 (define (chat-list-preview-window &optional owner)
@@ -1150,17 +1171,39 @@
 
 ;; Compatibility callbacks cannot resurrect previews after a live reload.
 (define (chat-list--preview-now! request) #f)
+(define (chat-list-hold-group!)
+  ;; the list covers the frame, so nothing it displays beside itself may
+  ;; decide which group the frame stands in. The frame derives its group
+  ;; from what it shows, and the pane shows a chat that usually lives
+  ;; somewhere else: previewing walked the frame from group to group, and
+  ;; one view per group then answered with a different list than the one
+  ;; on screen. A pin holds a real group; a frame standing in no group
+  ;; has none to pin, so the held answer is put back by hand.
+  (when (frame-local 'chat-list-pinned)
+    (let ((held (frame-local 'chat-list-held-group)))
+      (unless (equal? (frame-local 'current-group) held)
+        (set-frame-local! 'current-group held)
+        (when (boundp 'frame-group-label-refresh!) (frame-group-label-refresh!))))))
+
 (define (chat-list-preview-row! owner row)
-  ;; the row at point goes into the other pane. A heading is not a chat
-  ;; and an archived row is a path, not a buffer: both leave the pane
-  ;; showing what it last held rather than blanking it. With no pane —
-  ;; the minibuffer form — the card is still the right answer.
+  ;; the row at point goes into the other window, as the real chat
+  ;; buffer. A heading is not a chat and an archived row is a path, not
+  ;; a buffer: both leave that window showing what it last held rather
+  ;; than blanking it.
+  ;;
+  ;; The window form has a pane of its own. The minibuffer form has the
+  ;; window it was invoked from, and previews there the way C-x b does —
+  ;; this override used to send it to the floating card instead, so the
+  ;; chat prompt read an isolated text copy in a popup rather than the
+  ;; chat itself. ibuffer-preview! owns that path; only a form with
+  ;; neither a pane nor a home window falls back to a card.
   (let ((win (chat-list-preview-window owner)))
-    (cond ((not win) (listing-preview-schedule! owner row))
+    (cond ((not win) (ibuffer-preview! owner row))
           ((and (string? row) (buffer-known? row)
                 (not (equal? (window-buffer win) row)))
            (with-layout-suppressed
-             (lambda () (display-buffer-in-window! win row))))
+             (lambda () (display-buffer-in-window! win row)))
+           (chat-list-hold-group!))
           (else #f))))
 
 (define (chat-list-preview!)
@@ -1183,16 +1226,23 @@
                (active-window) (window-showing (chat-list-buffer)))))
     (when (and w (window-exists? w)) (select-window! w))))
 
+(define (chat-list-release-hold!)
+  ;; the bookkeeping half of leaving, with no window moved: the frame
+  ;; gets its own pin back and the list stops holding a pane.
+  (when (frame-local 'chat-list-pinned)
+    (set-frame-local! 'pinned-group (frame-local 'chat-list-prior-pin))
+    (set-frame-local! 'chat-list-prior-pin #f)
+    (set-frame-local! 'chat-list-held-group #f)
+    (set-frame-local! 'chat-list-pinned #f))
+  (set-frame-local! 'chat-list-preview-window #f))
+
 (define (chat-list-uncover!)
   ;; the list covered the frame, so leaving hands the whole arrangement
   ;; back. With nothing recorded there is nothing to restore and the
   ;; ordinary listing quit reveals whatever the window held before.
-  (let ((tree (frame-local 'chat-list-covered)))
-    (set-frame-local! 'chat-list-covered #f)
-    (set-frame-local! 'chat-list-preview-window #f)
-    (if tree
-        (with-layout-suppressed (lambda () (window-tree-set! tree)))
-        (listing-quit! (chat-list-buffer)))))
+  (chat-list-release-hold!)
+  (unless (transient-frame-exit! 'chat-list)
+    (listing-quit! (chat-list-buffer))))
 
 (define (chat-list-keep! keep)
   (chat-list-clear-search!)

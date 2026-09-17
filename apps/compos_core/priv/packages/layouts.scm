@@ -88,7 +88,81 @@
       (layout-focus-restore! focus)
       panes)))
 
-;;; --- tile-all: the overview -------------------------------------------------
+;;; --- transient frames -------------------------------------------------------
+;;; A transient frame mode borrows the frame and gives it back. It records
+;;; the arrangement it found on the way in, and leaving puts that
+;;; arrangement back EXACTLY: the same panes, the same buffers in them,
+;;; and the group the frame stood in.
+;;;
+;;; This is not window history and it is not quit-restore. Those answer
+;;; "what did this one window show before", one window at a time, and a
+;;; mode that split, covered or retiled the frame cannot be undone one
+;;; window at a time — the window it was invoked in came back holding
+;;; whatever the history had, and the pane beside it was simply lost.
+;;;
+;;; A mode enters by NAME, so two can stand at once without reading each
+;;; other's record. Entering twice does not re-record: what a mode gives
+;;; back is the arrangement from before it took the frame, never one it
+;;; made itself. A mode that stopped standing by some other road — its
+;;; buffer was replaced, a layout was applied — abandons its record
+;;; instead of restoring a tree of windows that no longer exist.
+
+(define (transient-frame--records) (or (frame-local 'transient-frames) '()))
+
+(define (transient-frame--set! records) (set-frame-local! 'transient-frames records))
+
+(define (transient-frame-standing? name)
+  (and (assoc name (transient-frame--records)) #t))
+
+(define (transient-frame-enter! name)
+  (if (transient-frame-standing? name)
+      #f
+      (begin
+        (transient-frame--set!
+          (cons (list name (window-tree) (frame-group)) (transient-frame--records)))
+        #t)))
+
+(define (transient-frame-abandon! name)
+  (transient-frame--set!
+    (filter (lambda (r) (not (equal? (car r) name))) (transient-frame--records)))
+  #f)
+
+;; the mode is standing only while the buffer it took the frame for is on
+;; screen. Arriving with a stale record re-arms: the arrangement to give
+;; back is the one in front of you now.
+(define (transient-frame-rearm! name buf)
+  (when (and (transient-frame-standing? name)
+             (not (and (string? buf) (buffer-known? buf) (window-showing buf))))
+    (transient-frame-abandon! name))
+  (transient-frame-enter! name))
+
+(define (transient-frame-exit! name)
+  (let ((record (assoc name (transient-frame--records))))
+    (if (not record)
+        #f
+        (let ((tree (nth 1 record)) (group (nth 2 record)))
+          (transient-frame-abandon! name)
+          (with-layout-suppressed (lambda () (window-tree-set! tree)))
+          ;; the windows walked while the mode stood, and a frame derives
+          ;; its group from what it shows: standing where you stood is
+          ;; part of giving the frame back
+          (unless (equal? (frame-group) group)
+            (set-frame-local! 'current-group group)
+            (when (boundp 'frame-group-label-refresh!) (frame-group-label-refresh!)))
+          #t))))
+
+(public! 'transient-frame-enter!
+  "(transient-frame-enter! NAME) — record the frame's arrangement so NAME can give it back; #f when NAME already stands")
+(public! 'transient-frame-exit!
+  "(transient-frame-exit! NAME) — put back exactly the arrangement and group NAME found; #f when NAME never entered")
+(public! 'transient-frame-standing?
+  "(transient-frame-standing? NAME) — #t while NAME holds an arrangement to give back")
+(public! 'transient-frame-rearm!
+  "(transient-frame-rearm! NAME BUF) — enter, re-recording when NAME's record is stale because BUF is not on screen")
+(public! 'transient-frame-abandon!
+  "(transient-frame-abandon! NAME) — drop NAME's record without restoring anything")
+
+;;; --- tile-all: the overview -------------------------------------------------;;; --- tile-all: the overview -------------------------------------------------
 ;;; tile-all is the context overview. It tiles each buffer in the current
 ;;; group or project and locks the frame. Keys select a tile and do not edit.
 ;;; SPC pops the selection out into a new group. The new group

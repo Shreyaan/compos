@@ -38,14 +38,31 @@ arrangement you were working in rather than in the list's two panes.
 
 The minibuffer form has no pane of its own and keeps the floating card.
 
+The list holds the frame's group still for as long as it covers the
+frame. The frame derives its current group from the buffers it shows,
+and the pane shows a chat that usually lives in some other group — so
+previewing walked the frame from group to group as the cursor moved.
+One list per group then answered with a different list buffer than the
+one on screen: the pane stopped following the cursor, and a second
+`*chat-list*` appeared. Arrival pins the group it opened in and records
+it; a frame standing in no group has none to pin, so the preview puts
+the recorded answer back by hand. Leaving hands the frame its own pin
+back and lets the group settle from the windows again, which is what
+lets `RET` enter the chat's own group.
+
 ## Listing buffers and floating peek cards
 
 `M-x ibuffer` opens an ordinary listing buffer in the window that invoked
 it, reusing a matching one in the current group without selecting another
 window that shows it. Different groups get separate listing buffers. The
-rows identify buffers. The card described below is ibuffer's preview and
-the chat prompt's; the chat list's window form previews into a pane
-instead, as above.
+rows identify buffers. The card described below is ibuffer's preview.
+Neither chat surface uses it: the window form previews into its pane and
+the minibuffer form previews into the window it was invoked from, both
+over the real chat buffer. `chat-list-mode` overrides the row-preview
+callback, and that override used to send the minibuffer form to the card
+— so the chat prompt read `*listing-preview:FRAME*`, an isolated text
+copy, in a popup instead of the chat. It now hands that form to
+`ibuffer-preview!`, which is the same path `C-x b` takes.
 
 Row navigation shows a **Preview** card after a short pause. The card is inset
 from the window borders, raised with a soft shadow, and connected by a line
