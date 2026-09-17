@@ -106,9 +106,7 @@ if config_env() == :test do
     provenance_path: ":memory:",
     desktop_path: "/tmp/compos-desktop-test-#{suffix}.etf",
     daemon_registry_path: "/tmp/compos-daemons-test-#{suffix}.json",
-    desktop_autorestore: false,
-    # no models.dev fetches from tests
-    llmdb_auto: false
+    desktop_autorestore: false
 
   config :logger, level: :warning
 

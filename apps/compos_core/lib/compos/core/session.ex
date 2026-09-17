@@ -1794,7 +1794,7 @@ defmodule Compos.Core.Session do
         end,
       {"llm-cost-report",
        "(llm-cost-report) — return one usage plist per day and model, with cost."} => fn [] ->
-        for row <- Compos.Core.LLMDb.report() do
+        for row <- Compos.Core.LLMUsage.report() do
           [
             {:sym, "day"},
             row.day,
@@ -1812,7 +1812,7 @@ defmodule Compos.Core.Session do
             row.cache_write,
             # as whole percent: Scheme has no float formatting worth the name
             {:sym, "hit-rate"},
-            case Compos.Core.LLMDb.hit_rate(row) do
+            case Compos.Core.LLMUsage.hit_rate(row) do
               nil -> false
               r -> round(r * 100)
             end,
@@ -1840,7 +1840,7 @@ defmodule Compos.Core.Session do
       end,
       {"llm-max-tokens",
        "(llm-max-tokens MODEL) — return the model's maximum output tokens, or #f."} => fn [model] ->
-        Compos.Core.LLMDb.max_tokens(s(model)) || false
+        Compos.Core.ModelCatalog.max_tokens(s(model)) || false
       end,
       {"llm-model-reasoning",
        "(llm-model-reasoning MODEL) — return normalized reasoning controls from the shared model catalog, or #f."} =>
@@ -2241,7 +2241,7 @@ defmodule Compos.Core.Session do
        "(llm-context-limit MODEL) — input tokens the model accepts, or #f when unknown."} => fn [
                                                                                                   m
                                                                                                 ] ->
-        Compos.Core.LLMDb.context_limit(to_string(m)) || false
+        Compos.Core.ModelCatalog.context_limit(to_string(m)) || false
       end,
       {"eval-string", "(eval-string SRC) — evaluate SRC as Scheme; return the last value."} =>
         fn [src], store -> eval_src.(src, store) end,
@@ -3269,7 +3269,7 @@ defmodule Compos.Core.Session do
   defdelegate scheme_to_json(value), to: Compos.Core.Plist, as: :to_json
 
   defp usage_to_plist(usage) do
-    t = Compos.Core.LLMDb.tokens(usage)
+    t = Compos.Core.LLMUsage.tokens(usage)
 
     [
       {:sym, "input"},

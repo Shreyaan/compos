@@ -14,6 +14,55 @@ defmodule Compos.Core.ModelCatalog do
   them into a single connector-wide "effort" list invents invalid choices.
   """
 
+  @doc """
+  Pricing for a model spec, $ per million tokens, or nil when the catalog
+  has no cost for it: %{input:, output:, cache_read:, cache_write:}.
+  """
+  def price(spec) do
+    with {:ok, %{cost: %{} = cost}} <- lookup(spec) do
+      %{
+        input: Map.get(cost, :input),
+        output: Map.get(cost, :output),
+        cache_read: Map.get(cost, :cache_read) || 0,
+        cache_write: Map.get(cost, :cache_write) || 0
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The model's own output-token limit from the catalog, or nil.
+
+  A flat cap truncates a long reply on a model that allows far more, and
+  the provider reports that truncation as a length stop, which the editor
+  then has to show. Meta documents a 128K maximum generated output for the
+  Muse Spark family; the catalog carries the context window instead.
+  """
+  def max_tokens(spec) do
+    if String.contains?(spec, "muse-spark-") do
+      128 * 1024
+    else
+      with {:ok, %{limits: %{} = limits}} <- lookup(spec),
+           out when is_integer(out) and out > 0 <- Map.get(limits, :output),
+           do: out,
+           else: (_ -> nil)
+    end
+  end
+
+  @doc """
+  How many input tokens the model accepts, or nil. `limits.input` where the
+  catalog states one, else `limits.context`: a model can hold a million
+  tokens of context and accept fewer of them as input, and it is the input
+  figure a conversation runs into. Compaction reads this.
+  """
+  def context_limit(spec) do
+    with {:ok, %{limits: %{} = limits}} <- lookup(spec),
+         n when is_integer(n) and n > 0 <- Map.get(limits, :input) || Map.get(limits, :context),
+         do: n,
+         else: (_ -> nil)
+  end
+
   @doc "Reasoning controls for a ReqLLM model spec, or nil when it is unknown."
   def reasoning(model_spec) when is_binary(model_spec) do
     with {:ok, model} <- lookup(model_spec) do
@@ -69,7 +118,8 @@ defmodule Compos.Core.ModelCatalog do
     ]
   end
 
-  defp lookup(spec) do
+  @doc "The catalog entry for a spec: `provider:id`, or a bare id looked up as Anthropic then OpenAI."
+  def lookup(spec) do
     case LLMDB.model(spec) do
       {:ok, _} = ok ->
         ok

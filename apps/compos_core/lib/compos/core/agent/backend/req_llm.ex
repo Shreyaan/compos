@@ -193,8 +193,8 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   defp bill(%{turn_usage: usage} = state) when map_size(usage) == 0, do: state
 
   defp bill(state) do
-    cost = Compos.Core.LLMDb.record(state.turn_model || LLM.model(), state.turn_usage, state.slug)
-    t = Compos.Core.LLMDb.tokens(state.turn_usage)
+    cost = Compos.Core.LLMUsage.record(state.turn_model || LLM.model(), state.turn_usage, state.slug)
+    t = Compos.Core.LLMUsage.tokens(state.turn_usage)
 
     emit(state,
       type: :usage,

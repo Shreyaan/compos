@@ -64,7 +64,7 @@ defmodule Compos.Core.LLM do
   `dispatcher` is a Scheme closure `(name args-plist) -> result`; `callback`
   gets the final text. opts: `:on_usage` is called (before `callback`) with
   the summed usage map of every round, plus "cost" when llmdb prices the
-  model; the request is also recorded in the LLMDb ledger.
+  model; the request is also recorded in the LLMUsage ledger.
   """
   def complete_tools(prompt, system, specs, dispatcher, callback, opts \\ [])
       when is_function(callback, 1) do
@@ -119,7 +119,7 @@ defmodule Compos.Core.LLM do
   end
 
   defp deliver_usage(usage, on_usage) do
-    cost = Compos.Core.LLMDb.record(model(), usage)
+    cost = Compos.Core.LLMUsage.record(model(), usage)
     if on_usage, do: on_usage.(Map.put(usage, "cost", cost))
   end
 
@@ -616,7 +616,7 @@ defmodule Compos.Core.LLM do
   # truncated long replies on models that allow far more, and a length stop
   # reported itself as a clean end_turn — the reply just stopped.
   defp max_tokens(spec) do
-    Application.get_env(:compos_core, :llm_max_tokens) || Compos.Core.LLMDb.max_tokens(spec) || 4096
+    Application.get_env(:compos_core, :llm_max_tokens) || Compos.Core.ModelCatalog.max_tokens(spec) || 4096
   end
 
   # our tools never execute through req_llm (the loop dispatches into the
@@ -731,7 +731,7 @@ defmodule Compos.Core.LLM do
   #
   # 'total_cost rides along because req_llm already priced this request
   # against its own model database, from the provider's raw numbers. It
-  # remains the accurate figure; the fallback in LLMDb prices these
+  # remains the accurate figure; the fallback in LLMUsage prices these
   # normalized counts, and now it agrees.
   @doc """
   req_llm usage + a model spec -> the ledger's field names, with
@@ -784,7 +784,7 @@ defmodule Compos.Core.LLM do
 
       case with_retry(fn -> ReqLLM.generate_text(spec, prompt, opts) end) do
         {:ok, resp} ->
-          Compos.Core.LLMDb.record(
+          Compos.Core.LLMUsage.record(
             requested_model,
             usage_strings(ReqLLM.Response.usage(resp), spec)
           )

@@ -92,7 +92,6 @@ defmodule Compos.Core.Application do
         start: {Compos.Core.SchemeWarmup, :start_link, [[]]},
         restart: :temporary
       },
-      Compos.Core.LLMDb,
       # one-shot: register the grammars the user installed. These are
       # the reader's own, so they can arrive after the frame does.
       %{
