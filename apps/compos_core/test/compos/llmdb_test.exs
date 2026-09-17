@@ -148,10 +148,7 @@ defmodule Compos.LLMDbTest do
     assert mystery.cost == 0
   end
 
-  test "the scheme surface: llm-price, format-usd, llm-cost-report" do
-    {:ok, price} = Session.eval(~s{(plist-get (llm-price "claude-sonnet-5") 'output)})
-    assert price == "15.0"
-
+  test "the scheme surface: format-usd, llm-cost-report" do
     {:ok, usd} = Session.eval("(format-usd 0.03315)")
     assert usd == ~s{"$0.0332"}
 

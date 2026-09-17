@@ -575,8 +575,6 @@ defmodule Compos.Core.SchemeAPI do
         "(reload-files! PATHS) — evaluate the changed top-level forms of each .scm and refresh the modes they redefine; return (FILES FORMS).",
       "refresh-primitives!" =>
         "(refresh-primitives!) — rebind every Elixir primitive to the version now loaded; return #t.",
-      "window-list-all" =>
-        "(window-list-all) — return ((WINDOW-ID BUFFER FRAME-ID) ...) for every window on every frame.",
       "redraw!" => "(redraw!) — tell every connected client to re-render every frame; return #t.",
       "desktop-dirty!" =>
         "(desktop-dirty!) — schedule persistence after Scheme-owned desktop state changes; return #t.",
@@ -733,7 +731,6 @@ defmodule Compos.Core.SchemeAPI do
       "frame-list" => "(frame-list) — return frame ids in most-recently-used order.",
       "selected-frame" => "(selected-frame) — return the current frame's id.",
       "select-frame!" => "(select-frame! FRAME) — make FRAME current; return #t on success.",
-      "make-frame!" => "(make-frame!) — create a frame and return its id.",
       "window-list-all" =>
         "(window-list-all) — return (WIN BUFFER FRAME) rows for every window in every frame.",
       "window-set-buffer!" =>
@@ -796,7 +793,6 @@ defmodule Compos.Core.SchemeAPI do
         "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first.",
       "overriding-map!" =>
         "(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?]) — the frame's overriding keymap, ahead of every other; #f clears it. LOCK? makes an unbound key undefined (Transient). UNTIL-COMMAND? drops it when the next command finishes (the prefix argument).",
-      "overriding-map" => "(overriding-map) — the frame's overriding keymap, or #f.",
       "buffer-at-point-map!" =>
         "(buffer-at-point-map! BUF KEYMAP) — the keymap of the thing at point in BUF (a block), ahead of the minor maps; #f clears it. Emacs's overlay keymap.",
       "buffer-at-point-map" => "(buffer-at-point-map BUF) — the keymap at point in BUF, or #f.",
@@ -1632,9 +1628,6 @@ defmodule Compos.Core.SchemeAPI do
               message: "the tree does not compile; staying up: #{out}"
         end
       end,
-      "window-list-all" => fn [] ->
-        Enum.map(Editor.list_windows_all(), fn {id, buffer, fid} -> [id, buffer, fid] end)
-      end,
       # A reload changes what a render would produce, but nothing asks for
       # one: the client repaints on an editor event, and evaluating a
       # definition is not an event. Without this a reloaded modeline, face,
@@ -2172,10 +2165,6 @@ defmodule Compos.Core.SchemeAPI do
         if ok, do: Compos.Core.Frame.put(id)
         ok
       end,
-      "make-frame!" => fn [] ->
-        {:ok, id} = Editor.attach_frame(nil)
-        id
-      end,
       # every window everywhere: ((id buffer frame-id) ...) — the cross-frame
       # walk for kill-buffer replacement, agent window release
       "window-list-all" => fn [] ->
@@ -2373,7 +2362,6 @@ defmodule Compos.Core.SchemeAPI do
         [name, lock] -> Editor.set_overriding_map(plain(name), lock == true)
         [name, lock, until] -> Editor.set_overriding_map(plain(name), lock == true, until == true)
       end,
-      "overriding-map" => fn [] -> Editor.overriding_map() || false end,
       "buffer-at-point-map!" => fn [buf, name] ->
         Editor.set_at_point_map(buf, name && plain(name))
         :void

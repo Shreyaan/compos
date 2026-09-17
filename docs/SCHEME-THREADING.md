@@ -1,8 +1,7 @@
 # Scheme threading
 
 compos evaluates Scheme in BEAM processes. The processes share one live Scheme
-world unless code starts an isolated actor. Buffers remain independent state
-owners.
+world. Buffers remain independent state owners.
 
 This document separates the current runtime from the intended incremental
 library model.
@@ -15,12 +14,10 @@ The runtime has these execution paths:
 | --- | --- | --- | --- |
 | Ordinary evaluation | Shared Scheme world | Serial for one lane or worker | Keys, commands, callbacks, and writes |
 | `SchemeTask` | Shared Scheme world | Independent one-shot process | Concurrent reads and explicit parallel work |
-| `SchemeActor` | Private Scheme environment | Serial mailbox | Isolated long-lived state and supervision |
 | Buffer process | One buffer | Serial mailbox | Text, point, locals, provenance, and edits |
 
-`COMPOS_SCHEME_EXECUTION=single_actor` routes ordinary Scheme evaluation through
-one serial worker. Compatibility mode routes ordinary evaluation through serial
-lanes. Shared-world tasks and isolated actors remain available in both modes.
+Ordinary evaluation runs on serial lanes, one per owner. Shared-world tasks
+are available from any lane.
 
 A lane is an ordering queue. A lane is not a transaction, an ownership
 boundary, or a separate Scheme world.
@@ -128,7 +125,7 @@ processes can lose a read-modify-write update:
 ```
 
 Two evaluators can both read `0` and both write `1`. Keep mutable global state
-small. Put editor state in buffers or explicit actors. Use a narrow serialized
+small. Put editor state in buffers. Use a narrow serialized
 writer when a global invariant spans several operations.
 
 The editable race diagram is in
@@ -137,19 +134,6 @@ The editable race diagram is in
 The planned Loro provenance layer will add versioned buffer operations,
 anchors, authorship, and conflict handling. The task layer does not invent a
 second buffer transaction model before that layer lands.
-
-## Isolated actors
-
-An actor owns a private Scheme environment and a FIFO mailbox. Only data crosses
-the mailbox. Actor `set!` and `define` calls do not change the shared Scheme
-world.
-
-Use actors for private long-lived state, supervision, timers, and message
-protocols. Do not create one actor per buffer. Buffers already own their state.
-
-Actor spawn currently copies the shared Scheme environment. This makes actors
-more expensive than shared-world tasks. See [SCHEME-ACTORS.md](SCHEME-ACTORS.md)
-for the complete actor API and its current limits.
 
 ## Definitions and discovery
 

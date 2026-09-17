@@ -70,12 +70,8 @@ dispatch it to another worker.
   popup → buffer keymap; breaks the undo chain for non-undo commands.
 - **Session** — owns the Scheme interpreter; loads `priv/*.scm`, then
   `~/.compos/ai-config.scm`, then `~/.compos/init.scm`. All commands are Scheme
-  closures in an ETS table. Ordinary evaluation can use compatibility lanes or
-  one serial worker (`COMPOS_SCHEME_EXECUTION=single_actor`).
-- **SchemeActor** — optional isolated Scheme processes. Each owns a private
-  environment and serial mailbox. Only data crosses actor boundaries; buffers
-  and other editor mechanisms remain shared services. See
-  `docs/SCHEME-ACTORS.md`.
+  closures in an ETS table. Ordinary evaluation runs on lanes: one serial
+  worker per owner (the UI, a group, a buffer, an RPC client, an agent).
 - **SchemeTask** — one-shot Scheme computations in supervised BEAM processes
   over the live shared environment. Explicit Scheme can fan out with task
   primitives; an LLM round automatically runs up to four `pure`/`read` tools

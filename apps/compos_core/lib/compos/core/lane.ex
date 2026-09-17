@@ -25,21 +25,7 @@ defmodule Compos.Core.Lane do
 
   @registry Compos.Core.LaneRegistry
   @supervisor Compos.Core.LaneSupervisor
-  @single_lane :scheme
   @jobs_table :compos_lane_jobs
-
-  @doc "The configured Scheme scheduler: :lanes or :single_actor."
-  def execution_mode do
-    Application.get_env(:compos_core, :scheme_execution, :lanes)
-  end
-
-  @doc "Resolve a logical owner to its execution lane."
-  def route(key) do
-    case execution_mode() do
-      :lanes -> key
-      :single_actor -> @single_lane
-    end
-  end
 
   @doc "The lane key of the running worker, or nil outside a lane."
   def current, do: Process.get(:compos_scheme_lane)
@@ -57,7 +43,6 @@ defmodule Compos.Core.Lane do
   """
   def run(key, fun, timeout \\ 30_000, label \\ "") do
     logical_key = key
-    key = route(key)
 
     if current() == key do
       {:reply, value} = fun.(nil)
@@ -143,7 +128,6 @@ defmodule Compos.Core.Lane do
   @doc "Run FUN in the lane without waiting; the reply is discarded."
   def cast(key, fun, label \\ "") do
     logical_key = key
-    key = route(key)
     enqueued_at = System.monotonic_time(:millisecond)
 
     GenServer.cast(
@@ -154,7 +138,6 @@ defmodule Compos.Core.Lane do
 
   @doc "Kill the lane's worker; queued work is lost, the store survives."
   def kill(key) do
-    key = route(key)
 
     case Registry.lookup(@registry, key) do
       [{pid, _}] -> Process.exit(pid, :kill)

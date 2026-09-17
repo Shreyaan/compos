@@ -21,7 +21,7 @@ defmodule Compos.Core.Session do
 
   require Logger
 
-  alias Compos.Core.{Buffer, Editor, Frame, Lane, SchemeActor, SchemeTask}
+  alias Compos.Core.{Buffer, Editor, Frame, Lane, SchemeTask}
   alias Compos.Scheme
   alias Compos.Scheme.Reader
 
@@ -1051,25 +1051,12 @@ defmodule Compos.Core.Session do
       "messages-snapshot" =>
         "(messages-snapshot [LIMIT]) — return recent structured editor messages, oldest first.",
       "messages-clear!" => "(messages-clear!) — discard every editor message.",
-      "actor-spawn" =>
-        "(actor-spawn BEHAVIOR STATE) — start an isolated Scheme actor; BEHAVIOR returns (NEW-STATE REPLY).",
-      "actor-self" => "(actor-self) — return the current isolated actor, or #f.",
-      "actor-ref?" => "(actor-ref? VALUE) — return #t when VALUE is a Scheme actor reference.",
-      "actor-alive?" => "(actor-alive? ACTOR) — return #t when ACTOR is running.",
-      "actor-send!" => "(actor-send! ACTOR MESSAGE) — send a data message without waiting.",
-      "actor-call" =>
-        "(actor-call ACTOR MESSAGE [MS]) — send a data message and return its reply.",
-      "actor-after!" => "(actor-after! MS ACTOR MESSAGE) — send a data message after the delay.",
-      "actor-monitor!" =>
-        "(actor-monitor! OBSERVER TARGET TAG) — send (down TAG REASON) when TARGET stops.",
-      "actor-stop!" => "(actor-stop! ACTOR) — stop ACTOR and invalidate its reference.",
       "task-spawn" =>
         "(task-spawn THUNK) — run a zero-argument Scheme closure concurrently over the shared editor world.",
       "task-run!" =>
         "(task-run! THUNK CALLBACK [MS]) — run THUNK concurrently; later call CALLBACK with OK? and its value or error.",
       "task-await" =>
         "(task-await TASK [MS]) — wait for a Scheme task and return its value, or raise its error.",
-      "task-ref?" => "(task-ref? VALUE) — return #t when VALUE is a Scheme task reference.",
       "task-alive?" => "(task-alive? TASK) — return #t while TASK remains available.",
       "task-cancel!" => "(task-cancel! TASK) — stop a Scheme task.",
       "define-command" =>
@@ -1125,7 +1112,6 @@ defmodule Compos.Core.Session do
       "lsp-open!" => "(lsp-open! ID BUF) — open BUF on the server and keep it in sync.",
       "lsp-close!" => "(lsp-close! ID BUF) — close BUF on the server.",
       "lsp-notify!" => "(lsp-notify! ID METHOD PARAMS) — send a notification to the server.",
-      "lsp-request" => "(lsp-request ID METHOD PARAMS CB) — send a request; CB gets (OK RESULT).",
       "lsp-buffer-request" =>
         "(lsp-buffer-request ID METHOD BUF BYTE-POS [EXTRA] CB) — request at a buffer position; CB gets (OK RESULT).",
       "db-connect!" =>
@@ -1169,7 +1155,6 @@ defmodule Compos.Core.Session do
       "ts-installed-grammars" =>
         "(ts-installed-grammars) — return the installed tree-sitter grammar names.",
       "format-usd" => "(format-usd AMOUNT) — return AMOUNT as a dollar string with 4 decimals.",
-      "llm-price" => "(llm-price MODEL) — return the model's token price plist, or #f.",
       "llm-cost-report" =>
         "(llm-cost-report) — return one usage plist per day and model, with cost.",
       "set-llm-model!" => "(set-llm-model! MODEL) — set the active LLM model.",
@@ -1206,7 +1191,6 @@ defmodule Compos.Core.Session do
       "agent-start!" => "(agent-start! SLUG CONFIG) — start an agent thread from a config plist.",
       "agent-prompt!" =>
         "(agent-prompt! SLUG TEXT [DISPLAY]) — send a prompt; return 'sent or 'queued.",
-      "agent-cancel!" => "(agent-cancel! SLUG) — cancel the agent's current turn.",
       "agent-dequeue!" =>
         "(agent-dequeue! SLUG TEXT) — remove one queued prompt whose text is TEXT; return #t or #f.",
       "agent-permission-respond!" =>
@@ -1352,46 +1336,6 @@ defmodule Compos.Core.Session do
         clear_messages()
         :void
       end,
-      "actor-spawn" => fn [behavior, initial_state], store ->
-        interp = %Scheme{store: store, global: global}
-
-        case SchemeActor.start(interp, behavior, initial_state) do
-          {:ok, ref} -> {ref, store}
-          {:error, reason} -> raise_scheme("actor-spawn: #{reason}")
-        end
-      end,
-      "actor-self" => fn [] -> SchemeActor.current() end,
-      "actor-ref?" => fn [value] -> SchemeActor.actor_ref?(value) end,
-      "actor-alive?" => fn [actor] -> SchemeActor.alive?(actor) end,
-      "actor-send!" => fn [actor, message] ->
-        case SchemeActor.cast(actor, message) do
-          :ok -> true
-          {:error, reason} -> raise_scheme("actor-send!: #{reason}")
-        end
-      end,
-      "actor-call" => fn
-        [actor, message] ->
-          actor_call(actor, message, 5_000)
-
-        [actor, message, timeout] ->
-          actor_call(actor, message, trunc(timeout))
-      end,
-      "actor-after!" => fn [milliseconds, actor, message] ->
-        case SchemeActor.deliver_after(actor, trunc(milliseconds), message) do
-          :ok -> true
-          {:error, reason} -> raise_scheme("actor-after!: #{reason}")
-        end
-      end,
-      "actor-monitor!" => fn [observer, target, tag] ->
-        case SchemeActor.monitor(observer, target, tag) do
-          :ok -> true
-          {:error, reason} -> raise_scheme("actor-monitor!: #{reason}")
-        end
-      end,
-      "actor-stop!" => fn [actor] ->
-        :ok = SchemeActor.stop(actor)
-        true
-      end,
       "task-spawn" => fn [closure] ->
         case SchemeTask.start(closure) do
           {:ok, ref} -> ref
@@ -1406,7 +1350,6 @@ defmodule Compos.Core.Session do
         [task] -> scheme_task_await(task, 30_000)
         [task, timeout] -> scheme_task_await(task, trunc(timeout))
       end,
-      "task-ref?" => fn [value] -> SchemeTask.task_ref?(value) end,
       "task-alive?" => fn [task] -> SchemeTask.alive?(task) end,
       "task-cancel!" => fn [task] ->
         :ok = SchemeTask.cancel(task)
@@ -1793,18 +1736,6 @@ defmodule Compos.Core.Session do
         Compos.Core.LSP.Conn.notify(pid, s(method), scheme_to_json(params))
         :void
       end,
-      "lsp-request" => fn [id, method, params, callback] ->
-        {pid, key} = lsp_conn!(id)
-
-        Compos.Core.LSP.Conn.request(
-          pid,
-          s(method),
-          scheme_to_json(params),
-          lsp_cb(callback, key)
-        )
-
-        :void
-      end,
       "lsp-buffer-request" => fn
         [id, method, buf, pos, callback] ->
           {pid, key} = lsp_conn!(id)
@@ -1994,24 +1925,6 @@ defmodule Compos.Core.Session do
       "ts-installed-grammars" => fn [] -> Compos.Core.TreeSitter.installed() end,
       "format-usd" => fn [amount] when is_number(amount) ->
         "$" <> :erlang.float_to_binary(amount * 1.0, decimals: 4)
-      end,
-      "llm-price" => fn [model] ->
-        case Compos.Core.LLMDb.price(s(model)) do
-          nil ->
-            false
-
-          p ->
-            [
-              {:sym, "input"},
-              p.input,
-              {:sym, "output"},
-              p.output,
-              {:sym, "cache-read"},
-              p.cache_read,
-              {:sym, "cache-write"},
-              p.cache_write
-            ]
-        end
       end,
       "llm-cost-report" => fn [] ->
         for row <- Compos.Core.LLMDb.report() do
@@ -2205,10 +2118,6 @@ defmodule Compos.Core.Session do
           :sent -> true
           {:error, _reason} -> false
         end
-      end,
-      "agent-cancel!" => fn [slug] ->
-        Compos.Core.LLMSession.cancel(s(slug))
-        :void
       end,
       "agent-dequeue!" => fn [slug, text] ->
         case Compos.Core.LLMSession.dequeue(s(slug), to_string(text)) do
@@ -2961,13 +2870,6 @@ defmodule Compos.Core.Session do
   defp s(str) when is_binary(str), do: str
 
   defp raise_scheme(msg), do: raise(Compos.Scheme.Eval.Error, message: msg)
-
-  defp actor_call(actor, message, timeout) do
-    case SchemeActor.call(actor, message, timeout) do
-      {:ok, reply} -> reply
-      {:error, reason} -> raise_scheme("actor-call: #{reason}")
-    end
-  end
 
   defp scheme_task_await(task, timeout) do
     case SchemeTask.await(task, timeout) do

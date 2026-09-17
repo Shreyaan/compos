@@ -48,7 +48,6 @@ defmodule Compos.Core.Application do
       {Registry, keys: :unique, name: Compos.Core.EndpointRegistry},
       {Registry, keys: :unique, name: Compos.Core.DBRegistry},
       {Registry, keys: :unique, name: Compos.Core.WebServerRegistry},
-      {Registry, keys: :unique, name: Compos.Core.SchemeActorRegistry},
       {Registry, keys: :unique, name: Compos.Core.SchemeTaskRegistry},
       {DynamicSupervisor, name: Compos.Core.BufferSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Compos.Core.ProcSupervisor, strategy: :one_for_one},
@@ -59,7 +58,6 @@ defmodule Compos.Core.Application do
       {DynamicSupervisor, name: Compos.Core.EndpointSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Compos.Core.DBSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Compos.Core.WebServerSupervisor, strategy: :one_for_one},
-      {DynamicSupervisor, name: Compos.Core.SchemeActorSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Compos.Core.SchemeTaskSupervisor, strategy: :one_for_one},
       Compos.Core.SchemeReadLimiter,
       # before Session: it owns the Scheme world's ETS tables so a Session

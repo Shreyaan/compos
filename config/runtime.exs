@@ -70,17 +70,6 @@ if config_env() != :test do
   # an environment variable wins over the conf file
   get = fn env_key, conf_key -> System.get_env(env_key) || conf[conf_key] end
 
-  if execution = get.("COMPOS_SCHEME_EXECUTION", "scheme_execution") do
-    mode =
-      case execution do
-        "lanes" -> :lanes
-        "single_actor" -> :single_actor
-        other -> raise "scheme_execution must be lanes or single_actor, got: #{other}"
-      end
-
-    config :compos_core, scheme_execution: mode
-  end
-
   if registry = get.("COMPOS_DAEMON_REGISTRY", "registry") do
     config :compos_core, daemon_registry_path: Path.expand(registry)
   end

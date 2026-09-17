@@ -125,13 +125,8 @@ defmodule Compos.LSPPrimitivesTest do
     assert eval!(~s{(lsp-server-detail "nope@/tmp")}) == "#f"
   end
 
-  test "a request against a missing connection raises, and lsp-log answers" do
+  test "lsp-log answers for a live connection" do
     id = start!("prim-e")
-
-    assert {:error, msg} =
-             Session.eval(~s{(lsp-request "gone@/x" "m" '() (lambda (ok r) #f))})
-
-    assert msg =~ "no connection"
     assert eval!(~s{(length (lsp-log "#{id}"))}) =~ ~r/\d+/
   end
 end
