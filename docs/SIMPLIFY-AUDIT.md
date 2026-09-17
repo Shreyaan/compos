@@ -664,6 +664,9 @@ llm-mode removal, sentry/worktrees/jj trims.
 
 Each step lands alone and leaves the tree green.
 
+**Done 2026-09-18:** load-path (9a1ca5bb), the 40 test wrappers (316ab4a5),
+plist-get and its nine wrappers (9e74f0e8), the secrets seam (7640482e).
+
 **Next three steps, in order.**
 
 1. `load-path`: the defvar in editor.scm, `load` searching it in Scheme over
