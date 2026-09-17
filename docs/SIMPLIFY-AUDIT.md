@@ -665,7 +665,12 @@ llm-mode removal, sentry/worktrees/jj trims.
 Each step lands alone and leaves the tree green.
 
 **Done 2026-09-18:** load-path (9a1ca5bb), the 40 test wrappers (316ab4a5),
-plist-get and its nine wrappers (9e74f0e8), the secrets seam (7640482e).
+plist-get and its nine wrappers (9e74f0e8), the secrets seam (7640482e),
+SchemeActor + single_actor + six unused primitives (7ac0c748). A recount
+with Elixir eval strings, user config, skills and prompts in the corpus
+found 20 unreferenced primitives, not 52; introspection reads that tests
+use to assert state (face-list, keymap-parent, buffer-local-map, lsp-log,
+task-alive?, unbind-global!) stay.
 
 **Next three steps, in order.**
 

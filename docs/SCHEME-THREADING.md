@@ -221,7 +221,6 @@ the displayed row count.
 | `apps/compos_core/lib/compos/core/session.ex` | Scheme entry points, primitives, roots, and GC timer |
 | `apps/compos_core/lib/compos/core/scheme_task.ex` | Shared-world one-shot processes |
 | `apps/compos_core/lib/compos/core/scheme_read_limiter.ex` | Global read admission limit |
-| `apps/compos_core/lib/compos/core/scheme_actor.ex` | Private Scheme actors and mailboxes |
 | `apps/compos_core/lib/compos/core/llm.ex` | Effect-aware tool-round dispatch |
 | `apps/compos_scheme/lib/compos/scheme.ex` | The `Scheme.exec` boundary |
 | `apps/compos_scheme/lib/compos/scheme/env.ex` | Local frames, shared ETS rows, caches, publication, and GC coordination |
