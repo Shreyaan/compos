@@ -16,7 +16,7 @@ are marked (CQ #n).
 | editor.scm | 15.3k | ~4k | 9.5k moves to packages; 2.8k deleted; 0.8k of comments to docs |
 | Elixir | 49k | ~25k | 4.7k of JS/CSS to static files; two LiveViews to one; duplicate modules |
 | Tests | 78k | ~40k | 43 wrapper files, 40 double-covered features, demo-app tests |
-| Docs | 66 files, 13.7k | ~22 files, ~6k | stale, superseded, essays out |
+| Docs | 66 files, 13.7k | ~27 files, ~7k | stale and superseded out; the essays stay |
 | Primitives | 582 | ~350 | 52 unreferenced, 25 dual spellings, families to one door |
 | Commands | 986 | ~650 | 160 window commands to 55; 90 app commands out; 60 leftovers |
 | Defcustoms | 253 | ~120 | 88 have one reader in their own file; 41 belong to apps |
@@ -650,9 +650,9 @@ llm-mode removal, sentry/worktrees/jj trims.
    COMPOS.md, COMPONENTS-SPEC, CONTROL-SPEC, PROVENANCE + BUFFER, four
    COMPOSML docs; never built: ANNOTATIONS, PDF-ANNOTATIONS,
    EDITING-SURFACE-SPEC, ORG-MODE-PLAN, SIMPLIFY-SPEC (has `pkill`),
-   CLEANUP-QUEUE, SCHEME-TEST-MIGRATION, SWITCHER-PERF-HANDOFF; essays:
-   BEYOND-TOOLS, CORDIS-VS-EMACS, EMACS-AS-AGENT-HARNESS, INTRODUCTION,
-   COMPOS-HOMEPAGE-BRIEF. Dangling: AI-NATIVE-SPEC, INTERFACE, SCOPE, LISP,
+   CLEANUP-QUEUE, SCHEME-TEST-MIGRATION, SWITCHER-PERF-HANDOFF. The essays
+   (BEYOND-TOOLS, CORDIS-VS-EMACS, EMACS-AS-AGENT-HARNESS, INTRODUCTION,
+   COMPOS-HOMEPAGE-BRIEF) stay in docs/ (ruled 2026-09-19). Dangling: AI-NATIVE-SPEC, INTERFACE, SCOPE, LISP,
    ACP, calendar. Non-doc files: 7 png, a patch, a saved chat transcript.
 8. Skills: 12 to 5. code-change says "do not read CLAUDE.md as a ritual"
    while CLAUDE.md says load code-change before every change. compos-boot
