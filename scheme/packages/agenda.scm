@@ -139,9 +139,6 @@
     (and g (string-downcase
              (substring-bytes line (car (nth 1 g)) (cadr (nth 1 g)))))))
 
-(define (agenda--basename path)
-  (car (reverse (string-split path "/"))))
-
 ;; every dated entry in TEXT, in file order. The walk is fence-aware
 ;; through morg's own line predicates, so a # inside a code block is not
 ;; a heading. HEAD is (pos todo title tags) of the nearest heading.
@@ -176,7 +173,7 @@
                          (cons (list 'z (car ts) 'time (cadr ts) 'kind k
                                      'todo (and head (cadr head))
                                      'title (if head (caddr head)
-                                                (agenda--basename path))
+                                                (file-name-nondirectory path))
                                      'tags (and head (nth 3 head))
                                      'file path 'pos (if head (car head) pos))
                                acc)
@@ -294,7 +291,7 @@
   (list (plist-get row 'title)
         (or (plist-get row 'who) "")
         (or (plist-get row 'tags) "")
-        (agenda--basename (plist-get row 'file))))
+        (file-name-nondirectory (plist-get row 'file))))
 
 (define (agenda--iota start n)
   (let loop ((i 0) (acc '()))
@@ -374,7 +371,7 @@
     (let ((todo (plist-get e 'todo))) (if todo (string-append todo "  ") ""))
     (or (plist-get e 'title) "")
     (let ((tags (plist-get e 'tags))) (if tags (string-append "  " tags) ""))
-    "  — " (agenda--basename (plist-get e 'file))))
+    "  — " (file-name-nondirectory (plist-get e 'file))))
 
 (define (agenda--field tag face text) (list face text tag))
 
@@ -406,7 +403,7 @@
             (let ((tags (plist-get e 'tags)))
               (if tags (list (agenda--field "agenda-tags" "agenda-tags" tags)) '()))
             (list (agenda--field "agenda-source" "agenda-file"
-                        (agenda--basename (plist-get e 'file))))))))
+                        (file-name-nondirectory (plist-get e 'file))))))))
 
 (define (agenda--render! buf)
   (let* ((today (agenda--today-z))

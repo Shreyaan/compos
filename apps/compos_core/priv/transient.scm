@@ -21,10 +21,6 @@
             ((equal? (car xs) key) (loop (cdr (cdr xs))))
             (else (cons (car xs) (cons (cadr xs) (loop (cdr (cdr xs))))))))))
 
-(define (transient--alist-put al key value)
-  (cons (list key value)
-    (filter (lambda (e) (not (equal? (car e) key))) al)))
-
 (define (transient--alist-get al key fallback)
   (let ((e (assoc key al))) (if e (cadr e) fallback)))
 
@@ -94,7 +90,7 @@
 
 (define (transient--set-value! argument value)
   (let* ((state (transient--active))
-         (values (transient--alist-put (plist-get state 'values) argument value)))
+         (values (alist-put (plist-get state 'values) argument value)))
     (transient--set-active! (transient--put state 'values values))))
 
 (define (transient--raw-groups prefix state)
@@ -148,7 +144,7 @@
                      (argument (plist-get item 'argument)))
                 (loop (cdr items)
                   (if argument
-                      (transient--alist-put values argument
+                      (alist-put values argument
                         (transient--item-default item))
                       values))))))))
 
@@ -408,7 +404,7 @@
          (old (transient--alist-get *transient-history* name '()))
          (history (take-n (cons values (remove (lambda (v) (equal? v values)) old))
                           transient-history-limit)))
-    (set! *transient-history* (transient--alist-put *transient-history* name history))))
+    (set! *transient-history* (alist-put *transient-history* name history))))
 
 (define (transient--export! state)
   (set-frame-local! 'transient-current-prefix (plist-get state 'prefix))
@@ -585,7 +581,7 @@
     (let ((state (transient--active)))
       (when state
         (set! *transient-defaults*
-          (transient--alist-put *transient-defaults*
+          (alist-put *transient-defaults*
             (plist-get state 'prefix) (plist-get state 'values)))
         (message "Set transient values")))))
 

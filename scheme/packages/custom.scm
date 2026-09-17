@@ -16,10 +16,6 @@
 ;; but the implementation does not: the copy here crashed on an
 ;; odd-length plist where the original returns #f.
 
-(define (custom--alist-put alist key val)
-  (cons (list key val)
-        (remove (lambda (e) (equal? (car e) key)) alist)))
-
 ;;; --- registries --------------------------------------------------------------
 
 (define *custom-groups* '())    ; (name doc)
@@ -28,12 +24,12 @@
 (define *custom-set-faces* '()) ; saved (face (attr val ...))
 
 (define (defgroup name doc)
-  (set! *custom-groups* (custom--alist-put *custom-groups* name doc))
+  (set! *custom-groups* (alist-put *custom-groups* name doc))
   name)
 
 (define (defcustom name default doc &rest opts)
   (set! *custom-vars*
-    (custom--alist-put *custom-vars* name
+    (alist-put *custom-vars* name
                        (append (list 'default default 'doc doc) opts)))
   ;; a saved value wins; otherwise the default — unless init.scm already
   ;; defined the variable itself (user set!s beat defaults, like setq)
@@ -79,19 +75,19 @@
 ;; file round-trips
 (define (custom-set-variables! &rest entries)
   (for-each (lambda (e)
-              (set! *custom-set-vars* (custom--alist-put *custom-set-vars* (car e) (cadr e)))
+              (set! *custom-set-vars* (alist-put *custom-set-vars* (car e) (cadr e)))
               (customize-set! (car e) (cadr e)))
             entries))
 
 (define (custom-set-faces! &rest entries)
   (for-each (lambda (e)
-              (set! *custom-set-faces* (custom--alist-put *custom-set-faces* (car e) (cadr e)))
+              (set! *custom-set-faces* (alist-put *custom-set-faces* (car e) (cadr e)))
               (apply set-face-attribute! (cons (car e) (cadr e))))
             entries))
 
 (define (customize-save! name value)
   (customize-set! name value)
-  (set! *custom-set-vars* (custom--alist-put *custom-set-vars* name value))
+  (set! *custom-set-vars* (alist-put *custom-set-vars* name value))
   (custom-write!))
 
 (define (customize-save-face! face &rest attrs)
@@ -153,7 +149,7 @@
 
 (define (face-remap-in! buf face attrs)
   (let* ((old (or (buffer-local buf 'face-remap) '()))
-         (remap (custom--alist-put old face attrs)))
+         (remap (alist-put old face attrs)))
     (buffer-set-local! buf 'face-remap remap)
     (buffer-set-local! buf 'style (face-remap--css remap))
     remap))

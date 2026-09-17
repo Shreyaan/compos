@@ -439,9 +439,6 @@
           ((equal? (car (car es)) name) (car es))
           (else (loop (cdr es))))))
 
-(define (help--take xs n)
-  (if (or (null? xs) (= n 0)) '() (cons (car xs) (help--take (cdr xs) (- n 1)))))
-
 (define (help--command-section name)
   (let ((k (key-for-command name)))
     (string-append
@@ -472,7 +469,7 @@
     (fold (lambda (out g)
             (fold (lambda (acc h) (cons h acc))
                   out
-                  (help--take (cdr g) per-section)))
+                  (take (cdr g) per-section)))
           '() (help--apropos-groups hits))))
 
 (define (help--apropos-section name)

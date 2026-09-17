@@ -223,18 +223,6 @@
           (message "not a git repository")
           (git--open! root (git-prefix dir))))))
 
-;; `M-x diff-mode`, the file-precise entry. define-mode makes every mode an
-;; M-x command; the generated diff-mode command set the mode on the current
-;; buffer, found no 'diff-backend local, and did nothing. This override
-;; supplies the policy: a diff buffer refreshes in place; a file buffer
-;; opens the diff for that one file; every other buffer opens the diff for
-;; its directory. `M-x git-diff` keeps the directory scope. The scope
-;; comes from git-prefix, not string arithmetic on the root: git resolves
-;; symlinks in the root, the buffer path keeps them.
-(define (git--basename p)
-  (let ((i (string-rindex p "/")))
-    (if i (substring p (+ i 1) (string-length p)) p)))
-
 (define-command "diff-mode" "Toggle the source-control diff for this file or directory"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -248,7 +236,7 @@
                 (message "not a git repository")
                 (git--open! root
                   (if (string? path)
-                      (string-append (git-prefix dir) (git--basename path))
+                      (string-append (git-prefix dir) (file-name-nondirectory path))
                       (git-prefix dir)))))))))
 
 (define (git--scope-label root prefix)

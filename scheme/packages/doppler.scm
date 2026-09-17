@@ -36,11 +36,8 @@
 
 ;;; --- CLI plumbing -------------------------------------------------------------
 
-(define (dp--quote s)
-  (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
-
 (define (dp--run args)
-  (shell-command->string (string-append (dp--quote doppler-program) " " args)))
+  (shell-command->string (string-append (sh-quote doppler-program) " " args)))
 
 (define (dp--json args)
   (json-parse (dp--run (string-append args " --json"))))
@@ -53,14 +50,14 @@
   (or (dp--json "projects") '()))
 
 (define (dp--configs-data project)
-  (or (dp--json (string-append "configs --project " (dp--quote project))) '()))
+  (or (dp--json (string-append "configs --project " (sh-quote project))) '()))
 
 (define (dp--secret-name-list project config)
   (sort
     (map symbol->string
       (dp--plist-keys
-        (or (dp--json (string-append "secrets --project " (dp--quote project)
-                                     " --config " (dp--quote config)
+        (or (dp--json (string-append "secrets --project " (sh-quote project)
+                                     " --config " (sh-quote config)
                                      " --only-names"))
             '())))))
 
@@ -160,13 +157,13 @@
 ;; no file yet and the caller pays for the fetch.
 (define (dp--download project config local?)
   (let ((cmd (string-append "secrets download --no-file --format json"
-                            " --project " (dp--quote project)
-                            " --config " (dp--quote config)
-                            " --fallback " (dp--quote (dp--fallback-path project config)))))
+                            " --project " (sh-quote project)
+                            " --config " (sh-quote config)
+                            " --fallback " (sh-quote (dp--fallback-path project config)))))
     (if local?
         (dp--run (string-append cmd " --fallback-only 2>/dev/null"))
         (begin
-          (shell-command->string (string-append "mkdir -p " (dp--quote (dp--fallback-dir))))
+          (shell-command->string (string-append "mkdir -p " (sh-quote (dp--fallback-dir))))
           (dp--run cmd)))))
 
 (define (dp--warm-config! project config)
@@ -191,9 +188,9 @@
 
 (define (dp--fetch-one project config name)
   (let ((out (string-trim
-               (dp--run (string-append "secrets get " (dp--quote name)
-                                       " --project " (dp--quote project)
-                                       " --config " (dp--quote config)
+               (dp--run (string-append "secrets get " (sh-quote name)
+                                       " --project " (sh-quote project)
+                                       " --config " (sh-quote config)
                                        " --plain")))))
     (if (or (equal? out "") (dp--error? out)) #f out)))
 
@@ -234,9 +231,9 @@
 (define (doppler-secret-set! project config name value)
   (let ((out
           (dp--run
-            (string-append "secrets set " (dp--quote name) " " (dp--quote value)
-                           " --project " (dp--quote project)
-                           " --config " (dp--quote config)
+            (string-append "secrets set " (sh-quote name) " " (sh-quote value)
+                           " --project " (sh-quote project)
+                           " --config " (sh-quote config)
                            " --silent --no-interactive"))))
     ;; --silent makes successful writes empty. Any text is an error or warning.
     (if (not (equal? (string-trim out) ""))
@@ -249,9 +246,9 @@
 (define (doppler-secret-delete! project config name)
   (let ((out
           (dp--run
-            (string-append "secrets delete " (dp--quote name)
-                           " --project " (dp--quote project)
-                           " --config " (dp--quote config)
+            (string-append "secrets delete " (sh-quote name)
+                           " --project " (sh-quote project)
+                           " --config " (sh-quote config)
                            " --yes --silent"))))
     (if (not (equal? (string-trim out) ""))
         (begin (message (string-trim out)) #f)

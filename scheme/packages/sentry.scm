@@ -51,14 +51,8 @@
         ((symbol? value) (symbol->string value))
         (else "")))
 
-(define (sentry--replace text from to)
-  (string-join (string-split text from) to))
-
-(define (sentry--shell-quote text)
-  (string-append "'" (sentry--replace text "'" "'\\''") "'"))
-
 (define (sentry--config-escape text)
-  (sentry--replace (sentry--replace (sentry--text text) "\\" "\\\\") "\"" "\\\""))
+  (string-replace (string-replace (sentry--text text) "\\" "\\\\") "\"" "\\\""))
 
 (define (sentry--truncate text width)
   (let ((value (sentry--text text)))
@@ -76,11 +70,6 @@
     (re-replace-all
       "\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b"
       value "[redacted-ip]")))
-
-(define (sentry--take rows count)
-  (if (or (null? rows) (< count 1))
-      '()
-      (cons (car rows) (sentry--take (cdr rows) (- count 1)))))
 
 (define (sentry--limit value)
   (let ((n (if (number? value) value sentry-limit)))
@@ -150,7 +139,7 @@
           (write-file! path (sentry--curl-config url token))
           (let ((out (shell-command->string
                        (string-append sentry-curl-program " --config "
-                                      (sentry--shell-quote path)))))
+                                      (sh-quote path)))))
             (delete-file! path)
             out)))))
 
@@ -162,7 +151,7 @@
           (write-file! path (sentry--curl-write-config url token body))
           (let ((out (shell-command->string
                        (string-append sentry-curl-program " --config "
-                                      (sentry--shell-quote path)))))
+                                      (sh-quote path)))))
             (delete-file! path)
             out)))))
 
@@ -181,7 +170,7 @@
           (write-file! path (sentry--curl-config url token))
           (shell-command->string
             (string-append sentry-curl-program " --config "
-                           (sentry--shell-quote path))
+                           (sh-quote path))
             (lambda (out)
               (delete-file! path)
               (k out)))))))
@@ -281,7 +270,7 @@
 (define (sentry--parse-issues reply count)
   (if (sentry--error? reply)
       reply
-      (map sentry--safe-issue (sentry--take reply count))))
+      (map sentry--safe-issue (take reply count))))
 
 (define (sentry-list-issues &optional query environment time-range limit)
   (let ((count (sentry--limit limit)))
@@ -311,7 +300,7 @@
                      (list "per_page" count))))))
     (if (sentry--error? reply)
         reply
-        (map sentry--safe-event (sentry--take reply count)))))
+        (map sentry--safe-event (take reply count)))))
 
 (define (sentry-event-detail event-id)
   (let ((reply
@@ -384,13 +373,6 @@
 
 (define (sentry--pretty-json value)
   (json-encode value #t))
-
-(define (sentry--html-escape text)
-  (let* ((value (sentry--text text))
-         (value (re-replace-all "&" value "&amp;"))
-         (value (re-replace-all "<" value "&lt;"))
-         (value (re-replace-all ">" value "&gt;")))
-    (re-replace-all "\"" value "&quot;")))
 
 (define (sentry--issue-title issue)
   (let* ((title (string-trim (sentry--text (plist-get issue 'title))))
@@ -498,13 +480,6 @@
       "\n\nRaw issue JSON\n"
       (sentry--pretty-json issue))))
 
-(define (sentry--replace-buffer! buf text)
-  (buffer-create buf)
-  (buffer-set-read-only! buf #f)
-  (buffer-delete-range! buf 0 (buffer-size buf))
-  (buffer-append! buf text)
-  (buffer-set-read-only! buf #t))
-
 (define (sentry--detail-buffer issue-id)
   (string-append "*Sentry issue: " (sentry--text issue-id) "*"))
 
@@ -514,10 +489,10 @@
       (begin
         (buffer-set-local! buf 'render-mode "text")
         (buffer-set-local! buf 'render-blocks '())
-        (sentry--replace-buffer!
-          buf (string-append (sentry--error-message issue) "\n")))
+        (buffer-set-text!
+          buf (string-append (sentry--error-message issue) "\n") #t))
       (begin
-        (sentry--replace-buffer! buf (sentry--issue-text issue))
+        (buffer-set-text! buf (sentry--issue-text issue) #t)
         (buffer-set-local! buf 'sentry-detail-issue issue)
         (buffer-set-local! buf 'render-mode "blocks")
         (buffer-set-local! buf 'render-blocks
@@ -589,11 +564,11 @@
 
 (define (sentry--render-events! buf issue-id)
   (let ((events (sentry-issue-events issue-id)))
-    (sentry--replace-buffer!
+    (buffer-set-text!
       buf
       (if (sentry--error? events)
           (string-append (sentry--error-message events) "\n")
-          (sentry--events-text events)))))
+          (sentry--events-text events)) #t)))
 
 (define (sentry--events-setup! buf)
   (sentry--join-group! buf)

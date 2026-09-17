@@ -14,14 +14,14 @@
 
 (define (doom-test-reset!)
   (shell-command->string
-    (string-append "rm -rf " (doom--sh-quote *doom-test-home*)
-                   " && mkdir -p " (doom--sh-quote *doom-test-home*)))
+    (string-append "rm -rf " (sh-quote *doom-test-home*)
+                   " && mkdir -p " (sh-quote *doom-test-home*)))
   (set! doom-home *doom-test-home*))
 
 (define (doom-test-done!)
   (let ((page (doom--file "doom.html")))
     (when (buffer-exists? page) (buffer-kill! page)))
-  (shell-command->string (string-append "rm -rf " (doom--sh-quote *doom-test-home*)))
+  (shell-command->string (string-append "rm -rf " (sh-quote *doom-test-home*)))
   (set! doom-home ""))
 
 ;; stand-ins: the package asks whether a file is there, never what is in it

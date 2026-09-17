@@ -343,11 +343,11 @@
 ;; pandoc. Only the waiting above is ours.
 (define (linkedin--inbox-markdown html)
   (let ((file (string-append (compos-home) "/linkedin-inbox.html"))
-        (sheet (string-append (compos-priv-dir) "/packages/web/parsers/linkedin-inbox.xsl")))
+        (sheet (locate-library "web/parsers/linkedin-inbox.xsl")))
     (write-file! file html)
     (shell-command->string
-      (string-append "xsltproc --html " (web--shell-quote sheet)
-                     " " (web--shell-quote file) " 2>/dev/null"
+      (string-append "xsltproc --html " (sh-quote sheet)
+                     " " (sh-quote file) " 2>/dev/null"
                      " | pandoc --wrap=none -f html-native_divs-native_spans -t gfm-raw_html")
       (compos-home))))
 
@@ -396,11 +396,8 @@ a{color:var(--accent);text-decoration:none}
 .chip.alert{background:var(--accent);color:var(--bg)}
 </style>")
 
-;; a name or a message is page text, and both come off a page the reader
-;; does not control, so neither is trusted to be markup
-(define (li--replace s from to) (string-join (string-split (or s "") from) to))
 (define (li--esc s)
-  (li--replace (li--replace (li--replace (or s "") "&" "&amp;") "<" "&lt;") ">" "&gt;"))
+  (string-replace (string-replace (string-replace (or s "") "&" "&amp;") "<" "&lt;") ">" "&gt;"))
 
 (define (li-thread? row) (equal? (plist-get row 'kind) 'thread))
 
@@ -408,7 +405,7 @@ a{color:var(--accent);text-decoration:none}
 
 ;; the page is named after what it shows, so the buffer reads as its title
 (define (li-page-title row)
-  (let ((name (li-clip (string-trim (li--replace (or (plist-get row 'name) "") "*" "")) 48)))
+  (let ((name (li-clip (string-trim (string-replace (or (plist-get row 'name) "") "*" "")) 48)))
     (if (equal? name "") (string-append "linkedin:" (li-key row)) name)))
 
 ;; two rows can carry the same title; the second one keeps its key, so no

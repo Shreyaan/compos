@@ -164,11 +164,6 @@
 
 ;;; --- numbers ----------------------------------------------------------------
 
-(define (profile--take xs n)
-  (if (or (null? xs) (<= n 0))
-      '()
-      (cons (car xs) (profile--take (cdr xs) (- n 1)))))
-
 ;; a value already counted in tenths, as "12.3"
 (define (profile--tenths n)
   (string-append (number->string (quotient n 10)) "." (number->string (remainder n 10))))
@@ -213,7 +208,7 @@
 
 (define (profile--function-rows r)
   (let ((total (plist-get r 'calls))
-        (fns (profile--take (plist-get r 'functions) profile-function-rows)))
+        (fns (take (plist-get r 'functions) profile-function-rows)))
     (if (null? fns)
         '()
         (cons (profile--sep
@@ -240,7 +235,7 @@
   (let* ((all (or (plist-get r 'sites) '()))
          (ranked (map (lambda (p) (nth 1 p))
                       (sort (map (lambda (s) (list (- 0 (plist-get s 'elements)) s)) all))))
-         (sites (profile--take ranked profile-site-rows)))
+         (sites (take ranked profile-site-rows)))
     (if (null? sites)
         '()
         (let ((total (fold (lambda (n s) (+ n (plist-get s 'elements))) 0 sites)))
@@ -257,7 +252,7 @@
 
 (define (profile--process-rows r)
   (let ((total (plist-get r 'reductions))
-        (ps (profile--take (plist-get r 'processes) profile-process-rows)))
+        (ps (take (plist-get r 'processes) profile-process-rows)))
     (if (null? ps)
         '()
         (cons (profile--sep "who did the work · reductions")
@@ -275,7 +270,7 @@
 (define (profile--layer-rows r)
   (let* ((at (plist-get r 'at-ms))
          (rows (filter (lambda (e) (>= (plist-get e 'time-ms) at)) (telemetry-events 200)))
-         (rows (profile--take (reverse rows) profile-layer-rows)))
+         (rows (take (reverse rows) profile-layer-rows)))
     (if (null? rows)
         '()
         (cons (profile--sep "the layers · ms, oldest first")

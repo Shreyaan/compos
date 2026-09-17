@@ -143,7 +143,7 @@
   (lambda ()
     (if (equal? (string-trim (shell-command->string "command -v xsltproc || true")) "")
         (check-true! #t "xsltproc is not installed, so the stylesheet is not read here")
-        (let ((xsl (priv-path "packages/web/parsers/feed.xsl")))
+        (let ((xsl (locate-library "web/parsers/feed.xsl")))
           (shell-command->string (string-append "rm -rf " t--feeds-dir))
           (make-directory! t--feeds-dir)
           (write-file! (string-append t--feeds-dir "/rss.xml")

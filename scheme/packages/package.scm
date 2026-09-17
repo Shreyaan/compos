@@ -11,9 +11,6 @@
 ;;;
 ;;; M-x package-install prompts for a spec. Delete the file to uninstall.
 
-(define (package--quote s)
-  (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
-
 (define (package--url spec)
   (if (or (string-prefix? "http://" spec) (string-prefix? "https://" spec))
       spec
@@ -39,9 +36,9 @@
     (if (not (string-suffix? ".scm" name))
         (message "packages are .scm files — spec must point at one")
         (let ((out (shell-command->string
-                     (string-append "mkdir -p " (package--quote (package-dir))
-                                    " && curl -fsSL " (package--quote url)
-                                    " -o " (package--quote path)
+                     (string-append "mkdir -p " (sh-quote (package-dir))
+                                    " && curl -fsSL " (sh-quote url)
+                                    " -o " (sh-quote path)
                                     " && echo FETCH-OK"))))
           (if (string-contains? out "FETCH-OK")
               (begin

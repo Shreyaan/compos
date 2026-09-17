@@ -156,6 +156,33 @@ defmodule Compos.Scheme.Builtins do
                                                                                              ] ->
         String.starts_with?(s, pre)
       end,
+      {"string-replace",
+       "(string-replace S FROM TO) — S with every FROM replaced by TO; a non-string S is \"\"."} =>
+        fn
+          [s, from, to] when is_binary(s) -> String.replace(s, from, to)
+          [_, _, _] -> ""
+        end,
+      {"html-escape",
+       "(html-escape S) — S with & < > \" and ' as HTML entities; a non-string S is \"\"."} => fn
+        [s] when is_binary(s) ->
+          s
+          |> String.replace("&", "&amp;")
+          |> String.replace("<", "&lt;")
+          |> String.replace(">", "&gt;")
+          |> String.replace("\"", "&quot;")
+          |> String.replace("'", "&#39;")
+
+        [_] ->
+          ""
+      end,
+      {"first-line", "(first-line S) — the first line of S, trimmed; a non-string S is \"\"."} =>
+        fn
+          [s] when is_binary(s) -> s |> String.split("\n", parts: 2) |> hd() |> String.trim()
+          [_] -> ""
+        end,
+      {"file-name-nondirectory",
+       "(file-name-nondirectory PATH) — the last segment of PATH; \"\" after a trailing slash."} =>
+        fn [path] -> path |> String.split("/") |> List.last() end,
       {"string-suffix?", "(string-suffix? SUF S) — return true if S ends with SUF."} => fn [
                                                                                              suf,
                                                                                              s
@@ -426,6 +453,31 @@ defmodule Compos.Scheme.Builtins do
             v -> v
           end
         end,
+      {"take", "(take LST N) — the first N elements of LST, or all of them when it is shorter."} =>
+        fn [l, n] when is_list(l) and is_integer(n) -> Enum.take(l, max(n, 0)) end,
+      {"alist-put",
+       "(alist-put ALIST KEY VAL) — ALIST with (KEY VAL) first and any older KEY entry gone."} =>
+        fn [al, key, val] when is_list(al) ->
+          [[key, val] | Enum.reject(al, &(is_list(&1) and hd(&1) == key))]
+        end,
+      {"alist-get", "(alist-get ALIST KEY) — the value after KEY in ALIST, or #f."} => fn [
+                                                                                            al,
+                                                                                            key
+                                                                                          ]
+                                                                                          when is_list(
+                                                                                                 al
+                                                                                               ) ->
+        case Enum.find(al, &(is_list(&1) and hd(&1) == key)) do
+          [_, v | _] -> v
+          _ -> false
+        end
+      end,
+      {"alist-delete", "(alist-delete ALIST KEY) — ALIST without its KEY entry."} => fn [al, key]
+                                                                                        when is_list(
+                                                                                               al
+                                                                                             ) ->
+        Enum.reject(al, &(is_list(&1) and hd(&1) == key))
+      end,
       {"list-head",
        "(list-head LST K) — return the first K elements of LST; an error past the end."} => fn [
                                                                                                  l,

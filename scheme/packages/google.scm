@@ -42,8 +42,7 @@
 (define (google--email id) (or (plist-get (google--account id) 'email) id))
 (define (google--text v) (if (string? v) v ""))
 (define (google--line v) (re-replace-all "[\r\n\t]" (google--text v) " "))
-(define (google--replace s from to) (string-join (string-split s from) to))
-(define (google--query-escape s) (google--replace (google--replace s "\\" "\\\\") "'" "\\'"))
+(define (google--query-escape s) (string-replace (string-replace s "\\" "\\\\") "'" "\\'"))
 (define (google--id s) (url-encode s))
 (define (google--transport account method url params body k)
   (google-http! account method url params body k))
@@ -264,7 +263,7 @@
       (list (string-append (google--line (google--row-title row))
               (if (equal? (plist-get row 'mimeType) "application/vnd.google-apps.folder") "/" ""))
             (or (plist-get row 'size) "—") (or (plist-get row 'modifiedTime) "")
-            (google--replace (or (plist-get row 'mimeType) "") "application/vnd.google-apps." "")))
+            (string-replace (or (plist-get row 'mimeType) "") "application/vnd.google-apps." "")))
     'key (lambda (buf row) (google--row-id row))
     'title (lambda (buf) (string-append (plist-get (google--service (buffer-local buf 'google-service)) 'title) " / " (or (buffer-local buf 'google-drive-path) (if (equal? (buffer-local buf 'google-service) "drive") "My Drive" "All files"))))
     'meta (lambda (buf) (string-append (google--email (buffer-local buf 'google-account)) "  "
@@ -452,7 +451,7 @@
 
 ;;; Item buffers expose readable text and complete structured API data.
 (define (google--base64url-decode text)
-  (let* ((s (google--replace (google--replace text "-" "+") "_" "/"))
+  (let* ((s (string-replace (string-replace text "-" "+") "_" "/"))
          (padding (modulo (- 4 (modulo (string-length s) 4)) 4)))
     (base64-decode (string-append s (make-string padding #\=)))))
 (define (google--mail-text payload)
@@ -569,11 +568,11 @@
          (parent (buffer-local buf 'google-parent))
          (path (plist-get op 'path)))
     (when (and id (equal? (plist-get op 'service) (buffer-local buf 'google-service)))
-      (for-each (lambda (placeholder) (set! path (google--replace path placeholder (google--id id))))
+      (for-each (lambda (placeholder) (set! path (string-replace path placeholder (google--id id))))
                 '("DOCUMENT_ID" "PRESENTATION_ID" "SPREADSHEET_ID" "MESSAGE_ID" "EVENT_ID" "FILE_ID" "TASK_ID" "FORM_ID"))
-      (when parent (set! path (google--replace path "TASKLIST_ID" (google--id parent))))
+      (when parent (set! path (string-replace path "TASKLIST_ID" (google--id parent))))
       (when (and parent (equal? (plist-get op 'service) "calendar"))
-        (set! path (google--replace path "/calendars/primary/" (string-append "/calendars/" (google--id parent) "/")))))
+        (set! path (string-replace path "/calendars/primary/" (string-append "/calendars/" (google--id parent) "/")))))
     (let ((body (plist-get op 'body)) (revision (plist-get row 'revisionId)))
       (when (equal? (plist-get op 'name) "Calendar: create event")
         (set! body (list 'summary "New event"
@@ -644,7 +643,7 @@
          (raw (string-append "To: " safe-to "\r\nSubject: =?UTF-8?B?" (base64-encode safe-subject)
            "?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
            (google--mime-lines (base64-encode body))))
-         (encoded (google--replace (google--replace (google--replace (base64-encode raw) "+" "-") "/" "_") "=" "")))
+         (encoded (string-replace (string-replace (string-replace (base64-encode raw) "+" "-") "/" "_") "=" "")))
     (list 'service "gmail" 'method "POST" 'path "/users/me/drafts"
           'body (list 'message (list 'raw encoded)))))
 (define-command "google-compose" "Compose a mail draft for this Google account"

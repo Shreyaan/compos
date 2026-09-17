@@ -5,7 +5,7 @@ defmodule Compos.Core.SchemeAPI do
   table entry, kill-ring access. Everything with *policy* — what C-k kills,
   what find-file prompts, what M-x lists — is Scheme (priv/editor.scm).
 
-  Conventions (compos docs/LISP.md): predicates `?`, mutators `!`.
+  Conventions: predicates `?`, mutators `!`.
   """
 
   alias Compos.Core
@@ -36,6 +36,13 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(google_primitives())
     |> Map.merge(http_primitives())
     |> Compos.Core.SchemeRawNames.add()
+  end
+
+  # one whole-buffer rewrite: five packages wrote create, unlock, clear,
+  # append, relock around every render
+  defp set_text(name, text) do
+    unless Buffer.exists?(name), do: Compos.Core.create_buffer(name)
+    :ok = Buffer.replace_range(name, 0, Buffer.byte_size(name), text, source: :editor)
   end
 
   defp google_primitives do
@@ -567,6 +574,18 @@ defmodule Compos.Core.SchemeAPI do
         fn [name, pos, len, text] ->
           :ok = Buffer.replace_range(name, pos, len, text, source: :editor)
           :void
+        end,
+      {"buffer-set-text!",
+       "(buffer-set-text! BUF TEXT [READ-ONLY?]) — make BUF (created when missing) hold TEXT alone, past read-only; with READ-ONLY? given, set the flag after."} =>
+        fn
+          [name, text] ->
+            set_text(name, text)
+            :void
+
+          [name, text, read_only] ->
+            set_text(name, text)
+            Buffer.set_read_only(name, read_only == true)
+            :void
         end,
       {"buffer-version-token",
        "(buffer-version-token BUF) — what this replica knows, as an opaque token to hand a peer; #f if the buffer records no history."} =>

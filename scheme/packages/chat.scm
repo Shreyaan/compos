@@ -1466,7 +1466,7 @@
   (run-hook-with-args 'chat-summary-hook buf 'summary text)
   (let ((log (or (buffer-local buf 'chat-summary-log) '())))
     (buffer-set-local! buf 'chat-summary-log
-      (chat-summary--take (cons (list (current-time) text) log) *chat-summary-log-max*)))
+      (take (cons (list (current-time) text) log) *chat-summary-log-max*)))
   ;; A summary is transcript status: ordered where it lands, durable in the
   ;; record, but filtered from every model-facing conversation path.
   (chat-record-push! buf "status" (list (list "text" text)) #f)
@@ -1484,9 +1484,6 @@
   ;; paragraph now; mid-turn the turn-end save carries it
   (unless (buffer-local buf 'chat-turn-active)
     (chat-log-save! buf)))
-
-(define (chat-summary--take l n)
-  (if (or (null? l) (<= n 0)) '() (cons (car l) (chat-summary--take (cdr l) (- n 1)))))
 
 ;; The bar shows the latest line. The log shows every line, the chat's
 ;; summaries and the repo's open changes in one order of time.

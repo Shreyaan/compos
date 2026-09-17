@@ -28,21 +28,6 @@
           ((and (string? subdomain) (not (equal? subdomain "")))
            (string-append "https://" subdomain ".substack.com"))
           (else ""))))
-(define (substack--replace-buffer! buf text)
-  (unless (buffer-exists? buf) (buffer-create buf))
-  (buffer-set-read-only! buf #f)
-  (let ((old (buffer-text buf)))
-    (if (equal? old "") (buffer-append! buf text) (buffer-replace! buf old text)))
-  (buffer-set-read-only! buf #t)
-  buf)
-(define (substack--html-escape text)
-  (let loop ((pairs '(("&" "&amp;") ("<" "&lt;") (">" "&gt;") ("\"" "&quot;")))
-             (out (substack--text text)))
-    (if (null? pairs) out
-        (loop (cdr pairs)
-              (string-join (string-split out (car (car pairs)))
-                           (car (cdr (car pairs))))))))
-
 (define (substack--subscription payload publication-id)
   (let loop ((rows (or (plist-get payload 'subscriptions) '())))
     (cond ((null? rows) #f)
@@ -259,16 +244,16 @@
         (author (substack--post-author post)))
     (string-append
       substack-reader-css "<article><h1>"
-      (substack--html-escape (plist-get post 'title))
+      (html-escape (plist-get post 'title))
       "</h1><div class='meta'>"
-      (substack--html-escape
+      (html-escape
         (string-append
           (if (equal? author "") (plist-get publication 'author) author)
           " · " (substack--date (plist-get post 'post_date))
           " · " (plist-get publication 'name)))
       "</div>" body "</article>")))
 (define (substack--apply-reader! buf publication post)
-  (substack--replace-buffer! buf (substack--reader-html publication post))
+  (buffer-set-text! buf (substack--reader-html publication post) #t)
   (buffer-set-local! buf 'substack-publication publication)
   (buffer-set-local! buf 'substack-post post)
   (buffer-set-local! buf 'preview-renderer "html")
@@ -302,8 +287,8 @@
         (with-current-buffer buf
           (lambda () (set-mode! "substack-reader-mode"))))
       (when (= (buffer-size buf) 0)
-        (substack--replace-buffer! buf
-          (string-append (plist-get post 'title) "\n\nLoading...\n"))
+        (buffer-set-text! buf
+          (string-append (plist-get post 'title) "\n\nLoading...\n") #t)
         (substack--fetch-reader! buf))
       (buffer-set-local! *substack-buffer* 'substack-current-reader buf)
       (display-buffer-detail! buf owner)

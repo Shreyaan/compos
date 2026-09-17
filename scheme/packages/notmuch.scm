@@ -189,20 +189,17 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- CLI plumbing -------------------------------------------------------------
 
-(define (nm--quote s)
-  (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
-
 (define (nm--cmd args)
   (let ((here (string-append
                 (if (equal? notmuch-profile "")
                     ""
-                    (string-append "NOTMUCH_PROFILE=" (nm--quote notmuch-profile) " "))
+                    (string-append "NOTMUCH_PROFILE=" (sh-quote notmuch-profile) " "))
                 notmuch-program " " args)))
     (if (equal? notmuch-host "")
         here
         ;; the remote shell reads the whole call as one word
-        (string-append notmuch-ssh-program " " (nm--quote notmuch-host)
-                       " " (nm--quote here)))))
+        (string-append notmuch-ssh-program " " (sh-quote notmuch-host)
+                       " " (sh-quote here)))))
 
 (define (nm--host-label)
   (if (equal? notmuch-host "") "this machine" notmuch-host))
@@ -265,17 +262,11 @@ when a message has no text/plain part." 'group 'notmuch)
   (let ((s (or s "")))
     (if (> (string-length s) n) (substring s 0 n) s)))
 
-(define (nm--html-escape s)
-  (let* ((s (string-join (string-split s "&") "&amp;"))
-         (s (string-join (string-split s "<") "&lt;"))
-         (s (string-join (string-split s ">") "&gt;")))
-    s))
-
 (define (nm--html->text html)
   (let ((tmp (string-append (expand-path "~") "/.compos/mail-part.html")))
     (write-file! tmp html)
     (shell-command->string
-      (string-append notmuch-html-renderer " < " (nm--quote tmp)))))
+      (string-append notmuch-html-renderer " < " (sh-quote tmp)))))
 
 ;;; --- search buffer ------------------------------------------------------------
 
@@ -295,7 +286,7 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define (nm--search-json query limit)
   (or (nm--json (string-append "search --format=json --limit="
-                               (number->string limit) " -- " (nm--quote query)))
+                               (number->string limit) " -- " (sh-quote query)))
       '()))
 
 ;; stored per row: (thread-id subject authors tags date)
@@ -404,7 +395,7 @@ when a message has no text/plain part." 'group 'notmuch)
         ;; count, and not count --output=threads: grouping threads over a
         ;; large query costs seconds
         (let ((n (string-trim
-                   (nm--run (string-append "count -- " (nm--quote query))))))
+                   (nm--run (string-append "count -- " (sh-quote query))))))
           (buffer-set-local! buf 'nm-count (list key n))
           n))))
 
@@ -610,7 +601,7 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define (nm--batch-count-command queries)
   (string-append "printf '%s\\n' "
-                 (string-join (map nm--quote queries) " ")
+                 (string-join (map sh-quote queries) " ")
                  " | " (nm--cmd "count --batch")))
 
 (define (nm--parse-counts output)
@@ -1211,7 +1202,7 @@ when a message has no text/plain part." 'group 'notmuch)
           (string-split
             (string-trim
               (nm--run (string-append "search --output=tags -- "
-                                      (nm--quote (nm--query-of buf)))))
+                                      (sh-quote (nm--query-of buf)))))
             "\n")))
 
 (define-command "notmuch-add-tag" "Add a tag to marked threads, or the thread at point (completes)"
@@ -1222,8 +1213,8 @@ when a message has no text/plain part." 'group 'notmuch)
             (lambda (tag)
               (unless (equal? (string-trim tag) "")
                 (if (nm--any-marked? buf)
-                    (nm--tag-marked! buf (nm--quote (string-append "+" (string-trim tag))))
-                    (nm--tag! buf (nm--quote (string-append "+" (string-trim tag))))))))
+                    (nm--tag-marked! buf (sh-quote (string-append "+" (string-trim tag))))
+                    (nm--tag! buf (sh-quote (string-append "+" (string-trim tag))))))))
           (message "No thread on this line")))))
 
 (catalog-meta! 'command "notmuch-add-tag" 'domain 'mail 'effects '(write external execute))
@@ -1238,8 +1229,8 @@ when a message has no text/plain part." 'group 'notmuch)
             (lambda (tag)
               (unless (equal? (string-trim tag) "")
                 (if (nm--any-marked? buf)
-                    (nm--tag-marked! buf (nm--quote (string-append "-" (string-trim tag))))
-                    (nm--tag! buf (nm--quote (string-append "-" (string-trim tag))))))))
+                    (nm--tag-marked! buf (sh-quote (string-append "-" (string-trim tag))))
+                    (nm--tag! buf (sh-quote (string-append "-" (string-trim tag))))))))
           (message "No thread on this line")))))
 (catalog-meta! 'command "notmuch-remove-tag" 'domain 'mail 'effects '(write external execute))
 ;; Archive drops one tag and trash swaps three. This is the blunt one:
@@ -1389,7 +1380,7 @@ when a message has no text/plain part." 'group 'notmuch)
            (filter (lambda (l) (not (equal? l "")))
              (string-split
                (string-trim (nm--run (string-append "search --output=threads -- "
-                                       (nm--quote (nm--marked-query buf)))))
+                                       (sh-quote (nm--marked-query buf)))))
                "\n")))
       (let ((th (nm--thread-at buf))) (if th (list (nm--th-id th)) '()))))
 
@@ -1444,7 +1435,7 @@ than a wrong tag, so phishing sits lower than the rest.")
                       (map (lambda (t) (string-append "-" t)) drop))))
     (unless (null? ops)
       (nm--run (string-append "tag "
-                 (string-join (map nm--quote ops) " ")
+                 (string-join (map sh-quote ops) " ")
                  " -- thread:" id)))
     ops))
 
@@ -1606,7 +1597,7 @@ than a wrong tag, so phishing sits lower than the rest.")
 notmuch-host names another machine, here when it is empty."
   (if (equal? notmuch-host "")
       script
-      (string-append notmuch-ssh-program " " (nm--quote notmuch-host) " " (nm--quote script))))
+      (string-append notmuch-ssh-program " " (sh-quote notmuch-host) " " (sh-quote script))))
 
 (define (nm--host-sh script)
   "Run SCRIPT where the mail store lives and answer its output."
@@ -1616,15 +1607,15 @@ notmuch-host names another machine, here when it is empty."
   "Record EMAIL in the blocked-sender database the notmuch post-new hook reads."
   (nm--host-sh
    (string-append "mkdir -p \"$HOME/.notmuch\" && touch \"" *notmuch-blocked-file* "\" && "
-                  "grep -qxF " (nm--quote email) " \"" *notmuch-blocked-file* "\" || "
-                  "printf '%s\\n' " (nm--quote email) " >> \"" *notmuch-blocked-file* "\""))
+                  "grep -qxF " (sh-quote email) " \"" *notmuch-blocked-file* "\" || "
+                  "printf '%s\\n' " (sh-quote email) " >> \"" *notmuch-blocked-file* "\""))
   email)
 
 (define (nm--trash-sender! target)
   "Trash every message from TARGET, an address or a whole domain, block it, and
 refresh the index. Answers how many matched."
   (let ((n (nm--count (string-append "from:" target))))
-    (nm--run (string-append "tag +trash +blocked -inbox -unread -- " (nm--quote (string-append "from:" target))))
+    (nm--run (string-append "tag +trash +blocked -inbox -unread -- " (sh-quote (string-append "from:" target))))
     (nm--block-sender! target)
     (nm--after-change! *notmuch-search-buffer*)
     n))
@@ -1663,18 +1654,18 @@ refresh the index. Answers how many matched."
 ;; needs QP decoding, and only as a last resort for senders with no header.
 (define (nm--unsubscribe-header-links msg-id)
   (let* ((hdr (string-trim (nm--run (string-append
-                 "show --format=raw -- " (nm--quote (string-append "id:" msg-id))
+                 "show --format=raw -- " (sh-quote (string-append "id:" msg-id))
                  " | grep -i '^list-unsubscribe:' | head -1"))))
          (post (string-trim (nm--run (string-append
-                 "show --format=raw -- " (nm--quote (string-append "id:" msg-id))
+                 "show --format=raw -- " (sh-quote (string-append "id:" msg-id))
                  " | grep -i '^list-unsubscribe-post:' | head -1"))))
          (https (let ((m (string-trim (shell-command->string
-                    (string-append "printf '%s' " (nm--quote hdr)
+                    (string-append "printf '%s' " (sh-quote hdr)
                                    " | grep -oE '<https?://[^>]*>' | head -1")
                     (default-directory)))))
                   (if (equal? m "") #f (substring m 1 (- (string-length m) 1)))))
          (mailto (let ((m (string-trim (shell-command->string
-                    (string-append "printf '%s' " (nm--quote hdr)
+                    (string-append "printf '%s' " (sh-quote hdr)
                                    " | grep -oE '<mailto:[^>]*>' | head -1")
                     (default-directory)))))
                    (if (equal? m "") #f (substring m 1 (- (string-length m) 1)))))
@@ -1687,7 +1678,7 @@ refresh the index. Answers how many matched."
 ;; or nothing on an oddly-encoded message — acceptable as a fallback only.
 (define (nm--unsubscribe-body-link msg-id)
   (let* ((cmd (string-append
-                "show --format=raw -- " (nm--quote (string-append "id:" msg-id))
+                "show --format=raw -- " (sh-quote (string-append "id:" msg-id))
                 " | perl -MMIME::QuotedPrint -0777 -ne '"
                 "my $raw = $_; my $dec = eval { decode_qp($raw) }; $dec = $raw unless defined $dec; "
                 "if ($dec =~ /(https?:\\/\\/[^\\s\"\\x27<>]*unsubscribe[^\\s\"\\x27<>]*)/i) { print \"$1\\n\"; exit } "
@@ -1696,7 +1687,7 @@ refresh the index. Answers how many matched."
     (if (equal? out "") #f out)))
 
 (define (nm--curl-text url)
-  (shell-command->string (string-append "curl -sL --max-time 15 " (nm--quote url)) (default-directory)))
+  (shell-command->string (string-append "curl -sL --max-time 15 " (sh-quote url)) (default-directory)))
 
 (define (nm--purge-unsubscribe! msg-id)
   (let* ((links (and msg-id (nm--unsubscribe-header-links msg-id)))
@@ -1709,7 +1700,7 @@ refresh the index. Answers how many matched."
                       (string-append "curl -sL --max-time 15 -X POST "
                                      "-H 'Content-Type: application/x-www-form-urlencoded' "
                                      "-d 'List-Unsubscribe=One-Click' -o /dev/null -w '%{http_code}' "
-                                     (nm--quote https))
+                                     (sh-quote https))
                       (default-directory)))))
          (if (member code '("200" "202" "204"))
              (string-append "unsubscribed (RFC 8058 one-click, " code ")")
@@ -1853,14 +1844,14 @@ them the address is live, so a purge never follows one."
 (define (nm--marked-tags buf)
   (filter (lambda (tag) (not (equal? tag "")))
     (string-split (string-trim
-      (nm--run (string-append "search --output=tags -- " (nm--quote (nm--marked-query buf)))))
+      (nm--run (string-append "search --output=tags -- " (sh-quote (nm--marked-query buf)))))
       "\n")))
 
 (define (nm--tag-marked! buf changes)
   (if (not (nm--any-marked? buf))
       (message "No selected messages")
       (begin
-        (nm--run (string-append "tag " changes " -- " (nm--quote (nm--marked-query buf))))
+        (nm--run (string-append "tag " changes " -- " (sh-quote (nm--marked-query buf))))
         ;; Keep the local selection across the refresh. The selected thread IDs
         ;; remain valid even when their displayed tags change.
         (nm--after-change! buf))))
@@ -1964,7 +1955,7 @@ them the address is live, so a purge never follows one."
     (if (null? parts) ""
         (string-append "<mail-attachments><strong>Attachments</strong>"
           (string-join (map (lambda (p)
-                             (string-append "<mail-attachment part-id=\"" (number->string (plist-get p 'id)) "\">" (nm--html-escape (plist-get p 'filename)) "</mail-attachment>"))
+                             (string-append "<mail-attachment part-id=\"" (number->string (plist-get p 'id)) "\">" (html-escape (plist-get p 'filename)) "</mail-attachment>"))
                            parts) "")
           "<small>C-c a to open an attachment</small></mail-attachments>"))))
 
@@ -1977,7 +1968,7 @@ them the address is live, so a purge never follows one."
                    (list (plist-get part 'filename)
                          (nm--cmd (string-append "show --format=raw --part="
                            (number->string (plist-get part 'id)) " -- "
-                           (nm--quote (string-append "id:" (plist-get msg 'id)))))))
+                           (sh-quote (string-append "id:" (plist-get msg 'id)))))))
                  (nm--attachment-parts (plist-get msg 'body)))))
         '() msgs))
 
@@ -1990,7 +1981,7 @@ them the address is live, so a purge never follows one."
   (let* ((root (string-append (compos-home) "/attachments")))
     (make-directory! root)
     (let ((dir (string-trim (shell-command->string
-                 (string-append "mktemp -d " (nm--quote (string-append root "/part-XXXXXX")))))))
+                 (string-append "mktemp -d " (sh-quote (string-append root "/part-XXXXXX")))))))
       (if (not (string-prefix? (string-append root "/part-") dir))
           (message "Could not create an attachment directory")
           (let ((path (string-append dir "/" (nm--attachment-filename (car attachment)))))
@@ -1998,7 +1989,7 @@ them the address is live, so a purge never follows one."
             ;; Redirect bytes locally: binary attachments must never pass
             ;; through Scheme strings or text-buffer decoding.
             (shell-command->string
-              (string-append (cadr attachment) " > " (nm--quote path) " && printf attachment-ok")
+              (string-append (cadr attachment) " > " (sh-quote path) " && printf attachment-ok")
               (lambda (result)
                 (if (equal? result "attachment-ok")
                     (visit path)
@@ -2136,20 +2127,20 @@ them the address is live, so a purge never follows one."
          (html (nm--parts-html (plist-get msg 'body)))
          (body (or html
                    (string-append "<pre style=\"white-space:pre-wrap;font:inherit\">"
-                                  (nm--html-escape (nm--parts-text (plist-get msg 'body)))
+                                  (html-escape (nm--parts-text (plist-get msg 'body)))
                                   "</pre>"))))
     (string-append
-      "<mail-message message-id=\"" (nm--html-escape (or (plist-get msg 'id) "")) "\">"
-      "<header><mail-from>" (nm--html-escape (or (plist-get h 'From) "")) "</mail-from> · "
-      "<mail-date>" (nm--html-escape (or (plist-get h 'Date) "")) "</mail-date>"
+      "<mail-message message-id=\"" (html-escape (or (plist-get msg 'id) "")) "\">"
+      "<header><mail-from>" (html-escape (or (plist-get h 'From) "")) "</mail-from> · "
+      "<mail-date>" (html-escape (or (plist-get h 'Date) "")) "</mail-date>"
       (let ((to (plist-get h 'To)))
-        (if to (string-append " · to <mail-to>" (nm--html-escape to) "</mail-to>") ""))
+        (if to (string-append " · to <mail-to>" (html-escape to) "</mail-to>") ""))
       "</header>" (nm--attachment-html msg) "<mail-body>" body "</mail-body></mail-message>")))
 
 (define (nm--thread-html subject msgs)
   (string-append
     "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>"
-    (nm--html-escape subject)
+    (html-escape subject)
     "</title><style>mail-thread,mail-message,mail-body,mail-attachments,mail-attachment{display:block}"
     "mail-message>header{border-top:1px solid #d0c8b8;margin-top:14px;padding:6px 0;font:12px system-ui;color:#666}"
     "mail-from{font-weight:bold}"
@@ -2158,7 +2149,7 @@ them the address is live, so a purge never follows one."
     "mail-subject{display:block;font:700 21px/1.3 system-ui;"
     "color:var(--default-fg,#141310);margin:0 0 6px}</style></head>"
     "<body style=\"margin:14px;font-family:system-ui\"><mail-thread>"
-    "<mail-subject>" (nm--html-escape subject) "</mail-subject>"
+    "<mail-subject>" (html-escape subject) "</mail-subject>"
     (fold (lambda (acc m) (string-append acc (nm--msg-html m))) "" msgs)
     "</mail-thread></body></html>"))
 
@@ -2380,7 +2371,7 @@ them the address is live, so a purge never follows one."
                       (else ovs)))))))
 
 (define (nm--compose-reply! msg-id)
-  (let* ((j (nm--json (string-append "reply --format=json id:" (nm--quote msg-id))))
+  (let* ((j (nm--json (string-append "reply --format=json id:" (sh-quote msg-id))))
          (rh (and j (plist-get j 'reply-headers)))
          (orig (and j (plist-get j 'original))))
     (if (not rh)
@@ -2473,7 +2464,7 @@ would let a word in the body pick the account the mail goes out from."
           (begin
             (write-file! tmp text)
             (let ((out (shell-command->string
-                         (string-append "cat " (nm--quote tmp) " | "
+                         (string-append "cat " (sh-quote tmp) " | "
                                         (nm--host-cmd (string-append route " && echo SENT-OK"))))))
               (if (string-contains? out "SENT-OK")
                   (begin (run-command "quit-window") (message "Sent"))
@@ -2585,7 +2576,7 @@ would let a word in the body pick the account the mail goes out from."
 ;; same blind-trust shape mail-tag! exists to fix, one level down.
 (define (nm--count query)
   (string->number
-    (string-trim (nm--run (string-append "count -- " (nm--quote query))))))
+    (string-trim (nm--run (string-append "count -- " (sh-quote query))))))
 
 (define (mail-tag! raw changes)
   (let* ((id (if (string-prefix? "thread:" raw)
@@ -2608,7 +2599,7 @@ would let a word in the body pick the account the mail goes out from."
 (define (notmuch-sender-count query limit)
   (let* ((raw (nm--run (string-append
                 "address --output=sender --output=count --deduplicate=address -- "
-                (nm--quote query))))
+                (sh-quote query))))
          (lines (filter (lambda (l) (> (string-length l) 0)) (string-split raw "\n")))
          (rows (map (lambda (l)
                       (let ((parts (string-split l "\t")))

@@ -132,9 +132,6 @@
 ;;; feed.xsl turns it into FEED \t DATE \t LINK \t TITLE lines. A feed
 ;;; that fails answers nothing and the others still land.
 
-(define (feeds--shell-quote text)
-  (string-append "'" (string-join (string-split text "'") "'\\''") "'"))
-
 (define (feeds--item-date e) (nth 1 e))
 (define (feeds--item-feed e) (nth 2 e))
 (define (feeds--item-link e) (nth 3 e))
@@ -156,13 +153,11 @@
                     items))))))
 
 (define (feeds--fetch-command urls)
-  (let ((xsl (feeds--shell-quote
-               (string-append (compos-priv-dir)
-                              "/packages/web/parsers/feed.xsl"))))
+  (let ((xsl (sh-quote (locate-library "web/parsers/feed.xsl"))))
     (string-join
       (map (lambda (u)
              (string-append
-               "curl -sL --max-time 15 " (feeds--shell-quote u)
+               "curl -sL --max-time 15 " (sh-quote u)
                " 2>/dev/null | xsltproc --novalid " xsl " - 2>/dev/null"))
            urls)
       "; ")))
@@ -212,7 +207,7 @@
 ;;; application/atom+xml link, and the href resolves against the page.
 
 (define (feeds--discover-command url)
-  (let ((u (feeds--shell-quote url)))
+  (let ((u (sh-quote url)))
     (string-append
       "body=$(curl -sL --max-time 15 " u " 2>/dev/null); "
       "case \"$body\" in "

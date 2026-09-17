@@ -63,4 +63,25 @@ defmodule Compos.Scheme.ListBuiltinsTest do
            (list (map tick '(a b c)) n)
            """) == [[1, 2, 3], 3]
   end
+
+  test "the shared string and list helpers" do
+    assert run(~s{(string-replace "a-b-c" "-" "+")}) == "a+b+c"
+    assert run(~s{(string-replace #f "-" "+")}) == ""
+
+    assert run(~S{(html-escape "<a href=\"x\">&</a>")}) ==
+             "&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;"
+
+    assert run(~s{(html-escape 3)}) == ""
+    assert run(~s{(first-line "  one \ntwo")}) == "one"
+    assert run(~s{(first-line #f)}) == ""
+    assert run(~s{(file-name-nondirectory "/a/b/c.txt")}) == "c.txt"
+    assert run(~s{(file-name-nondirectory "/a/b/")}) == ""
+    assert run(~s{(file-name-nondirectory "plain")}) == "plain"
+    assert run("(take '(1 2 3) 2)") == [1, 2]
+    assert run("(take '(1) 5)") == [1]
+    assert run("(alist-put '((a 1) (b 2)) 'a 3)") == [[{:sym, "a"}, 3], [{:sym, "b"}, 2]]
+    assert run("(alist-get '((a 1)) 'a)") == 1
+    assert run("(alist-get '((a 1)) 'z)") == false
+    assert run("(alist-delete '((a 1) (b 2)) 'a)") == [[{:sym, "b"}, 2]]
+  end
 end

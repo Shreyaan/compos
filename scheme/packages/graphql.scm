@@ -46,25 +46,10 @@
 (define (graphql--text v)
   (if (symbol? v) (symbol->string v) v))
 
-;; JSON null parses to #f, and a GraphQL answer is full of nulls: an absent
-;; object, a type with no fields, a schema with no mutation. plist-get wants
-;; a list and stops the interpreter when it gets #f, so nothing here reads a
-;; plist any other way.
-(define (graphql--replace s from to)
-  (string-join (string-split s from) to))
-
-(define (graphql--take xs n)
-  (if (or (null? xs) (< n 1))
-      '()
-      (cons (car xs) (graphql--take (cdr xs) (- n 1)))))
-
-(define (graphql--first-line s)
-  (if (string? s) (string-trim (car (string-split s "\n"))) ""))
-
 ;; " — description", or nothing at all. A schema description can run for
 ;; paragraphs; a catalog line takes the first line of it.
 (define (graphql--dash d)
-  (let ((first (graphql--first-line d)))
+  (let ((first (first-line d)))
     (if (equal? first "") "" (string-append "  — " first))))
 
 ;;; --- the registry -------------------------------------------------------------
@@ -113,10 +98,7 @@
 ;; curl reads a quoted config value with backslash escapes. The backslash
 ;; goes first: escape it after the quote and you escape your own escapes.
 (define (graphql--escape s)
-  (graphql--replace (graphql--replace (graphql--text s) "\\" "\\\\") "\"" "\\\""))
-
-(define (graphql--shell-quote s)
-  (string-append "'" (graphql--replace s "'" "'\\''") "'"))
+  (string-replace (string-replace (graphql--text s) "\\" "\\\\") "\"" "\\\""))
 
 (define (graphql--header-lines headers)
   (if (or (null? headers) (null? (cdr headers)))
@@ -147,7 +129,7 @@
     (write-file! conf-path (graphql--config url headers body-path))
     (let ((out (shell-command->string
                  (string-append graphql-curl-program " --config "
-                                (graphql--shell-quote conf-path)))))
+                                (sh-quote conf-path)))))
       (delete-file! body-path)
       (delete-file! conf-path)
       out)))
@@ -204,7 +186,7 @@
              (graphql--fail (string-append "the request failed: " (string-trim text))))
             (else
               (graphql--fail (string-append "HTTP " (number->string status) ": "
-                                            (graphql--first-line text)))))))))
+                                            (first-line text)))))))))
 
 (define (graphql--path->string p)
   (string-join (map (lambda (x) (if (number? x) (number->string x) (graphql--text x))) p) "."))
@@ -236,7 +218,7 @@
   (let* ((reply (graphql-post name query variables))
          (err (graphql-errors reply)))
     (set! *graphql-last-error* err)
-    (when err (message (string-append "graphql: " (graphql--first-line err))))
+    (when err (message (string-append "graphql: " (first-line err))))
     (plist-get reply 'data)))
 
 ;;; --- the schema ---------------------------------------------------------------
@@ -397,7 +379,7 @@
         (or *graphql-last-error* "no schema")
         (let* ((hits (filter (lambda (l) (graphql--matches? l (graphql--words query)))
                              (graphql--schema-lines types)))
-               (shown (graphql--take hits graphql-apropos-limit))
+               (shown (take hits graphql-apropos-limit))
                (more (- (length hits) (length shown))))
           (if (null? hits)
               (string-append "nothing in " (graphql--text name)

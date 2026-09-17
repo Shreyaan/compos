@@ -45,8 +45,6 @@
           (else (loop (cdr bs))))))
 (define *web-cache-ttl* 600)
 
-(define (web--shell-quote text)
-  (string-append "'" (string-join (string-split text "'") "'\\''") "'"))
 ;;; --- the two readings -----------------------------------------------------------
 ;;; One page, one path, two readings.
 ;;;
@@ -98,7 +96,7 @@
 (define (web--parser-path sheet)
   (if (string-prefix? "/" sheet)
       sheet
-      (string-append (compos-priv-dir) "/packages/web/parsers/" sheet)))
+      (locate-library (string-append "web/parsers/" sheet))))
 
 ;; The one door a user package registers through: same triple as
 ;; *web--sites*, replacing any earlier entry for the same base.
@@ -141,13 +139,13 @@
       (if sheet
           (string-append
             "xsltproc --html "
-            (web--shell-quote (web--parser-path sheet))
+            (sh-quote (web--parser-path sheet))
             " ")
-          (string-append "readable --base " (web--shell-quote url) " "))
-      (web--shell-quote file) " 2>/dev/null" *web--pandoc*)))
+          (string-append "readable --base " (sh-quote url) " "))
+      (sh-quote file) " 2>/dev/null" *web--pandoc*)))
 
 (define (web--full-command file)
-  (string-append "cat " (web--shell-quote file) *web--pandoc*))
+  (string-append "cat " (sh-quote file) *web--pandoc*))
 
 ;; A nested table layout defeats pandoc, which writes a "[TABLE]"
 ;; placeholder instead of the rows. Flattening the table tags gives the
@@ -155,7 +153,7 @@
 (define (web--flatten-command file)
   (string-append
     "perl -pe 's{</?(?:table|tbody|thead|tr|td|th)\\b[^>]*>}{ }gi' < "
-    (web--shell-quote file) *web--pandoc*))
+    (sh-quote file) *web--pandoc*))
 
 ;; under this many bytes a reading found nothing worth showing
 (define *web--thin-bytes* 200)
@@ -283,12 +281,12 @@
     (list "application/pdf"
           (lambda (file url)
             (string-append "pdftotext -layout -nopgbrk "
-                           (web--shell-quote file) " - 2>/dev/null")))
+                           (sh-quote file) " - 2>/dev/null")))
     (list "text/csv" (lambda (file url) (web--pandoc-command file "csv")))
     (list "text/tab-separated-values" (lambda (file url) (web--pandoc-command file "tsv")))
     (list "application/json" (lambda (file url) (web--fence-command file "json")))
     (list "image/" (lambda (file url) (web--image-command url)))
-    (list "text/" (lambda (file url) (string-append "cat " (web--shell-quote file))))))
+    (list "text/" (lambda (file url) (string-append "cat " (sh-quote file))))))
 
 ;; the one door another package registers a reader through
 (define (web-register-mime! type reader)
@@ -302,18 +300,18 @@
 
 (define (web--pandoc-command file from)
   (string-append "pandoc --wrap=none -f " from " -t gfm "
-                 (web--shell-quote file) " 2>/dev/null"))
+                 (sh-quote file) " 2>/dev/null"))
 
 ;; a body that is not prose reads as code: the fence keeps the reader
 ;; from taking any of it for markdown
 (define (web--fence-command file language)
-  (string-append "printf '```" language "\\n'; cat " (web--shell-quote file)
+  (string-append "printf '```" language "\\n'; cat " (sh-quote file)
                  "; printf '\\n```\\n'"))
 
 ;; an image is one line of markdown: the page renders it
 (define (web--image-command url)
   (string-append "printf '%s\\n' "
-                 (web--shell-quote (string-append "![](" url ")"))))
+                 (sh-quote (string-append "![](" url ")"))))
 
 ;; the reader wrote nothing: the type is the whole answer
 (define (web--mime-markdown url type out file)
@@ -370,9 +368,9 @@
 ;; under it, the type the bytes look like.
 (define (web--curl-fetch url k revalidate?)
   (let* ((file (web--body-file! "body"))
-         (u (web--shell-quote url))
-         (f (web--shell-quote file))
-         (dir (web--shell-quote (string-append (compos-home) "/web-etags"))))
+         (u (sh-quote url))
+         (f (sh-quote file))
+         (dir (sh-quote (string-append (compos-home) "/web-etags"))))
     (shell-command->string
       (string-append
         "mkdir -p " dir "; "
@@ -1377,8 +1375,8 @@
          (file (string-append dir "/" (web--download-name url))))
     (message (string-append "downloading " url " …"))
     (shell-command->string
-      (string-append "mkdir -p " (web--shell-quote dir) " && curl -sL --max-time 120 "
-                     (web--shell-quote url) " -o " (web--shell-quote file)
+      (string-append "mkdir -p " (sh-quote dir) " && curl -sL --max-time 120 "
+                     (sh-quote url) " -o " (sh-quote file)
                      " && printf ok")
       (lambda (out)
         (if (equal? (string-trim (or out "")) "ok")

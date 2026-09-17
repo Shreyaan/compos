@@ -179,13 +179,6 @@
   (let ((cells (telemetry--cells buf row)))
     (list (nth 0 cells) (nth 1 cells) (nth 3 cells) (nth 4 cells) (nth 5 cells))))
 
-(define (telemetry--replace-buffer! buf text)
-  (buffer-create buf)
-  (buffer-set-read-only! buf #f)
-  (buffer-delete-range! buf 0 (buffer-size buf))
-  (buffer-append! buf text)
-  (buffer-set-read-only! buf #t))
-
 (define (telemetry--detail-text row)
   (string-append
     "Telemetry Event\n\n"
@@ -249,8 +242,8 @@
   (lambda ()
     (let ((row (list-current (current-buffer))))
       (when row
-        (telemetry--replace-buffer! *telemetry-detail-buffer*
-          (telemetry--detail-text row))
+        (buffer-set-text! *telemetry-detail-buffer*
+          (telemetry--detail-text row) #t)
         (buffer-set-local! *telemetry-detail-buffer* 'telemetry-detail-row row)
         (display-buffer-other-window! *telemetry-detail-buffer*)
         (with-current-buffer *telemetry-detail-buffer*

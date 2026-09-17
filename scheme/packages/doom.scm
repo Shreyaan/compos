@@ -142,11 +142,6 @@
 
 ;;; --- the install --------------------------------------------------------------
 
-;; POSIX single quoting: the config home is the user's path, and it can
-;; hold a space.
-(define (doom--sh-quote s)
-  (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
-
 ;; One asset. The fetch is a shell run because the file is binary and
 ;; large: the IWAD is four megabytes and the engine is two. curl writes a
 ;; part file and the move only happens on success, so a failed fetch
@@ -155,9 +150,9 @@
   (let* ((url (string-append doom-source "/" name))
          (out (doom--file name))
          (part (string-append out ".part"))
-         (cmd (string-append "curl -fsSL --max-time 600 -o " (doom--sh-quote part)
-                             " " (doom--sh-quote url)
-                             " && mv -f " (doom--sh-quote part) " " (doom--sh-quote out))))
+         (cmd (string-append "curl -fsSL --max-time 600 -o " (sh-quote part)
+                             " " (sh-quote url)
+                             " && mv -f " (sh-quote part) " " (sh-quote out))))
     (shell-command->string cmd (doom--dir)
       (lambda (output) (k (file-exists? out))))))
 

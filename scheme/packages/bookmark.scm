@@ -597,17 +597,10 @@
 
 ;;; --- annotations -------------------------------------------------------------
 
-(define (bookmark--replace-buffer! buf text read-only?)
-  (buffer-create buf)
-  (buffer-set-read-only! buf #f)
-  (buffer-delete-range! buf 0 (buffer-size buf))
-  (buffer-append! buf text)
-  (buffer-set-read-only! buf read-only?))
-
 (define (bookmark--show-annotation record)
   (let* ((name (bookmark--get record 'name ""))
          (annotation (bookmark--get record 'annotation "")))
-    (bookmark--replace-buffer!
+    (buffer-set-text!
       *bookmark-annotation-buffer*
       (string-append name "\n" (bookmark--repeat "=" (string-length name))
                      "\n\n" (if (equal? (string-trim annotation) "")
@@ -624,7 +617,7 @@
 (define (bookmark-edit-annotation-name! name)
   (let ((record (bookmark-get name)))
     (when record
-      (bookmark--replace-buffer!
+      (buffer-set-text!
         *bookmark-annotation-edit-buffer*
         (bookmark--get record 'annotation "") #f)
       (buffer-set-local! *bookmark-annotation-edit-buffer* 'bookmark-name name)
@@ -646,7 +639,7 @@
                       (not (equal? (string-trim
                                      (bookmark--get record 'annotation "")) "")))
                     (bookmark--ensure-loaded!))))
-      (bookmark--replace-buffer!
+      (buffer-set-text!
         *bookmark-annotation-buffer*
         (if (null? rows)
             "No bookmark annotations.\n"

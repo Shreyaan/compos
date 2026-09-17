@@ -174,9 +174,6 @@
 
 (define *setup-interpreters* '("node" "python" "python3" "ruby" "bun" "deno" "env"))
 
-(define (setup--basename path)
-  (car (reverse (string-split path "/"))))
-
 (define (setup--cmd-label cmd)
   "What to name when a command is missing. An interpreter is always installed,
    so for `node /path/agent.js` the missing thing is the script, not node. For
@@ -184,7 +181,7 @@
   (let ((program (setup--cmd-program cmd)))
     (cond
       ((not program) "no command declared")
-      ((not (member (setup--basename program) *setup-interpreters*)) program)
+      ((not (member (file-name-nondirectory program) *setup-interpreters*)) program)
       (else
        (let loop ((words (cdr (string-split cmd " "))))
          (cond ((null? words) program)
@@ -229,20 +226,14 @@
   "The connector names this machine can run now."
   (map car (filter (lambda (row) (car (cdr (cdr row)))) (setup-inference-scan))))
 
-(define (setup--replace-buffer! buf text)
-  (buffer-create buf)
-  (buffer-set-read-only! buf #f)
-  (buffer-delete-range! buf 0 (buffer-size buf))
-  (buffer-append! buf text)
-  (buffer-goto! buf 0))
-
 ;; A bot document never takes the user's selected window. Silent mode does
 ;; not create or display the document, so it cannot alter the window tree.
 (define (bot-show-document-other-window! buf title markdown silent?)
   (if silent?
       (message (string-append "Setup: " title))
       (begin
-        (setup--replace-buffer! buf markdown)
+        (buffer-set-text! buf markdown #f)
+        (buffer-goto! buf 0)
         (buffer-set-local! buf 'help-title title)
         (with-current-buffer buf (lambda () (set-mode! "help-mode")))
         (display-buffer-other-window! buf))))

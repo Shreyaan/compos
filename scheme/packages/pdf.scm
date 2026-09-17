@@ -455,16 +455,6 @@
                 (plist-get match 'baseline-y)
                 text (or font0 "Helvetica") size))))))
 
-(define (pdf--html-escape value)
-  (let* ((text (or value ""))
-         (text (re-replace-all "&" text "&amp;"))
-         (text (re-replace-all "<" text "&lt;"))
-         (text (re-replace-all ">" text "&gt;")))
-    (re-replace-all "\"" text "&quot;")))
-
-(define (pdf--basename path)
-  (car (reverse (string-split path "/"))))
-
 (define (pdf--pdf-stem filename)
   (if (and (>= (string-length filename) 4)
            (string-suffix? ".pdf" (string-downcase filename)))
@@ -480,7 +470,7 @@
 (define (pdf--generated-copy? path)
   (re-match?
     "-edited(\\.pdf|-[0-9]{8}-[0-9]{6}(-[0-9]+)?\\.pdf)$"
-    (pdf--basename path)))
+    (file-name-nondirectory path)))
 
 (define (pdf--working-path source)
   ;; The first edit protects the original with a generated sibling. Later
@@ -492,10 +482,10 @@
                  (pdf--path-key path) ".pdf"))
 
 (define (pdf--buffer-name path)
-  (string-append "*PDF: " (pdf--basename path) " · " (pdf--path-key path) "*"))
+  (string-append "*PDF: " (file-name-nondirectory path) " · " (pdf--path-key path) "*"))
 
 (define (pdf--edit-buffer-name path)
-  (string-append "*PDF Edit: " (pdf--basename path) " · "
+  (string-append "*PDF Edit: " (file-name-nondirectory path) " · "
                  (pdf--path-key path) "*"))
 
 (define (pdf--page buf)
@@ -542,7 +532,7 @@
   (quotient (* 960 zoom) 100))
 
 (define (pdf--document-html path page total zoom image text &optional original dark?)
-  (let ((title (pdf--html-escape (pdf--basename path))))
+  (let ((title (html-escape (file-name-nondirectory path))))
     (string-append
       "<!doctype html><html><head><meta charset=\"utf-8\"><title>" title
       "</title><style>"
@@ -604,7 +594,7 @@
       (if original
           (string-append
             "<section class=\"edit\"><strong>Editing generated copy: " title "</strong>"
-            "<small>Original remains unchanged: " (pdf--html-escape original) "</small>"
+            "<small>Original remains unchanged: " (html-escape original) "</small>"
             "<div class=\"edit-actions\">"
             (pdf--action "move-backward" "Move earlier" "[")
             (pdf--action "move-forward" "Move later" "]")
@@ -620,7 +610,7 @@
             (number->string (pdf--page-width zoom)) "px\"><img alt=\"Page "
             (number->string page) "\" src=\"data:image/png;base64," image
             "\"></div></main><details class=\"extract\"><summary>Page text</summary><pre>"
-            (pdf--html-escape text) "</pre></details>")
+            (html-escape text) "</pre></details>")
           (string-append
             "<main class=\"error\"><h1>Cannot render this PDF</h1>"
             "<p>Install Poppler so <code>pdfinfo</code>, <code>pdftoppm</code>, "
