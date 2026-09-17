@@ -439,5 +439,7 @@
 
 ;; The dashboard is core chrome, and core loads before this registry exists.
 ;; Its handler is defined there and registered here.
+;; By name, in a lambda: a hot reload of editor.scm redefines the handler,
+;; and a registration by value would keep calling the old one.
 (when (boundp 'dashboard-block-click)
-  (on-block-click! 'dashboard dashboard-block-click))
+  (on-block-click! 'dashboard (lambda (buf id) (dashboard-block-click buf id))))
