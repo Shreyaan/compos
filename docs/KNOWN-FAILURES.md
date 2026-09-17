@@ -1,159 +1,52 @@
 # Known failing tests
 
-`bin/test-fast` on a clean worktree does not come back green. This is the
-record of what was already red, so the next person can tell a regression
-from the weather.
+The tests that were red before the simplification work of 2026-09-18 and
+2026-09-19, so a regression can be told from the weather. Each entry was
+measured the same way: the test file as it stood before the change was run
+against the code as it stood before the change, in the test env, and it
+failed the same way after.
 
-Measured over **10 full runs** of `bin/test-fast` in clean worktrees at
-HEAD, 2026-08-23/24, during the Scheme test migration. Counts are how many
-of those 10 runs each test failed in.
+**This is evidence, not permission.** A test listed here is a defect nobody
+has looked at, or a test that asserts a production key binding, which the
+house rule forbids. Fix the defect or rewrite the test; do not extend the
+list to make a run green.
 
-**This is evidence, not permission.** A test listed here is not "allowed to
-fail" — most of these are real defects nobody has looked at. Two were
-confirmed this week by porting them to Scheme and watching them fail the
-same way:
+## Elixir
 
-- `marked switcher buffers pull as one operation` — marks two rows, runs
-  the pull, and neither buffer joins the group.
-- `the switcher narrows by the annotation the marginalia supplies` — the
-  modal switcher does not narrow.
+| File | Red | Note |
+|---|---|---|
+| agent_test.exs | 36 of 52 | the `a1` slug and the fake-transport handshake; every ACP scenario after the first fails on `Agent.info("a1")` |
+| chat_reset_test.exs, switch_test.exs, preset_test.exs | 17 | the transport never opens; same root as agent_test |
+| backend_stub_test.exs | 2 | same root |
+| chat_agent_test.exs | 2 | same root |
+| transient_test.exs | 2 | the LLM menu no longer applies a saved combination |
+| project_search_test.exs | 4 | group membership after project-switch and dired-in-group; the ripgrep hint carries an `M-1` prefix |
+| llm_tools_test.exs | 3 | apropos output format; describe-function source; 22 tools where the test expects 10 (the tool zoo regrew, audit item 5.6) |
+| write_file_test.exs | 1 | `C-n then RET` in the write prompt leaves the minibuffer |
+| movie_test.exs, chosen_pane_test.exs, spotify_test.exs | 1 each | opt-in apps |
+| chrome_test.exs | 1 | "returning from a page a buffer already on screen is selected" |
+| load_test.exs | 0 | was red on calendar.scm, which init.scm never loaded; now expected |
+
+## Scheme (priv/tests)
+
+Run one file with `SCHEME_TESTS=name mix test apps/compos_core/test/compos/scheme_suite_test.exs`.
+
+| Test | Note |
+|---|---|
+| a-mode-map-answers-for-the-buffer..., a-minor-mode-map-answers-ahead..., every-major-mode-key-leads-to-a-live-command, every-minor-mode-key-leads-to-a-live-command, a-list-mode-answers-to-its-own-map-under-list-mode-map, a-list-key-bar-defaults-to-the-keymap-component | the keymap ladder |
+| fence-markers-step-back-with-other-preview-markup, a-link-keeps-its-text-and-hides-its-target, a-csv-block-draws-as-a-table | blocks |
+| the-default-face-size-is-the-setting-and-survives-a-theme, a-dark-theme-shows-the-row-under-point | themes; red since the warm-dark theme commit |
+| the-stance-is-set-in-one-place, the-modeline-names-the-tool-surface | llm-setup |
+| unstamped-bundled-declarations-do-not-multiply, a-near-miss-on-a-name-lands-anyway, kind-package-namespace-domain-and-effect-filters-compose, components-use-the-main-catalog-and-expose-a-runnable-contract | apropos and the catalog |
+| malformed-scheme-goes-nowhere, code-mode-asks-before-it-assigns-this-frame-a-worktree | code-mode |
+| the-index-gives-each-thread-two-lines, every-tag-reads-in-full-until-the-column-narrows, notmuch-quit-kills-the-mail-views-and-lands-on-work, mark-all-then-archive-marked-asks-before-it-acts | notmuch |
+| context-providers-explain-the-selection-to-chat-and-agents, subagents-table-draws-one-row-per-edge, overview-uses-only-the-current-group, tile-all-uses-only-the-current-project, telemetry-toggle-opens-the-popup-and-closes-it, telemetry-has-a-narrow-view-for-the-side-popup | one each |
+| a-page-opens-in-the-frame-group-when-the-window-has-none-and-cycles-views | passes alone; fails when the feeds tests run first (test pollution) |
+| membership-answers-the-id, modeline-memberships-follow-the-buffer, llm-config-session-is-the-groups-most-recent-chat, a-summary-is-always-a-string, applying-a-bundle-applies-all-of-it, a-bundle-remembers-disabled-prompt-sections | pass alone; fail after other files leave a group behind (test pollution) |
 
 ## Faster ways to ask
 
-`mix test` has the flags for this; reach for them before a four-minute
-partition run.
-
-**`--failed`** runs only the tests that failed the last time they ran —
-RSpec's `--only-failures`. The manifest is
-`_build/test/lib/<app>/.mix/.mix_test_failures`, one per umbrella app, and
-it accumulates across invocations rather than holding only the last run.
-Use it for the re-check loop after a fix:
-
-```sh
-cd apps/compos_core && mix test --failed
-```
-
-It answers "what failed when I last ran it". It cannot answer "was this
-already red before my change" — by the time you ask, your change is in.
-That question is what this file is for.
-
-**`--stale`** runs only the tests referencing modules that changed. The
-inner loop while editing.
-
-**`--repeat-until-failure N`** is the one for the 21 names below that fail
-in one run out of ten. Characterising a flake by re-running the whole
-suite and waiting to see if a name comes back costs four minutes a
-sample; this costs one test:
-
-```sh
-cd apps/compos_core && mix test --repeat-until-failure 50 test/compos/switcher_sleep_test.exs
-```
-
-## How to use it
-
-Run `bin/test-fast` in a worktree at HEAD, not in the shared checkout —
-another session's uncommitted work adds failures that are not yours:
-
-```sh
-git worktree add /tmp/verify HEAD && cd /tmp/verify
-bin/test-fast 2>&1 | tee /tmp/run.log
-grep -E "^\s+[0-9]+\) test" /tmp/run.log | sed 's/^ *[0-9]*) //' | sort > /tmp/now.txt
-comm -13 <(grep -oE '^\| `[^`]+`' docs/KNOWN-FAILURES.md | tr -d '|` ') /tmp/now.txt
-```
-
-A name that is NOT in this list is the one to look at. Then, before
-blaming your change: run that file alone across three seeds, and run the
-same file at the commit before your change. Three of the four scares
-during the migration were pre-existing, and one — `pull adds the current
-group` — failed twice at HEAD and looked conclusive until it failed at the
-parent commit too.
-
-## The shape of it
-
-The 64 names split cleanly in two, and the split is the useful part:
-
-- **24 fail in all 10 runs.** These are not flake. They are defects with a
-  reproducer already written, sitting untouched — fourteen of them in the
-  switcher and the buffer list alone (`EditorTest`, `SwitcherSleepTest`,
-  `SwitchModalTest`, `MarginaliaProjectTest`). If anything here is worth a
-  morning, it is that cluster: one cause probably accounts for most of it.
-- **21 fail in exactly 1 of 10.** Timing, ordering, frame geometry. These
-  are the ones that make a green run impossible and make attribution cost
-  a baseline run every time.
-
-The rest sit in between and are worth suspecting individually.
-
-## The count band
-
-Whole-suite failures ranged **30-42** across the 10 runs. The count
-moves on its own; so do the names. Roughly a third of this list appears in
-one run and not the next. Diff the NAMES, never the number.
-
-## The list
-
-| count | test |
-|---|---|
-| 10/10 | `test C-h b lists local bindings before global ones (Compos.HelpTest)` |
-| 10/10 | `test C-k kills the dormant buffer the row names (Compos.SwitcherSleepTest)` |
-| 10/10 | `test C-x b is history first: previous buffer defaults, containers ride under it (Compos.EditorTest)` |
-| 10/10 | `test C-x p s opens the project's scratch, tags the project's buffers, and toggles back (Compos.ProjectScratchTest)` |
-| 10/10 | `test RET copies only the current secret value (Compos.DopplerTest)` |
-| 10/10 | `test RET on a name that matches nothing founds a group from the windows (Compos.EditorTest)` |
-| 10/10 | `test a group you switched to is a history row; its name finds it and its members (Compos.EditorTest)` |
-| 10/10 | `test a killed file member comes back with content, not an empty shell (Compos.EditorTest)` |
-| 10/10 | `test a project-rooted group offers its files, and the card defaults to dired (Compos.SwitchModalTest)` |
-| 10/10 | `test a row for a buffer killed elsewhere leaves the list on the next command (Compos.SwitcherSleepTest)` |
-| 10/10 | `test a stale off-screen buffer catches up when the switcher shows it (Compos.EditorTest)` |
-| 10/10 | `test a verb acts on the nearest row when point sits in the chrome (Compos.SwitcherSleepTest)` |
-| 10/10 | `test api -> codex -> claude-code -> api on ONE chat: everything survives (Compos.SwitchTest)` |
-| 10/10 | `test buffer groups: C-c g tags members, C-c q talks to the group's one chat (Compos.EditorTest)` |
-| 10/10 | `test dired (pure Scheme userland) / matches the marginalia too, and C-g puts the listing back (Compos.EditorTest)` |
-| 10/10 | `test marginalia the switcher narrows by the annotation the marginalia supplies (Compos.MarginaliaProjectTest)` |
-| 10/10 | `test mouse rows select and action controls run the keyboard commands (Compos.DopplerTest)` |
-| 10/10 | `test narrowing to a dormant candidate wakes it; ESC puts it back to sleep (Compos.SwitcherSleepTest)` |
-| 10/10 | `test opens as a grouped primary buffer, never a popup (Compos.DopplerTest)` |
-| 10/10 | `test returning from a page C-x b is the editor's own command, redefined rather than rebound (Compos.ChromeTest)` |
-| 10/10 | `test the modal switcher C-t puts the marked buffers in a group, and an empty answer removes it (Compos.EditorTest)` |
-| 10/10 | `test the modal switcher lists with the buffer annotation, narrows by mode, C-k kills, RET visits (Compos.EditorTest)` |
-| 10/10 | `test the modal switcher typing and the arrows preview the highlighted buffer in the home window (Compos.EditorTest)` |
-| 10/10 | `test which-key panel appears for pending prefix (Compos.EditorTest)` |
-| 9/10 | `test C-c s opens a plain scratch beside any ordinary buffer and toggles back (Compos.ScratchTest)` |
-| 9/10 | `test RET opens distinct grouped detail buffers through the real key path (Compos.SentryTest)` |
-| 9/10 | `test a save reloads every running app (Compos.AppPreviewTest)` |
-| 8/10 | `test C-c s opens a scratch chat that carries the coding presets (Compos.CodeModeTest)` |
-| 8/10 | `test M-x code-mode joins a group, loads the coding presets, and turns on llm-mode (Compos.CodeModeTest)` |
-| 8/10 | `test marked switcher buffers pull as one operation (Compos.GroupSwitchCommandTest)` |
-| 8/10 | `test restore-minor-modes! re-runs setup idempotently (reload path) (Compos.CodeModeTest)` |
-| 7/10 | `test C-c RET talks to the companion without leaving the document (Compos.EditorTest)` |
-| 7/10 | `test C-c w opens the optional companion for the writing workspace (Compos.WritingTest)` |
-| 7/10 | `test code-mode asks before it assigns this frame a worktree, group, and chat (Compos.CodeModeTest)` |
-| 7/10 | `test enabling writing mode opens its grouped plain scratch beside the preview (Compos.WritingTest)` |
-| 5/10 | `test M-. in a help page opens the source of the name at point (Compos.HelpTest)` |
-| 5/10 | `test a name in a help page is a link to its source, and the link opens it (Compos.HelpTest)` |
-| 5/10 | `test pull adds the current group without switching context (Compos.GroupSwitchCommandTest)` |
-| 4/10 | `test C-c q founds a group and asks its one chat from the minibuffer (Compos.EditorTest)` |
-| 4/10 | `test openai models run the tool loop like every other model (Compos.EditorTest)` |
-| 3/10 | `test chat opens the group companion; RET sends, reply appends (Compos.EditorTest)` |
-| 3/10 | `test the scroll keys move an html preview page instead of point (Compos.HelpTest)` |
-| 2/10 | `test M-? with no name at point still shows the buffer, its mode and its keys (Compos.HelpTest)` |
-| 1/10 | `test *agents* fleet: sorted by attention, y answers the current line's thread (Compos.AgentTest)` |
-| 1/10 | `test C-c C-v toggles the source of a generated page, C-h m describes a plain buffer (Compos.HelpTest)` |
-| 1/10 | `test C-g cancels every queued turn and finalizes running tool cards (Compos.AgentTest)` |
-| 1/10 | `test C-h a searches the editor and renders the hits as a page (Compos.HelpTest)` |
-| 1/10 | `test C-h k over an unbound key says so, and the capture ends (Compos.HelpTest)` |
-| 1/10 | `test M-? describes a public function at point by its signature (Compos.HelpTest)` |
-| 1/10 | `test M-? over a name the editor does not know falls back to the apropos hits (Compos.HelpTest)` |
-| 1/10 | `test M-? over prose says nothing about it and describes the buffer instead (Compos.HelpTest)` |
-| 1/10 | `test a heading takes no selection and no count (Compos.GroupSwitchCommandTest)` |
-| 1/10 | `test cancelled group creation changes no group state (Compos.GroupSwitchCommandTest)` |
-| 1/10 | `test m marks; a verb acts on every marked chat, not the line at point (Compos.AgentTest)` |
-| 1/10 | `test outbound — Scheme addresses a tab a message to a tab goes out as an overlay op (Compos.ChromeTest)` |
-| 1/10 | `test pop removes only the current group and replaces a visible buffer (Compos.GroupSwitchCommandTest)` |
-| 1/10 | `test project-ripgrep RET on the first match opens that file at that line (Compos.ProjectSearchTest)` |
-| 1/10 | `test returning from a page a buffer already on screen is selected, not pulled somewhere else (Compos.ChromeTest)` |
-| 1/10 | `test session/new carries our mcpServers and _meta; the adapter loads no user config (Compos.AgentTest)` |
-| 1/10 | `test the activity row shows work in progress and clears at turn end (Compos.Ui.EditorLiveTest)` |
-| 1/10 | `test the catalog new bundled declarations cannot silently expand the Luna backfill (Compos.AproposTest)` |
-| 1/10 | `test the catalog the bundled backfill leaves no unknown metadata (Compos.AproposTest)` |
-| 1/10 | `test the locals partition (W8) a restored chat sheds its dead runtime state; a live one keeps it (Compos.ChatResetTest)` |
-| 1/10 | `test the mode setup rebuilds the buffer from its locals (Compos.GitDiffTest)` |
+`mix test --failed` reruns what failed last time (`_build/test/lib/<app>/.mix/.mix_test_failures`).
+`SCHEME_TIMES=1` on the Scheme bridge prints the slowest tests.
+To attribute a failure: run the pre-change test file (`git show HEAD:path > test/compos/zz_old_x_test.exs`,
+with the module renamed) against the pre-change code, and compare failure names, not counts.
