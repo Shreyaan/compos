@@ -53,9 +53,10 @@ defmodule Compos.Mix.Daemon do
     package_dir = Path.join(root, "apps/compos_core/priv/packages")
     init = Path.join(root, "apps/compos_core/priv/init.scm")
 
-    ~r/\(load-bundled-package\s+"([^"]+)"\)/
+    ~r/\(load\s+"([^"]+)"\)/
     |> Regex.scan(File.read!(init), capture: :all_but_first)
     |> Enum.map(fn [file] -> Path.join(package_dir, file) end)
+    |> Enum.filter(&File.regular?/1)
   end
 end
 

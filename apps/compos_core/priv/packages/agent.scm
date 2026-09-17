@@ -4,12 +4,9 @@
 ;;; and the chat fleet. This file only coordinates backend event batches.
 
 ;; This compound package owns the load order of its focused modules.
-(load-bundled-package "agent-permissions.scm")
-(load-bundled-package "agent-connectors.scm")
-(load-bundled-package "agent-transcript.scm")
-
-;; A nested load changes catalog attribution. Restore this entry point's name.
-(package! 'agent)
+(load "agent-permissions.scm")
+(load "agent-connectors.scm")
+(load "agent-transcript.scm")
 
 ;; event kinds that count as the turn having produced something visible —
 ;; a turn-end after none of them is a silent turn
@@ -466,5 +463,5 @@
   "(agent-answer-question! SLUG ID ANSWER) — answer the agent's pending branching question")
 
 ;; Session and fleet APIs depend on the event coordinator above.
-(load-bundled-package "agent-session.scm")
+(load "agent-session.scm")
 (package! 'agent)

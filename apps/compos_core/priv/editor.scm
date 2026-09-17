@@ -6362,13 +6362,82 @@
          (or (equal? path r)
              (string-prefix? (string-append r "/") path)))))
 
-;; Where a .scm file may live. The priv tree is the editor's own source; the
-;; config home holds init.scm, custom.scm and the user's packages. Add a
-;; directory here to work on Scheme somewhere else.
+;;; --- load-path ----------------------------------------------------------------
+;;; Where (load NAME) looks for a relative NAME, first match wins: the
+;;; editor's own priv tree, the packages at the project root, the config
+;;; home, and the user's packages. An absolute name loads as it is. The
+;;; kernel sets the default; init.scm and the user init load by bare name
+;;; and add a directory only for Scheme outside these four.
+
+(defvar 'load-path
+  (append (list (compos-priv-dir)
+                (string-append (compos-priv-dir) "/packages"))
+          (let ((root (compos-project-dir)))
+            (if root (list (string-append root "/scheme/packages")) '()))
+          (list (compos-config-dir)
+                (string-append (compos-config-dir) "/packages")))
+  "Directories (load NAME) searches for a relative NAME, in order.")
+
+;; Emacs add-to-list: VALUE goes to the front of the list VAR names, once.
+(define (add-to-list! var value)
+  (let ((cur (symbol-value var)))
+    (unless (member value cur)
+      (set-symbol-value! var (cons value cur)))
+    (symbol-value var)))
+
+;; the file (load NAME) reads, or #f. NAME may omit ".scm".
+(define (locate-library name)
+  (if (or (string-prefix? "/" name) (string-prefix? "~" name))
+      (and (file-exists? name) name)
+      (let loop ((dirs load-path))
+        (if (null? dirs)
+            #f
+            (let* ((plain (string-append (car dirs) "/" name))
+                   (scm (string-append plain ".scm")))
+              (cond ((file-exists? scm) scm)
+                    ((file-exists? plain) plain)
+                    (else (loop (cdr dirs)))))))))
+
+(define (load--library-name path)
+  (car (string-split (car (reverse (string-split path "/"))) ".scm")))
+
+;; the origin stamp a file gets from where it lives: the editor's own trees
+;; are bundled, everything else is the user's
+(define (load--origin path)
+  (let ((root (compos-project-dir)))
+    (if (or (write--under-root? path (compos-priv-dir))
+            (and root (write--under-root? path root)))
+        'bundled
+        'user)))
+
+;; (load NAME) finds NAME on load-path, stamps the catalog package and
+;; origin from the file, evaluates it, and puts the stamps back. A nested
+;; load therefore never changes the attribution of the file around it.
+(define (load name)
+  (let ((path (locate-library name)))
+    (unless path
+      (error (string-append "cannot load " name ": not on load-path")))
+    (let ((pkg *loading-package*)
+          (ns *loading-namespace*)
+          (org *loading-origin*)
+          (dom *catalog-domain*)
+          (eff *catalog-effects*))
+      (origin! (load--origin path))
+      (package! (string->symbol (load--library-name path)))
+      (let ((result (builtin-load path)))
+        (set! *loading-package* pkg)
+        (set! *loading-namespace* ns)
+        (set! *loading-origin* org)
+        (set! *catalog-domain* dom)
+        (set! *catalog-effects* eff)
+        result))))
+
+;; Where a .scm file may live: every load-path directory, the home, and
+;; whatever the user adds here to work on Scheme somewhere else.
 (defvar '*scheme-write-roots* '())
 
 (define (scheme-write-roots)
-  (append (list (compos-priv-dir) (compos-home)) *scheme-write-roots*))
+  (append load-path (list (compos-home)) *scheme-write-roots*))
 
 (effects! '(pure))
 

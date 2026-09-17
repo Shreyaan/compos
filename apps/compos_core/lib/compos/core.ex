@@ -21,6 +21,25 @@ defmodule Compos.Core do
   def config_dir,
     do: Application.get_env(:compos_core, :config_dir) || home()
 
+  @doc """
+  The checkout this daemon runs from, or nil in a release.
+
+  Mix links `_build/<env>/lib/compos_core/priv` to the checkout's
+  `apps/compos_core/priv`, so the resolved priv path names the project
+  root three directories up. A release copies priv and has no root.
+  """
+  def project_dir do
+    priv = Compos.Core.Session.canonical(Application.app_dir(:compos_core, "priv"))
+
+    case Enum.reverse(Path.split(priv)) do
+      ["priv", "compos_core", "apps" | rest] when rest != [] ->
+        rest |> Enum.reverse() |> Path.join()
+
+      _ ->
+        nil
+    end
+  end
+
   def create_buffer(name, opts \\ []) do
     restored = BufferStore.lookup(name)
 

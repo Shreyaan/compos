@@ -158,5 +158,7 @@ apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
 Boot order is explicit: `editor.scm`, the small stdlib files, then stock
 `priv/init.scm`, which lists every bundled package in dependency order. After
 stock boot, user config runs as `~/.compos/ai-config.scm`, `~/.compos/init.scm`,
-then saved `~/.compos/custom.scm`. User-installed packages load only when the
-user init names them with `(load "packages/name.scm")`.
+then saved `~/.compos/custom.scm`. `(load NAME)` searches `load-path`: priv, its
+packages, the project's `scheme/packages`, the config home, and its
+packages. User-installed packages load only when the user init names them
+with `(load "name.scm")`.

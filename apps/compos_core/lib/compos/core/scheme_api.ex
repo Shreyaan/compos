@@ -559,6 +559,8 @@ defmodule Compos.Core.SchemeAPI do
       "compos-home" => "(compos-home) — return the compos home directory path (~/.compos).",
       "compos-priv-dir" =>
         "(compos-priv-dir) — return the bundled Scheme directory (the editor's priv dir).",
+      "compos-project-dir" =>
+        "(compos-project-dir) — the checkout this daemon runs from, or #f in a release.",
       "compos-config-dir" =>
         "(compos-config-dir) — where user config reads from (COMPOS_CONFIG, else the home).",
       "compos-socket-path" =>
@@ -1591,6 +1593,7 @@ defmodule Compos.Core.SchemeAPI do
       # ~/.compos in real life, a tmp dir in tests — config and user packages
       "compos-home" => fn [] -> Compos.Core.home() end,
       "compos-priv-dir" => fn [] -> Application.app_dir(:compos_core, "priv") end,
+      "compos-project-dir" => fn [] -> Compos.Core.project_dir() || false end,
       "compos-config-dir" => fn [] -> Compos.Core.config_dir() end,
       # The socket THIS daemon listens on. A second daemon (COMPOS_HOME, or the
       # verify config) listens elsewhere, and anything it spawns must come back

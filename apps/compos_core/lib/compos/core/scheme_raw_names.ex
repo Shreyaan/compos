@@ -37,6 +37,7 @@ defmodule Compos.Core.SchemeRawNames do
   # primitive's own name lives in editor.scm.
   @wrapped %{
     "define-command--raw" => "define-command",
+    "builtin-load" => "load",
     "undefine-command--raw" => "undefine-command",
     "minibuffer-read*--raw" => "minibuffer-read*",
     "raw-buffer-create" => "buffer-create",

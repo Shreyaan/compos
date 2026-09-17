@@ -131,20 +131,21 @@ defmodule Compos.Core.Hotload do
 
   # The daemon runs from the checkout, so the sources are under the working
   # directory. A release has no checkout and watches nothing here. Each
-  # app's `lib` and this app's `priv` are named directly: `apps` as a whole
-  # would also cover the Rust build directory, which writes thousands of
-  # files per cargo run.
+  # app's `lib`, this app's `priv`, and the project's `scheme` tree (the
+  # Scheme `load-path`) are named directly: `apps` as a whole would also
+  # cover the Rust build directory, which writes thousands of files per
+  # cargo run.
   defp project_roots do
-    root = File.cwd!()
+    case Compos.Core.project_dir() do
+      nil ->
+        []
 
-    if File.exists?(Path.join(root, "mix.exs")) do
-      Enum.filter(
-        Path.wildcard(Path.join(root, "apps/*/lib")) ++
-          [Path.join(root, "apps/compos_core/priv")],
-        &File.dir?/1
-      )
-    else
-      []
+      root ->
+        Enum.filter(
+          Path.wildcard(Path.join(root, "apps/*/lib")) ++
+            [Path.join(root, "apps/compos_core/priv"), Path.join(root, "scheme")],
+          &File.dir?/1
+        )
     end
   end
 

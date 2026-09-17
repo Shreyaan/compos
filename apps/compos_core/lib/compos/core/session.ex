@@ -938,7 +938,18 @@ defmodule Compos.Core.Session do
   defp reload_source_paths do
     priv = canonical(Application.app_dir(:compos_core, "priv"))
     packages = Path.wildcard(Path.join([priv, "packages", "**/*.scm"]))
-    Enum.map(@bootstrap_files, &Path.join(priv, &1)) ++ packages ++ config_source_paths()
+
+    Enum.map(@bootstrap_files, &Path.join(priv, &1)) ++
+      packages ++ project_source_paths() ++ config_source_paths()
+  end
+
+  # The packages at the project root, `scheme/`, the second entry of the
+  # Scheme `load-path`. A release has no project root.
+  defp project_source_paths do
+    case Compos.Core.project_dir() do
+      nil -> []
+      root -> Path.wildcard(Path.join([root, "scheme", "**/*.scm"]))
+    end
   end
 
   defp config_source_paths do

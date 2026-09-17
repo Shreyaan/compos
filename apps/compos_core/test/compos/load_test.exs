@@ -11,12 +11,15 @@ defmodule Compos.LoadTest do
   test "stock init reaches every bundled package through package entry points" do
     priv = Application.app_dir(:compos_core, "priv")
     init = File.read!(Path.join(priv, "init.scm"))
-    load_pattern = ~r/\(load-bundled-package\s+"([^"]+)"\)/
+    load_pattern = ~r/\(load\s+"([^"]+)"\)/
 
+    # init.scm also loads editor/blocks and editor/goto-address by name;
+    # only the entries under packages/ are packages
     top_level =
       load_pattern
       |> Regex.scan(init, capture: :all_but_first)
       |> Enum.map(&hd/1)
+      |> Enum.filter(&File.regular?(Path.join([priv, "packages", &1])))
 
     nested =
       Enum.flat_map(top_level, fn package ->

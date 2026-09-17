@@ -102,9 +102,7 @@
                             (string-append dir "/" f)))
                     (filter (lambda (f) (string-suffix? ".scm" f))
                             (if (file-exists? dir) (list-dir dir) '()))))))
-    (append (scm (compos-priv-dir))
-            (scm (string-append (compos-priv-dir) "/packages"))
-            (scm (package-dir)))))
+    (apply append (map scm (append load-path (list (package-dir)))))))
 
 ;; The force-reload door. A primitive is an anonymous fun the session
 ;; captured from an Elixir module at boot. Recompiling that module purges
