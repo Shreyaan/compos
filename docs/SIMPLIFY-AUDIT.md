@@ -699,6 +699,15 @@ Hotload needs paths); the two PTY runners wait for a measured reason;
 the double-covered Elixir tests stay where they hold key-dispatch or
 Elixir-API assertions the Scheme twin lacks.
 
+**And later still:** the twelve restatement tools are gone, the toolbox is
+the ten llm_tools_test names (item 5.6 W1); the MCP, LSP, DB, endpoint,
+web-server, browser and LLM-session primitives register from their own
+modules and the reload logic is Hotload.Scheme, so session.ex is 2,100
+lines from 3,341 (item 8.10, 8.12); one JSON-RPC framer; docs/KNOWN-FAILURES.md
+is rewritten from measurement. Landmine met on the way: the colocated jj
+working copy rewrote the git index and 26 package files fell out of HEAD
+for six commits; repaired in d867255d, recorded in memory.
+
 **Red before today, measured by running the pre-change file** (for the
 KNOWN-FAILURES rewrite): agent_test 36 of 52; ChatResetTest, SwitchTest,
 PresetTest 17; MovieTest, ChosenPaneTest, SpotifyTest 1 each; TransientTest
