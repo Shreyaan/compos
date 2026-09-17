@@ -40,7 +40,14 @@ defmodule Compos.LoadTest do
         dir |> Path.join("**/*.scm") |> Path.wildcard() |> Enum.map(&Path.relative_to(&1, dir))
       end)
 
-    assert Enum.sort(loaded) == Enum.sort(packages)
+    # the apps the stock boot leaves out (priv/init.scm names them); a user
+    # init loads them by name, and test_helper.exs loads them for the suite
+    opt_in =
+      ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 spotify title training)
+      |> Enum.map(&(&1 <> ".scm"))
+
+    assert Enum.sort(loaded) == Enum.sort(packages -- (opt_in ++ ["calendar/calendar.scm"]))
+    assert Enum.sort(opt_in -- packages) == [], "an opt-in app is missing from scheme/packages"
     assert length(loaded) == length(Enum.uniq(loaded))
 
     assert "agent.scm" in top_level
