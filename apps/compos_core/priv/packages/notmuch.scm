@@ -1301,7 +1301,8 @@ when a message has no text/plain part." 'group 'notmuch)
 (defcustom 'notmuch-autotag-flags
   '("important" "Does this thread need this reader to act, decide, reply, or pay, or does it carry a deadline, a sum of money, or a consequence that matters to them personally? A bulk mailing that merely sounds urgent is not important."
     "spam" "Is this unsolicited bulk mail from a sender this reader never gave their address to and has no relationship with?"
-    "phishing" "Does this thread try to get credentials, money, card or account details, or personal data by pretending to be a person or an organisation it is not? Look for a sender domain that does not match the brand it claims, a link that does not go where it says, and pressure to act at once.")
+    "phishing" "Does this thread pretend to be a person or an organisation it is not, so it can take credentials, money, card or account details, or personal data? Read the From line before you read anything else. When the display name claims a brand or a person and the sender domain has nothing to do with that brand, the mail is a fake and the answer is yes, however ordinary and however correct the rest of it looks. The brand's own domain, or a subdomain of it, is not a mismatch, so mail that really comes from the brand is no even when it asks the reader to verify something or to act at once. The other signs of a fake are a link that does not go where its text says and an attachment that asks the reader to sign in."
+    "reply-due" "The most recent message in this thread, by its Date header, comes from somebody other than this reader, and it waits on an answer from them: a question, a request, a reminder, or a decision that is theirs to make. Is that true of this thread? It is not true when this reader sent the most recent message, when the matter is already settled, and when the mail is a bulk mailing, a notification, a receipt, or comes from an address that takes no reply.")
   "Yes/no tags notmuch-autotag asks about one at a time, as tag then question.")
 
 (defcustom 'notmuch-autotag-threshold 0.75
@@ -1409,13 +1410,25 @@ when a message has no text/plain part." 'group 'notmuch)
               (append out (list (nm--autotag-flag-key i)
                                 (jev-noul (car (cdr xs)))))))))
 
+(defcustom 'notmuch-autotag-thresholds '("phishing" 0.5)
+  "Per-tag override of notmuch-autotag-threshold, as tag then number. A tag with
+no entry answers to the general threshold. A missed phishing mail costs more
+than a wrong tag, so phishing sits lower than the rest.")
+
+(define (nm--autotag-threshold-for tag)
+  "How sure JEV must be before TAG is applied."
+  (let loop ((xs notmuch-autotag-thresholds))
+    (cond ((or (null? xs) (null? (cdr xs))) notmuch-autotag-threshold)
+          ((equal? (car xs) tag) (cadr xs))
+          (else (loop (cdr (cdr xs)))))))
+
 (define (nm--autotag-flags-said-yes reply)
   (let loop ((xs (nm--autotag-flag-tags)) (i 0) (out '()))
     (if (null? xs)
         (reverse out)
         (let ((p (jev-answer-noul reply (nm--autotag-flag-key i))))
           (loop (cdr xs) (+ i 1)
-                (if (and p (>= p notmuch-autotag-threshold))
+                (if (and p (>= p (nm--autotag-threshold-for (car xs))))
                     (cons (car xs) out)
                     out))))))
 
@@ -1553,74 +1566,19 @@ when a message has no text/plain part." 'group 'notmuch)
         (run-command "notmuch"))))
 (catalog-meta! 'command "notmuch-back" 'domain 'mail 'effects '(write external execute))
 
-(define (nm--sender-at buf)
-  (let ((th (nm--thread-at buf)))
-    (and th
-         (let* ((msgs (nm--flatten-msgs
-                        (or (nm--json (string-append "show --format=json --body=false thread:"
-                                                     (nm--th-id th)))
-                            '())))
-                (from (if (null? msgs)
-                          ""
-                          (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
-                (parts (string-split from "<")))
-           (if (null? (cdr parts))
-               (string-trim from)
-               (car (string-split (cadr parts) ">")))))))
-
 (define-command "notmuch-filter-by-sender" "Narrow the search to this thread's sender"
   (lambda ()
-    (let* ((buf (current-buffer)) (email (nm--sender-at buf)))
+    (let* ((buf (current-buffer))
+           (thread-id (nm--thread-here))
+           (email (and thread-id (nm--thread-sender thread-id))))
       (cond
-        ((not email) (message "No thread on this line"))
+        ((not thread-id) (message "No thread here"))
         ((equal? email "") (message "Could not extract the sender"))
         (else
           (nm--query-push-only! buf (string-append "from:" email))
           (nm--refresh! buf)
           (list-goto-first-entry buf)
           (message (string-append "from:" email)))))))
-
-(domain! 'mail)
-(effects! '(write external execute))
-
-(defcustom 'notmuch-purge-tag "archived"
-  "The tag notmuch-purge-sender adds as it takes a sender out of the inbox.
-It marks what the purge took, so one tag command puts it all back.")
-
-(define (nm--purge-query email)
-  (string-append "tag:inbox AND NOT tag:flagged AND from:" email))
-
-(define (nm--purge-count email)
-  (let ((n (string->number (string-trim (notmuch (string-append "count -- " (nm--purge-query email)))))))
-    (if (number? n) n 0)))
-
-(define-command "notmuch-purge-sender"
-  "Archive every inbox message from this thread's sender, flagged mail aside"
-  (lambda ()
-    (let* ((buf (current-buffer)) (email (nm--sender-at buf)))
-      (cond
-        ((not email) (message "No thread on this line"))
-        ((equal? email "") (message "Could not extract the sender"))
-        ((re-find "[^A-Za-z0-9._%+@-]" email 0)
-         (message (string-append "Will not purge an odd address: " email)))
-        (else
-          (let ((n (nm--purge-count email)))
-            (if (= n 0)
-                (message (string-append "Nothing from " email " in the inbox"))
-                (minibuffer-read
-                  (string-append "Purge " (number->string n) " from " email "? ")
-                  (list "yes" "no")
-                  (lambda (ans)
-                    (if (equal? ans "yes")
-                        (begin
-                          (notmuch (string-append "tag +" notmuch-purge-tag " -inbox -- "
-                                                  (nm--purge-query email)))
-                          (nm--refresh! buf)
-                          (message (string-append "Purged " (number->string n) " from " email
-                                                  " (+" notmuch-purge-tag ")")))
-                        (message "Cancelled")))))))))))
-
-(effects! '(unknown))
 
 (define (nm--thread-here)
   "The thread the command acts on: an open notmuch-show buffer names its thread, a list row carries one."
@@ -1663,11 +1621,12 @@ notmuch-host names another machine, here when it is empty."
                   "printf '%s\\n' " (nm--quote email) " >> \"" *notmuch-blocked-file* "\""))
   email)
 
-(define (nm--trash-sender! email)
-  "Trash every message from EMAIL, block the address, and refresh the index. Answers how many matched."
-  (let ((n (nm--count (string-append "from:" email))))
-    (nm--run (string-append "tag +trash +blocked -inbox -unread -- " (nm--quote (string-append "from:" email))))
-    (nm--block-sender! email)
+(define (nm--trash-sender! target)
+  "Trash every message from TARGET, an address or a whole domain, block it, and
+refresh the index. Answers how many matched."
+  (let ((n (nm--count (string-append "from:" target))))
+    (nm--run (string-append "tag +trash +blocked -inbox -unread -- " (nm--quote (string-append "from:" target))))
+    (nm--block-sender! target)
     (nm--after-change! *notmuch-search-buffer*)
     n))
 
@@ -1770,8 +1729,21 @@ notmuch-host names another machine, here when it is empty."
              "unsubscribed (found in body, confirmed)")
             (else (string-append "found a possible link in the body but couldn't confirm — check by hand: " body-link))))))))
 
+(define (nm--purge-phish? thread-id)
+  "#t when this thread is a fake. A phisher's unsubscribe link is bait: it tells
+them the address is live, so a purge never follows one."
+  (> (nm--count (string-append "thread:" thread-id " AND \\(tag:phishing OR tag:spam\\)")) 0))
+
+(define (nm--purge-run! thread-id email)
+  "Unsubscribe, trash every message from EMAIL, and block that one address."
+  (let* ((verdict (if (nm--purge-phish? thread-id)
+                      "no unsubscribe: the sender is a fake"
+                      (nm--purge-unsubscribe! (nm--newest-msg-id thread-id))))
+         (n (nm--trash-sender! email)))
+    (message (string-append (nm--trashed-label n email) "; " verdict))))
+
 (define-command "notmuch-purge-sender"
-  "Trash every message from this thread's sender and try to unsubscribe: RFC 8058 one-click POST when offered, else a plain GET, else a best-effort scan of the body (works on a *notmuch* list row or an open notmuch-show buffer)"
+  "Purge this thread's sender: unsubscribe, trash every message from them, and block that one address out of the inbox for good. The block is the address alone, never the domain, because one address at a shared or hijacked domain says nothing about the rest of it (works on a *notmuch* list row or an open notmuch-show buffer)"
   (lambda ()
     (let ((thread-id (nm--thread-here)))
       (if (not thread-id)
@@ -1779,10 +1751,8 @@ notmuch-host names another machine, here when it is empty."
           (let ((email (nm--thread-sender thread-id)))
             (if (equal? email "")
                 (message "Could not extract the sender")
-                (let* ((msg-id (nm--newest-msg-id thread-id))
-                       (verdict (nm--purge-unsubscribe! msg-id))
-                       (n (nm--trash-sender! email)))
-                  (message (string-append (nm--trashed-label n email) "; " verdict)))))))))
+                (nm--purge-run! thread-id email)))))))
+
 (catalog-meta! 'command "notmuch-purge-sender" 'domain 'mail 'effects '(destroy external))
 
 (define-command "notmuch-unsubscribe"
