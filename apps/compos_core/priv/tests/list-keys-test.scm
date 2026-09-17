@@ -5,7 +5,7 @@
 ;;; and, three entries later, "quit-window" again.
 
 (domain! 'testing)
-(effects! '(read))
+(effects! '(read write))
 
 (deftest 'no-list-mode-binds-one-key-twice
   "every 'keys table names each key once"

@@ -1077,6 +1077,9 @@
 ;;; The mark goes on the first line and the lines under it start where it
 ;;; does. A two-line row has no single label row, so the head shows none.
 ;;;   'footer   (buf) -> ((KEY WORD) ...)   the key bar under the rows
+;;;   'keymap-component #f               opt the key bar back into header lines;
+;;;                                       it renders through the shared ui/keymap
+;;;                                       component by default
 ;;;   'preview  (buf entry)                 what moving the highlight shows
 ;;;   'compact  #t                          merge title and meta; omit rules
 ;;;   'layouts  ordered profile plists. A profile can override view options.
@@ -1361,11 +1364,26 @@
       '()
       (list (list-label-line buf cols))))
 
-;; the key bar, as header lines: the mode's 'footer keys, under the counts
+;; The key bar renders through the shared ui/keymap component by default:
+;; it wraps at the window width instead of dropping hints off the end of
+;; a header line. A mode that wants the header-line bar sets
+;; 'keymap-component #f.
+(define (list-keymap-component? buf)
+  (let* ((opts (list-mode-opts (list-mode-of buf)))
+         (profile (list-active-layout buf)))
+    (let ((v (cond ((list-plist-key? profile 'keymap-component)
+                    (plist-get profile 'keymap-component))
+                   ((list-plist-key? opts 'keymap-component)
+                    (plist-get opts 'keymap-component))
+                   (else #t))))
+      (not (equal? v #f)))))
+
+;; the key bar as header lines, when a mode opts out of the shared
+;; ui/keymap component with 'keymap-component #f
 (define (list-key-lines buf)
   (let* ((f (list-opt buf 'footer))
          (keys (if f (f buf) '())))
-    (cond ((or (null? keys) (list-opt buf 'keymap-component)) '())
+    (cond ((or (null? keys) (list-keymap-component? buf)) '())
           ((list-opt buf 'wrap-key-hints)
            (let ((width (list-view-width buf)))
              (let loop ((rest keys) (line '()) (out '()))
@@ -2394,7 +2412,7 @@
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
           (list-composml! buf shown head)
           (list-composml-text! buf shown prepared)
-          (when (list-opt buf 'keymap-component)
+          (when (list-keymap-component? buf)
             (desktop-skip! buf 'footer-line-blocks)
             (let* ((footer (list-opt buf 'footer))
                    (blocks (and footer (list (component 'ui/keymap (list 'keys (footer buf)))))))
