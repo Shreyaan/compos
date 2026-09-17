@@ -686,6 +686,18 @@ priv/packages entry leaves load-path. Then: the last six moved (19ba0452);
 fourteen apps left the stock boot (8024a266); one primitive registration
 with the doc in the key (item 7.6, the fix for CQ's double registration).
 
+**Also done 2026-09-19:** docs sweep (cd4575aa), eight shared builtins +
+buffer-set-text! (a1c82b9c), eight more wrapper tests (next commit), one
+JSON-RPC framer for ACP, Codex and MCP stdio.
+
+**Red before today, measured by running the pre-change file** (for the
+KNOWN-FAILURES rewrite): agent_test 36 of 52; ChatResetTest, SwitchTest,
+PresetTest 17; MovieTest, ChosenPaneTest, SpotifyTest 1 each; TransientTest
+2; WriteFileTest "C-n then RET"; ProjectSearchTest 4; LLMToolsTest 3;
+ChromeTest "returning from a page"; LoadTest was red on calendar. Scheme:
+the keymap ladder tests, the block and theme tests, a-page-opens when feeds
+runs first, and the four apropos tests.
+
 **Next three steps, in order.**
 
 1. `load-path`: the defvar in editor.scm, `load` searching it in Scheme over
