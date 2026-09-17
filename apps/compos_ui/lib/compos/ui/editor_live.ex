@@ -569,6 +569,9 @@ defmodule Compos.Ui.EditorLive do
   # the window tree (this process's own work)
   defp refresh(socket) do
     t0 = System.monotonic_time(:millisecond)
+    # the boot id rides every render: a hot-swapped page module bumps it,
+    # and the client's boot check reloads the page when it moves
+    socket = assign(socket, boot_id: :persistent_term.get(:compos_boot_id, "dev"))
     {socket, state_ms} = refresh_state(socket)
     total = System.monotonic_time(:millisecond) - t0
 

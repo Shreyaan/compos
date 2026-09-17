@@ -52,7 +52,10 @@ if config_env() == :dev do
   # compiler is named here so a test can name a stub.
   config :compos_core,
     hotload: true,
-    hotload_recompile: {Compos.Core.Hotload.Compile, :compile, []}
+    hotload_recompile: {Compos.Core.Hotload.Compile, :compile, []},
+    # the modules that hold a page's stylesheet and script: a swap of one
+    # bumps the boot id, so every open page reloads itself
+    hotload_page_modules: [Compos.Ui.Layouts, Compos.Ui.MobileLayouts]
 
   # code_reloader runs `mix compile` inside this VM on a browser request, and
   # purges the modules an outside compile changed before it starts. Both steps

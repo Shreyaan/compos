@@ -244,6 +244,7 @@ defmodule Compos.Core.Hotload do
             # captured from. Rebind them before anything evaluates, or the
             # next keystroke raises "function #Function<...> is invalid".
             refresh_primitives()
+            reboot_pages(reloaded)
 
             case length(reloaded) + length(removed) do
               0 -> "recompiled, no module changed"
@@ -263,6 +264,30 @@ defmodule Compos.Core.Hotload do
     end
   rescue
     e -> "compile failed: #{Exception.message(e)}"
+  end
+
+  @doc """
+  A page module holds the stylesheet and the client script (the root
+  layout). A swap of one leaves every open page with the old CSS under the
+  new HTML, so the swap bumps the boot id and tells every client: the
+  page's own boot check sees a new id and reloads itself. Which modules
+  are pages is configuration (`:hotload_page_modules`), because this app
+  does not know the UI's names. Answers whether it rebooted.
+  """
+  def reboot_pages(reloaded) do
+    pages = Application.get_env(:compos_core, :hotload_page_modules, [])
+
+    if Enum.any?(reloaded, &(&1 in pages)) do
+      :persistent_term.put(:compos_boot_id, Integer.to_string(System.system_time(:millisecond)))
+      Compos.Core.Events.broadcast_editor(:reboot)
+      true
+    else
+      false
+    end
+  rescue
+    e ->
+      Logger.error("Compos.Core.Hotload: page reboot failed: #{Exception.message(e)}")
+      false
   end
 
   defp refresh_primitives do

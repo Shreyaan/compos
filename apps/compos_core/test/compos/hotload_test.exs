@@ -169,6 +169,25 @@ defmodule Compos.HotloadTest do
       assert report =~ "2 forms"
     end
 
+    # The root layout holds the page's stylesheet. A swap of it left every
+    # open page with the old CSS under the new HTML until someone pressed
+    # reload by hand. The swap now bumps the boot id and tells the clients;
+    # each page's boot check does the rest.
+    test "a swapped page module bumps the boot id and tells every client" do
+      before = :persistent_term.get(:compos_boot_id, "dev")
+      Application.put_env(:compos_core, :hotload_page_modules, [Compos.HotloadTest.Recompiler])
+      on_exit(fn -> Application.delete_env(:compos_core, :hotload_page_modules) end)
+      Compos.Core.Events.subscribe_editor()
+
+      refute Hotload.reboot_pages([Compos.Core.Buffer]), "a module that is not a page reboots nothing"
+      assert :persistent_term.get(:compos_boot_id, "dev") == before
+
+      Process.sleep(2)
+      assert Hotload.reboot_pages([Compos.Core.Buffer, Compos.HotloadTest.Recompiler])
+      assert :persistent_term.get(:compos_boot_id, "dev") != before
+      assert_receive {:editor_change, :reboot}
+    end
+
     test "a compile failure is reported, and the daemon stays up" do
       Application.put_env(
         :compos_core,
