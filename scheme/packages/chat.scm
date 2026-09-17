@@ -1155,17 +1155,15 @@
 (define *chat-summary-debounce-ms* 10000)
 (define *chat-summary-tail-lines* 60)
 
-(defcustom 'chat-summary-max-bytes 180
-  "How long a chat's running summary may be. A longer answer is cut at a word. One sentence of a turn summary usually fits inside it."
-  'group 'chat 'type 'integer)
+;; How long a chat's running summary may be. A longer answer is cut at a word. One sentence of a turn summary usually fits inside it.
+(define chat-summary-max-bytes 180)
 
 (defcustom 'chat-title-max-bytes 56
   "How long a chat's title may be. The name is a label, not a sentence."
   'group 'chat 'type 'integer)
 
-(defcustom 'chat-title-max-words 6
-  "How many words a chat's title may hold. The card writer answers with a factual title of three to eight words; a chat shows a label."
-  'group 'chat 'type 'integer)
+;; How many words a chat's title may hold. The card writer answers with a factual title of three to eight words; a chat shows a label.
+(define chat-title-max-words 6)
 
 ;; one line, because the .chat header is one line
 ;; N bytes at most, cut at the last word inside the budget so the line
@@ -1268,9 +1266,8 @@
 ;;; is about the work that just happened and not about the chat, which
 ;;; the title already names. One line per turn, kept in the summary log.
 
-(defcustom 'chat-summary-turn-bytes 1400
-  "How much of a finished turn the card writer reads when it says what the agent did."
-  'group 'chat 'type 'integer)
+;; How much of a finished turn the card writer reads when it says what the agent did.
+(define chat-summary-turn-bytes 1400)
 
 (define (chat-summary--first-ask buf)
   ;; the record is newest-first, so the first ask is at the far end

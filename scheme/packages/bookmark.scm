@@ -19,9 +19,8 @@
   "Save after this many changes. Use #f to save only with bookmark-save."
   'group 'bookmark 'type 'number)
 
-(defcustom 'bookmark-search-size 24
-  "The number of context bytes saved before and after a bookmark."
-  'group 'bookmark 'type 'number)
+;; The number of context bytes saved before and after a bookmark.
+(define bookmark-search-size 24)
 
 (defcustom 'bookmark-sort-order "name"
   "The list order: name, modified, or created."

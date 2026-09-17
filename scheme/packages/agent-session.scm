@@ -190,9 +190,8 @@
   "Run a chat input that opens with a paren as Scheme instead of sending it to the agent. Set #f to send every input."
   'group 'chat 'type 'boolean)
 
-(defcustom 'chat-scheme-width 84
-  "How wide a printed value may be before it breaks across lines."
-  'group 'chat 'type 'number)
+;; How wide a printed value may be before it breaks across lines.
+(define chat-scheme-width 84)
 
 (define (chat-scheme-input? text)
   (and chat-scheme-input (string-prefix? "(" text)))

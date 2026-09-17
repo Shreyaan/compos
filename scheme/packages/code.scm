@@ -20,9 +20,8 @@
 
 (defgroup 'code-browse "Structural browsing of source files.")
 
-(defcustom 'code-browse-fold-lines 80
-  "Files with more lines than this fold their definitions on entry."
-  'group 'code-browse 'type 'number)
+;; Files with more lines than this fold their definitions on entry.
+(define code-browse-fold-lines 80)
 
 ;;; --- the node shape -----------------------------------------------------------
 

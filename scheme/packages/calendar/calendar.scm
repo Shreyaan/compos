@@ -20,17 +20,17 @@
   "~/Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb"
   "Fallback read when no agent is installed. Recurrence is not expanded here.")
 
-(defcustom 'calendar-window-back 365
-  "Days before today that the text file keeps.")
+;; Days before today that the text file keeps.
+(define calendar-window-back 365)
 
-(defcustom 'calendar-window-forward 730
-  "Days after today that the text file keeps.")
+;; Days after today that the text file keeps.
+(define calendar-window-forward 730)
 
 (defcustom 'calendar-week-start 1
   "The first column of the week grid. 0 is Sunday and 1 is Monday.")
 
-(defcustom 'calendar-agent-timeout 20
-  "Seconds to wait for the Aqua agent to answer one request.")
+;; Seconds to wait for the Aqua agent to answer one request.
+(define calendar-agent-timeout 20)
 
 (defcustom 'calendar-agent-directory
   "/Users/svs/src/compos/apps/compos_core/priv/packages/calendar/agent"

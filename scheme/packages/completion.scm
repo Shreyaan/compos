@@ -24,9 +24,8 @@
   "Offer completions while you type, in the modes that ask for it."
   'group 'completion 'type 'boolean)
 
-(defcustom 'completion-auto-delay 150
-  "Milliseconds of quiet typing before completion asks."
-  'group 'completion 'type 'number)
+;; Milliseconds of quiet typing before completion asks.
+(define completion-auto-delay 150)
 
 (defcustom 'completion-auto-prefix 2
   "The fewest characters before point that make completion ask."

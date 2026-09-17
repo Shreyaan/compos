@@ -30,9 +30,8 @@
   "The search the app opens with the first time, before you have run one."
   'group 'amazon)
 
-(defcustom 'amazon-fetch-tries 25
-  "How many times the app looks for the search page before giving up. Each look is 400ms."
-  'group 'amazon 'type 'number)
+;; How many times the app looks for the search page before giving up. Each look is 400ms.
+(define amazon-fetch-tries 25)
 
 (define *amazon-buffer* "*amazon*")
 (define *amazon-log* "*amazon-log*")

@@ -1042,72 +1042,37 @@
   ;; one list per group, as ibuffer is one per group: the list opens in
   ;; the group you called it from and stays there.
   ;;
-  ;; The list covers the frame and lays out two panes: itself in the
-  ;; larger one and the selected chat in the smaller. The preview is a
-  ;; real window over a real buffer, not a card floated on the rows — you
-  ;; read a chat in it the way you read a chat anywhere.
+  ;; The list takes one window and previews with a floating card, the
+  ;; same way ibuffer does — one preview surface for both listings. It
+  ;; used to cover the frame and split a 2/3 + 1/3 pane for the chat
+  ;; instead; a pane of its own meant there was never a neighbour for a
+  ;; card to lie over, and covering the frame put a chat from one group
+  ;; and a buffer from another side by side in one viewport.
   ;;
-  ;; Covering the frame is only fair if the frame comes back, so the list
-  ;; is a transient frame mode (layouts.scm): it records the arrangement
-  ;; it found and gives that back whole when it leaves. Re-arming rather
-  ;; than entering matters because the list can stop covering the frame
-  ;; without leaving through q — a listing takes its window, a layout is
-  ;; applied — and the tree it promised to restore is then a tree of
-  ;; windows that no longer exist.
+  ;; Taking a window is still only fair if the frame comes back, so the
+  ;; list is a transient frame mode (layouts.scm): it records the
+  ;; arrangement it found and gives that back whole when it leaves.
+  ;; Re-arming rather than entering matters because the list can stop
+  ;; standing without leaving through q — a listing takes its window, a
+  ;; layout is applied — and the tree it promised to restore is then a
+  ;; tree of windows that no longer exist.
   (let ((buf (ibuffer-group-view! "chat-list-mode" *chat-list-buffer*)))
     (unless (transient-frame-standing? 'chat-list) (chat-list-release-hold!))
     (transient-frame-rearm! 'chat-list (frame-local 'chat-list-view))
     (ibuffer-view! buf 'sort 'recent 'grouping 'group)
     (set-frame-local! 'chat-list-view buf)
-    (buffer-set-local! buf 'window-preference-cover #t)
-    (let ((preview
-           (with-layout-suppressed
-             (lambda ()
-               (switch-to-buffer-here! buf)
-               (delete-other-windows!)
-               (let ((home (active-window)))
-                 (split-window! 'h chat-list-pane-share)
-                 (let ((pane (other-window-id home)))
-                   (select-window! home)
-                   pane))))))
-      (set-frame-local! 'chat-list-preview-window preview)
-      ;; the group is settled only now: a frame with no group yet gets one
-      ;; as the windows change, and a list left ownerless is a list no
-      ;; group ever reuses. It belongs to the group you opened it in
-      (when (boundp 'group-current-recalculate!) (group-current-recalculate!))
-      (let ((group (frame-group)))
-        (when (and group (not (equal? (buffer-group buf) group)))
-          (buffer-move-to-group! buf group))
-        ;; the pane shows a chat that usually lives in some other group,
-        ;; and the frame derives its current group from what it displays
-        ;; — so previewing pulled the frame into the previewed chat's
-        ;; group. One view per group then resolved to a different clone
-        ;; than the one on screen: the pane stopped following the cursor
-        ;; and a second list appeared. The list owns the frame while it
-        ;; covers it, so it holds the group still until it leaves
-        (unless (frame-local 'chat-list-pinned)
-          (set-frame-local! 'chat-list-prior-pin (frame-local 'pinned-group))
-          (set-frame-local! 'chat-list-pinned #t))
-        ;; a frame standing in no group has nothing to pin, so the held
-        ;; group — #f and all — is put back by hand after every preview
-        (set-frame-local! 'chat-list-held-group group)
-        (set-frame-local! 'pinned-group group))
-      preview)))
-
-(define (chat-list-preview-window &optional owner)
-  (let ((view (or owner (chat-list-buffer)))
-        (win (frame-local 'chat-list-preview-window)))
-    (and win (window-exists? win)
-         ;; the pane belongs to the window form. The minibuffer form runs
-         ;; the same mode over its own view buffer and has no pane beside
-         ;; it, so it must not be handed this one
-         (equal? view (frame-local 'chat-list-view))
-         (not (equal? win (window-showing view)))
-         win)))
-
-(defcustom 'chat-list-pane-share 0.667
-  "The chat list's share of the frame; the rest previews the selected chat."
-  'group 'chat 'type 'number)
+    ;; arriving is an explicit request to look, so a card dismissed on
+    ;; this row last time does not silence the preview on this one
+    (buffer-set-local! buf 'listing-peek-dismissed-row #f)
+    (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))
+    ;; the group is settled only now: a frame with no group yet gets one
+    ;; as the windows change, and a list left ownerless is a list no
+    ;; group ever reuses. It belongs to the group you opened it in
+    (when (boundp 'group-current-recalculate!) (group-current-recalculate!))
+    (let ((group (frame-group)))
+      (when (and group (not (equal? (buffer-group buf) group)))
+        (buffer-move-to-group! buf group)))
+    buf))
 
 (defcustom 'chat-list-preview-delay-ms 150
   "Milliseconds of idle time before the chat list previews the selected row."
@@ -1171,40 +1136,13 @@
 
 ;; Compatibility callbacks cannot resurrect previews after a live reload.
 (define (chat-list--preview-now! request) #f)
-(define (chat-list-hold-group!)
-  ;; the list covers the frame, so nothing it displays beside itself may
-  ;; decide which group the frame stands in. The frame derives its group
-  ;; from what it shows, and the pane shows a chat that usually lives
-  ;; somewhere else: previewing walked the frame from group to group, and
-  ;; one view per group then answered with a different list than the one
-  ;; on screen. A pin holds a real group; a frame standing in no group
-  ;; has none to pin, so the held answer is put back by hand.
-  (when (frame-local 'chat-list-pinned)
-    (let ((held (frame-local 'chat-list-held-group)))
-      (unless (equal? (frame-local 'current-group) held)
-        (set-frame-local! 'current-group held)
-        (when (boundp 'frame-group-label-refresh!) (frame-group-label-refresh!))))))
-
 (define (chat-list-preview-row! owner row)
-  ;; the row at point goes into the other window, as the real chat
-  ;; buffer. A heading is not a chat and an archived row is a path, not
-  ;; a buffer: both leave that window showing what it last held rather
-  ;; than blanking it.
-  ;;
-  ;; The window form has a pane of its own. The minibuffer form has the
-  ;; window it was invoked from, and previews there the way C-x b does —
-  ;; this override used to send it to the floating card instead, so the
-  ;; chat prompt read an isolated text copy in a popup rather than the
-  ;; chat itself. ibuffer-preview! owns that path; only a form with
-  ;; neither a pane nor a home window falls back to a card.
-  (let ((win (chat-list-preview-window owner)))
-    (cond ((not win) (ibuffer-preview! owner row))
-          ((and (string? row) (buffer-known? row)
-                (not (equal? (window-buffer win) row)))
-           (with-layout-suppressed
-             (lambda () (display-buffer-in-window! win row)))
-           (chat-list-hold-group!))
-          (else #f))))
+  ;; one preview surface for both listings: the row at point floats the
+  ;; same read-only card ibuffer floats, laid over a neighbouring window
+  ;; rather than a pane of the list's own. A heading is not a chat and an
+  ;; archived row is a path, not a buffer: ibuffer-preview! leaves the
+  ;; card showing what it last held rather than blanking it.
+  (ibuffer-preview! owner row))
 
 (define (chat-list-preview!)
   (let ((owner (chat-list-buffer)))
@@ -1345,9 +1283,12 @@
     (unless (equal? input "") (minibuffer-change! input))))
 
 (define (chat-list-open! &optional standing)
-  (let ((preview (chat-list-arrive!)))
+  (let ((view (chat-list-arrive!)))
     (buffer-set-local! (chat-list-buffer) 'ibuffer-scope 'chat-list)
-    (buffer-set-local! (chat-list-buffer) 'ibuffer-prompt-home-window preview)
+    ;; the window form floats a card like ibuffer. A home window is what
+    ;; the minibuffer form previews into instead of a card, and setting
+    ;; it here is what silenced this list's preview altogether
+    (buffer-set-local! (chat-list-buffer) 'ibuffer-prompt-home-window #f)
     (list-clear-query! (chat-list-buffer))
     (with-current-buffer (chat-list-buffer)
       (lambda () (with-list-mode-skip-render (lambda () (set-mode! "chat-list-mode")))))
