@@ -60,12 +60,12 @@ defmodule Compos.LoadTest do
       |> then(&Regex.scan(load_pattern, &1, capture: :all_but_first))
       |> Enum.map(&hd/1)
 
+    # agent-fleet is the chats table, loaded by init.scm after ibuffer
     assert agent_modules == [
              "agent-permissions.scm",
              "agent-connectors.scm",
              "agent-transcript.scm",
-             "agent-session.scm",
-             "agent-fleet.scm"
+             "agent-session.scm"
            ]
 
     assert {:ok, entry} =
