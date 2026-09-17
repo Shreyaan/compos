@@ -21,11 +21,10 @@ defmodule Compos.Core.Session do
 
   require Logger
 
-  alias Compos.Core.{Buffer, Editor, Frame, Lane, SchemeTask}
+  alias Compos.Core.{Buffer, Editor, Frame, Hotload, Lane, SchemeTask}
   alias Compos.Scheme
   import Compos.Core.Prims
   alias Compos.Scheme.Prim
-  alias Compos.Scheme.Reader
 
   @messages "*Messages*"
   @messages_table :compos_messages
@@ -83,7 +82,12 @@ defmodule Compos.Core.Session do
 
   # user config, in load order: saved customizations load last so they win
   @user_config_files ~w(ai-config.scm init.scm custom.scm)
-  @reload_context ~w(origin! package! namespace! category! domain! effects!)
+
+  @doc "The bootstrap files, in load order."
+  def bootstrap_files, do: @bootstrap_files
+
+  @doc "The user config files, in load order."
+  def user_config_files, do: @user_config_files
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -469,7 +473,7 @@ defmodule Compos.Core.Session do
     {:ok,
      %{
        last_live: Scheme.frame_count(interp),
-       reload_manifest: reload_manifest()
+       reload_manifest: Hotload.Scheme.manifest()
      }}
   end
 
@@ -693,10 +697,10 @@ defmodule Compos.Core.Session do
   def handle_call({:reload_files, paths}, _from, state) do
     # A dev code reload keeps the existing GenServer state. Seed the new
     # manifest lazily so adding this mechanism does not require a restart.
-    manifest = Map.get(state, :reload_manifest) || reload_manifest()
+    manifest = Map.get(state, :reload_manifest) || Hotload.Scheme.manifest()
 
-    with {:ok, files} <- reload_changes(paths, manifest),
-         {:ok, _, _interp} <- eval_reload_forms(files) do
+    with {:ok, files} <- Hotload.Scheme.changes(paths, manifest),
+         {:ok, _, _interp} <- Hotload.Scheme.eval(files) do
       next_manifest =
         Enum.reduce(files, manifest, fn {path, fingerprints, _forms}, acc ->
           Map.put(acc, path, fingerprints)
@@ -791,7 +795,7 @@ defmodule Compos.Core.Session do
           path = Application.app_dir(:compos_core, "priv/#{file}")
           # one file is one package here too: dired.scm carried transient's
           # stamp before this, so every dired command was filed under it
-          interp = stamp_load_unit(interp, path, :bundled)
+          interp = Hotload.Scheme.stamp_load_unit(interp, path, :bundled)
 
           case Scheme.eval_string(interp, File.read!(path)) do
             {:ok, _, interp} ->
@@ -811,171 +815,6 @@ defmodule Compos.Core.Session do
     # only after that boot manifest has finished and explicitly loads any user
     # packages it wants from ~/.compos/packages.
     interp |> load_user_init() |> stamp_origin_user()
-  end
-
-  # The stamp is its own eval, so a package's own line numbers stay its own.
-  defp stamp_load_unit(interp, path, origin) do
-    code = "(origin! '#{origin}) (package! '#{Path.basename(path, ".scm")})"
-
-    case Scheme.eval_string(interp, code) do
-      {:ok, _, interp2} -> interp2
-      {:error, _} -> interp
-    end
-  end
-
-  defp reload_changes(paths, manifest) do
-    Enum.reduce_while(paths, {:ok, []}, fn path, {:ok, acc} ->
-      expanded = canonical(path)
-
-      try do
-        with {:ok, src} <- File.read(expanded) do
-          forms = Reader.read_all(src)
-          fingerprints = form_fingerprints(forms)
-
-          changed =
-            case Map.fetch(manifest, expanded) do
-              {:ok, previous} ->
-                package_changed? = fingerprints != previous
-
-                Enum.filter(forms, fn form ->
-                  reload_context?(form) or not MapSet.member?(previous, form_fingerprint(form)) or
-                    (package_changed? and reload_registration?(form))
-                end)
-
-              :error ->
-                forms
-            end
-
-          {:cont, {:ok, [{expanded, fingerprints, changed} | acc]}}
-        else
-          {:error, reason} -> {:halt, {:error, "#{expanded}: #{inspect(reason)}"}}
-        end
-      rescue
-        error -> {:halt, {:error, "#{expanded}: #{Exception.message(error)}"}}
-      end
-    end)
-    |> case do
-      {:ok, files} -> {:ok, Enum.reverse(files)}
-      error -> error
-    end
-  end
-
-  # A reload is bracketed by two Scheme hooks. `reload-begin!` opens the
-  # record; every `define-mode` and `register-minor-mode!` the reload
-  # evaluates names itself in it. `reload-finish!` re-runs mode setup on
-  # the buffers that wear one of those modes, so a mode change reaches the
-  # buffers already open in it. Without that, a reloaded mode holds the old
-  # keys and overlays until a restart, which is the reason a restart was
-  # ever needed for a mode change.
-  #
-  # The hooks run inside the same `Scheme.exec` as the forms, so they see
-  # exactly the definitions this reload made. Both are guarded by `boundp`:
-  # a reload of `editor.scm` itself starts before either name exists.
-  @reload_begin "(if (boundp (quote reload-begin!)) (reload-begin!))"
-  @reload_finish "(if (boundp (quote reload-finish!)) (reload-finish!))"
-
-  defp eval_reload_forms(files) do
-    Scheme.exec(interp(), fn interp ->
-      interp = eval_hook(interp, @reload_begin)
-
-      case reduce_reload_files(files, interp) do
-        {:ok, value, interp} ->
-          {:ok, value, eval_hook(interp, @reload_finish)}
-
-        # The finish hook runs after a failed reload too: the forms that did
-        # evaluate can already have redefined a mode, and the record must
-        # not carry those names into the next reload.
-        {:error, message, interp} ->
-          eval_hook(interp, @reload_finish)
-          {:error, message}
-      end
-    end)
-  end
-
-  defp reduce_reload_files(files, interp) do
-    Enum.reduce_while(files, {:ok, nil, interp}, fn {path, _fingerprints, forms},
-                                                    {:ok, _, current} ->
-      current = stamp_load_unit(current, path, reload_origin(path))
-
-      case Scheme.eval_forms(current, forms) do
-        {:ok, value, next} -> {:cont, {:ok, value, next}}
-        {:error, message} -> {:halt, {:error, message, current}}
-      end
-    end)
-  end
-
-  defp eval_hook(interp, src) do
-    case Scheme.eval_string(interp, src) do
-      {:ok, _, interp2} ->
-        interp2
-
-      {:error, message} ->
-        Logger.error("reload hook failed: #{message}")
-        interp
-    end
-  end
-
-  defp reload_context?([{:sym, name} | _]), do: name in @reload_context
-  defp reload_context?(_), do: false
-
-  # A list registration captures its options by value. Updating the options
-  # definition alone leaves the live mode on its old callbacks/settings even
-  # though the registration's own source is unchanged. Replay registrations
-  # in source order when their package changes, without resetting other state.
-  defp reload_registration?([{:sym, "define-list-mode!"} | _]), do: true
-  defp reload_registration?(_), do: false
-
-  defp form_fingerprints(forms), do: MapSet.new(forms, &form_fingerprint/1)
-  defp form_fingerprint(form), do: :crypto.hash(:sha256, :erlang.term_to_binary(form))
-
-  defp reload_origin(path) do
-    user_packages = Path.join(Compos.Core.config_dir(), "packages") |> canonical()
-    if String.starts_with?(canonical(path), user_packages <> "/"), do: :user, else: :bundled
-  end
-
-  defp reload_manifest do
-    reload_source_paths()
-    |> Enum.reduce(%{}, fn path, acc ->
-      case File.read(path) do
-        {:ok, src} ->
-          try do
-            Map.put(acc, Path.expand(path), form_fingerprints(Reader.read_all(src)))
-          rescue
-            _ -> acc
-          end
-
-        _ ->
-          acc
-      end
-    end)
-  end
-
-  # Every file the session evaluates, not only the bundled ones. A file the
-  # manifest does not name re-evaluates ALL of its forms on the first save,
-  # because reload_changes cannot tell an edited form from an untouched one
-  # without a baseline. The config home loads at boot like priv does, so it
-  # needs the same baseline.
-  defp reload_source_paths do
-    priv = canonical(Application.app_dir(:compos_core, "priv"))
-
-    Enum.map(@bootstrap_files, &Path.join(priv, &1)) ++
-      project_source_paths() ++ config_source_paths()
-  end
-
-  # The packages at the project root, `scheme/`, the second entry of the
-  # Scheme `load-path`. A release has no project root.
-  defp project_source_paths do
-    case Compos.Core.project_dir() do
-      nil -> []
-      root -> Path.wildcard(Path.join([root, "scheme", "**/*.scm"]))
-    end
-  end
-
-  defp config_source_paths do
-    home = canonical(Compos.Core.config_dir())
-
-    Enum.map(@user_config_files, &Path.join(home, &1)) ++
-      Path.wildcard(Path.join([home, "packages", "**/*.scm"]))
   end
 
   @doc """
