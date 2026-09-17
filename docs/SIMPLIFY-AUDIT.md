@@ -675,7 +675,9 @@ task-alive?, unbind-global!) stay. One test support module (b59e22e6):
 The package move (0e96750d): 92 packages in scheme/packages; agenda,
 agent-transcript, annotate, appearance, diff-mode, paredit wait in
 priv/packages for another session's commit, then one rename and the
-priv/packages entry leaves load-path.
+priv/packages entry leaves load-path. Then: the last six moved (19ba0452);
+fourteen apps left the stock boot (8024a266); one primitive registration
+with the doc in the key (item 7.6, the fix for CQ's double registration).
 
 **Next three steps, in order.**
 
