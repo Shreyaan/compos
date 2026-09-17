@@ -178,6 +178,9 @@
     (list 'ts-escape 'fg "#7a5a1a")
     (list 'default 'bg "#e6e0d2" 'fg "#1b1a17")
     (list 'window 'bg "#fdfcf8")
+    (list 'paper 'bg "#efeadf")
+    (list 'body 'fg "#3f3b33")
+    (list 'border-soft 'bg "#e2dbc9")
     (list 'window-inactive 'bg "#f4f0e6")
     (list 'modeline 'bg "#eae5da" 'fg "#57534a")
     (list 'modeline-active 'bg "#e7e9f1" 'fg "#1b1a17")
@@ -237,9 +240,9 @@
     (list 'diff-add-word 'bg "rgba(61, 107, 79, 0.30)")
     (list 'diff-del-word 'bg "rgba(160, 48, 32, 0.26)")
     (list 'code-scope 'bg "rgba(38, 53, 107, 0.07)")
-    (list 'chrome 'gap "6px" 'radius "5px"
-          'border "1px solid #d5cdb9"
-          'shadow "0 2px 10px rgba(27, 26, 23, 0.07)")))
+    (list 'chrome 'gap "5px" 'radius "0"
+          'border "1px solid #cbc4b1"
+          'shadow "0 14px 40px rgba(27, 26, 23, 0.13)")))
 
 (define-theme "paper-night"          ; the design's warm dark
   (list
@@ -258,10 +261,15 @@
     (list 'ts-variable 'fg "#d8d0c0")
     (list 'ts-property 'fg "#c2b8a3")
     (list 'ts-escape 'fg "#d5ac66")
-    (list 'default 'bg "#100f0c" 'fg "#efe9dc")
-    (list 'window 'bg "#201d18")
-    (list 'window-inactive 'bg "#161410")
-    (list 'modeline 'bg "#2c2822" 'fg "#b3aa99")
+    ;; the grounds are the design's own: canvas, paper, paper-soft (a
+    ;; raised popup), paper-dim (a sunken bar), hl (the selected row)
+    (list 'default 'bg "#080807" 'fg "#efe9dc")
+    (list 'window 'bg "#23201a")
+    (list 'paper 'bg "#1c1a15")
+    (list 'body 'fg "#d6cfc0")
+    (list 'border-soft 'bg "#37312a")
+    (list 'window-inactive 'bg "#1a1813")
+    (list 'modeline 'bg "#1c1a15" 'fg "#b3aa99")
     (list 'modeline-active 'bg "#282f4a" 'fg "#efe9dc")
     (list 'cursor 'bg "#9fb0ea")
     (list 'region 'bg "#445281")
@@ -272,10 +280,10 @@
     (list 'diff-block 'fg "#d5ac66" 'style "italic")
     (list 'diff-block-source 'fg "#a79d8c" 'style "italic")
     (list 'dim 'fg "#a79d8c")
-    (list 'select 'bg "#3a4468")
-    (list 'hl-line 'bg "#464034")
+    (list 'select 'bg "#282f4a")
+    (list 'hl-line 'bg "#2a251a")
     (list 'linenum 'fg "#4a443a")
-    (list 'border 'bg "#39342b")
+    (list 'border 'bg "#4a4238")
     (list 'warn 'fg "#d5ac66")
     ;; the list faces: a column label and a rule are fainter than
     ;; `dim`, and a list says good and bad in one word
@@ -317,9 +325,9 @@
     (list 'diff-add-word 'bg "rgba(121, 189, 147, 0.32)")
     (list 'diff-del-word 'bg "rgba(224, 112, 90, 0.30)")
     (list 'code-scope 'bg "rgba(213, 172, 102, 0.10)")
-    (list 'chrome 'gap "6px" 'radius "5px"
-          'border "1px solid #39342b"
-          'shadow "0 2px 14px rgba(0, 0, 0, 0.35)")))
+    (list 'chrome 'gap "5px" 'radius "0"
+          'border "1px solid #4a4238"
+          'shadow "0 14px 40px rgba(0, 0, 0, 0.7)")))
 
 (define-theme "compos-dark"
   (list
@@ -389,7 +397,7 @@
     (list 'diff-add-word 'bg "rgba(158, 206, 106, 0.30)")
     (list 'diff-del-word 'bg "rgba(247, 118, 142, 0.28)")
     (list 'code-scope 'bg "rgba(122, 162, 247, 0.10)")
-    (list 'chrome 'gap "6px" 'radius "5px"
+    (list 'chrome 'gap "5px" 'radius "0"
           'border "1px solid #15161a"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
@@ -460,7 +468,7 @@
     (list 'diff-add-word 'bg "rgba(166, 227, 161, 0.30)")
     (list 'diff-del-word 'bg "rgba(243, 139, 168, 0.28)")
     (list 'code-scope 'bg "rgba(137, 180, 250, 0.10)")
-    (list 'chrome 'gap "6px" 'radius "5px"
+    (list 'chrome 'gap "5px" 'radius "0"
           'border "1px solid #11111b"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
@@ -491,7 +499,7 @@
     (list 'hl-line 'bg "#333854")
     (list 'linenum 'fg "#3b4261")
     (list 'border 'bg "#101014")
-    (list 'chrome 'gap "6px" 'radius "5px"
+    (list 'chrome 'gap "5px" 'radius "0"
           'border "1px solid #101014"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
@@ -566,6 +574,16 @@
 (defface! 'fixed-pitch 'family "var(--font-mono)")
 (defface! 'variable-pitch 'family "var(--font-sans)")
 
+;; The three grounds and inks the design names that no theme named yet.
+;; `paper` is the ground a pane and the chrome bars share: it sits between
+;; the frame canvas and a raised popup. A theme that does not name it keeps
+;; the window ground, so nothing moves. `body` is prose: one step back from
+;; the strongest ink and one step ahead of a label. `border-soft` is a
+;; separator inside a pane, lighter than the frame's own border.
+(defface! 'paper 'bg "var(--window-bg)")
+(defface! 'body 'fg "color-mix(in srgb, var(--default-fg) 66%, var(--dim-fg))")
+(defface! 'border-soft 'bg "color-mix(in srgb, var(--border-bg) 55%, var(--window-bg))")
+
 ;; the chat transcript reads these by variable; each is a compos face
 (defface! 'agent-meta 'inherit 'dim)
 (defface! 'agent-thought 'inherit 'dim)
@@ -597,8 +615,11 @@
             (theme-apply! before))
           (message (string-append "Kept theme " (or before ""))))))))
 
-;;; boot: reapply the persisted theme choice (written by load-theme)
-(if (file-exists? (theme-file)) (load (theme-file)))
+;;; boot: reapply the persisted theme choice (written by load-theme).
+;;; A home with no choice yet boots into the design's warm dark.
+(if (file-exists? (theme-file))
+    (load (theme-file))
+    (theme-apply! "paper-night"))
 
 (category! 'faces)
 (public! 'load-theme "(load-theme NAME) — switch color theme (persists)")

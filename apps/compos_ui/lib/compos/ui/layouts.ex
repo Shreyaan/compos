@@ -34,7 +34,7 @@ defmodule Compos.Ui.Layouts do
         </script>
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-          href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
           rel="stylesheet"
         />
         <style>
@@ -54,6 +54,112 @@ defmodule Compos.Ui.Layouts do
                          'Hack Nerd Font Mono', ui-monospace, Menlo, monospace);
             --font-sans: var(--sans-family, 'IBM Plex Sans', system-ui, sans-serif);
             --font-serif: var(--serif-family, Spectral, Georgia, serif);
+
+            /* --- the design's token layer --------------------------------
+               The Modern Emacs design names two layers: a base palette and
+               a semantic layer over it. Compos keeps the palette in Scheme,
+               where a theme owns it, so each token here resolves through the
+               face variable that draws the same thing. The literal after the
+               comma is the design's own light value, and it only shows
+               before the faces arrive with the LiveView. Chrome reads these
+               names and never a face variable, so one theme moves every bar
+               at once. */
+            --surface-canvas: var(--default-bg, #e6e0d2);
+            --surface-pane: var(--paper-bg, #efeadf);
+            --surface-chrome: var(--paper-bg, #efeadf);
+            --surface-sunken: var(--window-inactive-bg, #f4f0e6);
+            --surface-raised: var(--window-bg, #fdfcf8);
+            --surface-select: var(--hl-line-bg, #f5f1e6);
+            --surface-mark: color-mix(in srgb, var(--warn-fg, #7a5a1a) 13%, transparent);
+
+            --text-strong: var(--default-fg, #1b1a17);
+            --text-body: var(--body-fg, #3f3b33);
+            --text-soft: var(--modeline-fg, #57534a);
+            --text-faint: var(--dim-fg, #8a857a);
+            --text-dim: var(--faint-fg, #b3ac9c);
+
+            --edge: var(--border-bg, #cbc4b1);
+            --edge-soft: var(--border-soft-bg, #e2dbc9);
+
+            --accent: var(--accent-fg, #26356b);
+            --accent-wash: var(--select-bg, #e7e9f1);
+            --ok: var(--ok-fg, #2e6b45);
+            --warn: var(--warn-fg, #7a5a1a);
+            --alert: var(--alert-fg, #a83a2b);
+            --dot: var(--linenum-fg, #b3ac9c);
+            --diff-add: var(--diff-add-bg, rgba(46, 107, 69, 0.1));
+            --diff-del: var(--diff-del-bg, rgba(168, 58, 43, 0.09));
+
+            /* Compos has no curved lines. Every surface is square: chrome,
+               rows, panes, overlays, cards. The radius names stay so a rule
+               can still be expressive, and they all resolve to 0. */
+            --r-none: 0;
+            --r-xs: 0;
+            --r-sm: 0;
+            --r-md: 0;
+            --r-lg: 0;
+            --r-pane: 0;
+            --border: 1px solid var(--edge);
+            --border-soft: 1px solid var(--edge-soft);
+            --border-dash: 1px dashed var(--edge);
+            --edge-current: 2px solid var(--accent);
+            --edge-none: 2px solid transparent;
+            --hair: 1px;
+
+            /* The chrome scale is deliberately narrow: five steps carry
+               every bar, list and label in the product. */
+            --fs-micro: 10px;
+            --fs-label: 11px;
+            --fs-meta: 11.5px;
+            --fs-small: 12.5px;
+            --fs-code: 13px;
+            --fs-ui: 13.5px;
+            --fs-input: 14.5px;
+            --fs-body: 14.5px;
+            --fs-lead: 15px;
+            --fs-subhead: 19px;
+            --fs-title: 30px;
+
+            --ls-label: 0.16em;
+            --ls-caps: 0.14em;
+            --ls-wide: 0.2em;
+            --ls-code: -0.1px;
+            --ls-title: -0.4px;
+
+            --lh-ui: 1.45;
+            --lh-code: 1.62;
+            --lh-prose: 1.55;
+            --lh-title: 1.15;
+
+            --fw-reg: 400;
+            --fw-med: 500;
+            --fw-semi: 600;
+
+            --s1: 2px;
+            --s2: 3px;
+            --s3: 4px;
+            --s4: 6px;
+            --s5: 8px;
+            --s6: 10px;
+            --s7: 12px;
+            --s8: 14px;
+            --s9: 16px;
+            --s10: 18px;
+            --s11: 22px;
+            --s12: 26px;
+            --s14: 34px;
+            --s16: 44px;
+
+            /* the numbers that make a bar feel like Emacs rather than like
+               a web app: a row is 3px tall in padding, not 12 */
+            --row-py: 3px;
+            --row-px: 16px;
+            --chrome-py: 6px;
+            --chrome-px: 12px;
+            --bar-py: 4px;
+            --mark-col: 20px;
+            --glyph-col: 16px;
+            --num-col: 30px;
           }
           * { margin: 0; padding: 0; box-sizing: border-box; }
           html, body { height: 100%; }
@@ -69,6 +175,14 @@ defmodule Compos.Ui.Layouts do
             /* the frame echo area is configurable: top = -1, bottom = 10 */
             display: flex; flex-direction: column; position: relative;
             overflow: hidden;
+            /* The frame's default face is mono: the design sets the whole
+               editor in IBM Plex Mono and spends Spectral only on prose and
+               titles. Sans stays on body, for the pages outside the editor. */
+            font: var(--fw-reg) var(--fs-ui) / var(--lh-ui) var(--font-mono);
+            color: var(--text-strong);
+            /* the frame is the container every bar measures itself against,
+               so a bar degrades by the frame's width and not the screen's */
+            container-type: inline-size;
             /* the application text scale (appearance.scm ui-scale): the
                'ui face's zoom is a root variable, and the whole page
                grows by it, rendered pages included. A viewport unit does
@@ -112,7 +226,7 @@ defmodule Compos.Ui.Layouts do
             z-index: 40;
           }
           .workspace-bar-kind, .workspace-bar-port {
-            padding: 4px 8px; border-radius: 999px;
+            padding: 4px 8px; border-radius: 0;
             background: var(--alert-fg, #d13b32); color: white;
             font-weight: 750; letter-spacing: 0.08em;
           }
@@ -185,18 +299,26 @@ defmodule Compos.Ui.Layouts do
             min-width: min(520px, 100%);
             height: 62%;
           }
+          /* A pane keeps the same box whether or not it has the point:
+             a 1px border that is transparent at rest and takes the frame's
+             edge when current, so nothing in the layout moves. The current
+             pane also lifts off the canvas; a pane at rest sits flat on the
+             sunken ground. */
           .window {
             display: flex; flex-direction: column;
-            background: var(--window-inactive-bg, #f4f0e6);
-            border: var(--chrome-border, none);
+            background: var(--surface-sunken);
+            border: 1px solid transparent;
             border-radius: var(--chrome-radius, 0);
-            box-shadow: var(--chrome-shadow, inset -1px -1px 0 0 var(--border-bg, #d5cdb9));
+            box-shadow: none;
             overflow: hidden;
             min-width: 0; min-height: 0;
             position: relative;
-
           }
-          .window.active { background: var(--window-bg, #fdfcf8); }
+          .window.active {
+            background: var(--surface-pane);
+            border-color: var(--edge);
+            box-shadow: var(--chrome-shadow, 0 14px 40px rgba(0, 0, 0, 0.28));
+          }
 
           .window.preview-highlight {
             outline: 1px solid color-mix(in srgb, var(--accent-fg, #8f9cdb) 65%, transparent);
@@ -209,7 +331,7 @@ defmodule Compos.Ui.Layouts do
             visibility: hidden; width: auto; height: auto;
             max-width: calc(100vw - 48px); min-width: 0;
             border: 1px solid color-mix(in srgb, var(--accent-fg, #8f9cdb) 65%, transparent);
-            border-radius: 14px;
+            border-radius: 0;
             background: color-mix(in srgb, var(--window-bg, #25231f) 92%, var(--accent-fg, #8f9cdb) 8%);
             box-shadow: 0 28px 70px #0008, 0 9px 22px #0006,
                         0 2px 3px #0005, inset 0 1px 0 #ffffff30;
@@ -224,7 +346,7 @@ defmodule Compos.Ui.Layouts do
             font-weight: 700; color: var(--accent-fg, #aab5ef); }
           .peek-card-title { flex: 1; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .8; }
-          .peek-card-dismiss { border: 1px solid #ffffff30; border-radius: 5px;
+          .peek-card-dismiss { border: 1px solid #ffffff30; border-radius: 0;
             background: transparent; color: inherit; padding: 2px 7px; cursor: pointer; }
           .peek-card-dismiss:hover { background: #ffffff16; }
           .peek-card-body { margin: 0; padding: 18px 20px 34px; flex: 1; min-height: 0;
@@ -255,7 +377,7 @@ defmodule Compos.Ui.Layouts do
             position: absolute; z-index: 18; top: 8px; right: 10px;
             padding: 4px 10px;
             border: 1px solid color-mix(in srgb, var(--alert-fg, #d13b32) 72%, white);
-            border-radius: 999px;
+            border-radius: 0;
             background: var(--alert-fg, #d13b32);
             color: white;
             font: 700 10px/1.2 var(--font-mono);
@@ -364,7 +486,7 @@ defmodule Compos.Ui.Layouts do
             display: inline-flex; align-items: center; gap: .62em;
             margin: .32em .35em .32em 0; padding: .42em .8em;
             border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 42%, transparent);
-            border-radius: 999px;
+            border-radius: 0;
             background: color-mix(in srgb, var(--accent-fg, #26356b) 10%, var(--window-bg, #fdfcf8));
             color: var(--accent-fg, #26356b); box-shadow: 0 2px 10px rgba(0,0,0,.08);
             font-family: var(--font-mono); font-size: .78em; font-weight: 750;
@@ -564,13 +686,21 @@ defmodule Compos.Ui.Layouts do
           .cursor {
             background: var(--cursor-bg, #26356b);
             color: var(--window-bg, #fdfcf8);
-            border-radius: 1px;
+            border-radius: 0;
+          }
+          /* A window at rest hollows its caret: the block becomes a 1px
+             outline, so the frame says which caret is live without moving
+             a pixel or hiding where point is. */
+          .window.inactive .cursor {
+            background: transparent;
+            color: inherit;
+            box-shadow: inset 0 0 0 1px var(--cursor-bg, var(--accent));
           }
           .window.dismissible { outline: 1px solid color-mix(in srgb, var(--cursor-bg, #26356b) 25%, transparent); outline-offset: -1px; }
           /* one key, one corner. The chip floats over the top right of the
              window, so a dismissible buffer spends no row on saying so. */
           .dismiss-action { position: absolute; top: 3px; right: 5px; z-index: 4; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; opacity: .6; }
-          .dismiss-action kbd { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 3px; background: var(--cursor-bg, #26356b); color: var(--cursor-fg, #fff); font: 700 11px var(--font-mono); }
+          .dismiss-action kbd { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 0; background: var(--cursor-bg, #26356b); color: var(--cursor-fg, #fff); font: 700 11px var(--font-mono); }
           .dismiss-action:hover, .dismiss-action:focus-visible { opacity: 1; outline: none; }
           .dismiss-action:focus-visible kbd { outline: 2px solid var(--cursor-bg, #26356b); outline-offset: 2px; }
           .window.active .cursor { }
@@ -598,7 +728,7 @@ defmodule Compos.Ui.Layouts do
 
           .line img.img-embed {
             display: inline-block; max-width: min(100%, 640px); height: auto;
-            border-radius: 4px; margin: 6px 8px 6px 0; vertical-align: middle;
+            border-radius: 0; margin: 6px 8px 6px 0; vertical-align: middle;
           }
           .line-content:has(> img.img-avatar) {
             display: inline-flex; align-items: flex-end;
@@ -669,7 +799,7 @@ defmodule Compos.Ui.Layouts do
           .ag-user {
             display: flex; gap: 12px; margin: 10px 0;
             background: var(--agent-you-bg, rgba(99, 110, 200, 0.10));
-            border-radius: 8px; padding: 8px 12px;
+            border-radius: 0; padding: 8px 12px;
           }
           .ag-user-text {
             min-width: 0; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.92);
@@ -679,7 +809,7 @@ defmodule Compos.Ui.Layouts do
              one screenshot cannot own the whole transcript. */
           .ag-image-img {
             min-width: 0; max-width: 100%; max-height: 320px;
-            object-fit: contain; border-radius: 6px; display: block;
+            object-fit: contain; border-radius: 0; display: block;
           }
           /* The measure belongs to the text, not to the block: five table
              columns do not fit in 62ch. `overflow-wrap: anywhere` made it
@@ -689,7 +819,7 @@ defmodule Compos.Ui.Layouts do
              `break-word` still breaks a long URL, and it leaves the
              minimum width alone. */
           .ag-prose {
-            font-family: var(--font-serif); font-size: var(--ag-base); line-height: 1.6;
+            font-family: var(--chat-family, var(--font-serif)); font-size: var(--ag-base); line-height: 1.6;
             margin: 8px 0; overflow-wrap: break-word;
           }
           .ag-prose > * { max-width: 62ch; }
@@ -697,7 +827,7 @@ defmodule Compos.Ui.Layouts do
           .ag-prose .code-block pre { margin: 6px 0; }
           .ag-prose code, .ag-prose pre {
             font-family: var(--font-mono); font-size: var(--ag-base);
-            background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 4px;
+            background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 0;
           }
           .ag-prose code { padding: 1px 4px; }
           .ag-prose pre { padding: 8px 10px; overflow-x: auto; margin: 6px 0; }
@@ -783,12 +913,12 @@ defmodule Compos.Ui.Layouts do
             transform: rotate(0deg); transition: transform var(--chrome-anim, 0ms) ease;
           }
           .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
-          .ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-meta-fg, #999); }
+          .ag-dot { width: 7px; height: 7px; border-radius: 0; background: var(--agent-meta-fg, #999); }
           .ag-dot.running { background: var(--warn-fg, #e0af68); }
           .ag-dot.done { background: var(--ok-fg, #4a7a4a); }
           .ag-dot.failed { background: var(--alert-fg, #a8342a); }
           .ag-kind {
-            padding: 1px 5px; border-radius: 4px; color: var(--agent-tool-fg, #26356b);
+            padding: 1px 5px; border-radius: 0; color: var(--agent-tool-fg, #26356b);
             background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 10%, transparent);
             font-family: var(--font-sans); font-size: calc(var(--ag-base) * 0.5); font-weight: 700;
             letter-spacing: 0.05em; text-transform: uppercase;
@@ -840,7 +970,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-perm {
             display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0;
-            border: 1px solid var(--agent-permission-fg, #e0af68); border-radius: 8px;
+            border: 1px solid var(--agent-permission-fg, #e0af68); border-radius: 0;
             padding: 8px 12px; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85);
           }
           .ag-perm-title {
@@ -850,7 +980,7 @@ defmodule Compos.Ui.Layouts do
           .ag-perm-actions { display: flex; flex: 0 1 auto; flex-wrap: wrap; gap: 10px; max-width: 100%; }
           .ag-question {
             margin: 10px 0; padding: 11px 12px;
-            border: 1px solid var(--agent-tool-fg, #26356b); border-radius: 8px;
+            border: 1px solid var(--agent-tool-fg, #26356b); border-radius: 0;
             background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 6%, transparent);
             font-family: var(--font-mono);
           }
@@ -869,7 +999,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-btn {
             font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.75); padding: 3px 12px;
-            border-radius: 6px; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.2));
+            border-radius: 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.2));
             background: transparent; color: inherit; cursor: pointer;
           }
           /* bb's hierarchy: affirmative filled, session-scope outlined, deny
@@ -907,7 +1037,7 @@ defmodule Compos.Ui.Layouts do
           /* what the chat prompt evaluated, and what it printed: code, so
              it keeps its columns and scrolls sideways rather than wrapping */
           .ag-eval {
-            display: block; margin: 10px 0; padding: 10px 13px; border-radius: 8px;
+            display: block; margin: 10px 0; padding: 10px 13px; border-radius: 0;
             border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
             background: color-mix(in srgb, var(--accent-fg, #26356b) 5%, var(--window-bg, #fdfcf8));
           }
@@ -921,7 +1051,7 @@ defmodule Compos.Ui.Layouts do
             position: relative;
             display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;
             border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
-            border-radius: 10px; padding: 9px 14px;
+            border-radius: 0; padding: 9px 14px;
             background: var(--window-bg, rgba(255,255,255,0.5));
           }
           .ag-input {
@@ -934,31 +1064,47 @@ defmodule Compos.Ui.Layouts do
           .ag-queued-row { margin: 2px 18px; flex-shrink: 0; }
           .ag-hint { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.65); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
           .ml-extra {
-            display: flex; align-items: center; gap: 12px;
-            font-family: var(--font-mono); font-size: 12.5px; padding: 0 8px;
+            display: flex; align-items: baseline; gap: var(--s7);
+            flex: 0 0 auto; min-width: 0;
+            font-family: var(--font-mono); font-size: var(--fs-meta);
             white-space: nowrap;
           }
-          .ml-extra .ml-segment { color: var(--dim-fg, #8a857a); }
+          .ml-extra .ml-segment { color: var(--text-faint); text-transform: none; }
           .ml-extra .ml-attention { color: var(--agent-permission-fg, #a8741a); font-weight: 600; }
-          /* a segment reads as Markdown: ml-strong is `*bold*`, and ml-tight
-             joins a segment to the one before it with no gap between them. */
-          .ml-extra .ml-strong { font-weight: 600; }
-          .ml-extra .ml-tight { margin-left: -12px; }
+          /* A segment reads as Markdown: ml-strong is `*bold*`, and ml-tight
+             joins a segment to the one before it with no gap between them.
+             The pair is the design's terse settings fact: the label stays a
+             label and the value carries no weight of its own, so layout:free
+             reads as one setting and not as a sentence. */
+          .ml-extra .ml-strong {
+            font-weight: var(--fw-reg); color: var(--text-faint);
+          }
+          .ml-extra .ml-tight {
+            margin-left: calc(-1 * var(--s7)); color: var(--text-soft);
+          }
           /* font-lock scopes (tree-sitter): the .ts-SCOPE rules come from the
              ts-SCOPE faces, see Compos.Ui.FaceCSS. A theme or a defface! owns
              every syntax colour, weight and slant. */
+          /* A window's mode line is not a coloured band. It is the same
+             ground as the window's header line with a hairline above it,
+             one line tall, and the buffer's name is the only thing on it
+             at full strength. A window at rest dims the whole line. */
           .modeline {
-            display: flex; align-items: center; gap: 8px;
-            min-height: 32px; padding: 0 12px;
-            flex-shrink: 0;
-            background: var(--modeline-bg, #ded9ca);
-            color: var(--modeline-fg, #34322c);
-            font-size: 13.5px;
+            display: flex; align-items: center; gap: var(--s9);
+            padding: 3px var(--s7);
+            flex: none; min-width: 0; overflow: hidden;
+            background: var(--surface-chrome);
+            border-top: var(--border-soft);
+            color: var(--text-dim);
+            font-family: var(--font-mono); font-size: var(--fs-meta);
           }
           .window.active .modeline {
-            background: var(--modeline-active-bg, #e1e5f1);
-            color: var(--modeline-active-fg, #18203f);
+            background: var(--surface-chrome);
+            color: var(--text-faint);
           }
+          /* a mode line is always exactly one line tall: its trailing value
+             never wraps and never pushes past its box */
+          .modeline > .ml-pos { flex: none; white-space: nowrap; }
           .window.buffer-selected .modeline {
             box-shadow: inset 3px 0 var(--accent-fg, #26356b);
           }
@@ -987,11 +1133,16 @@ defmodule Compos.Ui.Layouts do
           }
           .ml-caret:hover { opacity: 1; }
           .ml-dot {
-            width: 6px; height: 6px; border-radius: 50%;
+            width: 6px; height: 6px; border-radius: 0;
             background: var(--linenum-fg, #c3bcac); flex: 0 0 auto;
           }
           .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
-          .modeline .name { font-weight: 600; color: var(--buffer-group-color, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .modeline .name {
+            font-weight: var(--fw-semi); font-size: var(--fs-meta);
+            color: var(--accent); white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; text-transform: none;
+          }
+          .window.inactive .modeline .name { color: var(--text-faint); }
           /* The buffer-name grammar (editor.scm): every chrome that shows a
              buffer or a group draws these classes and never the raw name.
              *Messages* is bold and keeps no asterisks; :mode: is the icon. */
@@ -1004,91 +1155,174 @@ defmodule Compos.Ui.Layouts do
           }
           .ml-tab .bn-icon, .ml-tab-on .bn-icon { color: inherit; }
           .ml-icon { display: inline-block; min-width: 1.1em; color: var(--accent-fg, #26356b); font-weight: 700; text-align: center; }
-          .ml-pos { font-family: var(--font-mono); font-size: 12.5px; opacity: 1; white-space: nowrap; }
-          .ml-mode { font-family: var(--font-mono); font-size: 12.5px; opacity: 1; white-space: nowrap; }
+          .ml-pos { font-family: var(--font-mono); font-size: var(--fs-meta); opacity: 1; white-space: nowrap; }
+          .ml-mode { font-family: var(--font-mono); font-size: var(--fs-meta); opacity: 1; white-space: nowrap; }
           .ml-group-item { color: var(--buffer-group-color, var(--accent-fg, #26356b)); }
           .ml-state-modified { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
           .ml-info { color: inherit; }
           .ml-toggle { cursor: pointer; }
           .ml-toggle:hover { opacity: 1; text-decoration: underline; }
           .ml-group {
-            font-family: var(--font-mono); font-size: 12px;
+            font-family: var(--font-mono); font-size: var(--fs-meta);
             color: var(--buffer-group-color, var(--accent-fg, #26356b)); opacity: 0.85;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             max-width: 16ch; flex: 0 1 auto;
           }
+          /* The frame's header line. It carries the furniture: the wordmark,
+             the group tabs, the frame's path, the facts, the key legend. It
+             is chrome, so it is square, hairlined, mono and quiet, and it
+             clips its own overflow rather than growing tall. */
           .echo-bar {
-            order: var(--ui-echo-order, -1);
-            display: flex; align-items: baseline; gap: 14px;
-            min-height: 34px; padding: 4px 14px 5px;
-            flex-shrink: 0;
-            background: var(--window-bg, #fdfcf8);
-            border-bottom: 1px solid var(--border-bg, #cbc4b1);
-            font-family: var(--font-mono); font-size: 14px;
+            order: -1;
+            display: flex; align-items: center; gap: var(--s9);
+            padding: var(--chrome-py) var(--chrome-px);
+            flex: none; min-width: 0; overflow: hidden;
+            background: var(--surface-chrome);
+            border-bottom: var(--border);
+            font-family: var(--font-mono); font-size: var(--fs-meta);
+            color: var(--text-faint);
           }
-          /* A message passes and the bar around it stays, so a message
-             says which of the two it is: an accent-tinted chip lifts it
-             off the bar the tabs and the path share. An empty echo draws
+          /* the wordmark leads the bar: the emblem at cap height, the name
+             tracked wide, both at full strength */
+          .ml-wordmark {
+            display: inline-flex; align-items: center; gap: var(--s5);
+            flex: 0 0 auto;
+            font-weight: var(--fw-semi); letter-spacing: var(--ls-wide);
+            text-transform: uppercase;
+            color: var(--text-strong);
+          }
+          .ml-wordmark img { width: 15px; height: 15px; display: block; }
+          /* a visible hairline holds the two halves of the bar apart, in
+             place of an invisible spacer */
+          .ml-rule {
+            display: block; flex: 1 1 auto; min-width: 8px;
+            height: var(--hair); background: var(--edge-soft);
+          }
+          .ml-divider {
+            display: block; flex: 0 0 auto;
+            width: var(--hair); height: 13px; background: var(--edge);
+          }
+          /* a fact is a label and a value, never one string: the label stays
+             tracked and dim while the value stays full strength. The pair
+             closes the bar's own gap so the two read as one thing, and the
+             rule is symmetric, because a quantity puts its value first and
+             wears the label as a unit (650 MiB VM). */
+          .ml-fact-k {
+            font-size: var(--fs-micro); letter-spacing: var(--ls-label);
+            text-transform: uppercase; color: var(--text-dim);
+            white-space: nowrap;
+          }
+          .ml-fact-v {
+            font-size: var(--fs-meta); color: var(--text-strong);
+            white-space: nowrap;
+          }
+          .ml-fact-v.ok { color: var(--ok); }
+          .ml-fact-v.warn { color: var(--warn); }
+          .ml-fact-v.alert { color: var(--alert); }
+          .ml-fact-v.accent { color: var(--accent); }
+          .ml-extra .ml-fact-k + .ml-fact-v,
+          .ml-extra .ml-fact-v + .ml-fact-k {
+            margin-left: calc(-1 * var(--s7)); padding-left: var(--s4);
+          }
+          /* The echo area is the frame's own bar, under the mode line and
+             below every window. It is the sunken ground, hairlined on top,
+             and it wraps rather than clipping: a message is the one thing
+             in the frame that must be read whole. */
+          .echo-area {
+            order: var(--ui-echo-order, -1);
+            display: flex; align-items: center; flex-wrap: wrap;
+            gap: var(--s4) var(--s9);
+            padding: var(--bar-py) var(--row-px) 5px;
+            flex: none; min-width: 0;
+            background: var(--surface-sunken);
+            border-top: var(--border);
+            font-family: var(--font-mono); font-size: var(--fs-meta);
+            color: var(--text-faint);
+          }
+          /* A message is text, not a chip: it reads at full strength on the
+             echo ground and holds its exact characters. An empty echo draws
              nothing. */
           .echo {
-            color: var(--default-fg, #1b1a17); white-space: pre;
+            color: var(--text-strong); white-space: pre;
             min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
-            font-weight: 600; align-self: center;
-          }
-          .echo:not(:empty) {
-            padding: 2px 10px 3px; border-radius: 7px;
-            background: color-mix(in srgb, var(--accent-fg, #26356b) 22%, var(--window-bg, #fdfcf8));
-            border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 48%, transparent);
+            text-transform: none; letter-spacing: 0;
           }
           .ml-frame-path {
             min-width: 0; max-width: 62vw; flex: 0 1 auto;
             overflow: hidden; text-overflow: ellipsis;
-            color: var(--dim-fg, #57534a); font-size: 12.5px; white-space: nowrap;
+            color: var(--text-dim); font-size: var(--fs-small);
+            white-space: nowrap; text-transform: none; letter-spacing: 0;
           }
           .ml-frame-group {
-            color: var(--frame-group-color, var(--accent-fg, #26356b)); font-size: 12.5px;
-            font-weight: 650; white-space: nowrap;
+            color: var(--frame-group-color, var(--accent)); font-size: var(--fs-small);
+            font-weight: var(--fw-semi); white-space: nowrap; text-transform: none;
           }
-          /* The frame tab rail: the groups the frame last stood in. It is
-             furniture, so it is the loudest thing on the bar, and the group
-             you stand in is a filled chip in that group's own colour. */
+          /* The frame's groups as tabs (the design's c-groups-bar): every
+             group projected once, tracked uppercase like the rest of the
+             header line. The group you stand in is full-strength ink on the
+             select ground with a hairline, the same treatment as a selected
+             chip. Uppercase is a typographic device: the name underneath
+             keeps its case. */
           .ml-tabs {
-            display: flex; align-items: center; gap: 5px;
+            display: flex; align-items: center; gap: 1px;
             min-width: 0; flex: 0 1 auto; overflow: hidden;
-            align-self: center; padding-right: 12px;
-            border-right: 1px solid color-mix(in srgb, var(--border-bg, #cbc4b1) 70%, transparent);
+            align-self: center;
           }
           .ml-tab {
-            cursor: pointer; white-space: nowrap;
-            font-size: 13px; font-weight: 600; letter-spacing: 0.15px;
-            padding: 3px 11px 4px; border-radius: 7px;
-            color: var(--dim-fg, #8a857a);
-            background: color-mix(in srgb, var(--border-bg, #cbc4b1) 30%, transparent);
+            cursor: default; white-space: nowrap;
+            font-size: var(--fs-label); font-weight: var(--fw-reg);
+            letter-spacing: var(--ls-label); text-transform: uppercase;
+            padding: 3px var(--s6);
+            color: var(--text-faint);
+            background: transparent;
             border: 1px solid transparent;
             max-width: 20ch; overflow: hidden; text-overflow: ellipsis;
             transition: background var(--chrome-anim, 0ms) ease, color var(--chrome-anim, 0ms) ease;
           }
-          .ml-tab:hover {
-            color: var(--fg, #2b2723);
-            background: color-mix(in srgb, var(--border-bg, #cbc4b1) 80%, transparent);
-          }
-          /* Mixed a shade down so the near-white label clears the lighter
-             group colours, and reads the same under a dark theme. */
+          .ml-tab:hover { color: var(--text-strong); background: transparent; }
           .ml-tab-on, .ml-tab-on:hover {
-            color: #fdfcf8; font-weight: 700; max-width: 26ch;
-            background: color-mix(in srgb, var(--frame-group-color, var(--accent-fg, #26356b)) 84%, #14120e);
-            border-color: color-mix(in srgb, var(--frame-group-color, var(--accent-fg, #26356b)) 60%, #14120e);
-            box-shadow: 0 2px 9px color-mix(in srgb, var(--frame-group-color, var(--accent-fg, #26356b)) 34%, transparent);
+            color: var(--text-strong); max-width: 26ch;
+            background: var(--surface-select);
+            border-color: var(--edge);
           }
-          .ml-tab-more {
-            background: transparent; font-weight: 500; opacity: 0.7;
-          }
-          .ml-tab-more:hover { opacity: 1; }
+          .ml-tab-more { background: transparent; color: var(--text-dim); }
+          .ml-tab-more:hover { color: var(--text-strong); }
+          /* the key legend: the key carries the accent, the verb stays a
+             label. No separators — the gap does that work. */
           .echo-hint {
-            color: var(--dim-fg, #8a857a); opacity: 0.8; font-size: 12.5px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            display: inline-flex; align-items: baseline;
+            gap: var(--s4) var(--s9);
+            flex: 0 0 auto; min-width: 0; overflow: hidden;
+            white-space: nowrap;
+            color: var(--text-faint); font-size: var(--fs-meta);
+          }
+          /* in the echo area the hints sit after the message; the rule
+             between them takes the slack, so a message never moves a key */
+          .echo-area .ml-rule { align-self: center; }
+          .echo-area:has(.echo:empty) .echo { display: none; }
+          .ml-key {
+            font-weight: var(--fw-semi); text-transform: none;
+            color: var(--accent); white-space: nowrap;
+          }
+          .ml-do { color: var(--text-faint); text-transform: none; }
+          .echo-hint .ml-key + .ml-do {
+            margin-left: calc(var(--s4) - var(--s9));
+          }
+          /* Chrome never spills: a bar clips its own overflow rather than
+             pushing the frame wider, and the key hints are the first thing
+             to give way. The frame is the container, so the bar answers the
+             frame's width and not the screen's. */
+          @container (max-width: 1280px) {
+            .echo-area .echo-hint,
+            .echo-area .echo-hint + .ml-rule { display: none; }
           }
           .mb-spacer { flex: 1; }
+          /* in a bar the spacer is a visible hairline, the way the design
+             holds a bar's two halves apart */
+          .modeline > .mb-spacer {
+            align-self: center; min-width: 8px;
+            height: var(--hair); background: var(--edge-soft);
+          }
           .prompt { color: var(--accent-fg, #26356b); font-weight: 600; white-space: pre; flex-shrink: 0; }
           .mb-input { white-space: pre; flex-shrink: 0; font-family: var(--font-mono); }
           .mb-input .cursor { background: var(--cursor-bg, #26356b); }
@@ -1211,7 +1445,7 @@ defmodule Compos.Ui.Layouts do
           .transient-head-spacer { flex: 1; }
           .transient-chips { display: inline-flex; gap: 8px; align-items: center; }
           .transient-chip {
-            padding: 4px 14px; border-radius: 999px; font-size: 16px;
+            padding: 4px 14px; border-radius: 0; font-size: 16px;
             border: 1px solid var(--border-bg, #e2dbc9); color: var(--dim-fg, #8a857a);
           }
           .transient-chip.active {
@@ -1242,14 +1476,14 @@ defmodule Compos.Ui.Layouts do
           .transient-item {
             display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
             gap: 16px; align-items: center; min-height: 46px; padding: 5px 12px 5px 8px;
-            border-radius: 8px; border-left: 3px solid transparent; font-size: 21px;
+            border-radius: 0; border-left: 3px solid transparent; font-size: 21px;
           }
           .transient-item.selected {
             background: var(--select-bg, #e7e9f1); border-left-color: var(--accent-fg, #26356b);
           }
           .transient-key {
             display: inline-flex; align-items: center; justify-content: center;
-            width: 40px; height: 36px; border-radius: 8px;
+            width: 40px; height: 36px; border-radius: 0;
             background: var(--default-bg, #f4f0e6); color: var(--dim-fg, #8a857a);
             font-size: 19px; font-weight: 650;
           }
@@ -1571,7 +1805,7 @@ defmodule Compos.Ui.Layouts do
           .wk-key {
             justify-self: start;
             min-width: 3ch; padding: 1px 5px;
-            border: 1px solid var(--border-bg, #d8d0c0); border-radius: 3px;
+            border: 1px solid var(--border-bg, #d8d0c0); border-radius: 0;
             background: var(--select-bg, #e7e9f1);
             color: var(--accent-fg, #26356b); font-weight: 700;
           }

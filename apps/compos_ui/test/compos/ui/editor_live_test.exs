@@ -46,15 +46,23 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, conn: build_conn()}
   end
 
-  test "mounts the frame modeline above and the buffer modeline below", %{conn: conn} do
+  # the frame carries two bars of its own above the windows: the header
+  # line holds what stays, the echo area what passes. A window carries its
+  # own mode line, and only at its foot.
+  test "mounts the frame header line and echo area above, the buffer modeline below",
+       %{conn: conn} do
     {:ok, view, html} = live(conn, "/")
-    assert has_element?(view, "#editor > .echo-bar + .windows")
+    assert has_element?(view, "#editor > .echo-bar + .echo-area")
+    assert has_element?(view, "#editor > .echo-area + .windows")
     assert has_element?(view, ".window > .modeline:last-child")
     refute has_element?(view, ".window > .modeline:not(:last-child)")
     assert html =~ "ui-test-"
   end
 
-  test "the bottom frame modeline keeps the active file's full path", %{conn: conn} do
+  # The path is a fact on the buffer, so the window's own bars carry it and
+  # the frame header line does not. A file prompt still names it: the read
+  # starts where the file lives.
+  test "the frame header line carries no path; the file prompt does", %{conn: conn} do
     root = Path.join(System.tmp_dir!(), "compos-frame-path-#{System.unique_integer([:positive])}")
     path = Path.join(root, "notes.txt")
     File.mkdir_p!(root)
@@ -64,10 +72,10 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, _} = Compos.Core.Session.eval(~s{(visit "#{path}")})
     {:ok, view, _html} = live(conn, "/")
 
-    assert has_element?(view, ".echo-bar .ml-frame-path", path)
-
-    Compos.Core.Editor.set_echo("saved")
-    assert has_element?(view, ".echo-bar .ml-frame-path", path)
+    refute has_element?(view, ".echo-bar .ml-frame-path")
+    refute has_element?(view, ".echo-bar .ml-theme")
+    refute has_element?(view, ".echo-bar .echo-hint")
+    assert has_element?(view, ".echo-area .echo-hint")
 
     keys(view, ["C-x", "C-f"])
     assert has_element?(view, ".mb-input-row .ml-frame-path", path)

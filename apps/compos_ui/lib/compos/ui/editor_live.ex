@@ -1412,7 +1412,8 @@ defmodule Compos.Ui.EditorLive do
         <c-text class="workspace-bar-root">{@state.workspace.root}</c-text>
         <c-text class="workspace-bar-help">C-x w new tab · C-x d switch daemon</c-text>
       </c-group>
-      <.frame_modeline state={@state} tabs={@tabs} />
+      <.frame_header_line state={@state} tabs={@tabs} />
+      <.frame_echo state={@state} />
       <c-windows class="windows" role="main">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </c-windows>
@@ -1582,16 +1583,18 @@ defmodule Compos.Ui.EditorLive do
     """
   end
 
-  # The bar reads left to right from what stays to what passes: the tab
-  # rail is furniture and holds the left edge through a prompt, and the
-  # echo, the global mode string and the key hint are the ephemeral half,
-  # after the spacer. A message never moves a tab.
-  defp frame_modeline(assigns) do
+  # The frame's header line. It carries only what stays: the wordmark, the
+  # groups as tabs, and the frame's facts (global-mode-string). The frame
+  # names its current group here, once; a window in that group does not
+  # repeat it. A hairline holds the two halves apart. The message and the
+  # key hints live in the echo area, so a message never moves a tab.
+  defp frame_header_line(assigns) do
     ~M"""
-    <c-statusbar
-      :if={true}
-      class="echo-bar"
-    >
+    <c-statusbar class="echo-bar">
+      <c-text class="ml-wordmark" title="compos">
+        <img src="/images/compos-emblem-v1.png" width="15" height="15" alt="" />compos
+      </c-text>
+      <c-text class="ml-divider"></c-text>
       <c-tabs :if={@tabs.tabs != []} class="ml-tabs">
         <c-tab
           :for={t <- @tabs.tabs}
@@ -1607,14 +1610,40 @@ defmodule Compos.Ui.EditorLive do
           phx-click="frame_tab"
         >{@tabs.more} more</c-tab>
       </c-tabs>
-      <c-text :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</c-text>
-      <c-text class="mb-spacer"></c-text>
-      <c-echo class="echo" role="status">{@state.echo}</c-echo>
-      <c-text :if={@state.minibuffer == nil && @state.transient == nil && @state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><c-text class="ml-attention">{@state.modeline_extra}</c-text><% else %><c-text :for={{c, t} <- @state.modeline_extra} class={c}>{t}</c-text><% end %></c-text>
-      <c-key-hints class="echo-hint" :if={@state.minibuffer == nil && @state.transient == nil && @state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</c-key-hints>
+      <c-text class="ml-rule"></c-text>
+      <c-text :if={@state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><c-text class="ml-attention">{@state.modeline_extra}</c-text><% else %><c-text :for={{c, t} <- @state.modeline_extra} class={c}>{t}</c-text><% end %></c-text>
     </c-statusbar>
     """
   end
+
+  # The echo area is the frame's own bar and holds only what passes: the
+  # message, a rule, then the keys that matter where you are standing. It
+  # sits under every window unless echo-area-position says top.
+  defp frame_echo(assigns) do
+    ~M"""
+    <c-statusbar class="echo-area" role="status">
+      <c-echo class="echo">{@state.echo}</c-echo>
+      <c-text class="ml-rule"></c-text>
+      <c-key-hints class="echo-hint">
+        <c-text :for={{k, v} <- header_keys()} class="ml-key">{k}<%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
+      </c-key-hints>
+    </c-statusbar>
+    """
+  end
+
+  # The echo area's key hints. Each entry is a key and the verb it runs; an
+  # empty verb draws the key alone, the way the design does for the keys
+  # every Emacs user already knows.
+  @header_keys [
+    {"C-x C-f", ""},
+    {"C-x b", ""},
+    {"C-x d", ""},
+    {"C-c a", "agent"},
+    {"M-x", ""},
+    {"C-g", ""}
+  ]
+
+  defp header_keys, do: @header_keys
 
   # The groups the frame modeline offers as tabs. Scheme decides which
   # ones and how many, and this asks again only when the frame's group or
