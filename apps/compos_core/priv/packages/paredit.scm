@@ -721,7 +721,7 @@
 (add-hook! 'post-command-hook 'paredit--show-paren!)
 
 (define-style! 'paredit "
-.f-paren-match{background:color-mix(in srgb, var(--accent-fg,#4a6a8a) 32%, transparent);border-radius:2px}
+.f-paren-match{background:color-mix(in srgb, var(--accent-fg,#4a6a8a) 32%, transparent);border-radius: 0}
 ")
 
 (register-minor-mode! "paredit-mode" paredit--setup! paredit--teardown!)

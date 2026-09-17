@@ -588,6 +588,19 @@
   "Reveal the reply one paragraph at a time. Set #f to reveal every chunk as it arrives."
   'group 'chat 'type 'boolean)
 
+;; A reply reads as prose, so it took the serif slot. A reply is also
+;; mostly code, paths, and names, so the serif slot is wrong as often as
+;; it is right. The type is a setting, not a constant: the 'chat face's
+;; family attribute publishes --chat-family, and .ag-prose reads it with
+;; the serif slot as its fallback. Empty writes no variable, so empty
+;; means serif and nothing in the stylesheet has to change.
+(defcustom 'chat-font-family ""
+  "The font of a chat reply, as a CSS font stack. Empty means the serif slot."
+  'group 'chat
+  'set (lambda (stack) (defface! 'chat 'family stack)))
+
+(defface! 'chat 'family chat-font-family)
+
 (define (agent-prose-note! buf start)
   (unless (buffer-local buf 'agent-prose-from)
     (buffer-set-local! buf 'agent-prose-from start)))

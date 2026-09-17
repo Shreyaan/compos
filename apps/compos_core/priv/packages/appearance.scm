@@ -50,6 +50,31 @@
 (define-command "text-scale-reset" "Give this buffer the normal text size"
   (lambda () (text-scale-apply! (current-buffer) 0)))
 
+;; A buffer keeps its own size, so a size set once in a buffer you no
+;; longer remember stays set. This is the one door back to normal for
+;; every buffer at once. It touches only the buffers that carry a
+;; scale, so a dormant buffer at the normal size is never woken.
+(define (text-scale-reset-all!)
+  (let loop ((bs (buffer-list)) (n 0))
+    (if (null? bs)
+        n
+        (let* ((b (car bs))
+               (s (buffer-local b 'text-scale)))
+          (if (and s (not (= s 0)))
+              (begin (buffer-set-local! b 'text-scale 0)
+                     (text-scale-sync! b)
+                     (loop (cdr bs) (+ n 1)))
+              (loop (cdr bs) n))))))
+
+(define-command "text-scale-reset-all" "Give every buffer the normal text size"
+  (lambda ()
+    (let ((n (text-scale-reset-all!)))
+      (message (if (= n 0)
+                   "every buffer already has the normal text size"
+                   (string-append "normal text size in "
+                                  (number->string n)
+                                  (if (= n 1) " buffer" " buffers")))))))
+
 ;; How a buffer writes its name. editor.scm owns the grammar and the
 ;; default; this declares it, so a name reads the same way after a restart.
 ;; *strong* ~dim~ `mono` :icon:, and :mode: is the buffer's own icon.
@@ -121,10 +146,13 @@
 (appearance--anim-apply!)
 
 ;; The size of buffer text is the default face's size. 13px was the
-;; design size; the reading size is larger. A defface! default survives a
-;; theme load, because no theme names a size on the default face.
-(defcustom 'default-font-size "20.8px"
-  "The size of buffer text: the default face's size, as CSS. Two steps up the 1.2 ladder from 13px."
+;; design size and 20.8px was the reading size, which was too large: every
+;; buffer that wanted to be read carried a negative text-scale to undo it.
+;; 14px is the size chosen by measuring the rendered page. A defface!
+;; default survives a theme load, because no theme names a size on the
+;; default face.
+(defcustom 'default-font-size "14px"
+  "The size of buffer text: the default face's size, as CSS."
   'group 'appearance
   'set (lambda (size) (defface! 'default 'size size)))
 
@@ -189,5 +217,7 @@
   "(text-scale-apply! BUF N) — set BUF's text scale to step N on the 1.2 ladder; 0 is normal")
 (public! 'text-scale-sync!
   "(text-scale-sync! BUF) — write BUF's remap again from its 'text-scale local")
+(public! 'text-scale-reset-all!
+  "(text-scale-reset-all!) — give every buffer the normal text size; answer how many changed")
 (public! 'ui-scale-apply!
   "(ui-scale-apply! N) — set the whole application's text scale to step N; 0 is normal")

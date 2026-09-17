@@ -702,7 +702,7 @@
 .agenda-today .c-fold-head { border-left: 3px solid #a03020; }
 .agenda-row { display: flex; align-items: baseline; gap: 10px; }
 .agenda-time { font-family: var(--font-mono); color: var(--dim-fg); min-width: 5ch; text-align: right; }
-.agenda-badge { border-radius: 999px; padding: 0 8px; font-size: 10px; font-family: var(--font-mono); white-space: nowrap; background: var(--hl-line-bg); }
+.agenda-badge { border-radius: 0; padding: 0 8px; font-size: 10px; font-family: var(--font-mono); white-space: nowrap; background: var(--hl-line-bg); }
 .agenda-todo { color: #a03020; border: 1px solid #a03020; background: transparent; }
 .agenda-done { color: var(--dim-fg); border: 1px solid var(--border-bg); background: transparent; }
 .agenda-late { color: #fff8f0; background: #a03020; }

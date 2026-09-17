@@ -141,7 +141,7 @@ defmodule Compos.Ui.MobileLayouts do
           .ag-user { display: flex; gap: 10px; margin: 12px 0; padding-left: 8px; border-left: 2px solid var(--rule); }
           .ag-user-text { min-width: 0; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; color: var(--ink-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
           .ag-queued { opacity: .6; }
-          .ag-prose { font-family: var(--font-serif); font-size: 16px; line-height: 1.5; margin: 12px 0; text-wrap: pretty; }
+          .ag-prose { font-family: var(--chat-family, var(--font-serif)); font-size: 16px; line-height: 1.5; margin: 12px 0; text-wrap: pretty; }
           .ag-prose p { margin: 6px 0; }
           .ag-prose ul, .ag-prose ol { margin: 6px 0 6px 1.3em; }
           .ag-prose code, .ag-prose pre { font-family: var(--font-mono); font-size: 12px; background: var(--panel-dim); }

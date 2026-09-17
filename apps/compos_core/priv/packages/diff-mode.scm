@@ -1362,22 +1362,22 @@
 .diff-key { color: var(--accent-fg, #26356b); font-weight: 600; }
 .diff-head { margin: 0 0 8px; font-family: var(--font-mono); font-size: 12px; color: var(--dim-fg, #8a857a); }
 .diff-tabs { margin: 0 0 10px; }
-.diff-message { font-family: var(--font-mono); font-size: 12px; line-height: 1.55; margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hl-line-bg, rgba(0,0,0,0.03)); border-left: 2px solid var(--diff-file-fg, rgba(0,0,0,0.2)); }
-.diff-conflict-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; margin: 0 0 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; background: var(--diff-conflict-bg, rgba(168, 58, 43, 0.12)); border: 1px solid var(--alert-fg, #a83a2b); }
+.diff-message { font-family: var(--font-mono); font-size: 12px; line-height: 1.55; margin: 0 0 12px; padding: 10px 12px; border-radius: 0; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hl-line-bg, rgba(0,0,0,0.03)); border-left: 2px solid var(--diff-file-fg, rgba(0,0,0,0.2)); }
+.diff-conflict-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; margin: 0 0 10px; border-radius: 0; font-family: var(--font-mono); font-size: 12px; background: var(--diff-conflict-bg, rgba(168, 58, 43, 0.12)); border: 1px solid var(--alert-fg, #a83a2b); }
 .diff-conflict-icon { color: var(--alert-fg, #a83a2b); }
 .diff-conflict-label { font-weight: 600; color: var(--alert-fg, #a83a2b); }
 .diff-conflict-hint { margin-left: auto; color: var(--dim-fg, #8a857a); font-size: 11px; }
 .diff-section { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim-fg, #8a857a); padding: 12px 2px 6px; margin-top: 4px; border-bottom: 1px solid var(--border-bg, rgba(0,0,0,0.10)); }
 .blocks-scroll > .diff-section:first-child { margin-top: 0; padding-top: 2px; }
 .diff-log { font-family: var(--font-mono); font-size: 12px; padding-top: 6px; }
-.diff-commit { display: flex; gap: 12px; padding: 3px 10px; border-radius: 4px; white-space: nowrap; }
+.diff-commit { display: flex; gap: 12px; padding: 3px 10px; border-radius: 0; white-space: nowrap; }
 .diff-commit.current { background: var(--hl-line-bg, rgba(0,0,0,0.05)); }
 .diff-sha { color: var(--diff-hunk-fg, #7a5a1a); flex: none; }
 .diff-date { color: var(--dim-fg, #8a857a); flex: none; }
 .diff-author { color: var(--accent-fg, #26356b); flex: none; min-width: 10ch; }
 .diff-subject { overflow: hidden; text-overflow: ellipsis; }
 .diff-empty { font-family: var(--font-mono); font-size: 12px; padding: 12px; color: var(--dim-fg, #8a857a); }
-.diff-card { margin: 0 0 10px; border-radius: 7px; border: 1px solid var(--diff-file-fg, rgba(0,0,0,0.14)); overflow: hidden; }
+.diff-card { margin: 0 0 10px; border-radius: 0; border: 1px solid var(--diff-file-fg, rgba(0,0,0,0.14)); overflow: hidden; }
 .diff-card.current { box-shadow: 0 0 0 2px var(--accent-fg, #26356b) inset; }
 .diff-card-head.current { background: var(--hl-line-bg, rgba(38,53,107,0.12)); box-shadow: inset 3px 0 0 var(--accent-fg, #26356b); color: var(--accent-fg, inherit); }
 .diff-card-head { display: flex; align-items: baseline; gap: 8px; cursor: pointer; padding: 6px 10px; user-select: none; font-family: var(--font-mono); font-size: 12px; background: var(--hl-line-bg, rgba(0,0,0,0.03)); }
@@ -1397,7 +1397,7 @@
 .diff-text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff-side.k-del.old, .diff-side.k-mod.old { background: var(--diff-del-bg, rgba(160, 48, 32, 0.10)); color: var(--diff-del-fg, inherit); }
 .diff-side.k-add.new, .diff-side.k-mod.new { background: var(--diff-add-bg, rgba(61, 107, 79, 0.12)); color: var(--diff-add-fg, inherit); }
-.diff-side .hl { border-radius: 2px; padding: 0 1px; }
+.diff-side .hl { border-radius: 0; padding: 0 1px; }
 .diff-side.old .hl { background: var(--diff-del-word-bg, rgba(160, 48, 32, 0.28)); }
 .diff-side.new .hl { background: var(--diff-add-word-bg, rgba(61, 107, 79, 0.30)); }
 .diff-gap { grid-column: 1 / -1; padding: 2px 10px; font-family: var(--font-mono); font-size: 10.5px; color: var(--dim-fg, #8a857a); background: var(--hl-line-bg, rgba(0,0,0,0.02)); }
