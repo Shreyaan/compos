@@ -107,6 +107,32 @@ defmodule Compos.SchemeTest do
     assert run("'foo") == {:sym, "foo"}
   end
 
+  test "string=? compares every string to the first" do
+    assert run(~s{(string=? "a" "a")}) == true
+    assert run(~s{(string=? "a" "a" "a")}) == true
+    assert run(~s{(string=? "a" "b")}) == false
+    assert run(~s{(string=? "a" "a" "b")}) == false
+  end
+
+  test "format builds a string from its directives" do
+    assert run(~s{(format "~a has ~s tabs" "chrome" 42)}) == "chrome has 42 tabs"
+    # ~a shows a string bare, ~s keeps the quotes that make it readable back
+    assert run(~s{(format "~s vs ~a" "hi" "hi")}) == ~s{"hi" vs hi}
+    assert run(~s{(format "a~%b")}) == "a\nb"
+    assert run(~s{(format "100~~")}) == "100~"
+    assert run(~s{(format "~a" '(1 "a" b))}) == ~s{(1 "a" b)}
+  end
+
+  test "a format string that does not match its arguments says so" do
+    # eval errors come back as {:error, msg}; the run/1 helper matches :ok
+    assert {:error, m1} = Scheme.eval_string(Scheme.new(), ~s{(format "~a ~a" "one")})
+    assert m1 =~ "no argument for ~a"
+    assert {:error, m2} = Scheme.eval_string(Scheme.new(), ~s{(format "~a" "one" "two")})
+    assert m2 =~ "unused argument"
+    assert {:error, m3} = Scheme.eval_string(Scheme.new(), ~s{(format "~q" 1)})
+    assert m3 =~ "unknown directive ~q"
+  end
+
   test "string-edit-distance is the Levenshtein distance" do
     assert run(~s{(string-edit-distance "kitten" "sitting")}) == 3
     assert run(~s{(string-edit-distance "" "abc")}) == 3
