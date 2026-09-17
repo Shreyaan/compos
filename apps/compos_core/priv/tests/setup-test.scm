@@ -72,6 +72,36 @@
                  "the M-x command")
     (check-true! (assoc "setup" *preview-link-verbs*) "the setup link handler")))
 
+(deftest 'setup-documents-open-at-the-beginning
+  "opening M-x must not reveal a hidden end-of-document point"
+  (lambda ()
+    (setup--replace-buffer! *setup-buffer* "# First\n\nLast\n")
+    (check-equal! (buffer-point *setup-buffer*) 0 "the document point")))
+
+(deftest 'welcome-marker-makes-first-frame-policy-idempotent
+  "every profile sees Welcome once without legacy-state detection"
+  (lambda ()
+    (when (file-exists? (setup-welcome-marker-path))
+      (delete-file-path! (setup-welcome-marker-path) #t))
+    (check-true! (setup-welcome-needed?) "an unmarked profile needs Welcome")
+    (setup-mark-welcome-seen!)
+    (check-false! (setup-welcome-needed?) "the marker suppresses later frames")
+    (delete-file-path! (setup-welcome-marker-path) #t)))
+
+(deftest 'welcome-is-marked-only-after-it-opens
+  "a display failure must not suppress Welcome on the next launch"
+  (lambda ()
+    (let ((original (command-function "setup-welcome")))
+      (when (file-exists? (setup-welcome-marker-path))
+        (delete-file-path! (setup-welcome-marker-path) #t))
+      (define-command "setup-welcome" "test display failure"
+        (lambda () (error "welcome display failed")))
+      (check-equal! (car (eval-string-safe "(setup-show-welcome-once!)")) 'error
+                    "the display failure is reported")
+      (check-false! (file-exists? (setup-welcome-marker-path))
+                    "the next launch may try again")
+      (define-command "setup-welcome" "Open the welcome page" original))))
+
 (deftest 'openrouter-enablement-selects-the-api-lane
   "a stored key turns on hosted inference without exposing the value"
   (lambda ()

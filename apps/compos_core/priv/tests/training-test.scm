@@ -6,66 +6,76 @@
 (tests-need-a-disposable-editor!
   "replaces the frame layout to verify the companion window")
 
-(deftest 'training-points-at-the-real-curriculum
-  "the bot opens the repository document instead of generated prose"
-  (lambda ()
-    (check-true! (string-suffix? "/docs/training.md" (training-document-path))
-                 "the curriculum path")
-    (check-true! (file-exists? (training-document-path)) "the curriculum exists")))
+(define (t--training-clean!)
+  (when (minibuffer-state) (minibuffer-cancel!))
+  (when (buffer-known? "TUTORIAL") (buffer-kill! "TUTORIAL"))
+  (when (file-exists? (training-state-path))
+    (delete-file-path! (training-state-path) #t)))
 
-;; the visible text of every "- [Title](#anchor)" row. An action link
-;; points at a command, not at a heading, so it is not one of these.
-(define (t--contents-titles guide)
-  (filter (lambda (x) x)
-    (map (lambda (line)
-           (and (string-prefix? "- [" line)
-                (let ((i (string-index line "](#")))
-                  (and i (substring-bytes line 3 i)))))
-         (string-split guide "\n"))))
+(define (t--training-answer! key)
+  (minibuffer-change! key)
+  (not (minibuffer-state)))
 
-(deftest 'training-curriculum-has-working-tour-anchors
-  "every lesson the contents lists is a heading, and the action link works"
+(deftest 'training-opens-an-editable-copy-not-the-master
+  "the tutorial is a writable non-file buffer copied from the master"
   (lambda ()
-    ;; Naming three anchors sent this test red the day a heading was
-    ;; reworded, which is an edit to the guide and not a broken guide.
-    ;; The contents must reach the lessons: that is the fact to hold.
-    (let* ((guide (read-file (training-document-path)))
-           (titles (t--contents-titles guide)))
-      (check-true! (>= (length titles) 5) "the contents lists the lessons")
-      (for-each
-        (lambda (title)
-          (check-contains! guide (string-append "## " title)
-                           (string-append "a heading for " title)))
-        titles)
-      (check-contains! guide "compos:training/summarize-mode" "the action link"))))
+    (t--training-clean!)
+    (let ((buf (training-fresh-tutorial!)))
+      (check-equal! buf "TUTORIAL" "the Emacs buffer name")
+      (check-false! (buffer-path buf) "the master is not visited")
+      (check-false! (buffer-read-only? buf) "the exercise is editable")
+      (check-equal! (buffer-text buf) (read-file (training-document-path))
+                    "the fresh copy"))
+    (t--training-clean!)))
 
-(deftest 'training-tour-starts-with-m-x-and-waits
-  "the first chat turn begins an interactive lesson instead of dumping the guide"
+(deftest 'training-reopens-the-live-copy-without-a-question
+  "C-h t selects the live personal copy without interrupting the reader"
   (lambda ()
-    (let ((prompt (training-tour-prompt)))
-      (check-contains! prompt "Begin with M-x" "the first lesson")
-      (check-contains! prompt "one short step per turn" "the pace")
-      (check-contains! prompt "wait for the user" "the interaction"))))
+    (t--training-clean!)
+    (training--load-tutorial! "my live copy\n" 3)
+    (buffer-insert! "TUTORIAL" (buffer-size "TUTORIAL") "one edit")
+    (training--open-tutorial!)
+    (check-equal! (current-buffer) "TUTORIAL" "the live copy is selected")
+    (check-equal! (buffer-text "TUTORIAL") "my live copy\none edit"
+                  "its edits stay intact")
+    (check-false! (minibuffer-state) "no resume or revert question")
+    (t--training-clean!)))
 
-(deftest 'training-summary-names-the-current-major-mode
-  "the companion receives a concrete mode lesson request"
+(deftest 'training-resumes-saved-progress-without-a-question
+  "C-h t restores saved text and point directly when no live copy exists"
   (lambda ()
-    (test-buffer! "*zz-training-mode*" "hello")
-    (with-current-buffer "*zz-training-mode*"
-      (lambda () (set-mode! "text-mode")))
-    (let ((prompt (training-mode-summary-prompt "*zz-training-mode*")))
-      (check-contains! prompt "text-mode" "the mode name")
-      (check-contains! prompt "shortcut keys" "the lesson scope")
-      (check-contains! prompt "M-x" "the command model"))
-    (buffer-kill! "*zz-training-mode*")))
+    (t--training-clean!)
+    (let ((buf (training--load-tutorial! "saved copy\n" 6)))
+      (training-save-state! buf)
+      (buffer-kill! buf))
+    (training--open-tutorial!)
+    (check-equal! (buffer-text "TUTORIAL") "saved copy\n" "the saved text")
+    (check-equal! (buffer-point "TUTORIAL") 6 "the saved point")
+    (check-false! (minibuffer-state) "no resume question")
+    (t--training-clean!)))
 
-(deftest 'training-registers-its-launcher-and-links
-  "the direct launcher is discoverable through M-x and rendered links"
+(deftest 'only-the-C-x-k-policy-asks-about-tutorial-progress
+  "C-x k owns retention; shared kill callers neither ask nor keep a stale save"
   (lambda ()
-    (check-true! (member "training-bot" (command-names)) "the bot command")
-    (check-true! (member "training-companion-summarize-mode" (command-names))
-                 "the summary command")
-    (check-true! (assoc "training" *preview-link-verbs*) "the link handler")))
+    (t--training-clean!)
+    (check-equal! (key-binding "C-x k") "training-kill-buffer"
+                  "the retention policy is attached to C-x k")
+    (let ((buf (training--load-tutorial! "older saved copy\n" 5)))
+      (training-save-state! buf)
+      (buffer-insert! buf (buffer-size buf) "new work"))
+    (switch-to-buffer! "TUTORIAL")
+    (run-command "training-kill-buffer")
+    (run-command "minibuffer-confirm")
+    (check-true! (t--training-answer! "n") "the question closes")
+    (check-false! (buffer-known? "TUTORIAL") "C-x k kills the tutorial")
+    (check-false! (file-exists? (training-state-path)) "the old save is removed")
+
+    (training--load-tutorial! "ordinary kill\n" 4)
+    (buffer-goto! "TUTORIAL" 5)
+    (kill-buffer-confirm! "TUTORIAL" (lambda (killed?) #t))
+    (check-false! (buffer-known? "TUTORIAL") "the ordinary kill completes")
+    (check-false! (minibuffer-state) "the shared helper did not ask")
+    (t--training-clean!)))
 
 (deftest 'training-tour-selects-the-companion-window
   "the companion pops up as the active window beside the curriculum"

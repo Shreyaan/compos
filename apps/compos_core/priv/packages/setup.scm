@@ -233,7 +233,8 @@
   (buffer-create buf)
   (buffer-set-read-only! buf #f)
   (buffer-delete-range! buf 0 (buffer-size buf))
-  (buffer-append! buf text))
+  (buffer-append! buf text)
+  (buffer-goto! buf 0))
 
 ;; A bot document never takes the user's selected window. Silent mode does
 ;; not create or display the document, so it cannot alter the window tree.
@@ -526,37 +527,61 @@
       "Scheme decides editor behavior. Elixir supplies mechanisms that Scheme cannot provide.\n"
       "This keeps the system open, inspectable, and teachable.\n"))))
 
-(define-command "setup-welcome" "Open the welcome page"
-  (lambda ()
-    (setup--show-document! "Welcome to Compos" (string-append
+(define (setup-welcome-document)
+  (string-append
       "# Welcome to Compos\n\n"
-      "Compos is a composable computer for knowledge work. It is an editor, a browser,\n"
-      "a mail client, and a home for agents, and all of it answers to the same small\n"
-      "set of keys.\n\n"
+      "Compos is a composable computer for knowledge work: an editor, a browser,\n"
+      "a mail client, and a place for agents. It follows the model of Emacs: one\n"
+      "program holds every kind of text, and all of it uses the same small set of\n"
+      "keys.\n\n"
       "You do not have to learn it all now. This page is the short version.\n\n"
-      "## One key to remember\n\n"
-      "`M-x` runs any command by name. If you forget everything else, press `M-x` and\n"
-      "type a word for what you want: `file`, `group`, `mail`, `browse`. The list\n"
-      "filters as you type, and it shows the shortcut beside each command, so you\n"
-      "learn the keys by using the names.\n\n"
-      "`C-g` cancels anything. Nothing you press is hard to undo.\n\n"
-      "## What you work in\n\n"
-      "- A **buffer** holds text: a file, a chat, a mail thread, a web page, the\n"
-      "  output of a command. Everything is a buffer.\n"
-      "- A **window** shows a buffer. Windows split, and they never lose your place.\n"
-      "- A **group** is the set of buffers for one task, with the arrangement you\n"
-      "  left them in. Switch to a group and the screen becomes that task again.\n\n"
-      "## The agent works inside, not beside\n\n"
-      "A chat is a buffer like any other, so it sits in the group with the work it is\n"
-      "about, and it reads the buffers you have open. You do not paste context into\n"
-      "it, and you do not leave your work to ask it something.\n\n"
+      "## One key\n\n"
+      "`M-x` runs any command by name. If you forget everything else, press `M-x`\n"
+      "and type a word for what you want: `file`, `group`, `mail`, `browse`. The\n"
+      "list gets shorter as you type, and it shows each command's key beside the\n"
+      "name.\n\n"
+      "`C-g` cancels anything. No key you press is hard to undo.\n\n"
+      "## Buffers, windows, groups\n\n"
+      "- A **buffer** holds text: a file, a chat, a mail thread, a web page, or the\n"
+      "  output of a command. Almost everything you see is a buffer.\n"
+      "- A **window** shows a buffer. Windows split, and each one keeps its own\n"
+      "  point.\n"
+      "- A **group** is the set of buffers for one task, with the window\n"
+      "  arrangement you left. Switch to a group and that task comes back.\n\n"
+      "## The agent works in your buffers\n\n"
+      "A chat is a buffer, so it sits in the group with the work it is about, and\n"
+      "it can read the buffers you have open. You do not paste context into it, and\n"
+      "you do not leave your work to ask a question.\n\n"
       "## Start here\n\n"
+      "- **[Start the tutorial](compos:training/tutorial)** — learn by editing real\n"
+      "  text.\n"
+      "- Press `C-h t` to open or resume the tutorial at any time.\n"
       "- [Set up your inference](compos:setup/inference)\n\n"
       "## Then\n\n"
       "- [M-x and the editor philosophy](compos:setup/keys)\n"
       "- [Writing code with an agent](compos:setup/code)\n"
       "- [Setup status](compos:setup/report)\n\n"
-      "Press `C-x C-f` to open a file when you want to start working.\n"))))
+      "Press `C-x C-f` to open a file when you want to start working.\n"))
+
+(define-command "setup-welcome" "Open the welcome page"
+  (lambda ()
+    (setup--show-document! "Welcome to Compos" (setup-welcome-document))))
+
+(define (setup-welcome-marker-path)
+  (string-append (compos-home) "/welcome-seen"))
+
+(define (setup-welcome-needed?)
+  (not (file-exists? (setup-welcome-marker-path))))
+
+(define (setup-mark-welcome-seen!)
+  (write-file! (setup-welcome-marker-path) "1\n")
+  #t)
+
+(define (setup-show-welcome-once!)
+  (when (setup-welcome-needed?)
+    (run-command "setup-welcome")
+    (unless (ignore-errors (lambda () (setup-mark-welcome-seen!)))
+      (message "Could not record that the Welcome page was shown"))))
 
 (define (setup--inference-rows)
   (apply string-append
@@ -678,6 +703,7 @@
       (else #f))))
 
 (add-hook! 'frame-attach-hook 'setup-apply-default-connector!)
+(add-hook! 'frame-attach-hook 'setup-show-welcome-once! #t)
 
 (define (setup--follow-link arg)
   (cond ((equal? arg "report") (run-command "setup-report"))
