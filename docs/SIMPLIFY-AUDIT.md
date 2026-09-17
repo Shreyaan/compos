@@ -1,0 +1,719 @@
+# Simplification audit
+
+Seven read-only audits of the tree on 2026-09-18. Each item names the file,
+states the fault, and gives the simpler shape. Line numbers are from the tree
+on that day. Nothing here is started.
+
+Companion documents: `SIMPLIFY-SPEC.md` (ONE CHAT, 2026-08-08) and
+`CLEANUP-QUEUE.md` (2026-08-22). Items from those that this audit re-confirmed
+are marked (CQ #n).
+
+## 0. The numbers
+
+| Surface | Now | Target | How |
+|---|---|---|---|
+| Scheme in stock boot (no tests) | 81.7k | ~40k | 7k stays in scheme/packages/, out of boot; 30k is duplicate or dead |
+| editor.scm | 15.3k | ~4k | 9.5k moves to packages; 2.8k deleted; 0.8k of comments to docs |
+| Elixir | 49k | ~25k | 4.7k of JS/CSS to static files; two LiveViews to one; duplicate modules |
+| Tests | 78k | ~40k | 43 wrapper files, 40 double-covered features, demo-app tests |
+| Docs | 66 files, 13.7k | ~22 files, ~6k | stale, superseded, essays out |
+| Primitives | 582 | ~350 | 52 unreferenced, 25 dual spellings, families to one door |
+| Commands | 986 | ~650 | 160 window commands to 55; 90 app commands out; 60 leftovers |
+| Defcustoms | 253 | ~120 | 88 have one reader in their own file; 41 belong to apps |
+| Chat buffer-locals | 74 + ~20 undeclared | ~40 | runtime state lives in the Agent process |
+| Frame-local keys | 48 | ~15 | one window-configuration slot map |
+| Recency stores | 7 | 1 | |
+| Preview mechanisms | 7 | 1 | |
+| "Put the frame back" mechanisms | 12 | 1 | |
+| Ways to run Scheme | 11 | 3 | lane, task, rpc |
+| Persistence mechanisms per buffer | 5 | 2 | Loro log + desktop |
+| Hook mechanisms | 6 | 1 | |
+| Prompt doors | 5 | 1 | |
+| Mode definers | 6 | 1 | |
+| JSON-RPC framers | 5 | 1 | |
+| Markdown renderers | 3 | 1 | |
+| Model catalogs | 3 | 1 | |
+| PTY runners | 2 | 1 | |
+| Observability surfaces | 6 | 2 | one event stream, one sample |
+
+Roughly 210k lines including tests becomes roughly 105k.
+
+## 1. The target shape
+
+**Elixir: ten mechanisms.** Interpreter. Buffer (rope + Loro log, points,
+locals, ranges). Editor (frame map, window tree ops, one render row model).
+KeyDispatch (one lookup that asks Scheme). Lane (serial per key) + Task
+(one-shot). Transport + JsonRpc (one framer; ACP, LSP, MCP, Codex are
+vocabularies). Backend base + ReqLLM + ACP. Hotload. Desktop. Telemetry
+stream. Each connector module exports its own primitives with docs in one
+`prim` macro.
+
+**Scheme kernel: ~4k lines in editor.scm.** Catalog (one table). One
+`define-mode` with keyword args. `define-command`. Hooks, including keyed
+hooks. Keymaps as data with the ladder in Scheme. Files and the write door.
+The display-buffer chain. One `window-configuration` value. Minibuffer as a
+buffer with a mode. Tabulated list with a `'surface` option.
+
+**Packages: one per domain, no private helpers.** chat, agent connectors,
+groups, layouts, dashboard, look (peek), lists, terminal, remote, isearch,
+dired, notmuch, web, morg, lsp, treesit, jj, worktrees.
+
+**User config: providers and personal apps.** A seam in core is one custom
+that holds a function. The config supplies the function:
+
+```scheme
+(set-custom 'secret-provider
+  (lambda (name) (shell-out "doppler" "secrets" "get" name "--plain")))
+```
+
+No registry, no wrapper package.
+
+**Layout.** `apps/compos_core/priv/*.scm` holds the kernel only: editor.scm
+and the boot files. Every package lives at the project root in
+`scheme/packages/`. init.scm lists the stock packages; amazon, linkedin,
+substack, spotify, movie, doom, doom-lite, spreadsheet, graphql, calendar,
+px0, title, training, recording, peers are in `scheme/packages/` too, out of
+init.scm, and load only when the user init names them.
+
+The door is Emacs's: a `load-path` list, and `load` of a relative name
+searches it. The kernel sets the default, so init.scm and the user init
+load by bare name and add a directory only for something outside the tree.
+
+```scheme
+;; editor.scm
+(defvar 'load-path
+  (list (compos-priv-dir)
+        (string-append (compos-project-dir) "/scheme/packages")
+        (compos-home)
+        (string-append (compos-home) "/packages")))
+
+;; init.scm and ~/.compos/init.scm
+(load "notmuch.scm")
+```
+
+Today `load` (session.ex:2550) takes one expanded path and searches nothing;
+init.scm and package.scm hardcode `(compos-priv-dir)`; Hotload names its
+roots in Elixir (hotload.ex:137-147); the Scheme write roots are a third
+list (editor.scm:6371). All four become readers of `load-path`: `load`
+searches it in Scheme over the one-path builtin, Hotload asks Scheme for it
+at boot and on change, the write roots derive from it, and the release
+copies every entry. `load-bundled-package` and its five hand-expanded
+copies in init.scm go away.
+
+## 2. What to look for (the patterns every audit found)
+
+These are the tests to run against any file. Each one names the audits that
+hit it.
+
+1. **One fact, N stores, plus sync code.** 7 recency rings; current group in
+   3 places; attribution in 3 (Loro commit, authors spans, edit_log); text in
+   2 (rope + Loro) with a cross-check on every checkpoint; commands in 3
+   registries; messages in ETS and a buffer; faces in 4 places.
+2. **One mechanism, N names.** 7 previews (peek, listing-preview, candidate,
+   collect, switch, ibuffer, group); 12 frame restores (winner, transient
+   frames, popup-return x3, overview-return, group layouts, hidden windows,
+   switch/ibuffer restore-home, quit-restore, layout-focus-token); 6 hook
+   mechanisms; 5 prompt doors and 5 question readers; 6 mode definers; 9
+   "special buffer" predicates.
+3. **A special case beside a generic that covers it.** 62 curl call sites
+   beside `http-request`; popup identity parsed from a CSS class string
+   beside a window leaf; an "agent" render mode beside "blocks"; Google's
+   private Bandit listener beside web_server.ex; two PTY runners; five
+   JSON-RPC framers beside Endpoint.Conn, which already has every framing.
+4. **Policy that leaked into mechanism.** The keymap ladder (360 lines of
+   editor.ex); minibuffer and completion rules across 4 Elixir modules; word
+   syntax and kill-line in buffer.ex; the kill fallback picked in Elixir and
+   then re-picked in Scheme; prompt strings, model defaults, retry budgets
+   and buffer names in agent.ex, llm.ex, and the backends; key policy in the
+   JS of layouts.ex.
+5. **Dependency arrows pointing the wrong way.** editor.scm calls 129
+   symbols that 28 packages define, through 79 `boundp` guards. The kernel
+   creates package keymaps (spotify-map, annotate-map). dired wraps all 15
+   of its commands for google.scm. This is why chat, lists, dashboard and
+   layouts never moved out.
+6. **Migrations that run forever.** `Desktop.upgrade` and `Buffer.upgrade`
+   on every message; chat-input-migrate!, chat-record-migrate!, the
+   companion-of upgrade, llm-bundles-assign-keys, the llm-responses mirror;
+   every buffer change broadcast twice for a "compatibility alias".
+7. **Registered but never read.** 52 primitives with no production caller;
+   88 defcustoms with one reader in their own file; 103 commands reachable
+   only by M-x, 60 of them leftovers; 22 of 37 face aliases; 10 commands
+   that exist for their test.
+8. **Metadata that does not pull its weight.** 1,150 lines of catalog stamps
+   across 231 files with 4 runtime readers; the apropos engine (850 Scheme +
+   368 Elixir + OpenAI embeddings) to search docstrings; 248 public! entries
+   that restate a signature the define already states.
+9. **A builtin gap that N files patch.** `plist-get` throws on `#f`, so 25
+   wrappers exist; no `string-replace`, `html-escape`, `take`, `string-clip`,
+   `alist-put!`, so 40 private helpers exist; `sh-quote` is public but 8
+   packages copy it.
+10. **Two-way registration.** Every primitive lives in an impl map and a
+    parallel docs map (900 lines); one name is registered twice with the
+    later merge winning.
+11. **Tests that duplicate or preserve.** 43 wrapper files around one bridge
+    that already runs every Scheme test; 40 features tested in both suites;
+    7 FakeTransport copies; 144 private `eval!` helpers; 61 files assert
+    production chords.
+12. **Comments as changelog.** 23% of editor.scm is comment, much of it
+    "the bug this line prevents" and dates.
+13. **Name collisions.** chrome (extension, window overlays, a face);
+    transient (menu, frame); backend/connector/lane/provider for one thing;
+    setup/bundle/preset/combination/history entry/workspace defaults for one
+    record; shell/term/comint crossed against Emacs.
+
+Lenses this audit did not run: usage telemetry (which commands anyone runs,
+so deletion is data-driven); the 4.7k of CSS and JS in layouts.ex against
+docs/COMPONENTS.md; the ~45 files Scheme and Elixir write under `~/.compos`
+with no manifest; a latency benchmark for the one-serial-world execution
+model (item 8.4).
+
+## 3. Kernel: editor.scm
+
+Verdict per section (line ranges of 2026-09-18):
+
+| Section | Lines | Verdict |
+|---|---|---|
+| catalog, package stamps | 1-200 | kernel; `catalog-meta!` merge duplicates `catalog-register!` |
+| define-command, interactive spec | 201-314 | kernel; string codes and 'b 'd 'm unused |
+| public! registry | 315-395 | delete: second copy of the catalog |
+| tabulated lists | 396-2656 | package `tabulated-list.scm` (2,261 lines, 48 callers all outside) |
+| minibuffer | 2907-3472 | kernel ~300 after one door; rail to groups; shape cycling has no caller |
+| hooks | 3473-3576 | kernel |
+| defvar-local family | 3577-3647 | delete (0 production callers) |
+| marginalia, chrome | 3648-3801 | package |
+| modes | 3904-4161 | kernel ~120; icons, link syntax out |
+| visual lines | 4604-4840 | package |
+| isearch, hl-line, font-lock, replace | 5834-6145 | package; font-lock keywords has no setter |
+| remote files | 6781-7020 | package |
+| popper | 7513-7886 | package, one `popup-show!` |
+| peek | 8379-8776 | package `look.scm`; peek.scm is a second peek |
+| tiling, window-layout commands | 9061-9440 | layouts.scm |
+| collect | 9441-9718 | package |
+| terminal, comint, tail | 9719-9885 | package |
+| LLM pipes, llm-mode, chat-mode, bundles, transcript | 9886-12092 | packages (2,207 lines) |
+| modeline dashboard | 12209-13320 | package `dashboard.scm` (~960) |
+| command palette | 13574-13736 | package |
+| direction families, arrow installers | 14033-14248 | layouts.scm; 0-caller tables deleted |
+| public API | 14876-15276 | shrink to ~100 |
+
+Findings:
+
+1. Four registrations per command (Elixir ETS, `*command-fns*`,
+   `*command-names*`, catalog) and two per public function. Three copies of
+   "replace, touch generation, notify apropos" at E:126, 186, 303. One
+   catalog keyed "kind:name"; `public!` = `catalog-register!`.
+2. Six mode definers, seven per-mode side tables (`*mode-parents*`,
+   `*mode-docs*`, `*mode-icons*`, `*mode-link-syntaxes*`,
+   `*dismissible-modes*`, `*mode-layouts*`, `*mode-headlines*`), nine
+   hand-written minor-mode toggles, four ways to re-run setup by name, three
+   ways to rebuild. One `(define-mode NAME 'parent 'minor 'keys 'doc 'icon
+   'setup 'teardown)` and `(mode-get MODE KEY)` with the parent walk.
+3. The alist upsert idiom appears 34 times in editor.scm and 121 in priv;
+   `hook--alist-put` is that function. `alist-put!`, `alist-get`,
+   `alist-delete` become builtins beside `assoc`.
+4. Six hook mechanisms: add-hook!, on-X! wrappers, keyed registries
+   (`*preview-link-verbs*`, `*marginalia*`, `*context-providers*`,
+   `*embark-actions*`, `*paste-hooks*`), the Elixir single handler fanned
+   out, re-`set!` seam lambdas (buffer-project-label, switch-buffer-source,
+   display-foreign?, buffer-kill-repair, candidate-face-for), and
+   frame-attached!. Keyed hooks `(add-hook! '(preview-link "def") fn)`
+   replace all of them and the 79 boundp guards.
+5. Five prompt doors (minibuffer-read*, minibuffer-read, completing-read,
+   minibuffer-read-preview, read-string) and five question readers (read-char
+   = read-char-choice; y-or-n, y-or-n-p, yes-or-no-p). The M-a..M-z shortcut
+   generator registers 35 commands, 23 of which do nothing.
+6. Six variable mechanisms (define, defvar, defvar-local family, defcustom,
+   persist-global!, buffer-set-local!). `(defvar 'x default 'persist #t)`
+   replaces persist-global! and its 15 get/put closure pairs.
+7. Shadowed definitions: E:2790-2851 (preview-goto-pos! and friends) is
+   overwritten by preview.scm:330-436; the editor copy lacks url-decode.
+   scheme-mode, html-mode, elixir-mode, json-mode are redefined by
+   treesit.scm:57-74 and file-view.scm:39. Eight layout variables are
+   defined here and defcustom'd again in layouts.scm.
+8. Dead: dash--seg-gap, list-filters-label, list-stamp!,
+   llm-mode--stream-range!, reload-refresh-modes!, scroll-other-window-by!,
+   `*minibuffer-shapes*`, list-filter-clear, list-more,
+   toggle-window-animations, scroll-popup(-down), and 24 define-commands with
+   no key and no caller. Test-only: buffer-unselect(-all),
+   desktop-apply-mode!, display-action-for, chat-set-backend, popup-move-*,
+   window-prefers-buffer?, run-hook-with-args-until-*, the magic and
+   interpreter mode alists, kill-all-local-variables!.
+9. Copy-pasted bodies: the save epilogue 6x (E:6446-6547); the visit body 4x
+   (E:7005-7152); the remote-sh! wrapper 9x (E:6910-6983); the mb-list
+   prompt door 3x (E:1945, ibuffer.scm:1761, agent-fleet.scm:1306); "another
+   window that is not the popup" 7 finders with 3 exclusion sets.
+10. Emacs parity nobody uses (~450 lines): mark ring + global mark ring;
+    font-lock keywords; command-call/call-interactively; read-number,
+    read-buffer, current-kill; define-globalized-minor-mode! (evil only).
+11. Nine special-buffer predicates. `buffer-special?` = derived from
+    special-mode; `chat-buffer?` = the 7-site inline guard.
+12. Chat locals: three lists, 77 names, ~40 belong to packages;
+    'agent-mode-wanted is in no list; llm-mode keeps an undeclared fourth
+    set. `(local-class! 'name 'identity|'conversation|'runtime)` declared
+    where the local is defined.
+13. Reimplemented builtins: nth (unsafe list-ref) x4, list-tail-n,
+    name--trim-left/right, name--index, sort-by-car, catalog--get,
+    chrome--get, transient--put, abbreviate-home, move-lines.
+14. One-shot migrations on every boot: shell-mode alias, companion-of
+    upgrade, chat-input-migrate!, chat-record-migrate!, llm-bundles-assign-keys,
+    the llm-responses mirror. One desktop migration pass with a cut-off.
+15. Keys bound from six sections; C-c b bound 3x; C-c m 3x to two commands;
+    the dashboard hardcodes chord names in rows.
+16. Small bootstrap files: transient.scm and chrome.scm are packages;
+    themes.scm restates ~60 faces per palette 4x, 15 ts-* faces have no
+    producer, 22 of 37 Emacs face aliases have 0 references; three settings
+    files (transient-values.scm, theme.scm, custom.scm) for one thing.
+17. Blocks: four fence finders under five vocabularies; five block files
+    hand-write the package prologue; init.scm hand-expands
+    load-bundled-package three times.
+
+## 4. Windows, groups, layouts, lists
+
+Inventory: frame (Elixir map + a Scheme `*frame-locals*` shadow with 48
+keys), window, popup (a window whose buffer carries a CSS class string that
+Elixir parses at editor.ex:2936), display-buffer chain, target layout, peek,
+listing-preview, candidate preview, collect, switch-preview, ibuffer-preview,
+group-preview, detail, group (groups.scm 4,372 = five packages), current
+group (3 copies), sealed groups, group MRU (7 recency stores), graveyard,
+group layouts per frame, transient frames, overview, autolayout, hidden
+windows, mode layouts, scenes, tile algorithms, winner, quit-restore, kill
+fallback (two pickers), fill seams, list-mode (2,260), ibuffer (2,621),
+switch (1,077; both files claim to be THE switcher), minibuffer with three
+geometries.
+
+The minimal set is eight concepts:
+
+1. **frame**: one store. Fold `*frame-locals*` into the Elixir frame map or
+   the reverse; delete set_frame_group_label/style.
+2. **window**: leaf with `buffer, history, top, side, owner`. `side` replaces
+   the class-string popup detection; `owner` replaces peek-window,
+   listing-preview-target, detail window, collect window, group-preview.
+3. **buffer**: `'group-ids` only; drop the chat-only `'group-id` split and the
+   migration paths; `special?` derived from mode.
+4. **group**: record + `'group-ids`. One MRU (Elixir state.mru already holds
+   `{:group, g}`); delete `*group-mru*`, `group-mru-history-ids`, both cycle
+   rings, tab-order. Graveyard = record with `killed-at`.
+5. **window-configuration**: one value `(tree buffers points group)` with
+   Emacs names. Replaces 12 restore mechanisms (~650 lines to ~120).
+6. **one display rule table**: keep the chain. Peek, listing-preview,
+   candidate, collect, switch, ibuffer, group previews and detail memory
+   become one `display-preview` action: show NAME in the owner window of the
+   asking list, never bump MRU, never take focus (~1,100 to ~250). Target
+   layout and group pane choice become display actions (~350 to ~80).
+7. **one arrange function**: `(window-arrange! SPEC)` over the mode-layout
+   grammar; tile algorithms, autolayout, scenes, overview, target and
+   adaptive layouts are spec producers (~1,000 to ~350).
+8. **one list renderer**: list-mode with `'surface` (window, popup,
+   minibuffer, modal). switch.scm, ibuffer.scm, the groups board, chat-list,
+   collect, mb-rail, the group prompt rail and ibuffer-prompt! become a rows
+   function each. Group rows are built four ways today. Elixir renders one
+   row model for minibuffer, completion, transient, rail and list windows
+   (~1,600 lines).
+
+Commands: 160 in this domain to ~55. Families: 19 window-layout-*/
+autolayout-* to `window-layout ALGO`; 7 overview-* to 0; 9 popup-* to
+display-buffer + quit-window + scroll-other-window; 10 ibuffer sort/group
+toggles to the list-mode verbs that exist; 12 switcher entry commands to
+`switch-to-buffer` with 'scope and 'surface; 9 group-add variants to three.
+
+State duplication: current group (3), membership (`'group-ids`, `'group-id`,
+legacy `'group`/`'companion-of`, `group-members-index`, frame owner slot),
+recency (7), window->buffer (Elixir tree + 8 Scheme parallel trees each with
+its own dead-buffer sanitizer), popup identity (4 ways).
+
+Elixir editor.ex duplicates Scheme: kill fallback then group repair;
+other_window cyclic then Scheme focusable filter; preview_buffer as a second
+entry point; group_label/group_color as a second store; restore_tree history
+rules beside layout--restore-histories!.
+
+Totals: ~15,400 to ~7,000 lines; docs/groups.md, WINDOWS.md,
+DISPLAY-BUFFER.md, POPUPS.md, PEEK.md, GROUP-MODES.md, CHAT-LIST.md become one
+WINDOWS.md.
+
+## 5. Agent, chat, LLM, tools, permissions
+
+Scope: Elixir 6,534 (agent.ex, 5 backends, llm.ex, llm_session.ex, llmdb.ex,
+model_catalog.ex, mcp, reactor, candidates, embedding_index); Scheme 12,853
+in 19 packages + ~2,100 in editor.scm.
+
+1. **Two conversation lanes still exist.** llm-mode (E:9926-10760, ~800) is a
+   second runtime with its own session open, context fn, dispatcher, and a
+   permission stub that answers 'allow. M-o becomes "send region to the
+   group's chat".
+2. **Four backends, one contract not enforced.** close/1, emit/2,
+   adapter_exit, json_text, Port handle_info quads are byte-identical across
+   acp.ex and codex_app_server.ex; 27 GenServer.call shims; 5 capability
+   lists. `use Backend` defines the shims; a backend supplies
+   start/prompt/translate.
+3. **JSON-RPC framing written five times** (acp, codex, mcp/conn, lsp/conn,
+   transport.ex) while endpoint/conn.ex already has exec+tcp transports with
+   every framing. One JsonRpc over Endpoint.Conn (~450 lines).
+4. **codex_app_server.ex is an ACP clone** (903 lines) with an English regex
+   on a vendor message. Delete if codex-acp works.
+5. **llm.ex + req_llm.ex + llm_session.ex are three modules for one lane.**
+   `llm-with-tools` has zero callers; LLM.request is test-only;
+   llm_session.ex is 20 pass-throughs; llm-session-* and agent-* primitive
+   families (30) write the same escaped slot. One `agent-*` family (~12).
+6. **The tool zoo grew back** (CQ W1): 25 define-tool! in 6 files, 22 of them
+   restate a public! function one line above; model-facing tool lists are
+   built five ways. eval-scheme + ask; apropos is a function the model calls
+   through eval.
+7. **Catalog metadata**: public! 1,042, effects! 545, domain! 327,
+   catalog-meta! 258, category! 94 across 231 files; four runtime readers of
+   effects; CQ #1 (strings vs symbols, so 258 entries never match) still
+   stands. One docstring + one optional 'effects tag on the ~50 destructive
+   functions.
+8. **Apropos**: 850 Scheme + 368 Elixir + OpenAI embeddings to search
+   docstrings. ~60-line grep over the catalog; keep BM25 if measured better.
+9. **Permissions**: 14 concepts, an 8-arm policy, five Elixir
+   implementations, one reachable decision. Default stance is auto; arm 5
+   returns allow-always for `execute`; eval-scheme is '(write execute) so
+   the effects verdict never fires for the one tool that matters; arm 1
+   greps raw text for verbs. One `(permit? buf text) -> allow|ask|deny` over
+   stance + deny-list; Elixir keeps resolve_permission and the ask UI.
+   (CQ #6: raw text differs per lane, req_llm.ex:378, still open.)
+10. **The config record exists six times**: connector, MCP server, preset,
+    bundle, setup's program registry, workspace LLM defaults. `compos` is
+    registered as an MCP server pointing at itself and special-cased out five
+    times. One record `(name connector cmd model effort servers stance)` +
+    one picker; llm-config.scm 951, setup.scm 713, mcp-hub.scm 419 mostly go.
+11. **Twelve surfaces show one conversation**: chat-mode, *chat-list*,
+    " *chats*", chat-switch-prompt (0 callers), chat-list preview (a fourth
+    block renderer), *subagents* (0 non-test callers), *Chat Performance*,
+    three sentry modes, llm-mode, scratch outputs. chat-mode + one ibuffer
+    kind.
+12. **Transcript primitives written twice, byte for byte**: chat-blocks-push!
+    = agent-block-push!, chat-blocks-drop! = agent-block-drop-kind!,
+    chat-render! = agent-render!, chat-clear-waiting! = agent-clear-waiting!
+    over two locals, and chat-abort calls both. Turn->text in 3 places,
+    flatten in 3, clip in 5, "find this chat's buffer" in 4.
+13. **Elixir holds policy**: `<system>` wrapper (acp.ex:222), an English
+    instruction sentence (codex:483), denial strings the model reads,
+    "claude-sonnet-5" default, per-model context hacks, 40 retries on a
+    string match, "*agent: slug*" buffer names, CLAUDECODE deletion.
+14. **Dead and broken**: chat-dismiss defined twice, the winner calls
+    `chat-dismiss--finish!` which exists nowhere; chat-list--preview-now! is
+    a `#f` stub; ~25 zero-caller defs listed in the audit.
+15. **sentry.scm** (954) is an HTTP client dressed as a subsystem; its API
+    fns have zero external callers. ~120 lines the model calls via eval.
+16. **worktrees.scm + jj.scm**: 75% agent ceremony, little reachable;
+    jj-push exists to justify a deny-list carve-out.
+17. **Prompt composition**: 330 lines + 111 of doc for 8.4KB of text; three
+    lanes still splice differently. One `(chat-system-prompt buf)`.
+18. **Title/summary/compaction** (~700): the file's own comment says
+    compaction no longer pays for itself.
+
+Target: Elixir ~1,600 of 6,534; Scheme ~4,500 of ~14,950. Order: config
+record, permit?, tools + catalog, backend base + JsonRpc, one chat.scm,
+llm-mode removal, sentry/worktrees/jj trims.
+
+## 6. Packages
+
+1. **Out of boot**: 15 personal apps, 6,634 lines, ~75 commands, 41
+   defcustoms, 0 inbound users. They stay in `scheme/packages/` and leave
+   init.scm; the user init opts in. calendar/ is
+   not even loaded. org.scm (646) is superseded by morg. 1-commit imports
+   untouched since 2026-08-29: db, endpoint, graphql, package, peers,
+   training, web-server. ~7,300 lines and ~250ms of boot.
+2. **Core depends on packages**: editor.scm calls 129 symbols from 28
+   packages; 66 of ~100 files forward-reference later loads; init.scm
+   ordering is enforced by comments; 28 packages re-stamp `package!` at top
+   level; `message` is shadowed by messages.scm at boot slot 66 so two
+   `message`s exist during boot. Declared `requires` derive the order.
+3. **Builtin gap**: safe plist-get reimplemented 25 times; make the builtin
+   return `#f` for a non-list. sh-quote copied 8 times. `--replace-buffer!`
+   copied 5 times; add `buffer-set-text!`. String helpers (replace,
+   html-escape, text, take, clip, first-line, basename) ~40 defines. Time
+   formatting 7 ways. Exact duplicate bodies: 19 groups, 79 lines.
+4. **App skeleton**: home-group!/enter-group!/join-group!/log! copied per app
+   with 3 divergent behaviours (sentry sets a `'group` local instead of
+   buffer-add-group!). Each app writes --rows, --cells, --meta, --columns,
+   --narrow-cells, a refresh command, a detail buffer, a log buffer, 2-12
+   registration forms. A `define-app` form removes ~150 lines per app.
+   Browser-scrape apps share an unextracted page-poll loop.
+5. **HTTP**: http.scm exists; 8 packages hand-build curl through
+   shell-command->string (62 sites).
+6. **Defcustoms**: 253; 24 have a non-default value; 88 are read at one site
+   in their own file. Rule: a defcustom needs a second reader or a user
+   story.
+7. **Commands**: 264 unbound; 103 reachable only by M-x; ~60 look like
+   leftovers (bookmark-* parity stubs x12, ibuffer-do-sort-by-* x3,
+   agent-verbosity-* x3, chat-heal/unstick/derive-names, ...).
+8. **Load-time side effects**: editor.scm 115, themes 64, groups 42, irc 36;
+   perf.scm arms a timer at boot for a mode that is off by default. A package
+   registers data and does nothing until its mode runs.
+
+## 7. Primitive surface and Elixir modules
+
+1. layouts.ex is 2,903 lines of JS + 1,780 of CSS in ~S strings; the Keys
+   hook `mounted()` is one 1,326-line closure; key policy (CMD_KEYS,
+   editingAfterKey, nativeTextKey) lives in JS. Static files; Scheme
+   publishes the key tables as frame data.
+2. Two LiveViews for one editor: mobile_live.ex + mobile_layouts.ex repeat
+   mount/refresh/drain, 9 handle_event clauses verbatim, the modeline, the
+   AgentScroll hook, 295 lines of CSS; the keys panel synthesizes C-n/C-p/RET
+   presses. One EditorLive; Scheme picks the 'handheld layout profile.
+3. Three Markdown renderers (markdown/html.ex, editor_live.ex:3112-4300 with
+   an Earmark fallback, embed cards + oembed.ex). Markdown.Html owns the
+   document; drop Earmark.
+4. The view runs the text display engine (viewport_lines, build_static,
+   display_spans, which calls Buffer.request_fontification; line_cache per
+   LiveView process). Core Display returns rows per window memoized by
+   version; both clients and /raw consume it (CQ: whole-buffer build_static).
+5. "agent" is a special render mode across four layers (editor.ex agent_leaf
+   reads 12 named locals; ag_block clauses; agent_transcript.ex; AgentScroll;
+   122 .ag-* CSS rules) beside the generic "blocks" mode that renders any
+   Scheme block tree.
+6. Every primitive is registered twice (impl map + docs map: 900 lines);
+   window-list-all is registered twice. One `prim("name", "doc", fn)` macro.
+7. Google: 5 prims, a private Req wrapper, a private Bandit listener for the
+   OAuth callback beside web_server.ex, a token refresh that is one POST.
+   One `oauth2` prim; the callback page is a Scheme web-server handler.
+8. Minibuffer and completion policy in Elixir: vertico-directory rule in
+   minibuffer-del!, "fill input with the selected label", 5 completion
+   styles, a window of 8, "SPC ends completion". The prompt is a buffer with
+   a keymap; Candidates.matches?/rank stays as one pure prim (~400 lines,
+   ~12 prims).
+9. Landing policy in the Editor GenServer, then wrapped again in Scheme
+   under builtin-* raw names (22 aliases): delete_window lands on first_leaf,
+   other_window cyclic, set_window_buffer bumps MRU, kill_buffer recreates
+   *scratch* and closes an llm session by reading a local.
+10. The Editor GenServer builds the render payload (render_walk 205 lines,
+    modeline_group formats "N groups" strings) and editor_live.ex adds its
+    own header with hardcoded chords ("C-x C-f", "C-c a", "C-x w").
+11. Per-subsystem list/detail/log/on-event families seven times
+    (mcp-, lsp-, endpoint-, web-server-, db-, agent-, socket-) with three
+    copies of strftime; nine single-slot handler registries. `(conn-list
+    KIND)`, `(conn-detail KIND NAME)`, `(conn-log KIND NAME)`, `(on-event!
+    KIND fn)`: 22 prims to 4.
+12. Motion and word syntax in Elixir (12 prims, fixed word class). Keep a
+    fast char/line primitive; forward-word etc. are Scheme with a
+    mode-settable syntax.
+13. Dual spellings: point/buffer-point, goto-char!/buffer-goto!,
+    keymap-set!/define-key, buffer-set-hidden!/fold-set!,
+    local-set-key/local-set-key*, minibuffer-read/minibuffer-read*,
+    delete-window!/delete-window-id!, window-list/window-list-all,
+    split-window!/split-root!. ~25 prims.
+14. 52 registered names with no production caller (43 test-only, 9 none).
+    SchemeActor (283 lines, 9 prims, a supervisor) has zero production users.
+15. Three model catalogs (llmdb.ex downloads models.dev; model_catalog.ex
+    reads the llm_db hex package which IS that snapshot; llm.ex receives
+    total_cost from req_llm). The LLMDb vs LLMDB name collision is the open
+    llmdb-max-tokens bug. ModelCatalog over LLMDB; keep a ~60-line usage
+    ledger.
+16. Two PTY runners over /usr/bin/script (proc.ex, terminal.ex); prims
+    dispatch on Terminal.running? for every call. One Terminal; comint is
+    Terminal with raw: false.
+17. Dired presentation in Elixir: file-stat returns "17.3M" and "Jan  5
+    14:02"; file-mtime and file-size exist because file-stat cannot be
+    sorted. One file-stat returning numbers.
+18. Small twins: four telemetry collectors with four stores; two FileSystem
+    watchers (watch.ex, hotload.ex) each with debounce; three shell spawners;
+    remote-* prims are shell-command->string with an ssh prefix; irc.ex +
+    2 prims for one package; embedding_index.ex posts raw Req to OpenAI
+    while req_llm ships embed/3; MCP-over-HTTP hand-rolls SSE beside an
+    Endpoint {:http, url} transport.
+19. homepage_live.ex (1,355) is a marketing site for three brands with no
+    core calls. Static HTML or out of the repo.
+20. Fourteen primitives each re-implement the sync/async fork with their own
+    timeout constant. Every blocking prim is sync; Scheme wraps it in
+    task-run! when it wants a callback.
+
+## 8. Runtime: buffer, session, editor, execution model
+
+1. 32 GenServer modules, 12 Registries, 11 DynamicSupervisors; ten
+   Registry+DynamicSupervisor pairs are the same pattern. One
+   `Compos.Core.Children`.
+2. `:compos_escaped_closures` (95 references) holds six unrelated things:
+   command GC roots, reactor callbacks, debounce timers, eval-defer tokens,
+   task callbacks, the last 32 eval results. It is the Scheme heap roots
+   table; name and type it as one.
+3. ~14 files under ~/.compos from Elixir and ~30 more from Scheme, no owner
+   or manifest.
+4. **Eleven ways to run Scheme**: lanes, :single_actor (one test + a config
+   line), SchemeActor (copied env), SchemeTask, task-run!, eval-defer!/
+   eval-resolve!, with-scheme-lock, wait-until polling, debounce!, Reactor
+   Tasks, SchemeReadLimiter. The two-tier Env with escape/promote/flush, the
+   Session frame GC walking every buffer's locals, SchemeHeap,
+   SchemeRawNames, and the stale-frame retry loops exist because many BEAM
+   processes mutate one Scheme world. Minimal: one serial process per lane +
+   SchemeTask for pure reads. If one serial world is adopted, env.ex (546) +
+   gc.ex + roots + flush + heir dance collapse (~900 lines). Largest and
+   riskiest item; needs a `:ui` latency benchmark under an agent turn first.
+5. **Attribution recorded three times** (Loro commit actor, authors spans +
+   origins, edit_log capped at 500 and not persisted); pending_ops batch
+   fields for a SQLite store that no longer exists; the moduledoc still
+   promises it. Loro is the only author record (~650 lines).
+6. **Text held twice**: rope + Loro doc mirror every edit, `verify_history`
+   compares them at every checkpoint, the checkpoint stores the text again
+   beside the Loro snapshot. Either the doc is the text or the doc waits for
+   multiplayer.
+7. **Five persistence mechanisms per buffer**: checkpoint etf, catalog.etf
+   (with a copy of every local under 1KB), Loro log, desktop.etf, BufferView
+   ETS row rebuilt at boot. The catalog is rebuilt by scanning checkpoints,
+   so it is a cache pretending to be a store. One file per buffer = Loro log;
+   catalog derived at boot; desktop = window trees + Scheme globals.
+8. **Four read paths for one field** (ETS row, GenServer call, dormant
+   checkpoint read, BufferStore fact/local); `Buffer.point/1` tries three.
+   The row is the only read model for live and dormant buffers.
+9. Display and command-loop state in the model struct: fontify task/cache,
+   ts, goal_col, insert_run, undo_run; hidden, narrow_range, overlays are
+   three tagged-range maps adjusted by the same function. One `ranges` map.
+10. **Session.ex is a second primitive table**: 2,300 of 3,341 lines are
+    primitives and connector glue; hot-reload logic (250 lines) lives here
+    while Hotload only watches. Each connector exports its own primitives;
+    Hotload.Scheme owns reload; Session keeps eval/exec/GC (~700 lines).
+    Registering primitives by module+name makes a code swap self-healing and
+    deletes SchemeRawNames.
+11. Messages stored twice (ETS ring + *Messages* buffer). The buffer is the
+    log.
+12. **Keymaps**: 14 prims, ~30 handle_calls, 360 lines of ladder resolution
+    in editor.ex while key_dispatch.ex says "what keys mean is Scheme's
+    business". Keymaps are Scheme data; Elixir keeps one lookup.
+13. MRU three ways; clips/navigations/selects are three identical take-once
+    slots; faces in four places; undo_exempt is a per-command property that
+    belongs in catalog meta.
+14. **Observability**: Telemetry + telemetry.scm, SysMon + perf.scm (500
+    lines of hand-rolled SVG), Profiler + profile.scm (VM-wide counters),
+    live_dashboard, Lane slow-job Logger beside the telemetry row, ChatPerf
+    jsonl, llm-usage.jsonl, KeyDispatch trace. One bounded event stream +
+    one sample + one Scheme buffer (~2,000 lines).
+15. **Seven code paths wake a buffer** with a 3-way branch on the caller's
+    process kind and a pdict flag; the four-condition eviction guard is
+    written twice. `wake(name)` = start from Loro log + one Scheme
+    `buffer-woken!` on the buffer's lane, always async.
+16. `Desktop.upgrade` and `Buffer.upgrade` run on every message; desktop v1
+    beside v2/v3; use code_change/3 once.
+17. compos_scheme is clean: no editor knowledge; stale moduledoc only.
+18. Named leftovers: events broadcast twice for a "compatibility alias";
+    "legacy" actor kind; read_many_fallback; the Buffer moduledoc describes
+    list-of-ropes undo and a SQLite store.
+
+## 9. Tests, docs, skills, cruft
+
+1. 43 `*_scheme_test.exs` wrappers (1,961 lines) duplicate
+   `scheme_suite_test.exs`, which already runs every priv/tests file; two
+   name Scheme files that do not exist.
+2. 40 features tested in both suites (~7,800 ExUnit lines); 104 ExUnit files
+   only call Session.eval (11,205 lines): Scheme policy in Elixir clothing.
+   editor_test.exs (4,643): dired, switcher, display-buffer, tiling describes
+   are Scheme policy with Scheme suites.
+3. 7 FakeTransport copies; `eval!` in 144 files; `press` in 66; `wait_until`
+   in 20. Three ways to fake an LLM turn; four ways to get a second daemon.
+4. 61 files assert production chords; 28 press C-x/C-h/M-x; 14 of the 24
+   always-red tests are named after a chord.
+5. ~3,500 lines of tests for demo apps (doom, spreadsheet, pdf, google scene,
+   chrome, evil, whatsapp, amazon, irc).
+6. KNOWN-FAILURES.md lists 64 names from 2026-08-23; nobody re-measured.
+7. Docs: 19 current specs; stale: HANDOFF.html (2026-08-14, wrong repo path,
+   still the CLAUDE.md entry point), ROADMAP, KNOWN-FAILURES,
+   PERFORMANCE-REVIEW; superseded: doc/WINDOWS.md, training.md vs LEARN
+   COMPOS.md, COMPONENTS-SPEC, CONTROL-SPEC, PROVENANCE + BUFFER, four
+   COMPOSML docs; never built: ANNOTATIONS, PDF-ANNOTATIONS,
+   EDITING-SURFACE-SPEC, ORG-MODE-PLAN, SIMPLIFY-SPEC (has `pkill`),
+   CLEANUP-QUEUE, SCHEME-TEST-MIGRATION, SWITCHER-PERF-HANDOFF; essays:
+   BEYOND-TOOLS, CORDIS-VS-EMACS, EMACS-AS-AGENT-HARNESS, INTRODUCTION,
+   COMPOS-HOMEPAGE-BRIEF. Dangling: AI-NATIVE-SPEC, INTERFACE, SCOPE, LISP,
+   ACP, calendar. Non-doc files: 7 png, a patch, a saved chat transcript.
+8. Skills: 12 to 5. code-change says "do not read CLAUDE.md as a ritual"
+   while CLAUDE.md says load code-change before every change. compos-boot
+   and compos-restart both carry the COMPOS_VERIFY recipe; compos-debug and
+   bin/compos default to `~/.compos-web`.
+9. Root cruft: `-`, `touched`, editing.png (3MB), image.png, demo.org,
+   budget.sheet.json, boards/*.tldr, doc/WINDOWS.md (kept by an explicit
+   .gitignore line), three mix-generated READMEs, two erl_crash.dump,
+   burrito_out/aimax_macos_arm, 7 stale worktrees (1.8GB, still registered),
+   the ai-max.el symlink and worktree.
+10. Naming: source is clean; aimax/ai-max/cordis survive in
+    .claude/settings.local.json, skills.scm:291 (`cordis.patch.yml`),
+    docs, and build dirs.
+
+## 10. Order of work
+
+Each step lands alone and leaves the tree green.
+
+**Next three steps, in order.**
+
+1. `load-path`: the defvar in editor.scm, `load` searching it in Scheme over
+   the one-path builtin, Hotload and the write roots reading it,
+   `load-bundled-package` deleted. One commit; tests in
+   `priv/tests/load-path-test.scm`. No file moves, so it does not collide
+   with other sessions.
+2. The move: `git mv apps/compos_core/priv/packages scheme/packages` once the
+   tree has no uncommitted package edits, plus the release step. One
+   commit, no code change.
+3. In parallel with either: the Phase 0 deletions that touch nothing anyone
+   is editing. The 52 unreferenced primitives, SchemeActor, the 43 test
+   wrappers, the `plist-get` builtin fix and its 25 wrappers, the secrets
+   seam.
+
+**Phase 0, mechanical and safe.**
+1. Delete: 52 unreferenced prims, 25 dual spellings, SchemeActor, the 43
+   test wrappers, the Elixir half of the 40 double-covered features, demo-app
+   tests, dead commands and functions from sections 3.8 and 5.14, root cruft,
+   stale worktrees, 44 docs.
+2. Move every package to `scheme/packages/` at the project root; priv keeps
+   the kernel. Drop the 15 personal apps, calendar, and org.scm from
+   init.scm. homepage_live.ex becomes static HTML in the repo.
+3. Secrets seam: `secret-provider` custom in keys.scm; delete
+   `key--from-doppler`, the `*-doppler-project` customs in sentry and
+   google, doppler.scm; the provider is one lambda in user config.
+4. Builtins: plist-get returns #f on non-list; alist-put!/get/delete;
+   string-replace, html-escape, take, string-clip, first-line, basename;
+   buffer-set-text!; time-label. Delete the ~110 private copies.
+5. One test support module: eval!, press, wait_until, one FakeTransport.
+
+**Phase 1, registries.**
+6. One catalog; public! = catalog-register!; one `prim` macro with docs;
+   each connector exports its primitives; drop domain!/category!/
+   namespace!/catalog-meta!, keep one 'effects tag.
+7. One define-mode with keyword args and mode-get; one defvar with 'persist.
+8. Keyed hooks replace the on-X! wrappers, keyed registries, re-set! seams
+   and the 79 boundp guards. Declared `requires` order init.scm.
+9. Move whole sections out of editor.scm: lists, chat/LLM, dashboard,
+   layouts, peek, popper, isearch, remote, terminal, collect, palette,
+   visual lines. editor.scm lands at ~4k.
+
+**Phase 2, domains.**
+10. Windows: window-configuration value; leaf side/owner; one
+    display-preview action; one MRU; one arrange!; list-mode 'surface;
+    fold *frame-locals* into the frame; split chat naming out of groups.scm.
+11. Agent: config record; permit?; eval + ask + apropos-as-function; Backend
+    base + JsonRpc over Endpoint.Conn; delete codex_app_server if codex-acp
+    works; one chat.scm with one transcript module; delete llm-mode; trim
+    sentry, worktrees, jj, prompts, title/summary.
+
+**Phase 3, runtime.**
+12. Loro log is the text and the author record; catalog derived; one read
+    model; one wake path; code_change instead of per-message upgrade.
+13. Minibuffer is a buffer with a mode; keymaps are Scheme data; motion and
+    kill policy in Scheme; landing policy out of the Editor GenServer.
+14. One Display row model in core; one LiveView; static app.js/editor.css;
+    Markdown.Html owns the document; "agent" render mode folds into
+    "blocks"; Scheme composes modeline and header blocks.
+15. One event stream + one sample; drop Profiler, live_dashboard, ChatPerf,
+    the SVG builders.
+
+**Phase 4, decision.** Benchmark `:ui` latency under an agent turn with one
+serial Scheme world. If it holds, collapse env.ex, gc, roots, flush, the
+heir dance and the retry loops.
+
+## 11. Rules so it does not grow back
+
+- A seam in core is one custom that holds a function. The provider lives in
+  user config. No wrapper package.
+- Scheme that is not the kernel lives in `scheme/packages/` at the project
+  root. An app that the editor does not need is out of init.scm; the user
+  init loads it by name.
+- A package registers data at load and does nothing until its mode runs.
+- A defcustom needs a second reader or a user story. Otherwise `define`.
+- A command needs a key, a menu, a hook, or a caller. Otherwise it is a
+  function.
+- A primitive needs a production caller. A test is not a caller.
+- One fact, one store. A second store is a cache and must be derivable in
+  one call.
+- A new mechanism must name the existing one it could not use.
+- The kernel calls no package name. Packages add hooks; the kernel runs them.
+- Comments state the contract. History goes in git.
+- Tests: Scheme tests policy through the function; Elixir tests mechanism;
+  no test presses a production chord.
