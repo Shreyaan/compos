@@ -1,6 +1,6 @@
 ---
 name: app-creator
-description: Build a compos app — a listing, one detail buffer per row, and actions on both. Use for requests to create an app-shaped mode (amazon, mail, sentry, whatsapp shaped), an app group, a list-plus-detail view, or app-wide keys. Owns the home group, the responsive three-column layout, the detail window and its `` C-` `` walk.
+description: Build a compos app — a listing, one detail buffer per row, and actions on both. Use for requests to create an app-shaped mode (amazon, mail, sentry, whatsapp shaped), an app group, a list-plus-detail view, or app-wide keys. Read it before any define-list-mode! call: it owns the reserved list keys (/ is always the filter), the column-width budget, the responsive layout profiles, the home group, the detail window and its `` C-` `` walk.
 ---
 
 # Build a compos app
@@ -73,12 +73,88 @@ a preview timer with no frame group is exactly the case that loses the layout.
 `(define-list-mode! "amazon-mode" OPTS)` with `'transient #f` — an app buffer
 is persistent, not a derived view.
 
+A list already knows how to be a list. Do not rebuild filtering, marking, row
+motion, sorting or grouping: declare the table and the verbs, and take the rest.
+Read `(apropos "define a list mode")` for the full option list before you start.
+
 `'rows` `'columns` `'cells` `'key` are the table. `'preview` is what makes it an
 app: moving the point opens that row's detail. `'keys` are the actions. `'doc`
 is the mode's help and must name every key.
 
 Rows are data, not text. Keep the parsed record in the row and let `'cells`
 render it, so an action on a row has the whole record and not a printed line.
+
+#### Keys you do not get
+
+Four keys are bound on your map AFTER your own, so a mode that declares one
+silently does not get it and the footer that advertises it is a lie:
+
+| key | is | always |
+|---|---|---|
+| `/` | `list-filter` | narrows the rows to what you type. `/` is the search key everywhere in this editor, so it is the search key here |
+| `<` | `list-cycle-grouping` | your optional regroup callback |
+| `>` | `list-cycle-sorting` | your optional resort callback |
+| `SPC` | your `'mark-command`, else `list-mark` | |
+
+Nine more are inherited from `list-mode-map` and ARE yours to shadow: `f` also
+filters, `\\` pops the filter, `?` describes the mode, `n`/`p` walk, `m` marks,
+`u`/`U`/`*` unmark and mark-all, `x` executes the marks, `g` reverts. Most apps
+shadow `g` with their own refetch. That is fine.
+
+Give your own verbs the letters none of these use. A server-side filter is not
+the same thing as `/` — `/` narrows the rows already drawn, so put "read a
+different query" on its own key (`t` for a tab, `s` for a scope) and say so in
+`'doc`.
+
+After you define the mode, read the map back rather than trusting the
+declaration:
+
+```scheme
+(keymap-bindings (mode-keymap "amazon-mode"))
+```
+
+#### Columns have a budget
+
+A column width of `#f` takes the rest of the line. Exactly one column should
+have it, and it should be the one holding the longest text. Everything else is
+a fixed number, and those numbers are a budget against the frame.
+
+Declare responsive profiles instead of one wide table. They are ordered and the
+first match wins, so narrowest first:
+
+```scheme
+'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 84)
+                     'columns amazon--narrow-columns 'cells amazon--narrow-cells)
+               (list 'name 'mid 'max-cols (lambda (buf) 118)
+                     'columns amazon--mid-columns 'cells amazon--mid-cells)
+               (list 'name 'wide 'default #t))
+```
+
+Drop columns as the frame narrows; never let the `#f` column be squeezed to
+nothing. A column that is empty on almost every row has not earned its width —
+compute the columns from the rows and leave it out when no row fills it:
+
+```scheme
+(define (amazon--columns buf)
+  (append (list (list "item" 28))
+          (if (amazon--any-discount? buf) (list (list "was" 10)) '())
+          (list (list "title" #f))))
+```
+
+Two things that will cost you an hour otherwise:
+
+- The chosen profile is cached per width in the `list-layout-cache` buffer
+  local. A profile you add after the buffer exists is not picked up until that
+  local is cleared: `(buffer-set-local! buf 'list-layout-cache #f)`.
+- A buffer with no window measures at a default width, so verify the layout in
+  a real window, or check `(list-view-width buf)` before believing the draw.
+
+#### Say what a column means
+
+A column heading is a claim. If the value under it is a proposal, a draft or a
+request rather than the thing itself, the heading must say so, and two
+different kinds of fact never share one column. Test it by reading one row
+aloud as a sentence: if the sentence is false, the heading is wrong.
 
 ### 3. One detail buffer PER ROW, opened with display-buffer-detail!
 

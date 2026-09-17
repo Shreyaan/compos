@@ -783,8 +783,8 @@
 (define-keymap! "list-mode-map")
 (for-each (lambda (p) (define-key "list-mode-map" (car p) (cadr p)))
   '(("?" "describe-mode")
-    ("/" "list-cycle-grouping") (">" "list-cycle-sorting")
-    ("f" "list-filter") ("\\" "list-filter-pop")
+    ("/" "list-filter") ("f" "list-filter") ("\\" "list-filter-pop")
+    ("<" "list-cycle-grouping") (">" "list-cycle-sorting")
     ("n" "list-next") ("p" "list-prev")
     ("SPC" "list-mark") ("m" "list-mark")
     ("u" "list-unmark") ("U" "list-unmark-all") ("*" "list-mark-all")
@@ -793,9 +793,15 @@
 ;; These keys are the grammar of every markable list, not suggestions inherited from
 ;; the parent map. Install them on each child too, so a mode cannot keep an
 ;; older local meaning. SPC always marks the row at point.
+;;
+;; / is the search key everywhere in this editor, so it is the search key
+;; in every list: it narrows the rows to what you type. Grouping and
+;; sorting are a pair and read as one, on < and >. A list mode that
+;; declares / in its own keys does not get it -- these go on last.
 (define (list-mode-standard-keys! name)
   (let ((opts (list-mode-opts name)))
-    (define-key (mode-keymap name) "/" "list-cycle-grouping")
+    (define-key (mode-keymap name) "/" "list-filter")
+    (define-key (mode-keymap name) "<" "list-cycle-grouping")
     (define-key (mode-keymap name) ">" "list-cycle-sorting")
     (unless (plist-get opts 'no-marks)
       (define-key (mode-keymap name) "SPC"
@@ -15037,7 +15043,7 @@
 (public! 'buffer-derived-mode? "(buffer-derived-mode? BUF NAME) — #t when the buffer's major mode is NAME or descends from it")
 (public! 'mode-setup! "(mode-setup! NAME) — run NAME's setup in the current buffer, the way a derived mode inherits it")
 (public! 'define-list-mode!
-  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Set transient to #f for persistent app buffers (default #t). Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact. SPC calls the optional mark-command, or list-mark by default. The reserved / and > keys call optional regroup and resort callbacks; f opens the text filter. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
+  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Read the app-creator skill before writing one: it owns what a list already does for you and what is yours to declare. Set transient to #f for persistent app buffers (default #t). KEYS. Four are TAKEN -- bound on your map after your own keys, so a mode that declares one silently does not get it: / narrows the rows (list-filter), < and > call the optional regroup and resort callbacks, SPC calls the optional mark-command or list-mark. / is the search key everywhere in this editor and it is the search key here. Another nine are INHERITED from list-mode-map and yours to shadow: f also filters, \\ pops the filter, ? describes the mode, n/p walk, m marks, u/U/* unmark and mark-all, x executes the marks, g reverts (most apps shadow g with their own refetch). Give your own verbs the letters none of these use. Responsive layouts are ordered profiles selected by min-cols, max-cols, or default, first match wins; profiles may override columns, cells, footer, and compact, and the chosen profile is cached per width in the list-layout-cache buffer local. A column width of #f takes the rest of the line, so put the widest text last and budget the fixed widths against the narrow, compact and wide turns. Rows are records, not text: keep the parsed value and let cells render it. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
   'ui)
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 (public! 'marginalia! "(marginalia! CATEGORY FN) — FN turns one candidate of CATEGORY ('file 'buffer 'command) into the text beside it; replaces the annotator for that category")
