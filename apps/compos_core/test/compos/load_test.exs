@@ -13,8 +13,8 @@ defmodule Compos.LoadTest do
     init = File.read!(Path.join(priv, "init.scm"))
     load_pattern = ~r/\(load\s+"([^"]+)"\)/
 
-    # the bundled load-path: scheme/packages at the project root, then priv
-    dirs = [Path.join(Compos.Core.project_dir(), "scheme/packages"), Path.join(priv, "packages")]
+    # the bundled packages: scheme/packages at the project root
+    dirs = [Path.join(Compos.Core.project_dir(), "scheme/packages")]
     locate = fn name -> Enum.find(Enum.map(dirs, &Path.join(&1, name)), &File.regular?/1) end
 
     # init.scm also loads editor/blocks and editor/goto-address by name;

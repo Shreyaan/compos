@@ -18,7 +18,7 @@
   "priv, its packages, the config home and its packages are on load-path"
   (lambda ()
     (check-true! (member (compos-priv-dir) load-path) "priv")
-    (check-true! (member (string-append (compos-priv-dir) "/packages") load-path)
+    (check-true! (member (string-append (compos-project-dir) "/scheme/packages") load-path)
                  "the bundled packages")
     (check-true! (member (compos-config-dir) load-path) "the config home")
     (check-true! (member (string-append (compos-config-dir) "/packages") load-path)

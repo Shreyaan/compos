@@ -318,6 +318,7 @@
 .amazon-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; }
 .amazon-note { margin: 8px 12px; padding: 8px 10px; border-left: 3px solid var(--accent-fg); background: var(--hl-line-bg); white-space: pre-wrap; color: var(--fg); }
 .amazon-reviews { padding: 4px 0; font-family: var(--font-sans); color: var(--fg); }
+.amazon-photo { display: block; max-width: 200px; max-height: 200px; width: auto; height: auto; object-fit: contain; border: 1px solid var(--border-bg); border-radius: 3px; margin: 2px 0 6px; }
 ")
 
 (define (amazon--row-field row key alt) (or (plist-get row key) alt))
@@ -379,6 +380,24 @@
     (when row
       (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))
 
+;; the tab bar's number hints are real keys: 1, 2 and 3 switch the tab
+;; without the mouse; the click handler takes the same ids
+(define (amazon-tab-here! tab)
+  (let ((buf (current-buffer)))
+    (if (buffer-local buf 'amazon-row)
+        (begin (amazon-tab-set! buf tab)
+               (message (string-append "Showing " tab)))
+        (message "Not a product page"))))
+
+(define-command "amazon-tab-overview" "Show the product's Overview tab"
+  (lambda () (amazon-tab-here! "overview")))
+
+(define-command "amazon-tab-specs" "Show the product's Specs tab"
+  (lambda () (amazon-tab-here! "specs")))
+
+(define-command "amazon-tab-reviews" "Show the product's Reviews tab"
+  (lambda () (amazon-tab-here! "reviews")))
+
 (define (amazon--tab-entry buf id label key)
   (list id label (equal? (amazon-tab buf) id) key))
 
@@ -388,6 +407,16 @@
           'tabs (list (amazon--tab-entry buf "overview" "Overview" "1")
                       (amazon--tab-entry buf "specs" "Specs" "2")
                       (amazon--tab-entry buf "reviews" "Reviews" "3")))))
+
+;; the search page gives one photo per row; block mode draws it as an <img>,
+;; so the detail page keeps the product picture the listing page dropped
+(define (amazon--photo-block row)
+  (let ((src (plist-get row 'img)))
+    (and src
+         (list 'tag "img"
+               'class "amazon-photo"
+               'attrs (list (list "src" src)
+                            (list "alt" (or (plist-get row 'title) "")))))))
 
 (define (amazon--actions row)
   (let* ((asin (plist-get row 'asin))
@@ -408,10 +437,13 @@
          (rating (plist-get row 'rating))
          (revs (plist-get row 'reviews))
          (kept? (amazon-saved? asin))
-         (in? (amazon-in-cart? asin)))
+         (in? (amazon-in-cart? asin))
+         (photo (amazon--photo-block row)))
     (list 'tag "div" 'class "amazon-head"
           'children
-          (list
+          (append
+            (if photo (list photo) '())
+            (list
             (list 'tag "div" 'class "amazon-title" 'text (plist-get row 'title))
             (list 'tag "div" 'class "amazon-price"
                   'text (string-append
@@ -428,7 +460,7 @@
                       (and (plist-get row 'sponsored) (component 'ui/badge (list 'text "sponsored")))
                       (and kept? (component 'ui/badge (list 'text "saved")))
                       (and in? (component 'ui/badge (list 'text "in your cart"))))))
-            (amazon--actions row)))))
+            (amazon--actions row))))))
 
 (define (amazon--overview-blocks row)
   (let* ((asin (plist-get row 'asin))
@@ -859,9 +891,12 @@
           (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))))
 (mode-parent! "amazon-detail-mode" "special-mode")
 (mode-doc! "amazon-detail-mode"
-  "One product, as its own page. m saves it and marks it in the listing, N writes a note that stays on this page, n and p walk the listing's pages, c adds it to the cart, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
+  "One product, as its own page. 1, 2 and 3 switch the Overview, Specs and Reviews tabs; m saves it and marks it in the listing, N writes a note that stays on this page, n and p walk the listing's pages, c adds it to the cart, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
 (mode-keys! "amazon-detail-mode"
-  (list (list "c" "amazon-cart")
+  (list (list "1" "amazon-tab-overview")
+        (list "2" "amazon-tab-specs")
+        (list "3" "amazon-tab-reviews")
+        (list "c" "amazon-cart")
         (list "m" "amazon-save")
         (list "N" "amazon-note")
         (list "n" "amazon-next-page")

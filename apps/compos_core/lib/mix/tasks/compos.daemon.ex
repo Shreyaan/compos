@@ -49,10 +49,8 @@ defmodule Compos.Mix.Daemon do
     |> Path.expand()
   end
 
-  # the bundled load-path: the packages at the project root, then priv
-  def package_dirs(root) do
-    [Path.join(root, "scheme/packages"), Path.join(root, "apps/compos_core/priv/packages")]
-  end
+  # the bundled packages: scheme/packages at the project root
+  def package_dirs(root), do: [Path.join(root, "scheme/packages")]
 
   def package_paths(root) do
     init = Path.join(root, "apps/compos_core/priv/init.scm")

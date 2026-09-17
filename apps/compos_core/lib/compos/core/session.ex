@@ -937,10 +937,9 @@ defmodule Compos.Core.Session do
   # needs the same baseline.
   defp reload_source_paths do
     priv = canonical(Application.app_dir(:compos_core, "priv"))
-    packages = Path.wildcard(Path.join([priv, "packages", "**/*.scm"]))
 
     Enum.map(@bootstrap_files, &Path.join(priv, &1)) ++
-      packages ++ project_source_paths() ++ config_source_paths()
+      project_source_paths() ++ config_source_paths()
   end
 
   # The packages at the project root, `scheme/`, the second entry of the
