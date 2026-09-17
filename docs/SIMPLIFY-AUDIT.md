@@ -330,6 +330,38 @@ Totals: ~15,400 to ~7,000 lines; docs/groups.md, WINDOWS.md,
 DISPLAY-BUFFER.md, POPUPS.md, PEEK.md, GROUP-MODES.md, CHAT-LIST.md become one
 WINDOWS.md.
 
+### 4a. Rearranging windows takes seconds (first-class, ruled 2026-09-18)
+
+A window change is a tree edit plus one hook. The Scheme suite marks 49
+window-rearranging tests with 120-300s timeouts, and the bridge gives each
+test 30s. Nothing in a rearrangement justifies more than milliseconds: the
+silent-buffer rule already holds (per-command work only for the manipulated
+buffer; the per-window dashboard sync was fixed).
+
+Measured 2026-09-18 in the test VM (`SCHEME_TIMES=1 SCHEME_TESTS=...`,
+then one call at a time):
+
+| Operation | Time |
+|---|---|
+| split-window!, delete-other-windows!, switch-to-buffer! | 0ms |
+| buffer-create, buffer-kill! | 0-2ms |
+| every layout-policy, window, group-switch test | under 0.4s |
+| ibuffer draw, 4 rows | 12-14ms |
+| ibuffer draw, 24 rows | 43-47ms |
+| ibuffer test fixture (open, set filter, refresh) | 135-141ms |
+| one ibuffer test | 0.4-0.7s |
+| tile-all-uses-only-the-current-project | 3.05s = its `wait-until` cap; the test fails in the dirty tree |
+
+Rearranging windows costs nothing. The seconds in the suite are `wait-until`
+caps on failing tests and the 30s bridge timeout on hanging ones. The real
+cost is the table draw: about 5ms fixed plus 2ms per row (list-head-lines
+3ms for two lines, list-prepare-rows! and list-composml-text! 2ms each for
+four rows), and the ibuffer fixture draws the 24-row table three times per
+test where one draw would do (`list-set-filters!` redraws, then
+`ibuffer-refresh!` draws again; `list-filter-clear!` redraws a buffer the
+next line kills). Next: bring one draw under 1ms per row, and make the
+fixture draw once.
+
 ## 5. Agent, chat, LLM, tools, permissions
 
 Scope: Elixir 6,534 (agent.ex, 5 backends, llm.ex, llm_session.ex, llmdb.ex,

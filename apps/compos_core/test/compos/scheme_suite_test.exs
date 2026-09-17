@@ -164,14 +164,22 @@ defmodule Compos.SchemeSuiteTest do
 
     assert real != [], "no test matched SCHEME_TESTS=#{System.get_env("SCHEME_TESTS")}"
 
-    failures =
-      for name <- real,
-          result = eval("(run-test '#{name})"),
-          reduced = reduce(name, result),
-          reduced != nil,
-          do: reduced
+    {failures, times} =
+      Enum.reduce(real, {[], []}, fn name, {fails, times} ->
+        {us, result} = :timer.tc(fn -> eval("(run-test '#{name})") end)
+        reduced = reduce(name, result)
+        {if(reduced, do: [reduced | fails], else: fails), [{div(us, 1000), name} | times]}
+      end)
 
-    assert failures == [], "\n" <> Enum.join(failures, "\n")
+    # SCHEME_TIMES=1 prints the slowest tests, for work on the editor's cost
+    if System.get_env("SCHEME_TIMES") do
+      times
+      |> Enum.sort(:desc)
+      |> Enum.take(25)
+      |> Enum.each(fn {ms, name} -> IO.puts("  #{String.pad_leading(to_string(ms), 6)}ms  #{name}") end)
+    end
+
+    assert failures == [], "\n" <> Enum.join(Enum.reverse(failures), "\n")
   end
 
   # "()" is a pass. Anything else is the test's own report, or the eval
