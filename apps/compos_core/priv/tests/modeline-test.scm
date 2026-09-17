@@ -187,6 +187,44 @@
       (check-equal! (plist-get (cadr two) 'class) "dseg-rule"
                     "and the rule stands between them"))))
 
+(define (t--dash-meta? blocks)
+  (let loop ((bs blocks))
+    (cond ((null? bs) #f)
+          ((and (pair? (car bs))
+                (equal? (plist-get (car bs) 'class) "dseg-meta")) #t)
+          (else (loop (cdr bs))))))
+
+(deftest 'a-wide-window-keeps-the-headline-on-one-row
+  "a narrow window stacks metadata beneath the title; a wide one keeps every segment inline"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-modeline-headline-layout*" ""))
+          (top (list (list 'group 'badge) (list 'wide 'title)))
+          (meta (list (list 'mode 'mode-block) (list 'llm 'llm-block))))
+      (check-false! (t--dash-meta? (dash--assemble-headline top meta #f buf))
+                    "a wide window wraps no metadata row")
+      (check-true! (t--dash-meta? (dash--assemble-headline top meta #t buf))
+                   "a narrow window stacks the metadata beneath the title")
+      (buffer-kill! buf))))
+
+(deftest 'an-llm-config-change-refreshes-the-dashboard-line
+  "llm-config-changed! runs the hook the dashboard subscribes to, so the headline re-reads the model"
+  (lambda ()
+    (let ((buf "*zz-modeline-llm-changed*")
+          (was (current-buffer)))
+      (test-buffer! buf "")
+      (switch-to-buffer! buf)
+      (window-configuration-changed!)
+      (buffer-set-local! buf 'llm-model "m-before")
+      (dashboard--sync! buf)
+      (check-contains! (or (buffer-local buf 'dashboard-line) "") "m-before"
+                       "the headline shows the model before the change")
+      (buffer-set-local! buf 'llm-model "m-after")
+      (llm-config-changed! buf)
+      (check-contains! (or (buffer-local buf 'dashboard-line) "") "m-after"
+                       "the hook re-reads the model after the change")
+      (switch-to-buffer! was)
+      (buffer-kill! buf))))
+
 (deftest 'a-chats-title-is-the-first-summary-and-does-not-move
   "the first label the running summary writes becomes the title; later paragraphs move the summary only, and the bar and the list rows show the title"
   (lambda ()

@@ -30,6 +30,12 @@
 (define (llm-config--mark-selected!)
   (set-frame-local! 'llm-config-selected #t))
 
+;; The menu applies changes as it goes (a pick applies at once), but the
+;; dashboard line re-reads state only when told. One hook on exit tells every
+;; subscriber -- editor.scm subscribes to refresh the headline.
+(define (llm-config-changed! buf)
+  (run-hook-with-args 'llm-config-changed-hook buf))
+
 ;;; Choosing a bundle does not apply it: it parks it as the frame's pending
 ;;; choice and the menu stays open, so a wrong letter costs one more letter
 ;;; and not a whole re-open. The choice applies once, when level one closes.
@@ -59,7 +65,8 @@
 (define (llm-config--quit! buf)
   (when (frame-local 'llm-config-selected)
     (llm-config-remember! (llm-config-combination buf)))
-  (set-frame-local! 'llm-config-selected #f))
+  (set-frame-local! 'llm-config-selected #f)
+  (llm-config-changed! buf))
 
 ;; level one owns the pending choice, so only its exit applies it
 (define (llm-config--quit-top! buf)

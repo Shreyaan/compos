@@ -12342,7 +12342,8 @@
    the rest below the title instead of squeezing it. dseg-meta is the
    row Scheme builds for the metadata; the picker is ordered ahead of
    it, and the title keeps growing to fill the top row. */
-.dash-persistent { flex-wrap: wrap; column-gap: 16px; row-gap: 4px; }
+.dash-persistent { flex-wrap: nowrap; column-gap: 16px; }
+.dash-persistent:has(.dseg-meta) { flex-wrap: wrap; row-gap: 4px; }
 .dash-verbosity { order: 1; }
 .dseg-meta { order: 2; flex: 0 1 100%; display: flex; align-items: baseline;
              gap: 16px; min-width: 0; }
@@ -12908,7 +12909,12 @@
              (append (list (list 'wide (dash--wide-seg #f title "dseg-chat-title")))
                      (if (and vcs (not (dash--summary buf)))
                          (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
-         (keep (dash--headline-keep buf (buffer-cols buf))))
+         (width (buffer-cols buf))
+         (keep (dash--headline-keep buf width))
+         ;; KEEP says which segments survive a narrow window; NARROW? says
+         ;; whether the window is narrow enough to stack the metadata beneath
+         ;; the title at all. A wide window shares one row with every segment.
+         (narrow? (< width narrow-cols)))
     ;; the state marker rides last: it draws nothing, so it takes no rule
     ;; beside it, and no keep list can drop it
     (let* ((group? (lambda (cell) (equal? (car cell) 'group)))
@@ -12928,12 +12934,22 @@
            ;; the top row. CSS reads dseg-meta to place that second row.
            (top (filter (lambda (cell) (and (cadr cell) (or (group? cell) (wide? cell)))) kept))
            (meta (filter (lambda (cell) (and (cadr cell) (not (or (group? cell) (wide? cell))))) kept)))
+      (dash--assemble-headline top meta narrow? buf))))
+
+;; TOP is the badge and the title; META is mode/model/lane. A narrow window
+;; stacks META on a second row beneath the title (dseg-meta); a wide window
+;; keeps every surviving segment on one row, ruled together.
+(define (dash--assemble-headline top meta narrow? buf)
+  (if narrow?
       (append
         (dash--ruled (map cadr top))
         (if (pair? meta)
             (list (list 'tag "div" 'class "dseg-meta" 'children (map cadr meta)))
             '())
-        (list (dash--state-mark buf))))))
+        (list (dash--state-mark buf)))
+      (append
+        (dash--ruled (append (map cadr top) (map cadr meta)))
+        (list (dash--state-mark buf)))))
 
 (define (dash--wide-seg key text &optional title-class)
   (let ((base (dash--seg key (list (list (if title-class "dseg-strong" "f-dim") text))
@@ -13161,6 +13177,17 @@
 
 (add-hook! 'buffer-shown-hook 'dashboard--catchup!)
 (add-hook! 'window-configuration-change-hook 'dashboard--catchup-visible!)
+;; The dashboard line reads the model, lane and preset from locals, so an
+;; llm-config change re-renders the headline. llm-config runs this hook on
+;; exit; the handler refreshes the configured buffer and its session.
+(define (dashboard--llm-config-changed! buf)
+  (when (buffer-exists? buf)
+    (dashboard--sync! buf)
+    (let ((session (llm-config-session buf)))
+      (when (and session (not (equal? session buf)))
+        (dashboard--sync! session)))))
+
+(add-hook! 'llm-config-changed-hook 'dashboard--llm-config-changed!)
 
 (define (dashboard--render! buf)
   (desktop-skip! buf 'dashboard-line)
