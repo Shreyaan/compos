@@ -3,7 +3,6 @@ defmodule Compos.Core.Browser.Prims do
 
   import Compos.Core.Prims
   alias Compos.Core.{Frame}
-  alias Compos.Scheme
   alias Compos.Core.Session
 
   @escaped :compos_escaped_closures

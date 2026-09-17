@@ -2,7 +2,6 @@ defmodule Compos.Core.LLMSession.Prims do
   @moduledoc "The Scheme primitives of this mechanism; the policy is in Scheme."
 
   import Compos.Core.Prims
-  alias Compos.Scheme
 
   @escaped :compos_escaped_closures
 

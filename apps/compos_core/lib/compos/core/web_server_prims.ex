@@ -2,7 +2,6 @@ defmodule Compos.Core.WebServer.Prims do
   @moduledoc "The Scheme primitives of this mechanism; the policy is in Scheme."
 
   import Compos.Core.Prims
-  alias Compos.Scheme
   alias Compos.Core.Session
 
   @doc "Every primitive under its {name, doc} key."

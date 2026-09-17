@@ -3,7 +3,6 @@ defmodule Compos.Core.Endpoint.Prims do
 
   import Compos.Core.Prims
   alias Compos.Core.{Endpoint}
-  alias Compos.Scheme
   alias Compos.Core.Session
 
   @escaped :compos_escaped_closures

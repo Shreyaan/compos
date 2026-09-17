@@ -3,7 +3,6 @@ defmodule Compos.Core.LSP.Prims do
 
   import Compos.Core.Prims
   alias Compos.Core.{LSP}
-  alias Compos.Scheme
   alias Compos.Core.Session
 
   @escaped :compos_escaped_closures
