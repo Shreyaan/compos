@@ -47,11 +47,17 @@ stage. Each stage is one commit, verified live and by a screenshot.
    `ui/keymap` strip is the design's: a key is accent text, a verb a faint
    label, no cap. DONE. Facts (group:, sort:) on the card are not yet
    drawn; the ibuffer head line still carries them.
-5. **Narrow at full size.** Ibuffer is the minibuffer grown to full, with
-   the selected buffer previewed beside the list as a window at rest. No
-   centred modal.
-6. **Focus/cua move.** A focus window trades places with its neighbour by
-   direction; a cua window refuses through the echo area.
+5. **Narrow at full size.** `C-x C-b` opens `*ibuffer*` as a list buffer
+   in a window, `/` narrows it in the minibuffer, and the row at point
+   previews in the other window (the no-popup-previews ruling). That is
+   the design's mechanism already. Left to do: the facts (group:, sort:)
+   move from the ibuffer head line onto the keys card, and the `panel`
+   and `modal` minibuffer geometries lose their centring and scrim so a
+   grown minibuffer stays docked at the bottom.
+6. **Focus/cua move.** `window-left/right/up/down` already trade a window
+   with its neighbour by direction and say `No window left` through the
+   echo area; the editing (cua) state gives the same chords to the caret.
+   The mechanism exists; nothing to add.
 
 ## Open questions
 
