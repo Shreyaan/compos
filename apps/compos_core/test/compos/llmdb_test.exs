@@ -15,7 +15,11 @@ defmodule Compos.LLMDbTest do
     },
     "openrouter" => %{
       "models" => %{
-        "deepseek/deepseek-chat" => %{"cost" => %{"input" => 0.2, "output" => 0.4}}
+        "deepseek/deepseek-chat" => %{"cost" => %{"input" => 0.2, "output" => 0.4}},
+        "meta/muse-spark-1.1" => %{
+          "cost" => %{"input" => 1.25, "output" => 4.25},
+          "limit" => %{"context" => 1_048_576, "output" => 943_718}
+        }
       }
     },
     "deepseek" => %{
@@ -50,6 +54,13 @@ defmodule Compos.LLMDbTest do
     # limit. DeepSeek's documented maximum generated output is 384K.
     assert LLMDb.max_tokens("deepseek:deepseek-v4-pro") == 393_216
     assert LLMDb.max_tokens("deepseek:deepseek-v4-flash") == 393_216
+  end
+
+  test "Muse Spark output limit is Meta's documented 128K" do
+    # openrouter reports ~90% of the 1M context window (943718) as the
+    # output limit; Meta documents a 128K maximum generated output.
+    assert LLMDb.max_tokens("openrouter:meta/muse-spark-1.1") == 131_072
+    assert LLMDb.max_tokens("muse-spark-1.1") == 131_072
   end
 
   test "cost sums all four token buckets per million" do
