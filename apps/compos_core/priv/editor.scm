@@ -1077,7 +1077,6 @@
 ;;; The mark goes on the first line and the lines under it start where it
 ;;; does. A two-line row has no single label row, so the head shows none.
 ;;;   'footer   (buf) -> ((KEY WORD) ...)   the key bar under the rows
-;;;   'keymap-component #f               opt the key bar back into header lines;
 ;;;                                       it renders through the shared ui/keymap
 ;;;                                       component by default
 ;;;   'preview  (buf entry)                 what moving the highlight shows
@@ -1364,38 +1363,6 @@
       '()
       (list (list-label-line buf cols))))
 
-;; The key bar renders through the shared ui/keymap component by default:
-;; it wraps at the window width instead of dropping hints off the end of
-;; a header line. A mode that wants the header-line bar sets
-;; 'keymap-component #f.
-(define (list-keymap-component? buf)
-  (let* ((opts (list-mode-opts (list-mode-of buf)))
-         (profile (list-active-layout buf)))
-    (let ((v (cond ((list-plist-key? profile 'keymap-component)
-                    (plist-get profile 'keymap-component))
-                   ((list-plist-key? opts 'keymap-component)
-                    (plist-get opts 'keymap-component))
-                   (else #t))))
-      (not (equal? v #f)))))
-
-;; the key bar as header lines, when a mode opts out of the shared
-;; ui/keymap component with 'keymap-component #f
-(define (list-key-lines buf)
-  (let* ((f (list-opt buf 'footer))
-         (keys (if f (f buf) '())))
-    (cond ((or (null? keys) (list-keymap-component? buf)) '())
-          ((list-opt buf 'wrap-key-hints)
-           (let ((width (list-view-width buf)))
-             (let loop ((rest keys) (line '()) (out '()))
-               (if (null? rest)
-                   (reverse (if (null? line) out (cons (list-key-bar-text (reverse line)) out)))
-                   (let ((next (cons (car rest) line)))
-                     (if (or (null? line)
-                             (<= (string-length (car (list-key-bar-text (reverse next)))) width))
-                         (loop (cdr rest) next out)
-                         (loop rest '() (cons (list-key-bar-text (reverse line)) out))))))))
-          (else (list (list-key-bar buf keys))))))
-
 (define (list-table-head buf)
   (let* ((cols (list-columns buf))
          (w (list-view-width buf))
@@ -1413,15 +1380,12 @@
                                       (list-shift-spans (cadr meta)
                                                         (+ (string-byte-length title) 2))
                                       '()))))
-                    (list-key-lines buf)
                     (list-label-lines buf cols))
             (append (list (list-title-line buf w))
                     (if (equal? (car meta) "") '() (list meta))
-                    (list-key-lines buf)
                     (list-label-lines buf cols)))
         (append (list (list-title-line buf w))
                 (if (equal? (car meta) "") '() (list meta))
-                (list-key-lines buf)
                 (list (list-rule-line w))
                 (list-label-lines buf cols)))))
 
@@ -1432,21 +1396,6 @@
     (cond (f (map (lambda (l) (list l '())) (string-split (f buf) "\n")))
           ((list-table? buf) (list-table-head buf))
           (else (list (list "" '()))))))
-
-;; the key bar: what this list does, in the words the mode chose
-(define (list-key-bar-text keys)
-  (let loop ((ks keys) (text " ") (spans '()))
-    (if (null? ks)
-        (list text (reverse spans))
-        (let* ((key (car (car ks)))
-               (word (car (cdr (car ks))))
-               (at (string-byte-length text))
-               (piece (string-append key " " word)))
-          (loop (cdr ks)
-                (string-append text piece (if (null? (cdr ks)) "" " · "))
-                (cons (list (+ at (string-byte-length key) 1)
-                            (string-byte-length word) "dim")
-                      (cons (list at (string-byte-length key) "accent") spans)))))))
 
 ;;; --- the keys card -------------------------------------------------------
 ;;; The keymap every list-mode buffer carries (docs/DESIGN-PORT.md, stage
@@ -1479,7 +1428,8 @@
     (and footer
          (boundp 'component)
          (list (component 'ui/keys-bar
-                 (list 'main (footer buf)
+                 ;; the bar owns ?: a mode that lists it says it twice
+                 (list 'main (filter (lambda (k) (not (equal? (car k) "?"))) (footer buf))
                        'grids (list-keys-grids buf)
                        'expanded (if (buffer-local buf 'list-keys-expanded) #t #f)))))))
 
@@ -1493,20 +1443,6 @@
       (let ((blocks (list-keys-bar-blocks buf)))
         (when blocks (buffer-set-local! buf 'footer-line-blocks blocks)))
       (message (if now "all keys — ? folds them" "main keys")))))
-
-;; the bar fits the window: a key that does not fit is dropped from the
-;; end, and a bar that dropped any ends in "? keys", where ? shows them
-;; all. A bar that wrapped took two lines and pushed the rows down.
-(define (list-key-bar buf keys)
-  (let ((w (list-view-width buf))
-        (full (list-key-bar-text keys)))
-    (if (<= (string-length (car full)) w)
-        full
-        (let loop ((ks keys))
-          (let ((bar (list-key-bar-text (append ks '(("?" "keys"))))))
-            (if (or (null? ks) (<= (string-length (car bar)) w))
-                bar
-                (loop (reverse (cdr (reverse ks))))))))))
 
 ;; one entry's cells, one list per line of the row
 (define (list-row-cells buf e &optional ctx)
@@ -2458,11 +2394,11 @@
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
           (list-composml! buf shown head)
           (list-composml-text! buf shown prepared)
-          (when (list-keymap-component? buf)
-            (desktop-skip! buf 'footer-line-blocks)
-            (let ((blocks (list-keys-bar-blocks buf)))
-              (unless (equal? blocks (buffer-local buf 'footer-line-blocks))
-                (buffer-set-local! buf 'footer-line-blocks blocks))))))
+          ;; the keys bar at the window's foot is the list's one keymap
+          (desktop-skip! buf 'footer-line-blocks)
+          (let ((blocks (list-keys-bar-blocks buf)))
+            (unless (equal? blocks (buffer-local buf 'footer-line-blocks))
+              (buffer-set-local! buf 'footer-line-blocks blocks)))))
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
             (last (- (list-shown-count buf) 1)))
         ;; Restore the buffer's point without moving every window that

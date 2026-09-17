@@ -260,7 +260,7 @@
                                 (list 'tag "div" 'class "keys-more"
                                       'click "list-keys-toggle"
                                       'attrs (list (list "title" (if expanded "fewer keys" "every key")))
-                                      'segs (list (list "c-keymap-key" "?" "kbd")
+                                      'segs (list (list "c-keymap-key" "?" "c-action-key")
                                                   (list "keys-more-word"
                                                         (cond (expanded "fewer")
                                                               ((> n 0) (string-append "all " (number->string n)))
@@ -274,7 +274,7 @@
                                                        (list "count" (number->string (length (cadr g))))))
                                      (map (lambda (r)
                                             (list 'tag "c-binding" 'class "c-binding"
-                                                  'segs (list (list "c-keymap-key" (car r) "kbd")
+                                                  'segs (list (list "c-keymap-key" (car r) "c-action-key")
                                                               (list "do" (cadr r)))))
                                           (cadr g)))))
                        grids)
@@ -292,7 +292,7 @@
                  (list 'tag "c-row" 'class "c-keymap-row"
                        'segs
                        (append
-                         (list (list "c-keymap-key" (car k) "kbd")
+                         (list (list "c-keymap-key" (car k) "c-action-key")
                                (list "c-keymap-cmd" (cadr k)))
                          (if (> (length k) 2)
                              (list (list "c-keymap-doc" (nth 2 k)))
@@ -408,10 +408,10 @@
 .c-group { display: block; margin: 0 0 10px; }
 .c-keymap { display: flex; flex-wrap: wrap; gap: var(--s4) var(--s9); padding: 5px 12px; font-family: var(--font-mono); font-size: var(--fs-meta); line-height: 1.35; white-space: normal; color: var(--text-faint); }
 .c-keymap-row { display: inline-flex; align-items: baseline; gap: var(--s4); min-width: 0; max-width: 100%; white-space: nowrap; }
-.c-keymap-key { display: inline-block; flex: none; padding: 0; border: 0; background: transparent; color: var(--accent); font: var(--fw-semi) var(--fs-meta)/1.2 var(--font-mono); white-space: nowrap; text-transform: none; }
+/* the key is a c-action-key (layouts.ex): one element, one colour */
+.c-keymap-key { display: inline-block; flex: none; font-size: var(--fs-meta); line-height: 1.2; }
 .c-keymap-cmd { color: var(--text-faint); }
 .c-keymap-doc { color: var(--text-dim); }
-.buffer-footer:has(.c-keymap) { padding: 0; max-height: 30%; overflow-y: auto; white-space: normal; }
 
 ")
 

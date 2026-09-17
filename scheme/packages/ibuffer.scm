@@ -1129,10 +1129,6 @@
 (define (ibuffer-counts-text buf n dirty bytes)
   (list (list (ibuffer-noun buf n) "dim")))
 
-;; the keys used to stand in a bar of their own over the rows. ? shows
-;; them all, with the mode's doc, so the bar is one word here.
-(define *ibuffer-keys-hint* (list (list "   ? keys" "faint")))
-
 ;; the wide head says the choices as chips; the compact one says the
 ;; current ones in four words
 (define (ibuffer-wide-meta-line buf n dirty bytes)
@@ -1143,16 +1139,14 @@
                            (symbol->string (ibuffer-grouping buf)))
             (list (list "   " #f))
             (ibuffer-chips "SORT" (map symbol->string *ibuffer-sorts*)
-                           (symbol->string (ibuffer-sort buf)))
-            *ibuffer-keys-hint*)))
+                           (symbol->string (ibuffer-sort buf))))))
 
 (define (ibuffer-compact-meta-line buf n dirty bytes)
   (ibuffer-join-parts
     (append (ibuffer-counts-parts buf n dirty bytes)
             (list (list (string-append " · by " (symbol->string (ibuffer-grouping buf))
                                        " · " (symbol->string (ibuffer-sort buf)))
-                        "dim"))
-            *ibuffer-keys-hint*)))
+                        "dim")))))
 
 (define (ibuffer-meta-with buf line)
   ;; The header counts rows. It does not weigh them: a size is a question
@@ -2268,7 +2262,6 @@
     'meta (lambda (buf) (ibuffer-meta buf))
     'total (lambda (buf) (ibuffer-total buf))
     'compact #t
-    'keymap-component #t
     'page-size 60
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)

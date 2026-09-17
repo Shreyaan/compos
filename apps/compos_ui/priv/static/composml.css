@@ -1,6 +1,6 @@
 /* ComposML is ordinary light DOM. Low-specificity defaults leave full CSS control. */
 :where(c-frame, c-windows, c-split, c-window, c-buffer, c-line, c-modeline, c-headerline, c-headline, c-statusbar, c-tabs, c-field, c-minibuffer, c-completions, c-completion, c-which-key, c-transcript, c-message, c-tool-call, c-result, c-activity, c-prompt, c-toolbar, c-action, c-value, c-group) { display: block; }
-:where(c-buffer-name, c-mode, c-position, c-status, c-progress, c-tab, c-label, c-metric, c-key-hints, c-arguments, c-input, c-cursor, c-echo, c-text) { display: inline; }
+:where(c-buffer-name, c-mode, c-position, c-status, c-progress, c-tab, c-label, c-metric, c-key-hints, c-arguments, c-input, c-cursor, c-echo, c-text, c-action-key) { display: inline; }
 :where(c-frame, c-windows, c-split, c-window, c-buffer, c-line, c-modeline, c-headerline, c-buffer-name, c-mode, c-position, c-headline, c-statusbar, c-status, c-progress, c-tabs, c-tab, c-field, c-label, c-metric, c-key-hints, c-minibuffer, c-completions, c-completion, c-which-key, c-transcript, c-message, c-tool-call, c-arguments, c-result, c-activity, c-prompt, c-input, c-cursor, c-toolbar, c-echo, c-action, c-value, c-group, c-text)[hidden] { display: none; }
 
 /* The list component owns layout; modes supply domain names and field roles. */

@@ -685,10 +685,10 @@ defmodule Compos.Ui.EditorLiveTest do
     {unmodified, _} = :binary.match(html, ">Unmodified<")
     {control, _} = :binary.match(html, ">Control<")
     {meta, _} = :binary.match(html, ">Meta<")
-    {plain_a, _} = :binary.match(html, ">a</c-text>")
-    {plain_z, _} = :binary.match(html, ">z</c-text>")
-    {control_a, _} = :binary.match(html, ">C-a</c-text>")
-    {control_z, _} = :binary.match(html, ">C-z</c-text>")
+    {plain_a, _} = :binary.match(html, ">a</c-action-key>")
+    {plain_z, _} = :binary.match(html, ">z</c-action-key>")
+    {control_a, _} = :binary.match(html, ">C-a</c-action-key>")
+    {control_z, _} = :binary.match(html, ">C-z</c-action-key>")
 
     assert unmodified < control and control < meta
     assert plain_a < plain_z and control_a < control_z

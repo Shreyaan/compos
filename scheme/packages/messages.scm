@@ -370,7 +370,6 @@
     ;; The keys live in the shared ui/keymap component, pinned under the
     ;; rows: it wraps at the window width instead of dropping hints off
     ;; the end of a header line.
-    'keymap-component #t
     'footer (lambda (buf)
               '(("l" "level") ("G" "group") ("P" "project")
                 ("/" "filter") ("\\" "widen") ("g" "refresh")

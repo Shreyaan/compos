@@ -326,11 +326,11 @@
   "the head is one line: the title, the counts, and where the keys are"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
-    (check-equal! (ibuffer-compact-footer "*ibuffer*") '() "no key bar")
-    (check-equal! (list-key-lines "*ibuffer*") '() "so the head carries none")
+    (check-true! (pair? (ibuffer-compact-footer "*ibuffer*")) "the footer names the main keys for the bar")
     (check-equal! (list-label-lines "*ibuffer*" (list-columns "*ibuffer*")) '()
                   "and no column is named, so no label row")
-    (check-contains! (car (ibuffer-meta "*ibuffer*")) "? keys" "the meta says where the keys are")
+    (check-false! (string-contains? (car (ibuffer-meta "*ibuffer*")) "? keys")
+                  "the head says nothing about keys: the bar at the foot has them")
     (ibuffer-test-reset!)))
 
 ;;; --- RET goes to the buffer where it lives ------------------------------------

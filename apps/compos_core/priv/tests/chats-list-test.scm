@@ -109,7 +109,6 @@
     (check-equal! (ibuffer-row-kind "*zz-chats-a*") 'chat "a chat row wears the chat kind")
     (check-contains! (buffer-text *chat-list*) "Chats" "the title")
     (check-contains! (buffer-text *chat-list*) "3 chats" "the noun is chat")
-    (check-equal! (list-key-lines *chat-list*) '() "no key bar stands over the rows")
     (chats-test-reset!)))
 
 (deftest 'the-list-arrives-in-the-invoking-group

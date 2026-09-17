@@ -438,31 +438,22 @@ defmodule Compos.Ui.Layouts do
             font: 650 11px/1.3 var(--font-mono);
             letter-spacing: 0.015em;
           }
-          /* The keymap every list-mode buffer carries (the design's
-             c-keys-bar): a small card floating inside the window at its
-             bottom corner, over the rows, in the tooltip idiom -- a
-             hairline, a hard 3px shadow, no blur. One line: the main keys
-             and `? all N`. `?` grows the card upward into the whole map;
-             the rows underneath keep the point. A buffer that sets a plain
-             footer-line text gets the same card. */
+          /* The keymap every list-mode buffer carries: a bar at the foot of
+             the window, full width, above the mode line and never over the
+             rows. One line: the main keys the mode declared and `? all N`.
+             `?` grows the bar into the whole map; the rows keep the point. */
           .buffer-footer {
-            position: absolute; right: var(--s7); bottom: var(--keys-bottom, 30px);
-            z-index: 6;
+            flex: none; min-width: 0;
             display: flex; flex-direction: column; gap: var(--s4);
-            max-width: calc(100% - 2 * var(--s7));
-            padding: var(--s2) var(--s6) 4px;
-            background: var(--surface-raised);
-            border: var(--border);
-            box-shadow: 3px 3px 0 var(--edge);
+            max-height: 45%; overflow: auto;
+            padding: var(--s3) var(--row-px) var(--s4);
+            background: var(--surface-sunken);
+            border-top: var(--border-soft);
             font-family: var(--font-mono); font-size: var(--fs-meta);
             color: var(--text-faint);
             white-space: nowrap;
           }
-          .buffer-footer:has(.c-keys-bar.expanded) {
-            padding: var(--s5) var(--s7) var(--s6);
-            min-width: min(100%, 460px);
-            border-color: var(--text-strong);
-          }
+          .buffer-footer:has(.c-keys-bar.expanded) { padding: var(--s5) var(--row-px) var(--s6); }
           .buffer-footer .c-keys-bar { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
           .buffer-footer .keys-line {
             display: flex; flex-wrap: wrap; align-items: baseline;
@@ -470,14 +461,17 @@ defmodule Compos.Ui.Layouts do
           }
           /* a card is not a bar: when the room runs out its keys wrap onto
              a second line rather than clipping */
-          .buffer-footer .c-keymap { padding: 0; flex: 0 1 auto; min-width: 0; gap: var(--s3) var(--s8); }
+          /* the strip's rows and the more-control share one wrapping line,
+             so `? all N` follows the last key instead of taking a line */
+          .buffer-footer .keys-line > .c-keymap { display: contents; }
+          .buffer-footer .keys-line { gap: var(--s3) var(--s8); }
           .buffer-footer .keys-more {
-            flex: none; margin-left: auto; padding-left: var(--s5);
+            flex: none; padding-left: var(--s5);
             border-left: var(--border-soft); color: var(--text-faint);
             white-space: nowrap; cursor: default;
           }
           .buffer-footer .keys-more:hover { color: var(--text-strong); }
-          .buffer-footer .keys-more .c-keymap-key { margin-right: var(--s3); }
+          .buffer-footer .keys-more c-action-key { margin-right: var(--s3); }
           /* the whole map: a grid per keymap, key then verb, read down the
              columns like describe-keymap */
           .buffer-footer .c-keys {
@@ -498,7 +492,7 @@ defmodule Compos.Ui.Layouts do
             align-items: baseline; padding: 1px var(--s4);
             font-size: var(--fs-small); color: var(--text-soft); white-space: nowrap;
           }
-          .buffer-footer .c-binding .c-keymap-key { text-align: right; overflow: hidden; text-overflow: ellipsis; }
+          .buffer-footer .c-binding c-action-key { display: block; text-align: right; overflow: hidden; text-overflow: ellipsis; }
           .buffer-footer .c-binding .do { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
           .window.workspace-pending .buffer-header {
             border-bottom-color: color-mix(in srgb, var(--alert-fg, #d13b32) 68%, transparent);
@@ -1231,12 +1225,6 @@ defmodule Compos.Ui.Layouts do
             background: var(--linenum-fg, #c3bcac); flex: 0 0 auto;
           }
           .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
-          .modeline .name {
-            font-weight: var(--fw-semi); font-size: var(--fs-meta);
-            color: var(--accent); white-space: nowrap;
-            overflow: hidden; text-overflow: ellipsis; text-transform: none;
-          }
-          .window.inactive .modeline .name { color: var(--text-faint); }
           /* The buffer-name grammar (editor.scm): every chrome that shows a
              buffer or a group draws these classes and never the raw name.
              *Messages* is bold and keeps no asterisks; :mode: is the icon. */
@@ -1278,7 +1266,6 @@ defmodule Compos.Ui.Layouts do
           /* the name is the last thing on the mode line to give way: the
              position sheds its size, then its percentage, then itself,
              before the name loses a character */
-          .modeline .name { flex: 0 1 auto; min-width: 6ch; }
           @container (max-width: 560px) { .modeline .ml-pos-size { display: none; } }
           @container (max-width: 460px) { .modeline .ml-project { display: none; } }
           @container (max-width: 460px) { .modeline .ml-pos-pct { display: none; } }
@@ -1416,12 +1403,18 @@ defmodule Compos.Ui.Layouts do
              between them takes the slack, so a message never moves a key */
           .echo-area .ml-rule { align-self: center; }
           .echo-area:has(.echo:empty) .echo { display: none; }
-          .ml-key {
-            font-weight: var(--fw-semi); text-transform: none;
+          /* A pressable key is one element, c-action-key, and it is always
+             the same: accent, semibold, mono, its exact characters. The
+             echo hints, the keys card, the transient legends and the
+             which-key panel all draw it; a wrapper adds a box or a size,
+             never a colour. */
+          c-action-key {
+            font-family: var(--font-mono); font-weight: var(--fw-semi);
             color: var(--accent); white-space: nowrap;
+            text-transform: none; letter-spacing: 0;
           }
           .ml-do { color: var(--text-faint); text-transform: none; }
-          .echo-hint .ml-key + .ml-do {
+          .echo-hint c-action-key + .ml-do {
             margin-left: calc(var(--s4) - var(--s9));
           }
           /* Chrome never spills: a bar clips its own overflow rather than
@@ -1600,8 +1593,8 @@ defmodule Compos.Ui.Layouts do
           .transient-key {
             display: inline-flex; align-items: center; justify-content: center;
             width: 40px; height: 36px; border-radius: 0;
-            background: var(--default-bg, #f4f0e6); color: var(--dim-fg, #8a857a);
-            font-size: 19px; font-weight: 650;
+            background: var(--default-bg, #f4f0e6);
+            font-size: 19px; font-weight: var(--fw-semi);
           }
           .transient-item.selected .transient-key {
             background: var(--accent-fg, #26356b); color: var(--window-bg, #fdfcf8);
@@ -1652,7 +1645,7 @@ defmodule Compos.Ui.Layouts do
             padding: 14px 28px 16px; border-top: 1px solid var(--border-bg, #e2dbc9);
             color: var(--dim-fg, #8a857a); font-size: 16px;
           }
-          .transient-legend-key { color: var(--default-fg, #1b1a17); font-weight: 700; }
+          .transient-legend-key { margin-right: var(--s3); }
           /* the palette body: candidates left, the facts panel right */
           .mb-body { display: flex; flex: 1; min-height: 0; }
           .mb-body .mb-cands { flex: 1; min-width: 0; }
@@ -1923,7 +1916,7 @@ defmodule Compos.Ui.Layouts do
             min-width: 3ch; padding: 1px 5px;
             border: 1px solid var(--border-bg, #d8d0c0); border-radius: 0;
             background: var(--select-bg, #e7e9f1);
-            color: var(--accent-fg, #26356b); font-weight: 700;
+            font-weight: var(--fw-semi);
           }
           .wk-cmd {
             min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

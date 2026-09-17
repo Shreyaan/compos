@@ -12,7 +12,7 @@ defmodule Compos.Ui.ComposML do
     buffer-name mode position headline statusbar status progress tabs tab field
     label metric key-hints minibuffer completions completion which-key transcript
     message user agent toolcall info summary permission plan tool-call arguments result eval activity prompt input cursor toolbar echo
-    action value group text row card preview empty properties list item message-body question answers hint)
+    action action-key value group text row card preview empty properties list item message-body question answers hint)
 
   @mail_elements ~w(mailboxes mailbox mailbox-name unread-count message-count
     mail-query mail-threads mail-thread mail-subject mail-date mail-participants

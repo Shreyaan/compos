@@ -62,16 +62,16 @@
     (check-equal! (buffer-local "*Messages*" 'text-scale) messages-text-scale
                   "the buffer carries the configured step")))
 
-(deftest 'the-messages-list-pins-its-keys-in-the-keymap-component
-  "the key bar is the shared ui/keymap component, not a header line"
+(deftest 'the-messages-list-pins-its-keys-in-the-keys-bar
+  "the key bar is the keys bar at the window's foot, not a header line"
   (lambda ()
     (messages-clear!)
     (message "a row" 'info)
     (run-command "view-messages")
     (let ((blocks (buffer-local "*Messages*" 'footer-line-blocks)))
       (check-true! (pair? blocks) "the footer carries blocks")
-      (check-equal! (plist-get (car blocks) 'tag) "c-key-hints"
-                    "and those blocks are the keymap component"))))
+      (check-equal! (plist-get (car blocks) 'tag) "c-keys-bar"
+                    "and those blocks are the keys bar"))))
 
 (deftest 'messages-cells-name-the-buffer-and-colour-the-level
   "the source is the buffer that spoke, not its group"

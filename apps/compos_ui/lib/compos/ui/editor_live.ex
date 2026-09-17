@@ -1436,7 +1436,7 @@ defmodule Compos.Ui.EditorLive do
               <h3 class="wk-group-title">{label}<c-text>{length(bindings)}</c-text></h3>
               <c-group class="wk-grid">
                 <c-group :for={w <- bindings} class="wk-item" data-command={String.downcase(w.command)}>
-                  <c-text class="wk-key">{w.key}</c-text>
+                  <c-action-key class="wk-key">{w.key}</c-action-key>
                   <c-text class="wk-cmd">{w.command}</c-text>
                 </c-group>
               </c-group>
@@ -1458,14 +1458,14 @@ defmodule Compos.Ui.EditorLive do
               <c-text class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</c-text>
               <c-text class="mb-head-spacer"></c-text>
               <c-text class="mb-head-legend">
-                <c-text :for={row <- palette_legend(@state.minibuffer)} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
+                <c-text :for={row <- palette_legend(@state.minibuffer)} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
               </c-text>
             </c-group>
           <% else %>
             <c-group class="mb-label-row">
               <%= case Map.get(@state.minibuffer, :legend, []) do %>
                 <% [_ | _] = legend -> %>
-                  <c-text :for={row <- legend} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
+                  <c-text :for={row <- legend} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
                 <% _ -> %>
                   {label_row(@state.minibuffer)}
               <% end %>
@@ -1552,7 +1552,7 @@ defmodule Compos.Ui.EditorLive do
                       :for={item <- group.items}
                       class={"transient-item #{if item.selected, do: "selected"} #{item.behavior}"}
                     >
-                      <c-text class="transient-key">{item.key}</c-text>
+                      <c-action-key class="transient-key">{item.key}</c-action-key>
                       <c-text class="transient-description">{item.description}</c-text>
                       <c-text :if={item.value != ""} class="transient-value">{item.value}</c-text>
                     </c-group>
@@ -1570,12 +1570,12 @@ defmodule Compos.Ui.EditorLive do
             </c-group>
             <c-group class="transient-help">
               <%= if @state.transient[:legend] not in [nil, []] do %>
-                <c-text :for={row <- @state.transient.legend} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
+                <c-text :for={row <- @state.transient.legend} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
               <% else %>
-                <c-text class="transient-legend"><c-text class="transient-legend-key">RET</c-text> invoke</c-text>
-                <c-text class="transient-legend"><c-text class="transient-legend-key">C-g</c-text> quit</c-text>
-                <c-text class="transient-legend"><c-text class="transient-legend-key">↑↓</c-text> select</c-text>
-                <c-text class="transient-legend"><c-text class="transient-legend-key">?</c-text> help</c-text>
+                <c-text class="transient-legend"><c-action-key class="transient-legend-key">RET</c-action-key> invoke</c-text>
+                <c-text class="transient-legend"><c-action-key class="transient-legend-key">C-g</c-action-key> quit</c-text>
+                <c-text class="transient-legend"><c-action-key class="transient-legend-key">↑↓</c-action-key> select</c-text>
+                <c-text class="transient-legend"><c-action-key class="transient-legend-key">?</c-action-key> help</c-text>
               <% end %>
             </c-group>
           </c-minibuffer>
@@ -1628,7 +1628,7 @@ defmodule Compos.Ui.EditorLive do
       <c-echo class="echo">{@state.echo}</c-echo>
       <c-text class="ml-rule"></c-text>
       <c-key-hints class="echo-hint">
-        <c-text :for={{k, v} <- header_keys()} class="ml-key">{k}<%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
+        <c-text :for={{k, v} <- header_keys()} class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
       </c-key-hints>
     </c-statusbar>
     """
@@ -2255,16 +2255,15 @@ defmodule Compos.Ui.EditorLive do
         {@node.footer_line}
       </c-group>
       <c-modeline class="modeline">
-        <c-text class={"ml-dot #{if @node.modified, do: "modified"}"}></c-text>
-        <c-buffer-name
-          buffer={@node.buffer}
-          modified={to_string(@node.modified)}
-          class="name"
+        <%!-- the header line names the buffer; the mode line does not say
+               it again. The dot is the state and opens the dashboard. --%>
+        <c-text
+          class={"ml-dot #{if @node.modified, do: "modified"}"}
           title={@node.buffer}
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
-        ><%= if ml_segs(@node) != [] do %><c-text :for={{c, t} <- ml_segs(@node)} class={c}>{t}</c-text><% else %>{ml_name(@node)}<% end %></c-buffer-name>
+        ></c-text>
         <c-field name="project" :if={@node.modeline_project && @node.modeline_project != ""} class="ml-project">{@node.modeline_project}</c-field>
         <c-status state="selected" :if={@node.selected} class="ml-mode ml-selected">● selected</c-status>
         <c-mode :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</c-mode>
@@ -2818,6 +2817,11 @@ defmodule Compos.Ui.EditorLive do
     """
   end
 
+  # a product photo or an embedded picture, drawn from its src attr
+  defp blk(%{b: %{tag: "img"}} = assigns) do
+    ~M|<img class={blk_class(@b, @line)} {@b.attrs} loading="lazy" />|
+  end
+
   # any other tag: an SVG chart, a table, a label. The attributes are the
   # mode's, filtered by the allowlist below; a click still routes by id.
   defp blk(assigns) do
@@ -2862,12 +2866,12 @@ defmodule Compos.Ui.EditorLive do
   # Nothing that loads a resource, runs a script, or submits a form. A tag
   # outside the list draws as a div, an attribute outside it is dropped.
   @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre kbd p h1 h2 h3 h4 table thead tbody tr th td ul ol li
-                 svg g path rect circle ellipse line polyline polygon text tspan title)
+                 svg g path rect circle ellipse line polyline polygon text tspan title img)
   @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target style d viewBox preserveAspectRatio fill stroke stroke-width
                   stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
                   stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
                   width height points transform vector-effect text-anchor font-size
-                  dominant-baseline shape-rendering title colspan rowspan)
+                  dominant-baseline shape-rendering title colspan rowspan src alt)
 
   defp semantic_line(%{fields: []} = assigns) do
     ~M"""
@@ -4261,9 +4265,6 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp ml_segs(_), do: []
-
-  defp ml_name(%{modeline_name: name}) when is_binary(name) and name != "", do: name
-  defp ml_name(%{buffer: buffer}), do: buffer
 
   defp ml_bytes(text) do
     b = Kernel.byte_size(text)

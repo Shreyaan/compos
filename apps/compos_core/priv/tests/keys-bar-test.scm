@@ -24,7 +24,13 @@
         (check-true! (string-prefix? "all " (t--keys-bar-more bar))
                      "the line ends in ? all N")
         (check-equal! (length (plist-get bar 'children)) 1
-                      "and holds no grid while folded"))
+                      "and holds no grid while folded")
+        ;; every pressable key is one element, so it is always one colour
+        (let* ((line (car (plist-get bar 'children)))
+               (strip (car (plist-get line 'children)))
+               (row (car (plist-get strip 'children)))
+               (key (car (plist-get row 'segs))))
+          (check-equal! (caddr key) "c-action-key" "a key draws as c-action-key")))
       (buffer-kill! buf))))
 
 (deftest 'question-mark-grows-the-card-into-the-whole-map
