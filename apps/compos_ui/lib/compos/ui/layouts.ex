@@ -796,6 +796,9 @@ defmodule Compos.Ui.Layouts do
           /* one key, one corner. The chip floats over the top right of the
              window, so a dismissible buffer spends no row on saying so. */
           .dismiss-action { position: absolute; top: 3px; right: 5px; z-index: 4; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; opacity: .6; }
+          /* a window with a header line has the switcher in that corner;
+             the dismiss key stays on q and draws no chip over it */
+          .window:has(> .dash-top) > .dismiss-action { display: none; }
           .dismiss-action kbd { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 0; background: var(--cursor-bg, #26356b); color: var(--cursor-fg, #fff); font: 700 11px var(--font-mono); }
           .dismiss-action:hover, .dismiss-action:focus-visible { opacity: 1; outline: none; }
           .dismiss-action:focus-visible kbd { outline: 2px solid var(--cursor-bg, #26356b); outline-offset: 2px; }
@@ -1279,7 +1282,8 @@ defmodule Compos.Ui.Layouts do
           .echo-bar {
             order: -1;
             display: flex; align-items: center; gap: var(--s9);
-            padding: var(--chrome-py) var(--chrome-px);
+            /* one short line: the tabs set the height, the bar adds 3px */
+            padding: var(--s2) var(--chrome-px);
             flex: none; min-width: 0; overflow: hidden;
             background: var(--surface-chrome);
             border-bottom: var(--border);
@@ -1376,7 +1380,7 @@ defmodule Compos.Ui.Layouts do
             cursor: default; white-space: nowrap;
             font-size: var(--fs-label); font-weight: var(--fw-reg);
             letter-spacing: var(--ls-label); text-transform: uppercase;
-            padding: 3px var(--s6);
+            padding: 2px var(--s5);
             color: var(--text-faint);
             background: transparent;
             border: 1px solid transparent;
