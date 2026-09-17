@@ -1813,7 +1813,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;;; only when a group the cut left out takes its slot. A tab is one
 ;;; click to another context; the count opens the board with the rest.
 
-(defcustom 'frame-tabs-limit 5
+(defcustom 'frame-tabs-limit 10
   "How many groups the frame modeline shows as tabs. The rest count as one more."
   'group 'groups 'type 'number)
 
