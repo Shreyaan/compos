@@ -79,6 +79,11 @@ defmodule Compos.Scheme.Builtins do
       end,
       "string-append" => fn args -> Enum.join(args) end,
       "string-length" => fn [s] -> String.length(s) end,
+      "string=?" => fn [a | rest] when is_binary(a) -> Enum.all?(rest, &(&1 == a)) end,
+      # every Scheme has format and this one did not, so a caller building a
+      # message reached for string-append and value->string, or guessed a name
+      # that is not here and lost the guess inside a callback
+      "format" => fn [fmt | args] when is_binary(fmt) -> format_string(fmt, args) end,
       "string-contains?" => fn [s, sub] -> String.contains?(s, sub) end,
       "string-prefix?" => fn [pre, s] -> String.starts_with?(s, pre) end,
       "string-suffix?" => fn [suf, s] -> String.ends_with?(s, suf) end,
@@ -373,6 +378,9 @@ defmodule Compos.Scheme.Builtins do
       "function-source" => "(function-source F) — return the lambda source of F; builtins report as opaque.",
       "string-append" => "(string-append S ...) — concatenate the strings into one string.",
       "string-length" => "(string-length S) — return the count of characters in S, not bytes.",
+      "string=?" => "(string=? S ...) — return true if every string is the same.",
+      "format" =>
+        "(format FMT ARG ...) — build a string: ~a inserts a value as text, ~s as its printed form, ~% a newline, ~~ a tilde.",
       "string-contains?" => "(string-contains? S SUB) — return true if S contains SUB.",
       "string-prefix?" => "(string-prefix? PRE S) — return true if S starts with PRE.",
       "string-edit-distance" =>
@@ -513,6 +521,44 @@ defmodule Compos.Scheme.Builtins do
   end
 
   defp cmp_pairs(_args, _op), do: true
+
+  # ~a inserts a value as text, ~s as its printed form (a string keeps its
+  # quotes), ~% a newline, ~~ a tilde. Anything else is an error rather than
+  # a silently copied directive: a wrong format string should say so.
+  defp format_string(fmt, args) do
+    {out, rest} = format_scan(String.graphemes(fmt), args, [])
+
+    unless rest == [] do
+      raise Eval.Error, message: "format: #{length(rest)} unused argument(s)"
+    end
+
+    IO.iodata_to_binary(out)
+  end
+
+  defp format_scan([], args, acc), do: {Enum.reverse(acc), args}
+
+  defp format_scan(["~", d | _], [], _acc) when d in ["a", "s"] do
+    raise Eval.Error, message: "format: no argument for ~#{d}"
+  end
+
+  defp format_scan(["~", "a" | t], [a | args], acc),
+    do: format_scan(t, args, [format_display(a) | acc])
+
+  defp format_scan(["~", "s" | t], [a | args], acc),
+    do: format_scan(t, args, [Printer.print(a) | acc])
+
+  defp format_scan(["~", "%" | t], args, acc), do: format_scan(t, args, ["\n" | acc])
+  defp format_scan(["~", "~" | t], args, acc), do: format_scan(t, args, ["~" | acc])
+
+  defp format_scan(["~", d | _], _args, _acc) do
+    raise Eval.Error, message: "format: unknown directive ~#{d}"
+  end
+
+  defp format_scan([c | t], args, acc), do: format_scan(t, args, [c | acc])
+
+  # ~a shows a string bare; every other value prints
+  defp format_display(v) when is_binary(v), do: v
+  defp format_display(v), do: Printer.print(v)
 
   # keep the elements whose PRED answer is truthy (KEEP true) or false
   defp select(pred, l, store, keep) do

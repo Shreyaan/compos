@@ -177,7 +177,13 @@ defmodule Compos.Core.Session do
   dropping an out-of-editor reply loses it outright. Backend.call_context uses
   the same defensive retry. Ordinary callbacks still fail fast.
   """
-  def apply_reply_callback(closure, args, fid \\ nil, lane \\ nil, retries \\ @stale_frame_retries) do
+  def apply_reply_callback(
+        closure,
+        args,
+        fid \\ nil,
+        lane \\ nil,
+        retries \\ @stale_frame_retries
+      ) do
     result = apply_callback(closure, args, fid, lane)
 
     case result do
@@ -192,8 +198,9 @@ defmodule Compos.Core.Session do
       # retries exhausted: exec_apply stayed quiet for every attempt, so the
       # lost reply would otherwise leave no trace at all. Say it once.
       {:error, msg} ->
-        if stale_frame?(msg),
-          do: message("error: " <> msg <> " (reply dropped after #{@stale_frame_retries} retries)")
+        if stale_frame?(msg) do
+          message("error: #{msg} (reply dropped after #{@stale_frame_retries} retries)")
+        end
 
         result
 
