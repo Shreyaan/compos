@@ -1046,10 +1046,13 @@
 ;;; reads a face variable with a fallback, so a theme that says nothing
 ;;; still gets a readable chart.
 
-(defface! 'perf-indigo 'fg "#3b5bb5")
-(defface! 'perf-amber 'fg "#b07a2a")
-(defface! 'perf-red 'fg "#c24a3a")
-(defface! 'perf-green 'fg "#3a8a58")
+;; The four hues are the theme's own accents, stepped toward the dim ink:
+;; a monitor is read all day, and a saturated field shouts. Nominal is not
+;; a colour at all: only warm and hot carry one.
+(defface! 'perf-indigo 'fg "color-mix(in srgb, var(--accent-fg) 55%, var(--dim-fg))")
+(defface! 'perf-amber 'fg "color-mix(in srgb, var(--warn-fg) 60%, var(--dim-fg))")
+(defface! 'perf-red 'fg "color-mix(in srgb, var(--alert-fg) 65%, var(--dim-fg))")
+(defface! 'perf-green 'fg "var(--modeline-fg)")
 
 (define-style! 'perf "
 .perf-root { font-family: var(--font-mono); font-size: 12.5px; color: var(--default-fg); -webkit-font-smoothing: antialiased; height: 100%; min-height: 0; display: flex; flex-direction: column; }
@@ -1101,8 +1104,8 @@
 .perf-stroke.perf-idle { stroke: var(--dim-fg); }
 span.perf-hot { color: var(--perf-red-fg, #c24a3a); }
 span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
-span.perf-cool { color: var(--perf-indigo-fg, #3b5bb5); }
-span.perf-ok { color: var(--perf-green-fg, #3a8a58); }
+span.perf-cool { color: var(--modeline-fg); }
+span.perf-ok { color: var(--modeline-fg); }
 span.perf-idle { color: var(--dim-fg); }
 .perf-corner { position: absolute; font-size: 10px; color: var(--dim-fg); }
 .perf-corner-tl { left: 6px; top: 4px; } .perf-corner-bl { left: 6px; bottom: 3px; } .perf-corner-tr { right: 6px; top: 3px; }
@@ -1123,7 +1126,7 @@ span.perf-idle { color: var(--dim-fg); }
 .perf-ring-track { fill: none; stroke: var(--hl-line-bg); stroke-width: 5; }
 .perf-ring-arc { fill: none; stroke-width: 5; }
 .perf-ring-arc.perf-user { stroke: var(--perf-indigo-fg, #3b5bb5); } .perf-ring-arc.perf-sys { stroke: var(--perf-amber-fg, #b07a2a); }
-.perf-ring-arc.perf-io { stroke: var(--perf-red-fg, #c24a3a); } .perf-ring-arc.perf-ok { stroke: var(--perf-green-fg, #3a8a58); }
+.perf-ring-arc.perf-io { stroke: var(--perf-red-fg, #c24a3a); } .perf-ring-arc.perf-ok { stroke: var(--modeline-fg); }
 .perf-ring-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; }
 .perf-ring-label { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); }
 .perf-ring-sub { font-size: 10.5px; color: var(--dim-fg); }
@@ -1136,7 +1139,7 @@ span.perf-idle { color: var(--dim-fg); }
 .perf-core-label { position: relative; display: flex; justify-content: space-between; font-size: 10px; }
 .perf-histo { flex: 1; min-height: 130px; display: flex; align-items: flex-end; gap: 1px; padding: 10px 12px 6px; }
 .perf-hbar { flex: 1; min-width: 0; }
-.perf-hbar.perf-fill.perf-hot { background: var(--perf-red-fg, #c24a3a); } .perf-hbar.perf-fill.perf-warm { background: var(--perf-amber-fg, #b07a2a); } .perf-hbar.perf-fill.perf-cool { background: var(--perf-indigo-fg, #3b5bb5); }
+.perf-hbar.perf-fill.perf-hot { background: var(--perf-red-fg, #c24a3a); } .perf-hbar.perf-fill.perf-warm { background: var(--perf-amber-fg, #b07a2a); } .perf-hbar.perf-fill.perf-cool { background: var(--dim-fg); }
 .perf-axis { display: flex; justify-content: space-between; padding: 0 12px 6px; font-size: 10px; color: var(--dim-fg); }
 .perf-heat { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 12px; gap: 4px; }
 .perf-heat-row { flex: 1; display: flex; align-items: center; gap: 8px; min-height: 22px; }
@@ -1144,10 +1147,10 @@ span.perf-idle { color: var(--dim-fg); }
 .perf-heat-cells { flex: 1; display: flex; gap: 1px; height: 100%; min-width: 0; }
 .perf-cell { flex: 1; min-width: 0; }
 .perf-h0 { background: var(--hl-line-bg); }
-.perf-h1 { background: color-mix(in srgb, var(--perf-indigo-fg, #3b5bb5) 25%, transparent); }
-.perf-h2 { background: color-mix(in srgb, var(--perf-indigo-fg, #3b5bb5) 50%, transparent); }
-.perf-h3 { background: color-mix(in srgb, var(--perf-amber-fg, #b07a2a) 60%, transparent); }
-.perf-h4 { background: color-mix(in srgb, var(--perf-red-fg, #c24a3a) 65%, transparent); }
+.perf-h1 { background: color-mix(in srgb, var(--default-fg) 12%, transparent); }
+.perf-h2 { background: color-mix(in srgb, var(--default-fg) 24%, transparent); }
+.perf-h3 { background: color-mix(in srgb, var(--default-fg) 38%, transparent); }
+.perf-h4 { background: color-mix(in srgb, var(--perf-amber-fg, #b07a2a) 70%, transparent); }
 .perf-h5 { background: var(--perf-red-fg, #c24a3a); }
 .perf-heat-val { flex: 0 0 38px; font-size: 10px; text-align: right; }
 .perf-plist { flex: 1; min-height: 0; overflow-y: auto; }
@@ -1166,7 +1169,7 @@ span.perf-idle { color: var(--dim-fg); }
 .perf-disk { display: grid; grid-template-columns: 170px 1fr 80px 50px; gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 11px; }
 .perf-diskbar { height: 9px; border: 1px solid var(--border-bg); background: var(--hl-line-bg); }
 .perf-diskfill { height: 100%; }
-.perf-diskfill.perf-hot { background: var(--perf-red-fg, #c24a3a); } .perf-diskfill.perf-warm { background: var(--perf-amber-fg, #b07a2a); } .perf-diskfill.perf-cool { background: var(--perf-indigo-fg, #3b5bb5); } .perf-diskfill.perf-idle { background: var(--perf-green-fg, #3a8a58); }
+.perf-diskfill.perf-hot { background: var(--perf-red-fg, #c24a3a); } .perf-diskfill.perf-warm { background: var(--perf-amber-fg, #b07a2a); } .perf-diskfill.perf-cool { background: var(--dim-fg); } .perf-diskfill.perf-idle { background: var(--dim-fg); }
 .perf-logs { flex: 1; min-height: 0; overflow-y: auto; padding: 3px 0; }
 .perf-log { display: flex; gap: 10px; padding: 3px 12px; font-size: 11.5px; }
 .perf-log-new { background: var(--hl-line-bg); }
