@@ -27,8 +27,8 @@ defmodule Compos.Core.SchemeRawNames do
     * `M-x reload-scheme` registers it again, so a raw name that somehow
       goes wrong is repaired in the running daemon.
 
-  `add/1` and `add_docs/1` skip a name whose target the caller's map does
-  not hold, so each module contributes only its own primitives. The test
+  `add/1` skips a name whose target the caller's map does not hold, so
+  each module contributes only its own primitives. The test
   `scheme_raw_names_test.exs` checks that every name here resolves in
   exactly one module.
   """
@@ -70,21 +70,11 @@ defmodule Compos.Core.SchemeRawNames do
   The raw name gets the same fun as the primitive, so both names are one
   primitive with two spellings.
   """
-  def add(primitives) do
-    Enum.reduce(@wrapped, primitives, fn {raw, target}, acc ->
-      case Map.fetch(primitives, target) do
-        {:ok, fun} -> Map.put(acc, raw, fun)
-        :error -> acc
-      end
-    end)
-  end
-
-  @doc "DOCS plus one line per raw name whose target DOCS documents."
-  def add_docs(docs) do
-    Enum.reduce(@wrapped, docs, fn {raw, target}, acc ->
-      case Map.fetch(docs, target) do
-        {:ok, _} -> Map.put(acc, raw, doc(raw, target))
-        :error -> acc
+  def add(entries) do
+    Enum.reduce(@wrapped, entries, fn {raw, target}, acc ->
+      case Compos.Scheme.Prim.fun(entries, target) do
+        nil -> acc
+        fun -> Map.put(acc, {raw, doc(raw, target)}, fun)
       end
     end)
   end

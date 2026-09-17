@@ -23,6 +23,7 @@ defmodule Compos.Core.Session do
 
   alias Compos.Core.{Buffer, Editor, Frame, Lane, SchemeTask}
   alias Compos.Scheme
+  alias Compos.Scheme.Prim
   alias Compos.Scheme.Reader
 
   @messages "*Messages*"
@@ -424,7 +425,7 @@ defmodule Compos.Core.Session do
         # this process created the environment table, so a crash here would
         # destroy it; hand it to the table owner instead
         Compos.Core.SchemeTables.adopt(interp.store.tid)
-        interp = Scheme.register(interp, session_primitives(interp.global))
+        interp = Scheme.register(interp, Prim.funs(session_primitives(interp.global)))
         load_stdlib!(interp)
       end)
 
@@ -442,6 +443,7 @@ defmodule Compos.Core.Session do
 
     :persistent_term.put(@pt, interp)
     :persistent_term.put(@pt_stamp, primitive_stamp())
+    :persistent_term.erase(@pt_docs)
     Process.send_after(self(), :gc_tick, @gc_interval)
 
     # A restart is a boot of the Scheme world, so the Scheme world's durable
@@ -659,11 +661,15 @@ defmodule Compos.Core.Session do
       # A register also puts the raw primitive back over the Scheme wrapper
       # that editor.scm defines for the same name.
       extra =
-        Map.merge(Compos.Core.SchemeAPI.primitives(), session_primitives(interp.global))
+        Map.merge(
+          Compos.Core.SchemeAPI.primitives(),
+          Prim.funs(session_primitives(interp.global))
+        )
 
       interp = Scheme.rebind_primitives(interp, extra)
       :persistent_term.put(@pt, interp)
       :persistent_term.put(@pt_stamp, primitive_stamp())
+      :persistent_term.erase(@pt_docs)
       {:reply, :ok, state}
     else
       {:reply, {:error, :primitives_not_loaded}, state}
@@ -1023,10 +1029,21 @@ defmodule Compos.Core.Session do
   end
 
   # one merged map: the three registration modules' docs
+  # The entries build closures, so the merged doc map is derived once per
+  # primitive generation: apropos asks for a doc per global name.
+  @pt_docs {__MODULE__, :primitive_docs}
+
   defp primitive_docs do
-    Compos.Scheme.Builtins.docs()
-    |> Map.merge(Compos.Core.SchemeAPI.docs())
-    |> Map.merge(docs())
+    :persistent_term.get(@pt_docs, nil) ||
+      (
+        docs =
+          Compos.Scheme.Builtins.docs()
+          |> Map.merge(Compos.Core.SchemeAPI.docs())
+          |> Map.merge(docs())
+
+        :persistent_term.put(@pt_docs, docs)
+        docs
+      )
   end
 
   defp doc_name({:sym, n}), do: n
@@ -1036,270 +1053,7 @@ defmodule Compos.Core.Session do
   One-line doc string for every primitive that `session_primitives/1`
   registers. Format: a call signature, then " — ", then one sentence.
   """
-  def docs, do: Compos.Core.SchemeRawNames.add_docs(own_docs())
-
-  defp own_docs do
-    %{
-      "primitive-doc" =>
-        "(primitive-doc NAME) — return the one-line doc for an Elixir primitive, or #f.",
-      "primitive-docs" =>
-        "(primitive-docs) — return (NAME DOC) pairs for every Elixir primitive, sorted.",
-      "message" => "(message TEXT [LEVEL]) — log TEXT and show it in the echo area.",
-      "message-emit" =>
-        "(message-emit TEXT LEVEL SOURCE GROUP PROJECT) — record one structured editor message.",
-      "messages-snapshot" =>
-        "(messages-snapshot [LIMIT]) — return recent structured editor messages, oldest first.",
-      "messages-clear!" => "(messages-clear!) — discard every editor message.",
-      "task-spawn" =>
-        "(task-spawn THUNK) — run a zero-argument Scheme closure concurrently over the shared editor world.",
-      "task-run!" =>
-        "(task-run! THUNK CALLBACK [MS]) — run THUNK concurrently; later call CALLBACK with OK? and its value or error.",
-      "task-await" =>
-        "(task-await TASK [MS]) — wait for a Scheme task and return its value, or raise its error.",
-      "task-alive?" => "(task-alive? TASK) — return #t while TASK remains available.",
-      "task-cancel!" => "(task-cancel! TASK) — stop a Scheme task.",
-      "define-command" =>
-        "(define-command NAME [DOC] FN) — register an M-x command; DOC shows in M-x.",
-      "undefine-command" => "(undefine-command NAME) — remove an M-x command from the registry.",
-      "command-names" => "(command-names) — return every M-x command name.",
-      "global-keys" =>
-        "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding.",
-      "local-keys" =>
-        "(local-keys BUF) — return ((KEYS COMMAND) ...) for BUF's own key bindings.",
-      "command-fn" => "(command-fn NAME) — return the command's closure, or #f.",
-      "command-doc" =>
-        "(command-doc NAME) — return the command's doc string; empty when it has none.",
-      "run-command" => "(run-command NAME) — run the named command; error when it is undefined.",
-      "llm" => "(llm PROMPT CALLBACK) — start an async completion; CALLBACK gets the reply text.",
-      "llm-with-model" =>
-        "(llm-with-model PROMPT MODEL CALLBACK) — async completion on MODEL; CALLBACK gets the reply text.",
-      "llm-tools" =>
-        "(llm-tools PROMPT SYSTEM SPECS DISPATCHER CB [USAGE-CB]) — async tool loop; CB gets text.",
-      "browser-call" =>
-        "(browser-call OP ARGS CB) — send OP to the browser; CB gets a reply plist.",
-      "browser-call-sync" =>
-        "(browser-call-sync OP ARGS [MS]) — send OP and wait for the reply plist (default 2s, max 5s).",
-      "browser-serve!" =>
-        "(browser-serve! HANDLER) — set the handler for browser requests: (HANDLER OP ARGS).",
-      "browser-connected?" =>
-        "(browser-connected?) — return #t when a browser extension is connected.",
-      "dispatch-keys" =>
-        "(dispatch-keys KEYS) — dispatch key chords through the serialized GUI input queue, in order.",
-      "mcp-connect!" => "(mcp-connect! NAME SPEC) — connect an MCP server from a spec plist.",
-      "mcp-disconnect!" => "(mcp-disconnect! NAME) — disconnect the named MCP server.",
-      "mcp-connections" =>
-        "(mcp-connections) — return (name status tools type resources prompts) per connection.",
-      "mcp-server-detail" =>
-        "(mcp-server-detail NAME) — return a status plist, or #f when never started.",
-      "mcp-on-change!" =>
-        "(mcp-on-change! HANDLER) — set the handler that gets (NAME STATUS) on server changes.",
-      "mcp-log" => "(mcp-log NAME) — return ((time dir text) ...) JSON-RPC frames, oldest first.",
-      "mcp-tool-specs" => "(mcp-tool-specs NAMES) — return the tool specs of the named servers.",
-      "mcp-await-ready" =>
-        "(mcp-await-ready SERVER [MS]) — wait until the server is ready; return #t or #f.",
-      "mcp-tool-call" =>
-        "(mcp-tool-call SERVER TOOL ARGS [TIMEOUT|CB]) — call one tool; without CB, wait for text.",
-      "lsp-start!" => "(lsp-start! NAME ROOT SPEC) — start a language server for a project root.",
-      "lsp-stop!" =>
-        "(lsp-stop! ID) — stop the connection \"name@root\" with the shutdown handshake.",
-      "lsp-connections" => "(lsp-connections) — return (id status name root) per connection.",
-      "lsp-server-detail" =>
-        "(lsp-server-detail ID) — return a status plist, or #f when never started.",
-      "lsp-log" => "(lsp-log ID) — return ((time dir text) ...) JSON-RPC frames, oldest first.",
-      "lsp-on-event!" =>
-        "(lsp-on-event! HANDLER) — set the handler that gets (ID METHOD PARAMS) on server events.",
-      "lsp-open!" => "(lsp-open! ID BUF) — open BUF on the server and keep it in sync.",
-      "lsp-close!" => "(lsp-close! ID BUF) — close BUF on the server.",
-      "lsp-notify!" => "(lsp-notify! ID METHOD PARAMS) — send a notification to the server.",
-      "lsp-buffer-request" =>
-        "(lsp-buffer-request ID METHOD BUF BYTE-POS [EXTRA] CB) — request at a buffer position; CB gets (OK RESULT).",
-      "db-connect!" =>
-        "(db-connect! NAME SPEC) — open a named database connection; SPEC has 'adapter 'database 'user 'password 'host or 'socket_dir 'port 'ssl.",
-      "db-disconnect!" => "(db-disconnect! NAME) — close the database connection NAME.",
-      "db-connected?" => "(db-connected? NAME) — #t when NAME is open.",
-      "db-list" => "(db-list) — return (name adapter database) per connection.",
-      "db-adapters" => "(db-adapters) — the database adapters this build can open.",
-      "db-query" =>
-        "(db-query NAME-OR-TRANSACTION SQL [PARAMS] [CB]) — without CB, run on the calling lane and return RESULT; with CB, answer asynchronously with (OK RESULT).",
-      "db-with-transaction" =>
-        "(db-with-transaction NAME PROC) — call PROC with a scoped transaction handle; commit and return its value, or roll back on error.",
-      "endpoint-start!" =>
-        "(endpoint-start! NAME SPEC) — open a named connection; SPEC picks the transport and framing.",
-      "endpoint-stop!" => "(endpoint-stop! NAME) — close the connection NAME.",
-      "endpoint-send!" =>
-        "(endpoint-send! NAME TEXT) — write one frame; do not wait for an answer.",
-      "endpoint-ask" =>
-        "(endpoint-ask NAME TEXT UNTIL [TIMEOUT] CB) — send a frame, collect frames up to the sentinel UNTIL; CB gets (OK FRAMES).",
-      "endpoint-on-event!" =>
-        "(endpoint-on-event! HANDLER) — set the handler that gets (NAME KIND TEXT) for unsolicited frames.",
-      "endpoint-list" =>
-        "(endpoint-list) — return (name status transport framing queued) per connection.",
-      "endpoint-detail" =>
-        "(endpoint-detail NAME) — return a status plist, or #f when never started.",
-      "endpoint-log" =>
-        "(endpoint-log NAME) — return ((time dir text) ...) frames, oldest first.",
-      "web-server-start!" =>
-        "(web-server-start! NAME SPEC HANDLER) — start an HTTP callback or webhook server; HANDLER receives a request plist and returns a response plist.",
-      "web-server-stop!" => "(web-server-stop! NAME) — stop the named HTTP server.",
-      "web-server-list" =>
-        "(web-server-list) — return (name host port url max-body) for every programmable HTTP server.",
-      "web-server-detail" =>
-        "(web-server-detail NAME) — return the server detail plist, or #f when the server is not running.",
-      "tool-specs-json" =>
-        "(tool-specs-json SPECS) — return the specs as MCP tools/list JSON text.",
-      "priv-path" =>
-        "(priv-path REL) — return the absolute path of REL in the compos_core priv directory.",
-      "ts-install-grammar!" =>
-        "(ts-install-grammar! NAME URL) — install a tree-sitter grammar in the background.",
-      "ts-installed-grammars" =>
-        "(ts-installed-grammars) — return the installed tree-sitter grammar names.",
-      "format-usd" => "(format-usd AMOUNT) — return AMOUNT as a dollar string with 4 decimals.",
-      "llm-cost-report" =>
-        "(llm-cost-report) — return one usage plist per day and model, with cost.",
-      "set-llm-model!" => "(set-llm-model! MODEL) — set the active LLM model.",
-      "set-llm-cache-ttl!" =>
-        "(set-llm-cache-ttl! TTL) — set how long the provider holds a cached prefix.",
-      "backend-capabilities" =>
-        "(backend-capabilities NAME) — return the backend's capability symbols.",
-      "llm-max-tokens" =>
-        "(llm-max-tokens MODEL) — return the model's maximum output tokens, or #f.",
-      "llm-model-reasoning" =>
-        "(llm-model-reasoning MODEL) — return normalized reasoning controls from the shared model catalog, or #f.",
-      "llm-available-models" =>
-        "(llm-available-models) — return ReqLLM's credential-aware chat model inventory.",
-      "llm-session-open!" =>
-        "(llm-session-open! ID CONFIG [CONTEXT EVENTS RECORD PERMISSION]) — open a backend-neutral LLM session.",
-      "llm-session-send!" =>
-        "(llm-session-send! ID TEXT [DISPLAY IMAGES]) — send or queue a message on an LLM session; IMAGES is ((MIME PATH) ...).",
-      "llm-session-cancel!" => "(llm-session-cancel! ID) — cancel an LLM session's current turn.",
-      "llm-session-close!" => "(llm-session-close! ID) — close an LLM session.",
-      "llm-session-set-model!" =>
-        "(llm-session-set-model! ID MODEL) — switch a live LLM session's model when supported.",
-      "llm-session-set-effort!" =>
-        "(llm-session-set-effort! ID EFFORT) — set reasoning effort for subsequent turns when supported.",
-      "llm-session-set-mode!" =>
-        "(llm-session-set-mode! ID MODE) — switch a live LLM session's permission mode when supported.",
-      "llm-session-on-event!" =>
-        "(llm-session-on-event! HANDLER) — set the default normalized-event handler for LLM sessions.",
-      "llm-session-context-fn!" =>
-        "(llm-session-context-fn! HANDLER) — set the default turn-context provider for LLM sessions.",
-      "llm-session-record-fn!" =>
-        "(llm-session-record-fn! HANDLER) — set the default conversation-record writer for LLM sessions.",
-      "llm-session-permission-fn!" =>
-        "(llm-session-permission-fn! HANDLER) — set the default tool permission policy for LLM sessions.",
-      "agent-start!" => "(agent-start! SLUG CONFIG) — start an agent thread from a config plist.",
-      "agent-prompt!" =>
-        "(agent-prompt! SLUG TEXT [DISPLAY]) — send a prompt; return 'sent or 'queued.",
-      "agent-dequeue!" =>
-        "(agent-dequeue! SLUG TEXT) — remove one queued prompt whose text is TEXT; return #t or #f.",
-      "agent-permission-respond!" =>
-        "(agent-permission-respond! SLUG RPC-ID OPTION-ID) — answer a pending permission request.",
-      "agent-ask-permission!" =>
-        "(agent-ask-permission! SLUG TITLE RAW) — raise a permission card in the chat and block until it is answered; return 'allow, 'always or 'deny.",
-      "agent-question-respond!" =>
-        "(agent-question-respond! SLUG ID ANSWER) — answer a pending branching question.",
-      "agent-append!" =>
-        "(agent-append! SLUG TEXT) — insert TEXT at the agent's mark; return the new byte offset.",
-      "agent-mark" => "(agent-mark SLUG) — return the agent's output mark as a byte offset.",
-      "agent-list" => "(agent-list) — return the slugs of the running agent threads, sorted.",
-      "agent-kill!" => "(agent-kill! SLUG) — stop the agent thread.",
-      "agent-set-model!" =>
-        "(agent-set-model! SLUG MODEL) — switch the live session's model; return #t or #f.",
-      "agent-set-mode!" =>
-        "(agent-set-mode! SLUG MODE) — switch the permission mode; #f when unsupported.",
-      "agent-info" =>
-        "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, permission, question; or #f.",
-      "agent-steer!" =>
-        "(agent-steer! SLUG) — send the oldest queued message into the running turn; return #t when sent.",
-      "agent-on-event!" =>
-        "(agent-on-event! HANDLER) — set the global agent event handler: (HANDLER SLUG EVENTS).",
-      "agent-on-turn-end!" =>
-        "(agent-on-turn-end! HANDLER) — set the turn-end handler: (HANDLER SLUG STOP-REASON), called on the :ui lane after the turn has rendered.",
-      "agent-context-fn!" =>
-        "(agent-context-fn! HANDLER) — set the direct lane's context provider for each turn.",
-      "agent-record-fn!" =>
-        "(agent-record-fn! HANDLER) — set the direct lane's record writer for wire messages.",
-      "agent-permission-fn!" =>
-        "(agent-permission-fn! HANDLER) — set the tool policy; it returns allow, ask, or reject.",
-      "agent-permission-deadline!" =>
-        "(agent-permission-deadline! SLUG MS) — arm an auto-deny deadline on the permission.",
-      "set-modeline-extra!" =>
-        "(set-modeline-extra! TEXT) — set the extra text at the right of the frame modeline: a string, or a list of (CLASS TEXT) segments.",
-      "llm-model" => "(llm-model) — return the active LLM model id.",
-      "llm-context-limit" =>
-        "(llm-context-limit MODEL) — input tokens the model accepts, or #f when unknown.",
-      "eval-string" => "(eval-string SRC) — evaluate SRC as Scheme; return the last value.",
-      "eval-defer!" =>
-        "(eval-defer!) — claim the current eval's reply; return a token for eval-resolve!, or #f outside an eval.",
-      "eval-resolve!" =>
-        "(eval-resolve! TOKEN VALUE) — answer the deferred eval named by TOKEN with VALUE.",
-      "with-edit-author" =>
-        "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
-      "current-edit-author" =>
-        "(current-edit-author) — the caller process's edit author string, or #f",
-      "with-current-buffer" =>
-        "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window.",
-      "with-buffer-display-update" =>
-        "(with-buffer-display-update BUF THUNK) — keep the previous presentation visible until THUNK finishes updating text, styling and selection; release on errors too.",
-      "buffer-context?" =>
-        "(buffer-context?) — #t inside a logical current-buffer binding; window placement must not change the frame there.",
-      "with-frame-windows" =>
-        "(with-frame-windows THUNK) — run THUNK with no logical buffer context: current-buffer and switch-to-buffer! act on the frame's real windows.",
-      "with-scheme-lock" =>
-        "(with-scheme-lock KEY THUNK) — run THUNK once at a time for KEY across Scheme processes.",
-      "eval-string-safe" =>
-        "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG).",
-      "wait-until" =>
-        "(wait-until PRED &optional TIMEOUT-MS INTERVAL-MS) — poll PRED until it answers true; return #t, or #f at the deadline.",
-      "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
-      "set-symbol-value!" =>
-        "(set-symbol-value! 'NAME VAL) — set the global value of the symbol.",
-      "unbind-global!" => "(unbind-global! 'NAME) — remove the global binding of the symbol.",
-      "function-interpose!" =>
-        "(function-interpose! 'NAME WRAPPER) — internal binding wrapper; WRAPPER receives ORIGINAL and ARGS; #f removes it.",
-      "boundp" => "(boundp 'NAME) — return #t when the symbol has a global binding.",
-      "global-names" => "(global-names) — return every globally bound name, sorted.",
-      "load" => "(load PATH) — evaluate a Scheme file in the live session.",
-      "eval-region" =>
-        "(eval-region BUF START END) — evaluate the text between byte offsets START and END.",
-      "eval-buffer" => "(eval-buffer BUF) — evaluate the whole buffer as Scheme.",
-      "on-change!" =>
-        "(on-change! BUF CB ['eager]) — call (CB POS INSERTED DELETED-LEN SOURCE) on changes; fires only while BUF is visible or in the current buffer's group, unless 'eager; return an id.",
-      "remove-on-change!" => "(remove-on-change! ID) — remove a change handler by its id.",
-      "with-window-buffer" =>
-        "(with-window-buffer THUNK) — run THUNK with the window's buffer current, not the prompt.",
-      "delete-frame!" =>
-        "(delete-frame! [ID]) — delete the frame and run its prompt's cancel handler.",
-      "minibuffer-buffer" => "(minibuffer-buffer) — return the minibuffer's buffer name.",
-      "minibuffer-state" =>
-        "(minibuffer-state) — return the active prompt as a plist (prompt, input, sel, total, legend, candidates), or #f.",
-      "minibuffer-input!" => "(minibuffer-input! INPUT) — set the minibuffer input text.",
-      "minibuffer-style!" =>
-        "(minibuffer-style! STYLE) — change the open prompt's style, and so its shape, without closing it: \"modal\", \"panel\", \"minibuffer\", or #f.",
-      "minibuffer-change!" =>
-        "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler.",
-      "debounce!" =>
-        "(debounce! KEY MS CALLBACK ARG) — after MS idle, call CALLBACK with ARG; a newer call with KEY cancels the old one.",
-      "debounce-cancel!" =>
-        "(debounce-cancel! KEY) — cancel KEY's pending debounce timer; a later fire is a no-op.",
-      "minibuffer-confirm!" =>
-        "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value.",
-      "minibuffer-confirm-input!" =>
-        "(minibuffer-confirm-input!) — close the prompt; submit the input, not the candidate.",
-      "minibuffer-cancel!" =>
-        "(minibuffer-cancel!) — close the prompt; run its cancel handler; echo Quit.",
-      "minibuffer-detach!" =>
-        "(minibuffer-detach!) — close the prompt; return its state and closures, or #f.",
-      "minibuffer-complete!" =>
-        "(minibuffer-complete!) — run the prompt's completion, or copy the selection to the input.",
-      "minibuffer-next!" => "(minibuffer-next!) — move the candidate selection down one.",
-      "minibuffer-prev!" => "(minibuffer-prev!) — move the candidate selection up one.",
-      "minibuffer-rail!" =>
-        "(minibuffer-rail! ROWS INDEX FOCUSED) — set the palette's right-hand list. ROWS is ((LABEL HINT ...) ...), INDEX the row on, FOCUSED whether the arrows are in it; '() clears it.",
-      "minibuffer-del!" =>
-        "(minibuffer-del!) — delete one char back; at a directory boundary, delete the component."
-    }
-  end
+  def docs, do: Prim.docs(session_primitives(nil))
 
   defp session_primitives(global) do
     eval_src = fn src, store ->
@@ -1309,7 +1063,7 @@ defmodule Compos.Core.Session do
     end
 
     %{
-      "message" => fn
+      {"message", "(message TEXT [LEVEL]) — log TEXT and show it in the echo area."} => fn
         [text] ->
           message(to_string(text))
           :void
@@ -1318,43 +1072,56 @@ defmodule Compos.Core.Session do
           message(to_string(text), level)
           :void
       end,
-      "message-emit" => fn [text, level, source, group, project] ->
-        message(to_string(text), level,
-          source: to_string(source),
-          group: to_string(group),
-          project: to_string(project)
-        )
+      {"message-emit",
+       "(message-emit TEXT LEVEL SOURCE GROUP PROJECT) — record one structured editor message."} =>
+        fn [text, level, source, group, project] ->
+          message(to_string(text), level,
+            source: to_string(source),
+            group: to_string(group),
+            project: to_string(project)
+          )
 
-        :void
-      end,
-      "messages-snapshot" => fn
-        [] -> message_rows(@messages_limit)
-        [limit] -> message_rows(trunc(limit))
-      end,
-      "messages-clear!" => fn [] ->
+          :void
+        end,
+      {"messages-snapshot",
+       "(messages-snapshot [LIMIT]) — return recent structured editor messages, oldest first."} =>
+        fn
+          [] -> message_rows(@messages_limit)
+          [limit] -> message_rows(trunc(limit))
+        end,
+      {"messages-clear!", "(messages-clear!) — discard every editor message."} => fn [] ->
         clear_messages()
         :void
       end,
-      "task-spawn" => fn [closure] ->
-        case SchemeTask.start(closure) do
-          {:ok, ref} -> ref
-          {:error, reason} -> raise_scheme("task-spawn: #{reason}")
-        end
+      {"task-spawn",
+       "(task-spawn THUNK) — run a zero-argument Scheme closure concurrently over the shared editor world."} =>
+        fn [closure] ->
+          case SchemeTask.start(closure) do
+            {:ok, ref} -> ref
+            {:error, reason} -> raise_scheme("task-spawn: #{reason}")
+          end
+        end,
+      {"task-run!",
+       "(task-run! THUNK CALLBACK [MS]) — run THUNK concurrently; later call CALLBACK with OK? and its value or error."} =>
+        fn
+          [closure, callback] -> scheme_task_run(closure, callback, 300_000)
+          [closure, callback, timeout] -> scheme_task_run(closure, callback, trunc(timeout))
+        end,
+      {"task-await",
+       "(task-await TASK [MS]) — wait for a Scheme task and return its value, or raise its error."} =>
+        fn
+          [task] -> scheme_task_await(task, 30_000)
+          [task, timeout] -> scheme_task_await(task, trunc(timeout))
+        end,
+      {"task-alive?", "(task-alive? TASK) — return #t while TASK remains available."} => fn [task] ->
+        SchemeTask.alive?(task)
       end,
-      "task-run!" => fn
-        [closure, callback] -> scheme_task_run(closure, callback, 300_000)
-        [closure, callback, timeout] -> scheme_task_run(closure, callback, trunc(timeout))
-      end,
-      "task-await" => fn
-        [task] -> scheme_task_await(task, 30_000)
-        [task, timeout] -> scheme_task_await(task, trunc(timeout))
-      end,
-      "task-alive?" => fn [task] -> SchemeTask.alive?(task) end,
-      "task-cancel!" => fn [task] ->
+      {"task-cancel!", "(task-cancel! TASK) — stop a Scheme task."} => fn [task] ->
         :ok = SchemeTask.cancel(task)
         true
       end,
-      "define-command" => fn
+      {"define-command",
+       "(define-command NAME [DOC] FN) — register an M-x command; DOC shows in M-x."} => fn
         [name, closure] ->
           :ets.insert(Compos.Core.SchemeAPI.commands_table(), {command_name(name), closure, ""})
           :void
@@ -1363,110 +1130,129 @@ defmodule Compos.Core.Session do
           :ets.insert(Compos.Core.SchemeAPI.commands_table(), {command_name(name), closure, doc})
           :void
       end,
-      "undefine-command" => fn [name] ->
-        :ets.delete(Compos.Core.SchemeAPI.commands_table(), command_name(name))
-        true
+      {"undefine-command", "(undefine-command NAME) — remove an M-x command from the registry."} =>
+        fn [name] ->
+          :ets.delete(Compos.Core.SchemeAPI.commands_table(), command_name(name))
+          true
+        end,
+      {"command-names", "(command-names) — return every M-x command name."} => fn [] ->
+        command_names()
       end,
-      "command-names" => fn [] -> command_names() end,
       # ((KEYS COMMAND) ...) for every global binding
-      "global-keys" => fn [] ->
-        for {seq, cmd} <- Editor.global_keys(), do: [seq, cmd]
-      end,
+      {"global-keys", "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding."} =>
+        fn [] ->
+          for {seq, cmd} <- Editor.global_keys(), do: [seq, cmd]
+        end,
       # ((KEYS COMMAND) ...) for one buffer's own bindings
-      "local-keys" => fn [buf] ->
-        for {seq, cmd} <- Editor.local_keys(buf), do: [seq, cmd]
-      end,
-      "command-fn" => fn [name] ->
+      {"local-keys", "(local-keys BUF) — return ((KEYS COMMAND) ...) for BUF's own key bindings."} =>
+        fn [buf] ->
+          for {seq, cmd} <- Editor.local_keys(buf), do: [seq, cmd]
+        end,
+      {"command-fn", "(command-fn NAME) — return the command's closure, or #f."} => fn [name] ->
         case :ets.lookup(Compos.Core.SchemeAPI.commands_table(), command_name(name)) do
           [] -> false
           [{_, closure, _}] -> closure
         end
       end,
-      "command-doc" => fn [name] ->
+      {"command-doc",
+       "(command-doc NAME) — return the command's doc string; empty when it has none."} => fn [
+                                                                                                name
+                                                                                              ] ->
         case :ets.lookup(Compos.Core.SchemeAPI.commands_table(), command_name(name)) do
           [] -> ""
           [{_, _, doc}] -> doc
         end
       end,
-      "run-command" => fn [name], store ->
-        case :ets.lookup(Compos.Core.SchemeAPI.commands_table(), command_name(name)) do
-          [] ->
-            raise Compos.Scheme.Eval.Error, message: "undefined command: #{command_name(name)}"
+      {"run-command", "(run-command NAME) — run the named command; error when it is undefined."} =>
+        fn [name], store ->
+          case :ets.lookup(Compos.Core.SchemeAPI.commands_table(), command_name(name)) do
+            [] ->
+              raise Compos.Scheme.Eval.Error, message: "undefined command: #{command_name(name)}"
 
-          [{_, closure, _}] ->
-            Compos.Scheme.Eval.apply_fn(closure, [], store)
-        end
-      end,
-      "llm" => fn [prompt, callback] ->
-        # the callback vanishes into an opaque fun until the reply arrives —
-        # root it for the GC, and unroot once it has fired
-        key = {:llm, make_ref()}
-        :ets.insert(@escaped, {key, callback})
-
-        Compos.Core.LLM.complete(prompt, fn text ->
-          try do
-            apply_reply_callback(callback, [text])
-          after
-            :ets.delete(@escaped, key)
+            [{_, closure, _}] ->
+              Compos.Scheme.Eval.apply_fn(closure, [], store)
           end
-        end)
+        end,
+      {"llm", "(llm PROMPT CALLBACK) — start an async completion; CALLBACK gets the reply text."} =>
+        fn [prompt, callback] ->
+          # the callback vanishes into an opaque fun until the reply arrives —
+          # root it for the GC, and unroot once it has fired
+          key = {:llm, make_ref()}
+          :ets.insert(@escaped, {key, callback})
 
-        :void
-      end,
-      "llm-with-model" => fn [prompt, model, callback] ->
-        key = {:llm, make_ref()}
-        :ets.insert(@escaped, {key, callback})
-
-        Compos.Core.LLM.complete(prompt, to_string(model), fn text ->
-          try do
-            apply_reply_callback(callback, [text])
-          after
-            :ets.delete(@escaped, key)
-          end
-        end)
-
-        :void
-      end,
-      # gptel-style native tool use: specs/dispatcher come from the Scheme
-      # registry (packages/tools.scm) — the loop lives in LLM.complete_tools.
-      # An optional sixth arg is a usage callback: it gets a plist of summed
-      # token counts + cost before the text callback fires.  A seventh arg
-      # pins the model for buffer-local callers such as llm-mode.
-      "llm-tools" => fn [prompt, system, specs, dispatcher, callback | rest] ->
-        usage_cb = List.first(rest)
-        requested_model = Enum.at(rest, 1)
-        key = {:llm_tools, make_ref()}
-        :ets.insert(@escaped, {key, [dispatcher, callback, usage_cb]})
-
-        on_usage =
-          usage_cb &&
-            fn usage -> apply_callback(usage_cb, [usage_to_plist(usage)]) end
-
-        Compos.Core.LLM.complete_tools(
-          prompt,
-          system,
-          specs,
-          dispatcher,
-          fn text ->
+          Compos.Core.LLM.complete(prompt, fn text ->
             try do
               apply_reply_callback(callback, [text])
             after
               :ets.delete(@escaped, key)
             end
-          end,
-          on_usage: on_usage,
-          model: requested_model && to_string(requested_model)
-        )
+          end)
 
-        :void
-      end,
+          :void
+        end,
+      {"llm-with-model",
+       "(llm-with-model PROMPT MODEL CALLBACK) — async completion on MODEL; CALLBACK gets the reply text."} =>
+        fn [prompt, model, callback] ->
+          key = {:llm, make_ref()}
+          :ets.insert(@escaped, {key, callback})
+
+          Compos.Core.LLM.complete(prompt, to_string(model), fn text ->
+            try do
+              apply_reply_callback(callback, [text])
+            after
+              :ets.delete(@escaped, key)
+            end
+          end)
+
+          :void
+        end,
+      # gptel-style native tool use: specs/dispatcher come from the Scheme
+      # registry (packages/tools.scm) — the loop lives in LLM.complete_tools.
+      # An optional sixth arg is a usage callback: it gets a plist of summed
+      # token counts + cost before the text callback fires.  A seventh arg
+      # pins the model for buffer-local callers such as llm-mode.
+      {"llm-tools",
+       "(llm-tools PROMPT SYSTEM SPECS DISPATCHER CB [USAGE-CB]) — async tool loop; CB gets text."} =>
+        fn [prompt, system, specs, dispatcher, callback | rest] ->
+          usage_cb = List.first(rest)
+          requested_model = Enum.at(rest, 1)
+          key = {:llm_tools, make_ref()}
+          :ets.insert(@escaped, {key, [dispatcher, callback, usage_cb]})
+
+          on_usage =
+            usage_cb &&
+              fn usage -> apply_callback(usage_cb, [usage_to_plist(usage)]) end
+
+          Compos.Core.LLM.complete_tools(
+            prompt,
+            system,
+            specs,
+            dispatcher,
+            fn text ->
+              try do
+                apply_reply_callback(callback, [text])
+              after
+                :ets.delete(@escaped, key)
+              end
+            end,
+            on_usage: on_usage,
+            model: requested_model && to_string(requested_model)
+          )
+
+          :void
+        end,
 
       # --- browser (Compos.Core.Browser; policy in chrome.scm) ---------------
       # Outbound: OP is the extension verb ("tabs", "eval", "read", "overlay",
       # "type", "click"...), ARGS a plist, CALLBACK gets a plist back — 'ok #t
       # plus the reply, or 'ok #f and 'error. Async because a page operation is
       # slow and keystrokes must not block behind it.
-      "browser-call" => fn [op, args, callback] ->
+      {"browser-call",
+       "(browser-call OP ARGS CB) — send OP to the browser; CB gets a reply plist."} => fn [
+                                                                                             op,
+                                                                                             args,
+                                                                                             callback
+                                                                                           ] ->
         key = {:browser, make_ref()}
         :ets.insert(@escaped, {key, callback})
         # the frame that asked, carried across the round-trip: a command that
@@ -1489,31 +1275,38 @@ defmodule Compos.Core.Session do
       # over. The wait is safe because the reply runs in the bridge's own task
       # and never re-enters this process — it only sends a message here. It
       # does hold the interpreter, so the ceiling is low and the default lower.
-      "browser-call-sync" => fn args ->
-        [op, a | rest] = args
-        ms = rest |> List.first() |> browser_wait_ms()
-        me = self()
-        ref = make_ref()
+      {"browser-call-sync",
+       "(browser-call-sync OP ARGS [MS]) — send OP and wait for the reply plist (default 2s, max 5s)."} =>
+        fn args ->
+          [op, a | rest] = args
+          ms = rest |> List.first() |> browser_wait_ms()
+          me = self()
+          ref = make_ref()
 
-        Compos.Core.Browser.call(s(op), browser_args(a), fn reply ->
-          send(me, {:browser_sync, ref, reply})
-        end)
+          Compos.Core.Browser.call(s(op), browser_args(a), fn reply ->
+            send(me, {:browser_sync, ref, reply})
+          end)
 
-        receive do
-          {:browser_sync, ^ref, reply} -> browser_reply(reply)
-        after
-          ms -> [{:sym, "ok"}, false, {:sym, "error"}, "the browser did not answer in time"]
-        end
-      end,
+          receive do
+            {:browser_sync, ^ref, reply} -> browser_reply(reply)
+          after
+            ms -> [{:sym, "ok"}, false, {:sym, "error"}, "the browser did not answer in time"]
+          end
+        end,
       # Inbound: HANDLER answers what the browser asks — (HANDLER OP ARGS).
       # M-x in a tab is this: the extension asks "commands", chrome.scm says
       # what the list is. Rooted, since it outlives the call that made it.
-      "browser-serve!" => fn [handler] ->
-        :ets.insert(@escaped, {{:browser_handler, :serve}, handler})
-        Compos.Core.Browser.serve(handler)
-        :void
+      {"browser-serve!",
+       "(browser-serve! HANDLER) — set the handler for browser requests: (HANDLER OP ARGS)."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:browser_handler, :serve}, handler})
+          Compos.Core.Browser.serve(handler)
+          :void
+        end,
+      {"browser-connected?",
+       "(browser-connected?) — return #t when a browser extension is connected."} => fn [] ->
+        Compos.Core.Browser.connected?()
       end,
-      "browser-connected?" => fn [] -> Compos.Core.Browser.connected?() end,
       # A chord arriving from a tab goes through the same dispatcher the GUI
       # uses. It has to run OFF this process: KeyDispatch calls back into
       # Session, and calling it from inside Session would deadlock — hence the
@@ -1525,35 +1318,43 @@ defmodule Compos.Core.Session do
       # the Task waits on the input queue, so the injected sequence runs
       # after the event that asked for it and cannot interleave with a
       # user keystroke mid-chord (dup #23). It carries the caller's frame.
-      "dispatch-keys" => fn [specs] ->
-        keys = Enum.map(specs, &s/1)
-        fid = Compos.Core.Frame.current()
+      {"dispatch-keys",
+       "(dispatch-keys KEYS) — dispatch key chords through the serialized GUI input queue, in order."} =>
+        fn [specs] ->
+          keys = Enum.map(specs, &s/1)
+          fid = Compos.Core.Frame.current()
 
-        Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-          Enum.each(keys, &Compos.Core.Input.dispatch(fid, &1))
-        end)
+          Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+            Enum.each(keys, &Compos.Core.Input.dispatch(fid, &1))
+          end)
 
-        :void
-      end,
+          :void
+        end,
 
       # --- MCP client (Compos.Core.MCP; policy in packages/mcp.scm) ----------
-      "mcp-connect!" => fn [name, spec] ->
-        case Compos.Core.MCP.connect(s(name), mcp_spec(spec)) do
-          {:ok, _} -> :void
-          {:error, msg} -> raise_scheme("mcp-connect!: #{inspect(msg)}")
-        end
-      end,
-      "mcp-disconnect!" => fn [name] ->
+      {"mcp-connect!", "(mcp-connect! NAME SPEC) — connect an MCP server from a spec plist."} =>
+        fn [name, spec] ->
+          case Compos.Core.MCP.connect(s(name), mcp_spec(spec)) do
+            {:ok, _} -> :void
+            {:error, msg} -> raise_scheme("mcp-connect!: #{inspect(msg)}")
+          end
+        end,
+      {"mcp-disconnect!", "(mcp-disconnect! NAME) — disconnect the named MCP server."} => fn [
+                                                                                               name
+                                                                                             ] ->
         Compos.Core.MCP.disconnect(s(name))
         :void
       end,
-      "mcp-connections" => fn [] ->
-        for c <- Compos.Core.MCP.connections() do
-          [c.name, to_string(c.status), c.tools, to_string(c.type), c.resources, c.prompts]
-        end
-      end,
+      {"mcp-connections",
+       "(mcp-connections) — return (name status tools type resources prompts) per connection."} =>
+        fn [] ->
+          for c <- Compos.Core.MCP.connections() do
+            [c.name, to_string(c.status), c.tools, to_string(c.type), c.resources, c.prompts]
+          end
+        end,
       # what the hub's detail view reads: false for a server never started
-      "mcp-server-detail" => fn [name] ->
+      {"mcp-server-detail",
+       "(mcp-server-detail NAME) — return a status plist, or #f when never started."} => fn [name] ->
         case Compos.Core.MCP.detail(s(name)) do
           nil ->
             false
@@ -1585,81 +1386,93 @@ defmodule Compos.Core.Session do
       # (mcp-on-change! (lambda (name status) ...)) — the hub redraws itself
       # when a server becomes ready, dies, or fails. Rooted like the agent
       # event handler.
-      "mcp-on-change!" => fn [handler] ->
-        :ets.insert(@escaped, {{:mcp_handler}, handler})
-        :void
-      end,
-      "mcp-log" => fn [name] ->
-        for e <- Compos.Core.MCP.log(s(name)) do
-          [
-            # the reader is looking at a clock on their own wall, not UTC
-            e.at
-            |> :calendar.system_time_to_local_time(:millisecond)
-            |> NaiveDateTime.from_erl!()
-            |> Calendar.strftime("%H:%M:%S"),
-            to_string(e.dir),
-            e.text
-          ]
-        end
-      end,
-      "mcp-tool-specs" => fn [names] ->
-        Compos.Core.MCP.tool_specs(Enum.map(names, &s/1))
-      end,
+      {"mcp-on-change!",
+       "(mcp-on-change! HANDLER) — set the handler that gets (NAME STATUS) on server changes."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:mcp_handler}, handler})
+          :void
+        end,
+      {"mcp-log", "(mcp-log NAME) — return ((time dir text) ...) JSON-RPC frames, oldest first."} =>
+        fn [name] ->
+          for e <- Compos.Core.MCP.log(s(name)) do
+            [
+              # the reader is looking at a clock on their own wall, not UTC
+              e.at
+              |> :calendar.system_time_to_local_time(:millisecond)
+              |> NaiveDateTime.from_erl!()
+              |> Calendar.strftime("%H:%M:%S"),
+              to_string(e.dir),
+              e.text
+            ]
+          end
+        end,
+      {"mcp-tool-specs", "(mcp-tool-specs NAMES) — return the tool specs of the named servers."} =>
+        fn [names] ->
+          Compos.Core.MCP.tool_specs(Enum.map(names, &s/1))
+        end,
       # Wait for a server that is still shaking hands, up to the same
       # bound. An empty tool list reads as "this server serves nothing",
       # which is a lie the caller cannot tell from the truth.
-      "mcp-await-ready" => fn args ->
-        [server | rest] = args
-        server = s(server)
-        wait = if is_integer(List.first(rest)), do: List.first(rest), else: @mcp_wait
+      {"mcp-await-ready",
+       "(mcp-await-ready SERVER [MS]) — wait until the server is ready; return #t or #f."} =>
+        fn args ->
+          [server | rest] = args
+          server = s(server)
+          wait = if is_integer(List.first(rest)), do: List.first(rest), else: @mcp_wait
 
-        task =
-          Task.Supervisor.async_nolink(Compos.Core.TaskSupervisor, fn ->
-            Compos.Core.MCP.await_ready(server, wait)
-          end)
+          task =
+            Task.Supervisor.async_nolink(Compos.Core.TaskSupervisor, fn ->
+              Compos.Core.MCP.await_ready(server, wait)
+            end)
 
-        case Task.yield(task, wait) || Task.shutdown(task, :brutal_kill) do
-          {:ok, ready?} -> ready?
-          _ -> false
-        end
-      end,
+          case Task.yield(task, wait) || Task.shutdown(task, :brutal_kill) do
+            {:ok, ready?} -> ready?
+            _ -> false
+          end
+        end,
       # Call one tool on one server. The work runs in a task, never here:
       # this process draws the editor, and a server that answers in its own
       # time must not stop it. With a callback the call returns at once;
       # without one the caller waits, bounded, because the eval path (an
       # agent through the compos proxy) needs an answer, not a promise.
-      "mcp-tool-call" => fn
-        [server, tool, args] ->
-          mcp_wait_call(s(server), s(tool), mcp_args(args), @mcp_wait)
+      {"mcp-tool-call",
+       "(mcp-tool-call SERVER TOOL ARGS [TIMEOUT|CB]) — call one tool; without CB, wait for text."} =>
+        fn
+          [server, tool, args] ->
+            mcp_wait_call(s(server), s(tool), mcp_args(args), @mcp_wait)
 
-        [server, tool, args, timeout] when is_integer(timeout) ->
-          mcp_wait_call(s(server), s(tool), mcp_args(args), timeout)
+          [server, tool, args, timeout] when is_integer(timeout) ->
+            mcp_wait_call(s(server), s(tool), mcp_args(args), timeout)
 
-        [server, tool, args, callback] ->
-          key = {:mcp_call, make_ref()}
-          :ets.insert(@escaped, {key, callback})
-          {server, tool, args} = {s(server), s(tool), mcp_args(args)}
+          [server, tool, args, callback] ->
+            key = {:mcp_call, make_ref()}
+            :ets.insert(@escaped, {key, callback})
+            {server, tool, args} = {s(server), s(tool), mcp_args(args)}
 
-          Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-            result = Compos.Core.MCP.call_when_ready(server, tool, args, @mcp_wait)
+            Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+              result = Compos.Core.MCP.call_when_ready(server, tool, args, @mcp_wait)
 
-            try do
-              apply_callback(callback, mcp_callback_args(result))
-            after
-              :ets.delete(@escaped, key)
-            end
-          end)
+              try do
+                apply_callback(callback, mcp_callback_args(result))
+              after
+                :ets.delete(@escaped, key)
+              end
+            end)
 
-          :void
-      end,
+            :void
+        end,
       # --- LSP client (Compos.Core.LSP; policy in packages/lsp.scm) ----------
-      "lsp-start!" => fn [name, root, spec] ->
-        case Compos.Core.LSP.start(s(name), s(root), lsp_spec(spec)) do
-          {:ok, _} -> :void
-          {:error, msg} -> raise_scheme("lsp-start!: #{inspect(msg)}")
-        end
-      end,
-      "lsp-stop!" => fn [id] ->
+      {"lsp-start!", "(lsp-start! NAME ROOT SPEC) — start a language server for a project root."} =>
+        fn [name, root, spec] ->
+          case Compos.Core.LSP.start(s(name), s(root), lsp_spec(spec)) do
+            {:ok, _} -> :void
+            {:error, msg} -> raise_scheme("lsp-start!: #{inspect(msg)}")
+          end
+        end,
+      {"lsp-stop!",
+       "(lsp-stop! ID) — stop the connection \"name@root\" with the shutdown handshake."} => fn [
+                                                                                                  id
+                                                                                                ] ->
         case Compos.Core.LSP.parse_id(s(id)) do
           {name, root} -> Compos.Core.LSP.stop(name, root)
           _ -> :ok
@@ -1667,10 +1480,12 @@ defmodule Compos.Core.Session do
 
         :void
       end,
-      "lsp-connections" => fn [] ->
-        for c <- Compos.Core.LSP.connections(), do: [c.id, to_string(c.status), c.name, c.root]
-      end,
-      "lsp-server-detail" => fn [id] ->
+      {"lsp-connections", "(lsp-connections) — return (id status name root) per connection."} =>
+        fn [] ->
+          for c <- Compos.Core.LSP.connections(), do: [c.id, to_string(c.status), c.name, c.root]
+        end,
+      {"lsp-server-detail",
+       "(lsp-server-detail ID) — return a status plist, or #f when never started."} => fn [id] ->
         with {name, root} <- Compos.Core.LSP.parse_id(s(id)),
              d when d != nil <- Compos.Core.LSP.detail(name, root) do
           [
@@ -1689,34 +1504,40 @@ defmodule Compos.Core.Session do
           _ -> false
         end
       end,
-      "lsp-on-event!" => fn [handler] ->
-        :ets.insert(@escaped, {{:lsp_handler}, handler})
-        :void
-      end,
-      "lsp-log" => fn [id] ->
-        case Compos.Core.LSP.parse_id(s(id)) do
-          {name, root} ->
-            for e <- Compos.Core.LSP.log(name, root) do
-              [
-                e.at
-                |> :calendar.system_time_to_local_time(:millisecond)
-                |> NaiveDateTime.from_erl!()
-                |> Calendar.strftime("%H:%M:%S"),
-                to_string(e.dir),
-                e.text
-              ]
-            end
+      {"lsp-on-event!",
+       "(lsp-on-event! HANDLER) — set the handler that gets (ID METHOD PARAMS) on server events."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:lsp_handler}, handler})
+          :void
+        end,
+      {"lsp-log", "(lsp-log ID) — return ((time dir text) ...) JSON-RPC frames, oldest first."} =>
+        fn [id] ->
+          case Compos.Core.LSP.parse_id(s(id)) do
+            {name, root} ->
+              for e <- Compos.Core.LSP.log(name, root) do
+                [
+                  e.at
+                  |> :calendar.system_time_to_local_time(:millisecond)
+                  |> NaiveDateTime.from_erl!()
+                  |> Calendar.strftime("%H:%M:%S"),
+                  to_string(e.dir),
+                  e.text
+                ]
+              end
 
-          _ ->
-            []
-        end
-      end,
-      "lsp-open!" => fn [id, buf] ->
+            _ ->
+              []
+          end
+        end,
+      {"lsp-open!", "(lsp-open! ID BUF) — open BUF on the server and keep it in sync."} => fn [
+                                                                                                id,
+                                                                                                buf
+                                                                                              ] ->
         {pid, _key} = lsp_conn!(id)
         Compos.Core.LSP.Conn.open_doc(pid, s(buf))
         :void
       end,
-      "lsp-close!" => fn [id, buf] ->
+      {"lsp-close!", "(lsp-close! ID BUF) — close BUF on the server."} => fn [id, buf] ->
         case Compos.Core.LSP.parse_id(s(id)) do
           {name, root} ->
             case Compos.Core.LSP.whereis(name, root) do
@@ -1730,110 +1551,138 @@ defmodule Compos.Core.Session do
 
         :void
       end,
-      "lsp-notify!" => fn [id, method, params] ->
-        {pid, _key} = lsp_conn!(id)
-        Compos.Core.LSP.Conn.notify(pid, s(method), scheme_to_json(params))
-        :void
-      end,
-      "lsp-buffer-request" => fn
-        [id, method, buf, pos, callback] ->
-          {pid, key} = lsp_conn!(id)
-
-          Compos.Core.LSP.Conn.buffer_request(
-            pid,
-            s(method),
-            s(buf),
-            pos,
-            %{},
-            lsp_cb(callback, key)
-          )
-
+      {"lsp-notify!", "(lsp-notify! ID METHOD PARAMS) — send a notification to the server."} =>
+        fn [id, method, params] ->
+          {pid, _key} = lsp_conn!(id)
+          Compos.Core.LSP.Conn.notify(pid, s(method), scheme_to_json(params))
           :void
+        end,
+      {"lsp-buffer-request",
+       "(lsp-buffer-request ID METHOD BUF BYTE-POS [EXTRA] CB) — request at a buffer position; CB gets (OK RESULT)."} =>
+        fn
+          [id, method, buf, pos, callback] ->
+            {pid, key} = lsp_conn!(id)
 
-        [id, method, buf, pos, extra, callback] ->
-          {pid, key} = lsp_conn!(id)
+            Compos.Core.LSP.Conn.buffer_request(
+              pid,
+              s(method),
+              s(buf),
+              pos,
+              %{},
+              lsp_cb(callback, key)
+            )
 
-          Compos.Core.LSP.Conn.buffer_request(
-            pid,
-            s(method),
-            s(buf),
-            pos,
-            scheme_to_json(extra),
-            lsp_cb(callback, key)
-          )
+            :void
 
-          :void
-      end,
+          [id, method, buf, pos, extra, callback] ->
+            {pid, key} = lsp_conn!(id)
+
+            Compos.Core.LSP.Conn.buffer_request(
+              pid,
+              s(method),
+              s(buf),
+              pos,
+              scheme_to_json(extra),
+              lsp_cb(callback, key)
+            )
+
+            :void
+        end,
       # --- Databases (Compos.Core.DB; policy in packages/db.scm) ------------
-      "db-connect!" => fn [name, spec] ->
-        case Compos.Core.DB.connect(s(name), plist_to_map(spec)) do
-          {:ok, _} -> :void
-          {:error, msg} -> raise_scheme("db-connect!: #{msg}")
-        end
-      end,
-      "db-disconnect!" => fn [name] ->
+      {"db-connect!",
+       "(db-connect! NAME SPEC) — open a named database connection; SPEC has 'adapter 'database 'user 'password 'host or 'socket_dir 'port 'ssl."} =>
+        fn [name, spec] ->
+          case Compos.Core.DB.connect(s(name), plist_to_map(spec)) do
+            {:ok, _} -> :void
+            {:error, msg} -> raise_scheme("db-connect!: #{msg}")
+          end
+        end,
+      {"db-disconnect!", "(db-disconnect! NAME) — close the database connection NAME."} => fn [
+                                                                                                name
+                                                                                              ] ->
         Compos.Core.DB.disconnect(s(name))
         :void
       end,
-      "db-connected?" => fn [name] -> Compos.Core.DB.whereis(s(name)) != nil end,
-      "db-list" => fn [] ->
+      {"db-connected?", "(db-connected? NAME) — #t when NAME is open."} => fn [name] ->
+        Compos.Core.DB.whereis(s(name)) != nil
+      end,
+      {"db-list", "(db-list) — return (name adapter database) per connection."} => fn [] ->
         for c <- Compos.Core.DB.connections(), do: [c.name, c.adapter, c.database]
       end,
-      "db-adapters" => fn [] -> String.split(Compos.Core.DB.known_adapters(), ", ") end,
-      "db-query" => fn
-        [target, sql] ->
-          db_query_sync(db_target(target), s(sql), [])
-
-        [target, sql, params] when is_list(params) ->
-          db_query_sync(db_target(target), s(sql), db_params(params))
-
-        [name, sql, params, callback] ->
-          Compos.Core.DB.query(s(name), s(sql), db_params(params), db_cb(callback))
-          :void
-
-        [name, sql, callback] ->
-          Compos.Core.DB.query(s(name), s(sql), [], db_cb(callback))
-          :void
+      {"db-adapters", "(db-adapters) — the database adapters this build can open."} => fn [] ->
+        String.split(Compos.Core.DB.known_adapters(), ", ")
       end,
-      "db-with-transaction" => fn [name, procedure], store ->
-        case Compos.Core.DB.with_transaction(s(name), fn transaction ->
-               Compos.Scheme.Eval.apply_fn(procedure, [transaction], store)
-             end) do
-          {:ok, result_and_store} -> result_and_store
-          {:error, msg} -> raise_scheme("db-with-transaction: #{msg}")
-        end
-      end,
+      {"db-query",
+       "(db-query NAME-OR-TRANSACTION SQL [PARAMS] [CB]) — without CB, run on the calling lane and return RESULT; with CB, answer asynchronously with (OK RESULT)."} =>
+        fn
+          [target, sql] ->
+            db_query_sync(db_target(target), s(sql), [])
+
+          [target, sql, params] when is_list(params) ->
+            db_query_sync(db_target(target), s(sql), db_params(params))
+
+          [name, sql, params, callback] ->
+            Compos.Core.DB.query(s(name), s(sql), db_params(params), db_cb(callback))
+            :void
+
+          [name, sql, callback] ->
+            Compos.Core.DB.query(s(name), s(sql), [], db_cb(callback))
+            :void
+        end,
+      {"db-with-transaction",
+       "(db-with-transaction NAME PROC) — call PROC with a scoped transaction handle; commit and return its value, or roll back on error."} =>
+        fn [name, procedure], store ->
+          case Compos.Core.DB.with_transaction(s(name), fn transaction ->
+                 Compos.Scheme.Eval.apply_fn(procedure, [transaction], store)
+               end) do
+            {:ok, result_and_store} -> result_and_store
+            {:error, msg} -> raise_scheme("db-with-transaction: #{msg}")
+          end
+        end,
       # --- Endpoints (Compos.Core.Endpoint; policy in Scheme packages) ------
-      "endpoint-start!" => fn [name, spec] ->
-        case Compos.Core.Endpoint.start(s(name), endpoint_spec(spec)) do
-          {:ok, _} -> :void
-          {:error, msg} -> raise_scheme("endpoint-start!: #{inspect(msg)}")
-        end
-      end,
-      "endpoint-stop!" => fn [name] ->
+      {"endpoint-start!",
+       "(endpoint-start! NAME SPEC) — open a named connection; SPEC picks the transport and framing."} =>
+        fn [name, spec] ->
+          case Compos.Core.Endpoint.start(s(name), endpoint_spec(spec)) do
+            {:ok, _} -> :void
+            {:error, msg} -> raise_scheme("endpoint-start!: #{inspect(msg)}")
+          end
+        end,
+      {"endpoint-stop!", "(endpoint-stop! NAME) — close the connection NAME."} => fn [name] ->
         Compos.Core.Endpoint.stop(s(name))
         :void
       end,
-      "endpoint-send!" => fn [name, text] ->
+      {"endpoint-send!",
+       "(endpoint-send! NAME TEXT) — write one frame; do not wait for an answer."} => fn [
+                                                                                           name,
+                                                                                           text
+                                                                                         ] ->
         Compos.Core.Endpoint.Conn.send_frame(endpoint_conn!(name), s(text))
         :void
       end,
-      "endpoint-ask" => fn
-        [name, text, until, callback] ->
-          endpoint_ask(name, text, until, false, callback)
+      {"endpoint-ask",
+       "(endpoint-ask NAME TEXT UNTIL [TIMEOUT] CB) — send a frame, collect frames up to the sentinel UNTIL; CB gets (OK FRAMES)."} =>
+        fn
+          [name, text, until, callback] ->
+            endpoint_ask(name, text, until, false, callback)
 
-        [name, text, until, timeout, callback] ->
-          endpoint_ask(name, text, until, timeout, callback)
-      end,
-      "endpoint-on-event!" => fn [handler] ->
-        :ets.insert(@escaped, {{:endpoint_handler}, handler})
-        :void
-      end,
-      "endpoint-list" => fn [] ->
-        for c <- Compos.Core.Endpoint.connections(),
-            do: [c.name, to_string(c.status), to_string(c.transport), c.framing, c.queued]
-      end,
-      "endpoint-detail" => fn [name] ->
+          [name, text, until, timeout, callback] ->
+            endpoint_ask(name, text, until, timeout, callback)
+        end,
+      {"endpoint-on-event!",
+       "(endpoint-on-event! HANDLER) — set the handler that gets (NAME KIND TEXT) for unsolicited frames."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:endpoint_handler}, handler})
+          :void
+        end,
+      {"endpoint-list",
+       "(endpoint-list) — return (name status transport framing queued) per connection."} =>
+        fn [] ->
+          for c <- Compos.Core.Endpoint.connections(),
+              do: [c.name, to_string(c.status), to_string(c.transport), c.framing, c.queued]
+        end,
+      {"endpoint-detail",
+       "(endpoint-detail NAME) — return a status plist, or #f when never started."} => fn [name] ->
         case Compos.Core.Endpoint.detail(s(name)) do
           nil ->
             false
@@ -1853,43 +1702,51 @@ defmodule Compos.Core.Session do
             ]
         end
       end,
-      "endpoint-log" => fn [name] ->
-        for e <- Compos.Core.Endpoint.log(s(name)) do
-          [
-            e.at
-            |> :calendar.system_time_to_local_time(:millisecond)
-            |> NaiveDateTime.from_erl!()
-            |> Calendar.strftime("%H:%M:%S"),
-            to_string(e.dir),
-            e.text
-          ]
-        end
-      end,
+      {"endpoint-log", "(endpoint-log NAME) — return ((time dir text) ...) frames, oldest first."} =>
+        fn [name] ->
+          for e <- Compos.Core.Endpoint.log(s(name)) do
+            [
+              e.at
+              |> :calendar.system_time_to_local_time(:millisecond)
+              |> NaiveDateTime.from_erl!()
+              |> Calendar.strftime("%H:%M:%S"),
+              to_string(e.dir),
+              e.text
+            ]
+          end
+        end,
       # --- Inbound HTTP servers (Bandit mechanism; Scheme handlers) -------
-      "web-server-start!" => fn [name, spec, handler] ->
-        case Compos.Core.WebServer.start(s(name), plist_to_map(spec), handler) do
-          {:ok, detail} -> web_server_detail(detail)
-          {:error, msg} -> raise_scheme("web-server-start!: #{msg}")
-        end
-      end,
-      "web-server-stop!" => fn [name] ->
+      {"web-server-start!",
+       "(web-server-start! NAME SPEC HANDLER) — start an HTTP callback or webhook server; HANDLER receives a request plist and returns a response plist."} =>
+        fn [name, spec, handler] ->
+          case Compos.Core.WebServer.start(s(name), plist_to_map(spec), handler) do
+            {:ok, detail} -> web_server_detail(detail)
+            {:error, msg} -> raise_scheme("web-server-start!: #{msg}")
+          end
+        end,
+      {"web-server-stop!", "(web-server-stop! NAME) — stop the named HTTP server."} => fn [name] ->
         Compos.Core.WebServer.stop(s(name))
         :void
       end,
-      "web-server-list" => fn [] ->
-        for server <- Compos.Core.WebServer.servers() do
-          [server.name, server.host, server.port, server.url, server.max_body]
-        end
-      end,
-      "web-server-detail" => fn [name] ->
-        case Compos.Core.WebServer.detail(s(name)) do
-          nil -> false
-          detail -> web_server_detail(detail)
-        end
-      end,
+      {"web-server-list",
+       "(web-server-list) — return (name host port url max-body) for every programmable HTTP server."} =>
+        fn [] ->
+          for server <- Compos.Core.WebServer.servers() do
+            [server.name, server.host, server.port, server.url, server.max_body]
+          end
+        end,
+      {"web-server-detail",
+       "(web-server-detail NAME) — return the server detail plist, or #f when the server is not running."} =>
+        fn [name] ->
+          case Compos.Core.WebServer.detail(s(name)) do
+            nil -> false
+            detail -> web_server_detail(detail)
+          end
+        end,
       # MCP-shaped JSON for a list of registry tool specs — the proxy's
       # tools/list payload (input_schema key renamed to MCP's camelCase)
-      "tool-specs-json" => fn [specs] ->
+      {"tool-specs-json",
+       "(tool-specs-json SPECS) — return the specs as MCP tools/list JSON text."} => fn [specs] ->
         specs
         |> Enum.map(fn spec ->
           %{input_schema: schema} = t = Compos.Core.LLM.tool_json(spec)
@@ -1904,28 +1761,40 @@ defmodule Compos.Core.Session do
       # canonical: the build dir holds a symlink to the checkout's priv, and
       # a path that names the source file is the one a reader can open,
       # reload, and diff. A release has no link, so the path is unchanged.
-      "priv-path" => fn [rel] ->
-        canonical(Path.join(Application.app_dir(:compos_core, "priv"), rel))
-      end,
+      {"priv-path",
+       "(priv-path REL) — return the absolute path of REL in the compos_core priv directory."} =>
+        fn [rel] ->
+          canonical(Path.join(Application.app_dir(:compos_core, "priv"), rel))
+        end,
       # --- runtime tree-sitter grammars (Compos.Core.TreeSitter) --------------
-      "ts-install-grammar!" => fn [name, url] ->
-        n = s(name)
-        u = s(url)
+      {"ts-install-grammar!",
+       "(ts-install-grammar! NAME URL) — install a tree-sitter grammar in the background."} =>
+        fn [name, url] ->
+          n = s(name)
+          u = s(url)
 
-        Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-          case Compos.Core.TreeSitter.install(n, u) do
-            "ok" -> message("grammar #{n} installed — buffers pick it up on their next mode set")
-            err -> message("grammar #{n}: #{err}")
-          end
-        end)
+          Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+            case Compos.Core.TreeSitter.install(n, u) do
+              "ok" ->
+                message("grammar #{n} installed — buffers pick it up on their next mode set")
 
-        :void
+              err ->
+                message("grammar #{n}: #{err}")
+            end
+          end)
+
+          :void
+        end,
+      {"ts-installed-grammars",
+       "(ts-installed-grammars) — return the installed tree-sitter grammar names."} => fn [] ->
+        Compos.Core.TreeSitter.installed()
       end,
-      "ts-installed-grammars" => fn [] -> Compos.Core.TreeSitter.installed() end,
-      "format-usd" => fn [amount] when is_number(amount) ->
-        "$" <> :erlang.float_to_binary(amount * 1.0, decimals: 4)
-      end,
-      "llm-cost-report" => fn [] ->
+      {"format-usd", "(format-usd AMOUNT) — return AMOUNT as a dollar string with 4 decimals."} =>
+        fn [amount] when is_number(amount) ->
+          "$" <> :erlang.float_to_binary(amount * 1.0, decimals: 4)
+        end,
+      {"llm-cost-report",
+       "(llm-cost-report) — return one usage plist per day and model, with cost."} => fn [] ->
         for row <- Compos.Core.LLMDb.report() do
           [
             {:sym, "day"},
@@ -1953,152 +1822,189 @@ defmodule Compos.Core.Session do
           ]
         end
       end,
-      "set-llm-model!" => fn [m] ->
+      {"set-llm-model!", "(set-llm-model! MODEL) — set the active LLM model."} => fn [m] ->
         Compos.Core.LLM.set_model(m)
         :void
       end,
       # how long the provider holds a cached prefix ("5m", "1h") — the
       # defcustom llm-cache-ttl sets it
-      "set-llm-cache-ttl!" => fn [ttl] ->
+      {"set-llm-cache-ttl!",
+       "(set-llm-cache-ttl! TTL) — set how long the provider holds a cached prefix."} => fn [ttl] ->
         Compos.Core.LLM.set_cache_ttl(to_string(ttl))
         :void
       end,
       # what a backend can do, by its resolved 'backend name — Scheme asks
       # this instead of asking which connector it is looking at
-      "backend-capabilities" => fn [name] ->
+      {"backend-capabilities",
+       "(backend-capabilities NAME) — return the backend's capability symbols."} => fn [name] ->
         Enum.map(Compos.Core.Agent.Backend.capabilities_of(s(name)), &{:sym, to_string(&1)})
       end,
-      "llm-max-tokens" => fn [model] ->
+      {"llm-max-tokens",
+       "(llm-max-tokens MODEL) — return the model's maximum output tokens, or #f."} => fn [model] ->
         Compos.Core.LLMDb.max_tokens(s(model)) || false
       end,
-      "llm-model-reasoning" => fn [model] ->
-        case Compos.Core.ModelCatalog.reasoning(s(model)) do
-          nil -> false
-          controls -> Compos.Core.LLM.json_to_scheme(controls)
-        end
-      end,
+      {"llm-model-reasoning",
+       "(llm-model-reasoning MODEL) — return normalized reasoning controls from the shared model catalog, or #f."} =>
+        fn [model] ->
+          case Compos.Core.ModelCatalog.reasoning(s(model)) do
+            nil -> false
+            controls -> Compos.Core.LLM.json_to_scheme(controls)
+          end
+        end,
       # ReqLLM's credential-aware inventory sees only the environment. Compos's
       # key chain (env -> ~/.compos/<name>-key -> Doppler) is Scheme, so seed
       # ReqLLM's credential table from it first — a key in the file or Doppler
       # then counts as configured and the model shows in the picker. Runs in
       # the Session, so eval_src reaches the chain with no round-trip.
-      "llm-available-models" => fn [], store ->
-        store =
-          Enum.reduce(ReqLLM.Providers.list(), store, fn provider, store ->
-            {key, store} = eval_src.("(llm-key \"#{provider}\")", store)
+      {"llm-available-models",
+       "(llm-available-models) — return ReqLLM's credential-aware chat model inventory."} =>
+        fn [], store ->
+          store =
+            Enum.reduce(ReqLLM.Providers.list(), store, fn provider, store ->
+              {key, store} = eval_src.("(llm-key \"#{provider}\")", store)
 
-            if is_binary(key) and key != "" do
-              ReqLLM.put_key(ReqLLM.Keys.config_key(provider), key)
-            end
+              if is_binary(key) and key != "" do
+                ReqLLM.put_key(ReqLLM.Keys.config_key(provider), key)
+              end
 
-            store
-          end)
+              store
+            end)
 
-        {Compos.Core.ModelCatalog.available_models(), store}
-      end,
+          {Compos.Core.ModelCatalog.available_models(), store}
+        end,
 
       # --- backend-neutral LLM sessions -------------------------------------
       # A frontend may install callbacks scoped to this session. Omitted
       # callbacks fall back to the chat globals below, preserving existing
       # agent integrations while inline/document frontends use the same
       # lifecycle and backend adapters.
-      "llm-session-open!" => fn [id, config | rest] ->
-        keys = [:context, :handler, :record, :permission]
+      {"llm-session-open!",
+       "(llm-session-open! ID CONFIG [CONTEXT EVENTS RECORD PERMISSION]) — open a backend-neutral LLM session."} =>
+        fn [id, config | rest] ->
+          keys = [:context, :handler, :record, :permission]
 
-        callbacks =
-          keys
-          |> Enum.zip(rest)
-          |> Map.new(fn {key, callback} -> {key, callback} end)
+          callbacks =
+            keys
+            |> Enum.zip(rest)
+            |> Map.new(fn {key, callback} -> {key, callback} end)
 
-        case Compos.Core.LLMSession.open(s(id), plist_to_map(config), callbacks) do
-          {:ok, _pid} -> s(id)
-          {:error, {:already_started, _}} -> raise_scheme("LLM session already running: #{s(id)}")
-          {:error, reason} -> raise_scheme("llm-session-open!: #{inspect(reason)}")
-        end
-      end,
-      "llm-session-send!" => fn [id, text | rest] ->
-        display =
-          case rest do
-            [d | _] when is_binary(d) -> d
-            _ -> nil
+          case Compos.Core.LLMSession.open(s(id), plist_to_map(config), callbacks) do
+            {:ok, _pid} ->
+              s(id)
+
+            {:error, {:already_started, _}} ->
+              raise_scheme("LLM session already running: #{s(id)}")
+
+            {:error, reason} ->
+              raise_scheme("llm-session-open!: #{inspect(reason)}")
           end
+        end,
+      {"llm-session-send!",
+       "(llm-session-send! ID TEXT [DISPLAY IMAGES]) — send or queue a message on an LLM session; IMAGES is ((MIME PATH) ...)."} =>
+        fn [id, text | rest] ->
+          display =
+            case rest do
+              [d | _] when is_binary(d) -> d
+              _ -> nil
+            end
 
-        # attachments the user pasted: ((MIME PATH) ...). The bytes are
-        # already a file on disk — only the path travels.
-        images =
-          case rest do
-            [_, list | _] when is_list(list) ->
-              for [mime, path] <- list,
-                  is_binary(mime),
-                  is_binary(path),
-                  do: %{mime: mime, path: path}
+          # attachments the user pasted: ((MIME PATH) ...). The bytes are
+          # already a file on disk — only the path travels.
+          images =
+            case rest do
+              [_, list | _] when is_list(list) ->
+                for [mime, path] <- list,
+                    is_binary(mime),
+                    is_binary(path),
+                    do: %{mime: mime, path: path}
 
-            _ ->
-              []
+              _ ->
+                []
+            end
+
+          case Compos.Core.LLMSession.send(s(id), to_string(text), display, images) do
+            :sent -> {:sym, "sent"}
+            :queued -> {:sym, "queued"}
+            {:error, r} -> raise_scheme("llm-session-send!: #{inspect(r)}")
           end
-
-        case Compos.Core.LLMSession.send(s(id), to_string(text), display, images) do
-          :sent -> {:sym, "sent"}
-          :queued -> {:sym, "queued"}
-          {:error, r} -> raise_scheme("llm-session-send!: #{inspect(r)}")
-        end
-      end,
-      "llm-session-cancel!" => fn [id] ->
-        Compos.Core.LLMSession.cancel(s(id))
-        :void
-      end,
-      "llm-session-close!" => fn [id] ->
+        end,
+      {"llm-session-cancel!", "(llm-session-cancel! ID) — cancel an LLM session's current turn."} =>
+        fn [id] ->
+          Compos.Core.LLMSession.cancel(s(id))
+          :void
+        end,
+      {"llm-session-close!", "(llm-session-close! ID) — close an LLM session."} => fn [id] ->
         Compos.Core.LLMSession.close(s(id))
         :void
       end,
-      "llm-session-set-model!" => fn [id, model] ->
-        case Compos.Core.LLMSession.set_model(s(id), s(model)) do
-          :ok -> true
-          {:error, _} -> false
-        end
-      end,
-      "llm-session-set-effort!" => fn [id, effort] ->
-        case Compos.Core.LLMSession.set_effort(s(id), s(effort)) do
-          :ok -> true
-          {:error, _} -> false
-        end
-      end,
-      "llm-session-set-mode!" => fn [id, mode] ->
-        case Compos.Core.LLMSession.set_mode(s(id), s(mode)) do
-          :ok -> true
-          {:error, _} -> false
-        end
-      end,
-      "llm-session-on-event!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_handler}, handler})
-        :void
-      end,
-      "llm-session-context-fn!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_context}, handler})
-        :void
-      end,
-      "llm-session-record-fn!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_record}, handler})
-        :void
-      end,
-      "llm-session-permission-fn!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_permission}, handler})
-        :void
-      end,
+      {"llm-session-set-model!",
+       "(llm-session-set-model! ID MODEL) — switch a live LLM session's model when supported."} =>
+        fn [id, model] ->
+          case Compos.Core.LLMSession.set_model(s(id), s(model)) do
+            :ok -> true
+            {:error, _} -> false
+          end
+        end,
+      {"llm-session-set-effort!",
+       "(llm-session-set-effort! ID EFFORT) — set reasoning effort for subsequent turns when supported."} =>
+        fn [id, effort] ->
+          case Compos.Core.LLMSession.set_effort(s(id), s(effort)) do
+            :ok -> true
+            {:error, _} -> false
+          end
+        end,
+      {"llm-session-set-mode!",
+       "(llm-session-set-mode! ID MODE) — switch a live LLM session's permission mode when supported."} =>
+        fn [id, mode] ->
+          case Compos.Core.LLMSession.set_mode(s(id), s(mode)) do
+            :ok -> true
+            {:error, _} -> false
+          end
+        end,
+      {"llm-session-on-event!",
+       "(llm-session-on-event! HANDLER) — set the default normalized-event handler for LLM sessions."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_handler}, handler})
+          :void
+        end,
+      {"llm-session-context-fn!",
+       "(llm-session-context-fn! HANDLER) — set the default turn-context provider for LLM sessions."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_context}, handler})
+          :void
+        end,
+      {"llm-session-record-fn!",
+       "(llm-session-record-fn! HANDLER) — set the default conversation-record writer for LLM sessions."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_record}, handler})
+          :void
+        end,
+      {"llm-session-permission-fn!",
+       "(llm-session-permission-fn! HANDLER) — set the default tool permission policy for LLM sessions."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_permission}, handler})
+          :void
+        end,
 
       # --- agent threads (ACP runtime, see Compos.Core.Agent) -----------------
       # config/info/events cross the boundary as flat plists: (key val ...)
       # with symbol keys — this Scheme has no dotted pairs.
-      "agent-start!" => fn [slug, config] ->
-        case Compos.Core.LLMSession.open(to_string(slug), plist_to_map(config)) do
-          {:ok, _pid} -> to_string(slug)
-          {:error, {:already_started, _}} -> raise_scheme("agent already running: #{s(slug)}")
-          {:error, reason} -> raise_scheme("agent-start!: #{inspect(reason)}")
-        end
-      end,
+      {"agent-start!", "(agent-start! SLUG CONFIG) — start an agent thread from a config plist."} =>
+        fn [slug, config] ->
+          case Compos.Core.LLMSession.open(to_string(slug), plist_to_map(config)) do
+            {:ok, _pid} -> to_string(slug)
+            {:error, {:already_started, _}} -> raise_scheme("agent already running: #{s(slug)}")
+            {:error, reason} -> raise_scheme("agent-start!: #{inspect(reason)}")
+          end
+        end,
       # optional third arg: the display text (what the transcript shows and
       # records as the user turn) when the wire text carries seed context
-      "agent-prompt!" => fn [slug, text | rest] ->
+      {"agent-prompt!",
+       "(agent-prompt! SLUG TEXT [DISPLAY]) — send a prompt; return 'sent or 'queued."} => fn [
+                                                                                                slug,
+                                                                                                text
+                                                                                                | rest
+                                                                                              ] ->
         display =
           case rest do
             [d] when is_binary(d) -> d
@@ -2112,278 +2018,344 @@ defmodule Compos.Core.Session do
           {:error, r} -> raise_scheme("agent-prompt!: #{inspect(r)}")
         end
       end,
-      "agent-steer!" => fn [slug] ->
-        case Compos.Core.LLMSession.steer_next(s(slug)) do
-          :sent -> true
-          {:error, _reason} -> false
-        end
-      end,
-      "agent-dequeue!" => fn [slug, text] ->
-        case Compos.Core.LLMSession.dequeue(s(slug), to_string(text)) do
-          :ok -> true
-          {:error, _} -> false
-        end
-      end,
-      "agent-permission-respond!" => fn [slug, rpc_id, option_id] ->
-        option = if option_id in [false, :void], do: nil, else: s(option_id)
+      {"agent-steer!",
+       "(agent-steer! SLUG) — send the oldest queued message into the running turn; return #t when sent."} =>
+        fn [slug] ->
+          case Compos.Core.LLMSession.steer_next(s(slug)) do
+            :sent -> true
+            {:error, _reason} -> false
+          end
+        end,
+      {"agent-dequeue!",
+       "(agent-dequeue! SLUG TEXT) — remove one queued prompt whose text is TEXT; return #t or #f."} =>
+        fn [slug, text] ->
+          case Compos.Core.LLMSession.dequeue(s(slug), to_string(text)) do
+            :ok -> true
+            {:error, _} -> false
+          end
+        end,
+      {"agent-permission-respond!",
+       "(agent-permission-respond! SLUG RPC-ID OPTION-ID) — answer a pending permission request."} =>
+        fn [slug, rpc_id, option_id] ->
+          option = if option_id in [false, :void], do: nil, else: s(option_id)
 
-        case Compos.Core.Agent.respond_permission(s(slug), rpc_id, option) do
-          :ok -> :void
-          {:error, r} -> raise_scheme("agent-permission-respond!: #{inspect(r)}")
-        end
-      end,
+          case Compos.Core.Agent.respond_permission(s(slug), rpc_id, option) do
+            :ok -> :void
+            {:error, r} -> raise_scheme("agent-permission-respond!: #{inspect(r)}")
+          end
+        end,
       # WE ask, on our own lane. The proxy gate reaches a verdict of ask
       # and has no backend rpc to ride, so it raises the SAME card the ACP
       # lane raises and waits on the answer. This blocks the calling
       # process — never the Session, because the caller is a Task behind
       # eval-defer!.
-      "agent-ask-permission!" => fn [slug, title, raw] ->
-        case Compos.Core.Agent.ask_permission(s(slug), %{
-               title: to_string(title),
-               kind: "tool",
-               raw: to_string(raw)
-             }) do
-          :always -> {:sym, "always"}
-          :allow -> {:sym, "allow"}
-          _ -> {:sym, "deny"}
-        end
-      end,
-      "agent-question-respond!" => fn [slug, question_id, answer] ->
+      {"agent-ask-permission!",
+       "(agent-ask-permission! SLUG TITLE RAW) — raise a permission card in the chat and block until it is answered; return 'allow, 'always or 'deny."} =>
+        fn [slug, title, raw] ->
+          case Compos.Core.Agent.ask_permission(s(slug), %{
+                 title: to_string(title),
+                 kind: "tool",
+                 raw: to_string(raw)
+               }) do
+            :always -> {:sym, "always"}
+            :allow -> {:sym, "allow"}
+            _ -> {:sym, "deny"}
+          end
+        end,
+      {"agent-question-respond!",
+       "(agent-question-respond! SLUG ID ANSWER) — answer a pending branching question."} => fn [
+                                                                                                  slug,
+                                                                                                  question_id,
+                                                                                                  answer
+                                                                                                ] ->
         case Compos.Core.Agent.respond_question(s(slug), question_id, to_string(answer)) do
           :ok -> :void
           {:error, r} -> raise_scheme("agent-question-respond!: #{inspect(r)}")
         end
       end,
-      "agent-append!" => fn [slug, text] ->
-        case Compos.Core.Agent.append_at_mark(s(slug), to_string(text)) do
-          mark when is_integer(mark) -> mark
-          {:error, r} -> raise_scheme("agent-append!: #{inspect(r)}")
-        end
-      end,
-      "agent-mark" => fn [slug] ->
-        case Compos.Core.Agent.mark(s(slug)) do
-          mark when is_integer(mark) -> mark
-          {:error, r} -> raise_scheme("agent-mark: #{inspect(r)}")
-        end
-      end,
-      "agent-list" => fn [] -> Compos.Core.Agent.list() end,
-      "agent-kill!" => fn [slug] ->
+      {"agent-append!",
+       "(agent-append! SLUG TEXT) — insert TEXT at the agent's mark; return the new byte offset."} =>
+        fn [slug, text] ->
+          case Compos.Core.Agent.append_at_mark(s(slug), to_string(text)) do
+            mark when is_integer(mark) -> mark
+            {:error, r} -> raise_scheme("agent-append!: #{inspect(r)}")
+          end
+        end,
+      {"agent-mark", "(agent-mark SLUG) — return the agent's output mark as a byte offset."} =>
+        fn [slug] ->
+          case Compos.Core.Agent.mark(s(slug)) do
+            mark when is_integer(mark) -> mark
+            {:error, r} -> raise_scheme("agent-mark: #{inspect(r)}")
+          end
+        end,
+      {"agent-list", "(agent-list) — return the slugs of the running agent threads, sorted."} =>
+        fn [] -> Compos.Core.Agent.list() end,
+      {"agent-kill!", "(agent-kill! SLUG) — stop the agent thread."} => fn [slug] ->
         Compos.Core.LLMSession.close(s(slug))
         :void
       end,
       # live model switch on the running session (ACP session/set_model)
-      "agent-set-model!" => fn [slug, model] ->
-        case Compos.Core.LLMSession.set_model(s(slug), s(model)) do
-          :ok -> true
-          {:error, _} -> false
-        end
-      end,
+      {"agent-set-model!",
+       "(agent-set-model! SLUG MODEL) — switch the live session's model; return #t or #f."} =>
+        fn [slug, model] ->
+          case Compos.Core.LLMSession.set_model(s(slug), s(model)) do
+            :ok -> true
+            {:error, _} -> false
+          end
+        end,
       # live permission-mode switch (ACP session/set_mode); #f when the
       # backend doesn't do modes — the caller then answers requests itself
-      "agent-set-mode!" => fn [slug, mode] ->
+      {"agent-set-mode!",
+       "(agent-set-mode! SLUG MODE) — switch the permission mode; #f when unsupported."} => fn [
+                                                                                                 slug,
+                                                                                                 mode
+                                                                                               ] ->
         case Compos.Core.LLMSession.set_mode(s(slug), s(mode)) do
           :ok -> true
           {:error, _} -> false
         end
       end,
       # -> (slug "a1" buffer "*agent: a1*" status idle queued 0 permission #f)
-      "agent-info" => fn [slug] ->
-        case Compos.Core.Agent.info(s(slug)) do
-          {:error, _} ->
-            false
+      {"agent-info",
+       "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, permission, question; or #f."} =>
+        fn [slug] ->
+          case Compos.Core.Agent.info(s(slug)) do
+            {:error, _} ->
+              false
 
-          info ->
-            perm =
-              case info.permission do
-                nil ->
-                  false
+            info ->
+              perm =
+                case info.permission do
+                  nil ->
+                    false
 
-                p ->
-                  [
-                    {:sym, "rpc-id"},
-                    p.rpc_id,
-                    {:sym, "title"},
-                    p.title,
-                    {:sym, "options"},
-                    Enum.map(p.options, fn {oid, name, kind} -> [oid, name, kind] end)
-                  ]
-              end
+                  p ->
+                    [
+                      {:sym, "rpc-id"},
+                      p.rpc_id,
+                      {:sym, "title"},
+                      p.title,
+                      {:sym, "options"},
+                      Enum.map(p.options, fn {oid, name, kind} -> [oid, name, kind] end)
+                    ]
+                end
 
-            question =
-              case info.question do
-                nil ->
-                  false
+              question =
+                case info.question do
+                  nil ->
+                    false
 
-                q ->
-                  [
-                    {:sym, "id"},
-                    q.id,
-                    {:sym, "question"},
-                    q.question,
-                    {:sym, "answers"},
-                    q.answers
-                  ]
-              end
+                  q ->
+                    [
+                      {:sym, "id"},
+                      q.id,
+                      {:sym, "question"},
+                      q.question,
+                      {:sym, "answers"},
+                      q.answers
+                    ]
+                end
 
-            [
-              {:sym, "slug"},
-              info.slug,
-              {:sym, "buffer"},
-              info.buffer,
-              {:sym, "status"},
-              {:sym, to_string(info.status)},
-              {:sym, "queued"},
-              info.queued,
-              {:sym, "steering"},
-              info.steering,
-              {:sym, "permission"},
-              perm,
-              {:sym, "question"},
-              question
-            ]
-        end
-      end,
+              [
+                {:sym, "slug"},
+                info.slug,
+                {:sym, "buffer"},
+                info.buffer,
+                {:sym, "status"},
+                {:sym, to_string(info.status)},
+                {:sym, "queued"},
+                info.queued,
+                {:sym, "steering"},
+                info.steering,
+                {:sym, "permission"},
+                perm,
+                {:sym, "question"},
+                question
+              ]
+          end
+        end,
       # one global handler for all agent events: (lambda (slug events) ...).
       # It escapes into the Agent GenServers as an opaque fun — root it.
-      "agent-on-event!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_handler}, handler})
-        :void
-      end,
+      {"agent-on-event!",
+       "(agent-on-event! HANDLER) — set the global agent event handler: (HANDLER SLUG EVENTS)."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_handler}, handler})
+          :void
+        end,
       # the turn-end fan-out: (lambda (slug stop-reason) ...). The Agent
       # dispatches it once per completed turn, AFTER the batch carrying that
       # turn-end has rendered, and on the :ui lane — a listener reads a
       # finished transcript and touches buffers that are not the agent's.
-      "agent-on-turn-end!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_turn_end}, handler})
-        :void
-      end,
+      {"agent-on-turn-end!",
+       "(agent-on-turn-end! HANDLER) — set the turn-end handler: (HANDLER SLUG STOP-REASON), called on the :ui lane after the turn has rendered."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_turn_end}, handler})
+          :void
+        end,
       # the direct lane's context provider: (lambda (slug display-text) ...)
       # -> (turns ... system ... tools ... dispatcher ...), called by
       # Backend.ReqLLM at each turn start. Rooted like the event handler.
-      "agent-context-fn!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_context}, handler})
-        :void
-      end,
+      {"agent-context-fn!",
+       "(agent-context-fn! HANDLER) — set the direct lane's context provider for each turn."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_context}, handler})
+          :void
+        end,
       # the direct lane's record writer: (lambda (slug role blocks wire) ...),
       # called by the turn task for every message it puts on the wire. The
       # task reads the record and writes it in ONE order, so the next turn
       # replays exactly what the last one sent. Rooted like the handlers
       # above.
-      "agent-record-fn!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_record}, handler})
-        :void
-      end,
+      {"agent-record-fn!",
+       "(agent-record-fn! HANDLER) — set the direct lane's record writer for wire messages."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_record}, handler})
+          :void
+        end,
       # the permission policy the DIRECT lane consults before every tool
       # call: (lambda (slug name kind raw) ...) -> allow | ask | reject.
       # (The ACP lane answers its own requests through the same policy,
       # from the event handler.) Rooted like the handlers above.
-      "agent-permission-fn!" => fn [handler] ->
-        :ets.insert(@escaped, {{:agent_permission}, handler})
-        :void
-      end,
+      {"agent-permission-fn!",
+       "(agent-permission-fn! HANDLER) — set the tool policy; it returns allow, ask, or reject."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:agent_permission}, handler})
+          :void
+        end,
       # arm an auto-deny deadline on the thread's pending permission
-      "agent-permission-deadline!" => fn [slug, ms] ->
-        Compos.Core.Agent.permission_deadline(s(slug), trunc(ms))
-        :void
+      {"agent-permission-deadline!",
+       "(agent-permission-deadline! SLUG MS) — arm an auto-deny deadline on the permission."} =>
+        fn [slug, ms] ->
+          Compos.Core.Agent.permission_deadline(s(slug), trunc(ms))
+          :void
+        end,
+      {"set-modeline-extra!",
+       "(set-modeline-extra! TEXT) — set the extra text at the right of the frame modeline: a string, or a list of (CLASS TEXT) segments."} =>
+        fn [s] ->
+          Editor.set_modeline_extra(modeline_extra(s))
+          :void
+        end,
+      {"llm-model", "(llm-model) — return the active LLM model id."} => fn [] ->
+        Compos.Core.LLM.model()
       end,
-      "set-modeline-extra!" => fn [s] ->
-        Editor.set_modeline_extra(modeline_extra(s))
-        :void
+      {"llm-context-limit",
+       "(llm-context-limit MODEL) — input tokens the model accepts, or #f when unknown."} => fn [
+                                                                                                  m
+                                                                                                ] ->
+        Compos.Core.LLMDb.context_limit(to_string(m)) || false
       end,
-      "llm-model" => fn [] -> Compos.Core.LLM.model() end,
-      "llm-context-limit" => fn [m] -> Compos.Core.LLMDb.context_limit(to_string(m)) || false end,
-      "eval-string" => fn [src], store -> eval_src.(src, store) end,
+      {"eval-string", "(eval-string SRC) — evaluate SRC as Scheme; return the last value."} =>
+        fn [src], store -> eval_src.(src, store) end,
       # The deferred-reply lane. An eval that hands slow work to a Task
       # claims its caller's reply slot with eval-defer! and answers through
       # eval-resolve! when the Task's callback delivers the value. The
       # caller blocks in its own process; the Session moves on at once.
-      "eval-defer!" => fn [] ->
-        case Process.get(:eval_reply_to) do
-          nil ->
-            false
+      {"eval-defer!",
+       "(eval-defer!) — claim the current eval's reply; return a token for eval-resolve!, or #f outside an eval."} =>
+        fn [] ->
+          case Process.get(:eval_reply_to) do
+            nil ->
+              false
 
-          from ->
-            token = make_ref()
-            :ets.insert(@escaped, {{:eval_pending, token}, from})
-            Process.put(:eval_deferred, token)
-            token
-        end
-      end,
-      "eval-resolve!" => fn [token, value] ->
-        case :ets.lookup(@escaped, {:eval_pending, token}) do
-          [{key, from}] ->
-            :ets.delete(@escaped, key)
-            GenServer.reply(from, {:ok, Scheme.print(value)})
-            :void
+            from ->
+              token = make_ref()
+              :ets.insert(@escaped, {{:eval_pending, token}, from})
+              Process.put(:eval_deferred, token)
+              token
+          end
+        end,
+      {"eval-resolve!",
+       "(eval-resolve! TOKEN VALUE) — answer the deferred eval named by TOKEN with VALUE."} =>
+        fn [token, value] ->
+          case :ets.lookup(@escaped, {:eval_pending, token}) do
+            [{key, from}] ->
+              :ets.delete(@escaped, key)
+              GenServer.reply(from, {:ok, Scheme.print(value)})
+              :void
 
-          # already resolved, or the caller gave up — nobody to answer
-          [] ->
-            :void
-        end
-      end,
+            # already resolved, or the caller gave up — nobody to answer
+            [] ->
+              :void
+          end
+        end,
       # (with-edit-author AUTHOR THUNK) — every buffer mutation THUNK makes
       # is attributed to AUTHOR (see buffer-authors). The try/after restore
       # is the point: a raising handler must not leave the author stuck on
       # the session, misattributing every later keystroke.
-      "with-edit-author" => fn [author, thunk], store ->
-        prev = Process.get(:compos_edit_author)
+      {"with-edit-author",
+       "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR."} =>
+        fn [author, thunk], store ->
+          prev = Process.get(:compos_edit_author)
 
-        if author == false,
-          do: Process.delete(:compos_edit_author),
-          else: Process.put(:compos_edit_author, to_string(author))
+          if author == false,
+            do: Process.delete(:compos_edit_author),
+            else: Process.put(:compos_edit_author, to_string(author))
 
-        try do
-          Compos.Scheme.Eval.apply_fn(thunk, [], store)
-        after
-          if prev,
-            do: Process.put(:compos_edit_author, prev),
-            else: Process.delete(:compos_edit_author)
-        end
+          try do
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          after
+            if prev,
+              do: Process.put(:compos_edit_author, prev),
+              else: Process.delete(:compos_edit_author)
+          end
+        end,
+      {"current-edit-author",
+       "(current-edit-author) — the caller process's edit author string, or #f"} => fn [] ->
+        Process.get(:compos_edit_author) || false
       end,
-      "current-edit-author" => fn [] -> Process.get(:compos_edit_author) || false end,
       # Emacs' logical current-buffer binding, deliberately separate from
       # window display. Tool evaluation uses this so visit/switch operations
       # can establish the buffer commands act on without hijacking the user's
       # selected window.
-      "with-current-buffer" => fn [buffer, thunk], store ->
-        buffer = to_string(buffer)
+      {"with-current-buffer",
+       "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window."} =>
+        fn [buffer, thunk], store ->
+          buffer = to_string(buffer)
 
-        unless Compos.Core.Buffer.exists?(buffer) do
-          raise Compos.Scheme.Eval.Error, message: "no such buffer: #{buffer}"
-        end
+          unless Compos.Core.Buffer.exists?(buffer) do
+            raise Compos.Scheme.Eval.Error, message: "no such buffer: #{buffer}"
+          end
 
-        Compos.Core.Frame.with_buffer(buffer, fn ->
-          Compos.Scheme.Eval.apply_fn(thunk, [], store)
-        end)
-      end,
-      "with-buffer-display-update" => fn [buffer, thunk], store ->
-        Compos.Core.Events.with_display_update(to_string(buffer), fn ->
-          Compos.Scheme.Eval.apply_fn(thunk, [], store)
-        end)
-      end,
+          Compos.Core.Frame.with_buffer(buffer, fn ->
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          end)
+        end,
+      {"with-buffer-display-update",
+       "(with-buffer-display-update BUF THUNK) — keep the previous presentation visible until THUNK finishes updating text, styling and selection; release on errors too."} =>
+        fn [buffer, thunk], store ->
+          Compos.Core.Events.with_display_update(to_string(buffer), fn ->
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          end)
+        end,
       # The deliberate exit from that binding. Inside the thunk,
       # current-buffer and the switch primitives resolve through the
       # frame's real windows, so a tool that intends a display change can
       # make one and observe it truthfully.
-      "buffer-context?" => fn [] -> Frame.buffer_context() != nil end,
-      "with-frame-windows" => fn [thunk], store ->
-        Compos.Core.Frame.without_buffer(fn ->
-          Compos.Scheme.Eval.apply_fn(thunk, [], store)
-        end)
-      end,
+      {"buffer-context?",
+       "(buffer-context?) — #t inside a logical current-buffer binding; window placement must not change the frame there."} =>
+        fn [] -> Frame.buffer_context() != nil end,
+      {"with-frame-windows",
+       "(with-frame-windows THUNK) — run THUNK with no logical buffer context: current-buffer and switch-to-buffer! act on the frame's real windows."} =>
+        fn [thunk], store ->
+          Compos.Core.Frame.without_buffer(fn ->
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          end)
+        end,
       # Scheme tasks share global bindings. This narrow lock lets Scheme
       # publish an expensive derived value once after shared source changes.
       # The process identity keeps :global's requester identity distinct.
-      "with-scheme-lock" => fn [key, thunk], store ->
-        lock = {{__MODULE__, :scheme_lock, key}, self()}
+      {"with-scheme-lock",
+       "(with-scheme-lock KEY THUNK) — run THUNK once at a time for KEY across Scheme processes."} =>
+        fn [key, thunk], store ->
+          lock = {{__MODULE__, :scheme_lock, key}, self()}
 
-        :global.trans(lock, fn ->
-          # A waiting eval can hold shared reads from before the lock. Refresh
-          # them so the critical section sees the previous owner's writes.
-          Compos.Scheme.Env.forget_cached_reads()
-          Compos.Scheme.Eval.apply_fn(thunk, [], store)
-        end)
-      end,
+          :global.trans(lock, fn ->
+            # A waiting eval can hold shared reads from before the lock. Refresh
+            # them so the critical section sees the previous owner's writes.
+            Compos.Scheme.Env.forget_cached_reads()
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          end)
+        end,
       # (wait-until PRED &optional TIMEOUT-MS INTERVAL-MS) -> #t | #f
       #
       # Wait for work that is not on this lane: a subprocess handshake, a
@@ -2404,17 +2376,21 @@ defmodule Compos.Core.Session do
       # complete elsewhere. @wait_cap keeps a bad predicate well inside the
       # 30s Lane timeout, so a runaway wait reports as #f and not as a
       # frozen lane nobody can name.
-      "wait-until" => fn args, store ->
-        [pred | rest] = args
-        timeout = min(wait_arg(rest, 0, 2_000), @wait_cap)
-        interval = max(wait_arg(rest, 1, 20), 5)
-        deadline = System.monotonic_time(:millisecond) + timeout
-        wait_until_loop(pred, deadline, interval, store)
-      end,
+      {"wait-until",
+       "(wait-until PRED &optional TIMEOUT-MS INTERVAL-MS) — poll PRED until it answers true; return #t, or #f at the deadline."} =>
+        fn args, store ->
+          [pred | rest] = args
+          timeout = min(wait_arg(rest, 0, 2_000), @wait_cap)
+          interval = max(wait_arg(rest, 1, 20), 5)
+          deadline = System.monotonic_time(:millisecond) + timeout
+          wait_until_loop(pred, deadline, interval, store)
+        end,
       # (eval-string-safe SRC) -> (ok VAL) | (error MSG) — the catch this
       # dialect lacks; the eval-scheme tool's did-you-mean feedback needs to
       # observe the error instead of aborting the whole handler
-      "eval-string-safe" => fn [src], store ->
+      {"eval-string-safe",
+       "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG)."} => fn [src],
+                                                                                       store ->
         try do
           {val, store2} = eval_src.(src, store)
           {[{:sym, "ok"}, val], store2}
@@ -2425,31 +2401,48 @@ defmodule Compos.Core.Session do
         end
       end,
       # dynamic global access by symbol — what defcustom/customize are built on
-      "symbol-value" => fn [{:sym, name}], store ->
+      {"symbol-value", "(symbol-value 'NAME) — return the global value of the symbol."} => fn [
+                                                                                                {:sym,
+                                                                                                 name}
+                                                                                              ],
+                                                                                              store ->
         {Compos.Scheme.Env.lookup(store, global, name), store}
       end,
-      "set-symbol-value!" => fn [{:sym, name}, val], store ->
-        {val, Compos.Scheme.Env.define(store, global, name, val)}
-      end,
-      "unbind-global!" => fn [{:sym, name}], store ->
-        {:void, Compos.Scheme.Env.unbind(store, global, name)}
-      end,
-      "function-interpose!" => fn [{:sym, name}, wrapper], store ->
-        {:void, Compos.Scheme.Env.interpose(store, global, name, wrapper)}
-      end,
-      "boundp" => fn [{:sym, name}], store ->
+      {"set-symbol-value!", "(set-symbol-value! 'NAME VAL) — set the global value of the symbol."} =>
+        fn [{:sym, name}, val], store ->
+          {val, Compos.Scheme.Env.define(store, global, name, val)}
+        end,
+      {"unbind-global!", "(unbind-global! 'NAME) — remove the global binding of the symbol."} =>
+        fn [{:sym, name}], store ->
+          {:void, Compos.Scheme.Env.unbind(store, global, name)}
+        end,
+      {"function-interpose!",
+       "(function-interpose! 'NAME WRAPPER) — internal binding wrapper; WRAPPER receives ORIGINAL and ARGS; #f removes it."} =>
+        fn [{:sym, name}, wrapper], store ->
+          {:void, Compos.Scheme.Env.interpose(store, global, name, wrapper)}
+        end,
+      {"boundp", "(boundp 'NAME) — return #t when the symbol has a global binding."} => fn [
+                                                                                             {:sym,
+                                                                                              name}
+                                                                                           ],
+                                                                                           store ->
         {match?({:ok, _}, Compos.Scheme.Env.fetch(store, global, name)), store}
       end,
       # every globally bound name (builtins + userland defines) — the
       # discovery surface for agents writing eval-scheme code
-      "global-names" => fn [], store ->
+      {"global-names", "(global-names) — return every globally bound name, sorted."} => fn [],
+                                                                                           store ->
         {Compos.Scheme.Env.frame_names(store, global) |> Enum.sort(), store}
       end,
       # the doc sweep's surface: apropos scope "all" and describe-function
       # read these instead of showing a bare name. A userland alias of a
       # builtin — (define raw-buffer-create buffer-create) — carries the
       # builtin value, so the lookup follows the value to the real name.
-      "primitive-doc" => fn [name], store ->
+      {"primitive-doc",
+       "(primitive-doc NAME) — return the one-line doc for an Elixir primitive, or #f."} => fn [
+                                                                                                 name
+                                                                                               ],
+                                                                                               store ->
         n = doc_name(name)
 
         resolved =
@@ -2460,13 +2453,15 @@ defmodule Compos.Core.Session do
 
         {primitive_docs()[resolved] || primitive_docs()[n] || false, store}
       end,
-      "primitive-docs" => fn [] ->
-        primitive_docs() |> Enum.sort() |> Enum.map(fn {n, d} -> [n, d] end)
-      end,
+      {"primitive-docs",
+       "(primitive-docs) — return (NAME DOC) pairs for every Elixir primitive, sorted."} =>
+        fn [] ->
+          primitive_docs() |> Enum.sort() |> Enum.map(fn {n, d} -> [n, d] end)
+        end,
       # load-library: evaluate a Scheme file in the live session. A relative
       # path resolves against the config home, so init.scm can source
       # (load "providers.scm") without knowing where the daemon was started.
-      "load" => fn [path], store ->
+      {"load", "(load PATH) — evaluate a Scheme file in the live session."} => fn [path], store ->
         expanded = expand_load_path(path)
 
         case File.read(expanded) do
@@ -2477,11 +2472,14 @@ defmodule Compos.Core.Session do
             raise Compos.Scheme.Eval.Error, message: "cannot load #{expanded}: #{reason}"
         end
       end,
-      "eval-region" => fn [buffer, s, e], store ->
-        src = buffer |> Buffer.text() |> binary_part(s, e - s)
-        eval_src.(src, store)
-      end,
-      "eval-buffer" => fn [buffer], store ->
+      {"eval-region",
+       "(eval-region BUF START END) — evaluate the text between byte offsets START and END."} =>
+        fn [buffer, s, e], store ->
+          src = buffer |> Buffer.text() |> binary_part(s, e - s)
+          eval_src.(src, store)
+        end,
+      {"eval-buffer", "(eval-buffer BUF) — evaluate the whole buffer as Scheme."} => fn [buffer],
+                                                                                        store ->
         eval_src.(Buffer.text(buffer), store)
       end,
       # (on-change! buf (lambda (pos inserted deleted-len source) ...)) -> id
@@ -2497,23 +2495,27 @@ defmodule Compos.Core.Session do
       # The handler is an MFA, never a fun: a fun from this module dies
       # when a hot reload purges the module version it came from, and the
       # rule then fails on every change until a restart.
-      "on-change!" => fn [buf, callback | rest] ->
-        {:ok, id} =
-          Compos.Core.Reactor.on_change(
-            buf,
-            :any,
-            {__MODULE__, :fire_change, [callback]},
-            debounce: 30,
-            sources: :all,
-            eager: Enum.any?(rest, &match?({:sym, "eager"}, &1))
-          )
+      {"on-change!",
+       "(on-change! BUF CB ['eager]) — call (CB POS INSERTED DELETED-LEN SOURCE) on changes; fires only while BUF is visible or in the current buffer's group, unless 'eager; return an id."} =>
+        fn [buf, callback | rest] ->
+          {:ok, id} =
+            Compos.Core.Reactor.on_change(
+              buf,
+              :any,
+              {__MODULE__, :fire_change, [callback]},
+              debounce: 30,
+              sources: :all,
+              eager: Enum.any?(rest, &match?({:sym, "eager"}, &1))
+            )
 
-        # the Reactor holds the callback inside an opaque fun — root it for
-        # the GC for as long as the rule lives
-        :ets.insert(@escaped, {{:reactor, id}, callback})
-        id
-      end,
-      "remove-on-change!" => fn [id] ->
+          # the Reactor holds the callback inside an opaque fun — root it for
+          # the GC for as long as the rule lives
+          :ets.insert(@escaped, {{:reactor, id}, callback})
+          id
+        end,
+      {"remove-on-change!", "(remove-on-change! ID) — remove a change handler by its id."} => fn [
+                                                                                                   id
+                                                                                                 ] ->
         Compos.Core.Reactor.remove(id)
         :ets.delete(@escaped, {:reactor, id})
         :void
@@ -2523,19 +2525,23 @@ defmodule Compos.Core.Session do
       # current-buffer pointing at the WINDOW's buffer even though a prompt
       # is active — isearch's change handler moves point in the file, not
       # in the prompt it is typing into
-      "with-window-buffer" => fn [thunk], store ->
-        Editor.set_mb_redirect(false)
+      {"with-window-buffer",
+       "(with-window-buffer THUNK) — run THUNK with the window's buffer current, not the prompt."} =>
+        fn [thunk], store ->
+          Editor.set_mb_redirect(false)
 
-        try do
-          Compos.Scheme.Eval.apply_fn(thunk, [], store)
-        after
-          Editor.set_mb_redirect(true)
-        end
-      end,
+          try do
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          after
+            Editor.set_mb_redirect(true)
+          end
+        end,
 
       # store-aware (an active prompt's on_cancel closure applies in the
       # CURRENT store); refuses the sole frame
-      "delete-frame!" => fn args, store ->
+      {"delete-frame!",
+       "(delete-frame! [ID]) — delete the frame and run its prompt's cancel handler."} => fn args,
+                                                                                             store ->
         fid =
           case args do
             [] -> Frame.current() || Editor.last_active_frame()
@@ -2561,130 +2567,149 @@ defmodule Compos.Core.Session do
       # --- minibuffer commands (bound in the *minibuf* local keymap) ---------
       # Store-aware: handler closures apply in the CURRENT store — these run
       # inside the Session, so calling back via apply_callback would deadlock.
-      "minibuffer-buffer" => fn [] -> Editor.minibuf_name() end,
+      {"minibuffer-buffer", "(minibuffer-buffer) — return the minibuffer's buffer name."} =>
+        fn [] -> Editor.minibuf_name() end,
       # What the minibuffer is currently asking, as data — #f when it isn't
       # asking anything. The GUI reads this off the render payload; a browser
       # tab has no render payload, so it reads it here and draws its own.
-      "minibuffer-state" => fn [] ->
-        case Editor.snapshot().minibuffer do
-          nil ->
-            false
+      {"minibuffer-state",
+       "(minibuffer-state) — return the active prompt as a plist (prompt, input, sel, total, legend, candidates), or #f."} =>
+        fn [] ->
+          case Editor.snapshot().minibuffer do
+            nil ->
+              false
 
-          mb ->
-            [
-              {:sym, "prompt"},
-              mb.prompt,
-              {:sym, "input"},
-              mb.input,
-              {:sym, "sel"},
-              mb.list.sel,
-              {:sym, "total"},
-              Compos.Core.Candidates.total(mb.list),
-              # the prompt's flavour word, which decides its shape. A
-              # surface that draws its own prompt reads this to know
-              # whether it was asked for the bar, the popup or the modal.
-              {:sym, "style"},
-              Map.get(mb, :style) || false,
-              # the prompt's own key legend, as Scheme wrote it
-              {:sym, "legend"},
-              Map.get(mb, :legend) || [],
-              {:sym, "candidates"},
-              Enum.map(Compos.Core.Candidates.rows(mb.list), fn c ->
-                [{:sym, "label"}, c.label, {:sym, "hint"}, c.hint || ""]
-              end)
-            ]
-        end
-      end,
-      "minibuffer-style!" => fn [style] ->
-        Editor.minibuffer_set_style(if(style in [false, nil], do: nil, else: s(style)))
-        :void
-      end,
-      "minibuffer-input!" => fn [input] ->
+            mb ->
+              [
+                {:sym, "prompt"},
+                mb.prompt,
+                {:sym, "input"},
+                mb.input,
+                {:sym, "sel"},
+                mb.list.sel,
+                {:sym, "total"},
+                Compos.Core.Candidates.total(mb.list),
+                # the prompt's flavour word, which decides its shape. A
+                # surface that draws its own prompt reads this to know
+                # whether it was asked for the bar, the popup or the modal.
+                {:sym, "style"},
+                Map.get(mb, :style) || false,
+                # the prompt's own key legend, as Scheme wrote it
+                {:sym, "legend"},
+                Map.get(mb, :legend) || [],
+                {:sym, "candidates"},
+                Enum.map(Compos.Core.Candidates.rows(mb.list), fn c ->
+                  [{:sym, "label"}, c.label, {:sym, "hint"}, c.hint || ""]
+                end)
+              ]
+          end
+        end,
+      {"minibuffer-style!",
+       "(minibuffer-style! STYLE) — change the open prompt's style, and so its shape, without closing it: \"modal\", \"panel\", \"minibuffer\", or #f."} =>
+        fn [style] ->
+          Editor.minibuffer_set_style(if(style in [false, nil], do: nil, else: s(style)))
+          :void
+        end,
+      {"minibuffer-input!", "(minibuffer-input! INPUT) — set the minibuffer input text."} => fn [
+                                                                                                  input
+                                                                                                ] ->
         Editor.minibuffer_set_input(s(input))
         :void
       end,
       # Browser prompts do not pass through KeyDispatch, whose normal edit
       # path fires on_change. Keep the store-aware callback here so a dynamic
       # candidate provider behaves identically on both input surfaces.
-      "minibuffer-change!" => fn [input], store ->
-        input = s(input)
-        Editor.minibuffer_set_input(input)
+      {"minibuffer-change!",
+       "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler."} =>
+        fn [input], store ->
+          input = s(input)
+          Editor.minibuffer_set_input(input)
 
-        case Editor.snapshot().minibuffer do
-          %{on_change: oc} when oc not in [nil, false] ->
-            {_, store} = Compos.Scheme.Eval.apply_fn(oc, [input], store)
-            {:void, store}
+          case Editor.snapshot().minibuffer do
+            %{on_change: oc} when oc not in [nil, false] ->
+              {_, store} = Compos.Scheme.Eval.apply_fn(oc, [input], store)
+              {:void, store}
 
-          _ ->
-            {:void, store}
-        end
-      end,
+            _ ->
+              {:void, store}
+          end
+        end,
       # A small, general Scheme-side debounce. The callback stays rooted in
       # @escaped until its timer fires; the generation check makes a cancelled
       # timer harmless even if its message was already in this mailbox.
-      "debounce!" => fn [key, ms, callback, arg] ->
-        key = {:debounce, s(key)}
+      {"debounce!",
+       "(debounce! KEY MS CALLBACK ARG) — after MS idle, call CALLBACK with ARG; a newer call with KEY cancels the old one."} =>
+        fn [key, ms, callback, arg] ->
+          key = {:debounce, s(key)}
 
-        case :ets.lookup(@escaped, key) do
-          [{^key, {_generation, timer, _callback, _arg, _fid}}] ->
-            Process.cancel_timer(timer)
+          case :ets.lookup(@escaped, key) do
+            [{^key, {_generation, timer, _callback, _arg, _fid}}] ->
+              Process.cancel_timer(timer)
 
-          _ ->
-            :ok
-        end
+            _ ->
+              :ok
+          end
 
-        generation = make_ref()
-        # the primitive runs in a lane worker; the timer must land on the
-        # Session, whose handle_info routes the callback back into a lane
-        timer =
-          Process.send_after(
-            Process.whereis(__MODULE__),
-            {:scheme_debounce, key, generation},
-            trunc(ms)
-          )
+          generation = make_ref()
+          # the primitive runs in a lane worker; the timer must land on the
+          # Session, whose handle_info routes the callback back into a lane
+          timer =
+            Process.send_after(
+              Process.whereis(__MODULE__),
+              {:scheme_debounce, key, generation},
+              trunc(ms)
+            )
 
-        :ets.insert(@escaped, {key, {generation, timer, callback, arg, Frame.current()}})
-        :void
-      end,
-      "debounce-cancel!" => fn [key] ->
-        key = {:debounce, s(key)}
+          :ets.insert(@escaped, {key, {generation, timer, callback, arg, Frame.current()}})
+          :void
+        end,
+      {"debounce-cancel!",
+       "(debounce-cancel! KEY) — cancel KEY's pending debounce timer; a later fire is a no-op."} =>
+        fn [key] ->
+          key = {:debounce, s(key)}
 
-        case :ets.lookup(@escaped, key) do
-          [{^key, {_generation, timer, _callback, _arg, _fid}}] ->
-            Process.cancel_timer(timer)
-            :ets.delete(@escaped, key)
+          case :ets.lookup(@escaped, key) do
+            [{^key, {_generation, timer, _callback, _arg, _fid}}] ->
+              Process.cancel_timer(timer)
+              :ets.delete(@escaped, key)
 
-          _ ->
-            :ok
-        end
+            _ ->
+              :ok
+          end
 
-        :void
-      end,
-      "minibuffer-confirm!" => fn [], store ->
-        case Editor.minibuffer_close() do
-          %{on_confirm: oc} = mb when oc not in [nil, false] ->
-            {value, store} = mb_confirm_value(mb, store)
-            {_, store} = Compos.Scheme.Eval.apply_fn(oc, [value], store)
-            {:void, store}
+          :void
+        end,
+      {"minibuffer-confirm!",
+       "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value."} =>
+        fn [], store ->
+          case Editor.minibuffer_close() do
+            %{on_confirm: oc} = mb when oc not in [nil, false] ->
+              {value, store} = mb_confirm_value(mb, store)
+              {_, store} = Compos.Scheme.Eval.apply_fn(oc, [value], store)
+              {:void, store}
 
-          _ ->
-            {:void, store}
-        end
-      end,
+            _ ->
+              {:void, store}
+          end
+        end,
       # M-RET: submit the typed input as-is, ignoring the highlighted
       # candidate (vertico-exit-input) — creates files whose names fuzzy-
       # match existing ones
-      "minibuffer-confirm-input!" => fn [], store ->
-        case Editor.minibuffer_close() do
-          %{on_confirm: oc} = mb when oc not in [nil, false] ->
-            {_, store} = Compos.Scheme.Eval.apply_fn(oc, [mb.input], store)
-            {:void, store}
+      {"minibuffer-confirm-input!",
+       "(minibuffer-confirm-input!) — close the prompt; submit the input, not the candidate."} =>
+        fn [], store ->
+          case Editor.minibuffer_close() do
+            %{on_confirm: oc} = mb when oc not in [nil, false] ->
+              {_, store} = Compos.Scheme.Eval.apply_fn(oc, [mb.input], store)
+              {:void, store}
 
-          _ ->
-            {:void, store}
-        end
-      end,
-      "minibuffer-cancel!" => fn [], store ->
+            _ ->
+              {:void, store}
+          end
+        end,
+      {"minibuffer-cancel!",
+       "(minibuffer-cancel!) — close the prompt; run its cancel handler; echo Quit."} => fn [],
+                                                                                            store ->
         store =
           case Editor.minibuffer_close() do
             %{on_cancel: oc} when oc not in [nil, false] ->
@@ -2703,116 +2728,126 @@ defmodule Compos.Core.Session do
       # current input, and the handler closures themselves. Scheme adopts
       # them, so the prompt continues as a buffer (embark-collect). This is
       # the only way out of a prompt that neither confirms nor cancels.
-      "minibuffer-detach!" => fn [] ->
-        case Editor.minibuffer_close() do
-          nil ->
-            false
+      {"minibuffer-detach!",
+       "(minibuffer-detach!) — close the prompt; return its state and closures, or #f."} =>
+        fn [] ->
+          case Editor.minibuffer_close() do
+            nil ->
+              false
 
-          mb ->
-            [
-              [{:sym, "prompt"}, mb.prompt],
-              [{:sym, "input"}, mb.input],
+            mb ->
               [
-                {:sym, "candidates"},
-                Enum.map(Compos.Core.Candidates.filtered(mb.list), fn c ->
-                  [c.label, c.hint || ""]
-                end)
-              ],
-              [{:sym, "confirm"}, mb[:on_confirm] || false],
-              [{:sym, "cancel"}, mb[:on_cancel] || false],
-              [{:sym, "complete"}, mb[:on_complete] || false],
-              [{:sym, "collect"}, mb[:on_collect] || false]
-            ]
-        end
-      end,
-      "minibuffer-complete!" => fn [], store ->
-        mb = Editor.snapshot().minibuffer
+                [{:sym, "prompt"}, mb.prompt],
+                [{:sym, "input"}, mb.input],
+                [
+                  {:sym, "candidates"},
+                  Enum.map(Compos.Core.Candidates.filtered(mb.list), fn c ->
+                    [c.label, c.hint || ""]
+                  end)
+                ],
+                [{:sym, "confirm"}, mb[:on_confirm] || false],
+                [{:sym, "cancel"}, mb[:on_cancel] || false],
+                [{:sym, "complete"}, mb[:on_complete] || false],
+                [{:sym, "collect"}, mb[:on_collect] || false]
+              ]
+          end
+        end,
+      {"minibuffer-complete!",
+       "(minibuffer-complete!) — run the prompt's completion, or copy the selection to the input."} =>
+        fn [], store ->
+          mb = Editor.snapshot().minibuffer
 
-        cond do
-          mb == nil ->
-            {:void, store}
+          cond do
+            mb == nil ->
+              {:void, store}
 
-          mb.on_complete not in [nil, false] ->
-            selected = (mb.sel_touched && Editor.minibuffer_selected()) || false
+            mb.on_complete not in [nil, false] ->
+              selected = (mb.sel_touched && Editor.minibuffer_selected()) || false
 
-            case Compos.Scheme.Eval.apply_fn(mb.on_complete, [mb.input, selected], store) do
-              {[new_input, candidates], store}
-              when is_binary(new_input) and is_list(candidates) ->
-                Editor.minibuffer_set_input(new_input)
-                Editor.minibuffer_set_candidates(candidates)
-                {:void, store}
+              case Compos.Scheme.Eval.apply_fn(mb.on_complete, [mb.input, selected], store) do
+                {[new_input, candidates], store}
+                when is_binary(new_input) and is_list(candidates) ->
+                  Editor.minibuffer_set_input(new_input)
+                  Editor.minibuffer_set_candidates(candidates)
+                  {:void, store}
 
-              {_, store} ->
-                {:void, store}
-            end
+                {_, store} ->
+                  {:void, store}
+              end
 
-          true ->
-            case Editor.minibuffer_selected() do
-              nil -> :ok
-              label -> Editor.minibuffer_set_input(label)
-            end
+            true ->
+              case Editor.minibuffer_selected() do
+                nil -> :ok
+                label -> Editor.minibuffer_set_input(label)
+              end
 
-            {:void, store}
-        end
-      end,
-      "minibuffer-next!" => fn [] ->
-        Editor.minibuffer_move_sel(1)
-        :void
-      end,
-      "minibuffer-prev!" => fn [] ->
-        Editor.minibuffer_move_sel(-1)
-        :void
-      end,
+              {:void, store}
+          end
+        end,
+      {"minibuffer-next!", "(minibuffer-next!) — move the candidate selection down one."} =>
+        fn [] ->
+          Editor.minibuffer_move_sel(1)
+          :void
+        end,
+      {"minibuffer-prev!", "(minibuffer-prev!) — move the candidate selection up one."} =>
+        fn [] ->
+          Editor.minibuffer_move_sel(-1)
+          :void
+        end,
       # The palette's second list. The prompt keeps the state and sends the
       # whole rail each time, so this holds no cursor of its own: rows in,
       # rows out, and INDEX says which one wears the highlight. A row is
       # (LABEL HINT . REST); REST is the prompt's own and never travels.
-      "minibuffer-rail!" => fn [rows, index, focused] ->
-        rail =
-          case rows do
-            [_ | _] ->
-              i = index |> trunc() |> max(0) |> min(length(rows) - 1)
+      {"minibuffer-rail!",
+       "(minibuffer-rail! ROWS INDEX FOCUSED) — set the palette's right-hand list. ROWS is ((LABEL HINT ...) ...), INDEX the row on, FOCUSED whether the arrows are in it; '() clears it."} =>
+        fn [rows, index, focused] ->
+          rail =
+            case rows do
+              [_ | _] ->
+                i = index |> trunc() |> max(0) |> min(length(rows) - 1)
 
-              %{
-                focused: focused not in [false, nil],
-                rows:
-                  rows
-                  |> Enum.with_index()
-                  |> Enum.map(fn {row, k} ->
-                    {label, hint} =
-                      case row do
-                        [l, h | _] -> {l, h}
-                        [l] -> {l, ""}
-                        l -> {l, ""}
-                      end
+                %{
+                  focused: focused not in [false, nil],
+                  rows:
+                    rows
+                    |> Enum.with_index()
+                    |> Enum.map(fn {row, k} ->
+                      {label, hint} =
+                        case row do
+                          [l, h | _] -> {l, h}
+                          [l] -> {l, ""}
+                          l -> {l, ""}
+                        end
 
-                    %{label: s(label), hint: s(hint), selected: k == i}
-                  end)
-              }
+                      %{label: s(label), hint: s(hint), selected: k == i}
+                    end)
+                }
 
-            _ ->
-              nil
-          end
+              _ ->
+                nil
+            end
 
-        Editor.minibuffer_set_rail(rail)
-        :void
-      end,
+          Editor.minibuffer_set_rail(rail)
+          :void
+        end,
       # DEL: in a path prompt at a directory boundary, kill the whole
       # component (vertico-directory); otherwise one char back at point
-      "minibuffer-del!" => fn [] ->
-        mb = Editor.snapshot().minibuffer
-        input = Buffer.text(Editor.minibuf_name())
-        trimmed = String.replace(input, ~r{[^/]+/$}, "")
+      {"minibuffer-del!",
+       "(minibuffer-del!) — delete one char back; at a directory boundary, delete the component."} =>
+        fn [] ->
+          mb = Editor.snapshot().minibuffer
+          input = Buffer.text(Editor.minibuf_name())
+          trimmed = String.replace(input, ~r{[^/]+/$}, "")
 
-        if (mb && mb.on_complete not in [nil, false]) and trimmed != input and
-             String.ends_with?(input, "/") do
-          Editor.minibuffer_set_input(trimmed)
-        else
-          Buffer.delete_char(Editor.minibuf_name(), -1)
+          if (mb && mb.on_complete not in [nil, false]) and trimmed != input and
+               String.ends_with?(input, "/") do
+            Editor.minibuffer_set_input(trimmed)
+          else
+            Buffer.delete_char(Editor.minibuf_name(), -1)
+          end
+
+          :void
         end
-
-        :void
-      end
     }
     |> Compos.Core.SchemeRawNames.add()
   end

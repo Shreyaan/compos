@@ -1,4 +1,5 @@
 defmodule Compos.Scheme.Builtins do
+  alias Compos.Scheme.Prim
   import Bitwise
 
   alias Compos.Scheme.Text
@@ -13,51 +14,101 @@ defmodule Compos.Scheme.Builtins do
   # :calendar.datetime_to_gregorian_seconds at the unix epoch
   @unix_epoch_gregorian 62_167_219_200
 
-  def all do
+  def all, do: Prim.funs(entries())
+
+  @doc "NAME => doc for every builtin."
+  def docs, do: Prim.docs(entries())
+
+  @doc "Every builtin under its {name, doc} key."
+  def entries do
     %{
-      "+" => &arith(&1, 0, fn a, b -> a + b end),
-      "*" => &arith(&1, 1, fn a, b -> a * b end),
-      "-" => &sub/1,
-      "/" => &divide/1,
-      "=" => cmp(fn a, b -> a == b end),
-      "<" => cmp(fn a, b -> a < b end),
-      ">" => cmp(fn a, b -> a > b end),
-      "<=" => cmp(fn a, b -> a <= b end),
-      ">=" => cmp(fn a, b -> a >= b end),
-      "equal?" => fn [a, b] -> a == b end,
-      "not" => fn [a] -> a == false end,
-      "modulo" => fn [a, b] -> Integer.mod(a, b) end,
-      "remainder" => fn [a, b] -> rem(a, b) end,
-      "quotient" => fn [a, b] -> div(a, b) end,
-      "min" => fn args -> Enum.min(args) end,
-      "max" => fn args -> Enum.max(args) end,
-      "abs" => fn [x] -> abs(x) end,
-      "member" => fn [x, l] ->
+      {"+", "(+ N ...) — return the sum of the numbers; 0 with no arguments."} =>
+        &arith(&1, 0, fn a, b -> a + b end),
+      {"*", "(* N ...) — return the product of the numbers; 1 with no arguments."} =>
+        &arith(&1, 1, fn a, b -> a * b end),
+      {"-", "(- N ...) — negate N, or subtract the other numbers from N in order."} => &sub/1,
+      {"/", "(/ N ...) — divide N by the other numbers in order; return a float."} => &divide/1,
+      {"=", "(= N ...) — return true if each number equals the next."} =>
+        cmp(fn a, b -> a == b end),
+      {"<", "(< N ...) — return true if each number is less than the next."} =>
+        cmp(fn a, b -> a < b end),
+      {">", "(> N ...) — return true if each number is greater than the next."} =>
+        cmp(fn a, b -> a > b end),
+      {"<=", "(<= N ...) — return true if each number is less than or equal to the next."} =>
+        cmp(fn a, b -> a <= b end),
+      {">=", "(>= N ...) — return true if each number is greater than or equal to the next."} =>
+        cmp(fn a, b -> a >= b end),
+      {"equal?", "(equal? A B) — return true if A and B are structurally equal."} => fn [a, b] ->
+        a == b
+      end,
+      {"not", "(not X) — return true if X is false."} => fn [a] -> a == false end,
+      {"modulo", "(modulo A B) — return A modulo B; the result takes the sign of B."} => fn [a, b] ->
+        Integer.mod(a, b)
+      end,
+      {"remainder",
+       "(remainder A B) — return the remainder of A/B; the result takes the sign of A."} => fn [
+                                                                                                 a,
+                                                                                                 b
+                                                                                               ] ->
+        rem(a, b)
+      end,
+      {"quotient", "(quotient A B) — return the integer quotient of A/B, truncated toward zero."} =>
+        fn [a, b] -> div(a, b) end,
+      {"min", "(min N ...) — return the smallest of the numbers."} => fn args ->
+        Enum.min(args)
+      end,
+      {"max", "(max N ...) — return the largest of the numbers."} => fn args -> Enum.max(args) end,
+      {"abs", "(abs N) — return the absolute value of N."} => fn [x] -> abs(x) end,
+      {"member", "(member X LST) — return the tail of LST from the first X, or false."} => fn [
+                                                                                                x,
+                                                                                                l
+                                                                                              ] ->
         case Enum.drop_while(l, &(&1 != x)) do
           [] -> false
           tail -> tail
         end
       end,
-      "sort" => fn [l] -> Enum.sort(l) end,
-      "cons" => fn [h, t] when is_list(t) -> [h | t] end,
-      "car" => fn [[h | _]] -> h end,
-      "cdr" => fn [[_ | t]] -> t end,
-      "list" => fn args -> args end,
-      "null?" => fn [x] -> x == [] end,
-      "pair?" => fn [x] -> is_list(x) and x != [] end,
-      "length" => fn [l] -> length(l) end,
-      "append" => fn lists -> Enum.concat(lists) end,
-      "reverse" => fn [l] -> Enum.reverse(l) end,
-      "number?" => fn [x] -> is_number(x) end,
-      "string?" => fn [x] -> is_binary(x) end,
-      "symbol?" => fn [x] -> match?({:sym, _}, x) end,
-      "procedure?" => fn [x] ->
+      {"sort", "(sort LST) — return LST sorted in ascending term order."} => fn [l] ->
+        Enum.sort(l)
+      end,
+      {"cons", "(cons H T) — prepend H to the list T; T must be a list."} => fn [h, t]
+                                                                                when is_list(t) ->
+        [h | t]
+      end,
+      {"car", "(car LST) — return the first element of LST."} => fn [[h | _]] -> h end,
+      {"cdr", "(cdr LST) — return LST without its first element."} => fn [[_ | t]] -> t end,
+      {"list", "(list X ...) — return a list of the arguments."} => fn args -> args end,
+      {"null?", "(null? X) — return true if X is the empty list."} => fn [x] -> x == [] end,
+      {"pair?", "(pair? X) — return true if X is a non-empty list."} => fn [x] ->
+        is_list(x) and x != []
+      end,
+      {"length", "(length LST) — return the number of elements in LST."} => fn [l] ->
+        length(l)
+      end,
+      {"append", "(append LST ...) — concatenate the lists into one list."} => fn lists ->
+        Enum.concat(lists)
+      end,
+      {"reverse", "(reverse LST) — return LST with its elements in reverse order."} => fn [l] ->
+        Enum.reverse(l)
+      end,
+      {"number?", "(number? X) — return true if X is a number."} => fn [x] -> is_number(x) end,
+      {"string?", "(string? X) — return true if X is a string."} => fn [x] -> is_binary(x) end,
+      {"symbol?", "(symbol? X) — return true if X is a symbol."} => fn [x] ->
+        match?({:sym, _}, x)
+      end,
+      {"procedure?",
+       "(procedure? X) — return true if X is a callable, including an advised function."} => fn [
+                                                                                                  x
+                                                                                                ] ->
         match?({:closure, _, _, _}, x) or match?({:builtin, _, _}, x) or
           match?({:interposed, _, _}, x)
       end,
       # introspection: closures carry their AST, so userland functions can
       # print their own source; builtins are opaque Elixir
-      "function-source" => fn [v] ->
+      {"function-source",
+       "(function-source F) — return the lambda source of F; builtins report as opaque."} => fn [
+                                                                                                  v
+                                                                                                ] ->
         case source_callable(v) do
           {:closure, {req, opt, rest}, body, _env} ->
             params =
@@ -77,20 +128,45 @@ defmodule Compos.Scheme.Builtins do
             Compos.Scheme.Printer.print(other)
         end
       end,
-      "string-append" => fn args -> Enum.join(args) end,
-      "string-length" => fn [s] -> String.length(s) end,
-      "string=?" => fn [a | rest] when is_binary(a) -> Enum.all?(rest, &(&1 == a)) end,
+      {"string-append", "(string-append S ...) — concatenate the strings into one string."} =>
+        fn args -> Enum.join(args) end,
+      {"string-length", "(string-length S) — return the count of characters in S, not bytes."} =>
+        fn [s] -> String.length(s) end,
+      {"string=?", "(string=? S ...) — return true if every string is the same."} => fn [a | rest]
+                                                                                        when is_binary(
+                                                                                               a
+                                                                                             ) ->
+        Enum.all?(rest, &(&1 == a))
+      end,
       # every Scheme has format and this one did not, so a caller building a
       # message reached for string-append and value->string, or guessed a name
       # that is not here and lost the guess inside a callback
-      "format" => fn [fmt | args] when is_binary(fmt) -> format_string(fmt, args) end,
-      "string-contains?" => fn [s, sub] -> String.contains?(s, sub) end,
-      "string-prefix?" => fn [pre, s] -> String.starts_with?(s, pre) end,
-      "string-suffix?" => fn [suf, s] -> String.ends_with?(s, suf) end,
+      {"format",
+       "(format FMT ARG ...) — build a string: ~a inserts a value as text, ~s as its printed form, ~% a newline, ~~ a tilde."} =>
+        fn [fmt | args] when is_binary(fmt) -> format_string(fmt, args) end,
+      {"string-contains?", "(string-contains? S SUB) — return true if S contains SUB."} => fn [
+                                                                                                s,
+                                                                                                sub
+                                                                                              ] ->
+        String.contains?(s, sub)
+      end,
+      {"string-prefix?", "(string-prefix? PRE S) — return true if S starts with PRE."} => fn [
+                                                                                               pre,
+                                                                                               s
+                                                                                             ] ->
+        String.starts_with?(s, pre)
+      end,
+      {"string-suffix?", "(string-suffix? SUF S) — return true if S ends with SUF."} => fn [
+                                                                                             suf,
+                                                                                             s
+                                                                                           ] ->
+        String.ends_with?(s, suf)
+      end,
       # Levenshtein distance. The did-you-mean suggestions rank every
       # public-api name per unbound error; an interpreted inner loop held
       # the UI lane for seconds, so the distance is a builtin.
-      "string-edit-distance" => fn [a, b] ->
+      {"string-edit-distance",
+       "(string-edit-distance A B) — the Levenshtein distance between two strings."} => fn [a, b] ->
         bl = String.to_charlist(b)
 
         a
@@ -110,340 +186,374 @@ defmodule Compos.Scheme.Builtins do
         end)
         |> List.last()
       end,
-      "string-rindex" => fn [s, sub] ->
+      {"string-rindex",
+       "(string-rindex S SUB) — return the byte offset of the last SUB in S, or false."} => fn [
+                                                                                                 s,
+                                                                                                 sub
+                                                                                               ] ->
         case :binary.matches(s, sub) do
           [] -> false
           matches -> matches |> List.last() |> elem(0)
         end
       end,
-      "common-prefix" => fn [strings] ->
-        case strings do
-          [] ->
-            ""
+      {"common-prefix",
+       "(common-prefix STRINGS) — return the longest common prefix of the list of strings."} =>
+        fn [strings] ->
+          case strings do
+            [] ->
+              ""
 
-          [first | rest] ->
-            Enum.reduce(rest, first, fn s, acc ->
-              acc
-              |> String.graphemes()
-              |> Enum.zip(String.graphemes(s))
-              |> Enum.take_while(fn {a, b} -> a == b end)
-              |> Enum.map_join(&elem(&1, 0))
-            end)
-        end
-      end,
-      "string-index" => fn
-        [s, sub] ->
-          case :binary.match(s, sub) do
-            :nomatch -> false
-            {pos, _len} -> pos
+            [first | rest] ->
+              Enum.reduce(rest, first, fn s, acc ->
+                acc
+                |> String.graphemes()
+                |> Enum.zip(String.graphemes(s))
+                |> Enum.take_while(fn {a, b} -> a == b end)
+                |> Enum.map_join(&elem(&1, 0))
+              end)
           end
+        end,
+      {"string-index",
+       "(string-index S SUB [START]) — return the byte offset of the first SUB in S at or after START, or false."} =>
+        fn
+          [s, sub] ->
+            case :binary.match(s, sub) do
+              :nomatch -> false
+              {pos, _len} -> pos
+            end
 
-        # a caller that walks every occurrence needs to resume after the
-        # last one, so it says where to start
-        [s, sub, from] when from >= 0 and from <= byte_size(s) ->
-          case :binary.match(s, sub, scope: {from, byte_size(s) - from}) do
-            :nomatch -> false
-            {pos, _len} -> pos
-          end
+          # a caller that walks every occurrence needs to resume after the
+          # last one, so it says where to start
+          [s, sub, from] when from >= 0 and from <= byte_size(s) ->
+            case :binary.match(s, sub, scope: {from, byte_size(s) - from}) do
+              :nomatch -> false
+              {pos, _len} -> pos
+            end
 
-        [_s, _sub, _from] ->
-          false
+          [_s, _sub, _from] ->
+            false
+        end,
+      {"string-upcase", "(string-upcase S) — return S converted to upper case."} => fn [s] ->
+        String.upcase(s)
       end,
-      "string-upcase" => fn [s] -> String.upcase(s) end,
-      "string-downcase" => fn [s] -> String.downcase(s) end,
-      "string-trim" => fn [s] -> String.trim(s) end,
-      "string-repeat" => fn [s, n] -> String.duplicate(s, n) end,
+      {"string-downcase", "(string-downcase S) — return S converted to lower case."} => fn [s] ->
+        String.downcase(s)
+      end,
+      {"string-trim", "(string-trim S) — return S without leading and trailing whitespace."} =>
+        fn [s] -> String.trim(s) end,
+      {"string-repeat", "(string-repeat S N) — return S repeated N times."} => fn [s, n] ->
+        String.duplicate(s, n)
+      end,
       # byte-offset variants: compose with point/overlay/search positions,
       # which are all byte-based (grapheme substring/string-length are not)
-      "string-byte-length" => fn [s] -> byte_size(s) end,
-      "substring-bytes" => fn [s, from, to] ->
-        if from < 0 or to < from or to > byte_size(s) do
-          raise Eval.Error, message: "substring-bytes: range #{from}..#{to} out of 0..#{byte_size(s)}"
-        end
-
-        # snap both ends down to codepoint boundaries (Text says why)
-        Text.slice(s, from, to)
+      {"string-byte-length", "(string-byte-length S) — return the length of S in bytes."} => fn [
+                                                                                                  s
+                                                                                                ] ->
+        byte_size(s)
       end,
+      {"substring-bytes",
+       "(substring-bytes S FROM TO) — return the byte range FROM..TO, snapped to codepoint boundaries."} =>
+        fn [s, from, to] ->
+          if from < 0 or to < from or to > byte_size(s) do
+            raise Eval.Error,
+              message: "substring-bytes: range #{from}..#{to} out of 0..#{byte_size(s)}"
+          end
+
+          # snap both ends down to codepoint boundaries (Text says why)
+          Text.slice(s, from, to)
+        end,
       # reading and writing single bytes: a binary protocol arrives as
       # bytes, and Scheme has no character type to decode them with. These
       # are the accessors a length prefix or a message tag needs.
-      "string-byte" => fn [s, i] ->
+      {"string-byte",
+       "(string-byte S I) — return byte I of S as an integer 0..255, or #f past the end."} => fn [
+                                                                                                   s,
+                                                                                                   i
+                                                                                                 ] ->
         if i < 0 or i >= byte_size(s) do
           false
         else
           :binary.at(s, i)
         end
       end,
-      "string-bytes" => fn
-        [s] -> :binary.bin_to_list(s)
-        [s, from, to] -> bytes_range(s, from, to)
-      end,
-      "bytes->string" => fn [bytes] ->
-        Enum.each(bytes, fn b ->
-          unless is_integer(b) and b >= 0 and b <= 255 do
-            raise Eval.Error, message: "bytes->string: #{inspect(b)} is not a byte"
-          end
-        end)
+      {"string-bytes",
+       "(string-bytes S [FROM TO]) — return the bytes of S, or of a byte range, as integers."} =>
+        fn
+          [s] -> :binary.bin_to_list(s)
+          [s, from, to] -> bytes_range(s, from, to)
+        end,
+      {"bytes->string", "(bytes->string BYTES) — build a string from a list of integers 0..255."} =>
+        fn [bytes] ->
+          Enum.each(bytes, fn b ->
+            unless is_integer(b) and b >= 0 and b <= 255 do
+              raise Eval.Error, message: "bytes->string: #{inspect(b)} is not a byte"
+            end
+          end)
 
-        :binary.list_to_bin(bytes)
-      end,
+          :binary.list_to_bin(bytes)
+        end,
       # An unsigned integer out of a byte range, and back. Big-endian by
       # default: every network protocol writes its lengths that way.
-      "bytes->integer" => fn
-        [s, from, width] -> decode_int(s, from, width, "big")
-        [s, from, width, endian] -> decode_int(s, from, width, endian)
-      end,
-      "integer->bytes" => fn
-        [n, width] -> encode_int(n, width, "big")
-        [n, width, endian] -> encode_int(n, width, endian)
-      end,
+      {"bytes->integer",
+       "(bytes->integer S FROM WIDTH [ENDIAN]) — read an unsigned integer of WIDTH bytes at FROM; ENDIAN is \"big\" (default) or \"little\"."} =>
+        fn
+          [s, from, width] -> decode_int(s, from, width, "big")
+          [s, from, width, endian] -> decode_int(s, from, width, endian)
+        end,
+      {"integer->bytes",
+       "(integer->bytes N WIDTH [ENDIAN]) — write N as WIDTH bytes; ENDIAN is \"big\" (default) or \"little\"."} =>
+        fn
+          [n, width] -> encode_int(n, width, "big")
+          [n, width, endian] -> encode_int(n, width, endian)
+        end,
       # binary-safe transport encoding (MCP proxy, anything crossing RPC
       # where printed-string escaping would be ambiguous)
-      "base64-encode" => fn [s] -> Base.encode64(s) end,
-      "base64-decode" => fn [s] ->
-        case Base.decode64(s) do
-          {:ok, v} -> v
-          :error -> raise Eval.Error, message: "base64-decode: invalid input"
-        end
+      {"base64-encode", "(base64-encode S) — return S encoded as base64."} => fn [s] ->
+        Base.encode64(s)
       end,
-      "string-split" => fn [s, sep] -> String.split(s, sep) end,
-      "string-join" => fn [parts, sep] -> Enum.join(parts, sep) end,
-      "string-pad-left" => fn [s, n] -> String.pad_leading(s, n) end,
-      "string-pad-right" => fn [s, n] -> String.pad_trailing(s, n) end,
-      "substring" => fn [s, from, to] -> String.slice(s, from, to - from) end,
-      "number->string" => fn [n] -> Printer.print(n) end,
-      "value->string" => fn [v] -> Printer.print(v) end,
-      "string->number" => fn [s] ->
+      {"base64-decode", "(base64-decode S) — decode the base64 string S; error on invalid input."} =>
+        fn [s] ->
+          case Base.decode64(s) do
+            {:ok, v} -> v
+            :error -> raise Eval.Error, message: "base64-decode: invalid input"
+          end
+        end,
+      {"string-split", "(string-split S SEP) — split S on the separator SEP into a list."} => fn [
+                                                                                                   s,
+                                                                                                   sep
+                                                                                                 ] ->
+        String.split(s, sep)
+      end,
+      {"string-join",
+       "(string-join PARTS SEP) — join the list PARTS into one string with SEP between."} => fn [
+                                                                                                  parts,
+                                                                                                  sep
+                                                                                                ] ->
+        Enum.join(parts, sep)
+      end,
+      {"string-pad-left", "(string-pad-left S N) — pad S with leading spaces to N characters."} =>
+        fn [s, n] -> String.pad_leading(s, n) end,
+      {"string-pad-right", "(string-pad-right S N) — pad S with trailing spaces to N characters."} =>
+        fn [s, n] -> String.pad_trailing(s, n) end,
+      {"substring",
+       "(substring S FROM TO) — return the character range FROM..TO of S, not bytes."} => fn [
+                                                                                               s,
+                                                                                               from,
+                                                                                               to
+                                                                                             ] ->
+        String.slice(s, from, to - from)
+      end,
+      {"number->string", "(number->string N) — return N printed as a string."} => fn [n] ->
+        Printer.print(n)
+      end,
+      {"value->string", "(value->string V) — return V printed as a string."} => fn [v] ->
+        Printer.print(v)
+      end,
+      {"string->number", "(string->number S) — parse S as an integer or a float."} => fn [s] ->
         case Integer.parse(s) do
           {i, ""} -> i
           _ -> with {f, ""} <- Float.parse(s), do: f
         end
       end,
-      "symbol->string" => fn [{:sym, s}] -> s end,
-      "string->symbol" => fn [s] -> {:sym, s} end,
-      "apply" => fn [f, args], store -> Eval.apply_fn(f, args, store) end,
+      {"symbol->string", "(symbol->string SYM) — return the name of SYM as a string."} => fn [
+                                                                                               {:sym,
+                                                                                                s}
+                                                                                             ] ->
+        s
+      end,
+      {"string->symbol", "(string->symbol S) — return the symbol with the name S."} => fn [s] ->
+        {:sym, s}
+      end,
+      {"apply", "(apply F ARGS) — call F with the elements of the list ARGS as arguments."} =>
+        fn [f, args], store -> Eval.apply_fn(f, args, store) end,
       # List traversal applies a Scheme callable per element and threads the
       # store through. The interpreted loops these replace paid one frame
       # and a dozen evals per element, and a catalog walk at load time ran
       # into the millions of frames.
-      "map" => fn [f, l], store when is_list(l) ->
+      {"map", "(map F LST) — return the list of F applied to each element of LST."} => fn [f, l],
+                                                                                          store
+                                                                                          when is_list(
+                                                                                                 l
+                                                                                               ) ->
         Enum.map_reduce(l, store, fn x, store -> Eval.apply_fn(f, [x], store) end)
       end,
-      "for-each" => fn [f, l], store when is_list(l) ->
-        store =
-          Enum.reduce(l, store, fn x, store ->
-            {_, store} = Eval.apply_fn(f, [x], store)
-            store
-          end)
+      {"for-each", "(for-each F LST) — call F on each element of LST in order; return true."} =>
+        fn [f, l], store when is_list(l) ->
+          store =
+            Enum.reduce(l, store, fn x, store ->
+              {_, store} = Eval.apply_fn(f, [x], store)
+              store
+            end)
 
-        {true, store}
+          {true, store}
+        end,
+      {"filter", "(filter PRED LST) — return the elements of LST for which PRED is true."} => fn [
+                                                                                                   pred,
+                                                                                                   l
+                                                                                                 ],
+                                                                                                 store
+                                                                                                 when is_list(
+                                                                                                        l
+                                                                                                      ) ->
+        select(pred, l, store, true)
       end,
-      "filter" => fn [pred, l], store when is_list(l) -> select(pred, l, store, true) end,
-      "remove" => fn [pred, l], store when is_list(l) -> select(pred, l, store, false) end,
-      "fold" => fn [f, acc, l], store when is_list(l) ->
-        Enum.reduce(l, {acc, store}, fn x, {acc, store} -> Eval.apply_fn(f, [acc, x], store) end)
-      end,
-      "assoc" => fn [key, l] when is_list(l) ->
-        Enum.find(l, false, fn
-          [k | _] -> k == key
-          _ -> false
-        end)
-      end,
+      {"remove", "(remove PRED LST) — return the elements of LST for which PRED is false."} =>
+        fn [pred, l], store when is_list(l) -> select(pred, l, store, false) end,
+      {"fold", "(fold F ACC LST) — reduce LST from the left with (F ACC X), starting from ACC."} =>
+        fn [f, acc, l], store when is_list(l) ->
+          Enum.reduce(l, {acc, store}, fn x, {acc, store} -> Eval.apply_fn(f, [acc, x], store) end)
+        end,
+      {"assoc",
+       "(assoc KEY ALIST) — return the first element of ALIST whose car equals KEY, or false."} =>
+        fn [key, l] when is_list(l) ->
+          Enum.find(l, false, fn
+            [k | _] -> k == key
+            _ -> false
+          end)
+        end,
       # a non-list (#f from a missing lookup) answers #f, so a caller never
       # guards it: 25 packages wrote that guard when this raised
-      "plist-get" => fn [pl, key] -> plist_get(pl, key) end,
+      {"plist-get",
+       "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST; false when KEY is absent or PLIST is not a list."} =>
+        fn [pl, key] -> plist_get(pl, key) end,
       # native: an interpreted walk paid one frame per element, and a read
       # into a list of 3000 lines per definition made an outline take seconds
-      "list-ref" => fn [l, i] when is_list(l) and is_integer(i) ->
-        case Enum.at(l, i, :none) do
-          :none -> raise Eval.Error, message: "list-ref: index #{i} out of 0..#{length(l) - 1}"
-          v -> v
-        end
-      end,
-      "list-head" => fn [l, k] when is_list(l) and is_integer(k) ->
+      {"list-ref",
+       "(list-ref LST I) — return the element of LST at the 0-based index I; an error past the end."} =>
+        fn [l, i] when is_list(l) and is_integer(i) ->
+          case Enum.at(l, i, :none) do
+            :none -> raise Eval.Error, message: "list-ref: index #{i} out of 0..#{length(l) - 1}"
+            v -> v
+          end
+        end,
+      {"list-head",
+       "(list-head LST K) — return the first K elements of LST; an error past the end."} => fn [
+                                                                                                 l,
+                                                                                                 k
+                                                                                               ]
+                                                                                               when is_list(
+                                                                                                      l
+                                                                                                    ) and
+                                                                                                      is_integer(
+                                                                                                        k
+                                                                                                      ) ->
         if k < 0 or k > length(l) do
           raise Eval.Error, message: "list-head: count #{k} out of 0..#{length(l)}"
         end
 
         Enum.take(l, k)
       end,
-      "list-tail" => fn [l, k] when is_list(l) and is_integer(k) ->
-        if k < 0 or k > length(l) do
-          raise Eval.Error, message: "list-tail: count #{k} out of 0..#{length(l)}"
-        end
+      {"list-tail",
+       "(list-tail LST K) — return LST without its first K elements; an error past the end."} =>
+        fn [l, k] when is_list(l) and is_integer(k) ->
+          if k < 0 or k > length(l) do
+            raise Eval.Error, message: "list-tail: count #{k} out of 0..#{length(l)}"
+          end
 
-        Enum.drop(l, k)
-      end,
-      "display" => fn [x] ->
+          Enum.drop(l, k)
+        end,
+      {"display", "(display X) — write X to standard output without quotes."} => fn [x] ->
         IO.write(Printer.display(x))
         :void
       end,
-      "newline" => fn [] ->
+      {"newline", "(newline) — write a newline to standard output."} => fn [] ->
         IO.write("\n")
         :void
       end,
-      "error" => fn args ->
-        raise Eval.Error, message: Enum.map_join(args, " ", &Printer.display/1)
+      {"error",
+       "(error X ...) — raise an error; the message joins the displayed arguments with spaces."} =>
+        fn args ->
+          raise Eval.Error, message: Enum.map_join(args, " ", &Printer.display/1)
+        end,
+      {"re-match?", "(re-match? PAT S) — return true if the regex PAT matches S."} => fn [pat, s] ->
+        Regex.match?(re!(pat), s)
       end,
-      "re-match?" => fn [pat, s] -> Regex.match?(re!(pat), s) end,
-      "re-match" => fn [pat, s] ->
+      {"re-match",
+       "(re-match PAT S) — return the matched strings (match, then groups), or false."} => fn [
+                                                                                                pat,
+                                                                                                s
+                                                                                              ] ->
         case Regex.run(re!(pat), s) do
           nil -> false
           groups -> groups
         end
       end,
-      "re-find" => fn [pat, s, start] ->
-        case Regex.run(re!(pat), s, return: :index, offset: start) do
-          nil -> false
-          [{ms, len} | _] -> [ms, ms + len]
-        end
-      end,
-      "re-find*" => fn [pat, s] ->
+      {"re-find",
+       "(re-find PAT S START) — return [START END] byte offsets of the first match, or false."} =>
+        fn [pat, s, start] ->
+          case Regex.run(re!(pat), s, return: :index, offset: start) do
+            nil -> false
+            [{ms, len} | _] -> [ms, ms + len]
+          end
+        end,
+      {"re-find*",
+       "(re-find* PAT S) — return [START END] byte offsets for every match of PAT in S."} => fn [
+                                                                                                  pat,
+                                                                                                  s
+                                                                                                ] ->
         re!(pat)
         |> Regex.scan(s, return: :index)
         |> Enum.map(fn [{ms, len} | _] -> [ms, ms + len] end)
       end,
-      "re-groups" => fn [pat, s, start] ->
-        # PCRE truncates trailing unmatched groups; wrapping the pattern
-        # with a final always-matching () forces every group to report
-        # ({-1,0} for non-participants), then we drop the sentinel
-        case Regex.run(re!("(?:" <> pat <> ")()"), s, return: :index, offset: start) do
-          nil ->
-            false
+      {"re-groups",
+       "(re-groups PAT S START) — return [START END] byte pairs per group; false for unmatched groups."} =>
+        fn [pat, s, start] ->
+          # PCRE truncates trailing unmatched groups; wrapping the pattern
+          # with a final always-matching () forces every group to report
+          # ({-1,0} for non-participants), then we drop the sentinel
+          case Regex.run(re!("(?:" <> pat <> ")()"), s, return: :index, offset: start) do
+            nil ->
+              false
 
-          groups ->
-            groups
-            |> Enum.drop(-1)
-            |> Enum.map(fn
-              {-1, 0} -> false
-              {gs, len} -> [gs, gs + len]
-            end)
-        end
+            groups ->
+              groups
+              |> Enum.drop(-1)
+              |> Enum.map(fn
+                {-1, 0} -> false
+                {gs, len} -> [gs, gs + len]
+              end)
+          end
+        end,
+      {"re-replace", "(re-replace PAT S REPL) — replace the first match of PAT in S with REPL."} =>
+        fn [pat, s, repl] -> Regex.replace(re!(pat), s, repl, global: false) end,
+      {"re-replace-all",
+       "(re-replace-all PAT S REPL) — replace every match of PAT in S with REPL."} => fn [
+                                                                                           pat,
+                                                                                           s,
+                                                                                           repl
+                                                                                         ] ->
+        Regex.replace(re!(pat), s, repl)
       end,
-      "re-replace" => fn [pat, s, repl] -> Regex.replace(re!(pat), s, repl, global: false) end,
-      "re-replace-all" => fn [pat, s, repl] -> Regex.replace(re!(pat), s, repl) end,
-      "current-time" => fn [] -> System.os_time(:second) end,
-      "monotonic-ms" => fn [] -> System.monotonic_time(:millisecond) end,
-      "time->parts" => fn [secs] ->
-        {{y, mo, d}, {h, mi, _s}} = :calendar.system_time_to_local_time(trunc(secs), :second)
-        [y, mo, d, h, mi, :calendar.day_of_the_week({y, mo, d})]
+      {"current-time", "(current-time) — return the current time as unix seconds."} => fn [] ->
+        System.os_time(:second)
       end,
-      "parts->time" => fn [y, mo, d, h, mi] ->
-        case :calendar.local_time_to_universal_time_dst({{y, mo, d}, {h, mi, 0}}) do
-          [utc | _] -> :calendar.datetime_to_gregorian_seconds(utc) - @unix_epoch_gregorian
-          [] -> raise Eval.Error, message: "parts->time: invalid local time"
-        end
+      {"monotonic-ms",
+       "(monotonic-ms) — return a monotonic millisecond count, for timing one span."} => fn [] ->
+        System.monotonic_time(:millisecond)
       end,
-      "format-time" => fn [secs, fmt] ->
-        {{y, mo, d}, {h, mi, s}} = :calendar.system_time_to_local_time(trunc(secs), :second)
-        {:ok, ndt} = NaiveDateTime.new(y, mo, d, h, mi, s)
-        Calendar.strftime(ndt, fmt)
-      end,
-      "time+" => fn [secs, days] -> secs + days * 86_400 end
-    }
-  end
-
-  def docs do
-    %{
-      "+" => "(+ N ...) — return the sum of the numbers; 0 with no arguments.",
-      "*" => "(* N ...) — return the product of the numbers; 1 with no arguments.",
-      "-" => "(- N ...) — negate N, or subtract the other numbers from N in order.",
-      "/" => "(/ N ...) — divide N by the other numbers in order; return a float.",
-      "=" => "(= N ...) — return true if each number equals the next.",
-      "<" => "(< N ...) — return true if each number is less than the next.",
-      ">" => "(> N ...) — return true if each number is greater than the next.",
-      "<=" => "(<= N ...) — return true if each number is less than or equal to the next.",
-      ">=" => "(>= N ...) — return true if each number is greater than or equal to the next.",
-      "equal?" => "(equal? A B) — return true if A and B are structurally equal.",
-      "not" => "(not X) — return true if X is false.",
-      "modulo" => "(modulo A B) — return A modulo B; the result takes the sign of B.",
-      "remainder" => "(remainder A B) — return the remainder of A/B; the result takes the sign of A.",
-      "quotient" => "(quotient A B) — return the integer quotient of A/B, truncated toward zero.",
-      "min" => "(min N ...) — return the smallest of the numbers.",
-      "max" => "(max N ...) — return the largest of the numbers.",
-      "abs" => "(abs N) — return the absolute value of N.",
-      "member" => "(member X LST) — return the tail of LST from the first X, or false.",
-      "sort" => "(sort LST) — return LST sorted in ascending term order.",
-      "cons" => "(cons H T) — prepend H to the list T; T must be a list.",
-      "car" => "(car LST) — return the first element of LST.",
-      "cdr" => "(cdr LST) — return LST without its first element.",
-      "list" => "(list X ...) — return a list of the arguments.",
-      "null?" => "(null? X) — return true if X is the empty list.",
-      "pair?" => "(pair? X) — return true if X is a non-empty list.",
-      "length" => "(length LST) — return the number of elements in LST.",
-      "append" => "(append LST ...) — concatenate the lists into one list.",
-      "reverse" => "(reverse LST) — return LST with its elements in reverse order.",
-      "number?" => "(number? X) — return true if X is a number.",
-      "string?" => "(string? X) — return true if X is a string.",
-      "symbol?" => "(symbol? X) — return true if X is a symbol.",
-      "procedure?" => "(procedure? X) — return true if X is a callable, including an advised function.",
-      "function-source" => "(function-source F) — return the lambda source of F; builtins report as opaque.",
-      "string-append" => "(string-append S ...) — concatenate the strings into one string.",
-      "string-length" => "(string-length S) — return the count of characters in S, not bytes.",
-      "string=?" => "(string=? S ...) — return true if every string is the same.",
-      "format" =>
-        "(format FMT ARG ...) — build a string: ~a inserts a value as text, ~s as its printed form, ~% a newline, ~~ a tilde.",
-      "string-contains?" => "(string-contains? S SUB) — return true if S contains SUB.",
-      "string-prefix?" => "(string-prefix? PRE S) — return true if S starts with PRE.",
-      "string-edit-distance" =>
-        "(string-edit-distance A B) — the Levenshtein distance between two strings.",
-      "string-suffix?" => "(string-suffix? SUF S) — return true if S ends with SUF.",
-      "string-rindex" => "(string-rindex S SUB) — return the byte offset of the last SUB in S, or false.",
-      "common-prefix" => "(common-prefix STRINGS) — return the longest common prefix of the list of strings.",
-      "string-index" =>
-        "(string-index S SUB [START]) — return the byte offset of the first SUB in S at or after START, or false.",
-      "string-upcase" => "(string-upcase S) — return S converted to upper case.",
-      "string-downcase" => "(string-downcase S) — return S converted to lower case.",
-      "string-trim" => "(string-trim S) — return S without leading and trailing whitespace.",
-      "string-repeat" => "(string-repeat S N) — return S repeated N times.",
-      "string-byte-length" => "(string-byte-length S) — return the length of S in bytes.",
-      "substring-bytes" => "(substring-bytes S FROM TO) — return the byte range FROM..TO, snapped to codepoint boundaries.",
-      "string-byte" => "(string-byte S I) — return byte I of S as an integer 0..255, or #f past the end.",
-      "string-bytes" => "(string-bytes S [FROM TO]) — return the bytes of S, or of a byte range, as integers.",
-      "bytes->string" => "(bytes->string BYTES) — build a string from a list of integers 0..255.",
-      "bytes->integer" => "(bytes->integer S FROM WIDTH [ENDIAN]) — read an unsigned integer of WIDTH bytes at FROM; ENDIAN is \"big\" (default) or \"little\".",
-      "integer->bytes" => "(integer->bytes N WIDTH [ENDIAN]) — write N as WIDTH bytes; ENDIAN is \"big\" (default) or \"little\".",
-      "base64-encode" => "(base64-encode S) — return S encoded as base64.",
-      "base64-decode" => "(base64-decode S) — decode the base64 string S; error on invalid input.",
-      "string-split" => "(string-split S SEP) — split S on the separator SEP into a list.",
-      "string-join" => "(string-join PARTS SEP) — join the list PARTS into one string with SEP between.",
-      "string-pad-left" => "(string-pad-left S N) — pad S with leading spaces to N characters.",
-      "string-pad-right" => "(string-pad-right S N) — pad S with trailing spaces to N characters.",
-      "substring" => "(substring S FROM TO) — return the character range FROM..TO of S, not bytes.",
-      "number->string" => "(number->string N) — return N printed as a string.",
-      "value->string" => "(value->string V) — return V printed as a string.",
-      "string->number" => "(string->number S) — parse S as an integer or a float.",
-      "symbol->string" => "(symbol->string SYM) — return the name of SYM as a string.",
-      "string->symbol" => "(string->symbol S) — return the symbol with the name S.",
-      "apply" => "(apply F ARGS) — call F with the elements of the list ARGS as arguments.",
-      "map" => "(map F LST) — return the list of F applied to each element of LST.",
-      "for-each" => "(for-each F LST) — call F on each element of LST in order; return true.",
-      "filter" => "(filter PRED LST) — return the elements of LST for which PRED is true.",
-      "remove" => "(remove PRED LST) — return the elements of LST for which PRED is false.",
-      "fold" => "(fold F ACC LST) — reduce LST from the left with (F ACC X), starting from ACC.",
-      "assoc" =>
-        "(assoc KEY ALIST) — return the first element of ALIST whose car equals KEY, or false.",
-      "plist-get" =>
-        "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST; false when KEY is absent or PLIST is not a list.",
-      "list-ref" => "(list-ref LST I) — return the element of LST at the 0-based index I; an error past the end.",
-      "list-head" => "(list-head LST K) — return the first K elements of LST; an error past the end.",
-      "list-tail" => "(list-tail LST K) — return LST without its first K elements; an error past the end.",
-      "display" => "(display X) — write X to standard output without quotes.",
-      "newline" => "(newline) — write a newline to standard output.",
-      "error" => "(error X ...) — raise an error; the message joins the displayed arguments with spaces.",
-      "re-match?" => "(re-match? PAT S) — return true if the regex PAT matches S.",
-      "re-match" => "(re-match PAT S) — return the matched strings (match, then groups), or false.",
-      "re-groups" => "(re-groups PAT S START) — return [START END] byte pairs per group; false for unmatched groups.",
-      "re-find" => "(re-find PAT S START) — return [START END] byte offsets of the first match, or false.",
-      "re-find*" => "(re-find* PAT S) — return [START END] byte offsets for every match of PAT in S.",
-      "re-replace" => "(re-replace PAT S REPL) — replace the first match of PAT in S with REPL.",
-      "re-replace-all" => "(re-replace-all PAT S REPL) — replace every match of PAT in S with REPL.",
-      "current-time" => "(current-time) — return the current time as unix seconds.",
-      "monotonic-ms" => "(monotonic-ms) — return a monotonic millisecond count, for timing one span.",
-      "time->parts" => "(time->parts SECS) — return local [YEAR MONTH DAY HOUR MINUTE WEEKDAY]; Monday is 1.",
-      "parts->time" => "(parts->time Y MO D H MI) — convert local date parts to unix seconds.",
-      "format-time" => "(format-time SECS FMT) — format SECS as local time with the strftime pattern FMT.",
-      "time+" => "(time+ SECS DAYS) — return SECS moved forward by DAYS days."
+      {"time->parts",
+       "(time->parts SECS) — return local [YEAR MONTH DAY HOUR MINUTE WEEKDAY]; Monday is 1."} =>
+        fn [secs] ->
+          {{y, mo, d}, {h, mi, _s}} = :calendar.system_time_to_local_time(trunc(secs), :second)
+          [y, mo, d, h, mi, :calendar.day_of_the_week({y, mo, d})]
+        end,
+      {"parts->time", "(parts->time Y MO D H MI) — convert local date parts to unix seconds."} =>
+        fn [y, mo, d, h, mi] ->
+          case :calendar.local_time_to_universal_time_dst({{y, mo, d}, {h, mi, 0}}) do
+            [utc | _] -> :calendar.datetime_to_gregorian_seconds(utc) - @unix_epoch_gregorian
+            [] -> raise Eval.Error, message: "parts->time: invalid local time"
+          end
+        end,
+      {"format-time",
+       "(format-time SECS FMT) — format SECS as local time with the strftime pattern FMT."} =>
+        fn [secs, fmt] ->
+          {{y, mo, d}, {h, mi, s}} = :calendar.system_time_to_local_time(trunc(secs), :second)
+          {:ok, ndt} = NaiveDateTime.new(y, mo, d, h, mi, s)
+          Calendar.strftime(ndt, fmt)
+        end,
+      {"time+", "(time+ SECS DAYS) — return SECS moved forward by DAYS days."} => fn [secs, days] ->
+        secs + days * 86_400
+      end
     }
   end
 
@@ -567,7 +677,7 @@ defmodule Compos.Scheme.Builtins do
     {kept, store} =
       Enum.reduce(l, {[], store}, fn x, {acc, store} ->
         {answer, store} = Eval.apply_fn(pred, [x], store)
-        {if((answer != false) == keep, do: [x | acc], else: acc), store}
+        {if(answer != false == keep, do: [x | acc], else: acc), store}
       end)
 
     {Enum.reverse(kept), store}
@@ -578,5 +688,4 @@ defmodule Compos.Scheme.Builtins do
   defp plist_get(_, _key), do: false
   defp source_callable({:interposed, original, _}), do: source_callable(original)
   defp source_callable(value), do: value
-
 end

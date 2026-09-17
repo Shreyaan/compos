@@ -9,6 +9,7 @@ defmodule Compos.Core.SchemeAPI do
   """
 
   alias Compos.Core
+  alias Compos.Scheme.Prim
   alias Compos.Core.{Buffer, Editor, Git}
 
   @commands :compos_commands
@@ -19,7 +20,10 @@ defmodule Compos.Core.SchemeAPI do
 
   def commands_table, do: @commands
 
-  def primitives do
+  def primitives, do: Prim.funs(entries())
+
+  @doc "Every primitive under its {name, doc} key, raw names included."
+  def entries do
     buffer_primitives()
     |> Map.merge(editor_primitives())
     |> Map.merge(git_primitives())
@@ -38,33 +42,44 @@ defmodule Compos.Core.SchemeAPI do
     convert = &Compos.Core.LLM.json_to_scheme/1
 
     %{
-      "google-oauth-start!" => fn [path, scopes] ->
-        convert.(Compos.Core.Google.connect(Compos.Core.Session.scheme_to_json(path), scopes))
+      {"google-oauth-start!",
+       "(google-oauth-start! CLIENT SCOPES) — start native desktop OAuth using a client JSON file or installed-client record."} =>
+        fn [path, scopes] ->
+          convert.(Compos.Core.Google.connect(Compos.Core.Session.scheme_to_json(path), scopes))
+        end,
+      {"google-oauth-status",
+       "(google-oauth-status) — current OAuth progress without credentials."} => fn [] ->
+        convert.(Compos.Core.Google.status())
       end,
-      "google-oauth-status" => fn [] -> convert.(Compos.Core.Google.status()) end,
-      "google-accounts" => fn [] -> convert.(Compos.Core.Google.accounts()) end,
-      "google-http!" => fn
-        [account, url, request_json, callback] ->
-          async_dispatch(callback, fn ->
-            convert.(Compos.Core.Google.request_json(account, url, request_json))
-          end)
+      {"google-accounts",
+       "(google-accounts) — connected account subjects, emails, and scopes; never tokens."} =>
+        fn [] -> convert.(Compos.Core.Google.accounts()) end,
+      {"google-http!",
+       "(google-http! ACCOUNT METHOD URL PARAMS BODY [CALLBACK]) — authenticated Google HTTP request with an explicit account."} =>
+        fn
+          [account, url, request_json, callback] ->
+            async_dispatch(callback, fn ->
+              convert.(Compos.Core.Google.request_json(account, url, request_json))
+            end)
 
-        [account, method, url, params, body | rest] ->
-          params = Compos.Core.Session.scheme_to_json(params)
-          body = Compos.Core.Session.scheme_to_json(body)
+          [account, method, url, params, body | rest] ->
+            params = Compos.Core.Session.scheme_to_json(params)
+            body = Compos.Core.Session.scheme_to_json(body)
 
-          work = fn ->
-            convert.(Compos.Core.Google.request(account, method, url, params, body))
-          end
+            work = fn ->
+              convert.(Compos.Core.Google.request(account, method, url, params, body))
+            end
 
-          case rest do
-            [] -> work.()
-            [callback] -> async_dispatch(callback, work)
-          end
-      end,
-      "google-revoke!" => fn [account, callback] ->
-        async_dispatch(callback, fn -> convert.(Compos.Core.Google.disconnect(account)) end)
-      end
+            case rest do
+              [] -> work.()
+              [callback] -> async_dispatch(callback, work)
+            end
+        end,
+      {"google-revoke!",
+       "(google-revoke! ACCOUNT CALLBACK) — revoke and remove one Google account connection."} =>
+        fn [account, callback] ->
+          async_dispatch(callback, fn -> convert.(Compos.Core.Google.disconnect(account)) end)
+        end
     }
   end
 
@@ -90,20 +105,22 @@ defmodule Compos.Core.SchemeAPI do
   # runs in a Task and may wait much longer.
   defp http_primitives do
     %{
-      "http-request" => fn
-        [url] ->
-          http_call(url, [], http_inline_limit())
+      {"http-request",
+       "(http-request URL [OPTS] [CALLBACK]) — make one HTTP request and return (ok BOOL status N headers PLIST body STRING [json VALUE] [error TEXT]). OPTS is a plist of method, headers, params, body, json, form, timeout, connect-timeout, redirect and max-bytes. Without CALLBACK it holds the lane for up to 15 seconds; with CALLBACK it runs in a Task and CALLBACK gets the answer."} =>
+        fn
+          [url] ->
+            http_call(url, [], http_inline_limit())
 
-        [url, opts] ->
-          if is_list(opts) or opts == false do
-            http_call(url, opts, http_inline_limit())
-          else
-            async_dispatch(opts, fn -> http_call(url, [], http_async_limit()) end)
-          end
+          [url, opts] ->
+            if is_list(opts) or opts == false do
+              http_call(url, opts, http_inline_limit())
+            else
+              async_dispatch(opts, fn -> http_call(url, [], http_async_limit()) end)
+            end
 
-        [url, opts, callback] ->
-          async_dispatch(callback, fn -> http_call(url, opts, http_async_limit()) end)
-      end
+          [url, opts, callback] ->
+            async_dispatch(callback, fn -> http_call(url, opts, http_async_limit()) end)
+        end
     }
   end
 
@@ -267,7 +284,7 @@ defmodule Compos.Core.SchemeAPI do
       "ok" => status in 200..299,
       "status" => status,
       "headers" => http_reply_headers(headers),
-      "body" => body
+      {"body", ""} => body
     }
 
     reply = if truncated?, do: Map.put(reply, "truncated", true), else: reply
@@ -324,560 +341,17 @@ defmodule Compos.Core.SchemeAPI do
   defp http_async_limit, do: Application.get_env(:compos_core, :http_async_timeout_ms, 120_000)
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
-  def docs, do: Compos.Core.SchemeRawNames.add_docs(own_docs())
-
-  defp own_docs do
-    %{
-      "google-accounts" =>
-        "(google-accounts) — connected account subjects, emails, and scopes; never tokens.",
-      "google-oauth-start!" =>
-        "(google-oauth-start! CLIENT SCOPES) — start native desktop OAuth using a client JSON file or installed-client record.",
-      "google-oauth-status" =>
-        "(google-oauth-status) — current OAuth progress without credentials.",
-      "google-http!" =>
-        "(google-http! ACCOUNT METHOD URL PARAMS BODY [CALLBACK]) — authenticated Google HTTP request with an explicit account.",
-      "google-revoke!" =>
-        "(google-revoke! ACCOUNT CALLBACK) — revoke and remove one Google account connection.",
-      "http-request" =>
-        "(http-request URL [OPTS] [CALLBACK]) — make one HTTP request and return (ok BOOL status N headers PLIST body STRING [json VALUE] [error TEXT]). OPTS is a plist of method, headers, params, body, json, form, timeout, connect-timeout, redirect and max-bytes. Without CALLBACK it holds the lane for up to 15 seconds; with CALLBACK it runs in a Task and CALLBACK gets the answer.",
-      "buffer-create" =>
-        "(buffer-create NAME) — create an empty buffer NAME and return NAME. A NAME that is a file on disk loads that file instead.",
-      "buffer-list" => "(buffer-list) — return the names of all buffers.",
-      "buffer-list-mru" =>
-        "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers.",
-      "window-prev-buffers" =>
-        "(window-prev-buffers [ID]) — return the window's previous buffers, most recent first.",
-      "set-window-prev-buffers!" =>
-        "(set-window-prev-buffers! ID PREV) — replace the window's previous buffers with PREV, most recent first.",
-      "mru-list" =>
-        "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order.",
-      "mru-note-group!" => "(mru-note-group! NAME) — record a group switch as a history entry.",
-      "buffer-exists?" => "(buffer-exists? NAME) — return #t if the buffer NAME exists.",
-      "buffer-ref" =>
-        "(buffer-ref BUF) — return an immutable buffer handle for local reads and writes across renames, or #f if unknown.",
-      "buffer-known?" =>
-        "(buffer-known? NAME) — return #t if the buffer NAME is live OR dormant in the store; a dormant buffer wakes when you visit or edit it.",
-      "buffer-text" => "(buffer-text BUF) — return the buffer's whole text as a string.",
-      "buffer-size" => "(buffer-size BUF) — return the buffer's size in bytes.",
-      "buffer-modified?" =>
-        "(buffer-modified? BUF) — return #t if the buffer changed after its last save.",
-      "buffer-persistent?" =>
-        "(buffer-persistent? BUF) — return #t if the buffer writes a checkpoint and comes back at the next boot.",
-      "buffer-path" => "(buffer-path BUF) — return the buffer's file path, or #f if it has none.",
-      "buffer-append!" =>
-        "(buffer-append! BUF TEXT) — append TEXT to the buffer's end; ignores read-only.",
-      "buffer-insert!" =>
-        "(buffer-insert! BUF POS TEXT) — insert TEXT at byte POS; ignores read-only.",
-      "buffer-insert-at-local!" =>
-        "(buffer-insert-at-local! BUF LOCAL TEXT) — insert TEXT at the byte position the buffer-local LOCAL names and advance the local, atomically; return the advanced position.",
-      "buffer-marker-local!" =>
-        "(buffer-marker-local! BUF LOCAL &optional TYPE) — declare LOCAL a marker: the buffer keeps the position current through every edit, as it keeps point. TYPE 'advance (default) moves it with text inserted exactly on it; 'stay does not.",
-      "buffer-delete-range!" =>
-        "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
-      "buffer-replace-range!" =>
-        "(buffer-replace-range! BUF POS LEN TEXT) — replace LEN bytes at byte POS with TEXT as one undo step; ignores read-only.",
-      "buffer-version-token" =>
-        "(buffer-version-token BUF) — what this replica knows, as an opaque token to hand a peer; #f if the buffer records no history.",
-      "buffer-updates-since" =>
-        "(buffer-updates-since BUF TOKEN) — every change a replica at TOKEN has not seen, base64. Pass #f for a replica that knows nothing.",
-      "buffer-merge!" =>
-        "(buffer-merge! BUF UPDATES) — take base64 changes another replica made; the rope follows and the point stays put. #t when the text changed.",
-      "peer-eval" =>
-        "(peer-eval SOCKET CODE) — evaluate CODE on the daemon listening at SOCKET, a local path or host:/path over ssh. Returns its printed result, or raises when it cannot be reached.",
-      "buffer-anchor" =>
-        "(buffer-anchor BUF POS) — an opaque anchor on byte POS that keeps naming the same place while the text around it changes; #f if the buffer records no history.",
-      "buffer-anchor-pos" =>
-        "(buffer-anchor-pos BUF ANCHOR) — where an anchor from buffer-anchor points now, or #f if it cannot be resolved. Read a position now, edit at it later, and the edit still lands where you meant.",
-      "buffer-authors" =>
-        "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text.",
-      "buffer-author-lines" =>
-        "(buffer-author-lines BUF) — return (LINE AUTHOR BYTES) attribution rows, 1-based, in line order; a line two actors touched appears once per actor.",
-      "buffer-edit-log" =>
-        "(buffer-edit-log BUF) — return (VERSION AUTHOR POS INS DEL) edit records, newest first.",
-      "buffer-provenance-status" =>
-        "(buffer-provenance-status BUF) — return the durable recording state and accepted head.",
-      "buffer-history" =>
-        "(buffer-history BUF) — return every change to the buffer, oldest first: who made it, what it did, and when. A delete reports how many bytes it removed, not the text.",
-      "buffer-provenance-start!" =>
-        "(buffer-provenance-start! BUF [ACTOR REASON POLICY]) — start or resume recording; bridges any gap.",
-      "buffer-provenance-stop!" =>
-        "(buffer-provenance-stop! BUF [ACTOR REASON POLICY]) — stop recording; keeps all history.",
-      "buffer-provenance-checkpoint!" =>
-        "(buffer-provenance-checkpoint! BUF) — close the current changeset.",
-      "overlay-set!" =>
-        "(overlay-set! BUF TAG RANGES) — replace TAG's overlays with (START END FACE) byte ranges.",
-      "overlay-clear!" =>
-        "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay.",
-      "buffer-overlays" =>
-        "(buffer-overlays BUF [TAG]) — return all overlays, or TAG's alone, as (START END FACE) byte ranges.",
-      "buffer-set-hidden!" =>
-        "(buffer-set-hidden! BUF RANGES) — hide (fold) the given (START END) byte ranges.",
-      "fold-set!" =>
-        "(fold-set! BUF TAG RANGES) — replace TAG's hidden (START END) byte ranges; the display hides the union of all tags.",
-      "fold-get" =>
-        "(fold-get BUF [TAG]) — return TAG's hidden ranges; no TAG, or 'all, returns the union.",
-      "fold-clear!" =>
-        "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every tag's.",
-      "buffer-narrow!" =>
-        "(buffer-narrow! BUF START END) — narrow visible text to the exclusive byte range without changing buffer access.",
-      "buffer-narrow-range" =>
-        "(buffer-narrow-range BUF) — return the active (START END) narrowing, or #f.",
-      "buffer-widen!" => "(buffer-widen! BUF) — make the complete buffer visible.",
-      "buffer-goto!" => "(buffer-goto! BUF POS) — move the named buffer's point to byte POS.",
-      "buffer-windows-follow-point!" =>
-        "(buffer-windows-follow-point! BUF) — every window that shows BUF drops its scroll pin and follows point again; call it after a page replaces its text and places point.",
-      "file-mtime" =>
-        "(file-mtime PATH) — return the file's mtime in posix seconds, or 0 if it is gone.",
-      "file-size" =>
-        "(file-size PATH) — return the file's size in bytes, or 0 if it is gone or remote.",
-      "git-root" =>
-        "(git-root DIR [CB]) — return the absolute work-tree root of DIR, or (error MSG).",
-      "git-prefix" =>
-        "(git-prefix DIR [CB]) — return DIR's path inside its work tree with a trailing slash, or \"\" at the root.",
-      "git-status" =>
-        "(git-status DIR [PATHSPEC] [CB]) — return (path P orig-path P2 index X worktree Y) plists; a pathspec scopes the read.",
-      "git-diff" =>
-        "(git-diff DIR [OPTS] [CB]) — return parsed file plists; OPTS is (base REF path P staged BOOL).",
-      "git-stage-file" =>
-        "(git-stage-file DIR PATH [CB]) — stage one path in the index; return #t or (error MSG).",
-      "git-stage-patch" =>
-        "(git-stage-patch DIR PATCH [CB]) — apply one unified patch to the index; return #t or (error MSG).",
-      "git-log" =>
-        "(git-log DIR N [PATHSPEC] [CB]) — return the last N commits as (sha short-sha author date subject) plists.",
-      "git-show" => "(git-show DIR REF [CB]) — return the raw text of one commit.",
-      "diff-parse" =>
-        "(diff-parse TEXT) — parse unified-diff TEXT into the same file plists git-diff returns.",
-      "diff-word-range" =>
-        "(diff-word-range OLD NEW) — return ((OS OE) (NS NE)) byte ranges of the differing span, or #f.",
-      "watch-path!" =>
-        "(watch-path! DIR ['deep]) — watch DIR for changes, refcounted; return the watched root or (error MSG). A plain watch counts the direct children of DIR; 'deep counts the whole tree below it.",
-      "unwatch-path!" =>
-        "(unwatch-path! DIR ['deep]) — drop one watch reference, 'deep for a deep one; the subscription stops at zero.",
-      "watched-paths" => "(watched-paths) — return the watched roots.",
-      "fs-on-change!" =>
-        "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes.",
-      "telemetry-snapshot" =>
-        "(telemetry-snapshot [LIMIT]) — return recent telemetry events of every layer, newest first.",
-      "telemetry-clear!" => "(telemetry-clear!) — discard retained telemetry events.",
-      "vm-sample" =>
-        "(vm-sample) — one plist of VM and host counters: scheduler utilization, memory, rates since the previous sample, os_mon load, memory and disks.",
-      "vm-processes" =>
-        "(vm-processes LIMIT SORT FILTER) — plist (rows count matched): at most LIMIT process rows whose name or pid contains FILTER, sorted by \"reds\", \"memory\", \"queue\" or \"name\".",
-      "vm-process-info" =>
-        "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone.",
-      "vm-process-kill!" =>
-        "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive.",
-      "profile-start!" =>
-        "(profile-start! [PREFIXES]) — arm the call_time tracer over every loaded module whose name starts with one of PREFIXES (default \"Elixir.Compos.\"), and take the before snapshot of the processes and the VM.",
-      "profile-stop" =>
-        "(profile-stop) — disarm and answer one profile as a plist: wall-us, at-ms, the hot functions, the busy processes, and the VM deltas; #f when nothing was armed.",
-      "profile-cancel!" =>
-        "(profile-cancel!) — disarm the tracer and forget the snapshot; #t when a profile was armed.",
-      "embedding-search" =>
-        "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE GEN CACHED-ONLY) — eligible cosine scores for QUERY against the vectors of catalog generation GEN. CACHED-ONLY answers #f rather than embedding a query over the network.",
-      "embedding-warm!" =>
-        "(embedding-warm! QUERY TEXTS KEY GEN) — embed QUERY off the caller's lane so the next ask scores without waiting.",
-      "embedding-sync!" =>
-        "(embedding-sync! TEXTS KEY) — embed missing catalog TEXTS with OpenAI and persist their vectors by content hash.",
-      "embedding-cache-clear!" =>
-        "(embedding-cache-clear!) — delete cached apropos vectors from disk and memory; return the cache path.",
-      "block-on-click!" =>
-        "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked.",
-      "define-style!" =>
-        "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this.",
-      "preview-run-langs!" =>
-        "(preview-run-langs! LANGS) — name the block languages whose rendered page offers the run key; the fence-kind registry calls this.",
-      "buffer-hidden" =>
-        "(buffer-hidden BUF) — return the hidden (folded) byte ranges as (START END) pairs.",
-      "buffer-set-read-only!" =>
-        "(buffer-set-read-only! BUF BOOL) — set the buffer's read-only flag.",
-      "buffer-read-only?" => "(buffer-read-only? BUF) — return #t if the buffer is read-only.",
-      "buffer-kill!" => "(buffer-kill! BUF) — kill the buffer and release its windows.",
-      "ssh-command" => "(ssh-command) — return the configured ssh command string.",
-      "remote-read" =>
-        "(remote-read HOST PATH [CALLBACK]) — read a remote file; return text, 'directory, 'absent, or (error MSG). With CALLBACK, run in a Task and hand it the value.",
-      "remote-list-dir" =>
-        "(remote-list-dir HOST DIR [CALLBACK]) — list a remote directory; return entries or (error MSG). With CALLBACK, run in a Task and hand it the value.",
-      "remote-sh" =>
-        "(remote-sh HOST CMD [CALLBACK]) — run CMD on HOST over ssh; return #t or (error MSG). With CALLBACK, run in a Task and hand it the value.",
-      "remote-write" =>
-        "(remote-write HOST PATH TEXT [CALLBACK]) — write TEXT to a remote file; return #t or (error MSG). With CALLBACK, run in a Task and hand it the value.",
-      "buffer-mark-saved!" => "(buffer-mark-saved! BUF) — clear the buffer's modified flag.",
-      "find-file" =>
-        "(find-file PATH [PERSISTENT?] [READ?]) — open the file PATH in a buffer and return the buffer name. PERSISTENT? #f opens it for this session only: no checkpoint, and no restore at the next boot. READ? #f binds the buffer to the file without reading it, for a file whose viewer reads it from disk.",
-      "list-dir" =>
-        "(list-dir DIR) — return sorted entry names; directories carry a trailing slash.",
-      "directory-entries" =>
-        "(directory-entries DIR) — return sorted entry plists with name, type, exact bytes, mtime, size, date, and perms; return (error MSG) when DIR cannot be read.",
-      "expand-path" => "(expand-path PATH) — expand PATH to an absolute path.",
-      "file-realpath" =>
-        "(file-realpath PATH) — expand PATH and resolve any symlink in it, so two names for one directory compare equal.",
-      "file-stat" => "(file-stat PATH) — return (PERMS SIZE DATE) strings in dired style.",
-      "url-encode" => "(url-encode S) — percent-encode S as one URL path segment.",
-      "url-decode" => "(url-decode S) — decode a percent-encoded URL segment.",
-      "file-exists?" => "(file-exists? PATH) — return #t if PATH exists.",
-      "file-writable?" =>
-        "(file-writable? PATH) — return #t when the process can write PATH, or PATH does not exist yet.",
-      "file-directory?" => "(file-directory? PATH) — return #t if PATH is a directory.",
-      "read-file" => "(read-file PATH) — return the file's contents, or #f if unreadable.",
-      "shell-command->string" =>
-        "(shell-command->string CMD [DIR] [CALLBACK]) — run CMD in a shell; stderr merges into the output. With CALLBACK, run in a Task and return :void at once; CALLBACK gets the output. Without CALLBACK, block up to the shell time limit, then kill CMD and return what it wrote.",
-      "scheme-read" =>
-        "(scheme-read STR) — read STR as Scheme data; return the list of top-level forms, or #f when STR does not parse.",
-      "getenv" =>
-        "(getenv NAME) — return the environment variable NAME, or #f if it is unset or empty.",
-      "json-parse" =>
-        "(json-parse STR) — parse JSON; objects become plists with symbol keys; #f on failure.",
-      "json-encode" =>
-        "(json-encode V [PRETTY]) — encode a Scheme value as a JSON string; a plist becomes an object. A truthy PRETTY indents the output.",
-      "json-format" =>
-        "(json-format STR) — indent valid JSON without changing its values or object key order; return #f on invalid input.",
-      "write-file!" =>
-        "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t.",
-      "start-process!" =>
-        "(start-process! BUF CMD) — start a shell process attached to BUF; return #t on success.",
-      "start-terminal!" =>
-        "(start-terminal! BUF CMD) — start a raw PTY whose bounded plain transcript stays in BUF; return #t on success.",
-      "process-send!" =>
-        "(process-send! BUF TEXT) — send TEXT to the buffer's process; return #t on success.",
-      "process-running?" => "(process-running? BUF) — return #t if the buffer's process runs.",
-      "process-mark" =>
-        "(process-mark BUF) — return the byte position just after the last process output.",
-      "buffer-substring" =>
-        "(buffer-substring START END) — return the current buffer's text between byte START and END.",
-      "process-kill!" => "(process-kill! BUF) — kill the buffer's process.",
-      "process-list" =>
-        "(process-list) — return ((BUF CMD) ...) for every running process buffer.",
-      "process-restart!" =>
-        "(process-restart! BUF) — kill the buffer's process and run its command again; return #t on success.",
-      "line-text" => "(line-text) — return the current line's text, without the newline.",
-      "current-buffer" => "(current-buffer) — return the name of the current buffer.",
-      "point" => "(point) — return point in the current buffer as a byte offset.",
-      "buffer-point" => "(buffer-point BUF) — return the buffer's point as a byte offset.",
-      "buffer-line-at-point" =>
-        "(buffer-line-at-point BUF) — return (LINE TEXT) for the buffer's point.",
-      "compos-home" => "(compos-home) — return the compos home directory path (~/.compos).",
-      "compos-priv-dir" =>
-        "(compos-priv-dir) — return the bundled Scheme directory (the editor's priv dir).",
-      "compos-project-dir" =>
-        "(compos-project-dir) — the checkout this daemon runs from, or #f in a release.",
-      "compos-config-dir" =>
-        "(compos-config-dir) — where user config reads from (COMPOS_CONFIG, else the home).",
-      "compos-socket-path" =>
-        "(compos-socket-path) — return the path of this daemon's JSON-RPC socket.",
-      "socket-listeners" =>
-        "(socket-listeners) — return ((NAME STATUS ADDRESS) ...) for the daemon's listen sockets.",
-      "listener-restart!" =>
-        "(listener-restart! NAME) — stop and start the named listen socket; return #t.",
-      "daemon-restart!" =>
-        "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t.",
-      "reload-files!" =>
-        "(reload-files! PATHS) — evaluate the changed top-level forms of each .scm and refresh the modes they redefine; return (FILES FORMS).",
-      "refresh-primitives!" =>
-        "(refresh-primitives!) — rebind every Elixir primitive to the version now loaded; return #t.",
-      "redraw!" => "(redraw!) — tell every connected client to re-render every frame; return #t.",
-      "desktop-dirty!" =>
-        "(desktop-dirty!) — schedule persistence after Scheme-owned desktop state changes; return #t.",
-      "desktop-file-globals" =>
-        "(desktop-file-globals FILE) — return the globals a desktop file holds, as ((KEY VALUE) ...); the editor is not touched.",
-      "daemon-provision-workspace!" =>
-        "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT).",
-      "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
-      "forward-char!" =>
-        "(forward-char!) — move point one character forward; return the new point.",
-      "backward-char!" =>
-        "(backward-char!) — move point one character backward; return the new point.",
-      "forward-word!" =>
-        "(forward-word!) — move point to the end of the next word; return the new point.",
-      "backward-word!" =>
-        "(backward-word!) — move point to the start of the previous word; return the new point.",
-      "next-line!" =>
-        "(next-line!) — move point one line down, keep the goal column; return the new point.",
-      "previous-line!" =>
-        "(previous-line!) — move point one line up, keep the goal column; return the new point.",
-      "beginning-of-line!" =>
-        "(beginning-of-line!) — move point to the line start; return the new point.",
-      "end-of-line!" => "(end-of-line!) — move point to the line end; return the new point.",
-      "beginning-of-buffer!" =>
-        "(beginning-of-buffer!) — move point to byte 0; return the new point.",
-      "end-of-buffer!" =>
-        "(end-of-buffer!) — move point to the buffer's end; return the new point.",
-      "line-start-position" =>
-        "(line-start-position LINE) — return the start byte offset of 1-based LINE.",
-      "line-number-at-pos" =>
-        "(line-number-at-pos POS) — return the 1-based line byte offset POS is on.",
-      "insert!" => "(insert! TEXT) — insert TEXT at point; errors if the buffer is read-only.",
-      "delete-char!" =>
-        "(delete-char! N) — delete N characters at point, backward if negative; return the text.",
-      "kill-line!" =>
-        "(kill-line!) — delete from point to the line end, or the newline; return the text.",
-      "undo!" => "(undo!) — undo one step in the current buffer; return #t on success.",
-      "break-undo-chain!" =>
-        "(break-undo-chain!) — end a run of undos, so the next undo reverses them (redo). It is not a boundary: see undo-boundary!.",
-      "undo-boundary!" =>
-        "(undo-boundary!) — Emacs undo-boundary: the edits so far are one undo step, the edits after this are the next, even inside one command.",
-      "this-command" =>
-        "(this-command) — the name of the command now running; \"\" outside a command.",
-      "set-this-command!" =>
-        "(set-this-command! NAME) — what the next command sees as last-command; yank-pop sets \"yank\".",
-      "kill-append!" =>
-        "(kill-append! TEXT BEFORE?) — grow the newest kill-ring entry with TEXT, in front when BEFORE? is true.",
-      "undo-group!" =>
-        "(undo-group! BUF ON) — while ON, BUF's edits stay one undo step; a block's replace uses this so one landing is one undo.",
-      "undo-exempt!" =>
-        "(undo-exempt! COMMAND) — exempt COMMAND from the automatic undo-chain break.",
-      "buffer-save!" =>
-        "(buffer-save! [PATH]) — save the current buffer to its path; return the path or #f. With PATH, save there and adopt PATH as the buffer's path.",
-      "buffer-detach!" =>
-        "(buffer-detach! NAME) — forget NAME's file; text, point, locals and undo stay. Return #t, or #f when no live buffer has that name.",
-      "kill-push!" => "(kill-push! TEXT) — push TEXT onto the kill ring.",
-      "kill-top" => "(kill-top) — return the newest kill-ring entry, or \"\" when empty.",
-      "kill-nth" => "(kill-nth I) — return kill-ring entry I (0 is newest), or \"\" when absent.",
-      "kill-ring-size" => "(kill-ring-size) — return the number of kill-ring entries.",
-      "client-select!" =>
-        "(client-select! ALTER DIR GRANULARITY [COUNT]) — ask this frame's editable surface to move (\"move\") or extend (\"extend\") its selection \"forward\" or \"backward\" by \"character\", \"word\", \"line\", \"lineboundary\", \"paragraph\" or \"documentboundary\"; COUNT (default 1) applies the move that many times in one request, which is how a page moves; the client answers with point and mark.",
-      "clipboard-put!" =>
-        "(clipboard-put! TEXT) — put TEXT on the OS clipboard of this frame's client.",
-      "editor-url" =>
-        "(editor-url) — return the base URL this editor serves, e.g. http://localhost:4004.",
-      "daemon-name" => "(daemon-name) — return this daemon's configured name.",
-      "daemon-source-root" =>
-        "(daemon-source-root) — return the checkout that supplies this daemon's code.",
-      "daemon-workspace-root" =>
-        "(daemon-workspace-root) — return this daemon's workspace root, or #f.",
-      "daemon-set-workspace-label!" =>
-        "(daemon-set-workspace-label! PROJECT NAME) — set this daemon's frame-wide workspace label.",
-      "daemon-registry-path" =>
-        "(daemon-registry-path) — return the shared daemon registry file path.",
-      "navigate-url!" => "(navigate-url! URL) — navigate this frame's browser tab to URL.",
-      "buffer-set-local!" => "(buffer-set-local! BUF KEY VALUE) — set a buffer-local variable.",
-      "buffer-set-locals!" =>
-        "(buffer-set-locals! BUF PLIST) — set several buffer-locals in one change; the frame refreshes once, not once per key.",
-      "buffer-local" =>
-        "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset.",
-      "buffer-read-many" =>
-        "(buffer-read-many NAMES FIELDS LOCAL-KEYS) — one metadata snapshot per buffer; rows are (NAME FIELD-VALUES... LOCAL-VALUES...). Missing values are #f. Dormant buffers stay asleep. Fields: path, size, modified, read_only, point, mark, id.",
-      "buffer-locals" =>
-        "(buffer-locals BUF) — return ((KEY VALUE) ...) for every buffer-local, sorted by name.",
-      "set-mark!" => "(set-mark! POS) — set the mark at byte POS; #f clears the mark.",
-      "mark" => "(mark) — return the mark's byte offset, or #f if no mark is set.",
-      "region-beginning" =>
-        "(region-beginning) — return the smaller of point and mark as a byte offset.",
-      "region-end" => "(region-end) — return the larger of point and mark as a byte offset.",
-      "region-text" => "(region-text) — return the text between point and mark.",
-      "delete-region!" => "(delete-region!) — delete the text between point and mark.",
-      "exchange-point-and-mark!" =>
-        "(exchange-point-and-mark!) — swap point and mark; return #f if no mark is set.",
-      "ts-nav" =>
-        "(ts-nav OP) — tree-sitter motion 'forward|'backward|'up|'down; return a byte pos or #f.",
-      "ts-node" =>
-        "(ts-node KIND START END OP) — the node KIND covers the range (\"\" for the smallest); return its 'at|'parent|'child|'next|'prev|'top as (KIND START END), or #f.",
-      "ts-children" =>
-        "(ts-children KIND START END) — the named children of that node as ((KIND START END) ...); the range 0..SIZE names the whole file.",
-      "ts-query" =>
-        "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges.",
-      "ts-query-string" =>
-        "(ts-query-string LANG TEXT QUERY) — run a tree-sitter query on detached text; return (CAPTURE START END) byte ranges.",
-      "ts-langs" => "(ts-langs) — return the names of the loaded tree-sitter languages.",
-      "ts-highlight-string" =>
-        "(ts-highlight-string LANG TEXT) — highlight TEXT as LANG; return (START END SCOPE) byte ranges, () for an unknown language.",
-      "buffer-search" =>
-        "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f.",
-      "buffer-search-backward" =>
-        "(buffer-search-backward Q FROM) — search backward from byte FROM; return (START END) or #f.",
-      "set-face-attribute!" =>
-        "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs.",
-      "face-clear!" =>
-        "(face-clear! FACE) — forget every attribute of FACE; load-theme clears a face before it applies the theme.",
-      "face-batch!" =>
-        "(face-batch! OPS) — apply a list of face changes as one change: (clear FACE) forgets a face, (set FACE KEY VALUE ...) merges attributes. The page renders once, after the last one.",
-      "face-attribute" =>
-        "(face-attribute FACE ATTR) — the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here.",
-      "face-list" => "(face-list) — the names of every face the editor holds.",
-      "split-window!" =>
-        "(split-window! DIR [RATIO]) — split the active window 'h or 'v at RATIO (default 0.5).",
-      "split-root!" =>
-        "(split-root! DIR [RATIO]) — split the FRAME 'h or 'v at RATIO; the new window spans the frame and every other window shrinks. Returns the new window.",
-      "delete-window!" => "(delete-window!) — delete the active window; return #t on success.",
-      "delete-window-id!" => "(delete-window-id! WIN) — delete window WIN; return #t on success.",
-      "window-list" =>
-        "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows.",
-      "window-tree" =>
-        "(window-tree) — return the frame's window layout as an opaque value for window-tree-set!.",
-      "window-tree-set!" =>
-        "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree.",
-      "window-tree-buffers" =>
-        "(window-tree-buffers LAYOUT) — return the buffer names a layout from window-tree holds.",
-      "window-tree-rename" =>
-        "(window-tree-rename LAYOUT OLD NEW) — a copy of LAYOUT with the buffer name OLD replaced by NEW.",
-      "window-rects" =>
-        "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles.",
-      "select-window!" =>
-        "(select-window! WIN) — make WIN and its frame active; return #t on success.",
-      "active-window" => "(active-window) — return the active window's id.",
-      "window-point" =>
-        "(window-point WIN) — WIN's own point (Emacs window-point): the buffer's for the selected window, the stored one for any other; #f for no window.",
-      "window-set-point!" =>
-        "(window-set-point! WIN POS) — put WIN's point at byte POS (Emacs set-window-point); #t when WIN exists.",
-      "scroll-window!" =>
-        "(scroll-window! WIN LINES) — scroll window WIN by LINES; return #t on success.",
-      "delete-other-windows!" =>
-        "(delete-other-windows!) — delete every window in the frame except the active one.",
-      "other-window!" => "(other-window!) — select the next window in the frame.",
-      "switch-to-buffer!" =>
-        "(switch-to-buffer! BUF) — show BUF in the active window; return BUF.",
-      "window-switch-buffer!" =>
-        "(window-switch-buffer! BUF) — raw switch that restores a dormant BUF inline; return BUF.",
-      "frame-list" => "(frame-list) — return frame ids in most-recently-used order.",
-      "selected-frame" => "(selected-frame) — return the current frame's id.",
-      "select-frame!" => "(select-frame! FRAME) — make FRAME current; return #t on success.",
-      "window-list-all" =>
-        "(window-list-all) — return (WIN BUFFER FRAME) rows for every window in every frame.",
-      "window-set-buffer!" =>
-        "(window-set-buffer! WIN BUF) — show BUF in window WIN without selection; return #t.",
-      "frame-of-window" => "(frame-of-window WIN) — return the id of the window's frame, or #f.",
-      "minibuffer-read" =>
-        "(minibuffer-read PROMPT CANDIDATES [ON-COMPLETE] ON-CONFIRM) — activate the minibuffer.",
-      "minibuffer-read*" =>
-        "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail.",
-      "global-set-key" =>
-        "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally.",
-      "global-unset-key" =>
-        "(global-unset-key SEQ) — remove the global binding for the key sequence SEQ.",
-      "local-set-key" =>
-        "(local-set-key SEQ COMMAND) — bind SEQ to COMMAND in the current buffer.",
-      "local-set-key*" => "(local-set-key* BUF SEQ COMMAND) — bind SEQ to COMMAND in buffer BUF.",
-      "local-unset-key*" => "(local-unset-key* BUF SEQ) — drop BUF's own binding for SEQ.",
-      "transient-show!" =>
-        "(transient-show! MENU) — show this frame's Transient modal; #t locks keys with no menu; #f clears it.",
-      "local-remap!" =>
-        "(local-remap! FROM TO) — in the current buffer, every key bound to FROM runs TO.",
-      "local-remap*!" =>
-        "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO.",
-      "key-for-command" =>
-        "(key-for-command COMMAND [BUF]) — return the tersest key sequence bound to COMMAND, in BUF's keymap and the global one, or \"\".",
-      "key-binding" =>
-        "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys.",
-      "key-binding-source" =>
-        "(key-binding-source SEQ) — (COMMAND KEYMAP-NAME) for the binding SEQ resolves to here, 'prefix, or #f.",
-      "define-keymap!" =>
-        "(define-keymap! NAME [PARENT]) — a named keymap; PARENT answers the keys NAME does not bind. A buffer's own map is the keymap named after the buffer.",
-      "keymap-set!" =>
-        "(keymap-set! KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap.",
-      "keymap-unset!" =>
-        "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ.",
-      "define-key" =>
-        "(define-key KEYMAP SEQ COMMAND) — the Emacs name of keymap-set!. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap.",
-      "keymap-parent!" =>
-        "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind.",
-      "keymap-parent" => "(keymap-parent KEYMAP) — the parent's name, or #f.",
-      "keymap-bindings" =>
-        "(keymap-bindings KEYMAP) — ((KEYS COMMAND) ...), the keymap's own bindings.",
-      "keymap-lookup" =>
-        "(keymap-lookup KEYMAP SEQ) — what SEQ means in the named keymap and its parents: a name, 'prefix, or #f.",
-      "keymap-names" => "(keymap-names) — every keymap the editor holds.",
-      "use-local-map!" =>
-        "(use-local-map! BUF KEYMAP) — BUF's own map takes KEYMAP as its parent: the mode's map.",
-      "buffer-local-map" => "(buffer-local-map BUF) — the parent of BUF's own map, or #f.",
-      "clear-local-map!" =>
-        "(clear-local-map! BUF) — forget BUF's own bindings, parent, and remaps.",
-      "buffer-minor-maps!" =>
-        "(buffer-minor-maps! BUF NAMES) — the minor-mode keymaps in force in BUF, first wins, ahead of its own map.",
-      "buffer-minor-maps" => "(buffer-minor-maps BUF) — the minor-mode keymaps in force in BUF.",
-      "global-minor-maps!" =>
-        "(global-minor-maps! NAMES) — the minor-mode keymaps in force in every buffer, after the buffer's own minor maps.",
-      "global-minor-maps" => "(global-minor-maps) — the keymaps in force in every buffer.",
-      "buffer-keymaps" =>
-        "(buffer-keymaps BUF) — the keymap names that answer for BUF, in precedence order, \"global\" last.",
-      "where-is-internal" =>
-        "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first.",
-      "overriding-map!" =>
-        "(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?]) — the frame's overriding keymap, ahead of every other; #f clears it. LOCK? makes an unbound key undefined (Transient). UNTIL-COMMAND? drops it when the next command finishes (the prefix argument).",
-      "buffer-at-point-map!" =>
-        "(buffer-at-point-map! BUF KEYMAP) — the keymap of the thing at point in BUF (a block), ahead of the minor maps; #f clears it. Emacs's overlay keymap.",
-      "buffer-at-point-map" => "(buffer-at-point-map BUF) — the keymap at point in BUF, or #f.",
-      "completion-requery!" =>
-        "(completion-requery!) — narrow the popup to the text between its start and point.",
-      "ignore-errors" => "(ignore-errors THUNK) — THUNK's value, or #f when it raises.",
-      "capture-key!" =>
-        "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms.",
-      "trace-key!" =>
-        "(trace-key! KEYS) — dispatch the key list in this process; return one state row per phase.",
-      "last-command" => "(last-command) — return the name of the last command that ran.",
-      "last-keys" =>
-        "(last-keys) — return the key sequence whose keymap lookup ran the current command.",
-      "current-prefix-arg" =>
-        "(current-prefix-arg) — return this frame's raw one-shot prefix argument, or #f.",
-      "set-prefix-arg!" =>
-        "(set-prefix-arg! VALUE) — set this frame's raw one-shot prefix argument; #f clears it.",
-      "window-rows" =>
-        "(window-rows [WIN]) — text rows of WIN, or of the active window when WIN is omitted.",
-      "window-cols" =>
-        "(window-cols [WIN]) — return the number of text columns in WIN, or in the active window.",
-      "window-wrap-map" =>
-        "(window-wrap-map WIN) — return (VERSION ROWS) as the client measured WIN: the buffer version the page showed, and the byte offsets where its visual rows begin; #f when nothing was measured.",
-      "window-set-wrap-map!" =>
-        "(window-set-wrap-map! WIN VERSION ROWS) — record a wrap map for WIN the way the client does; for tests and headless drivers.",
-      "buffer-version" =>
-        "(buffer-version BUF) — return the buffer's edit version; it grows by one per change.",
-      "frame-cols" => "(frame-cols) — estimate the usable text columns across the current frame.",
-      "buffer-cols" =>
-        "(buffer-cols BUF) — return the text columns of a window showing BUF, else the active window's.",
-      "recenter!" => "(recenter!) — center the active window on the cursor line.",
-      "completion-show!" =>
-        "(completion-show! START END CANDIDATES) — show the completion popup for the text START..END; accept replaces that range, and END may lie past point.",
-      "completion-dismiss!" => "(completion-dismiss!) — dismiss the completion popup.",
-      "completion-move!" => "(completion-move! DELTA) — move the popup selection by DELTA rows.",
-      "completion-accept!" =>
-        "(completion-accept!) — close the popup; return (START END LABEL) of the selection, END as of now, or #f.",
-      "completion-match?" =>
-        "(completion-match? LABEL QUERY [STYLE]) — does QUERY match LABEL the way a prompt matches: 'flex (default), 'substring, 'prefix, 'regexp, 'exact.",
-      "regexp-quote" => "(regexp-quote TEXT) — TEXT with every regexp character escaped.",
-      "buffer-words" =>
-        "(buffer-words PREFIX) — return the buffer's words with PREFIX, sorted, without PREFIX itself.",
-      "count-words" => "(count-words BUF) — return the buffer's whitespace-separated word count.",
-      "minibuffer-selected" =>
-        "(minibuffer-selected) — return the highlighted minibuffer candidate.",
-      "set-mb-redirect!" =>
-        "(set-mb-redirect! BOOL) — toggle redirection of current-buffer to the minibuffer's text.",
-      "window-preview-buffer!" =>
-        "(window-preview-buffer! BUF [WIN]) — show BUF in WIN (default: the active window) without MRU changes.",
-      "window-tree-preview!" =>
-        "(window-tree-preview! LAYOUT) — draw a layout from window-tree as a look: the windows change, the MRU ring does not.",
-      "buffer-sleep!" =>
-        "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned.",
-      "minibuffer-set-candidates!" =>
-        "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
-      "set-frame-group-label!" =>
-        "(set-frame-group-label! NAME [FRAME]) — record a frame's group context; #f clears it. FRAME defaults to the selected one.",
-      "set-frame-group-style!" =>
-        "(set-frame-group-style! NAME COLOR [FRAME]) — record a frame's group label and accent color.",
-      "delete-file!" =>
-        "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
-      "trash-file!" =>
-        "(trash-file! PATH) — move one file or directory to the user trash; return its new path.",
-      "copy-file!" =>
-        "(copy-file! SOURCE DESTINATION) — copy one file or directory without overwriting; return DESTINATION.",
-      "set-file-mode!" => "(set-file-mode! PATH MODE) — set octal MODE such as 755 on PATH.",
-      "touch-file!" => "(touch-file! PATH) — update PATH's mtime or create an empty file.",
-      "make-symlink!" =>
-        "(make-symlink! TARGET LINK) — create LINK as a symbolic link to TARGET without overwriting.",
-      "buffer-rename!" =>
-        "(buffer-rename! OLD NEW) — rename a buffer in place, keeping its text, point, locals and undo; return NEW, or #f if the name is taken. Policy lives in rename-buffer!.",
-      "rename-file!" =>
-        "(rename-file! SOURCE DESTINATION) — move a file or directory and carry an open buffer with it.",
-      "make-directory!" =>
-        "(make-directory! PATH) — create the directory and its parents; return #t."
-    }
-  end
+  def docs, do: Prim.docs(entries())
 
   defp telemetry_primitives do
     %{
-      "telemetry-snapshot" => fn
-        [] -> telemetry_events(200)
-        [limit] -> telemetry_events(trunc(limit))
-      end,
-      "telemetry-clear!" => fn [] ->
+      {"telemetry-snapshot",
+       "(telemetry-snapshot [LIMIT]) — return recent telemetry events of every layer, newest first."} =>
+        fn
+          [] -> telemetry_events(200)
+          [limit] -> telemetry_events(trunc(limit))
+        end,
+      {"telemetry-clear!", "(telemetry-clear!) — discard retained telemetry events."} => fn [] ->
         :ok = Compos.Core.Telemetry.clear()
         :void
       end
@@ -888,19 +362,27 @@ defmodule Compos.Core.SchemeAPI do
     alias Compos.Core.SysMon
 
     %{
-      "vm-sample" => fn [] -> SysMon.sample() end,
-      "vm-processes" => fn
-        [limit, sort, filter] ->
-          SysMon.processes(trunc(limit), sysmon_text(sort), sysmon_text(filter))
+      {"vm-sample",
+       "(vm-sample) — one plist of VM and host counters: scheduler utilization, memory, rates since the previous sample, os_mon load, memory and disks."} =>
+        fn [] -> SysMon.sample() end,
+      {"vm-processes",
+       "(vm-processes LIMIT SORT FILTER) — plist (rows count matched): at most LIMIT process rows whose name or pid contains FILTER, sorted by \"reds\", \"memory\", \"queue\" or \"name\"."} =>
+        fn
+          [limit, sort, filter] ->
+            SysMon.processes(trunc(limit), sysmon_text(sort), sysmon_text(filter))
 
-        [limit, sort] ->
-          SysMon.processes(trunc(limit), sysmon_text(sort), "")
+          [limit, sort] ->
+            SysMon.processes(trunc(limit), sysmon_text(sort), "")
 
-        [limit] ->
-          SysMon.processes(trunc(limit), "reds", "")
-      end,
-      "vm-process-info" => fn [pid] -> SysMon.process_info(sysmon_text(pid)) end,
-      "vm-process-kill!" => fn [pid] -> SysMon.kill(sysmon_text(pid)) end
+          [limit] ->
+            SysMon.processes(trunc(limit), "reds", "")
+        end,
+      {"vm-process-info",
+       "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone."} =>
+        fn [pid] -> SysMon.process_info(sysmon_text(pid)) end,
+      {"vm-process-kill!",
+       "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive."} =>
+        fn [pid] -> SysMon.kill(sysmon_text(pid)) end
     }
   end
 
@@ -913,12 +395,18 @@ defmodule Compos.Core.SchemeAPI do
     alias Compos.Core.Profiler
 
     %{
-      "profile-start!" => fn
-        [] -> Profiler.start()
-        [prefixes] -> Profiler.start(profiler_prefixes(prefixes))
-      end,
-      "profile-stop" => fn [] -> Profiler.stop() end,
-      "profile-cancel!" => fn [] -> Profiler.cancel() end
+      {"profile-start!",
+       "(profile-start! [PREFIXES]) — arm the call_time tracer over every loaded module whose name starts with one of PREFIXES (default \"Elixir.Compos.\"), and take the before snapshot of the processes and the VM."} =>
+        fn
+          [] -> Profiler.start()
+          [prefixes] -> Profiler.start(profiler_prefixes(prefixes))
+        end,
+      {"profile-stop",
+       "(profile-stop) — disarm and answer one profile as a plist: wall-us, at-ms, the hot functions, the busy processes, and the VM deltas; #f when nothing was armed."} =>
+        fn [] -> Profiler.stop() end,
+      {"profile-cancel!",
+       "(profile-cancel!) — disarm the tracer and forget the snapshot; #t when a profile was armed."} =>
+        fn [] -> Profiler.cancel() end
     }
   end
 
@@ -959,163 +447,242 @@ defmodule Compos.Core.SchemeAPI do
 
   defp buffer_primitives do
     %{
-      "buffer-create" => fn [name] ->
-        Core.create_buffer(name)
-        name
+      {"buffer-create",
+       "(buffer-create NAME) — create an empty buffer NAME and return NAME. A NAME that is a file on disk loads that file instead."} =>
+        fn [name] ->
+          Core.create_buffer(name)
+          name
+        end,
+      {"buffer-list", "(buffer-list) — return the names of all buffers."} => fn [] ->
+        Core.list_buffers()
       end,
-      "buffer-list" => fn [] -> Core.list_buffers() end,
-      "buffer-list-mru" => fn [] -> Editor.buffer_mru() end,
-      "window-prev-buffers" => fn
-        [] -> Editor.window_buffer_history()
-        [id] -> Editor.window_buffer_history(id)
-      end,
-      "set-window-prev-buffers!" => fn [id, history] when is_list(history) ->
-        Editor.set_window_history(id, history)
-      end,
+      {"buffer-list-mru",
+       "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers."} =>
+        fn [] -> Editor.buffer_mru() end,
+      {"window-prev-buffers",
+       "(window-prev-buffers [ID]) — return the window's previous buffers, most recent first."} =>
+        fn
+          [] -> Editor.window_buffer_history()
+          [id] -> Editor.window_buffer_history(id)
+        end,
+      {"set-window-prev-buffers!",
+       "(set-window-prev-buffers! ID PREV) — replace the window's previous buffers with PREV, most recent first."} =>
+        fn [id, history] when is_list(history) ->
+          Editor.set_window_history(id, history)
+        end,
       # the whole history: ("buffer" NAME) and ("group" NAME) rows in
       # recency order — a group switch is an entry like a buffer visit
-      "mru-list" => fn [] -> Editor.mru_all() end,
-      "mru-note-group!" => fn [g] ->
-        Editor.mru_note_group(g)
-        :void
+      {"mru-list",
+       "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order."} =>
+        fn [] -> Editor.mru_all() end,
+      {"mru-note-group!", "(mru-note-group! NAME) — record a group switch as a history entry."} =>
+        fn [g] ->
+          Editor.mru_note_group(g)
+          :void
+        end,
+      {"buffer-exists?", "(buffer-exists? NAME) — return #t if the buffer NAME exists."} => fn [
+                                                                                                 name
+                                                                                               ] ->
+        Buffer.exists?(name)
       end,
-      "buffer-exists?" => fn [name] -> Buffer.exists?(name) end,
-      "buffer-ref" => fn [name] -> Buffer.ref(name) || false end,
+      {"buffer-ref",
+       "(buffer-ref BUF) — return an immutable buffer handle for local reads and writes across renames, or #f if unknown."} =>
+        fn [name] -> Buffer.ref(name) || false end,
       # the buffer list names dormant buffers too: they hold a checkpoint
       # and no process. A verb asks this, not exists?, or it refuses to act
       # on the rows it shows.
-      "buffer-known?" => fn [name] ->
-        Buffer.exists?(name) or Compos.Core.BufferStore.known?(name)
+      {"buffer-known?",
+       "(buffer-known? NAME) — return #t if the buffer NAME is live OR dormant in the store; a dormant buffer wakes when you visit or edit it."} =>
+        fn [name] ->
+          Buffer.exists?(name) or Compos.Core.BufferStore.known?(name)
+        end,
+      {"buffer-text", "(buffer-text BUF) — return the buffer's whole text as a string."} => fn [
+                                                                                                 name
+                                                                                               ] ->
+        Buffer.text(name)
       end,
-      "buffer-text" => fn [name] -> Buffer.text(name) end,
-      "buffer-size" => fn [name] -> Buffer.byte_size(name) end,
-      "buffer-modified?" => fn [name] -> Buffer.modified?(name) end,
-      "buffer-persistent?" => fn [name] -> Buffer.persistent?(name) end,
-      "buffer-path" => fn [name] -> Buffer.path(name) || false end,
+      {"buffer-size", "(buffer-size BUF) — return the buffer's size in bytes."} => fn [name] ->
+        Buffer.byte_size(name)
+      end,
+      {"buffer-modified?",
+       "(buffer-modified? BUF) — return #t if the buffer changed after its last save."} => fn [
+                                                                                                name
+                                                                                              ] ->
+        Buffer.modified?(name)
+      end,
+      {"buffer-persistent?",
+       "(buffer-persistent? BUF) — return #t if the buffer writes a checkpoint and comes back at the next boot."} =>
+        fn [name] -> Buffer.persistent?(name) end,
+      {"buffer-path", "(buffer-path BUF) — return the buffer's file path, or #f if it has none."} =>
+        fn [name] -> Buffer.path(name) || false end,
       # named buffer ops are programmatic (:editor source) — they bypass
       # read-only, like Emacs' inhibit-read-only
-      "buffer-append!" => fn [name, text] ->
+      {"buffer-append!",
+       "(buffer-append! BUF TEXT) — append TEXT to the buffer's end; ignores read-only."} => fn [
+                                                                                                  name,
+                                                                                                  text
+                                                                                                ] ->
         :ok = Buffer.append(name, text, source: :editor)
         :void
       end,
-      "buffer-insert!" => fn [name, pos, text] ->
+      {"buffer-insert!",
+       "(buffer-insert! BUF POS TEXT) — insert TEXT at byte POS; ignores read-only."} => fn [
+                                                                                              name,
+                                                                                              pos,
+                                                                                              text
+                                                                                            ] ->
         :ok = Buffer.insert_at(name, pos, text, source: :editor)
         :void
       end,
-      "buffer-insert-at-local!" => fn [name, local, text] ->
-        Buffer.insert_at_local(name, plain(local), to_string(text), source: :editor)
-      end,
-      "buffer-marker-local!" => fn
-        [name, local] ->
-          :ok = Buffer.declare_marker_local(name, plain(local))
-          :void
+      {"buffer-insert-at-local!",
+       "(buffer-insert-at-local! BUF LOCAL TEXT) — insert TEXT at the byte position the buffer-local LOCAL names and advance the local, atomically; return the advanced position."} =>
+        fn [name, local, text] ->
+          Buffer.insert_at_local(name, plain(local), to_string(text), source: :editor)
+        end,
+      {"buffer-marker-local!",
+       "(buffer-marker-local! BUF LOCAL &optional TYPE) — declare LOCAL a marker: the buffer keeps the position current through every edit, as it keeps point. TYPE 'advance (default) moves it with text inserted exactly on it; 'stay does not."} =>
+        fn
+          [name, local] ->
+            :ok = Buffer.declare_marker_local(name, plain(local))
+            :void
 
-        [name, local, type] ->
-          :ok =
-            Buffer.declare_marker_local(
-              name,
-              plain(local),
-              if(plain(type) == "stay", do: :stay, else: :advance)
-            )
+          [name, local, type] ->
+            :ok =
+              Buffer.declare_marker_local(
+                name,
+                plain(local),
+                if(plain(type) == "stay", do: :stay, else: :advance)
+              )
 
+            :void
+        end,
+      {"buffer-delete-range!",
+       "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only."} =>
+        fn [name, pos, len] ->
+          :ok = Buffer.delete_range(name, pos, len, source: :editor)
           :void
-      end,
-      "buffer-delete-range!" => fn [name, pos, len] ->
-        :ok = Buffer.delete_range(name, pos, len, source: :editor)
-        :void
-      end,
-      "buffer-replace-range!" => fn [name, pos, len, text] ->
-        :ok = Buffer.replace_range(name, pos, len, text, source: :editor)
-        :void
-      end,
-      "buffer-version-token" => fn [name] ->
-        case Buffer.version_token(name) do
-          token when is_binary(token) -> Base.url_encode64(token, padding: false)
-          _ -> false
-        end
-      end,
-      "buffer-updates-since" => fn [name, token] ->
-        from =
-          case token do
-            t when is_binary(t) -> Base.url_decode64!(t, padding: false)
-            _ -> nil
+        end,
+      {"buffer-replace-range!",
+       "(buffer-replace-range! BUF POS LEN TEXT) — replace LEN bytes at byte POS with TEXT as one undo step; ignores read-only."} =>
+        fn [name, pos, len, text] ->
+          :ok = Buffer.replace_range(name, pos, len, text, source: :editor)
+          :void
+        end,
+      {"buffer-version-token",
+       "(buffer-version-token BUF) — what this replica knows, as an opaque token to hand a peer; #f if the buffer records no history."} =>
+        fn [name] ->
+          case Buffer.version_token(name) do
+            token when is_binary(token) -> Base.url_encode64(token, padding: false)
+            _ -> false
           end
+        end,
+      {"buffer-updates-since",
+       "(buffer-updates-since BUF TOKEN) — every change a replica at TOKEN has not seen, base64. Pass #f for a replica that knows nothing."} =>
+        fn [name, token] ->
+          from =
+            case token do
+              t when is_binary(t) -> Base.url_decode64!(t, padding: false)
+              _ -> nil
+            end
 
-        case Buffer.updates_since(name, from) do
-          bytes when is_binary(bytes) -> Base.url_encode64(bytes, padding: false)
-          {:error, reason} -> raise Compos.Scheme.Eval.Error, message: inspect(reason)
-        end
-      end,
-      "buffer-merge!" => fn [name, updates] ->
-        bytes = Base.url_decode64!(updates, padding: false)
+          case Buffer.updates_since(name, from) do
+            bytes when is_binary(bytes) -> Base.url_encode64(bytes, padding: false)
+            {:error, reason} -> raise Compos.Scheme.Eval.Error, message: inspect(reason)
+          end
+        end,
+      {"buffer-merge!",
+       "(buffer-merge! BUF UPDATES) — take base64 changes another replica made; the rope follows and the point stays put. #t when the text changed."} =>
+        fn [name, updates] ->
+          bytes = Base.url_decode64!(updates, padding: false)
 
-        case Buffer.merge(name, bytes) do
-          {:ok, changed?} -> changed?
-          {:error, reason} -> raise Compos.Scheme.Eval.Error, message: inspect(reason)
-        end
-      end,
-      "peer-eval" => fn [socket, code] ->
-        case Compos.Core.Peer.eval(socket, code) do
-          {:ok, printed} -> printed
-          {:error, reason} -> raise Compos.Scheme.Eval.Error, message: inspect(reason)
-        end
-      end,
-      "buffer-anchor" => fn [name, pos] ->
-        Buffer.anchor(name, pos) || false
-      end,
-      "buffer-anchor-pos" => fn [name, anchor] ->
-        Buffer.anchor_pos(name, anchor) || false
-      end,
-      "buffer-authors" => fn [name] ->
-        for {s, e, a} <- Buffer.authors(name), do: [s, e, a]
-      end,
-      "buffer-author-lines" => fn [name] ->
-        for {line, author, bytes} <- Buffer.author_lines(name), do: [line, author, bytes]
-      end,
-      "buffer-edit-log" => fn [name] ->
-        for {v, a, pos, ins, del} <- Buffer.edit_log(name), do: [v, a || false, pos, ins, del]
-      end,
-      "buffer-provenance-status" => fn [name] ->
-        Buffer.provenance(name) |> json_to_scheme_value()
-      end,
-      "buffer-history" => fn [name] ->
-        Buffer.change_log(name) |> json_to_scheme_value()
-      end,
-      "buffer-provenance-start!" => fn
-        [name] ->
-          :ok = Buffer.provenance_start(name, source: :editor)
-          :void
+          case Buffer.merge(name, bytes) do
+            {:ok, changed?} -> changed?
+            {:error, reason} -> raise Compos.Scheme.Eval.Error, message: inspect(reason)
+          end
+        end,
+      {"peer-eval",
+       "(peer-eval SOCKET CODE) — evaluate CODE on the daemon listening at SOCKET, a local path or host:/path over ssh. Returns its printed result, or raises when it cannot be reached."} =>
+        fn [socket, code] ->
+          case Compos.Core.Peer.eval(socket, code) do
+            {:ok, printed} -> printed
+            {:error, reason} -> raise Compos.Scheme.Eval.Error, message: inspect(reason)
+          end
+        end,
+      {"buffer-anchor",
+       "(buffer-anchor BUF POS) — an opaque anchor on byte POS that keeps naming the same place while the text around it changes; #f if the buffer records no history."} =>
+        fn [name, pos] ->
+          Buffer.anchor(name, pos) || false
+        end,
+      {"buffer-anchor-pos",
+       "(buffer-anchor-pos BUF ANCHOR) — where an anchor from buffer-anchor points now, or #f if it cannot be resolved. Read a position now, edit at it later, and the edit still lands where you meant."} =>
+        fn [name, anchor] ->
+          Buffer.anchor_pos(name, anchor) || false
+        end,
+      {"buffer-authors",
+       "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text."} =>
+        fn [name] ->
+          for {s, e, a} <- Buffer.authors(name), do: [s, e, a]
+        end,
+      {"buffer-author-lines",
+       "(buffer-author-lines BUF) — return (LINE AUTHOR BYTES) attribution rows, 1-based, in line order; a line two actors touched appears once per actor."} =>
+        fn [name] ->
+          for {line, author, bytes} <- Buffer.author_lines(name), do: [line, author, bytes]
+        end,
+      {"buffer-edit-log",
+       "(buffer-edit-log BUF) — return (VERSION AUTHOR POS INS DEL) edit records, newest first."} =>
+        fn [name] ->
+          for {v, a, pos, ins, del} <- Buffer.edit_log(name), do: [v, a || false, pos, ins, del]
+        end,
+      {"buffer-provenance-status",
+       "(buffer-provenance-status BUF) — return the durable recording state and accepted head."} =>
+        fn [name] ->
+          Buffer.provenance(name) |> json_to_scheme_value()
+        end,
+      {"buffer-history",
+       "(buffer-history BUF) — return every change to the buffer, oldest first: who made it, what it did, and when. A delete reports how many bytes it removed, not the text."} =>
+        fn [name] ->
+          Buffer.change_log(name) |> json_to_scheme_value()
+        end,
+      {"buffer-provenance-start!",
+       "(buffer-provenance-start! BUF [ACTOR REASON POLICY]) — start or resume recording; bridges any gap."} =>
+        fn
+          [name] ->
+            :ok = Buffer.provenance_start(name, source: :editor)
+            :void
 
-        [name, actor, reason, policy_source] ->
-          :ok =
-            Buffer.provenance_start(
-              name,
-              source: :editor,
-              author: plain(actor),
-              reason: plain(reason),
-              policy_source: plain(policy_source)
-            )
+          [name, actor, reason, policy_source] ->
+            :ok =
+              Buffer.provenance_start(
+                name,
+                source: :editor,
+                author: plain(actor),
+                reason: plain(reason),
+                policy_source: plain(policy_source)
+              )
 
-          :void
-      end,
-      "buffer-provenance-stop!" => fn
-        [name] ->
-          :ok = Buffer.provenance_stop(name, source: :editor)
-          :void
+            :void
+        end,
+      {"buffer-provenance-stop!",
+       "(buffer-provenance-stop! BUF [ACTOR REASON POLICY]) — stop recording; keeps all history."} =>
+        fn
+          [name] ->
+            :ok = Buffer.provenance_stop(name, source: :editor)
+            :void
 
-        [name, actor, reason, policy_source] ->
-          :ok =
-            Buffer.provenance_stop(
-              name,
-              source: :editor,
-              author: plain(actor),
-              reason: plain(reason),
-              policy_source: plain(policy_source)
-            )
+          [name, actor, reason, policy_source] ->
+            :ok =
+              Buffer.provenance_stop(
+                name,
+                source: :editor,
+                author: plain(actor),
+                reason: plain(reason),
+                policy_source: plain(policy_source)
+              )
 
-          :void
-      end,
-      "buffer-provenance-checkpoint!" => fn [name] ->
+            :void
+        end,
+      {"buffer-provenance-checkpoint!",
+       "(buffer-provenance-checkpoint! BUF) — close the current changeset."} => fn [name] ->
         case Buffer.provenance_checkpoint(name, source: :editor) do
           :ok -> :void
           {:error, reason} -> [{:sym, "error"}, Atom.to_string(reason)]
@@ -1124,44 +691,64 @@ defmodule Compos.Core.SchemeAPI do
       # overlays: (overlay-set! buf 'org (list (list s e "org-todo") ...))
       # replaces the tag's whole range set — the fontification model is
       # "mode recomputes"; positions auto-adjust between recomputes
-      "overlay-set!" => fn [name, tag, ranges] ->
-        :ok =
-          Buffer.set_overlays(
-            name,
-            plain(tag),
-            Enum.map(ranges, fn [s, e, f] -> {s, e, plain(f)} end)
-          )
+      {"overlay-set!",
+       "(overlay-set! BUF TAG RANGES) — replace TAG's overlays with (START END FACE) byte ranges."} =>
+        fn [name, tag, ranges] ->
+          :ok =
+            Buffer.set_overlays(
+              name,
+              plain(tag),
+              Enum.map(ranges, fn [s, e, f] -> {s, e, plain(f)} end)
+            )
 
-        :void
-      end,
-      "overlay-clear!" => fn [name, tag] ->
-        :ok = Buffer.clear_overlays(name, if(plain(tag) == "all", do: :all, else: plain(tag)))
-        :void
-      end,
-      "buffer-overlays" => fn
-        [name] -> Enum.map(Buffer.overlays(name), fn {s, e, f} -> [s, e, f] end)
-        [name, tag] -> Enum.map(Buffer.overlays(name, plain(tag)), fn {s, e, f} -> [s, e, f] end)
-      end,
+          :void
+        end,
+      {"overlay-clear!",
+       "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay."} =>
+        fn [name, tag] ->
+          :ok = Buffer.clear_overlays(name, if(plain(tag) == "all", do: :all, else: plain(tag)))
+          :void
+        end,
+      {"buffer-overlays",
+       "(buffer-overlays BUF [TAG]) — return all overlays, or TAG's alone, as (START END FACE) byte ranges."} =>
+        fn
+          [name] ->
+            Enum.map(Buffer.overlays(name), fn {s, e, f} -> [s, e, f] end)
+
+          [name, tag] ->
+            Enum.map(Buffer.overlays(name, plain(tag)), fn {s, e, f} -> [s, e, f] end)
+        end,
       # folding: ranges is a list of (start end) byte ranges to hide.
       # A buffer has several fold owners, so ranges are tagged and each
       # owner replaces only its own tag. The display hides the union.
       # The untagged pair below writes and reads the "default" tag.
-      "buffer-set-hidden!" => fn [name, ranges] ->
+      {"buffer-set-hidden!",
+       "(buffer-set-hidden! BUF RANGES) — hide (fold) the given (START END) byte ranges."} => fn [
+                                                                                                   name,
+                                                                                                   ranges
+                                                                                                 ] ->
         :ok = Buffer.set_hidden(name, Enum.map(ranges, fn [s, e] -> {s, e} end))
         :void
       end,
-      "buffer-hidden" => fn [name] ->
-        Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
-      end,
-      "fold-set!" => fn [name, tag, ranges] ->
-        :ok = Buffer.set_hidden(name, plain(tag), Enum.map(ranges, fn [s, e] -> {s, e} end))
-        :void
-      end,
-      "fold-get" => fn
-        [name] -> Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
-        [name, tag] -> Enum.map(Buffer.hidden(name, fold_tag(tag)), fn {s, e} -> [s, e] end)
-      end,
-      "fold-clear!" => fn
+      {"buffer-hidden",
+       "(buffer-hidden BUF) — return the hidden (folded) byte ranges as (START END) pairs."} =>
+        fn [name] ->
+          Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
+        end,
+      {"fold-set!",
+       "(fold-set! BUF TAG RANGES) — replace TAG's hidden (START END) byte ranges; the display hides the union of all tags."} =>
+        fn [name, tag, ranges] ->
+          :ok = Buffer.set_hidden(name, plain(tag), Enum.map(ranges, fn [s, e] -> {s, e} end))
+          :void
+        end,
+      {"fold-get",
+       "(fold-get BUF [TAG]) — return TAG's hidden ranges; no TAG, or 'all, returns the union."} =>
+        fn
+          [name] -> Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
+          [name, tag] -> Enum.map(Buffer.hidden(name, fold_tag(tag)), fn {s, e} -> [s, e] end)
+        end,
+      {"fold-clear!",
+       "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every tag's."} => fn
         [name] ->
           :ok = Buffer.clear_hidden(name)
           :void
@@ -1170,107 +757,130 @@ defmodule Compos.Core.SchemeAPI do
           :ok = Buffer.clear_hidden(name, fold_tag(tag))
           :void
       end,
-      "buffer-narrow!" => fn [name, start, stop] ->
-        :ok = Buffer.narrow(name, start, stop)
-        :void
-      end,
-      "buffer-narrow-range" => fn [name] ->
+      {"buffer-narrow!",
+       "(buffer-narrow! BUF START END) — narrow visible text to the exclusive byte range without changing buffer access."} =>
+        fn [name, start, stop] ->
+          :ok = Buffer.narrow(name, start, stop)
+          :void
+        end,
+      {"buffer-narrow-range",
+       "(buffer-narrow-range BUF) — return the active (START END) narrowing, or #f."} => fn [name] ->
         case Buffer.narrow_range(name) do
           {start, stop} -> [start, stop]
           nil -> false
         end
       end,
-      "buffer-widen!" => fn [name] ->
+      {"buffer-widen!", "(buffer-widen! BUF) — make the complete buffer visible."} => fn [name] ->
         :ok = Buffer.widen(name)
         :void
       end,
-      "buffer-set-read-only!" => fn [name, bool] ->
+      {"buffer-set-read-only!",
+       "(buffer-set-read-only! BUF BOOL) — set the buffer's read-only flag."} => fn [name, bool] ->
         Buffer.set_read_only(name, bool == true)
         :void
       end,
-      "buffer-read-only?" => fn [name] -> Buffer.read_only?(name) end,
-      "buffer-kill!" => fn [name] ->
+      {"buffer-read-only?", "(buffer-read-only? BUF) — return #t if the buffer is read-only."} =>
+        fn [name] -> Buffer.read_only?(name) end,
+      {"buffer-kill!", "(buffer-kill! BUF) — kill the buffer and release its windows."} => fn [
+                                                                                                name
+                                                                                              ] ->
         Core.kill_buffer(name)
         :void
       end,
       # remote files: ssh transport only — /ssh: path syntax, remote buffers,
       # and save interception are Scheme (priv/editor.scm)
-      "ssh-command" => fn [] -> Compos.Core.Remote.ssh() end,
-      "remote-read" => fn [host, path | rest] ->
-        work = fn ->
-          case Compos.Core.Remote.read(host, path) do
-            {:ok, text} -> text
-            :directory -> {:sym, "directory"}
-            :absent -> {:sym, "absent"}
-            {:error, msg} -> [{:sym, "error"}, msg]
+      {"ssh-command", "(ssh-command) — return the configured ssh command string."} => fn [] ->
+        Compos.Core.Remote.ssh()
+      end,
+      {"remote-read",
+       "(remote-read HOST PATH [CALLBACK]) — read a remote file; return text, 'directory, 'absent, or (error MSG). With CALLBACK, run in a Task and hand it the value."} =>
+        fn [host, path | rest] ->
+          work = fn ->
+            case Compos.Core.Remote.read(host, path) do
+              {:ok, text} -> text
+              :directory -> {:sym, "directory"}
+              :absent -> {:sym, "absent"}
+              {:error, msg} -> [{:sym, "error"}, msg]
+            end
           end
-        end
 
-        case rest do
-          [] -> work.()
-          [callback] -> async_dispatch(callback, work)
-        end
-      end,
-      "remote-list-dir" => fn [host, dir | rest] ->
-        work = fn ->
-          case Compos.Core.Remote.list_dir(host, dir) do
-            {:ok, entries} -> entries
-            {:error, msg} -> [{:sym, "error"}, msg]
+          case rest do
+            [] -> work.()
+            [callback] -> async_dispatch(callback, work)
           end
-        end
-
-        case rest do
-          [] -> work.()
-          [callback] -> async_dispatch(callback, work)
-        end
-      end,
-      "remote-sh" => fn [host, cmd | rest] ->
-        work = fn ->
-          case Compos.Core.Remote.sh(host, cmd) do
-            :ok -> true
-            {:error, msg} -> [{:sym, "error"}, msg]
+        end,
+      {"remote-list-dir",
+       "(remote-list-dir HOST DIR [CALLBACK]) — list a remote directory; return entries or (error MSG). With CALLBACK, run in a Task and hand it the value."} =>
+        fn [host, dir | rest] ->
+          work = fn ->
+            case Compos.Core.Remote.list_dir(host, dir) do
+              {:ok, entries} -> entries
+              {:error, msg} -> [{:sym, "error"}, msg]
+            end
           end
-        end
 
-        case rest do
-          [] -> work.()
-          [callback] -> async_dispatch(callback, work)
-        end
-      end,
-      "remote-write" => fn [host, path, text | rest] ->
-        work = fn ->
-          case Compos.Core.Remote.write(host, path, text) do
-            :ok -> true
-            {:error, msg} -> [{:sym, "error"}, msg]
+          case rest do
+            [] -> work.()
+            [callback] -> async_dispatch(callback, work)
           end
-        end
+        end,
+      {"remote-sh",
+       "(remote-sh HOST CMD [CALLBACK]) — run CMD on HOST over ssh; return #t or (error MSG). With CALLBACK, run in a Task and hand it the value."} =>
+        fn [host, cmd | rest] ->
+          work = fn ->
+            case Compos.Core.Remote.sh(host, cmd) do
+              :ok -> true
+              {:error, msg} -> [{:sym, "error"}, msg]
+            end
+          end
 
-        case rest do
-          [] -> work.()
-          [callback] -> async_dispatch(callback, work)
-        end
-      end,
-      "buffer-mark-saved!" => fn [name] ->
-        Buffer.mark_saved(name)
-        :void
-      end,
-      "find-file" => fn
-        [path] ->
-          find_file(path, [])
+          case rest do
+            [] -> work.()
+            [callback] -> async_dispatch(callback, work)
+          end
+        end,
+      {"remote-write",
+       "(remote-write HOST PATH TEXT [CALLBACK]) — write TEXT to a remote file; return #t or (error MSG). With CALLBACK, run in a Task and hand it the value."} =>
+        fn [host, path, text | rest] ->
+          work = fn ->
+            case Compos.Core.Remote.write(host, path, text) do
+              :ok -> true
+              {:error, msg} -> [{:sym, "error"}, msg]
+            end
+          end
 
-        # A second argument of #f opens the file for this session only.
-        # Scheme decides that: see large-file-warning-threshold.
-        [path, persistent?] ->
-          find_file(path, persistent: persistent? != false)
+          case rest do
+            [] -> work.()
+            [callback] -> async_dispatch(callback, work)
+          end
+        end,
+      {"buffer-mark-saved!", "(buffer-mark-saved! BUF) — clear the buffer's modified flag."} =>
+        fn [name] ->
+          Buffer.mark_saved(name)
+          :void
+        end,
+      {"find-file",
+       "(find-file PATH [PERSISTENT?] [READ?]) — open the file PATH in a buffer and return the buffer name. PERSISTENT? #f opens it for this session only: no checkpoint, and no restore at the next boot. READ? #f binds the buffer to the file without reading it, for a file whose viewer reads it from disk."} =>
+        fn
+          [path] ->
+            find_file(path, [])
 
-        # A third of #f never reads the file: the buffer is bound to the
-        # path and its viewer reads the bytes from disk. Scheme decides
-        # that too: see browser-file-mode.
-        [path, persistent?, read?] ->
-          find_file(path, persistent: persistent? != false, read: read? != false)
-      end,
+          # A second argument of #f opens the file for this session only.
+          # Scheme decides that: see large-file-warning-threshold.
+          [path, persistent?] ->
+            find_file(path, persistent: persistent? != false)
+
+          # A third of #f never reads the file: the buffer is bound to the
+          # path and its viewer reads the bytes from disk. Scheme decides
+          # that too: see browser-file-mode.
+          [path, persistent?, read?] ->
+            find_file(path, persistent: persistent? != false, read: read? != false)
+        end,
       # directory listing: names only, directories marked with trailing "/"
-      "list-dir" => fn [dir] ->
+      {"list-dir",
+       "(list-dir DIR) — return sorted entry names; directories carry a trailing slash."} => fn [
+                                                                                                  dir
+                                                                                                ] ->
         expanded = Path.expand(if dir == "", do: ".", else: dir)
 
         case File.ls(expanded) do
@@ -1287,27 +897,35 @@ defmodule Compos.Core.SchemeAPI do
       end,
       # One read supplies Dired's row data. File.lstat/2 preserves links,
       # and exact bytes stay separate from the formatted display value.
-      "directory-entries" => fn [dir] ->
-        expanded = Path.expand(if dir == "", do: ".", else: dir)
+      {"directory-entries",
+       "(directory-entries DIR) — return sorted entry plists with name, type, exact bytes, mtime, size, date, and perms; return (error MSG) when DIR cannot be read."} =>
+        fn [dir] ->
+          expanded = Path.expand(if dir == "", do: ".", else: dir)
 
-        case File.ls(expanded) do
-          {:ok, names} ->
-            names
-            |> Enum.sort()
-            |> Enum.map(&directory_entry(expanded, &1))
+          case File.ls(expanded) do
+            {:ok, names} ->
+              names
+              |> Enum.sort()
+              |> Enum.map(&directory_entry(expanded, &1))
 
-          {:error, reason} ->
-            [{:sym, "error"}, file_error(reason, expanded)]
-        end
+            {:error, reason} ->
+              [{:sym, "error"}, file_error(reason, expanded)]
+          end
+        end,
+      {"expand-path", "(expand-path PATH) — expand PATH to an absolute path."} => fn [p] ->
+        Path.expand(p)
       end,
-      "expand-path" => fn [p] -> Path.expand(p) end,
       # A write rule compares a path against a root directory. In development
       # _build/dev/lib/compos_core/priv is a symlink to apps/compos_core/priv,
       # so the same directory has two names and a text prefix test fails on one
       # of them. Scheme has no way to read a link, so this resolves them.
-      "file-realpath" => fn [p] -> realpath(Path.expand(p)) end,
+      {"file-realpath",
+       "(file-realpath PATH) — expand PATH and resolve any symlink in it, so two names for one directory compare equal."} =>
+        fn [p] -> realpath(Path.expand(p)) end,
       # (file-stat path) -> (perms size date) strings, dired-style
-      "file-stat" => fn [p] ->
+      {"file-stat", "(file-stat PATH) — return (PERMS SIZE DATE) strings in dired style."} => fn [
+                                                                                                   p
+                                                                                                 ] ->
         case File.stat(Path.expand(p), time: :posix) do
           {:ok, stat} ->
             [format_mode(stat), format_size(stat.size), format_mtime(stat.mtime)]
@@ -1318,37 +936,53 @@ defmodule Compos.Core.SchemeAPI do
       end,
       # a sortable mtime (posix seconds), 0 when the file is gone — file-stat
       # formats for display and cannot be ordered
-      "file-mtime" => fn [p] ->
-        case File.stat(Path.expand(p), time: :posix) do
-          {:ok, stat} -> stat.mtime
-          {:error, _} -> 0
-        end
-      end,
+      {"file-mtime",
+       "(file-mtime PATH) — return the file's mtime in posix seconds, or 0 if it is gone."} =>
+        fn [p] ->
+          case File.stat(Path.expand(p), time: :posix) do
+            {:ok, stat} -> stat.mtime
+            {:error, _} -> 0
+          end
+        end,
       # a comparable byte count, for the same reason file-mtime exists:
       # file-stat formats a size for display ("17.3M") and cannot be
       # compared. Local paths only, like file-mtime — a remote path fails
       # the stat and answers 0, so a caller sizing a file to decide how
       # much work to do treats a remote file as it did before.
-      "file-size" => fn [p] ->
-        case File.stat(Path.expand(p)) do
-          {:ok, stat} -> stat.size
-          {:error, _} -> 0
-        end
-      end,
+      {"file-size",
+       "(file-size PATH) — return the file's size in bytes, or 0 if it is gone or remote."} =>
+        fn [p] ->
+          case File.stat(Path.expand(p)) do
+            {:ok, stat} -> stat.size
+            {:error, _} -> 0
+          end
+        end,
       # one segment, so a file buffer's slashes survive the round trip
-      "url-encode" => fn [s] -> URI.encode(s, &URI.char_unreserved?/1) end,
-      "url-decode" => fn [s] -> URI.decode(s) end,
-      "file-exists?" => fn [p] -> File.exists?(Path.expand(p)) end,
-      # a file that is not there yet can be created, so it counts as writable
-      "file-writable?" => fn [p] ->
-        case File.stat(Path.expand(p)) do
-          {:ok, stat} -> stat.access in [:write, :read_write]
-          {:error, _} -> true
-        end
+      {"url-encode", "(url-encode S) — percent-encode S as one URL path segment."} => fn [s] ->
+        URI.encode(s, &URI.char_unreserved?/1)
       end,
-      "file-directory?" => fn [p] -> File.dir?(Path.expand(p)) end,
+      {"url-decode", "(url-decode S) — decode a percent-encoded URL segment."} => fn [s] ->
+        URI.decode(s)
+      end,
+      {"file-exists?", "(file-exists? PATH) — return #t if PATH exists."} => fn [p] ->
+        File.exists?(Path.expand(p))
+      end,
+      # a file that is not there yet can be created, so it counts as writable
+      {"file-writable?",
+       "(file-writable? PATH) — return #t when the process can write PATH, or PATH does not exist yet."} =>
+        fn [p] ->
+          case File.stat(Path.expand(p)) do
+            {:ok, stat} -> stat.access in [:write, :read_write]
+            {:error, _} -> true
+          end
+        end,
+      {"file-directory?", "(file-directory? PATH) — return #t if PATH is a directory."} => fn [p] ->
+        File.dir?(Path.expand(p))
+      end,
       # (read-file PATH) -> contents, or #f if unreadable
-      "read-file" => fn [p] ->
+      {"read-file", "(read-file PATH) — return the file's contents, or #f if unreadable."} => fn [
+                                                                                                   p
+                                                                                                 ] ->
         case File.read(Path.expand(p)) do
           {:ok, text} -> text
           {:error, _} -> false
@@ -1356,252 +990,315 @@ defmodule Compos.Core.SchemeAPI do
       end,
       # (getenv NAME) — an unset OR empty variable is #f: a caller asking for
       # a key wants the next source in the chain, not the empty string
-      "getenv" => fn [name] ->
-        case System.get_env(name) do
-          v when v in [nil, ""] -> false
-          v -> v
-        end
-      end,
+      {"getenv",
+       "(getenv NAME) — return the environment variable NAME, or #f if it is unset or empty."} =>
+        fn [name] ->
+          case System.get_env(name) do
+            v when v in [nil, ""] -> false
+            v -> v
+          end
+        end,
       # This is mechanism, including for agent-attributed evals. Scheme's
       # permission policy is an overridable convenience, not an OS sandbox.
-      "shell-command->string" => fn
-        [cmd] ->
-          shell_to_string(cmd, File.cwd!())
+      {"shell-command->string",
+       "(shell-command->string CMD [DIR] [CALLBACK]) — run CMD in a shell; stderr merges into the output. With CALLBACK, run in a Task and return :void at once; CALLBACK gets the output. Without CALLBACK, block up to the shell time limit, then kill CMD and return what it wrote."} =>
+        fn
+          [cmd] ->
+            shell_to_string(cmd, File.cwd!())
 
-        [cmd, dir_or_cb | rest] ->
-          {dir, callback} =
-            case {dir_or_cb, rest} do
-              {cb, []} when not is_binary(cb) -> {File.cwd!(), cb}
-              {dir, []} -> {Path.expand(dir), nil}
-              {dir, [cb]} -> {Path.expand(dir), cb}
+          [cmd, dir_or_cb | rest] ->
+            {dir, callback} =
+              case {dir_or_cb, rest} do
+                {cb, []} when not is_binary(cb) -> {File.cwd!(), cb}
+                {dir, []} -> {Path.expand(dir), nil}
+                {dir, [cb]} -> {Path.expand(dir), cb}
+              end
+
+            if callback do
+              async_dispatch(callback, fn -> shell_to_string(cmd, dir, shell_async_limit()) end)
+            else
+              shell_to_string(cmd, dir)
             end
-
-          if callback do
-            async_dispatch(callback, fn -> shell_to_string(cmd, dir, shell_async_limit()) end)
-          else
-            shell_to_string(cmd, dir)
+        end,
+      {"scheme-read",
+       "(scheme-read STR) — read STR as Scheme data; return the list of top-level forms, or #f when STR does not parse."} =>
+        fn [src] ->
+          try do
+            Compos.Scheme.Reader.read_all(src)
+          rescue
+            _ -> false
           end
-      end,
-      "scheme-read" => fn [src] ->
-        try do
-          Compos.Scheme.Reader.read_all(src)
-        rescue
-          _ -> false
-        end
-      end,
+        end,
       # (json-parse STR) — objects become flat plists with symbol keys,
       # null becomes #f; #f on parse failure
-      "json-parse" => fn [s] ->
-        case Jason.decode(s) do
-          {:ok, v} -> Compos.Core.LLM.json_to_scheme(v)
-          {:error, _} -> false
-        end
-      end,
+      {"json-parse",
+       "(json-parse STR) — parse JSON; objects become plists with symbol keys; #f on failure."} =>
+        fn [s] ->
+          case Jason.decode(s) do
+            {:ok, v} -> Compos.Core.LLM.json_to_scheme(v)
+            {:error, _} -> false
+          end
+        end,
       # (json-encode V [PRETTY]) — the inverse: a plist becomes an object,
       # any other list an array. Escaping is the encoder's job, so a value
       # survives a round trip through a file that the printer's own escapes
       # do not. A truthy PRETTY indents the output.
-      "json-encode" => fn
-        [v] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v))
-        [v, false] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v))
-        [v, _pretty] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v), pretty: true)
-      end,
+      {"json-encode",
+       "(json-encode V [PRETTY]) — encode a Scheme value as a JSON string; a plist becomes an object. A truthy PRETTY indents the output."} =>
+        fn
+          [v] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v))
+          [v, false] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v))
+          [v, _pretty] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v), pretty: true)
+        end,
       # Formatting is lexical. A Scheme parse and encode cannot preserve JSON
       # null or object key order, so this narrow mechanism keeps the source
       # values intact while Scheme decides when a buffer uses it.
-      "json-format" => fn [text] ->
-        case Jason.decode(text) do
-          {:ok, _value} -> Jason.Formatter.pretty_print(text) <> "\n"
-          {:error, _reason} -> false
-        end
-      end,
-      "write-file!" => fn [p, text] ->
-        path = Path.expand(p)
-        File.mkdir_p!(Path.dirname(path))
-        File.write!(path, text)
-        true
-      end,
-      "start-process!" => fn [buffer, cmd] ->
-        case Compos.Core.Proc.start(buffer, cmd) do
-          {:ok, _} -> true
-          {:error, {:already_started, _}} -> true
-          _ -> false
-        end
-      end,
-      "start-terminal!" => fn [buffer, cmd] ->
-        case Compos.Core.Terminal.start(buffer, cmd) do
-          {:ok, _} -> true
-          {:error, {:already_started, _}} -> true
-          _ -> false
-        end
-      end,
-      "process-send!" => fn [buffer, text] ->
-        result =
-          if Compos.Core.Terminal.running?(buffer),
-            do: Compos.Core.Terminal.send_text(buffer, text),
-            else: Compos.Core.Proc.send_text(buffer, text)
+      {"json-format",
+       "(json-format STR) — indent valid JSON without changing its values or object key order; return #f on invalid input."} =>
+        fn [text] ->
+          case Jason.decode(text) do
+            {:ok, _value} -> Jason.Formatter.pretty_print(text) <> "\n"
+            {:error, _reason} -> false
+          end
+        end,
+      {"write-file!",
+       "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t."} =>
+        fn [p, text] ->
+          path = Path.expand(p)
+          File.mkdir_p!(Path.dirname(path))
+          File.write!(path, text)
+          true
+        end,
+      {"start-process!",
+       "(start-process! BUF CMD) — start a shell process attached to BUF; return #t on success."} =>
+        fn [buffer, cmd] ->
+          case Compos.Core.Proc.start(buffer, cmd) do
+            {:ok, _} -> true
+            {:error, {:already_started, _}} -> true
+            _ -> false
+          end
+        end,
+      {"start-terminal!",
+       "(start-terminal! BUF CMD) — start a raw PTY whose bounded plain transcript stays in BUF; return #t on success."} =>
+        fn [buffer, cmd] ->
+          case Compos.Core.Terminal.start(buffer, cmd) do
+            {:ok, _} -> true
+            {:error, {:already_started, _}} -> true
+            _ -> false
+          end
+        end,
+      {"process-send!",
+       "(process-send! BUF TEXT) — send TEXT to the buffer's process; return #t on success."} =>
+        fn [buffer, text] ->
+          result =
+            if Compos.Core.Terminal.running?(buffer),
+              do: Compos.Core.Terminal.send_text(buffer, text),
+              else: Compos.Core.Proc.send_text(buffer, text)
 
-        result == :ok
-      end,
-      "process-running?" => fn [buffer] ->
-        Compos.Core.Terminal.running?(buffer) or Compos.Core.Proc.running?(buffer)
-      end,
-      "process-mark" => fn [buffer] -> Compos.Core.Proc.mark(buffer) end,
-      "buffer-substring" => fn [s, e] ->
-        text = Buffer.text(Editor.current_buffer())
-        binary_part(text, s, min(e, Kernel.byte_size(text)) - s)
-      end,
-      "process-kill!" => fn [buffer] ->
+          result == :ok
+        end,
+      {"process-running?", "(process-running? BUF) — return #t if the buffer's process runs."} =>
+        fn [buffer] ->
+          Compos.Core.Terminal.running?(buffer) or Compos.Core.Proc.running?(buffer)
+        end,
+      {"process-mark",
+       "(process-mark BUF) — return the byte position just after the last process output."} =>
+        fn [buffer] -> Compos.Core.Proc.mark(buffer) end,
+      {"buffer-substring",
+       "(buffer-substring START END) — return the current buffer's text between byte START and END."} =>
+        fn [s, e] ->
+          text = Buffer.text(Editor.current_buffer())
+          binary_part(text, s, min(e, Kernel.byte_size(text)) - s)
+        end,
+      {"process-kill!", "(process-kill! BUF) — kill the buffer's process."} => fn [buffer] ->
         if Compos.Core.Terminal.running?(buffer),
           do: Compos.Core.Terminal.kill(buffer),
           else: Compos.Core.Proc.kill(buffer)
 
         :void
       end,
-      "process-list" => fn [] ->
+      {"process-list",
+       "(process-list) — return ((BUF CMD) ...) for every running process buffer."} => fn [] ->
         for {name, cmd} <- Enum.sort(Compos.Core.Proc.list() ++ Compos.Core.Terminal.list()),
             do: [name, cmd]
       end,
-      "process-restart!" => fn [buffer] ->
-        result =
-          if Compos.Core.Terminal.running?(buffer),
-            do: Compos.Core.Terminal.restart(buffer),
-            else: Compos.Core.Proc.restart(buffer)
+      {"process-restart!",
+       "(process-restart! BUF) — kill the buffer's process and run its command again; return #t on success."} =>
+        fn [buffer] ->
+          result =
+            if Compos.Core.Terminal.running?(buffer),
+              do: Compos.Core.Terminal.restart(buffer),
+              else: Compos.Core.Proc.restart(buffer)
 
-        case result do
-          {:ok, _} -> true
-          _ -> false
-        end
-      end,
+          case result do
+            {:ok, _} -> true
+            _ -> false
+          end
+        end,
       # current line's text (policy-free helper for comint & friends)
-      "line-text" => fn [] ->
-        buf = Editor.current_buffer()
-        text = Buffer.text(buf)
-        {bol, eol} = Compos.Core.Text.line_bounds(text, Buffer.point(buf))
-        binary_part(text, bol, eol - bol)
-      end
+      {"line-text", "(line-text) — return the current line's text, without the newline."} =>
+        fn [] ->
+          buf = Editor.current_buffer()
+          text = Buffer.text(buf)
+          {bol, eol} = Compos.Core.Text.line_bounds(text, Buffer.point(buf))
+          binary_part(text, bol, eol - bol)
+        end
     }
   end
 
   defp irc_primitives do
     %{
-      "irc-parse" => fn [line] ->
-        m = Compos.Core.IRC.parse(line)
+      {"irc-parse",
+       "(irc-parse LINE) — split one IRC line into (prefix P command C params (...) trailing T)."} =>
+        fn [line] ->
+          m = Compos.Core.IRC.parse(line)
 
-        [
-          {:sym, "prefix"},
-          m.prefix || false,
-          {:sym, "command"},
-          m.command,
-          {:sym, "params"},
-          m.params,
-          {:sym, "trailing"},
-          m.trailing || false,
-          {:sym, "raw"},
-          m.raw
-        ]
-      end,
-      "irc-format" => fn
-        [command, params] -> Compos.Core.IRC.format(command, params)
-        [command, params, trailing] -> Compos.Core.IRC.format(command, params, trailing)
-      end
+          [
+            {:sym, "prefix"},
+            m.prefix || false,
+            {:sym, "command"},
+            m.command,
+            {:sym, "params"},
+            m.params,
+            {:sym, "trailing"},
+            m.trailing || false,
+            {:sym, "raw"},
+            m.raw
+          ]
+        end,
+      {"irc-format",
+       "(irc-format COMMAND PARAMS [TRAILING]) — one IRC line from a command, its params, and an optional trailing text."} =>
+        fn
+          [command, params] -> Compos.Core.IRC.format(command, params)
+          [command, params, trailing] -> Compos.Core.IRC.format(command, params, trailing)
+        end
     }
   end
 
   defp discovery_primitives do
     %{
-      "embedding-cache-clear!" => fn [] ->
-        path = Compos.Core.EmbeddingIndex.cache_path()
-        :ok = Compos.Core.EmbeddingIndex.clear(path)
-        path
-      end,
-      "embedding-sync!" => fn [texts, key] ->
-        case Compos.Core.EmbeddingIndex.sync(texts, to_string(key)) do
-          {:ok, count} -> count
-          {:error, _reason} -> false
-        end
-      end,
+      {"embedding-cache-clear!",
+       "(embedding-cache-clear!) — delete cached apropos vectors from disk and memory; return the cache path."} =>
+        fn [] ->
+          path = Compos.Core.EmbeddingIndex.cache_path()
+          :ok = Compos.Core.EmbeddingIndex.clear(path)
+          path
+        end,
+      {"embedding-sync!",
+       "(embedding-sync! TEXTS KEY) — embed missing catalog TEXTS with OpenAI and persist their vectors by content hash."} =>
+        fn [texts, key] ->
+          case Compos.Core.EmbeddingIndex.sync(texts, to_string(key)) do
+            {:ok, count} -> count
+            {:error, _reason} -> false
+          end
+        end,
       # GEN is the catalog generation the texts belong to: the index keeps
       # the vectors it gathered for that generation and rebuilds them for no
       # other. `false` for a query nobody asked before, which needs the
       # network — the caller decides whether to wait for one.
-      "embedding-search" => fn [query, texts, key, limit, eligible, gen, cached_only] ->
-        opts = [gen: gen, cached_only: cached_only == true]
+      {"embedding-search",
+       "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE GEN CACHED-ONLY) — eligible cosine scores for QUERY against the vectors of catalog generation GEN. CACHED-ONLY answers #f rather than embedding a query over the network."} =>
+        fn [query, texts, key, limit, eligible, gen, cached_only] ->
+          opts = [gen: gen, cached_only: cached_only == true]
 
-        case Compos.Core.EmbeddingIndex.search(to_string(query), texts, to_string(key), opts) do
-          {:ok, scores} ->
-            # ELIGIBLE is #t when no filter narrows the answer. Building that
-            # mask and handing it over was most of what a query cost, and
-            # every entry in it said yes.
-            scores
-            |> then(fn scored ->
-              if is_list(eligible) do
-                mask = List.to_tuple(eligible)
+          case Compos.Core.EmbeddingIndex.search(to_string(query), texts, to_string(key), opts) do
+            {:ok, scores} ->
+              # ELIGIBLE is #t when no filter narrows the answer. Building that
+              # mask and handing it over was most of what a query cost, and
+              # every entry in it said yes.
+              scores
+              |> then(fn scored ->
+                if is_list(eligible) do
+                  mask = List.to_tuple(eligible)
 
-                Enum.filter(scored, fn {index, _score} ->
-                  index < tuple_size(mask) and elem(mask, index)
-                end)
-              else
-                scored
-              end
-            end)
-            |> Enum.take(max(0, limit))
-            |> Enum.map(fn {index, score} -> [index, score] end)
+                  Enum.filter(scored, fn {index, _score} ->
+                    index < tuple_size(mask) and elem(mask, index)
+                  end)
+                else
+                  scored
+                end
+              end)
+              |> Enum.take(max(0, limit))
+              |> Enum.map(fn {index, score} -> [index, score] end)
 
-          {:error, :absent} ->
-            false
+            {:error, :absent} ->
+              false
 
-          # the caller withheld the texts for a generation the index has not
-          # gathered yet; it retries with them
-          {:error, :not_prepared} ->
-            {:sym, "not-prepared"}
+            # the caller withheld the texts for a generation the index has not
+            # gathered yet; it retries with them
+            {:error, :not_prepared} ->
+              {:sym, "not-prepared"}
 
-          {:error, _reason} ->
-            []
-        end
-      end,
+            {:error, _reason} ->
+              []
+          end
+        end,
       # Embed QUERY for the next ask. It runs off the caller's lane, so the
       # ask that missed answers from the catalog now and the one after it
       # gets the semantic pass for free.
-      "embedding-warm!" => fn [query, texts, key, gen] ->
-        q = to_string(query)
-        k = to_string(key)
+      {"embedding-warm!",
+       "(embedding-warm! QUERY TEXTS KEY GEN) — embed QUERY off the caller's lane so the next ask scores without waiting."} =>
+        fn [query, texts, key, gen] ->
+          q = to_string(query)
+          k = to_string(key)
 
-        Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-          Compos.Core.EmbeddingIndex.search(q, texts, k, gen: gen)
-        end)
+          Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+            Compos.Core.EmbeddingIndex.search(q, texts, k, gen: gen)
+          end)
 
-        :void
-      end
+          :void
+        end
     }
   end
 
   defp editor_primitives do
     %{
       # point & motion — operate on the current (active window's) buffer
-      "current-buffer" => fn [] -> Editor.current_buffer() end,
-      "point" => fn [] -> Buffer.point(Editor.current_buffer()) end,
-      "buffer-point" => fn [name] -> Buffer.point(name) end,
-      "buffer-line-at-point" => fn [name] ->
+      {"current-buffer", "(current-buffer) — return the name of the current buffer."} => fn [] ->
+        Editor.current_buffer()
+      end,
+      {"point", "(point) — return point in the current buffer as a byte offset."} => fn [] ->
+        Buffer.point(Editor.current_buffer())
+      end,
+      {"buffer-point", "(buffer-point BUF) — return the buffer's point as a byte offset."} => fn [
+                                                                                                   name
+                                                                                                 ] ->
+        Buffer.point(name)
+      end,
+      {"buffer-line-at-point",
+       "(buffer-line-at-point BUF) — return (LINE TEXT) for the buffer's point."} => fn [name] ->
         {line, text} = Buffer.line_at_point(name)
         [line, text]
       end,
       # ~/.compos in real life, a tmp dir in tests — config and user packages
-      "compos-home" => fn [] -> Compos.Core.home() end,
-      "compos-priv-dir" => fn [] -> Application.app_dir(:compos_core, "priv") end,
-      "compos-project-dir" => fn [] -> Compos.Core.project_dir() || false end,
-      "compos-config-dir" => fn [] -> Compos.Core.config_dir() end,
+      {"compos-home", "(compos-home) — return the compos home directory path (~/.compos)."} =>
+        fn [] -> Compos.Core.home() end,
+      {"compos-priv-dir",
+       "(compos-priv-dir) — return the bundled Scheme directory (the editor's priv dir)."} =>
+        fn [] -> Application.app_dir(:compos_core, "priv") end,
+      {"compos-project-dir",
+       "(compos-project-dir) — the checkout this daemon runs from, or #f in a release."} =>
+        fn [] -> Compos.Core.project_dir() || false end,
+      {"compos-config-dir",
+       "(compos-config-dir) — where user config reads from (COMPOS_CONFIG, else the home)."} =>
+        fn [] -> Compos.Core.config_dir() end,
       # The socket THIS daemon listens on. A second daemon (COMPOS_HOME, or the
       # verify config) listens elsewhere, and anything it spawns must come back
       # to it rather than to the default path.
-      "compos-socket-path" => fn [] ->
+      {"compos-socket-path",
+       "(compos-socket-path) — return the path of this daemon's JSON-RPC socket."} => fn [] ->
         Application.get_env(:compos_rpc, :socket_path, Path.join(Compos.Core.home(), "sock"))
         |> Path.expand()
       end,
-      "socket-listeners" => fn [] ->
-        for l <- Compos.Core.Daemon.listeners(), do: [l.name, l.status, l.address]
-      end,
-      "listener-restart!" => fn [name] ->
+      {"socket-listeners",
+       "(socket-listeners) — return ((NAME STATUS ADDRESS) ...) for the daemon's listen sockets."} =>
+        fn [] ->
+          for l <- Compos.Core.Daemon.listeners(), do: [l.name, l.status, l.address]
+        end,
+      {"listener-restart!",
+       "(listener-restart! NAME) — stop and start the named listen socket; return #t."} => fn [
+                                                                                                name
+                                                                                              ] ->
         case Compos.Core.Daemon.restart_listener(name) do
           :ok ->
             true
@@ -1611,266 +1308,362 @@ defmodule Compos.Core.SchemeAPI do
               message: "listener-restart!: #{name}: #{inspect(reason)}"
         end
       end,
-      "daemon-restart!" => fn [] ->
-        case Compos.Core.Daemon.restart() do
-          :ok ->
-            true
+      {"daemon-restart!",
+       "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t."} =>
+        fn [] ->
+          case Compos.Core.Daemon.restart() do
+            :ok ->
+              true
 
-          {:error, :desktop_save_failed} ->
-            raise Compos.Scheme.Eval.Error, message: "desktop save failed; refusing to restart"
+            {:error, :desktop_save_failed} ->
+              raise Compos.Scheme.Eval.Error, message: "desktop save failed; refusing to restart"
 
-          {:error, {:spawn_failed, _code, out}} ->
-            raise Compos.Scheme.Eval.Error,
-              message: "could not respawn the daemon: #{inspect(out)}"
+            {:error, {:spawn_failed, _code, out}} ->
+              raise Compos.Scheme.Eval.Error,
+                message: "could not respawn the daemon: #{inspect(out)}"
 
-          {:error, {:compile_failed, out}} ->
-            raise Compos.Scheme.Eval.Error,
-              message: "the tree does not compile; staying up: #{out}"
-        end
-      end,
+            {:error, {:compile_failed, out}} ->
+              raise Compos.Scheme.Eval.Error,
+                message: "the tree does not compile; staying up: #{out}"
+          end
+        end,
       # A reload changes what a render would produce, but nothing asks for
       # one: the client repaints on an editor event, and evaluating a
       # definition is not an event. Without this a reloaded modeline, face,
       # or fringe stays on screen exactly as it was until the next keystroke,
       # which reads as "the reload did nothing".
-      "redraw!" => fn [] ->
-        Compos.Core.Events.broadcast_editor(:redraw)
-        Enum.each(Editor.frame_list(), &Compos.Core.Events.broadcast_frame/1)
-        true
-      end,
-      "desktop-dirty!" => fn [] ->
-        Compos.Core.Events.broadcast_editor(:scheme_state)
-        true
-      end,
+      {"redraw!", "(redraw!) — tell every connected client to re-render every frame; return #t."} =>
+        fn [] ->
+          Compos.Core.Events.broadcast_editor(:redraw)
+          Enum.each(Editor.frame_list(), &Compos.Core.Events.broadcast_frame/1)
+          true
+        end,
+      {"desktop-dirty!",
+       "(desktop-dirty!) — schedule persistence after Scheme-owned desktop state changes; return #t."} =>
+        fn [] ->
+          Compos.Core.Events.broadcast_editor(:scheme_state)
+          true
+        end,
       # The way back from a boot that brought the windows back and lost the
       # groups. This only reads the file: desktop-globals! installs them,
       # because installing runs Scheme and the caller is already in it.
-      "desktop-file-globals" => fn [file] ->
-        case Compos.Core.Desktop.file_globals(file) do
-          {:ok, globals} ->
-            globals
+      {"desktop-file-globals",
+       "(desktop-file-globals FILE) — return the globals a desktop file holds, as ((KEY VALUE) ...); the editor is not touched."} =>
+        fn [file] ->
+          case Compos.Core.Desktop.file_globals(file) do
+            {:ok, globals} ->
+              globals
 
-          {:error, reason} ->
-            raise Compos.Scheme.Eval.Error,
-              message: "desktop globals not read from #{file}: #{inspect(reason)}"
-        end
-      end,
+            {:error, reason} ->
+              raise Compos.Scheme.Eval.Error,
+                message: "desktop globals not read from #{file}: #{inspect(reason)}"
+          end
+        end,
       # The incremental form reloader, which lives in the Session. Scheme
       # cannot reach it otherwise: the diff is over read forms, and the
       # manifest of what each file last held is the Session's state.
-      "reload-files!" => fn [paths] ->
-        case Compos.Core.Session.reload_files(List.wrap(paths)) do
-          {:ok, %{files: files, forms: forms}} ->
-            [files, forms]
+      {"reload-files!",
+       "(reload-files! PATHS) — evaluate the changed top-level forms of each .scm and refresh the modes they redefine; return (FILES FORMS)."} =>
+        fn [paths] ->
+          case Compos.Core.Session.reload_files(List.wrap(paths)) do
+            {:ok, %{files: files, forms: forms}} ->
+              [files, forms]
 
-          {:error, reason} ->
-            raise Compos.Scheme.Eval.Error, message: "reload failed: #{inspect(reason)}"
-        end
-      end,
+            {:error, reason} ->
+              raise Compos.Scheme.Eval.Error, message: "reload failed: #{inspect(reason)}"
+          end
+        end,
       # A primitive is an anonymous fun captured when the session booted.
       # Recompiling the module that holds it purges that version, and the
       # next call raises "points to an old version of the code". The dev
       # watcher rebinds after every recompile; this is the door to ask by
       # name when a daemon is already wedged.
-      "refresh-primitives!" => fn [] ->
-        :ok = Compos.Core.Session.refresh_primitives()
-        true
-      end,
-      "daemon-provision-workspace!" => fn [workspace, name] ->
-        case Compos.Core.Daemon.provision_workspace(workspace, name) do
-          {:ok, %{url: url, home: home, port: port}} ->
-            [url, home, port]
+      {"refresh-primitives!",
+       "(refresh-primitives!) — rebind every Elixir primitive to the version now loaded; return #t."} =>
+        fn [] ->
+          :ok = Compos.Core.Session.refresh_primitives()
+          true
+        end,
+      {"daemon-provision-workspace!",
+       "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT)."} =>
+        fn [workspace, name] ->
+          case Compos.Core.Daemon.provision_workspace(workspace, name) do
+            {:ok, %{url: url, home: home, port: port}} ->
+              [url, home, port]
 
-          {:error, reason} ->
-            raise Compos.Scheme.Eval.Error,
-              message: "workspace daemon failed: #{inspect(reason)}"
-        end
-      end,
-      "goto-char!" => fn [pos] ->
+            {:error, reason} ->
+              raise Compos.Scheme.Eval.Error,
+                message: "workspace daemon failed: #{inspect(reason)}"
+          end
+        end,
+      {"goto-char!", "(goto-char! POS) — move point to byte POS; return POS."} => fn [pos] ->
         Buffer.goto(Editor.current_buffer(), pos)
         pos
       end,
       # goto-char! in a named buffer: an async refresh restores point in the
       # buffer it rebuilt, which is not always the current one
-      "buffer-goto!" => fn [name, pos] ->
-        Buffer.goto(name, pos)
-        pos
+      {"buffer-goto!", "(buffer-goto! BUF POS) — move the named buffer's point to byte POS."} =>
+        fn [name, pos] ->
+          Buffer.goto(name, pos)
+          pos
+        end,
+      {"buffer-windows-follow-point!",
+       "(buffer-windows-follow-point! BUF) — every window that shows BUF drops its scroll pin and follows point again; call it after a page replaces its text and places point."} =>
+        fn [name] ->
+          Editor.windows_follow_point(name) == :ok
+        end,
+      {"forward-char!",
+       "(forward-char!) — move point one character forward; return the new point."} => fn [] ->
+        Buffer.forward_char(Editor.current_buffer())
       end,
-      "buffer-windows-follow-point!" => fn [name] ->
-        Editor.windows_follow_point(name) == :ok
+      {"backward-char!",
+       "(backward-char!) — move point one character backward; return the new point."} => fn [] ->
+        Buffer.backward_char(Editor.current_buffer())
       end,
-      "forward-char!" => fn [] -> Buffer.forward_char(Editor.current_buffer()) end,
-      "backward-char!" => fn [] -> Buffer.backward_char(Editor.current_buffer()) end,
-      "forward-word!" => fn [] -> Buffer.forward_word(Editor.current_buffer()) end,
-      "backward-word!" => fn [] -> Buffer.backward_word(Editor.current_buffer()) end,
-      "next-line!" => fn [] -> Buffer.next_line(Editor.current_buffer()) end,
-      "previous-line!" => fn [] -> Buffer.previous_line(Editor.current_buffer()) end,
-      "beginning-of-line!" => fn [] -> Buffer.beginning_of_line(Editor.current_buffer()) end,
-      "end-of-line!" => fn [] -> Buffer.end_of_line(Editor.current_buffer()) end,
-      "beginning-of-buffer!" => fn [] -> Buffer.beginning_of_buffer(Editor.current_buffer()) end,
-      "end-of-buffer!" => fn [] -> Buffer.end_of_buffer(Editor.current_buffer()) end,
+      {"forward-word!",
+       "(forward-word!) — move point to the end of the next word; return the new point."} =>
+        fn [] -> Buffer.forward_word(Editor.current_buffer()) end,
+      {"backward-word!",
+       "(backward-word!) — move point to the start of the previous word; return the new point."} =>
+        fn [] -> Buffer.backward_word(Editor.current_buffer()) end,
+      {"next-line!",
+       "(next-line!) — move point one line down, keep the goal column; return the new point."} =>
+        fn [] -> Buffer.next_line(Editor.current_buffer()) end,
+      {"previous-line!",
+       "(previous-line!) — move point one line up, keep the goal column; return the new point."} =>
+        fn [] -> Buffer.previous_line(Editor.current_buffer()) end,
+      {"beginning-of-line!",
+       "(beginning-of-line!) — move point to the line start; return the new point."} => fn [] ->
+        Buffer.beginning_of_line(Editor.current_buffer())
+      end,
+      {"end-of-line!", "(end-of-line!) — move point to the line end; return the new point."} =>
+        fn [] -> Buffer.end_of_line(Editor.current_buffer()) end,
+      {"beginning-of-buffer!",
+       "(beginning-of-buffer!) — move point to byte 0; return the new point."} => fn [] ->
+        Buffer.beginning_of_buffer(Editor.current_buffer())
+      end,
+      {"end-of-buffer!",
+       "(end-of-buffer!) — move point to the buffer's end; return the new point."} => fn [] ->
+        Buffer.end_of_buffer(Editor.current_buffer())
+      end,
       # 1-based line -> its start byte offset, O(log n) via the rope's own
       # line index (same lookup mouse-click position resolution already
       # uses) — for goto-line, never walk next-line! in a loop for this
-      "line-start-position" => fn [line] ->
+      {"line-start-position",
+       "(line-start-position LINE) — return the start byte offset of 1-based LINE."} => fn [line] ->
         {start, _text} = Buffer.line_at(Editor.current_buffer(), trunc(line))
         start
       end,
-      "line-number-at-pos" => fn [pos] ->
+      {"line-number-at-pos",
+       "(line-number-at-pos POS) — return the 1-based line byte offset POS is on."} => fn [pos] ->
         Buffer.line_of(Editor.current_buffer(), trunc(pos))
       end,
 
       # editing (user-sourced: respects read-only)
-      "insert!" => fn [text] ->
-        case Buffer.insert(Editor.current_buffer(), text) do
-          :ok -> :void
-          {:error, :read_only} -> raise Compos.Scheme.Eval.Error, message: "Buffer is read-only"
-        end
-      end,
-      "delete-char!" => fn [n] ->
-        case Buffer.delete_char(Editor.current_buffer(), n) do
-          {:ok, deleted} -> deleted
-          {:error, :read_only} -> raise Compos.Scheme.Eval.Error, message: "Buffer is read-only"
-        end
-      end,
-      "kill-line!" => fn [] ->
-        case Buffer.kill_line(Editor.current_buffer()) do
-          {:ok, killed} -> killed
-          {:error, :read_only} -> raise Compos.Scheme.Eval.Error, message: "Buffer is read-only"
-        end
-      end,
-      "undo!" => fn [] ->
-        Buffer.undo(Editor.current_buffer()) == :ok
-      end,
+      {"insert!", "(insert! TEXT) — insert TEXT at point; errors if the buffer is read-only."} =>
+        fn [text] ->
+          case Buffer.insert(Editor.current_buffer(), text) do
+            :ok -> :void
+            {:error, :read_only} -> raise Compos.Scheme.Eval.Error, message: "Buffer is read-only"
+          end
+        end,
+      {"delete-char!",
+       "(delete-char! N) — delete N characters at point, backward if negative; return the text."} =>
+        fn [n] ->
+          case Buffer.delete_char(Editor.current_buffer(), n) do
+            {:ok, deleted} -> deleted
+            {:error, :read_only} -> raise Compos.Scheme.Eval.Error, message: "Buffer is read-only"
+          end
+        end,
+      {"kill-line!",
+       "(kill-line!) — delete from point to the line end, or the newline; return the text."} =>
+        fn [] ->
+          case Buffer.kill_line(Editor.current_buffer()) do
+            {:ok, killed} -> killed
+            {:error, :read_only} -> raise Compos.Scheme.Eval.Error, message: "Buffer is read-only"
+          end
+        end,
+      {"undo!", "(undo!) — undo one step in the current buffer; return #t on success."} =>
+        fn [] ->
+          Buffer.undo(Editor.current_buffer()) == :ok
+        end,
       # the redo-run flag only; undo-boundary! is the boundary
-      "break-undo-chain!" => fn [] ->
-        buf = Editor.current_buffer()
-        if Buffer.exists?(buf), do: Buffer.break_undo_chain(buf)
-        :void
-      end,
-      "undo-group!" => fn [name, on] ->
-        if Compos.Core.Buffer.exists?(name), do: Compos.Core.Buffer.undo_group(name, on == true)
-        :void
-      end,
-      "undo-exempt!" => fn [name] ->
+      {"break-undo-chain!",
+       "(break-undo-chain!) — end a run of undos, so the next undo reverses them (redo). It is not a boundary: see undo-boundary!."} =>
+        fn [] ->
+          buf = Editor.current_buffer()
+          if Buffer.exists?(buf), do: Buffer.break_undo_chain(buf)
+          :void
+        end,
+      {"undo-group!",
+       "(undo-group! BUF ON) — while ON, BUF's edits stay one undo step; a block's replace uses this so one landing is one undo."} =>
+        fn [name, on] ->
+          if Compos.Core.Buffer.exists?(name), do: Compos.Core.Buffer.undo_group(name, on == true)
+          :void
+        end,
+      {"undo-exempt!",
+       "(undo-exempt! COMMAND) — exempt COMMAND from the automatic undo-chain break."} => fn [
+                                                                                               name
+                                                                                             ] ->
         Editor.add_undo_exempt(name)
         :void
       end,
-      "buffer-save!" => fn
-        [] ->
-          case Buffer.save(Editor.current_buffer()) do
-            {:ok, path} -> path
-            {:error, :no_path} -> false
-          end
+      {"buffer-save!",
+       "(buffer-save! [PATH]) — save the current buffer to its path; return the path or #f. With PATH, save there and adopt PATH as the buffer's path."} =>
+        fn
+          [] ->
+            case Buffer.save(Editor.current_buffer()) do
+              {:ok, path} -> path
+              {:error, :no_path} -> false
+            end
 
-        [path] ->
-          {:ok, path} = Buffer.save(Editor.current_buffer(), path)
-          path
-      end,
-      "buffer-detach!" => fn [name] ->
-        if Buffer.exists?(name) do
-          Buffer.detach(name)
-          true
-        else
-          false
-        end
-      end,
+          [path] ->
+            {:ok, path} = Buffer.save(Editor.current_buffer(), path)
+            path
+        end,
+      {"buffer-detach!",
+       "(buffer-detach! NAME) — forget NAME's file; text, point, locals and undo stay. Return #t, or #f when no live buffer has that name."} =>
+        fn [name] ->
+          if Buffer.exists?(name) do
+            Buffer.detach(name)
+            true
+          else
+            false
+          end
+        end,
 
       # kill ring
-      "kill-push!" => fn [text] ->
+      {"kill-push!", "(kill-push! TEXT) — push TEXT onto the kill ring."} => fn [text] ->
         Editor.kill_push(text)
         :void
       end,
-      "kill-append!" => fn [text, before?] ->
-        Editor.kill_append(text, before? == true)
-        :void
-      end,
-      "kill-top" => fn [] -> Editor.kill_top() end,
-      "kill-nth" => fn [i] -> Editor.kill_nth(i) end,
-      "kill-ring-size" => fn [] -> Editor.kill_size() end,
-      "client-select!" => fn
-        [alter, dir, granularity] ->
-          Editor.select_request(alter, dir, granularity)
+      {"kill-append!",
+       "(kill-append! TEXT BEFORE?) — grow the newest kill-ring entry with TEXT, in front when BEFORE? is true."} =>
+        fn [text, before?] ->
+          Editor.kill_append(text, before? == true)
           :void
+        end,
+      {"kill-top", "(kill-top) — return the newest kill-ring entry, or \"\" when empty."} =>
+        fn [] -> Editor.kill_top() end,
+      {"kill-nth", "(kill-nth I) — return kill-ring entry I (0 is newest), or \"\" when absent."} =>
+        fn [i] -> Editor.kill_nth(i) end,
+      {"kill-ring-size", "(kill-ring-size) — return the number of kill-ring entries."} => fn [] ->
+        Editor.kill_size()
+      end,
+      {"client-select!",
+       "(client-select! ALTER DIR GRANULARITY [COUNT]) — ask this frame's editable surface to move (\"move\") or extend (\"extend\") its selection \"forward\" or \"backward\" by \"character\", \"word\", \"line\", \"lineboundary\", \"paragraph\" or \"documentboundary\"; COUNT (default 1) applies the move that many times in one request, which is how a page moves; the client answers with point and mark."} =>
+        fn
+          [alter, dir, granularity] ->
+            Editor.select_request(alter, dir, granularity)
+            :void
 
-        [alter, dir, granularity, count] ->
-          Editor.select_request(alter, dir, granularity, trunc(count))
-          :void
-      end,
-      "clipboard-put!" => fn [text] ->
+          [alter, dir, granularity, count] ->
+            Editor.select_request(alter, dir, granularity, trunc(count))
+            :void
+        end,
+      {"clipboard-put!",
+       "(clipboard-put! TEXT) — put TEXT on the OS clipboard of this frame's client."} => fn [
+                                                                                               text
+                                                                                             ] ->
         Editor.put_clipboard(text)
         :void
       end,
 
       # the LiveView app puts its own base URL at boot; a headless daemon
       # (tests, RPC with no web app) still answers with the default
-      "editor-url" => fn [] ->
-        :persistent_term.get(:compos_editor_url, "http://localhost:4004")
+      {"editor-url",
+       "(editor-url) — return the base URL this editor serves, e.g. http://localhost:4004."} =>
+        fn [] ->
+          :persistent_term.get(:compos_editor_url, "http://localhost:4004")
+        end,
+      {"daemon-name", "(daemon-name) — return this daemon's configured name."} => fn [] ->
+        Application.get_env(:compos_core, :name, "compos")
       end,
-      "daemon-name" => fn [] -> Application.get_env(:compos_core, :name, "compos") end,
-      "daemon-source-root" => fn [] -> File.cwd!() end,
-      "daemon-workspace-root" => fn [] ->
+      {"daemon-source-root",
+       "(daemon-source-root) — return the checkout that supplies this daemon's code."} => fn [] ->
+        File.cwd!()
+      end,
+      {"daemon-workspace-root",
+       "(daemon-workspace-root) — return this daemon's workspace root, or #f."} => fn [] ->
         Application.get_env(:compos_core, :workspace_root, false)
       end,
-      "daemon-set-workspace-label!" => fn [project, name] ->
-        Application.put_env(:compos_core, :workspace_project, to_string(project))
-        Application.put_env(:compos_core, :workspace_name, to_string(name))
-        Compos.Core.Events.broadcast_editor(:workspace_label)
-        :void
-      end,
-      "daemon-registry-path" => fn [] ->
+      {"daemon-set-workspace-label!",
+       "(daemon-set-workspace-label! PROJECT NAME) — set this daemon's frame-wide workspace label."} =>
+        fn [project, name] ->
+          Application.put_env(:compos_core, :workspace_project, to_string(project))
+          Application.put_env(:compos_core, :workspace_name, to_string(name))
+          Compos.Core.Events.broadcast_editor(:workspace_label)
+          :void
+        end,
+      {"daemon-registry-path",
+       "(daemon-registry-path) — return the shared daemon registry file path."} => fn [] ->
         Application.get_env(
           :compos_core,
           :daemon_registry_path,
           Path.expand("~/.compos/daemons.json")
         )
       end,
-      "navigate-url!" => fn [url] ->
+      {"navigate-url!", "(navigate-url! URL) — navigate this frame's browser tab to URL."} => fn [
+                                                                                                   url
+                                                                                                 ] ->
         Editor.navigate(url)
         :void
       end,
 
       # buffer-local variables
-      "buffer-set-local!" => fn [buf, k, v] ->
-        Buffer.set_local(buf, plain(k), v)
-        :void
+      {"buffer-set-local!", "(buffer-set-local! BUF KEY VALUE) — set a buffer-local variable."} =>
+        fn [buf, k, v] ->
+          Buffer.set_local(buf, plain(k), v)
+          :void
+        end,
+      {"buffer-set-locals!",
+       "(buffer-set-locals! BUF PLIST) — set several buffer-locals in one change; the frame refreshes once, not once per key."} =>
+        fn [buf, plist] when is_list(plist) ->
+          locals =
+            plist
+            |> Enum.chunk_every(2)
+            |> Enum.map(fn [k, v] -> {plain(k), v} end)
+            |> Map.new()
+
+          Buffer.set_locals(buf, locals)
+          :void
+        end,
+      {"buffer-local",
+       "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset."} => fn [
+                                                                                                   buf,
+                                                                                                   k
+                                                                                                 ] ->
+        Buffer.get_local(buf, plain(k)) || false
       end,
-      "buffer-set-locals!" => fn [buf, plist] when is_list(plist) ->
-        locals =
-          plist
-          |> Enum.chunk_every(2)
-          |> Enum.map(fn [k, v] -> {plain(k), v} end)
-          |> Map.new()
+      {"buffer-read-many",
+       "(buffer-read-many NAMES FIELDS LOCAL-KEYS) — one metadata snapshot per buffer; rows are (NAME FIELD-VALUES... LOCAL-VALUES...). Missing values are #f. Dormant buffers stay asleep. Fields: path, size, modified, read_only, point, mark, id."} =>
+        fn [names, fields, keys] ->
+          allowed = ~w(path size modified read_only point mark id)a
 
-        Buffer.set_locals(buf, locals)
-        :void
-      end,
-      "buffer-local" => fn [buf, k] -> Buffer.get_local(buf, plain(k)) || false end,
-      "buffer-read-many" => fn [names, fields, keys] ->
-        allowed = ~w(path size modified read_only point mark id)a
+          fields =
+            Enum.map(fields, fn field ->
+              name = plain(field)
 
-        fields =
-          Enum.map(fields, fn field ->
-            name = plain(field)
+              Enum.find(allowed, &(Atom.to_string(&1) == name)) ||
+                raise(ArgumentError, "unsupported buffer field: #{name}")
+            end)
 
-            Enum.find(allowed, &(Atom.to_string(&1) == name)) ||
-              raise(ArgumentError, "unsupported buffer field: #{name}")
-          end)
-
-        Buffer.read_many(names, fields, Enum.map(keys, &plain/1))
-      end,
+          Buffer.read_many(names, fields, Enum.map(keys, &plain/1))
+        end,
       # every local at once, so a help page can show a buffer's own state.
       # The name comes back as a symbol, the way the setter takes it.
-      "buffer-locals" => fn [buf] ->
-        buf
-        |> Buffer.locals()
-        |> Enum.map(fn {k, v} -> {to_string(k), v} end)
-        |> Enum.sort_by(fn {k, _} -> k end)
-        |> Enum.map(fn {k, v} -> [{:sym, k}, v || false] end)
-      end,
+      {"buffer-locals",
+       "(buffer-locals BUF) — return ((KEY VALUE) ...) for every buffer-local, sorted by name."} =>
+        fn [buf] ->
+          buf
+          |> Buffer.locals()
+          |> Enum.map(fn {k, v} -> {to_string(k), v} end)
+          |> Enum.sort_by(fn {k, _} -> k end)
+          |> Enum.map(fn {k, v} -> [{:sym, k}, v || false] end)
+        end,
 
       # mark & region
-      "set-mark!" => fn
+      {"set-mark!", "(set-mark! POS) — set the mark at byte POS; #f clears the mark."} => fn
         [false] ->
           Buffer.set_mark(Editor.current_buffer(), nil)
           :void
@@ -1879,237 +1672,313 @@ defmodule Compos.Core.SchemeAPI do
           Buffer.set_mark(Editor.current_buffer(), pos)
           :void
       end,
-      "mark" => fn [] -> Buffer.mark(Editor.current_buffer()) || false end,
-      "region-beginning" => fn [] -> region_bounds() |> elem(0) end,
-      "region-end" => fn [] -> region_bounds() |> elem(1) end,
-      "region-text" => fn [] ->
+      {"mark", "(mark) — return the mark's byte offset, or #f if no mark is set."} => fn [] ->
+        Buffer.mark(Editor.current_buffer()) || false
+      end,
+      {"region-beginning",
+       "(region-beginning) — return the smaller of point and mark as a byte offset."} => fn [] ->
+        region_bounds() |> elem(0)
+      end,
+      {"region-end", "(region-end) — return the larger of point and mark as a byte offset."} =>
+        fn [] -> region_bounds() |> elem(1) end,
+      {"region-text", "(region-text) — return the text between point and mark."} => fn [] ->
         {s, e} = region_bounds()
         buf = Editor.current_buffer()
         buf |> Buffer.text() |> binary_part(s, e - s)
       end,
-      "delete-region!" => fn [] ->
+      {"delete-region!", "(delete-region!) — delete the text between point and mark."} => fn [] ->
         {s, e} = region_bounds()
         if e > s, do: Buffer.delete_range(Editor.current_buffer(), s, e - s)
         :void
       end,
-      "exchange-point-and-mark!" => fn [] ->
-        buf = Editor.current_buffer()
+      {"exchange-point-and-mark!",
+       "(exchange-point-and-mark!) — swap point and mark; return #f if no mark is set."} =>
+        fn [] ->
+          buf = Editor.current_buffer()
 
-        case Buffer.mark(buf) do
-          nil ->
-            false
+          case Buffer.mark(buf) do
+            nil ->
+              false
 
-          m ->
-            p = Buffer.point(buf)
-            Buffer.set_mark(buf, p)
-            Buffer.goto(buf, m)
-            true
-        end
-      end,
+            m ->
+              p = Buffer.point(buf)
+              Buffer.set_mark(buf, p)
+              Buffer.goto(buf, m)
+              true
+          end
+        end,
 
       # tree-sitter: structural nav + queries on the current buffer.
       # Language comes from the buffer-local "ts-lang" (set by modes).
-      "ts-nav" => fn [op] ->
-        buf = Editor.current_buffer()
+      {"ts-nav",
+       "(ts-nav OP) — tree-sitter motion 'forward|'backward|'up|'down; return a byte pos or #f."} =>
+        fn [op] ->
+          buf = Editor.current_buffer()
 
-        case Buffer.get_local(buf, "ts-lang") do
-          nil ->
-            false
+          case Buffer.get_local(buf, "ts-lang") do
+            nil ->
+              false
 
-          lang ->
-            case Compos.Core.TS.ts_nav(lang, Buffer.text(buf), Buffer.point(buf), plain(op)) do
-              nil -> false
-              pos -> pos
-            end
-        end
-      end,
+            lang ->
+              case Compos.Core.TS.ts_nav(lang, Buffer.text(buf), Buffer.point(buf), plain(op)) do
+                nil -> false
+                pos -> pos
+              end
+          end
+        end,
       # node identity is a byte range, so the caller can walk from the node
       # it stands on instead of from the deepest node under point
-      "ts-node" => fn [kind, start, stop, op] ->
-        buf = Editor.current_buffer()
-        kind = if is_binary(kind), do: kind, else: ""
+      {"ts-node",
+       "(ts-node KIND START END OP) — the node KIND covers the range (\"\" for the smallest); return its 'at|'parent|'child|'next|'prev|'top as (KIND START END), or #f."} =>
+        fn [kind, start, stop, op] ->
+          buf = Editor.current_buffer()
+          kind = if is_binary(kind), do: kind, else: ""
 
-        case Buffer.ts_node(buf, kind, start, stop, plain(op)) do
-          nil -> false
-          {kind, s, e} -> [kind, s, e]
-        end
-      end,
-      "ts-children" => fn [kind, start, stop] ->
-        kind = if is_binary(kind), do: kind, else: ""
+          case Buffer.ts_node(buf, kind, start, stop, plain(op)) do
+            nil -> false
+            {kind, s, e} -> [kind, s, e]
+          end
+        end,
+      {"ts-children",
+       "(ts-children KIND START END) — the named children of that node as ((KIND START END) ...); the range 0..SIZE names the whole file."} =>
+        fn [kind, start, stop] ->
+          kind = if is_binary(kind), do: kind, else: ""
 
-        Editor.current_buffer()
-        |> Buffer.ts_children(kind, start, stop)
-        |> Enum.map(fn {k, s, e} -> [k, s, e] end)
-      end,
-      "ts-query" => fn [query] ->
-        buf = Editor.current_buffer()
+          Editor.current_buffer()
+          |> Buffer.ts_children(kind, start, stop)
+          |> Enum.map(fn {k, s, e} -> [k, s, e] end)
+        end,
+      {"ts-query",
+       "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges."} =>
+        fn [query] ->
+          buf = Editor.current_buffer()
 
-        case Buffer.get_local(buf, "ts-lang") do
-          nil ->
-            []
+          case Buffer.get_local(buf, "ts-lang") do
+            nil ->
+              []
 
-          lang ->
-            lang
-            |> Compos.Core.TS.ts_query_nif(Buffer.text(buf), query)
-            |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
-        end
-      end,
+            lang ->
+              lang
+              |> Compos.Core.TS.ts_query_nif(Buffer.text(buf), query)
+              |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
+          end
+        end,
       # Detached text has no buffer parser state. Search commands use this
       # mechanism for a file or an explicit language without changing a
       # buffer's mode or its incremental parser.
-      "ts-query-string" => fn [lang, text, query] ->
-        if is_binary(lang) and is_binary(text) and is_binary(query) do
-          lang
-          |> Compos.Core.TS.ts_query_nif(text, query)
-          |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
-        else
-          []
-        end
-      end,
-      "ts-langs" => fn [] -> Compos.Core.TS.ts_langs() end,
+      {"ts-query-string",
+       "(ts-query-string LANG TEXT QUERY) — run a tree-sitter query on detached text; return (CAPTURE START END) byte ranges."} =>
+        fn [lang, text, query] ->
+          if is_binary(lang) and is_binary(text) and is_binary(query) do
+            lang
+            |> Compos.Core.TS.ts_query_nif(text, query)
+            |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
+          else
+            []
+          end
+        end,
+      {"ts-langs", "(ts-langs) — return the names of the loaded tree-sitter languages."} =>
+        fn [] -> Compos.Core.TS.ts_langs() end,
       # one-shot highlight of detached text (embedded code blocks in
       # prose modes); the buffer's own language never enters into it
-      "ts-highlight-string" => fn [lang, text] ->
-        if is_binary(lang) and is_binary(text) do
-          lang
-          |> Compos.Core.TS.ts_highlight(text)
-          |> Enum.map(fn {s, e, scope} -> [s, e, scope] end)
-        else
-          []
-        end
-      end,
+      {"ts-highlight-string",
+       "(ts-highlight-string LANG TEXT) — highlight TEXT as LANG; return (START END SCOPE) byte ranges, () for an unknown language."} =>
+        fn [lang, text] ->
+          if is_binary(lang) and is_binary(text) do
+            lang
+            |> Compos.Core.TS.ts_highlight(text)
+            |> Enum.map(fn {s, e, scope} -> [s, e, scope] end)
+          else
+            []
+          end
+        end,
 
       # search: returns (start end) byte range or #f
-      "buffer-search" => fn [q, from] ->
-        case Buffer.search(Editor.current_buffer(), q, from, :forward) do
-          {s, e} -> [s, e]
-          nil -> false
-        end
-      end,
-      "buffer-search-backward" => fn [q, from] ->
-        case Buffer.search(Editor.current_buffer(), q, from, :backward) do
-          {s, e} -> [s, e]
-          nil -> false
-        end
-      end,
+      {"buffer-search",
+       "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f."} =>
+        fn [q, from] ->
+          case Buffer.search(Editor.current_buffer(), q, from, :forward) do
+            {s, e} -> [s, e]
+            nil -> false
+          end
+        end,
+      {"buffer-search-backward",
+       "(buffer-search-backward Q FROM) — search backward from byte FROM; return (START END) or #f."} =>
+        fn [q, from] ->
+          case Buffer.search(Editor.current_buffer(), q, from, :backward) do
+            {s, e} -> [s, e]
+            nil -> false
+          end
+        end,
 
       # faces: (set-face-attribute! 'modeline 'bg "#2f3140" 'fg "#fff" ...)
-      "set-face-attribute!" => fn [face | kvs] ->
-        attrs =
-          kvs
-          |> Enum.chunk_every(2)
-          |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)
+      {"set-face-attribute!",
+       "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs."} =>
+        fn [face | kvs] ->
+          attrs =
+            kvs
+            |> Enum.chunk_every(2)
+            |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)
 
-        Editor.set_face(plain(face), attrs)
-        :void
-      end,
-      "face-clear!" => fn [face] ->
-        Editor.clear_face(plain(face))
-        :void
-      end,
-      "face-batch!" => fn [ops] ->
-        ops
-        |> Enum.map(fn
-          [{:sym, "clear"}, face] ->
-            {:clear, plain(face)}
+          Editor.set_face(plain(face), attrs)
+          :void
+        end,
+      {"face-clear!",
+       "(face-clear! FACE) — forget every attribute of FACE; load-theme clears a face before it applies the theme."} =>
+        fn [face] ->
+          Editor.clear_face(plain(face))
+          :void
+        end,
+      {"face-batch!",
+       "(face-batch! OPS) — apply a list of face changes as one change: (clear FACE) forgets a face, (set FACE KEY VALUE ...) merges attributes. The page renders once, after the last one."} =>
+        fn [ops] ->
+          ops
+          |> Enum.map(fn
+            [{:sym, "clear"}, face] ->
+              {:clear, plain(face)}
 
-          [{:sym, "set"}, face | kvs] ->
-            {:set, plain(face),
-             kvs |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)}
-        end)
-        |> Editor.set_faces()
+            [{:sym, "set"}, face | kvs] ->
+              {:set, plain(face),
+               kvs |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)}
+          end)
+          |> Editor.set_faces()
 
-        :void
+          :void
+        end,
+      {"face-attribute",
+       "(face-attribute FACE ATTR) — the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here."} =>
+        fn [face, attr] ->
+          case get_in(Editor.faces(), [plain(face), plain(attr)]) do
+            nil -> false
+            v -> v
+          end
+        end,
+      {"face-list", "(face-list) — the names of every face the editor holds."} => fn [] ->
+        Map.keys(Editor.faces())
       end,
-      "face-attribute" => fn [face, attr] ->
-        case get_in(Editor.faces(), [plain(face), plain(attr)]) do
-          nil -> false
-          v -> v
-        end
-      end,
-      "face-list" => fn [] -> Map.keys(Editor.faces()) end,
 
       # windows (tiling tree)
-      "split-window!" => fn
-        [dir] ->
-          Editor.split(dir_atom(dir))
-          :void
+      {"split-window!",
+       "(split-window! DIR [RATIO]) — split the active window 'h or 'v at RATIO (default 0.5)."} =>
+        fn
+          [dir] ->
+            Editor.split(dir_atom(dir))
+            :void
 
-        [dir, ratio] ->
-          Editor.split(dir_atom(dir), ratio / 1)
-          :void
-      end,
+          [dir, ratio] ->
+            Editor.split(dir_atom(dir), ratio / 1)
+            :void
+        end,
       # a dock is a pane of the FRAME, not of a window: it spans the frame
       # and the windows above it shrink by its share
-      "split-root!" => fn
-        [dir] -> Editor.split_root(dir_atom(dir))
-        [dir, ratio] -> Editor.split_root(dir_atom(dir), ratio / 1)
-      end,
-      "delete-window!" => fn [] -> Editor.delete_window() == :ok end,
-      "delete-window-id!" => fn [id] -> Editor.delete_window_by_id(id) == :ok end,
+      {"split-root!",
+       "(split-root! DIR [RATIO]) — split the FRAME 'h or 'v at RATIO; the new window spans the frame and every other window shrinks. Returns the new window."} =>
+        fn
+          [dir] -> Editor.split_root(dir_atom(dir))
+          [dir, ratio] -> Editor.split_root(dir_atom(dir), ratio / 1)
+        end,
+      {"delete-window!", "(delete-window!) — delete the active window; return #t on success."} =>
+        fn [] -> Editor.delete_window() == :ok end,
+      {"delete-window-id!", "(delete-window-id! WIN) — delete window WIN; return #t on success."} =>
+        fn [id] -> Editor.delete_window_by_id(id) == :ok end,
       # false when the two panes make no rectangle: only a whole shared
       # edge can merge, so an eat never resizes a pane it leaves alone
-      "window-eat-id!" => fn [id, victim] -> Editor.eat_window(id, victim) == :ok end,
-      "window-list" => fn [] -> Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end) end,
+      {"window-eat-id!",
+       "(window-eat-id! ID VICTIM) — window ID takes the space of window VICTIM; #t when it did."} =>
+        fn [id, victim] -> Editor.eat_window(id, victim) == :ok end,
+      {"window-list",
+       "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows."} => fn [] ->
+        Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end)
+      end,
       # the layout round-trips as one opaque value: Scheme stores it in a
       # buffer-local and hands it back; only Elixir reads its insides.
       # The tree travels as the same tuple spec the desktop file uses,
       # which is what restore_tree accepts.
-      "window-tree" => fn [] ->
-        v = Editor.desktop_view()
-        %{tree: tree_spec(v.tree), active: v.active_buffer}
-      end,
-      "window-tree-set!" => fn [%{tree: tree, active: active}]
-                               when elem(tree, 0) in [:leaf, :split] ->
-        Editor.restore_tree(tree, active)
-        :void
-      end,
+      {"window-tree",
+       "(window-tree) — return the frame's window layout as an opaque value for window-tree-set!."} =>
+        fn [] ->
+          v = Editor.desktop_view()
+          %{tree: tree_spec(v.tree), active: v.active_buffer}
+        end,
+      {"window-tree-set!",
+       "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree."} =>
+        fn [%{tree: tree, active: active}]
+           when elem(tree, 0) in [:leaf, :split] ->
+          Editor.restore_tree(tree, active)
+          :void
+        end,
       # the same look, one level up from window-preview-buffer!: a whole
       # arrangement drawn without an entry in the history
-      "window-tree-preview!" => fn [%{tree: tree, active: active}]
-                                   when elem(tree, 0) in [:leaf, :split] ->
-        Editor.preview_tree(tree, active)
-        :void
-      end,
+      {"window-tree-preview!",
+       "(window-tree-preview! LAYOUT) — draw a layout from window-tree as a look: the windows change, the MRU ring does not."} =>
+        fn [%{tree: tree, active: active}]
+           when elem(tree, 0) in [:leaf, :split] ->
+          Editor.preview_tree(tree, active)
+          :void
+        end,
       # A saved layout names buffers, and a name can outlive its buffer.
       # Scheme decides what to do about that — visit the file, drop the
       # window — so it must be able to read the names back out.
-      "window-tree-buffers" => fn [%{tree: tree}] -> tree_buffers(tree) end,
+      {"window-tree-buffers",
+       "(window-tree-buffers LAYOUT) — return the buffer names a layout from window-tree holds."} =>
+        fn [%{tree: tree}] -> tree_buffers(tree) end,
       # A rename must reach a stored layout too, not only the live frame.
       # The swap is tree mechanics; which stores hold a layout is policy,
       # so Scheme owns the sweep and this returns one renamed copy.
-      "window-tree-rename" => fn [%{tree: tree, active: active} = layout, old, new] ->
-        %{
-          layout
-          | tree: tree_rename(tree, old, new),
-            active: if(active == old, do: new, else: active)
-        }
+      {"window-tree-rename",
+       "(window-tree-rename LAYOUT OLD NEW) — a copy of LAYOUT with the buffer name OLD replaced by NEW."} =>
+        fn [%{tree: tree, active: active} = layout, old, new] ->
+          %{
+            layout
+            | tree: tree_rename(tree, old, new),
+              active: if(active == old, do: new, else: active)
+          }
+        end,
+      {"window-rects",
+       "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles."} =>
+        fn [] -> Editor.window_rects() end,
+      {"select-window!",
+       "(select-window! WIN) — make WIN and its frame active; return #t on success."} => fn [id] ->
+        Editor.set_active(id) == :ok
       end,
-      "window-rects" => fn [] -> Editor.window_rects() end,
-      "select-window!" => fn [id] -> Editor.set_active(id) == :ok end,
-      "window-swap-id!" => fn [first, second] ->
-        Editor.swap_windows(first, second) == :ok
+      {"window-swap-id!",
+       "(window-swap-id! FIRST SECOND) — swap the buffers of two windows; #t when it did."} =>
+        fn [first, second] ->
+          Editor.swap_windows(first, second) == :ok
+        end,
+      {"active-window", "(active-window) — return the active window's id."} => fn [] ->
+        Editor.active_window()
       end,
-      "active-window" => fn [] -> Editor.active_window() end,
-      "window-point" => fn [id] ->
-        case Editor.window_point(id) do
-          {:ok, p} -> p
-          _ -> false
-        end
-      end,
-      "window-set-point!" => fn [id, pos] -> Editor.set_window_point(id, pos) == :ok end,
-      "scroll-window!" => fn [id, lines] ->
+      {"window-point",
+       "(window-point WIN) — WIN's own point (Emacs window-point): the buffer's for the selected window, the stored one for any other; #f for no window."} =>
+        fn [id] ->
+          case Editor.window_point(id) do
+            {:ok, p} -> p
+            _ -> false
+          end
+        end,
+      {"window-set-point!",
+       "(window-set-point! WIN POS) — put WIN's point at byte POS (Emacs set-window-point); #t when WIN exists."} =>
+        fn [id, pos] -> Editor.set_window_point(id, pos) == :ok end,
+      {"scroll-window!",
+       "(scroll-window! WIN LINES) — scroll window WIN by LINES; return #t on success."} => fn [
+                                                                                                 id,
+                                                                                                 lines
+                                                                                               ] ->
         Editor.scroll_window(id, lines) == :ok
       end,
-      "delete-other-windows!" => fn [] ->
-        Editor.delete_other_windows()
-        :void
-      end,
-      "other-window!" => fn [] ->
+      {"delete-other-windows!",
+       "(delete-other-windows!) — delete every window in the frame except the active one."} =>
+        fn [] ->
+          Editor.delete_other_windows()
+          :void
+        end,
+      {"other-window!", "(other-window!) — select the next window in the frame."} => fn [] ->
         Editor.other_window()
         :void
       end,
-      "switch-to-buffer!" => fn [name] ->
+      {"switch-to-buffer!",
+       "(switch-to-buffer! BUF) — show BUF in the active window; return BUF."} => fn [name] ->
         if Compos.Core.Frame.buffer_context() do
           unless Buffer.exists?(name), do: Core.create_buffer(name)
           Compos.Core.Frame.put_buffer(name)
@@ -2126,252 +1995,352 @@ defmodule Compos.Core.SchemeAPI do
       end,
       # editor.scm wraps this raw primitive so a dormant buffer's mode setup
       # completes in the current interpreter before switch-to-buffer! returns.
-      "window-switch-buffer!" => fn [name] ->
-        previous = Process.get(:compos_inline_runtime_restore)
-        Process.put(:compos_inline_runtime_restore, true)
+      {"window-switch-buffer!",
+       "(window-switch-buffer! BUF) — raw switch that restores a dormant BUF inline; return BUF."} =>
+        fn [name] ->
+          previous = Process.get(:compos_inline_runtime_restore)
+          Process.put(:compos_inline_runtime_restore, true)
 
-        try do
-          if Compos.Core.Frame.buffer_context() do
-            unless Buffer.exists?(name), do: Core.create_buffer(name)
-            Compos.Core.Frame.put_buffer(name)
-          else
-            # A forgotten name gets a fresh buffer here too — C-x b creates.
-            # A dormant name goes to set_window_buffer, which wakes it.
-            unless Buffer.exists?(name) or Compos.Core.BufferStore.known?(name),
-              do: Core.create_buffer(name)
+          try do
+            if Compos.Core.Frame.buffer_context() do
+              unless Buffer.exists?(name), do: Core.create_buffer(name)
+              Compos.Core.Frame.put_buffer(name)
+            else
+              # A forgotten name gets a fresh buffer here too — C-x b creates.
+              # A dormant name goes to set_window_buffer, which wakes it.
+              unless Buffer.exists?(name) or Compos.Core.BufferStore.known?(name),
+                do: Core.create_buffer(name)
 
-            Editor.set_window_buffer(name)
+              Editor.set_window_buffer(name)
+            end
+          after
+            if previous,
+              do: Process.put(:compos_inline_runtime_restore, previous),
+              else: Process.delete(:compos_inline_runtime_restore)
           end
-        after
-          if previous,
-            do: Process.put(:compos_inline_runtime_restore, previous),
-            else: Process.delete(:compos_inline_runtime_restore)
-        end
 
-        name
-      end,
+          name
+        end,
 
       # frames: one per attached client; window primitives above act on the
       # selected frame implicitly. delete-frame! lives in Session (it must
       # fire an active prompt's on_cancel in the current store).
-      "frame-list" => fn [] -> Editor.frame_list() end,
-      "selected-frame" => fn [] ->
+      {"frame-list", "(frame-list) — return frame ids in most-recently-used order."} => fn [] ->
+        Editor.frame_list()
+      end,
+      {"selected-frame", "(selected-frame) — return the current frame's id."} => fn [] ->
         Compos.Core.Frame.current() || Editor.last_active_frame()
       end,
-      "select-frame!" => fn [id] ->
-        # commands run with the dispatching frame stamped in the pdict —
-        # retarget it too, or the next primitive undoes the selection
-        ok = Editor.select_frame(id) == :ok
-        if ok, do: Compos.Core.Frame.put(id)
-        ok
-      end,
+      {"select-frame!", "(select-frame! FRAME) — make FRAME current; return #t on success."} =>
+        fn [id] ->
+          # commands run with the dispatching frame stamped in the pdict —
+          # retarget it too, or the next primitive undoes the selection
+          ok = Editor.select_frame(id) == :ok
+          if ok, do: Compos.Core.Frame.put(id)
+          ok
+        end,
       # every window everywhere: ((id buffer frame-id) ...) — the cross-frame
       # walk for kill-buffer replacement, agent window release
-      "window-list-all" => fn [] ->
-        Enum.map(Editor.list_windows_all(), fn {id, b, fid} -> [id, b, fid] end)
-      end,
+      {"window-list-all",
+       "(window-list-all) — return (WIN BUFFER FRAME) rows for every window in every frame."} =>
+        fn [] ->
+          Enum.map(Editor.list_windows_all(), fn {id, b, fid} -> [id, b, fid] end)
+        end,
       # set any window's buffer without selecting it (no frame/focus change)
-      "window-set-buffer!" => fn [id, name] ->
-        Editor.window_set_buffer(id, name) == :ok
-      end,
-      "frame-of-window" => fn [id] -> Editor.frame_of_window(id) || false end,
+      {"window-set-buffer!",
+       "(window-set-buffer! WIN BUF) — show BUF in window WIN without selection; return #t."} =>
+        fn [id, name] ->
+          Editor.window_set_buffer(id, name) == :ok
+        end,
+      {"frame-of-window", "(frame-of-window WIN) — return the id of the window's frame, or #f."} =>
+        fn [id] -> Editor.frame_of_window(id) || false end,
 
       # minibuffer & keymap — 3-arity: (prompt candidates on-confirm);
       # 4-arity adds an on-complete fn: input -> (list new-input candidates)
-      "minibuffer-read" => fn
-        [prompt, candidates, callback] ->
-          Editor.minibuffer_activate(prompt, candidates, callback)
-          :void
+      {"minibuffer-read",
+       "(minibuffer-read PROMPT CANDIDATES [ON-COMPLETE] ON-CONFIRM) — activate the minibuffer."} =>
+        fn
+          [prompt, candidates, callback] ->
+            Editor.minibuffer_activate(prompt, candidates, callback)
+            :void
 
-        [prompt, candidates, on_complete, callback] ->
-          Editor.minibuffer_activate(prompt, candidates, callback, on_complete)
-          :void
-      end,
+          [prompt, candidates, on_complete, callback] ->
+            Editor.minibuffer_activate(prompt, candidates, callback, on_complete)
+            :void
+        end,
       # full form: handlers is an alist of (list 'confirm f) (list 'change f)
       # (list 'complete f) (list 'cancel f) (list 'collect f) (list 'initial "text")
       # (list 'match-hint #t) — the last one widens the filter to the
       # annotation, so a prompt matches what a candidate MEANS. #t means
       # the first field; an integer N means the first N fields.
-      "minibuffer-read*" => fn [prompt, candidates, handlers] ->
-        map =
-          Map.new(handlers, fn [k, v] ->
-            case plain(k) do
-              "initial" -> {:input, v}
-              # A dynamic provider has already filtered/ranked its results.
-              "filter" -> {:filter, v}
-              "match-hint" -> {:match_hint, v}
-              # how the input matches a candidate: flex, substring, prefix,
-              # regexp, exact. The prompt chooses; the engine applies.
-              "completion-style" -> {:completion_style, Compos.Core.Candidates.style(v)}
-              # which row RET takes when the person did not arrow: 'first is
-              # the highlighted candidate (vertico), 'prompt is the typed
-              # input. A destination prompt (write-file) asks for 'prompt.
-              "preselect" -> {:preselect, String.to_atom(plain(v))}
-              # A prompt can reuse a domain list when its filtered result is
-              # collected. Scheme decides the target and receives the rows.
-              "collect" -> {:on_collect, v}
-              # the shape the prompt takes: "modal" (a centered panel over
-              # a scrim, spelled "palette" before it had a name), "popup"
-              # (an overlay on the bottom edge that reflows nothing), or the
-              # minibuffer rows, which every other value asks for
-              "style" -> {:style, v}
-              # the palette's own words: a footer note for the facts rail
-              # and a key legend for the head row, ((KEY LABEL) ...)
-              "note" -> {:note, v}
-              "legend" -> {:legend, v}
-              key -> {String.to_existing_atom("on_" <> key), v}
-            end
-          end)
+      {"minibuffer-read*",
+       "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail."} =>
+        fn [prompt, candidates, handlers] ->
+          map =
+            Map.new(handlers, fn [k, v] ->
+              case plain(k) do
+                "initial" -> {:input, v}
+                # A dynamic provider has already filtered/ranked its results.
+                "filter" -> {:filter, v}
+                "match-hint" -> {:match_hint, v}
+                # how the input matches a candidate: flex, substring, prefix,
+                # regexp, exact. The prompt chooses; the engine applies.
+                "completion-style" -> {:completion_style, Compos.Core.Candidates.style(v)}
+                # which row RET takes when the person did not arrow: 'first is
+                # the highlighted candidate (vertico), 'prompt is the typed
+                # input. A destination prompt (write-file) asks for 'prompt.
+                "preselect" -> {:preselect, String.to_atom(plain(v))}
+                # A prompt can reuse a domain list when its filtered result is
+                # collected. Scheme decides the target and receives the rows.
+                "collect" -> {:on_collect, v}
+                # the shape the prompt takes: "modal" (a centered panel over
+                # a scrim, spelled "palette" before it had a name), "popup"
+                # (an overlay on the bottom edge that reflows nothing), or the
+                # minibuffer rows, which every other value asks for
+                "style" -> {:style, v}
+                # the palette's own words: a footer note for the facts rail
+                # and a key legend for the head row, ((KEY LABEL) ...)
+                "note" -> {:note, v}
+                "legend" -> {:legend, v}
+                key -> {String.to_existing_atom("on_" <> key), v}
+              end
+            end)
 
-        Editor.minibuffer_activate_full(prompt, candidates, map)
-        :void
-      end,
-      "global-set-key" => fn [seq, command] ->
+          Editor.minibuffer_activate_full(prompt, candidates, map)
+          :void
+        end,
+      {"global-set-key",
+       "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally."} => fn [
+                                                                                                seq,
+                                                                                                command
+                                                                                              ] ->
         Editor.bind_key(String.split(seq, " "), key_binding_value(command))
         :void
       end,
-      "global-unset-key" => fn [seq] ->
+      {"global-unset-key",
+       "(global-unset-key SEQ) — remove the global binding for the key sequence SEQ."} => fn [seq] ->
         Editor.unbind_key(String.split(seq, " "))
         :void
       end,
-      "transient-show!" => fn
-        [false] ->
-          Editor.set_transient(nil)
-          :void
+      {"transient-show!",
+       "(transient-show! MENU) — show this frame's Transient modal; #t locks keys with no menu; #f clears it."} =>
+        fn
+          [false] ->
+            Editor.set_transient(nil)
+            :void
 
-        # #t locks key routing to the frame's transient keymap with no menu
-        # panel: the overview needs modal keys over a visible layout
-        [true] ->
-          Editor.set_transient(%{lock: true})
-          :void
+          # #t locks key routing to the frame's transient keymap with no menu
+          # panel: the overview needs modal keys over a visible layout
+          [true] ->
+            Editor.set_transient(%{lock: true})
+            :void
 
-        [[title, groups]] ->
-          Editor.set_transient(transient_menu(title, groups, []))
-          :void
+          [[title, groups]] ->
+            Editor.set_transient(transient_menu(title, groups, []))
+            :void
 
-        # (TITLE GROUPS META): META is an alist of header, rail, and legend
-        # parts. Scheme decides what each transient says; this only carries
-        # the strings to the frame.
-        [[title, groups, meta]] ->
-          Editor.set_transient(transient_menu(title, groups, meta))
-          :void
-      end,
-      "local-set-key" => fn [seq, command] ->
+          # (TITLE GROUPS META): META is an alist of header, rail, and legend
+          # parts. Scheme decides what each transient says; this only carries
+          # the strings to the frame.
+          [[title, groups, meta]] ->
+            Editor.set_transient(transient_menu(title, groups, meta))
+            :void
+        end,
+      {"local-set-key",
+       "(local-set-key SEQ COMMAND) — bind SEQ to COMMAND in the current buffer."} => fn [
+                                                                                           seq,
+                                                                                           command
+                                                                                         ] ->
         Editor.local_bind_key(Editor.current_buffer(), String.split(seq, " "), command)
         :void
       end,
       # explicit-buffer variant: bind without the buffer being current
-      "local-set-key*" => fn [buf, seq, command] ->
-        Editor.local_bind_key(buf, String.split(seq, " "), command)
-        :void
-      end,
+      {"local-set-key*", "(local-set-key* BUF SEQ COMMAND) — bind SEQ to COMMAND in buffer BUF."} =>
+        fn [buf, seq, command] ->
+          Editor.local_bind_key(buf, String.split(seq, " "), command)
+          :void
+        end,
       # the inverse: a minor mode restores the map it borrowed
-      "local-unset-key*" => fn [buf, seq] ->
+      {"local-unset-key*", "(local-unset-key* BUF SEQ) — drop BUF's own binding for SEQ."} => fn [
+                                                                                                   buf,
+                                                                                                   seq
+                                                                                                 ] ->
         Editor.local_unbind_key(buf, String.split(seq, " "))
         :void
       end,
       # Emacs [remap COMMAND]: every key bound to FROM runs TO in this
       # buffer — arrows, C-n/C-p, and user rebindings all follow at once
-      "local-remap!" => fn [from, to] ->
+      {"local-remap!",
+       "(local-remap! FROM TO) — in the current buffer, every key bound to FROM runs TO."} => fn [
+                                                                                                   from,
+                                                                                                   to
+                                                                                                 ] ->
         Editor.local_remap(Editor.current_buffer(), from, to)
         :void
       end,
-      "local-remap*!" => fn [buf, from, to] ->
+      {"local-remap*!",
+       "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO."} => fn [
+                                                                                                buf,
+                                                                                                from,
+                                                                                                to
+                                                                                              ] ->
         Editor.local_remap(buf, from, to)
         :void
       end,
-      "key-for-command" => fn
-        [name] -> Editor.key_for_command(name)
-        [name, buf] -> Editor.key_for_command(name, buf)
-      end,
+      {"key-for-command",
+       "(key-for-command COMMAND [BUF]) — return the tersest key sequence bound to COMMAND, in BUF's keymap and the global one, or \"\"."} =>
+        fn
+          [name] -> Editor.key_for_command(name)
+          [name, buf] -> Editor.key_for_command(name, buf)
+        end,
       # what a key sequence means here, without pressing it
-      "key-binding" => fn [seq] ->
-        case Editor.lookup_key(key_seq(seq)) do
-          {:command, name} -> name
-          :prefix -> {:sym, "prefix"}
-          _ -> false
-        end
-      end,
-      "key-binding-source" => fn [seq] ->
-        case Editor.lookup_key_source(key_seq(seq)) do
-          {:command, name, map} -> [name, map]
-          :prefix -> {:sym, "prefix"}
-          _ -> false
-        end
-      end,
+      {"key-binding",
+       "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys."} =>
+        fn [seq] ->
+          case Editor.lookup_key(key_seq(seq)) do
+            {:command, name} -> name
+            :prefix -> {:sym, "prefix"}
+            _ -> false
+          end
+        end,
+      {"key-binding-source",
+       "(key-binding-source SEQ) — (COMMAND KEYMAP-NAME) for the binding SEQ resolves to here, 'prefix, or #f."} =>
+        fn [seq] ->
+          case Editor.lookup_key_source(key_seq(seq)) do
+            {:command, name, map} -> [name, map]
+            :prefix -> {:sym, "prefix"}
+            _ -> false
+          end
+        end,
       # --- keymaps: named, with parents; a buffer's own map is named after it
-      "define-keymap!" => fn
-        [name] -> Editor.keymap_parent(plain(name), Editor.keymap_parent_of(plain(name)))
-        [name, parent] -> Editor.keymap_parent(plain(name), parent && plain(parent))
-      end,
-      "keymap-set!" => fn [name, seq, command] ->
+      {"define-keymap!",
+       "(define-keymap! NAME [PARENT]) — a named keymap; PARENT answers the keys NAME does not bind. A buffer's own map is the keymap named after the buffer."} =>
+        fn
+          [name] -> Editor.keymap_parent(plain(name), Editor.keymap_parent_of(plain(name)))
+          [name, parent] -> Editor.keymap_parent(plain(name), parent && plain(parent))
+        end,
+      {"keymap-set!",
+       "(keymap-set! KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap."} => fn [
+                                                                                              name,
+                                                                                              seq,
+                                                                                              command
+                                                                                            ] ->
         Editor.keymap_set(plain(name), key_seq(seq), key_binding_value(command))
         :void
       end,
-      "define-key" => fn [name, seq, command] ->
-        Editor.keymap_set(plain(name), key_seq(seq), key_binding_value(command))
-        :void
-      end,
-      "keymap-unset!" => fn [name, seq] ->
+      {"define-key",
+       "(define-key KEYMAP SEQ COMMAND) — the Emacs name of keymap-set!. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap."} =>
+        fn [name, seq, command] ->
+          Editor.keymap_set(plain(name), key_seq(seq), key_binding_value(command))
+          :void
+        end,
+      {"keymap-unset!",
+       "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ."} => fn [
+                                                                                            name,
+                                                                                            seq
+                                                                                          ] ->
         Editor.keymap_unset(plain(name), key_seq(seq))
         :void
       end,
-      "keymap-parent!" => fn [name, parent] ->
-        Editor.keymap_parent(plain(name), parent && plain(parent))
-        :void
+      {"keymap-parent!",
+       "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind."} =>
+        fn [name, parent] ->
+          Editor.keymap_parent(plain(name), parent && plain(parent))
+          :void
+        end,
+      {"keymap-parent", "(keymap-parent KEYMAP) — the parent's name, or #f."} => fn [name] ->
+        Editor.keymap_parent_of(plain(name)) || false
       end,
-      "keymap-parent" => fn [name] -> Editor.keymap_parent_of(plain(name)) || false end,
-      "keymap-bindings" => fn [name] ->
+      {"keymap-bindings",
+       "(keymap-bindings KEYMAP) — ((KEYS COMMAND) ...), the keymap's own bindings."} => fn [name] ->
         Enum.map(Editor.keymap_bindings(plain(name)), fn {k, c} -> [k, c] end)
       end,
-      "keymap-lookup" => fn [name, seq] ->
-        case Editor.lookup_keymap(plain(name), key_seq(seq)) do
-          {:command, cmd} -> cmd
-          :prefix -> {:sym, "prefix"}
-          _ -> false
-        end
+      {"keymap-lookup",
+       "(keymap-lookup KEYMAP SEQ) — what SEQ means in the named keymap and its parents: a name, 'prefix, or #f."} =>
+        fn [name, seq] ->
+          case Editor.lookup_keymap(plain(name), key_seq(seq)) do
+            {:command, cmd} -> cmd
+            :prefix -> {:sym, "prefix"}
+            _ -> false
+          end
+        end,
+      {"keymap-names", "(keymap-names) — every keymap the editor holds."} => fn [] ->
+        Editor.keymap_names()
       end,
-      "keymap-names" => fn [] -> Editor.keymap_names() end,
-      "use-local-map!" => fn [buf, name] ->
-        Editor.use_local_map(buf, name && plain(name))
-        :void
+      {"use-local-map!",
+       "(use-local-map! BUF KEYMAP) — BUF's own map takes KEYMAP as its parent: the mode's map."} =>
+        fn [buf, name] ->
+          Editor.use_local_map(buf, name && plain(name))
+          :void
+        end,
+      {"buffer-local-map", "(buffer-local-map BUF) — the parent of BUF's own map, or #f."} => fn [
+                                                                                                   buf
+                                                                                                 ] ->
+        Editor.buffer_local_map(buf) || false
       end,
-      "buffer-local-map" => fn [buf] -> Editor.buffer_local_map(buf) || false end,
-      "clear-local-map!" => fn [buf] ->
+      {"clear-local-map!",
+       "(clear-local-map! BUF) — forget BUF's own bindings, parent, and remaps."} => fn [buf] ->
         Editor.clear_local_map(buf)
         :void
       end,
-      "buffer-minor-maps!" => fn [buf, names] ->
-        Editor.set_minor_maps(buf, Enum.map(names, &plain/1))
-        :void
-      end,
-      "buffer-minor-maps" => fn [buf] -> Editor.minor_maps(buf) end,
-      "global-minor-maps!" => fn [names] ->
-        Editor.set_global_minor_maps(Enum.map(names, &plain/1))
-        :void
-      end,
-      "global-minor-maps" => fn [] -> Editor.global_minor_maps() end,
-      "buffer-keymaps" => fn [buf] -> Editor.buffer_keymaps(buf) end,
-      "where-is-internal" => fn
-        [name] -> Editor.where_is(name, Editor.current_buffer())
-        [name, buf] -> Editor.where_is(name, buf)
-      end,
-      "overriding-map!" => fn
-        [false] -> Editor.set_overriding_map(nil)
-        [name] -> Editor.set_overriding_map(plain(name))
-        [name, lock] -> Editor.set_overriding_map(plain(name), lock == true)
-        [name, lock, until] -> Editor.set_overriding_map(plain(name), lock == true, until == true)
-      end,
-      "buffer-at-point-map!" => fn [buf, name] ->
-        Editor.set_at_point_map(buf, name && plain(name))
-        :void
-      end,
-      "buffer-at-point-map" => fn [buf] -> Editor.at_point_map(buf) || false end,
-      "completion-requery!" => fn [] ->
-        Compos.Core.KeyDispatch.requery_completion()
-        :void
-      end,
-      "ignore-errors" => fn [thunk], store ->
+      {"buffer-minor-maps!",
+       "(buffer-minor-maps! BUF NAMES) — the minor-mode keymaps in force in BUF, first wins, ahead of its own map."} =>
+        fn [buf, names] ->
+          Editor.set_minor_maps(buf, Enum.map(names, &plain/1))
+          :void
+        end,
+      {"buffer-minor-maps", "(buffer-minor-maps BUF) — the minor-mode keymaps in force in BUF."} =>
+        fn [buf] -> Editor.minor_maps(buf) end,
+      {"global-minor-maps!",
+       "(global-minor-maps! NAMES) — the minor-mode keymaps in force in every buffer, after the buffer's own minor maps."} =>
+        fn [names] ->
+          Editor.set_global_minor_maps(Enum.map(names, &plain/1))
+          :void
+        end,
+      {"global-minor-maps", "(global-minor-maps) — the keymaps in force in every buffer."} =>
+        fn [] -> Editor.global_minor_maps() end,
+      {"buffer-keymaps",
+       "(buffer-keymaps BUF) — the keymap names that answer for BUF, in precedence order, \"global\" last."} =>
+        fn [buf] -> Editor.buffer_keymaps(buf) end,
+      {"where-is-internal",
+       "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first."} =>
+        fn
+          [name] -> Editor.where_is(name, Editor.current_buffer())
+          [name, buf] -> Editor.where_is(name, buf)
+        end,
+      {"overriding-map!",
+       "(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?]) — the frame's overriding keymap, ahead of every other; #f clears it. LOCK? makes an unbound key undefined (Transient). UNTIL-COMMAND? drops it when the next command finishes (the prefix argument)."} =>
+        fn
+          [false] ->
+            Editor.set_overriding_map(nil)
+
+          [name] ->
+            Editor.set_overriding_map(plain(name))
+
+          [name, lock] ->
+            Editor.set_overriding_map(plain(name), lock == true)
+
+          [name, lock, until] ->
+            Editor.set_overriding_map(plain(name), lock == true, until == true)
+        end,
+      {"buffer-at-point-map!",
+       "(buffer-at-point-map! BUF KEYMAP) — the keymap of the thing at point in BUF (a block), ahead of the minor maps; #f clears it. Emacs's overlay keymap."} =>
+        fn [buf, name] ->
+          Editor.set_at_point_map(buf, name && plain(name))
+          :void
+        end,
+      {"buffer-at-point-map", "(buffer-at-point-map BUF) — the keymap at point in BUF, or #f."} =>
+        fn [buf] -> Editor.at_point_map(buf) || false end,
+      {"completion-requery!",
+       "(completion-requery!) — narrow the popup to the text between its start and point."} =>
+        fn [] ->
+          Compos.Core.KeyDispatch.requery_completion()
+          :void
+        end,
+      {"ignore-errors", "(ignore-errors THUNK) — THUNK's value, or #f when it raises."} => fn [
+                                                                                                thunk
+                                                                                              ],
+                                                                                              store ->
         try do
           Compos.Scheme.Eval.apply_fn(thunk, [], store)
         rescue
@@ -2381,52 +2350,74 @@ defmodule Compos.Core.SchemeAPI do
         end
       end,
       # describe-key arms this, then reads the sequence back with (last-keys)
-      "capture-key!" => fn [command] ->
-        Editor.set_key_capture(command)
-        :void
-      end,
+      {"capture-key!",
+       "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms."} =>
+        fn [command] ->
+          Editor.set_key_capture(command)
+          :void
+        end,
       # the mechanism under (trace-key): KeyDispatch records a row per phase
-      "trace-key!" => fn [specs] ->
-        specs
-        |> List.wrap()
-        |> Enum.flat_map(&String.split(plain(&1), " ", trim: true))
-        |> Compos.Core.KeyDispatch.trace_keys()
-      end,
+      {"trace-key!",
+       "(trace-key! KEYS) — dispatch the key list in this process; return one state row per phase."} =>
+        fn [specs] ->
+          specs
+          |> List.wrap()
+          |> Enum.flat_map(&String.split(plain(&1), " ", trim: true))
+          |> Compos.Core.KeyDispatch.trace_keys()
+        end,
       # a mode's own stylesheet, rendered into the page beside the face
       # variables. Modes are trusted code — they can eval anything — so the
       # CSS ships raw.
-      "define-style!" => fn [name, css] ->
-        Editor.set_style(plain(name), css)
-        :void
-      end,
+      {"define-style!",
+       "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this."} =>
+        fn [name, css] ->
+          Editor.set_style(plain(name), css)
+          :void
+        end,
       # The languages whose blocks offer the run key in the rendered page.
       # The fence-kind registry pushes the list on every registration, so
       # the page never mirrors the registry by hand.
-      "preview-run-langs!" => fn [langs] ->
-        :persistent_term.put(
-          {Compos.Core.Markdown.Html, :run_langs},
-          Enum.map(langs, &String.downcase/1)
-        )
+      {"preview-run-langs!",
+       "(preview-run-langs! LANGS) — name the block languages whose rendered page offers the run key; the fence-kind registry calls this."} =>
+        fn [langs] ->
+          :persistent_term.put(
+            {Compos.Core.Markdown.Html, :run_langs},
+            Enum.map(langs, &String.downcase/1)
+          )
 
-        :void
-      end,
-      "last-command" => fn [] -> Editor.last_command() end,
-      "this-command" => fn [] -> Editor.this_command() end,
-      "set-this-command!" => fn [name] ->
-        Editor.set_this_command(name)
-        :void
-      end,
-      "undo-boundary!" => fn [] ->
-        Buffer.undo_boundary(Editor.current_buffer())
-        :void
-      end,
-      "last-keys" => fn [] -> Editor.last_keys() end,
-      "current-prefix-arg" => fn [] -> Editor.prefix_arg() || false end,
-      "set-prefix-arg!" => fn [arg] ->
-        Editor.set_prefix_arg(arg)
-        :void
-      end,
-      "window-rows" =>
+          :void
+        end,
+      {"last-command", "(last-command) — return the name of the last command that ran."} =>
+        fn [] -> Editor.last_command() end,
+      {"this-command",
+       "(this-command) — the name of the command now running; \"\" outside a command."} =>
+        fn [] -> Editor.this_command() end,
+      {"set-this-command!",
+       "(set-this-command! NAME) — what the next command sees as last-command; yank-pop sets \"yank\"."} =>
+        fn [name] ->
+          Editor.set_this_command(name)
+          :void
+        end,
+      {"undo-boundary!",
+       "(undo-boundary!) — Emacs undo-boundary: the edits so far are one undo step, the edits after this are the next, even inside one command."} =>
+        fn [] ->
+          Buffer.undo_boundary(Editor.current_buffer())
+          :void
+        end,
+      {"last-keys",
+       "(last-keys) — return the key sequence whose keymap lookup ran the current command."} =>
+        fn [] -> Editor.last_keys() end,
+      {"current-prefix-arg",
+       "(current-prefix-arg) — return this frame's raw one-shot prefix argument, or #f."} =>
+        fn [] -> Editor.prefix_arg() || false end,
+      {"set-prefix-arg!",
+       "(set-prefix-arg! VALUE) — set this frame's raw one-shot prefix argument; #f clears it."} =>
+        fn [arg] ->
+          Editor.set_prefix_arg(arg)
+          :void
+        end,
+      {"window-rows",
+       "(window-rows [WIN]) — text rows of WIN, or of the active window when WIN is omitted."} =>
         fn
           [] -> Editor.window_rows()
           [win] when is_integer(win) -> Editor.window_rows(win)
@@ -2434,141 +2425,182 @@ defmodule Compos.Core.SchemeAPI do
         end,
       # the client measures its own font and reports it; a window nobody
       # measured is worth the default
-      "buffer-cols" => fn [name] -> Editor.buffer_cols(name) end,
-      "window-cols" => fn
-        [] -> Editor.window_cols()
-        [win] when is_integer(win) -> Editor.window_cols(win)
-        _ -> Editor.window_cols()
-      end,
+      {"buffer-cols",
+       "(buffer-cols BUF) — return the text columns of a window showing BUF, else the active window's."} =>
+        fn [name] -> Editor.buffer_cols(name) end,
+      {"window-cols",
+       "(window-cols [WIN]) — return the number of text columns in WIN, or in the active window."} =>
+        fn
+          [] -> Editor.window_cols()
+          [win] when is_integer(win) -> Editor.window_cols(win)
+          _ -> Editor.window_cols()
+        end,
       # the wrap map is a measurement the client made; Scheme reads it
       # and decides what a row move means
-      "window-wrap-map" => fn
-        [win] when is_integer(win) ->
-          case Editor.wrap_map(win) do
-            {v, rows} -> [v, rows]
-            _ -> false
-          end
+      {"window-wrap-map",
+       "(window-wrap-map WIN) — return (VERSION ROWS) as the client measured WIN: the buffer version the page showed, and the byte offsets where its visual rows begin; #f when nothing was measured."} =>
+        fn
+          [win] when is_integer(win) ->
+            case Editor.wrap_map(win) do
+              {v, rows} -> [v, rows]
+              _ -> false
+            end
 
-        _ ->
-          false
-      end,
-      "window-set-wrap-map!" => fn [win, v, rows]
-                                   when is_integer(win) and is_integer(v) and is_list(rows) ->
-        Editor.set_wrap_map(win, v, rows)
-        :void
-      end,
-      "buffer-version" => fn [name] -> Buffer.version(name) || 0 end,
-      "frame-cols" => fn [] -> Editor.frame_cols() end,
-      "recenter!" => fn [] ->
+          _ ->
+            false
+        end,
+      {"window-set-wrap-map!",
+       "(window-set-wrap-map! WIN VERSION ROWS) — record a wrap map for WIN the way the client does; for tests and headless drivers."} =>
+        fn [win, v, rows]
+           when is_integer(win) and is_integer(v) and is_list(rows) ->
+          Editor.set_wrap_map(win, v, rows)
+          :void
+        end,
+      {"buffer-version",
+       "(buffer-version BUF) — return the buffer's edit version; it grows by one per change."} =>
+        fn [name] -> Buffer.version(name) || 0 end,
+      {"frame-cols", "(frame-cols) — estimate the usable text columns across the current frame."} =>
+        fn [] -> Editor.frame_cols() end,
+      {"recenter!", "(recenter!) — center the active window on the cursor line."} => fn [] ->
         Editor.recenter()
         :void
       end,
 
       # completion popup: candidates = strings or (label hint) pairs
-      "completion-show!" => fn [start, end_, candidates] ->
-        point = Buffer.point(Editor.current_buffer())
-        tail = if is_integer(end_), do: end_ - point, else: 0
-        Editor.completion_show(start, tail, candidates)
-        :void
-      end,
-      "completion-move!" => fn [delta] ->
-        Editor.completion_move(delta)
-        :void
-      end,
-      "completion-accept!" => fn [] ->
-        case Editor.completion_accept() do
-          {start, tail, label} -> [start, Buffer.point(Editor.current_buffer()) + tail, label]
-          nil -> false
-        end
-      end,
+      {"completion-show!",
+       "(completion-show! START END CANDIDATES) — show the completion popup for the text START..END; accept replaces that range, and END may lie past point."} =>
+        fn [start, end_, candidates] ->
+          point = Buffer.point(Editor.current_buffer())
+          tail = if is_integer(end_), do: end_ - point, else: 0
+          Editor.completion_show(start, tail, candidates)
+          :void
+        end,
+      {"completion-move!", "(completion-move! DELTA) — move the popup selection by DELTA rows."} =>
+        fn [delta] ->
+          Editor.completion_move(delta)
+          :void
+        end,
+      {"completion-accept!",
+       "(completion-accept!) — close the popup; return (START END LABEL) of the selection, END as of now, or #f."} =>
+        fn [] ->
+          case Editor.completion_accept() do
+            {start, tail, label} -> [start, Buffer.point(Editor.current_buffer()) + tail, label]
+            nil -> false
+          end
+        end,
       # the one matcher every surface narrows with; STYLE as in completion-style
-      "completion-match?" => fn
-        [label, query] ->
-          Compos.Core.Candidates.matches?(label, query, [], :flex)
+      {"completion-match?",
+       "(completion-match? LABEL QUERY [STYLE]) — does QUERY match LABEL the way a prompt matches: 'flex (default), 'substring, 'prefix, 'regexp, 'exact."} =>
+        fn
+          [label, query] ->
+            Compos.Core.Candidates.matches?(label, query, [], :flex)
 
-        [label, query, style] ->
-          Compos.Core.Candidates.matches?(label, query, [], Compos.Core.Candidates.style(style))
+          [label, query, style] ->
+            Compos.Core.Candidates.matches?(label, query, [], Compos.Core.Candidates.style(style))
+        end,
+      {"regexp-quote", "(regexp-quote TEXT) — TEXT with every regexp character escaped."} => fn [
+                                                                                                  text
+                                                                                                ] ->
+        Regex.escape(text)
       end,
-      "regexp-quote" => fn [text] -> Regex.escape(text) end,
-      "completion-dismiss!" => fn [] ->
+      {"completion-dismiss!", "(completion-dismiss!) — dismiss the completion popup."} => fn [] ->
         Editor.completion_dismiss()
         :void
       end,
       # words in the current buffer with the given prefix (dabbrev fuel)
-      "buffer-words" => fn [prefix] ->
-        text = Buffer.text(Editor.current_buffer())
+      {"buffer-words",
+       "(buffer-words PREFIX) — return the buffer's words with PREFIX, sorted, without PREFIX itself."} =>
+        fn [prefix] ->
+          text = Buffer.text(Editor.current_buffer())
 
-        ~r/[A-Za-z_][A-Za-z0-9_?!-]*/
-        |> Regex.scan(text)
-        |> List.flatten()
-        |> Enum.uniq()
-        |> Enum.filter(&(String.starts_with?(&1, prefix) and &1 != prefix))
-        |> Enum.sort()
-      end,
+          ~r/[A-Za-z_][A-Za-z0-9_?!-]*/
+          |> Regex.scan(text)
+          |> List.flatten()
+          |> Enum.uniq()
+          |> Enum.filter(&(String.starts_with?(&1, prefix) and &1 != prefix))
+          |> Enum.sort()
+        end,
       # whitespace-separated word count (writing-mode modeline, M-x count-words)
-      "count-words" => fn [buf] ->
-        ~r/\S+/ |> Regex.scan(Buffer.text(buf)) |> length()
-      end,
+      {"count-words", "(count-words BUF) — return the buffer's whitespace-separated word count."} =>
+        fn [buf] ->
+          ~r/\S+/ |> Regex.scan(Buffer.text(buf)) |> length()
+        end,
       # the highlighted candidate (consult-style preview reads it on move)
-      "minibuffer-selected" => fn [] -> Editor.minibuffer_selected() end,
+      {"minibuffer-selected",
+       "(minibuffer-selected) — return the highlighted minibuffer candidate."} => fn [] ->
+        Editor.minibuffer_selected()
+      end,
       # escape hatch: current-buffer defaults to the minibuffer's OWN text
       # while one is active, so a preview hook that wants to act on the
       # invoking buffer (e.g. goto-char! for a same-buffer position
       # preview) must toggle this off around that call, then back on
-      "set-mb-redirect!" => fn [bool] ->
-        Editor.set_mb_redirect(bool)
-        :void
-      end,
+      {"set-mb-redirect!",
+       "(set-mb-redirect! BOOL) — toggle redirection of current-buffer to the minibuffer's text."} =>
+        fn [bool] ->
+          Editor.set_mb_redirect(bool)
+          :void
+        end,
       # show a buffer in a window without MRU bookkeeping — candidate
       # preview must not reorder the buffer ring. The optional WIN is the
       # modal switcher's home window; default is the active window.
-      "window-preview-buffer!" => fn
-        [name] -> Editor.preview_buffer(name) == :ok
-        [name, win] -> Editor.preview_buffer(name, nil, win) == :ok
-      end,
+      {"window-preview-buffer!",
+       "(window-preview-buffer! BUF [WIN]) — show BUF in WIN (default: the active window) without MRU changes."} =>
+        fn
+          [name] -> Editor.preview_buffer(name) == :ok
+          [name, win] -> Editor.preview_buffer(name, nil, win) == :ok
+        end,
       # the way back to dormancy: preview wakes candidates, the prompt's
       # close puts the ones nobody picked back to sleep
-      "buffer-sleep!" => fn [name] ->
-        Compos.Core.sleep_buffer(name) == :ok
-      end,
-      "minibuffer-set-candidates!" => fn [candidates] ->
-        Editor.minibuffer_set_candidates(candidates)
-        :void
-      end,
-      "set-frame-group-label!" => fn
-        [label] ->
-          Editor.set_frame_group_label(if(is_binary(label), do: label, else: nil))
+      {"buffer-sleep!",
+       "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned."} =>
+        fn [name] ->
+          Compos.Core.sleep_buffer(name) == :ok
+        end,
+      {"minibuffer-set-candidates!",
+       "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list."} =>
+        fn [candidates] ->
+          Editor.minibuffer_set_candidates(candidates)
           :void
+        end,
+      {"set-frame-group-label!",
+       "(set-frame-group-label! NAME [FRAME]) — record a frame's group context; #f clears it. FRAME defaults to the selected one."} =>
+        fn
+          [label] ->
+            Editor.set_frame_group_label(if(is_binary(label), do: label, else: nil))
+            :void
 
-        [label, fid] ->
-          Editor.set_frame_group_label(
-            if(is_binary(label), do: label, else: nil),
-            if(is_binary(fid), do: fid, else: nil)
-          )
+          [label, fid] ->
+            Editor.set_frame_group_label(
+              if(is_binary(label), do: label, else: nil),
+              if(is_binary(fid), do: fid, else: nil)
+            )
 
-          :void
-      end,
-      "set-frame-group-style!" => fn
-        [label, color] ->
-          Editor.set_frame_group_style(
-            if(is_binary(label), do: label, else: nil),
-            if(is_binary(color), do: color, else: nil)
-          )
+            :void
+        end,
+      {"set-frame-group-style!",
+       "(set-frame-group-style! NAME COLOR [FRAME]) — record a frame's group label and accent color."} =>
+        fn
+          [label, color] ->
+            Editor.set_frame_group_style(
+              if(is_binary(label), do: label, else: nil),
+              if(is_binary(color), do: color, else: nil)
+            )
 
-          :void
+            :void
 
-        [label, color, fid] ->
-          Editor.set_frame_group_style(
-            if(is_binary(label), do: label, else: nil),
-            if(is_binary(color), do: color, else: nil),
-            if(is_binary(fid), do: fid, else: nil)
-          )
+          [label, color, fid] ->
+            Editor.set_frame_group_style(
+              if(is_binary(label), do: label, else: nil),
+              if(is_binary(color), do: color, else: nil),
+              if(is_binary(fid), do: fid, else: nil)
+            )
 
-          :void
-      end,
+            :void
+        end,
 
       # filesystem (dired's hands)
-      "delete-file!" => fn [p] ->
+      {"delete-file!",
+       "(delete-file! PATH) — delete a file or empty directory; return #t or error."} => fn [p] ->
         path = Path.expand(p)
 
         result =
@@ -2586,62 +2618,69 @@ defmodule Compos.Core.SchemeAPI do
             raise Compos.Scheme.Eval.Error, message: "delete failed: #{reason} (#{path})"
         end
       end,
-      "trash-file!" => fn [p] ->
-        path = Path.expand(p)
-        trash = user_trash_dir()
-        :ok = File.mkdir_p(trash)
-        target = unused_path(Path.join(trash, Path.basename(path)))
+      {"trash-file!",
+       "(trash-file! PATH) — move one file or directory to the user trash; return its new path."} =>
+        fn [p] ->
+          path = Path.expand(p)
+          trash = user_trash_dir()
+          :ok = File.mkdir_p(trash)
+          target = unused_path(Path.join(trash, Path.basename(path)))
 
-        case File.rename(path, target) do
-          :ok ->
-            target
+          case File.rename(path, target) do
+            :ok ->
+              target
 
-          {:error, reason} ->
-            raise Compos.Scheme.Eval.Error,
-              message: "trash failed: #{reason} (#{path} -> #{target})"
-        end
-      end,
-      "copy-file!" => fn [source, destination] ->
-        source = Path.expand(source)
-        destination = Path.expand(destination)
+            {:error, reason} ->
+              raise Compos.Scheme.Eval.Error,
+                message: "trash failed: #{reason} (#{path} -> #{target})"
+          end
+        end,
+      {"copy-file!",
+       "(copy-file! SOURCE DESTINATION) — copy one file or directory without overwriting; return DESTINATION."} =>
+        fn [source, destination] ->
+          source = Path.expand(source)
+          destination = Path.expand(destination)
 
-        cond do
-          path_present?(destination) ->
-            raise Compos.Scheme.Eval.Error,
-              message: "copy failed: destination exists (#{destination})"
+          cond do
+            path_present?(destination) ->
+              raise Compos.Scheme.Eval.Error,
+                message: "copy failed: destination exists (#{destination})"
 
-          true ->
-            :ok = File.mkdir_p(Path.dirname(destination))
+            true ->
+              :ok = File.mkdir_p(Path.dirname(destination))
 
-            case File.cp_r(source, destination) do
-              {:ok, _paths} ->
-                destination
+              case File.cp_r(source, destination) do
+                {:ok, _paths} ->
+                  destination
 
-              {:error, reason, failed} ->
-                raise Compos.Scheme.Eval.Error,
-                  message: "copy failed: #{reason} (#{failed})"
-            end
-        end
-      end,
-      "set-file-mode!" => fn [p, mode] ->
-        path = Path.expand(p)
+                {:error, reason, failed} ->
+                  raise Compos.Scheme.Eval.Error,
+                    message: "copy failed: #{reason} (#{failed})"
+              end
+          end
+        end,
+      {"set-file-mode!", "(set-file-mode! PATH MODE) — set octal MODE such as 755 on PATH."} =>
+        fn [p, mode] ->
+          path = Path.expand(p)
 
-        with {value, ""} <- Integer.parse(to_string(mode), 8),
-             :ok <- File.chmod(path, value) do
-          true
-        else
-          :error ->
-            raise Compos.Scheme.Eval.Error, message: "invalid octal mode: #{mode}"
+          with {value, ""} <- Integer.parse(to_string(mode), 8),
+               :ok <- File.chmod(path, value) do
+            true
+          else
+            :error ->
+              raise Compos.Scheme.Eval.Error, message: "invalid octal mode: #{mode}"
 
-          {:error, reason} ->
-            raise Compos.Scheme.Eval.Error,
-              message: "chmod failed: #{reason} (#{path})"
+            {:error, reason} ->
+              raise Compos.Scheme.Eval.Error,
+                message: "chmod failed: #{reason} (#{path})"
 
-          {_value, _rest} ->
-            raise Compos.Scheme.Eval.Error, message: "invalid octal mode: #{mode}"
-        end
-      end,
-      "touch-file!" => fn [p] ->
+            {_value, _rest} ->
+              raise Compos.Scheme.Eval.Error, message: "invalid octal mode: #{mode}"
+          end
+        end,
+      {"touch-file!", "(touch-file! PATH) — update PATH's mtime or create an empty file."} => fn [
+                                                                                                   p
+                                                                                                 ] ->
         path = Path.expand(p)
         :ok = File.mkdir_p(Path.dirname(path))
 
@@ -2654,45 +2693,52 @@ defmodule Compos.Core.SchemeAPI do
               message: "touch failed: #{reason} (#{path})"
         end
       end,
-      "make-symlink!" => fn [target, link] ->
-        link = Path.expand(link)
+      {"make-symlink!",
+       "(make-symlink! TARGET LINK) — create LINK as a symbolic link to TARGET without overwriting."} =>
+        fn [target, link] ->
+          link = Path.expand(link)
 
-        if path_present?(link) do
-          raise Compos.Scheme.Eval.Error,
-            message: "link failed: destination exists (#{link})"
-        else
-          :ok = File.mkdir_p(Path.dirname(link))
+          if path_present?(link) do
+            raise Compos.Scheme.Eval.Error,
+              message: "link failed: destination exists (#{link})"
+          else
+            :ok = File.mkdir_p(Path.dirname(link))
 
-          case File.ln_s(target, link) do
-            :ok ->
-              link
+            case File.ln_s(target, link) do
+              :ok ->
+                link
+
+              {:error, reason} ->
+                raise Compos.Scheme.Eval.Error,
+                  message: "link failed: #{reason} (#{link})"
+            end
+          end
+        end,
+      # the buffer keeps its process, so nothing in it moves. A name that is
+      # taken (live or in history) answers false: the caller picks another.
+      {"buffer-rename!",
+       "(buffer-rename! OLD NEW) — rename a buffer in place, keeping its text, point, locals and undo; return NEW, or #f if the name is taken. Policy lives in rename-buffer!."} =>
+        fn [old, new] ->
+          case Compos.Core.rename_buffer(old, new) do
+            {:ok, name} -> name
+            {:error, _reason} -> false
+          end
+        end,
+      {"rename-file!",
+       "(rename-file! SOURCE DESTINATION) — move a file or directory and carry an open buffer with it."} =>
+        fn [source, destination] ->
+          case Compos.Core.rename_file(source, destination) do
+            {:ok, path} ->
+              path
 
             {:error, reason} ->
               raise Compos.Scheme.Eval.Error,
-                message: "link failed: #{reason} (#{link})"
+                message:
+                  "rename failed: #{reason} (#{Path.expand(source)} -> #{Path.expand(destination)})"
           end
-        end
-      end,
-      # the buffer keeps its process, so nothing in it moves. A name that is
-      # taken (live or in history) answers false: the caller picks another.
-      "buffer-rename!" => fn [old, new] ->
-        case Compos.Core.rename_buffer(old, new) do
-          {:ok, name} -> name
-          {:error, _reason} -> false
-        end
-      end,
-      "rename-file!" => fn [source, destination] ->
-        case Compos.Core.rename_file(source, destination) do
-          {:ok, path} ->
-            path
-
-          {:error, reason} ->
-            raise Compos.Scheme.Eval.Error,
-              message:
-                "rename failed: #{reason} (#{Path.expand(source)} -> #{Path.expand(destination)})"
-        end
-      end,
-      "make-directory!" => fn [p] ->
+        end,
+      {"make-directory!",
+       "(make-directory! PATH) — create the directory and its parents; return #t."} => fn [p] ->
         File.mkdir_p!(Path.expand(p))
         true
       end
@@ -2709,7 +2755,11 @@ defmodule Compos.Core.SchemeAPI do
   # the plist (error "message"), which `list?` tells apart from a string.
   defp git_primitives do
     %{
-      "git-root" => fn [dir | rest] ->
+      {"git-root",
+       "(git-root DIR [CB]) — return the absolute work-tree root of DIR, or (error MSG)."} => fn [
+                                                                                                   dir
+                                                                                                   | rest
+                                                                                                 ] ->
         git_dispatch(rest, fn -> Git.root(dir) end, & &1)
       end,
       # (git-status DIR [PATHSPEC] [CALLBACK]) — a pathspec scopes the read
@@ -2717,60 +2767,80 @@ defmodule Compos.Core.SchemeAPI do
       # (diff-word-range OLD NEW) -> ((OS OE) (NS NE)), or #f when the two
       # lines differ at neither end. Byte scanning with UTF-8 boundaries is
       # mechanism; deciding what to emphasise with it is diff-mode's.
-      "diff-word-range" => fn [old, new] ->
-        case word_range(old, new) do
-          nil -> false
-          {{os, oe}, {ns, ne}} -> [[os, oe], [ns, ne]]
-        end
-      end,
+      {"diff-word-range",
+       "(diff-word-range OLD NEW) — return ((OS OE) (NS NE)) byte ranges of the differing span, or #f."} =>
+        fn [old, new] ->
+          case word_range(old, new) do
+            nil -> false
+            {{os, oe}, {ns, ne}} -> [[os, oe], [ns, ne]]
+          end
+        end,
       # (diff-parse TEXT) -> the same file plists git-diff returns. Text that
       # git handed us whole — a commit — has no structured form of its own.
-      "diff-parse" => fn [text] ->
-        text |> Compos.Core.Git.parse() |> diff_plist()
-      end,
-      "git-prefix" => fn [dir | rest] ->
-        git_dispatch(rest, fn -> Git.prefix(dir) end, & &1)
-      end,
-      "git-status" => fn [dir | rest] ->
-        {path, rest} = opt_path(rest)
+      {"diff-parse",
+       "(diff-parse TEXT) — parse unified-diff TEXT into the same file plists git-diff returns."} =>
+        fn [text] ->
+          text |> Compos.Core.Git.parse() |> diff_plist()
+        end,
+      {"git-prefix",
+       "(git-prefix DIR [CB]) — return DIR's path inside its work tree with a trailing slash, or \"\" at the root."} =>
+        fn [dir | rest] ->
+          git_dispatch(rest, fn -> Git.prefix(dir) end, & &1)
+        end,
+      {"git-status",
+       "(git-status DIR [PATHSPEC] [CB]) — return (path P orig-path P2 index X worktree Y) plists; a pathspec scopes the read."} =>
+        fn [dir | rest] ->
+          {path, rest} = opt_path(rest)
 
-        git_dispatch(
-          rest,
-          fn -> Git.status(dir, path) end,
-          &Enum.map(&1, fn e -> status_plist(e) end)
-        )
-      end,
+          git_dispatch(
+            rest,
+            fn -> Git.status(dir, path) end,
+            &Enum.map(&1, fn e -> status_plist(e) end)
+          )
+        end,
       # (git-diff DIR) | (git-diff DIR OPTS) | (git-diff DIR OPTS CALLBACK)
-      "git-diff" => fn
-        [dir] ->
-          git_dispatch([], fn -> Git.diff(dir, []) end, &diff_plist/1)
+      {"git-diff",
+       "(git-diff DIR [OPTS] [CB]) — return parsed file plists; OPTS is (base REF path P staged BOOL)."} =>
+        fn
+          [dir] ->
+            git_dispatch([], fn -> Git.diff(dir, []) end, &diff_plist/1)
 
-        [dir, opts] ->
-          if callback?(opts) do
-            git_dispatch([opts], fn -> Git.diff(dir, []) end, &diff_plist/1)
-          else
-            git_dispatch([], fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
-          end
+          [dir, opts] ->
+            if callback?(opts) do
+              git_dispatch([opts], fn -> Git.diff(dir, []) end, &diff_plist/1)
+            else
+              git_dispatch([], fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
+            end
 
-        [dir, opts | rest] ->
-          git_dispatch(rest, fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
-      end,
-      "git-stage-file" => fn [dir, path | rest] ->
-        git_dispatch(rest, fn -> Git.stage_file(dir, path) end, fn _ -> true end)
-      end,
-      "git-stage-patch" => fn [dir, patch | rest] ->
-        git_dispatch(rest, fn -> Git.stage_patch(dir, patch) end, fn _ -> true end)
-      end,
-      "git-log" => fn [dir, n | rest] ->
-        {path, rest} = opt_path(rest)
+          [dir, opts | rest] ->
+            git_dispatch(rest, fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
+        end,
+      {"git-stage-file",
+       "(git-stage-file DIR PATH [CB]) — stage one path in the index; return #t or (error MSG)."} =>
+        fn [dir, path | rest] ->
+          git_dispatch(rest, fn -> Git.stage_file(dir, path) end, fn _ -> true end)
+        end,
+      {"git-stage-patch",
+       "(git-stage-patch DIR PATCH [CB]) — apply one unified patch to the index; return #t or (error MSG)."} =>
+        fn [dir, patch | rest] ->
+          git_dispatch(rest, fn -> Git.stage_patch(dir, patch) end, fn _ -> true end)
+        end,
+      {"git-log",
+       "(git-log DIR N [PATHSPEC] [CB]) — return the last N commits as (sha short-sha author date subject) plists."} =>
+        fn [dir, n | rest] ->
+          {path, rest} = opt_path(rest)
 
-        git_dispatch(
-          rest,
-          fn -> Git.log(dir, n, path) end,
-          &Enum.map(&1, fn c -> log_plist(c) end)
-        )
-      end,
-      "git-show" => fn [dir, ref | rest] ->
+          git_dispatch(
+            rest,
+            fn -> Git.log(dir, n, path) end,
+            &Enum.map(&1, fn c -> log_plist(c) end)
+          )
+        end,
+      {"git-show", "(git-show DIR REF [CB]) — return the raw text of one commit."} => fn [
+                                                                                           dir,
+                                                                                           ref
+                                                                                           | rest
+                                                                                         ] ->
         git_dispatch(rest, fn -> Git.show(dir, plain(ref)) end, & &1)
       end
     }
@@ -2783,31 +2853,41 @@ defmodule Compos.Core.SchemeAPI do
   # subscribers is policy.
   defp watch_primitives do
     %{
-      "watch-path!" => fn [dir | rest] ->
-        deep? = rest == [{:sym, "deep"}]
+      {"watch-path!",
+       "(watch-path! DIR ['deep]) — watch DIR for changes, refcounted; return the watched root or (error MSG). A plain watch counts the direct children of DIR; 'deep counts the whole tree below it."} =>
+        fn [dir | rest] ->
+          deep? = rest == [{:sym, "deep"}]
 
-        case Compos.Core.Watch.watch(plain(dir), Compos.Core.Watch, deep: deep?) do
-          {:ok, root} -> root
-          {:error, msg} -> [{:sym, "error"}, msg]
-        end
+          case Compos.Core.Watch.watch(plain(dir), Compos.Core.Watch, deep: deep?) do
+            {:ok, root} -> root
+            {:error, msg} -> [{:sym, "error"}, msg]
+          end
+        end,
+      {"unwatch-path!",
+       "(unwatch-path! DIR ['deep]) — drop one watch reference, 'deep for a deep one; the subscription stops at zero."} =>
+        fn [dir | rest] ->
+          Compos.Core.Watch.unwatch(plain(dir), Compos.Core.Watch, deep: rest == [{:sym, "deep"}])
+          :void
+        end,
+      {"watched-paths", "(watched-paths) — return the watched roots."} => fn [] ->
+        Compos.Core.Watch.watching()
       end,
-      "unwatch-path!" => fn [dir | rest] ->
-        Compos.Core.Watch.unwatch(plain(dir), Compos.Core.Watch, deep: rest == [{:sym, "deep"}])
-        :void
-      end,
-      "watched-paths" => fn [] -> Compos.Core.Watch.watching() end,
-      "fs-on-change!" => fn [handler] ->
-        :ets.insert(@escaped, {{:fs_handler}, handler})
-        :void
-      end,
+      {"fs-on-change!",
+       "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:fs_handler}, handler})
+          :void
+        end,
       # clicking a block in a rich view. The client holds a buffer and the
       # block's own id string, not a command, so it needs a closure to hand
       # them to — the same one-handler shape as mcp-on-change! and
       # fs-on-change!. What an id means is the mode's business.
-      "block-on-click!" => fn [handler] ->
-        :ets.insert(@escaped, {{:block_click_handler}, handler})
-        :void
-      end
+      {"block-on-click!",
+       "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked."} =>
+        fn [handler] ->
+          :ets.insert(@escaped, {{:block_click_handler}, handler})
+          :void
+        end
     }
   end
 

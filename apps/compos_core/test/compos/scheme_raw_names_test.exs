@@ -20,26 +20,25 @@ defmodule Compos.SchemeRawNamesTest do
     out
   end
 
-  test "add/1 gives a raw name the same fun as the primitive it names" do
-    fun = fn [] -> :void end
-    added = SchemeRawNames.add(%{"define-command" => fun})
+  alias Compos.Scheme.Prim
 
-    assert added["define-command--raw"] == fun
+  test "add/1 gives a raw name the same fun as the primitive it names, and a doc" do
+    fun = fn [] -> :void end
+    added = SchemeRawNames.add(%{{"define-command", "(define-command ...) — define."} => fun})
+
+    assert Prim.funs(added)["define-command--raw"] == fun
+    assert Prim.docs(added)["define-command--raw"] =~ "define-command"
   end
 
   # Each module holds its own primitives only, so the shared list must skip
   # every name whose target this map does not have.
   test "add/1 skips a raw name whose target is not in the map" do
-    added = SchemeRawNames.add(%{"define-command" => fn [] -> :void end})
+    added =
+      SchemeRawNames.add(%{
+        {"define-command", "(define-command ...) — define."} => fn [] -> :void end
+      })
 
-    refute Map.has_key?(added, "raw-buffer-create")
-  end
-
-  test "add_docs/1 documents a raw name whose target is documented" do
-    docs = SchemeRawNames.add_docs(%{"buffer-create" => "(buffer-create NAME) — make it."})
-
-    assert docs["raw-buffer-create"] =~ "buffer-create"
-    refute Map.has_key?(docs, "define-command--raw")
+    refute Map.has_key?(Prim.funs(added), "raw-buffer-create")
   end
 
   test "SchemeAPI registers the raw name of every primitive it wraps" do
@@ -71,9 +70,11 @@ defmodule Compos.SchemeRawNamesTest do
   test "no bundled Scheme file captures a raw name" do
     priv = Application.app_dir(:compos_core, "priv")
 
+    packages = Path.join(Compos.Core.project_dir(), "scheme/packages")
+
     src =
       (Path.wildcard(Path.join(priv, "*.scm")) ++
-         Path.wildcard(Path.join([priv, "packages", "**/*.scm"])))
+         Path.wildcard(Path.join(packages, "**/*.scm")))
       |> Enum.map_join("\n", &File.read!/1)
 
     for {raw, target} <- SchemeRawNames.wrapped() do
