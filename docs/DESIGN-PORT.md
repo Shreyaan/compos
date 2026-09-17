@@ -38,15 +38,14 @@ stage. Each stage is one commit, verified live and by a screenshot.
    hairline, `chrome shadow-deep`). The inset group-colour ring is gone.
    A window is now a container, so its bars shed facts by its own width.
    DONE.
-4. **Keys bar.** Every list-mode buffer carries its keymap as a card at
-   the window's bottom corner (`.buffer-footer`, the `ui/keys-bar`
-   component). The mode declares the main keys as its `footer`; the card
-   adds `? all N`. `?` (`list-keys-toggle`, on list-mode-map and on the
-   card) grows it into a grid per keymap from `keys--expand`: the mode's
-   own map, then every list's map, a shadowed key shown once. The
-   `ui/keymap` strip is the design's: a key is accent text, a verb a faint
-   label, no cap. DONE. Facts (group:, sort:) on the card are not yet
-   drawn; the ibuffer head line still carries them.
+4. **Keys bar.** Every list-mode buffer carries its keymap as a bar at
+   the window's foot, full width, in flow above the mode line and never
+   over the rows (a ruling over the design's floating card). The mode
+   declares the main keys as its `footer`; the bar adds `? all N` and
+   owns `?`. `?` (`list-keys-toggle`) grows it into a grid per keymap
+   from `keys--expand`. No list buffer says anything about keys in its
+   head lines any more. Every pressable key is one element,
+   `c-action-key`, so it is always one colour. DONE.
 5. **Narrow at full size.** `C-x C-b` opens `*ibuffer*` as a list buffer
    in a window, `/` narrows it in the minibuffer, and the row at point
    previews in the other window (the no-popup-previews ruling). That is
