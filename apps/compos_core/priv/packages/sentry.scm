@@ -43,16 +43,7 @@
 (defcustom 'sentry-curl-program "curl"
   "The curl executable for Sentry requests." 'group 'sentry)
 
-(defcustom 'sentry-doppler-project "ats_ash"
-  "The Doppler project that holds SENTRY_AUTH_TOKEN." 'group 'sentry)
-
-(defcustom 'sentry-doppler-config "prd"
-  "The Doppler config that holds SENTRY_AUTH_TOKEN." 'group 'sentry)
-
 ;;; --- small helpers ------------------------------------------------------------
-
-(define (sentry--get pl key)
-  (if (pair? pl) (plist-get pl key) #f))
 
 (define (sentry--text value)
   (cond ((string? value) value)
@@ -127,13 +118,8 @@
     (string-append dir "/sentry-" (number->string (current-time)) "-"
                    (number->string *sentry--seq*) ".conf")))
 
-;; Resolve the token only when a request leaves. Do not cache it in this package.
-(define (sentry--token)
-  (or (getenv "SENTRY_AUTH_TOKEN")
-      (and (boundp 'doppler-secret-value)
-           (doppler-secret-value sentry-doppler-project sentry-doppler-config
-                                 "SENTRY_AUTH_TOKEN"))
-      #f))
+;; the key chain answers: the environment, a key file, or the secret provider
+(define (sentry--token) (key-get "SENTRY_AUTH_TOKEN"))
 
 (define (sentry--curl-config url token)
   (string-append

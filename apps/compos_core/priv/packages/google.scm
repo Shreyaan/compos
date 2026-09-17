@@ -60,11 +60,9 @@
   (buffer-delete-range! buf 0 (buffer-size buf))
   (buffer-append! buf text))
 
-(defcustom 'google-doppler-project "compos" "Doppler project for the Google OAuth client." 'group 'google)
-(defcustom 'google-doppler-config "dev" "Doppler config for GOOGLE_OAUTH_CLIENT_JSON." 'group 'google)
 (define (google--client)
   (if (file-exists? google-client-file) google-client-file
-      (let ((json (doppler-secret-value google-doppler-project google-doppler-config "GOOGLE_OAUTH_CLIENT_JSON")))
+      (let ((json (key-get "GOOGLE_OAUTH_CLIENT_JSON")))
         (if json (or (json-parse json) google-client-file) google-client-file))))
 
 (effects! '(write external))

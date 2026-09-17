@@ -19,7 +19,8 @@
   "The doppler executable." 'group 'doppler)
 
 ;; The key chain's Doppler source: which project/config the chain reads.
-;; keys.scm asks for a key by name and never knows Doppler is behind it.
+;; keys.scm asks its `secret-provider` for a key by name and never knows
+;; Doppler is behind it; user config points the custom here.
 (defcustom 'key-doppler-project "personal"
   "The Doppler project the key chain reads." 'group 'doppler)
 
@@ -70,8 +71,8 @@
     (if (null? ps)
         "no projects"
         (fold (lambda (acc p)
-                (string-append acc (custom--plist-get p 'name)
-                  (let ((d (custom--plist-get p 'description)))
+                (string-append acc (plist-get p 'name)
+                  (let ((d (plist-get p 'description)))
                     (if (and d (not (equal? d ""))) (string-append " — " d) ""))
                   "\n"))
               "" ps))))
@@ -81,8 +82,8 @@
     (if (null? cs)
         (string-append "no configs (or no such project: " project ")")
         (fold (lambda (acc c)
-                (string-append acc (custom--plist-get c 'name) "  ("
-                  (or (custom--plist-get c 'environment) "") ")\n"))
+                (string-append acc (plist-get c 'name) "  ("
+                  (or (plist-get c 'environment) "") ")\n"))
               "" cs))))
 
 ;; every other key of a flat plist (k1 v1 k2 v2 ...) — json-parse turns a
@@ -212,7 +213,7 @@
                     (set! *dp-value-cache* (cons (list key v) *dp-value-cache*))
                     v))))))))
 
-;; the one hook keys.scm calls: (doppler-key-value VAR) -> value | #f
+;; a secret provider for the key chain: (customize-set! 'secret-provider doppler-key-value)
 (define (doppler-key-value var)
   (doppler-secret-value key-doppler-project key-doppler-config var))
 
@@ -344,14 +345,14 @@
 
 (define (doppler--project-candidates)
   (map (lambda (p)
-         (list (custom--plist-get p 'name)
-               (or (custom--plist-get p 'description) "")))
+         (list (plist-get p 'name)
+               (or (plist-get p 'description) "")))
        (dp--projects-data)))
 
 (define (doppler--config-candidates project)
   (map (lambda (c)
-         (list (custom--plist-get c 'name)
-               (or (custom--plist-get c 'environment) "")))
+         (list (plist-get c 'name)
+               (or (plist-get c 'environment) "")))
        (dp--configs-data project)))
 
 (define (doppler--valid-name? name)

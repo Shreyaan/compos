@@ -7,7 +7,14 @@
 ;;; The chain, first hit wins:
 ;;;   1. the environment                (getenv VAR)
 ;;;   2. ~/.compos/<name>-key            (VAR minus _API_KEY, downcased)
-;;;   3. Doppler                        (packages/doppler.scm)
+;;;   3. the secret provider            (the `secret-provider` custom)
+;;;
+;;; The provider is one function from a name to a value or #f, and the
+;;; user config supplies it. Core names no provider:
+;;;
+;;;   (customize-set! 'secret-provider doppler-key-value)
+;;;   (customize-set! 'secret-provider
+;;;     (lambda (name) (shell-command->string (string-append "pass show " name))))
 ;;;
 ;;; A "@VAR" value anywhere in config is a reference, not a key: MCP
 ;;; specs and ACP env pairs carry "@EXA_API_KEY" and key-resolve turns
@@ -37,12 +44,14 @@
         (key--non-empty (string-trim (or (read-file path) "")))
         #f)))
 
-;; doppler.scm supplies (doppler-key-value VAR) when it loads; the chain
-;; consults it only when bound, so a missing doppler package never breaks
-;; key lookup. Its project/config live there, not here.
-(define (key--from-doppler var)
-  (if (boundp 'doppler-key-value)
-      (doppler-key-value var)
+;; the seam: one function from a name to a value or #f, set by user config
+(defcustom 'secret-provider #f
+  "A function from a secret name to its value or #f, asked after the environment and the key files. User config sets it; #f ends the chain."
+  'group 'keys)
+
+(define (key--from-provider var)
+  (if (procedure? secret-provider)
+      (secret-provider var)
       #f))
 
 ;;; --- the chain ----------------------------------------------------------------
@@ -54,7 +63,7 @@
         (cadr hit)
         (let ((v (or (getenv var)
                      (key--from-file var)
-                     (key--from-doppler var)
+                     (key--from-provider var)
                      #f)))
           (set! *key-cache* (cons (list var v) *key-cache*))
           v))))
@@ -72,7 +81,7 @@
     ;; otherwise meets as "no api key" at send time — say it now
     (when (or (equal? value #f) (equal? value ""))
       (message (string-append "llm key for " p
-                              " resolved empty — check doppler, then M-x reload-file on ai-config.scm")))
+                              " resolved empty — check the secret provider, then M-x reload-file on ai-config.scm")))
     (set! *llm-keys*
       (cons (list p value)
             (remove (lambda (e) (equal? (car e) p)) *llm-keys*)))

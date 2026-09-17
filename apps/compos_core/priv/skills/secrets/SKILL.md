@@ -7,7 +7,10 @@ description: Probe the secret providers on this machine and set a key up through
 
 A key never goes into a config file. Config holds an `@NAME` reference, and
 the chain in `keys.scm` resolves it at the moment of use, so the value stays
-in the provider. `(key-resolve V)` is that one resolution point: `"@VAR"`
+in the provider. The chain asks the environment, then `~/.compos/<name>-key`,
+then the `secret-provider` custom: one function from a name to a value or
+`#f`, which user config sets (`(customize-set! 'secret-provider
+doppler-key-value)`). Core names no provider. `(key-resolve V)` is that one resolution point: `"@VAR"`
 becomes the secret, a list of parts joins after each resolves, and anything
 else passes through unchanged.
 
@@ -42,8 +45,8 @@ when it is unregistered. `(register-llm-key! PROVIDER VALUE)` sets an
 explicit one, and `(register-llm-base-url! PROVIDER VALUE)` points a
 provider at a self-hosted OpenAI-compatible server.
 
-For a provider the chain does not adapt to yet, prefer an environment
-reference over a copied value, so rotation stays the provider's job.
+For any other provider, set `secret-provider` to a function that asks it,
+so rotation stays the provider's job.
 
 ## When there is no key and no agent
 
