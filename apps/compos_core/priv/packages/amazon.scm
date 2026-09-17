@@ -311,35 +311,14 @@
 ;;; HTML: the preview iframe runs no scripts, so every button on the page is
 ;;; a compos: link the editor hands back to Scheme.
 
-(define amazon-detail-css "<style>
-:root{--bg:#faf9f7;--fg:#1b1a17;--dim:#6b6760;--line:#e3dfd8;--accent:#0f6b52;--chip:#efece6;--card:#fff}
-@media (prefers-color-scheme:dark){:root{--bg:#161513;--fg:#eceae5;--dim:#9a958c;--line:#34312c;--accent:#5fd0aa;--chip:#26241f;--card:#fff}}
-*{box-sizing:border-box}
-html{font-size:clamp(13px,0.62vw,40px)}
-body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.5 -apple-system,BlinkMacSystemFont,Inter,system-ui,sans-serif}
-.wrap{padding:1.2rem;max-width:54rem}
-.top{display:flex;gap:1.3rem;flex-wrap:wrap;align-items:flex-start}
-.shot{flex:0 0 10rem;background:var(--card);border:1px solid var(--line);border-radius:.7rem;padding:.6rem}
-.shot img{max-width:100%;max-height:13rem;height:auto;display:block;margin:0 auto}
-.head{flex:1 1 18rem;min-width:14rem}
-h1{font-size:1.4rem;line-height:1.3;margin:0 0 .4rem;letter-spacing:-.01em}
-.price{font-size:1.9rem;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.price small{font-size:.85rem;font-weight:400;color:var(--dim);margin-left:.55rem;text-decoration:line-through}
-.chips{display:flex;gap:.4rem;flex-wrap:wrap;margin:.85rem 0 0}
-.chip{background:var(--chip);border-radius:999px;padding:.2rem .7rem;font-size:.8rem;color:var(--dim);white-space:nowrap}
-.chip.on{background:var(--accent);color:var(--bg);font-weight:600}
-.act{margin:1.1rem 0 0;display:flex;gap:.6rem;flex-wrap:wrap}
-.btn{display:inline-block;background:var(--accent);color:var(--bg);font-size:.9rem;font-weight:600;padding:.5rem 1.15rem;border-radius:999px;text-decoration:none;border:1px solid var(--accent)}
-.btn.ghost{background:transparent;color:var(--accent)}
-.btn.done{background:transparent;color:var(--dim);border-color:var(--line);font-weight:500}
-table{border-collapse:collapse;margin:1.2rem 0 0;width:100%;font-size:.87rem}
-td{padding:.42rem 0;border-top:1px solid var(--line);vertical-align:top}
-td:first-child{color:var(--dim);width:42%;white-space:nowrap}
-td:last-child{font-variant-numeric:tabular-nums}
-a{color:var(--accent);text-decoration:none}
-.note{margin:1.2rem 0 0;background:var(--chip);border-left:3px solid var(--accent);border-radius:.5rem;padding:.75rem .95rem;font-size:.9rem;white-space:pre-wrap}
-.note h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
-</style>")
+(define-style! 'amazon-detail "
+.amazon-head { padding: 8px 12px 2px; }
+.amazon-title { font-family: var(--font-sans); font-size: 14px; font-weight: 600; line-height: 1.3; color: var(--fg); margin-bottom: 2px; }
+.amazon-price { font-family: var(--font-mono); font-size: 13px; color: var(--fg); }
+.amazon-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; }
+.amazon-note { margin: 8px 12px; padding: 8px 10px; border-left: 3px solid var(--accent-fg); background: var(--hl-line-bg); white-space: pre-wrap; color: var(--fg); }
+.amazon-reviews { padding: 4px 0; font-family: var(--font-sans); color: var(--fg); }
+")
 
 (define (amazon--row-field row key alt) (or (plist-get row key) alt))
 
@@ -392,50 +371,132 @@ a{color:var(--accent);text-decoration:none}
                            (cons (list asin text) rest))))
   (amazon-touch! asin))
 
-(define (amazon-detail-html row)
+(define (amazon-tab buf) (or (buffer-local buf 'amazon-tab) "overview"))
+
+(define (amazon-tab-set! buf tab)
+  (buffer-set-local! buf 'amazon-tab tab)
+  (let ((row (buffer-local buf 'amazon-row)))
+    (when row
+      (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))
+
+(define (amazon--tab-entry buf id label key)
+  (list id label (equal? (amazon-tab buf) id) key))
+
+(define (amazon--tabs-block buf)
+  (component 'ui/tabs
+    (list 'class "amazon-tabs"
+          'tabs (list (amazon--tab-entry buf "overview" "Overview" "1")
+                      (amazon--tab-entry buf "specs" "Specs" "2")
+                      (amazon--tab-entry buf "reviews" "Reviews" "3")))))
+
+(define (amazon--actions row)
   (let* ((asin (plist-get row 'asin))
-         (img (plist-get row 'img))
+         (kept? (amazon-saved? asin))
+         (in? (amazon-in-cart? asin))
+         (note (amazon-note asin)))
+    (component 'ui/actions
+      (list 'actions
+            (list (list "amazon-cart" (if in? "✓ in cart · add another" "Add to cart") "c")
+                  (list "amazon-save" (if kept? "★ saved" "Save") "m")
+                  (list "amazon-note" (if note "Edit note" "Add a note") "N")
+                  (list "amazon-open" "Open in browser" "o"))))))
+
+(define (amazon--head-block row)
+  (let* ((asin (plist-get row 'asin))
          (mrp (plist-get row 'mrp))
          (incl (plist-get row 'incl))
          (rating (plist-get row 'rating))
          (revs (plist-get row 'reviews))
-         (deliv (plist-get row 'delivery))
-         (note (amazon-note asin))
          (kept? (amazon-saved? asin))
          (in? (amazon-in-cart? asin)))
-    (string-append
-     amazon-detail-css
-     "<div class='wrap'><div class='top'>"
-     (if img (string-append "<div class='shot'><img src='" img "' alt=''></div>") "")
-     "<div class='head'><h1>" (plist-get row 'title) "</h1>"
-     "<div class='price'>₹" (amazon--row-field row 'biz "—")
-     (if mrp (string-append "<small>₹" mrp "</small>") "") "</div>"
-     "<div class='chips'>"
-     (if rating (string-append "<span class='chip'>★ " rating
-                               (if revs (string-append " · " revs) "") "</span>") "")
-     (if incl (string-append "<span class='chip'>₹" incl " incl. GST</span>") "")
-     (if (plist-get row 'sponsored) "<span class='chip'>sponsored</span>" "")
-     (if kept? "<span class='chip on'>saved</span>" "")
-     (if in? "<span class='chip on'>in your cart</span>" "")
-     "</div><div class='act'>"
-     "<a class='btn" (if in? " done" "") "' href='compos:amazon-cart/" asin "'>"
-     (if in? "✓ in cart · add another" "Add to cart") "</a>"
-     "<a class='btn ghost' href='compos:amazon-save/" asin "'>"
-     (if kept? "★ saved" "Save") "</a>"
-     "<a class='btn ghost' href='compos:amazon-note/" asin "'>"
-     (if note "Edit note" "Add a note") "</a>"
-     "<a class='btn ghost' href='compos:amazon-open/" asin "'>Open in browser</a>"
-     "</div></div></div><table>"
-     "<tr><td>Price</td><td>₹" (amazon--row-field row 'biz "—") " excl. GST</td></tr>"
-     (if incl (string-append "<tr><td>With GST</td><td>₹" incl "</td></tr>") "")
-     (if mrp (string-append "<tr><td>M.R.P.</td><td>₹" mrp "</td></tr>") "")
-     (if rating (string-append "<tr><td>Rating</td><td>" rating " / 5"
-                               (if revs (string-append " · " revs " ratings") "") "</td></tr>") "")
-     (if deliv (string-append "<tr><td>Delivery</td><td>" deliv "</td></tr>") "")
-     "<tr><td>ASIN</td><td>" asin "</td></tr>"
-     "</table>"
-     (if note (string-append "<div class='note'><h2>Your note</h2>" note "</div>") "")
-     "</div>")))
+    (list 'tag "div" 'class "amazon-head"
+          'children
+          (list
+            (list 'tag "div" 'class "amazon-title" 'text (plist-get row 'title))
+            (list 'tag "div" 'class "amazon-price"
+                  'text (string-append
+                          "₹" (amazon--row-field row 'biz "—")
+                          (if incl (string-append "  ·  ₹" incl " incl. GST") "")
+                          (if mrp (string-append "  ·  M.R.P. ₹" mrp) "")))
+            (list 'tag "div" 'class "amazon-chips"
+                  'children
+                  (filter (lambda (b) b)
+                    (list
+                      (and rating (component 'ui/badge
+                                     (list 'text (string-append "★ " rating
+                                                (if revs (string-append " · " revs) "")))))
+                      (and (plist-get row 'sponsored) (component 'ui/badge (list 'text "sponsored")))
+                      (and kept? (component 'ui/badge (list 'text "saved")))
+                      (and in? (component 'ui/badge (list 'text "in your cart"))))))
+            (amazon--actions row)))))
+
+(define (amazon--overview-blocks row)
+  (let* ((asin (plist-get row 'asin))
+         (incl (plist-get row 'incl))
+         (rating (plist-get row 'rating))
+         (revs (plist-get row 'reviews))
+         (deliv (plist-get row 'delivery))
+         (note (amazon-note asin)))
+    (append
+      (list
+        (component 'ui/group
+          (list 'title "At a glance"
+                'body (list
+                  (component 'ui/kv
+                    (list 'pairs
+                      (list
+                        (list "Price" (string-append "₹" (amazon--row-field row 'biz "—") " excl. GST"))
+                        (list "With GST" (if incl (string-append "₹" incl) "—"))
+                        (list "Rating" (if rating (string-append rating " / 5") "—"))
+                        (list "Reviews" (if revs (string-append revs " ratings") "—"))
+                        (list "Delivery" (or deliv "—")))))))))
+      (if note (list (list 'tag "div" 'class "amazon-note" 'text note)) '()))))
+
+(define (amazon--specs-blocks row)
+  (let* ((asin (plist-get row 'asin))
+         (mrp (plist-get row 'mrp))
+         (incl (plist-get row 'incl))
+         (rating (plist-get row 'rating))
+         (revs (plist-get row 'reviews))
+         (deliv (plist-get row 'delivery)))
+    (list
+      (component 'ui/group
+        (list 'title "Product information"
+              'body (list
+                (component 'ui/kv
+                  (list 'pairs
+                    (list
+                      (list "Price (excl. GST)" (string-append "₹" (amazon--row-field row 'biz "—")))
+                      (list "With GST" (if incl (string-append "₹" incl) "—"))
+                      (list "M.R.P." (if mrp (string-append "₹" mrp) "—"))
+                      (list "Rating" (if rating (string-append rating " / 5") "—"))
+                      (list "Reviews" (if revs (string-append revs " ratings") "—"))
+                      (list "Delivery" (or deliv "—"))
+                      (list "ASIN" asin)
+                      (list "Sponsored" (if (plist-get row 'sponsored) "yes" "no")))))))))))
+
+(define (amazon--reviews-blocks row)
+  (let* ((rating (plist-get row 'rating))
+         (revs (plist-get row 'reviews)))
+    (list
+      (component 'ui/group
+        (list 'title "Customer reviews"
+              'body (list
+                (list 'tag "div" 'class "amazon-reviews"
+                      'text (string-append
+                              (if rating (string-append "★ " rating " / 5") "No rating yet")
+                              (if revs (string-append " · " revs " ratings") "")))
+                (component 'ui/empty
+                  (list 'text "Full reviews live on the Amazon page — open it in the browser to read them."))))))))
+
+(define (amazon--detail-blocks buf row)
+  (let ((tab (amazon-tab buf)))
+    (append
+      (list (amazon--tabs-block buf)
+            (amazon--head-block row))
+      (cond ((equal? tab "specs") (amazon--specs-blocks row))
+            ((equal? tab "reviews") (amazon--reviews-blocks row))
+            (else (amazon--overview-blocks row))))))
 
 (define (amz-page-title row)
   (let ((title (amz-clip (string-trim (amz-replace (or (plist-get row 'title) "") "*" "")) 48)))
@@ -455,17 +516,17 @@ a{color:var(--accent);text-decoration:none}
 (define (amazon-render-detail! buf row)
   (unless (buffer-exists? buf) (buffer-create buf))
   (buffer-set-read-only! buf #f)
-  (let ((old (buffer-text buf)) (new (amazon-detail-html row)))
+  (let ((old (buffer-text buf)) (title (plist-get row 'title)))
     (if (> (string-length old) 0)
-        (buffer-replace! buf old new)
-        (buffer-append! buf new)))
+        (buffer-replace! buf old title)
+        (buffer-append! buf title)))
   (buffer-set-local! buf 'amazon-row row)
   (buffer-set-local! buf 'amazon-title (amz-page-title row))
   (unless (buffer-derived-mode? buf "amazon-detail-mode")
     (with-current-buffer buf (lambda () (set-mode! "amazon-detail-mode"))))
-  (buffer-set-local! buf 'preview-renderer "html")
-  (enable-minor-mode! buf "preview-mode")
-  (preview-heal! buf)
+  (when (minor-mode-on? buf "preview-mode") (disable-minor-mode! buf "preview-mode"))
+  (buffer-set-local! buf 'render-mode "blocks")
+  (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row))
   (buffer-set-read-only! buf #t)
   buf)
 
