@@ -321,7 +321,7 @@
 
 (effects! '(write external execute))
 
-;; A host on the network is that machine own business, so only the local
+;; A host on the network is that machine's own business, so only the local
 ;; server starts from here. nohup keeps it after the editor stops: a
 ;; model server outlives the editor that asked for it. The sleep gives
 ;; the server time to bind its port before the version request.
@@ -425,8 +425,9 @@
     'title (lambda (buf) "Models")
     'meta models--meta
     'total (lambda (buf) (length (list-entries buf)))
+    ;; no local-filter here: it caches the source rows once, and the next
+    ;; answer from the host would never reach the table. / still filters.
     'no-marks #t
-    'local-filter #t
     'key (lambda (buf e) (plist-get e 'name))
     'footer (lambda (buf)
               '(("RET" "show") ("s" "load") ("k" "unload") ("i" "install")
