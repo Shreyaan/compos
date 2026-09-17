@@ -33,6 +33,10 @@ defmodule Compos.Core.Session do
   # LLM callbacks) — the GC can't see through funs, so they register here
   @escaped :compos_escaped_closures
 
+  # how many times apply_reply_callback re-applies a closure whose frame is
+  # still stale; past this the reply is dropped and reported once
+  @stale_frame_retries 10
+
   # sweep when the frame count doubles since the last sweep (with a floor so
   # small sessions never bother); checked on a timer — evals no longer pass
   # through this process, so it cannot count them
@@ -178,17 +182,27 @@ defmodule Compos.Core.Session do
 
     case result do
       {:error, msg} when retries > 0 ->
-        if is_binary(msg) and msg =~ "stale environment frame" do
+        if stale_frame?(msg) do
           Process.sleep(20)
           apply_reply_callback(closure, args, fid, lane, retries - 1)
         else
           result
         end
 
+      # retries exhausted: exec_apply stayed quiet for every attempt, so the
+      # lost reply would otherwise leave no trace at all. Say it once.
+      {:error, msg} ->
+        if stale_frame?(msg),
+          do: message("error: " <> msg <> " (reply dropped after #{@stale_frame_retries} retries)")
+
+        result
+
       _ ->
         result
     end
   end
+
+  defp stale_frame?(msg), do: is_binary(msg) and msg =~ "stale environment frame"
 
   @doc """
   Apply a Scheme closure and return its value (e.g. a completion fn).
@@ -563,7 +577,10 @@ defmodule Compos.Core.Session do
         {:reply, :ok}
 
       {:error, msg} ->
-        message("error: " <> msg)
+        # a stale frame is the transient apply_reply_callback retries away.
+        # Reporting each attempt put up to ten identical lines in *Messages*
+        # for one reply that then succeeded; the exhausted case reports there.
+        unless stale_frame?(msg), do: message("error: " <> msg)
         {:reply, {:error, msg}}
     end
   end
