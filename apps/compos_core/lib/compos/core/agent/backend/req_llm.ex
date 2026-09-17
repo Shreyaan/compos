@@ -21,7 +21,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   the turn.
   """
 
-  @behaviour Compos.Core.Agent.Backend
+  use Compos.Core.Agent.Backend
 
   use GenServer, restart: :temporary
 
@@ -34,23 +34,6 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
 
   # --- behaviour --------------------------------------------------------------
 
-  @impl Backend
-  def start(config, owner), do: GenServer.start_link(__MODULE__, {config, owner})
-
-  @impl Backend
-  def prompt(pid, text, context), do: GenServer.call(pid, {:prompt, text, context})
-
-  @impl Backend
-  def cancel(pid), do: GenServer.call(pid, :cancel)
-
-  @impl Backend
-  def close(pid) do
-    GenServer.stop(pid, :normal)
-    :ok
-  catch
-    :exit, _ -> :ok
-  end
-
   # the api lane is stateless — a model switch is just a variable, so it
   # always succeeds in place and the conversation continues
   @impl Backend
@@ -58,10 +41,6 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
 
   @impl Backend
   def set_effort(pid, effort), do: GenServer.call(pid, {:set_effort, effort})
-
-  @impl Backend
-  def respond_permission(pid, rpc_id, option_id),
-    do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
   def capabilities,
@@ -193,7 +172,9 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   defp bill(%{turn_usage: usage} = state) when map_size(usage) == 0, do: state
 
   defp bill(state) do
-    cost = Compos.Core.LLMUsage.record(state.turn_model || LLM.model(), state.turn_usage, state.slug)
+    cost =
+      Compos.Core.LLMUsage.record(state.turn_model || LLM.model(), state.turn_usage, state.slug)
+
     t = Compos.Core.LLMUsage.tokens(state.turn_usage)
 
     emit(state,

@@ -80,6 +80,45 @@ defmodule Compos.Core.Agent.Backend do
 
   @optional_callbacks set_mode: 2, set_effort: 2, respond_question: 3, steer: 5
 
+  @doc """
+  `use Compos.Core.Agent.Backend` in a GenServer backend: the behaviour,
+  plus the client side of every required callback as one call to the
+  process, each overridable. The optional callbacks stay with the backend
+  that supports them, because the Agent asks `function_exported?` before
+  it calls one.
+  """
+  defmacro __using__(_opts) do
+    quote do
+      @behaviour Compos.Core.Agent.Backend
+
+      @impl Compos.Core.Agent.Backend
+      def start(config, owner), do: GenServer.start_link(__MODULE__, {config, owner})
+
+      @impl Compos.Core.Agent.Backend
+      def prompt(pid, text, context), do: GenServer.call(pid, {:prompt, text, context})
+
+      @impl Compos.Core.Agent.Backend
+      def cancel(pid), do: GenServer.call(pid, :cancel)
+
+      @impl Compos.Core.Agent.Backend
+      def close(pid) do
+        GenServer.stop(pid, :normal)
+        :ok
+      catch
+        :exit, _ -> :ok
+      end
+
+      @impl Compos.Core.Agent.Backend
+      def set_model(pid, model_id), do: GenServer.call(pid, {:set_model, model_id})
+
+      @impl Compos.Core.Agent.Backend
+      def respond_permission(pid, rpc_id, option_id),
+        do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
+
+      defoverridable start: 2, prompt: 3, cancel: 1, close: 1, set_model: 2, respond_permission: 3
+    end
+  end
+
   @escaped :compos_escaped_closures
 
   @doc """

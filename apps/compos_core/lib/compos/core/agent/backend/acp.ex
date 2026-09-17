@@ -8,7 +8,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
   rendering live above the seam.
   """
 
-  @behaviour Compos.Core.Agent.Backend
+  use Compos.Core.Agent.Backend
 
   use GenServer, restart: :temporary
 
@@ -16,9 +16,6 @@ defmodule Compos.Core.Agent.Backend.ACP do
   alias Compos.Core.Agent.Backend
 
   # --- behaviour --------------------------------------------------------------
-
-  @impl Backend
-  def start(config, owner), do: GenServer.start_link(__MODULE__, {config, owner})
 
   @impl Backend
   def prompt(pid, text, context),
@@ -29,28 +26,10 @@ defmodule Compos.Core.Agent.Backend.ACP do
     do: GenServer.call(pid, {:steer, token, text, epoch})
 
   @impl Backend
-  def cancel(pid), do: GenServer.call(pid, :cancel)
-
-  @impl Backend
-  def close(pid) do
-    GenServer.stop(pid, :normal)
-    :ok
-  catch
-    :exit, _ -> :ok
-  end
-
-  @impl Backend
-  def set_model(pid, model_id), do: GenServer.call(pid, {:set_model, model_id})
-
-  @impl Backend
   def set_mode(pid, mode_id), do: GenServer.call(pid, {:set_mode, mode_id})
 
   @impl Backend
   def set_effort(pid, effort), do: GenServer.call(pid, {:set_effort, effort})
-
-  @impl Backend
-  def respond_permission(pid, rpc_id, option_id),
-    do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
   def capabilities, do: [:models, :streaming, :session_modes, :reasoning_effort]

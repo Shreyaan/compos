@@ -7,32 +7,12 @@ defmodule Compos.Core.Agent.Backend.ChromeGeminiNano do
   in the active page. No API key or model process runs in the daemon.
   """
 
-  @behaviour Compos.Core.Agent.Backend
+  use Compos.Core.Agent.Backend
 
   use GenServer, restart: :temporary
 
   alias Compos.Core.Agent.Backend
   alias Compos.Core.Browser
-
-  @impl Backend
-  def start(config, owner), do: GenServer.start_link(__MODULE__, {config, owner})
-
-  @impl Backend
-  def prompt(pid, text, context), do: GenServer.call(pid, {:prompt, text, context})
-
-  @impl Backend
-  def cancel(pid), do: GenServer.call(pid, :cancel)
-
-  @impl Backend
-  def close(pid) do
-    GenServer.stop(pid, :normal)
-    :ok
-  catch
-    :exit, _ -> :ok
-  end
-
-  @impl Backend
-  def set_model(pid, model_id), do: GenServer.call(pid, {:set_model, model_id})
 
   @impl Backend
   def respond_permission(_pid, _rpc_id, _option_id), do: :ok

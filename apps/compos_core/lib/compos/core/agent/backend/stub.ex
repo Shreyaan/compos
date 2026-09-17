@@ -14,7 +14,7 @@ defmodule Compos.Core.Agent.Backend.Stub do
   `{:sym, _}` and the `type` value back into a symbol here.
   """
 
-  @behaviour Compos.Core.Agent.Backend
+  use Compos.Core.Agent.Backend
 
   use GenServer, restart: :temporary
 
@@ -23,28 +23,7 @@ defmodule Compos.Core.Agent.Backend.Stub do
   # --- behaviour --------------------------------------------------------------
 
   @impl Backend
-  def start(config, owner), do: GenServer.start_link(__MODULE__, {config, owner})
-
-  @impl Backend
-  def prompt(pid, text, context), do: GenServer.call(pid, {:prompt, text, context})
-
-  @impl Backend
-  def cancel(pid), do: GenServer.call(pid, :cancel)
-
-  @impl Backend
-  def close(pid) do
-    GenServer.stop(pid, :normal)
-    :ok
-  catch
-    :exit, _ -> :ok
-  end
-
-  @impl Backend
   def set_model(_pid, _model_id), do: {:error, :unsupported}
-
-  @impl Backend
-  def respond_permission(pid, rpc_id, option_id),
-    do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
   def capabilities, do: []
@@ -94,7 +73,11 @@ defmodule Compos.Core.Agent.Backend.Stub do
   end
 
   def handle_call(:cancel, _from, %{paused: rest} = state) when is_list(rest) do
-    send(state.owner, {:backend_event, Backend.plist(type: :"turn-end", "stop-reason": "cancelled")})
+    send(
+      state.owner,
+      {:backend_event, Backend.plist(type: :"turn-end", "stop-reason": "cancelled")}
+    )
+
     {:reply, :ok, %{state | paused: nil}}
   end
 
@@ -104,7 +87,11 @@ defmodule Compos.Core.Agent.Backend.Stub do
   def handle_call(:prompts, _from, state), do: {:reply, state.prompts, state}
 
   defp play(state, []) do
-    send(state.owner, {:backend_event, Backend.plist(type: :"turn-end", "stop-reason": "end_turn")})
+    send(
+      state.owner,
+      {:backend_event, Backend.plist(type: :"turn-end", "stop-reason": "end_turn")}
+    )
+
     state
   end
 
