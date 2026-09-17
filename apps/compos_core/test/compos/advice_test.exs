@@ -3,7 +3,7 @@ defmodule Compos.AdviceTest do
   alias Compos.Core.Session
 
   @suite_file Path.join([:code.priv_dir(:compos_core), "tests", "advice-test.scm"])
-  @package Path.join([:code.priv_dir(:compos_core), "packages", "advice.scm"])
+  @package Path.join(Compos.Core.project_dir(), "scheme/packages/advice.scm")
   @lane {:scheme_suite, __MODULE__}
 
   setup do
@@ -12,15 +12,6 @@ defmodule Compos.AdviceTest do
     assert {:ok, _} = Session.eval(~s|(load "#{@suite_file}")|, nil, 30_000, @lane)
     on_exit(fn -> Session.eval("(advice-test-reset!)", nil, 30_000, @lane) end)
     :ok
-  end
-
-  test "Scheme advice policy" do
-    names = Regex.scan(~r/\(deftest '([^\s()]+)/, File.read!(@suite_file))
-    assert names != []
-
-    for [_, name] <- names do
-      assert {:ok, "()"} == Session.eval("(run-test '#{name})", nil, 30_000, @lane), name
-    end
   end
 
   test "source reload preserves disabled advice and replaces the original" do

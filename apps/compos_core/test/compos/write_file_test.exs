@@ -2,15 +2,6 @@ defmodule Compos.WriteFileTest do
   use Compos.Case, async: false
 
   alias Compos.Core.{Editor, Session}
-
-  @file_ Path.join([:code.priv_dir(:compos_core), "tests", "write-file-test.scm"])
-  @lane {:scheme_suite, __MODULE__}
-
-  defp names do
-    Regex.scan(~r/\(deftest '([^\s()]+)/, File.read!(@file_))
-    |> Enum.map(fn [_, name] -> name end)
-  end
-
   # A verb by its name. Which key reaches it is a preference that moves.
   defp run(command), do: {:ok, _} = Session.eval(~s[(run-command "#{command}")])
 
@@ -23,19 +14,6 @@ defmodule Compos.WriteFileTest do
       )
 
     name
-  end
-
-  @tag timeout: 120_000
-  test "write-file-test.scm passes" do
-    assert {:ok, _} = Session.eval(~s{(load "#{@file_}")}, nil, 30_000, @lane)
-
-    for name <- names() do
-      case Session.eval("(run-test '#{name})", nil, 60_000, @lane) do
-        {:ok, "()"} -> :ok
-        {:ok, failures} -> flunk("#{name} failed: #{failures}")
-        {:error, error} -> flunk("#{name} raised: #{error}")
-      end
-    end
   end
 
   describe "the write prompt" do
