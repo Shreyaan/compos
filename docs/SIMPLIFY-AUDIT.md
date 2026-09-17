@@ -670,7 +670,8 @@ SchemeActor + single_actor + six unused primitives (7ac0c748). A recount
 with Elixir eval strings, user config, skills and prompts in the corpus
 found 20 unreferenced primitives, not 52; introspection reads that tests
 use to assert state (face-list, keymap-parent, buffer-local-map, lsp-log,
-task-alive?, unbind-global!) stay.
+task-alive?, unbind-global!) stay. One test support module (b59e22e6):
+96 files use Compos.Case, one FakeTransport; 31 files keep a custom helper.
 
 **Next three steps, in order.**
 
