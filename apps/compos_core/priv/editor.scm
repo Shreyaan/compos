@@ -12926,7 +12926,7 @@
            ;; top row. The metadata -- mode, model, lane -- wraps onto its
            ;; own row beneath the title, and the verbosity picker stays on
            ;; the top row. CSS reads dseg-meta to place that second row.
-           (top (filter (lambda (cell) (and (cadr cell) (or (group? cell) (wide? cell))) kept))
+           (top (filter (lambda (cell) (and (cadr cell) (or (group? cell) (wide? cell)))) kept))
            (meta (filter (lambda (cell) (and (cadr cell) (not (or (group? cell) (wide? cell))))) kept)))
       (append
         (dash--ruled (map cadr top))
