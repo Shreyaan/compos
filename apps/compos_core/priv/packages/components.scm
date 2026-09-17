@@ -238,6 +238,48 @@
 
 ;;; --- living gallery ----------------------------------------------------------
 
+(defcomponent 'ui/keys-bar
+  "The keymap a list-mode buffer carries: a card at the window's bottom corner with the main keys and `? all N`; expanded, the whole map as a grid per keymap."
+  '((main list required) (grids list optional) (expanded boolean optional))
+  '(main (("RET" "visit") ("SPC" "mark") ("q" "quit"))
+    grids (("dired" (("RET" "dired-find-file") ("m" "dired-mark")))))
+  (lambda (p)
+    (let* ((expanded (component--get p 'expanded #f))
+           (grids (component--get p 'grids '()))
+           (n (apply + (map (lambda (g) (length (cadr g))) grids))))
+      (list 'tag "c-keys-bar"
+            'class (string-append "c-keys-bar" (if expanded " expanded" ""))
+            'children
+            (append
+              (list (list 'tag "div" 'class "keys-line"
+                          'children
+                          (list (component 'ui/keymap
+                                  (list 'keys (component--get p 'main '())
+                                        'tag "div" 'class "keys-main"))
+                                ;; a div: a span block draws no click
+                                (list 'tag "div" 'class "keys-more"
+                                      'click "list-keys-toggle"
+                                      'attrs (list (list "title" (if expanded "fewer keys" "every key")))
+                                      'segs (list (list "c-keymap-key" "?" "kbd")
+                                                  (list "keys-more-word"
+                                                        (cond (expanded "fewer")
+                                                              ((> n 0) (string-append "all " (number->string n)))
+                                                              (else "more"))))))))
+              (if expanded
+                  (map (lambda (g)
+                         (list 'tag "c-keys" 'class "c-keys"
+                               'children
+                               (cons (list 'tag "c-keys-head" 'class "c-keys-head"
+                                           'segs (list (list "name" (car g))
+                                                       (list "count" (number->string (length (cadr g))))))
+                                     (map (lambda (r)
+                                            (list 'tag "c-binding" 'class "c-binding"
+                                                  'segs (list (list "c-keymap-key" (car r) "kbd")
+                                                              (list "do" (cadr r)))))
+                                          (cadr g)))))
+                       grids)
+                  '()))))))
+
 (defcomponent 'ui/keymap
   "The keys in force and what each one does."
   '((keys list required) (tag string optional) (class string optional))
@@ -344,31 +386,31 @@
 
 (define-style! 'components "
 .c-section { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); padding: 12px 2px 6px; border-bottom: 1px solid var(--border-bg); }
-.c-card { margin: 0 0 10px; border: 1px solid var(--border-bg); border-radius: 7px; overflow: hidden; }
+.c-card { margin: 0 0 10px; border: 1px solid var(--border-bg); border-radius: 0; overflow: hidden; }
 .c-fold-head { display: flex; gap: 8px; padding: 6px 10px; background: var(--hl-line-bg); cursor: pointer; font-family: var(--font-mono); }
 .c-caret, .c-dim, .c-kv-key { color: var(--dim-fg); }
 .c-row { padding: 4px 10px; font-family: var(--font-mono); }
 .c-row.current { background: var(--hl-line-bg); }
 .c-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px; }
 .c-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 0; margin: 0 0 10px; border-bottom: 1px solid var(--border-bg); }
-.c-tab { display: inline-flex; gap: 6px; align-items: center; padding: 3px 10px; border: 1px solid transparent; border-bottom: none; border-radius: 5px 5px 0 0; cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg); }
+.c-tab { display: inline-flex; gap: 6px; align-items: center; padding: 3px 10px; border: 1px solid transparent; border-bottom: none; border-radius: 0; cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg); }
 .c-tab:hover { background: var(--hl-line-bg); color: var(--fg); }
 .c-tab-on { color: var(--fg); border-color: var(--border-bg); background: var(--hl-line-bg); }
 .c-tab-key { color: var(--accent-fg); font-weight: 600; }
-.c-action { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px solid var(--border-bg); border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
+.c-action { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px solid var(--border-bg); border-radius: 0; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
 .c-action:hover { background: var(--hl-line-bg); border-color: var(--dim-fg); }
 .c-action-key { color: var(--accent-fg); font-weight: 600; }
 .c-action-label { color: var(--fg); }
 .c-empty { padding: 12px; color: var(--dim-fg); font-family: var(--font-mono); }
-.c-badge { display: inline-block; border-radius: 999px; padding: 1px 7px; background: var(--hl-line-bg); font-size: 10px; }
+.c-badge { display: inline-block; border-radius: 0; padding: 1px 7px; background: var(--hl-line-bg); font-size: 10px; }
 .c-kv { padding: 7px 10px; font-family: var(--font-mono); font-size: 11px; }
 .c-kv-row { display: grid; grid-template-columns: minmax(8ch, .35fr) 1fr; gap: 10px; }
 .c-group { display: block; margin: 0 0 10px; }
-.c-keymap { display: flex; flex-wrap: wrap; gap: 3px 10px; padding: 5px 12px; font-family: var(--font-sans); font-size: 12px; line-height: 1.35; white-space: normal; }
-.c-keymap-row { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; max-width: 100%; }
-.c-keymap-key { display: inline-block; flex: none; padding: 1px 5px; border: 1px solid var(--border-bg); border-bottom-width: 2px; border-radius: 4px; background: var(--hl-line-bg); color: var(--accent-fg); font: 600 11px/1.4 var(--font-mono); white-space: nowrap; }
-.c-keymap-cmd { color: var(--fg); overflow-wrap: anywhere; }
-.c-keymap-doc { color: var(--dim-fg); overflow-wrap: anywhere; }
+.c-keymap { display: flex; flex-wrap: wrap; gap: var(--s4) var(--s9); padding: 5px 12px; font-family: var(--font-mono); font-size: var(--fs-meta); line-height: 1.35; white-space: normal; color: var(--text-faint); }
+.c-keymap-row { display: inline-flex; align-items: baseline; gap: var(--s4); min-width: 0; max-width: 100%; white-space: nowrap; }
+.c-keymap-key { display: inline-block; flex: none; padding: 0; border: 0; background: transparent; color: var(--accent); font: var(--fw-semi) var(--fs-meta)/1.2 var(--font-mono); white-space: nowrap; text-transform: none; }
+.c-keymap-cmd { color: var(--text-faint); }
+.c-keymap-doc { color: var(--text-dim); }
 .buffer-footer:has(.c-keymap) { padding: 0; max-height: 30%; overflow-y: auto; white-space: normal; }
 
 ")

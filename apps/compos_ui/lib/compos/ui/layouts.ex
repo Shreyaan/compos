@@ -438,16 +438,68 @@ defmodule Compos.Ui.Layouts do
             font: 650 11px/1.3 var(--font-mono);
             letter-spacing: 0.015em;
           }
+          /* The keymap every list-mode buffer carries (the design's
+             c-keys-bar): a small card floating inside the window at its
+             bottom corner, over the rows, in the tooltip idiom -- a
+             hairline, a hard 3px shadow, no blur. One line: the main keys
+             and `? all N`. `?` grows the card upward into the whole map;
+             the rows underneath keep the point. A buffer that sets a plain
+             footer-line text gets the same card. */
           .buffer-footer {
-            flex: 0 0 auto;
-            padding: 6px 14px;
-            border-top: 1px solid var(--border-bg, #cbc4b1);
-            background: var(--modeline-inactive-bg, var(--window-inactive-bg, #f4f0e6));
-            color: var(--dim-fg, #6b6a66);
-            font: 550 11px/1.3 var(--font-mono);
-            letter-spacing: 0.015em;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            position: absolute; right: var(--s7); bottom: var(--keys-bottom, 30px);
+            z-index: 6;
+            display: flex; flex-direction: column; gap: var(--s4);
+            max-width: calc(100% - 2 * var(--s7));
+            padding: var(--s2) var(--s6) 4px;
+            background: var(--surface-raised);
+            border: var(--border);
+            box-shadow: 3px 3px 0 var(--edge);
+            font-family: var(--font-mono); font-size: var(--fs-meta);
+            color: var(--text-faint);
+            white-space: nowrap;
           }
+          .buffer-footer:has(.c-keys-bar.expanded) {
+            padding: var(--s5) var(--s7) var(--s6);
+            min-width: min(100%, 460px);
+            border-color: var(--text-strong);
+          }
+          .buffer-footer .c-keys-bar { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+          .buffer-footer .keys-line {
+            display: flex; flex-wrap: wrap; align-items: baseline;
+            gap: var(--s3) var(--s9); min-width: 0;
+          }
+          /* a card is not a bar: when the room runs out its keys wrap onto
+             a second line rather than clipping */
+          .buffer-footer .c-keymap { padding: 0; flex: 0 1 auto; min-width: 0; gap: var(--s3) var(--s8); }
+          .buffer-footer .keys-more {
+            flex: none; margin-left: auto; padding-left: var(--s5);
+            border-left: var(--border-soft); color: var(--text-faint);
+            white-space: nowrap; cursor: default;
+          }
+          .buffer-footer .keys-more:hover { color: var(--text-strong); }
+          .buffer-footer .keys-more .c-keymap-key { margin-right: var(--s3); }
+          /* the whole map: a grid per keymap, key then verb, read down the
+             columns like describe-keymap */
+          .buffer-footer .c-keys {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+            gap: 0 var(--s10); align-content: start;
+          }
+          .buffer-footer .c-keys:first-of-type { margin-top: var(--s3); padding-top: var(--s5); border-top: var(--border-soft); }
+          .buffer-footer .c-keys-head {
+            grid-column: 1 / -1; display: flex; align-items: baseline; gap: var(--s5);
+            padding: var(--s2) 0;
+            font-size: var(--fs-label); letter-spacing: var(--ls-label); text-transform: uppercase;
+            color: var(--text-faint);
+          }
+          .buffer-footer .c-keys-head .name { color: var(--text-strong); font-weight: var(--fw-semi); }
+          .buffer-footer .c-keys-head .count { color: var(--text-dim); }
+          .buffer-footer .c-binding {
+            display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--s5);
+            align-items: baseline; padding: 1px var(--s4);
+            font-size: var(--fs-small); color: var(--text-soft); white-space: nowrap;
+          }
+          .buffer-footer .c-binding .c-keymap-key { text-align: right; overflow: hidden; text-overflow: ellipsis; }
+          .buffer-footer .c-binding .do { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
           .window.workspace-pending .buffer-header {
             border-bottom-color: color-mix(in srgb, var(--alert-fg, #d13b32) 68%, transparent);
             background: color-mix(in srgb, var(--alert-fg, #d13b32) 12%, var(--window-bg, #fdfcf8));

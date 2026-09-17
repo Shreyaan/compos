@@ -782,7 +782,7 @@
 ;; its own binds them on the buffer, since the profile is buffer state.
 (define-keymap! "list-mode-map")
 (for-each (lambda (p) (define-key "list-mode-map" (car p) (cadr p)))
-  '(("?" "describe-mode")
+  '(("?" "list-keys-toggle")
     ("/" "list-filter") ("f" "list-filter") ("\\" "list-filter-pop")
     ("<" "list-cycle-grouping") (">" "list-cycle-sorting")
     ("n" "list-next") ("p" "list-prev")
@@ -1447,6 +1447,52 @@
                 (cons (list (+ at (string-byte-length key) 1)
                             (string-byte-length word) "dim")
                       (cons (list at (string-byte-length key) "accent") spans)))))))
+
+;;; --- the keys card -------------------------------------------------------
+;;; The keymap every list-mode buffer carries (docs/DESIGN-PORT.md, stage
+;;; 4): a small card floating inside the window at its bottom corner, over
+;;; the rows. One line: the main keys the mode declared as its footer, and
+;;; `? all N`. `?` grows the card into the whole map, a grid per keymap,
+;;; key then verb, read down the columns like describe-keymap; the rows
+;;; underneath keep the point. The ui/keys-bar component (components.scm)
+;;; draws it; this decides what it holds.
+
+;; the whole map of a list buffer, a grid per keymap: the mode's own map
+;; first, then every list's map, a key the mode shadows shown once. Each
+;; grid is (TITLE ((KEY COMMAND) ...)).
+(define (list-keys-grids buf)
+  (if (not (boundp 'keys--expand))
+      '()
+      (let* ((mode (list-mode-of buf))
+             (own (if mode (keys--expand (mode-keymap mode) "" '()) '()))
+             (shared (keys--expand "list-mode-map" "" '()))
+             (seen (map car own))
+             (rest (filter (lambda (e) (not (member (car e) seen))) shared))
+             (row (lambda (e) (list (car e) (cadr e)))))
+        (append
+          (if (pair? own) (list (list (dashboard--mode-name mode) (map row own))) '())
+          (if (pair? rest) (list (list "list" (map row rest))) '())))))
+
+;; the card as blocks: #f when the mode declared no footer
+(define (list-keys-bar-blocks buf)
+  (let ((footer (list-opt buf 'footer)))
+    (and footer
+         (boundp 'component)
+         (list (component 'ui/keys-bar
+                 (list 'main (footer buf)
+                       'grids (list-keys-grids buf)
+                       'expanded (if (buffer-local buf 'list-keys-expanded) #t #f)))))))
+
+(define-command "list-keys-toggle"
+  "Grow this list's keys card into the whole keymap, or fold it back"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (now (not (buffer-local buf 'list-keys-expanded))))
+      (desktop-skip! buf 'list-keys-expanded)
+      (buffer-set-local! buf 'list-keys-expanded now)
+      (let ((blocks (list-keys-bar-blocks buf)))
+        (when blocks (buffer-set-local! buf 'footer-line-blocks blocks)))
+      (message (if now "all keys — ? folds them" "main keys")))))
 
 ;; the bar fits the window: a key that does not fit is dropped from the
 ;; end, and a bar that dropped any ends in "? keys", where ? shows them
@@ -2414,8 +2460,7 @@
           (list-composml-text! buf shown prepared)
           (when (list-keymap-component? buf)
             (desktop-skip! buf 'footer-line-blocks)
-            (let* ((footer (list-opt buf 'footer))
-                   (blocks (and footer (list (component 'ui/keymap (list 'keys (footer buf)))))))
+            (let ((blocks (list-keys-bar-blocks buf)))
               (unless (equal? blocks (buffer-local buf 'footer-line-blocks))
                 (buffer-set-local! buf 'footer-line-blocks blocks))))))
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
@@ -12783,6 +12828,10 @@
              ;; the header line's one switcher opens the narrow about HERE
              ((equal? id "buffer-switcher")
               (with-current-buffer buf (lambda () (run-command "buffer-switcher")))
+              #t)
+             ;; the keys card's `?` grows or folds it
+             ((equal? id "list-keys-toggle")
+              (with-current-buffer buf (lambda () (run-command "list-keys-toggle")))
               #t)
              (else #f))))
 

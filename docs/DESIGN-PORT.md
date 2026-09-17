@@ -38,9 +38,15 @@ stage. Each stage is one commit, verified live and by a screenshot.
    hairline, `chrome shadow-deep`). The inset group-colour ring is gone.
    A window is now a container, so its bars shed facts by its own width.
    DONE.
-4. **Keys bar.** Every list-mode buffer carries `c-keys-bar` at its bottom
-   corner: facts, the main keys, `? all N`. `?` grows it into the full
-   `c-keys` grids. Scheme derives it from the mode keymap.
+4. **Keys bar.** Every list-mode buffer carries its keymap as a card at
+   the window's bottom corner (`.buffer-footer`, the `ui/keys-bar`
+   component). The mode declares the main keys as its `footer`; the card
+   adds `? all N`. `?` (`list-keys-toggle`, on list-mode-map and on the
+   card) grows it into a grid per keymap from `keys--expand`: the mode's
+   own map, then every list's map, a shadowed key shown once. The
+   `ui/keymap` strip is the design's: a key is accent text, a verb a faint
+   label, no cap. DONE. Facts (group:, sort:) on the card are not yet
+   drawn; the ibuffer head line still carries them.
 5. **Narrow at full size.** Ibuffer is the minibuffer grown to full, with
    the selected buffer previewed beside the list as a window at rest. No
    centred modal.
