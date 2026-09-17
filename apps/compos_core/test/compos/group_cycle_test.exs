@@ -1,7 +1,7 @@
-defmodule Compos.GroupCycleSchemeTest do
+defmodule Compos.GroupCycleTest do
   @moduledoc """
-  Runs priv/tests/group-cycle-test.scm alone: one key walks a group
-  alone, most recently used first, and flips between the last two.
+  One key walks a group alone, most recently used first, through key
+  dispatch. The scenes come from priv/tests/group-cycle-test.scm.
   """
 
   use ExUnit.Case, async: false
@@ -9,32 +9,6 @@ defmodule Compos.GroupCycleSchemeTest do
   alias Compos.Core.{Editor, KeyDispatch, Session}
 
   @file_ Path.join([:code.priv_dir(:compos_core), "tests", "group-cycle-test.scm"])
-  @lane {:scheme_suite, __MODULE__}
-
-  defp eval!(code) do
-    {:ok, out} = Session.eval(code, nil, 30_000, @lane)
-    out
-  end
-
-  defp names do
-    Regex.scan(~r/\(deftest '([^\s()]+)/, File.read!(@file_))
-    |> Enum.map(fn [_, name] -> name end)
-  end
-
-  @tag timeout: 120_000
-  test "group-cycle-test.scm passes" do
-    eval!(~s{(load "#{@file_}")})
-    names = names()
-    assert names != [], "the file declares no test"
-
-    for name <- names do
-      case Session.eval("(run-test '#{name})", nil, 60_000, @lane) do
-        {:ok, "()"} -> :ok
-        {:ok, failures} -> flunk("#{name} failed: #{failures}")
-        {:error, err} -> flunk("#{name} raised: #{err}")
-      end
-    end
-  end
 
   test "group-next-buffer cycles the preferred mode through key dispatch" do
     previous = Editor.last_active_frame()

@@ -28,7 +28,12 @@ defmodule Compos.SchemeSuiteTest do
     out
   end
 
-  defp eval(code), do: Session.eval(code, nil, 30_000, @lane)
+  # a test that hangs is that test's failure, and the tests after it still run
+  defp eval(code) do
+    Session.eval(code, nil, 30_000, @lane)
+  catch
+    :exit, reason -> {:error, "timed out: #{inspect(reason, limit: 3)}"}
+  end
 
   # symbols print as a bare list: (a b c)
   defp names do
@@ -36,6 +41,34 @@ defmodule Compos.SchemeSuiteTest do
     |> String.trim_leading("(")
     |> String.trim_trailing(")")
     |> String.split(" ", trim: true)
+  end
+
+  @tests_dir Path.join(:code.priv_dir(:compos_core), "tests")
+
+  # the deftest names a file declares, read from the file
+  defp declared(path) do
+    Regex.scan(~r/\(deftest '([^\s()]+)/, File.read!(path))
+    |> Enum.map(fn [_, name] -> name end)
+  end
+
+  # One file at a time, for work on that file:
+  #   SCHEME_TESTS=morg mix test test/compos/scheme_suite_test.exs
+  # matches every priv/tests file whose name contains the word; a comma
+  # separates several words.
+  defp selected(names) do
+    case System.get_env("SCHEME_TESTS") do
+      nil ->
+        names
+
+      words ->
+        wanted =
+          for word <- String.split(words, ","),
+              path <- Path.wildcard(Path.join(@tests_dir, "*#{String.trim(word)}*.scm")),
+              name <- declared(path),
+              do: name
+
+        Enum.filter(names, &(&1 in wanted))
+    end
   end
 
   # Before trusting a green suite, prove the harness can go red. Three bad
@@ -104,6 +137,21 @@ defmodule Compos.SchemeSuiteTest do
            "the suite is skipping #{gated} tests it should be running"
   end
 
+  # A file that raises on load takes its tests with it in silence, and a
+  # green run then reads like a pass. Every file on disk must register
+  # every test it declares.
+  test "every test file registered every test it declares" do
+    found = names()
+
+    missing =
+      for path <- Path.wildcard(Path.join(@tests_dir, "*.scm")),
+          name <- declared(path),
+          name not in found,
+          do: "#{Path.basename(path)}: #{name}"
+
+    assert missing == [], "declared but not registered:\n" <> Enum.join(missing, "\n")
+  end
+
   # The whole Scheme suite runs inside this one test, and it has grown
   # past the 60s ExUnit default.
   @tag timeout: 180_000
@@ -112,10 +160,9 @@ defmodule Compos.SchemeSuiteTest do
 
     assert found != [], "priv/tests registered no tests — did load-tests! find the directory?"
 
-    real = found -- [@canary]
+    real = selected(found -- [@canary])
 
-    assert length(real) > 20,
-           "only #{length(real)} tests loaded — a test file probably raised on load"
+    assert real != [], "no test matched SCHEME_TESTS=#{System.get_env("SCHEME_TESTS")}"
 
     failures =
       for name <- real,

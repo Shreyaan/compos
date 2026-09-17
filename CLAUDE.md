@@ -24,6 +24,7 @@ Before an RL benchmark run or benchmark harness change, load
 ```sh
 bin/test-fast                               # the suite in 4 partitions; all four apps must stay green
 mix test                                    # one lane — use it when one readable log matters
+SCHEME_TESTS=morg mix test apps/compos_core/test/compos/scheme_suite_test.exs   # one priv/tests file
 mix compos.reload apps/compos_core/priv/packages/foo.scm   # a file outside the watched roots
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 ```
