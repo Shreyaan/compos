@@ -12335,12 +12335,17 @@
 .dseg-gap { flex: 1 1 auto; }
 .dseg-stack { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
 .dseg-wide { flex: 1 1 0; min-width: 0; }
-/* The headline is one row at every width. Nothing wraps and nothing breaks
-   to a second line: the badge and the metadata keep their natural size, and
-   the title is the one thing that gives way, ellipsising into what is left.
-   Every segment reads inline, key beside value, so the row stays one line
-   tall however narrow the pane gets. */
-.dash-persistent { flex-wrap: nowrap; gap: 16px; }
+/* The headline wraps at the title: the badge and the title (with the
+   open jj change) ride the top row, and the verbosity picker stays on
+   that row at its end. The metadata -- mode, model, lane -- wraps onto
+   a second row of its own beneath the title, so a narrow window stacks
+   the rest below the title instead of squeezing it. dseg-meta is the
+   row Scheme builds for the metadata; the picker is ordered ahead of
+   it, and the title keeps growing to fill the top row. */
+.dash-persistent { flex-wrap: wrap; column-gap: 16px; row-gap: 4px; }
+.dash-verbosity { order: 1; }
+.dseg-meta { order: 2; flex: 0 1 100%; display: flex; align-items: baseline;
+             gap: 16px; min-width: 0; }
 .dash-persistent .dseg,
 .dash-persistent .dseg-stack { flex-direction: row; align-items: baseline; gap: 6px; }
 .dash-persistent .dseg-stack { gap: 16px; }
@@ -12904,26 +12909,31 @@
                      (if (and vcs (not (dash--summary buf)))
                          (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
          (keep (dash--headline-keep buf (buffer-cols buf))))
-    ;; the state marker rides after the ruled segments: it draws nothing, so
-    ;; it takes no rule beside it, and no keep list can drop it
-    (append
-      (dash--ruled
-        (map cadr
-           ;; a cell that built no block says nothing, so it takes no slot and
-           ;; no rule beside it: outside a group there is no badge
-           (filter (lambda (cell) (cadr cell))
-           ;; the group badge leads at every width, the chat title follows it,
-           ;; and the metadata comes after both
-           (let* ((group? (lambda (cell) (equal? (car cell) 'group)))
-                  (wide? (lambda (cell) (equal? (car cell) 'wide)))
-                  (tail (remove group? cells))
-                  (ordered (append (filter group? cells)
-                                   (filter wide? tail)
-                                   (remove wide? tail))))
-             (if keep
-                 (filter (lambda (cell) (member (car cell) keep)) ordered)
-                 ordered)))))
-      (list (dash--state-mark buf)))))
+    ;; the state marker rides last: it draws nothing, so it takes no rule
+    ;; beside it, and no keep list can drop it
+    (let* ((group? (lambda (cell) (equal? (car cell) 'group)))
+           (wide? (lambda (cell) (equal? (car cell) 'wide)))
+           (tail (remove group? cells))
+           (ordered (append (filter group? cells)
+                            (filter wide? tail)
+                            (remove wide? tail)))
+           (kept (if keep
+                     (filter (lambda (cell) (member (car cell) keep)) ordered)
+                     ordered))
+           ;; a cell that built no block says nothing, so it takes no slot:
+           ;; outside a group there is no badge. The group badge leads at
+           ;; every width and the chat title follows it, on the headline's
+           ;; top row. The metadata -- mode, model, lane -- wraps onto its
+           ;; own row beneath the title, and the verbosity picker stays on
+           ;; the top row. CSS reads dseg-meta to place that second row.
+           (top (filter (lambda (cell) (and (cadr cell) (or (group? cell) (wide? cell))) kept))
+           (meta (filter (lambda (cell) (and (cadr cell) (not (or (group? cell) (wide? cell))))) kept)))
+      (append
+        (dash--ruled (map cadr top))
+        (if (pair? meta)
+            (list (list 'tag "div" 'class "dseg-meta" 'children (map cadr meta)))
+            '())
+        (list (dash--state-mark buf))))))
 
 (define (dash--wide-seg key text &optional title-class)
   (let ((base (dash--seg key (list (list (if title-class "dseg-strong" "f-dim") text))

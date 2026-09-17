@@ -19,6 +19,10 @@ defmodule Compos.LLMDbTest do
         "meta/muse-spark-1.1" => %{
           "cost" => %{"input" => 1.25, "output" => 4.25},
           "limit" => %{"context" => 1_048_576, "output" => 943_718}
+        },
+        "meta/muse-spark-1.2" => %{
+          "cost" => %{"input" => 1.25, "output" => 4.25},
+          "limit" => %{"context" => 1_048_576, "output" => 943_718}
         }
       }
     },
@@ -56,11 +60,18 @@ defmodule Compos.LLMDbTest do
     assert LLMDb.max_tokens("deepseek:deepseek-v4-flash") == 393_216
   end
 
-  test "Muse Spark output limit is Meta's documented 128K" do
-    # openrouter reports ~90% of the 1M context window (943718) as the
-    # output limit; Meta documents a 128K maximum generated output.
+  test "Muse Spark output limit is Meta's documented 128K across the family" do
+    # openrouter reports ~90% of the 1M context window (943718) as every
+    # Muse Spark's output limit; Meta documents a 128K maximum generated
+    # output for the whole family.
     assert LLMDb.max_tokens("openrouter:meta/muse-spark-1.1") == 131_072
     assert LLMDb.max_tokens("muse-spark-1.1") == 131_072
+    assert LLMDb.max_tokens("openrouter:meta/muse-spark-1.2") == 131_072
+    assert LLMDb.max_tokens("meta/muse-spark-1.3") == 131_072
+    assert LLMDb.max_tokens("meta/muse-spark-1.3-contributor") == 131_072
+
+    # a non-Spark Muse model keeps its own catalog limit
+    assert LLMDb.max_tokens("meta/muse-glimmer-30b") == nil
   end
 
   test "cost sums all four token buckets per million" do

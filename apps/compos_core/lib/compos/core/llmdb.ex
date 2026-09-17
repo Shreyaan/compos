@@ -60,10 +60,13 @@ defmodule Compos.Core.LLMDb do
         # limit. DeepSeek documents a 384K maximum generated output.
         384 * 1024
 
-      model when model in ["meta/muse-spark-1.1", "muse-spark-1.1"] ->
+      <<"meta/muse-spark-", _::binary>> ->
         # models.dev/openrouter report ~90% of the 1M context window (943718)
-        # as Muse Spark 1.1's output limit. Meta documents a 128K maximum
-        # generated output.
+        # as every Muse Spark's output limit. Meta documents a 128K maximum
+        # generated output for the whole family.
+        128 * 1024
+
+      <<"muse-spark-", _::binary>> ->
         128 * 1024
 
       _ ->
