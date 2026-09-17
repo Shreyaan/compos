@@ -12423,12 +12423,16 @@
 .dash-persistent .dseg-chat-title[glyph]::before {
   content: attr(glyph); flex: none; font-family: var(--font-mono);
   font-size: var(--fs-ui); color: var(--accent); }
+/* Space age: light, wide-tracked mono. A chat's title is a sentence and
+   goes to tracked capitals; a buffer name is case-significant and keeps
+   its case, tracked the same. */
 .dash-persistent .dseg-chat-title .dseg-v {
-  display: block; font-weight: var(--fw-semi); line-height: 1.3;
-  font-family: var(--font-mono); font-size: var(--fs-ui); letter-spacing: 0.01em;
+  display: block; font-weight: 300; line-height: 1.3;
+  font-family: var(--font-mono); font-size: var(--fs-small); letter-spacing: 0.14em;
   color: var(--text-strong); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
-.dash-persistent .dseg-chat-title .dseg-strong { font-weight: var(--fw-semi); }
+.dash-persistent .dseg-chat-title:not(.dseg-title-mono) .dseg-v { text-transform: uppercase; }
+.dash-persistent .dseg-chat-title .dseg-strong { font-weight: 300; }
 .dseg-fill { flex: 1 1 auto; min-width: 8px; height: var(--hair); background: var(--edge-soft); align-self: center; }
 /* the state needs no word: a floating window says it */
 .dash-state-mark { display: none; }
