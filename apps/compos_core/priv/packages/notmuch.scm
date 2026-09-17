@@ -535,6 +535,7 @@ when a message has no text/plain part." 'group 'notmuch)
             ("r" "notmuch-reply") ("a" "notmuch-archive") ("d" "notmuch-trash")
             ("u" "notmuch-smart-untag") ("." "notmuch-toggle-unread")
             ("@" "notmuch-filter-by-sender")
+            ("P" "notmuch-purge-sender")
             ("m" "notmuch-mark-toggle") ("M" "notmuch-mark-all")
             ("*" "notmuch-mark-all") ("U" "notmuch-unmark-all")
             ("F" "notmuch-filter-marked") ("A" "notmuch-archive-marked")
@@ -1552,29 +1553,74 @@ when a message has no text/plain part." 'group 'notmuch)
         (run-command "notmuch"))))
 (catalog-meta! 'command "notmuch-back" 'domain 'mail 'effects '(write external execute))
 
+(define (nm--sender-at buf)
+  (let ((th (nm--thread-at buf)))
+    (and th
+         (let* ((msgs (nm--flatten-msgs
+                        (or (nm--json (string-append "show --format=json --body=false thread:"
+                                                     (nm--th-id th)))
+                            '())))
+                (from (if (null? msgs)
+                          ""
+                          (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
+                (parts (string-split from "<")))
+           (if (null? (cdr parts))
+               (string-trim from)
+               (car (string-split (cadr parts) ">")))))))
+
 (define-command "notmuch-filter-by-sender" "Narrow the search to this thread's sender"
   (lambda ()
-    (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
-      (if (not th)
-          (message "No thread on this line")
-          (let* ((msgs (nm--flatten-msgs
-                         (or (nm--json (string-append "show --format=json --body=false thread:"
-                                                      (nm--th-id th)))
-                             '())))
-                 (from (if (null? msgs)
-                           ""
-                           (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
-                 (email (let ((parts (string-split from "<")))
-                          (if (null? (cdr parts))
-                              (string-trim from)
-                              (car (string-split (cadr parts) ">"))))))
-            (if (equal? email "")
-                (message "Could not extract the sender")
-                (begin
-                  (nm--query-push-only! buf (string-append "from:" email))
-                  (nm--refresh! buf)
-                  (list-goto-first-entry buf)
-                  (message (string-append "from:" email)))))))))
+    (let* ((buf (current-buffer)) (email (nm--sender-at buf)))
+      (cond
+        ((not email) (message "No thread on this line"))
+        ((equal? email "") (message "Could not extract the sender"))
+        (else
+          (nm--query-push-only! buf (string-append "from:" email))
+          (nm--refresh! buf)
+          (list-goto-first-entry buf)
+          (message (string-append "from:" email)))))))
+
+(domain! 'mail)
+(effects! '(write external execute))
+
+(defcustom 'notmuch-purge-tag "archived"
+  "The tag notmuch-purge-sender adds as it takes a sender out of the inbox.
+It marks what the purge took, so one tag command puts it all back.")
+
+(define (nm--purge-query email)
+  (string-append "tag:inbox AND NOT tag:flagged AND from:" email))
+
+(define (nm--purge-count email)
+  (let ((n (string->number (string-trim (notmuch (string-append "count -- " (nm--purge-query email)))))))
+    (if (number? n) n 0)))
+
+(define-command "notmuch-purge-sender"
+  "Archive every inbox message from this thread's sender, flagged mail aside"
+  (lambda ()
+    (let* ((buf (current-buffer)) (email (nm--sender-at buf)))
+      (cond
+        ((not email) (message "No thread on this line"))
+        ((equal? email "") (message "Could not extract the sender"))
+        ((re-find "[^A-Za-z0-9._%+@-]" email 0)
+         (message (string-append "Will not purge an odd address: " email)))
+        (else
+          (let ((n (nm--purge-count email)))
+            (if (= n 0)
+                (message (string-append "Nothing from " email " in the inbox"))
+                (minibuffer-read
+                  (string-append "Purge " (number->string n) " from " email "? ")
+                  (list "yes" "no")
+                  (lambda (ans)
+                    (if (equal? ans "yes")
+                        (begin
+                          (notmuch (string-append "tag +" notmuch-purge-tag " -inbox -- "
+                                                  (nm--purge-query email)))
+                          (nm--refresh! buf)
+                          (message (string-append "Purged " (number->string n) " from " email
+                                                  " (+" notmuch-purge-tag ")")))
+                        (message "Cancelled")))))))))))
+
+(effects! '(unknown))
 
 (define (nm--thread-here)
   "The thread the command acts on: an open notmuch-show buffer names its thread, a list row carries one."
