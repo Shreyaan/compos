@@ -177,7 +177,7 @@ defmodule Compos.Core.Session do
   dropping an out-of-editor reply loses it outright. Backend.call_context uses
   the same defensive retry. Ordinary callbacks still fail fast.
   """
-  def apply_reply_callback(closure, args, fid \\ nil, lane \\ nil, retries \\ 10) do
+  def apply_reply_callback(closure, args, fid \\ nil, lane \\ nil, retries \\ @stale_frame_retries) do
     result = apply_callback(closure, args, fid, lane)
 
     case result do
