@@ -15,9 +15,9 @@
 
 (define (ibuffer-test-reset!)
   (when (buffer-known? "*ibuffer*")
+    ;; the view dies on the next line: no redraw for a cleared filter
     (buffer-set-locals! "*ibuffer*"
-      (list 'ibuffer-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '()))
-    (list-filter-clear! "*ibuffer*")
+      (list 'ibuffer-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '() 'list-filters '()))
     (buffer-kill! "*ibuffer*"))
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
             '("*zz-ib-a*" "*zz-ib-b*" "*zz-ib-c*"))
@@ -33,9 +33,10 @@
   (switch-to-buffer! "*zz-ib-c*")
   (switch-to-buffer! "*zz-ib-b*")
   (run-command "ibuffer")
+  ;; the filter and the options land together, then one draw
   (buffer-set-locals! "*ibuffer*"
-    (list 'ibuffer-grouping grouping 'ibuffer-sort sort 'ibuffer-collapsed '()))
-  (list-set-filters! "*ibuffer*" (list (list "match" "zz-ib-")))
+    (list 'ibuffer-grouping grouping 'ibuffer-sort sort 'ibuffer-collapsed '()
+          'list-filters (list (list "match" "zz-ib-"))))
   (ibuffer-refresh!))
 
 (define (ibuffer-test-names)

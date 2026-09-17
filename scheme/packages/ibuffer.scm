@@ -832,8 +832,19 @@
     (not (or (and (equal? tag 'mode) (equal? g 'mode))
              (and (equal? tag 'group) (equal? g 'group))))))
 
+(define *ibuffer-fields-memo* '())
+
+;; the live fields depend on the buffer's grouping, not on the row, yet
+;; every row's cells asked: 25 rows paid 7ms for one answer. One draw
+;; computes it once; the rows fn clears the memo as a draw opens.
 (define (ibuffer-fields buf all)
-  (filter (lambda (f) (ibuffer-field-live? buf (ibuffer-field-tag f))) all))
+  (let* ((key (list buf (length all)))
+         (hit (assoc key *ibuffer-fields-memo*)))
+    (if hit
+        (cadr hit)
+        (let ((live (filter (lambda (f) (ibuffer-field-live? buf (ibuffer-field-tag f))) all)))
+          (set! *ibuffer-fields-memo* (cons (list key live) *ibuffer-fields-memo*))
+          live))))
 
 ;; A draw asks for the same cell twice: once to measure the column, once
 ;; to fill it. The answers can cost a syscall -- a chat's size is a stat
@@ -861,6 +872,7 @@
 
 (define (ibuffer-columns-clear!)
   (set! *ibuffer-columns-memo* '())
+  (set! *ibuffer-fields-memo* '())
   (set! *ibuffer-cell-memo* '()))
 
 (define (ibuffer-columns-for buf all)

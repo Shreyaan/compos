@@ -354,13 +354,20 @@ then one call at a time):
 
 Rearranging windows costs nothing. The seconds in the suite are `wait-until`
 caps on failing tests and the 30s bridge timeout on hanging ones. The real
-cost is the table draw: about 5ms fixed plus 2ms per row (list-head-lines
-3ms for two lines, list-prepare-rows! and list-composml-text! 2ms each for
-four rows), and the ibuffer fixture draws the 24-row table three times per
-test where one draw would do (`list-set-filters!` redraws, then
-`ibuffer-refresh!` draws again; `list-filter-clear!` redraws a buffer the
-next line kills). Next: bring one draw under 1ms per row, and make the
-fixture draw once.
+cost is the table draw, and the interpreter is not the reason: a lambda
+call, a buffer-local read, and an assoc over 100 entries each cost 1-2us.
+The reason is per-draw facts recomputed per row. `ibuffer-fields` depends
+on the buffer's grouping only, yet every row's cells asked it, at 0.28ms
+a call: 7ms of a 49ms draw. Memoized per draw, the draw is 39ms and the
+ibuffer tests run in 80-170ms instead of 400-700ms (the fixture also
+draws twice per test now, not four times).
+
+What is left in the 39ms for 25 rows: row fetch 3, column fit 5 (each
+field measures every row once), prepare 8 (cells 3, lay-out 3, lines 2),
+composml-text 9 (record fn 3, the loop 6), write and overlays 3, the rest
+under 2ms each. Under 1ms per row needs one pass per row that builds
+cells, lines, fields and record together instead of four passes; that is
+the "one list renderer" item in section 4, not a micro-fix.
 
 ## 5. Agent, chat, LLM, tools, permissions
 
