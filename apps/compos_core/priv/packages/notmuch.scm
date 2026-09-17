@@ -354,8 +354,18 @@ when a message has no text/plain part." 'group 'notmuch)
           ;; reader still counts them
           (else (string-join (map (lambda (t) (substring t 0 1)) tags) "")))))
 
+;; A hidden tag is a real tag: it stays in the database, stays searchable, and
+;; still completes in notmuch-remove-tag. It just never draws. Every row carries
+;; inbox, the bar already says unread, and compos-mark is drawn as a face, so a
+;; row that prints them spends width saying what it has already said.
+(defcustom 'notmuch-hidden-tags '("inbox" "unread" "compos-mark")
+  "Tags the thread list never draws.")
+
+(define (nm--visible-tags th)
+  (filter (lambda (t) (not (member t notmuch-hidden-tags))) (nm--th-tags th)))
+
 (define (nm--tags-text th)
-  (string-join (nm--th-tags th) " "))
+  (string-join (nm--visible-tags th) " "))
 
 ;; The tag column is as wide as the busiest thread of this search needs,
 ;; so every thread shows every tag it has. It stops at half the window:
@@ -458,7 +468,8 @@ when a message has no text/plain part." 'group 'notmuch)
               (nm--field "mail-date" (nm--th-date th) "trailing")
               (nm--field "mail-participants" (nm--th-authors th) "secondary")
               (list 'tag "mail-tags" 'attrs '(("field" "tags")) 'children
-                    (map (lambda (tag) (nm--field "mail-tag" tag)) (nm--th-tags th))))))
+                    (map (lambda (tag) (nm--field "mail-tag" tag))
+                         (nm--visible-tags th))))))
 
 (define (nm--click-thread! buf th)
   ;; The shared list already moved point to this record. Match n/p behavior.
@@ -1257,10 +1268,11 @@ when a message has no text/plain part." 'group 'notmuch)
                       (nm--tag! buf "--remove-all"))
                   (message "Cancelled"))))))))
 (catalog-meta! 'command "notmuch-remove-all-tags" 'domain 'mail 'effects '(destroy))
-;; Autotag: the mailbox's own tag list is the label set. The model reads one
-;; thread and picks from that list, so it cannot invent a folder. The state tags
-;; (inbox, unread, replied) are not on offer, and nothing is ever removed, so a
-;; classification can only add tags this mailbox already uses.
+;; Autotag: the mailbox's own tag list is the label set, sent to JEV as the
+;; options of one choice question. JEV reads the thread and picks exactly one of
+;; them, so it cannot invent a folder. The state tags (inbox, unread, replied)
+;; are not on offer, and nothing is ever removed, so a classification can only
+;; add a tag this mailbox already uses.
 (defcustom 'notmuch-autotag-exclude
   '("inbox" "unread" "attachment" "signed" "encrypted" "draft" "sent"
     "replied" "trash" "flagged" "compos-mark")
@@ -1268,9 +1280,50 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (defcustom 'notmuch-autotag-limit 6000
   "How much of a thread's text notmuch-autotag sends to the model.")
+;; A tag name alone is a thin description, and a thin description is what makes
+;; a classifier miss. These say what the tag covers. A tag with no entry here is
+;; described by its own name.
+(defcustom 'notmuch-autotag-hints
+  '("banking" "Anything from a bank, card issuer, or payment network: account and card statements, transaction and card alerts, balance and credit notices, loan and EMI notices, cheque and transfer confirmations, KYC and account-service mail. Mail from a bank belongs here even when it also looks like a bill, a receipt, or marketing. A broker, depository, demat provider, or fund house is not a bank."
+    "newsletter" "A recurring bulk mailing the reader subscribed to and that anyone on the list receives unchanged: a newsletter, digest, roundup, briefing, or new-post notification from a blog or publication. The giveaway is an unsubscribe link plus editorial content addressed to a list, not to this reader. A one-off promotion, an order receipt, or a service notice is not a newsletter."
+    "bills" "A bill or payment request from an ordinary vendor: a utility, a landlord, a telco, a subscription. Not a bank's own statement or fee, and not a broker's account or maintenance charge."
+    "invoice" "An invoice the reader issued or received for work or goods, with line items and an amount."
+    "expenses" "A receipt or expense record for something already paid."
+    "investments" "Anything from a broker, depository, demat provider, exchange, fund house, or wealth platform: holdings and portfolio statements, contract notes, trade confirmations, dividends, capital-gains statements, and that provider's own account and maintenance charges. Mail from a broker or a depository belongs here and not under banking, even when it reads as a bank alert or a bill."
+    "taxes" "Tax filings, tax notices, and tax authority correspondence."
+    "gov" "Mail from a government body or public authority: visas, licences, registrations, official notices."
+    "spam" "Unsolicited bulk mail from a sender the reader has no relationship with.")
+  "Per-tag descriptions notmuch-autotag sends JEV. A tag with no entry is described by its own name.")
+;; These three are not subjects, so they are not options in the one choice: a
+;; thread can be about investments AND be phishing. Each is its own yes/no
+;; question, and the answer is a probability, so the threshold lives here too.
+(defcustom 'notmuch-autotag-flags
+  '("important" "Does this thread need this reader to act, decide, reply, or pay, or does it carry a deadline, a sum of money, or a consequence that matters to them personally? A bulk mailing that merely sounds urgent is not important."
+    "spam" "Is this unsolicited bulk mail from a sender this reader never gave their address to and has no relationship with?"
+    "phishing" "Does this thread try to get credentials, money, card or account details, or personal data by pretending to be a person or an organisation it is not? Look for a sender domain that does not match the brand it claims, a link that does not go where it says, and pressure to act at once.")
+  "Yes/no tags notmuch-autotag asks about one at a time, as tag then question.")
+
+(defcustom 'notmuch-autotag-threshold 0.75
+  "How sure JEV must be before notmuch-autotag applies a yes/no tag.")
+
+
+(define (nm--autotag-pair-tags plist)
+  (let loop ((xs plist) (out '()))
+    (if (or (null? xs) (null? (cdr xs)))
+        (reverse out)
+        (loop (cdr (cdr xs)) (cons (car xs) out)))))
+
+(define (nm--autotag-flag-tags)
+  (nm--autotag-pair-tags notmuch-autotag-flags))
+
 
 (define (nm--autotag-vocabulary)
-  (filter (lambda (t) (not (member t notmuch-autotag-exclude))) (nm--all-tags)))
+  ;; A flag tag is never a subject option: it has its own yes/no question, and
+  ;; offering it twice would make the one subject pick fight with the flag.
+  (let ((flags (nm--autotag-flag-tags)))
+    (filter (lambda (t) (and (not (member t notmuch-autotag-exclude))
+                             (not (member t flags))))
+            (nm--all-tags))))
 
 (define (nm--thread-tags id)
   (filter (lambda (t) (not (equal? t "")))
@@ -1284,38 +1337,45 @@ when a message has no text/plain part." 'group 'notmuch)
           ((member (car l) acc) (loop (cdr l) acc))
           (else (loop (cdr l) (cons (car l) acc))))))
 
-(define (nm--autotag-prompt id vocab)
+(define nm--autotag-instructions
   (string-append
-    "Classify one email thread for a mail client.\n\n"
-    "These are the only tags you may use:\n" (string-join vocab ", ") "\n\n"
-    "Pick every tag that tells the truth about this thread. Copy each tag "
-    "exactly. Do not invent a tag. Pick nothing rather than a tag that only "
-    "nearly fits.\n\n"
-    "Answer with the tags on one line, separated by commas. Answer NONE when no "
-    "tag fits. Write no other words.\n\n"
-    "--- thread ---\n"
-    (nm--trunc (mail-read-thread id) notmuch-autotag-limit)))
+    "Pick the one tag that says what this email thread is about. "
+    "Read the sender before the wording: who sent it decides more than how it "
+    "reads, so decide what kind of organisation sent this before you weigh a "
+    "single word in it. A tag fits only when it is true of the whole thread, "
+    "not of one sentence in it. Pick none when no tag on the list tells the "
+    "truth."))
+(define (nm--autotag-hint tag)
+  (let loop ((xs notmuch-autotag-hints))
+    (cond ((or (null? xs) (null? (cdr xs))) tag)
+          ((equal? (car xs) tag) (car (cdr xs)))
+          (else (loop (cdr (cdr xs)))))))
 
-(define (nm--autotag-word s)
-  (let* ((s (string-trim s))
-         (s (if (and (> (string-length s) 1)
-                     (member (substring s 0 1) '("-" "*" "+")))
-                (string-trim (substring s 1 (string-length s)))
-                s)))
-    (string-join (string-split s "\"") "")))
+;; The options are t0, t1, ... and not the tags themselves: a tag is free text
+;; and carries spaces and case, and an option key has to survive as a symbol.
+(define (nm--autotag-option i)
+  (string->symbol (string-append "t" (number->string i))))
 
-(define (nm--autotag-words reply)
-  ;; The answer is one line of commas when the model obeys, and a bullet list or
-  ;; a sentence when it does not. Both cut into candidate words the same way.
-  (let loop ((lines (string-split (string-trim reply) "\n")) (acc '()))
-    (if (null? lines)
-        (reverse acc)
-        (loop (cdr lines)
-              (append (reverse (map nm--autotag-word (string-split (car lines) ",")))
-                      acc)))))
+(define (nm--autotag-criteria vocab)
+  (let loop ((xs vocab) (i 0) (out '()))
+    (if (null? xs)
+        (append out (list 'none "No tag on this list is true of this thread."))
+        (loop (cdr xs) (+ i 1)
+              (append out (list (nm--autotag-option i)
+                                (string-append (car xs) " - "
+                                               (nm--autotag-hint (car xs)))))))))
 
-(define (nm--autotag-choose reply vocab)
-  (nm--uniq (filter (lambda (t) (member t vocab)) (nm--autotag-words reply))))
+(define (nm--autotag-tag-of vocab chosen)
+  (let loop ((xs vocab) (i 0))
+    (cond ((null? xs) #f)
+          ((equal? chosen (symbol->string (nm--autotag-option i))) (car xs))
+          (else (loop (cdr xs) (+ i 1))))))
+
+
+
+
+
+
 
 (define (nm--autotag-thread-id line)
   (if (and (>= (string-length line) 7) (equal? (substring line 0 7) "thread:"))
@@ -1332,37 +1392,78 @@ when a message has no text/plain part." 'group 'notmuch)
                "\n")))
       (let ((th (nm--thread-at buf))) (if th (list (nm--th-id th)) '()))))
 
-(define (nm--autotag-one! id vocab k)
-  ;; K gets the tags this thread actually gained, so the caller reports a real
-  ;; change and never a blind \"done\".
-  (llm (nm--autotag-prompt id vocab)
-    (lambda (reply)
-      (let* ((have (nm--thread-tags id))
-             (new (filter (lambda (t) (not (member t have)))
-                          (nm--autotag-choose reply vocab))))
-        (unless (null? new)
-          (nm--run (string-append "tag "
-                     (string-join
-                       (map (lambda (t) (nm--quote (string-append "+" t))) new) " ")
-                     " -- thread:" id)))
-        (k new)))))
+(define (nm--autotag-flag-key i)
+  (string->symbol (string-append "f" (number->string i))))
 
-(define (nm--autotag-run! buf ids vocab added)
+(define (nm--autotag-questions vocab)
+  ;; One choice for the subject, then one yes/no per flag. The keys are t0, f0,
+  ;; ... for the same reason throughout: a tag is free text and an option key
+  ;; has to survive as a symbol.
+  (let loop ((xs notmuch-autotag-flags) (i 0)
+             (out (list 'tag (jev-choice nm--autotag-instructions
+                                         (nm--autotag-criteria vocab)))))
+    (if (or (null? xs) (null? (cdr xs)))
+        out
+        (loop (cdr (cdr xs)) (+ i 1)
+              (append out (list (nm--autotag-flag-key i)
+                                (jev-noul (car (cdr xs)))))))))
+
+(define (nm--autotag-flags-said-yes reply)
+  (let loop ((xs (nm--autotag-flag-tags)) (i 0) (out '()))
+    (if (null? xs)
+        (reverse out)
+        (let ((p (jev-answer-noul reply (nm--autotag-flag-key i))))
+          (loop (cdr xs) (+ i 1)
+                (if (and p (>= p notmuch-autotag-threshold))
+                    (cons (car xs) out)
+                    out))))))
+
+(define (nm--autotag-apply! id want)
+  ;; WANT is every tag this thread should end up carrying besides the system
+  ;; ones. Everything else goes, so a second run corrects an old answer instead
+  ;; of piling a new tag on top of it. Answers the ops it ran, already signed.
+  (let* ((have (nm--thread-tags id))
+         (add (filter (lambda (t) (not (member t have))) want))
+         (drop (filter (lambda (t) (and (not (member t notmuch-autotag-exclude))
+                                        (not (member t want))))
+                       have))
+         (ops (append (map (lambda (t) (string-append "+" t)) add)
+                      (map (lambda (t) (string-append "-" t)) drop))))
+    (unless (null? ops)
+      (nm--run (string-append "tag "
+                 (string-join (map nm--quote ops) " ")
+                 " -- thread:" id)))
+    ops))
+
+(define (nm--autotag-one! id vocab k)
+  ;; K gets the signed ops this thread actually took, so the caller reports a
+  ;; real change and never a blind \"done\".
+  (jev-ask (nm--trunc (mail-read-thread id) notmuch-autotag-limit)
+           (nm--autotag-questions vocab)
+    (lambda (reply)
+      (if (not reply)
+          (k '())
+          (let* ((chosen (jev-answer-choice reply 'tag))
+                 (tag (and chosen (nm--autotag-tag-of vocab chosen)))
+                 (want (append (if tag (list tag) '())
+                               (nm--autotag-flags-said-yes reply))))
+            (k (nm--autotag-apply! id want)))))))
+
+(define (nm--autotag-run! buf ids vocab changed)
   ;; One thread at a time: the model call is the slow part, and a queue of them
   ;; would spend on threads the user can no longer see going wrong.
   (if (null? ids)
       (begin
         (nm--refresh! buf)
-        (message (if (null? added)
-                     "Autotag: no tag fits"
+        (message (if (null? changed)
+                     "Autotag: nothing to change"
                      (string-append "Autotag: "
-                       (string-join (map (lambda (t) (string-append "+" t))
-                                         (nm--uniq added)) " ")))))
+                       (string-join (nm--uniq changed) " ")))))
       (begin
         (message (string-append "Autotag: " (number->string (length ids)) " to go"))
         (nm--autotag-one! (car ids) vocab
-          (lambda (new)
-            (nm--autotag-run! buf (cdr ids) vocab (append added new)))))))
+          (lambda (ops)
+            (nm--autotag-run! buf (cdr ids) vocab (append changed ops)))))))
 
 (define-command "notmuch-autotag"
   "Classify the marked threads, or the thread at point, with this mailbox's own tags"
@@ -1372,6 +1473,7 @@ when a message has no text/plain part." 'group 'notmuch)
            (ids (nm--autotag-targets buf)))
       (cond ((null? ids) (message "No thread on this line"))
             ((null? vocab) (message "This mailbox has no tags to classify with"))
+            ((not (jev-api-key)) (message "Autotag needs a JEV key: set TYPESAFE_API_KEY"))
             (else (nm--autotag-run! buf ids vocab '()))))))
 (catalog-meta! 'command "notmuch-autotag" 'domain 'mail
                'effects '(write external execute spend))
