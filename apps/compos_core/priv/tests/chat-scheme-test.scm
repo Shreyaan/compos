@@ -11,13 +11,24 @@
 
 (effects! '(write))
 
-(define (t--cs-chat! input)
-  (test-buffer! t--cs-buf "transcript\n")
-  (buffer-set-local! t--cs-buf 'mode-name "chat-mode")
-  (buffer-set-local! t--cs-buf 'render-mode "agent")
-  (buffer-set-local! t--cs-buf 'agent-saved-mark (buffer-size t--cs-buf))
-  (buffer-append! t--cs-buf input)
-  t--cs-buf)
+(define t--cs-buf2 "*zz-chat-scheme-2*")
+
+(define (t--cs-chat-named! name input)
+  (test-buffer! name "transcript\n")
+  (buffer-set-local! name 'mode-name "chat-mode")
+  (buffer-set-local! name 'render-mode "agent")
+  (buffer-set-local! name 'agent-saved-mark (buffer-size name))
+  (buffer-append! name input)
+  name)
+
+(define (t--cs-chat! input) (t--cs-chat-named! t--cs-buf input))
+
+;; a chat's history is a buffer-local, and the test buffer is reused, so
+;; each history test starts by forgetting what the last one typed
+(define (t--cs-forget-history! name)
+  (buffer-set-local! name 'chat-history-ring '())
+  (chat-history-reset! name)
+  name)
 
 (deftest 'a-parenthesised-input-is-scheme
   "and prose that merely mentions a call is not"
@@ -121,39 +132,42 @@
       (customize-set! 'chat-scheme-input saved)
       (check-true! (chat-scheme-input? "(+ 1 2)") "and it comes back"))))
 
-(deftest 'prompt-history-is-one-ring-for-every-chat
-  "what you ran in one chat, up-arrow reaches from another"
+(deftest 'prompt-history-belongs-to-its-chat
+  "a chat is its own session: the chat next door reaches none of it"
   (lambda ()
-    (let ((saved *chat-input-history*))
-      (set! *chat-input-history* '())
-      (let ((a (t--cs-chat! "(+ 3 4)")))
-        (with-current-buffer a (lambda () (run-command "agent-send")))
-        (buffer-kill! a))
-      (check-equal! (car (chat-history)) "(+ 3 4)"
-                    "the expression joined the history")
-      (let ((b (t--cs-chat! "")))
-        (with-current-buffer b
-          (lambda ()
-            (end-of-buffer!)
-            (run-command "chat-history-previous")
-            (check-equal! (chat-input-text b) "(+ 3 4)"
-                          "a prompt in another chat recalls it")
-            (run-command "chat-history-next")
-            (check-equal! (chat-input-text b) ""
-                          "and down comes back to the draft")))
-        (buffer-kill! b))
-      (set! *chat-input-history* saved))))
+    (let ((a (t--cs-forget-history! (t--cs-chat! "(+ 3 4)"))))
+      (with-current-buffer a (lambda () (run-command "agent-send")))
+      (check-equal! (car (chat-history a)) "(+ 3 4)"
+                    "the expression joined this chat's history"))
+    (let ((a (t--cs-chat! "")))
+      (with-current-buffer a
+        (lambda ()
+          (end-of-buffer!)
+          (run-command "chat-history-previous")
+          (check-equal! (chat-input-text a) "(+ 3 4)"
+                        "and this chat's prompt recalls it")
+          (run-command "chat-history-next")
+          (check-equal! (chat-input-text a) ""
+                        "down comes back to the draft"))))
+    (let ((b (t--cs-forget-history! (t--cs-chat-named! t--cs-buf2 ""))))
+      (with-current-buffer b
+        (lambda ()
+          (end-of-buffer!)
+          (run-command "chat-history-previous")
+          (check-equal! (chat-input-text b) ""
+                        "another chat's up-arrow reaches nothing of it")))
+      (buffer-kill! b))
+    (buffer-kill! t--cs-buf)))
 
 (deftest 'the-history-collapses-consecutive-repeats
   "the same input twice running takes one slot, and blanks take none"
   (lambda ()
-    (let ((saved *chat-input-history*))
-      (set! *chat-input-history* '())
-      (chat-history-push! "(foo)")
-      (chat-history-push! "(foo)")
-      (chat-history-push! "   ")
-      (check-equal! (length (chat-history)) 1 "one entry")
-      (set! *chat-input-history* saved))))
+    (let ((b (t--cs-forget-history! (t--cs-chat! ""))))
+      (chat-history-push! b "(foo)")
+      (chat-history-push! b "(foo)")
+      (chat-history-push! b "   ")
+      (check-equal! (length (chat-history b)) 1 "one entry")
+      (buffer-kill! b))))
 
 (deftest 'a-bare-command-call-runs-the-command
   "an M-x command is not a variable, so (name) reads as the command"
@@ -182,11 +196,10 @@
 (deftest 'an-open-paren-walks-the-expressions-only
   "what you have typed is the search: a paren reaches the expressions only"
   (lambda ()
-    (let ((saved *chat-input-history*))
-      (set! *chat-input-history* '())
-      (chat-history-push! "(+ 1 2)")
-      (chat-history-push! "write me a haiku")
-      (chat-history-push! "(buffer-list)")
+    (let ((seed (t--cs-forget-history! (t--cs-chat! ""))))
+      (chat-history-push! seed "(+ 1 2)")
+      (chat-history-push! seed "write me a haiku")
+      (chat-history-push! seed "(buffer-list)")
       (let ((b (t--cs-chat! "(")))
         (with-current-buffer b
           (lambda ()
@@ -200,18 +213,16 @@
             (run-command "chat-history-next")
             (run-command "chat-history-next")
             (check-equal! (chat-input-text b) "("
-                          "and down comes back to the half-typed draft")))
-        (buffer-kill! b))
+                          "and down comes back to the half-typed draft"))))
       (let ((b (t--cs-chat! "")))
         (with-current-buffer b
           (lambda ()
             (end-of-buffer!)
             (run-command "chat-history-previous")
-            (check-equal! (chat-input-text b) "(buffer-list)" "prose walks the whole ring")
+            (check-equal! (chat-input-text b) "(buffer-list)" "prose walks this chat's whole ring")
             (run-command "chat-history-previous")
-            (check-equal! (chat-input-text b) "write me a haiku" "including the messages")))
-        (buffer-kill! b))
-      (set! *chat-input-history* saved))))
+            (check-equal! (chat-input-text b) "write me a haiku" "including the messages"))))
+      (buffer-kill! t--cs-buf))))
 
 (deftest 'the-popup-keeps-the-arrows-while-it-shows
   "a word to complete owns the arrows; the space that ends it hands them back"
@@ -231,12 +242,11 @@
 (deftest 'the-history-walks-only-what-you-have-typed
   "up searches by prefix, the way a shell's history search does"
   (lambda ()
-    (let ((saved *chat-input-history*))
-      (set! *chat-input-history* '())
-      (chat-history-push! "(load \"one.scm\")")
-      (chat-history-push! "(buffer-list)")
-      (chat-history-push! "(load \"two.scm\")")
-      (chat-history-push! "ship it")
+    (let ((seed (t--cs-forget-history! (t--cs-chat! ""))))
+      (chat-history-push! seed "(load \"one.scm\")")
+      (chat-history-push! seed "(buffer-list)")
+      (chat-history-push! seed "(load \"two.scm\")")
+      (chat-history-push! seed "ship it")
       (let ((b (t--cs-chat! "(load ")))
         (with-current-buffer b
           (lambda ()
@@ -253,14 +263,12 @@
             (run-command "chat-history-next")
             (run-command "chat-history-next")
             (check-equal! (chat-input-text b) "(load "
-                          "down comes back to what you had typed")))
-        (buffer-kill! b))
+                          "down comes back to what you had typed"))))
       (let ((b (t--cs-chat! "sh")))
         (with-current-buffer b
           (lambda ()
             (end-of-buffer!)
             (run-command "chat-history-previous")
             (check-equal! (chat-input-text b) "ship it"
-                          "prose searches by prefix too")))
-        (buffer-kill! b))
-      (set! *chat-input-history* saved))))
+                          "prose searches by prefix too"))))
+      (buffer-kill! t--cs-buf))))

@@ -309,9 +309,9 @@
                     (string-append "λ " src "\n→ " *chat-scheme-buffer*)
                     body))
          (text (string-append "\n" shown "\n")))
-    ;; the expression joins the prompt history before it runs: up-arrow
-    ;; reaches the last thing you evaluated, from any chat
-    (chat-history-push! src)
+    ;; the expression joins this chat's prompt history before it runs:
+    ;; up-arrow reaches the last thing you evaluated here
+    (chat-history-push! buf src)
     (chat-history-reset! buf)
     (chat-clear-input! buf)
     (when (and other? ok) (chat-scheme-other-window! body))
@@ -377,7 +377,7 @@
                            ;; the message itself lands in the record when its
                            ;; turn starts; here it only joins the prompt history
                            ;; and the walk position resets
-                           (chat-history-push! input)
+                           (chat-history-push! buf input)
                            (chat-history-reset! buf)
                            (let ((result (agent-send-msg! slug input)))
                              (if (equal? result 'queued)
@@ -434,38 +434,39 @@
 
 (define *chat-history-limit* 200)
 
-;; One history for every prompt in the session: the expressions you ran and
-;; the messages you sent, newest first. A REPL's history belongs to the
-;; person, not the buffer — you reach for the apropos call you just made
-;; from whichever chat you are in now. It lives in memory only: a restart
-;; starts you clean, and the transcripts still hold what was said.
-(define *chat-input-history* '())
+;; One history per chat, newest first: the expressions you ran and the
+;; messages you sent in THIS buffer. A chat is a session of its own, the
+;; way a shell window is — the apropos call you made here is one
+;; up-arrow away here, and the chat next door is not full of it. It
+;; lives in memory only: a restart starts you clean, and the transcripts
+;; still hold what was said.
+(define (chat-history buf)
+  (or (buffer-local buf 'chat-history-ring) '()))
 
-(define (chat-history) *chat-input-history*)
+(define (chat-history-set! buf ring)
+  (buffer-set-local! buf 'chat-history-ring
+    (chat-take ring *chat-history-limit*)))
 
 ;; consecutive repeats collapse, the way a shell's history does
-(define (chat-history-push! text)
-  (let ((t (string-trim text)))
+(define (chat-history-push! buf text)
+  (let ((t (string-trim text))
+        (h (chat-history buf)))
     (unless (or (equal? t "")
-                (and (pair? *chat-input-history*)
-                     (equal? t (car *chat-input-history*))))
-      (set! *chat-input-history*
-        (chat-take (cons t *chat-input-history*) *chat-history-limit*)))))
+                (and (pair? h) (equal? t (car h))))
+      (chat-history-set! buf (cons t h)))))
 
 ;; A reload and a restart both start the ring empty, and a chat you had
 ;; been talking in all morning would answer the first up-arrow with
-;; nothing. The first walk in such a session seeds the ring from the chat
-;; you are standing in, newest first; from then on it is one ring again.
+;; nothing. The first walk in such a chat seeds its ring from its own
+;; transcript, newest first.
 (define (chat-history-seed! buf)
-  (when (null? *chat-input-history*)
-    (set! *chat-input-history*
-      (chat-take
-        (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
-          (cond ((null? ts) (reverse acc))
-                ((equal? (car (car ts)) "user")
-                 (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
-                (else (loop (cdr ts) acc))))
-        *chat-history-limit*))))
+  (when (null? (chat-history buf))
+    (chat-history-set! buf
+      (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
+        (cond ((null? ts) (reverse acc))
+              ((equal? (car (car ts)) "user")
+               (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
+              (else (loop (cdr ts) acc)))))))
 
 (define (chat-history-reset! buf)
   (buffer-set-local! buf 'chat-history-pos #f)
@@ -494,10 +495,11 @@
 ; prefix is taken once, when you step off the draft, and held for the
 ; walk: recall rewrites the input, and reading it again would change the
 ; ring underfoot.
-(define (chat-history-for prefix)
-  (if (equal? prefix "")
-      *chat-input-history*
-      (filter (lambda (s) (string-prefix? prefix s)) *chat-input-history*)))
+(define (chat-history-for buf prefix)
+  (let ((h (chat-history buf)))
+    (if (equal? prefix "")
+        h
+        (filter (lambda (s) (string-prefix? prefix s)) h))))
 
 (define (chat-history-prefix-of buf)
   (or (buffer-local buf 'chat-history-prefix)
@@ -507,7 +509,7 @@
 
 (define (chat-history-recall! buf dir)
   (let* ((prefix (chat-history-prefix-of buf))
-         (h (chat-history-for prefix))
+         (h (chat-history-for buf prefix))
          (pos (or (buffer-local buf 'chat-history-pos) -1))
          (next (if (< dir 0) (+ pos 1) (- pos 1))))
     (cond ((>= next (length h))
@@ -533,7 +535,7 @@
     (chat-history-seed! buf)
     (if (or (not (buffer-local buf 'agent-saved-mark))
             (not (chat-in-input? buf))
-            (null? (chat-history))
+            (null? (chat-history buf))
             ;; inside a multi-line input, up and down are still motion
             (if (< dir 0)
                 (not (chat-on-first-input-line? buf))
