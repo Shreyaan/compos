@@ -690,6 +690,15 @@ with the doc in the key (item 7.6, the fix for CQ's double registration).
 buffer-set-text! (a1c82b9c), eight more wrapper tests (next commit), one
 JSON-RPC framer for ACP, Codex and MCP stdio.
 
+**Also done 2026-09-19, later:** 45 single-reader defcustoms demoted
+(d9c3365b); one model catalog, LLMDb gone, ledger = LLMUsage (43b02bb9;
+the provider-blind max_tokens bug went with it); `use Backend` supplies
+the six required client shims. Not done, with reasons: the two
+FileSystem watchers are not one thing (Watch is content-free by contract,
+Hotload needs paths); the two PTY runners wait for a measured reason;
+the double-covered Elixir tests stay where they hold key-dispatch or
+Elixir-API assertions the Scheme twin lacks.
+
 **Red before today, measured by running the pre-change file** (for the
 KNOWN-FAILURES rewrite): agent_test 36 of 52; ChatResetTest, SwitchTest,
 PresetTest 17; MovieTest, ChosenPaneTest, SpotifyTest 1 each; TransientTest
