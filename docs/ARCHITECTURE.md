@@ -168,7 +168,7 @@ built:
    streams into a buffer the reactor can watch. Good for chat-shaped tools.
 2. **ACP/JSON-RPC over a port** — structured: the editor mediates file reads,
    permission prompts become minibuffer gates, progress becomes buffer updates.
-   This is the compos `docs/ACP.md` design and the right home for pi/codex.
+   This is the right home for pi/codex.
    Needs: a `Port`-based JSON-RPC client primitive (~100 lines Elixir), then the
    session/permission/tool-dispatch logic in Scheme — `acp.scm` next to
    `dired.scm`.

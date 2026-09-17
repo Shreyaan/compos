@@ -1,18 +1,17 @@
 # Documentation
 
-- [Advice](ADVICE.md) — named function advice, inspection, and enable/disable controls.
-- [Architecture](ARCHITECTURE.md) — system boundary and design rules.
-- [The New Browser Was Emacs All Along](EMACS-AS-AGENT-HARNESS.md) — why the
-  Emacs model fits agent harnesses and rich rendered applications.
-- [Cordis, Lisp, and JavaScript](CORDIS-VS-EMACS.md) — why Lisp runtimes need
-  less plugin lifecycle machinery.
-- [Handoff](HANDOFF.html) — current implementation guide.
-- [Roadmap](ROADMAP.md) — editor build order.
-- [AI-native plan](AI-NATIVE-SPEC.md) — discovery and code-browser work.
-- [Simplification plan](SIMPLIFY-SPEC.md) — agent and RPC architecture.
+The rules each subsystem keeps are beside it: ARCHITECTURE.md names them.
+
+- [Architecture](ARCHITECTURE.md) — the one rule, the layers, and the per-subsystem documents.
+- [Simplification audit](SIMPLIFY-AUDIT.md) — the current state, what to look for, the queue.
+- [Known failures](KNOWN-FAILURES.md) — the tests that were already red.
+- [Cleanup queue](CLEANUP-QUEUE.md) — the 2026-08-22 scan; open items are marked in the audit.
+- [ONE CHAT](SIMPLIFY-SPEC.md) — the agent and chat design, 2026-08-08.
 - [UI components](COMPONENTS.md) — agent-facing component contract.
-- [UI component specification](COMPONENTS-SPEC.md) — component-system design.
-- [Control specification](CONTROL-SPEC.md) — groups, presets, and permissions.
 - [Org-mode plan](ORG-MODE-PLAN.md) — Org implementation status and design.
-- [Code browser](code-browse.html) — rendered code-browser documentation.
+- [Code browser](CODEBROWSER.md) and its [plan](CODE-BROWSER-PLAN.md).
 - [MCP proxy](mcp-proxy.html) — rendered MCP proxy documentation.
+
+Essays: [The New Browser Was Emacs All Along](EMACS-AS-AGENT-HARNESS.md),
+[Cordis, Lisp, and JavaScript](CORDIS-VS-EMACS.md), [Beyond tools](BEYOND-TOOLS.md),
+[Introduction](INTRODUCTION.md), [Homepage brief](COMPOS-HOMEPAGE-BRIEF.md).

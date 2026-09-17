@@ -1,9 +1,9 @@
 # compos.el — working instructions
 
 Emacs rebuilt on the BEAM, scripted in Scheme, rendered by Phoenix LiveView.
-Read `docs/ARCHITECTURE.md` once before making changes. `docs/HANDOFF.html` has the
-current state, queue, and landmines (open it in the editor: `C-x C-f`, then
-`C-c C-v` to preview).
+Read `docs/ARCHITECTURE.md` once before making changes. `docs/SIMPLIFY-AUDIT.md`
+holds the current state and the queue; `docs/KNOWN-FAILURES.md` the tests that
+were already red.
 
 ## The one rule
 
