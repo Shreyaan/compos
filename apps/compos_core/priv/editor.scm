@@ -12285,21 +12285,21 @@
 (define-style! 'dashboard "
 .dash { font-family: var(--font-sans); padding: 2px 6px 8px; }
 .dash-head { display: flex; align-items: flex-end; gap: 16px;
-             padding: 10px 16px 12px; border-bottom: 1px solid var(--border, #e2dbc9); }
+             padding: 10px 16px 12px; border-bottom: 1px solid var(--border-bg, #e2dbc9); }
 .dash-name { font-family: var(--font-serif); font-size: 24px; letter-spacing: -0.4px; }
 .dash-file { font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg, #8a857a);
              padding-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dash-headmain { min-width: 0; }
 .dash-sp { flex: 1; }
 .dash-pills { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.dash-pill { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border, #cbc4b1);
+.dash-pill { padding: 2px 9px; border-radius: 0; border: 1px solid var(--border-bg, #cbc4b1);
              color: var(--dim-fg, #57534a); font-family: var(--font-mono); font-size: 10.5px;
              white-space: nowrap; }
 .dash-pill.warn { border-color: var(--diff-hunk-fg, #7a5a1a); color: var(--diff-hunk-fg, #7a5a1a); }
 .dash-pill.good { border-color: var(--diff-add-fg, #2e6b45); color: var(--diff-add-fg, #2e6b45); }
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .dash-cell { padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 8px;
-             border-right: 1px solid var(--border, #e2dbc9); min-width: 0; }
+             border-right: 1px solid var(--border-bg, #e2dbc9); min-width: 0; }
 .dash-cell:last-child { border-right: none; }
 .dash-title { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.18em;
               text-transform: uppercase; color: var(--dim-fg, #8a857a); }
@@ -12308,7 +12308,7 @@
 .dash-row { display: flex; align-items: baseline; gap: 8px;
             font-family: var(--font-mono); font-size: 11.5px; }
 .dash-k { color: var(--dim-fg, #8a857a); flex: 0 0 auto; }
-.dash-row .dash-sp { border-bottom: 1px dotted var(--border, #cfc8b6);
+.dash-row .dash-sp { border-bottom: 1px dotted var(--border-bg, #cfc8b6);
                      transform: translateY(-3px); }
 .dash-v { color: var(--default-fg, #1b1a17); text-align: right; min-width: 0;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -12316,8 +12316,8 @@
 .dash-v.good { color: var(--diff-add-fg, #2e6b45); }
 .dash-v.warn { color: var(--diff-hunk-fg, #7a5a1a); }
 .dash-chips { display: flex; flex-wrap: wrap; gap: 5px; }
-.dash-chip { padding: 2px 8px; border-radius: 6px; background: var(--window-bg, #fdfcf8);
-             border: 1px solid var(--border, #e2dbc9); font-family: var(--font-mono);
+.dash-chip { padding: 2px 8px; border-radius: 0; background: var(--window-bg, #fdfcf8);
+             border: 1px solid var(--border-bg, #e2dbc9); font-family: var(--font-mono);
              font-size: 10.5px; color: var(--dim-fg, #57534a); }
 .dash-chip.dim { color: var(--faint-fg, #b3ac9c); border-style: dashed; }
 .dash-chiprow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; }
@@ -12331,36 +12331,52 @@
    as the group's paint while standing a step back. The window's focus ring
    below keeps the pure colour, because that one has to carry across the
    frame. */
+/* The window you are in wears the accent on the TOP edge of its header
+   line: the same 2px line that marks a current row, so a window at rest
+   draws the same box with the line turned transparent and nothing in the
+   layout moves. The bottom edge is the frame's own hairline. */
 .dash-persistent { --dash-ink: color-mix(in srgb,
                      var(--buffer-group-color, var(--accent-fg, #26356b)) 58%,
                      var(--dim-fg, #8a857a));
-                   display: flex; align-items: center; gap: 20px; min-width: 0;
+                   display: flex; align-items: center; gap: var(--s9); min-width: 0;
                    overflow: hidden;
-                   padding: 7px 18px 8px;
-                   border-bottom: 2px solid var(--dash-ink, var(--buffer-group-color, var(--accent-fg, #26356b)));
-                   background: var(--window-bg, #fdfcf8); cursor: pointer; }
+                   padding: 7px var(--s8) 7px var(--s6);
+                   border-top: 1px solid transparent;
+                   border-bottom: var(--border);
+                   background: var(--surface-chrome); cursor: pointer; }
+/* the current mark is a 1px accent seam on the header line, mixed toward
+   the chrome so it reads as a seam, not a stripe */
+.window.active .dash-persistent {
+  border-top: 1px solid color-mix(in srgb, var(--accent) 55%, var(--surface-chrome)); }
+.window.inactive .dash-persistent { background: var(--surface-sunken); }
 /* every keyed segment shows its whole value; only the wide one gives way */
 .dseg { display: flex; flex-direction: column; gap: 1px; flex: 0 0 auto;
         font-family: var(--font-mono); }
 .dseg-r { align-items: flex-end; }
 .dseg-inline { flex-direction: row; align-items: baseline; gap: 7px; }
-.dseg-k { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
-          color: var(--faint-fg, #b3ac9c); white-space: nowrap; }
-.dseg-v { font-size: 14px; color: var(--default-fg, #1b1a17); white-space: nowrap; }
+.dseg-k { font-size: var(--fs-micro); letter-spacing: var(--ls-label);
+          text-transform: uppercase;
+          color: var(--text-dim); white-space: nowrap; }
+.dseg-v { font-size: var(--fs-meta); color: var(--text-strong); white-space: nowrap; }
 .dseg-strong { font-weight: 600; }
-/* The window you are in says where the Cmd-arrows go. In focus, where they
-   move the window itself, the whole window lights up: its full border wears
-   the group's colour, so the window looks like the thing you are about to
-   move. In editing, where the arrows move the caret, the ring is gone. The
-   ring is an inset shadow over the window's own one, so no pixel of the
-   layout shifts when the state turns, and only the selected window wears
-   it, because only it answers the arrows. The border says the state, so the
-   headline spends no segment on the word. */
-.window.active:has(.dash-state-focus) {
-  box-shadow: inset 0 0 0 2px var(--buffer-group-color, var(--accent-fg, #26356b)); }
-/* the state itself draws nothing; it is in the headline so the border rule
-   above has a class to read */
-.dash-state-mark { display: none; }
+/* The state tag: cua or focus, small and tracked, at the end of the header
+   line. The window's ground says the same thing (layouts.ex): a current cua
+   window sits, a current focus window floats. The tag keeps the state's
+   name as a class so that rule can read it. */
+.dash-state-mark { flex: 0 0 auto; margin-left: auto;
+                   font-size: var(--fs-label); letter-spacing: var(--ls-label);
+                   text-transform: uppercase; color: var(--text-faint); }
+/* The one switcher: a square action cell, no fill, dim until the pointer
+   is on it. Same shape as every other action in the frame. */
+.dseg-action { display: inline-flex; align-items: center; justify-content: center;
+               flex: 0 0 auto; width: 24px; height: 24px;
+               border: 1px solid transparent; cursor: default; user-select: none;
+               font: var(--fw-reg) 13px/1 var(--font-mono); color: var(--text-dim); }
+.dseg-action:hover { color: var(--text-strong); }
+/* The frame names its current group once. A window in that group does not
+   repeat it: the client marks the header line with data-pin only when the
+   buffer's group is not the frame's, and only then the pin shows. */
+.dash-persistent:not([data-pin]) > .dseg-group-badge { display: none; }
 /* a mode that gave itself a glyph shows the glyph at the size of a word */
 .dseg-glyph { font-size: 16px; line-height: 1; }
 .dseg-group-current { color: var(--dash-ink, var(--buffer-group-color, var(--default-fg, #1b1a17))); }
@@ -12369,56 +12385,34 @@
    nothing sits left of it. It is filled with the group's own colour, so its
    text takes the window background to stay legible, and the key goes away in
    the paint: the colour is the label. */
+/* The group leads the header line as a square pin: the accent's own wash
+   for a ground, and the group's colour on the text, so the pin still says
+   which group without a filled chip shouting over the title. A window at
+   rest hollows the pin to a hairline. */
 .dseg-group-badge { flex: 0 0 auto; display: flex; align-items: center;
-                    margin-left: -18px; padding: 3px 13px 4px 18px;
-                    border-radius: 0 999px 999px 0; min-width: 0;
-                    background: var(--dash-ink, var(--buffer-group-color, var(--accent-fg, #26356b)));
-                    /* the chip lifts a little off the headline, in its own
-                       colour rather than in grey, so the shadow belongs to
-                       the group as much as the fill does */
-                    box-shadow: 0 2px 8px color-mix(in srgb,
-                      var(--dash-ink, var(--buffer-group-color, var(--accent-fg, #26356b)))
-                      26%, transparent); }
+                    padding: 3px var(--s6) 4px; min-width: 0;
+                    border: 1px solid transparent;
+                    background: var(--accent-wash); }
+.window.inactive .dseg-group-badge { background: transparent;
+                    border-color: var(--edge-soft); }
 .dseg-group-badge .dseg { flex: 0 1 auto; min-width: 0; }
 .dseg-group-badge .dseg-k { display: none; }
-.dseg-group-badge .dseg-v { font-size: 13px; color: var(--window-bg, #fdfcf8);
+.dseg-group-badge .dseg-v { font-size: var(--fs-meta);
+                            color: var(--buffer-group-color, var(--accent));
                             white-space: nowrap; overflow: hidden;
                             text-overflow: ellipsis; }
-.dseg-group-badge .dseg-group-current { color: var(--window-bg, #fdfcf8); }
+.dseg-group-badge .dseg-group-current { color: var(--buffer-group-color, var(--accent)); }
 .dseg-group-badge .f-dim, .dseg-group-badge .f-faint {
-  color: var(--window-bg, #fdfcf8); opacity: .7; }
+  color: var(--buffer-group-color, var(--accent)); opacity: .7; }
+.window.inactive .dseg-group-badge .dseg-v,
+.window.inactive .dseg-group-badge .dseg-group-current { color: var(--text-faint); }
 /* the chip is its own edge; a rule beside it says nothing */
 .dash-persistent .dseg-group-badge + .dseg-rule { display: none; }
-/* The metadata in the headline is about the window you are working in: the
-   mode, the model, the lane, the open jj change are all answers to questions
-   you can only be asking of the window you are in. A window you are not in
-   says which group it belongs to and what it holds, and stops there. The rest
-   keeps its place in the row and comes back the instant the window takes
-   focus, so selecting a window reflows nothing. */
-.window.inactive .dash-persistent > * { display: none; }
-.window.inactive .dash-persistent > .dseg-group-badge,
-.window.inactive .dash-persistent > .dseg-chat-title { display: flex; }
-.window.inactive .dash-persistent > .dseg-group-badge .dseg { display: flex; }
-.dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
-             background: var(--border-bg, #cbc4b1); opacity: .5; }
-/* How much of the transcript to show is a fact about this window, so it
-   rides the end of the headline rather than a bar of its own. Three states
-   of one radio, joined into a single pill: at this size the glyph is the
-   whole control, and the word it stands for is on the button's title. The
-   chosen one is filled with --dash-ink, the same muted paint the headline
-   already wears on its badge and its bottom edge, so the row reads as one
-   thing. */
-.dash-verbosity { display: flex; flex: 0 0 auto; margin-left: auto;
-                  border: 1px solid var(--border-bg, #cbc4b1); border-radius: 999px;
-                  overflow: hidden; background: var(--window-bg, #fdfcf8); }
-.dvb { display: flex; align-items: center; justify-content: center;
-       width: 32px; height: 27px; padding: 0; border: 0; border-radius: 0;
-       background: transparent; cursor: pointer;
-       font: 400 17px/1 var(--font-mono); color: var(--faint-fg, #b3ac9c); }
-.dvb + .dvb { border-left: 1px solid var(--border-bg, #cbc4b1); }
-.dvb:hover { color: var(--default-fg, #1b1a17); }
-.dvb.on { background: var(--dash-ink, var(--buffer-group-color, var(--accent-fg, #26356b)));
-          color: var(--window-bg, #fdfcf8); }
+/* A window at rest keeps both of its bars whole: the ink steps down
+   (layouts.ex remaps the text tokens on .window.inactive), nothing hides,
+   so selecting a window reflows nothing. */
+.dseg-rule { width: var(--hair); height: 13px; flex: 0 0 auto;
+             background: var(--edge); }
 .dseg-gap { flex: 1 1 auto; }
 .dseg-stack { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
 .dseg-wide { flex: 1 1 0; min-width: 0; }
@@ -12431,7 +12425,7 @@
    it, and the title keeps growing to fill the top row. */
 .dash-persistent { flex-wrap: nowrap; column-gap: 16px; }
 .dash-persistent:has(.dseg-meta) { flex-wrap: wrap; row-gap: 4px; }
-.dash-verbosity { order: 1; }
+.dash-state-mark, .dseg-action { order: 1; }
 .dseg-meta { order: 2; flex: 0 1 100%; display: flex; align-items: baseline;
              gap: 16px; min-width: 0; }
 .dash-persistent .dseg,
@@ -12439,10 +12433,19 @@
 .dash-persistent .dseg-stack { gap: 16px; }
 .dash-persistent .dseg-v { white-space: nowrap; }
 .dash-persistent .dseg-chat-title { flex: 1 1 0; min-width: 0; }
+/* A title is set in the face that matches what the name IS. A chat topic
+   is a sentence a human wrote, so it takes the serif face at reading size.
+   A file name or a starred buffer is a machine name, so it keeps the mono
+   face and its exact characters. Neither is bold: the size is the weight. */
 .dash-persistent .dseg-chat-title .dseg-v {
-  display: block; font-size: 18px; font-weight: 700; line-height: 1.3;
-  color: var(--default-fg, #1b1a17); white-space: nowrap;
+  display: block; font-weight: var(--fw-reg); line-height: 1.3;
+  font-family: var(--font-serif); font-size: 19px; letter-spacing: -0.15px;
+  color: var(--text-strong); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
+.dash-persistent .dseg-chat-title .dseg-strong { font-weight: var(--fw-reg); }
+.dash-persistent .dseg-title-mono .dseg-v {
+  font-family: var(--font-mono); font-size: 14px;
+  letter-spacing: var(--ls-code); }
 .dash-persistent:has(.dseg-chat-title) .dseg-rule { display: none; }
 /* the chip is a label, not a column: it never wraps and never grows */
 .dash-persistent .dseg-group-badge .dseg-v {
@@ -12774,10 +12777,14 @@
 ;; registers this handler once the registry exists.
 (define (dashboard-block-click buf id)
   (and (string? id)
-       (string-prefix? "dash-mode:" id)
-       (begin
-         (modeline-toggle-mode! (substring id 10 (string-length id)))
-         #t)))
+       (cond ((string-prefix? "dash-mode:" id)
+              (modeline-toggle-mode! (substring id 10 (string-length id)))
+              #t)
+             ;; the header line's one switcher opens the narrow about HERE
+             ((equal? id "buffer-switcher")
+              (with-current-buffer buf (lambda () (run-command "buffer-switcher")))
+              #t)
+             (else #f))))
 
 (define (dashboard--group-ids buf)
   (if (chat-buffer? buf)
@@ -12898,13 +12905,68 @@
 (define (dash--state buf)
   (if (member "editing-caret-map" (buffer-minor-maps buf)) "editing" "focus"))
 
-;; The state draws nothing now: the window border is the cue. This marker
-;; carries the state's name as a class so the border rule can read it, and
+;; The state is a small tag at the end of the header line, and the window's
+;; ground says it again: a cua window sits, a focus window floats. The tag
+;; carries the state's name as a class so the window rule can read it, and
 ;; it sits outside the narrow-window keep list, because a window too narrow
-;; for the metadata still has to say whether the arrows move it.
+;; for the title still has to say whether the arrows move it. The design's
+;; words: an editing buffer is a cua buffer and stays put; every other
+;; buffer is a focus buffer and can be moved.
 (define (dash--state-mark buf)
-  (list 'tag "div"
-        'class (string-append "dash-state-mark dash-state-" (dash--state buf))))
+  (let ((st (dash--state buf)))
+    (list 'tag "c-tag"
+          'class (string-append "dash-state-mark dash-state-" st)
+          'text (if (equal? st "editing") "cua" "focus"))))
+
+;; The one switcher: a single action at the end of the header line that
+;; opens a narrow about this buffer. The design keeps one icon, not three.
+(define (dash--switcher buf)
+  (list 'tag "c-action" 'class "dseg-action" 'text "ⓘ"
+        'click "buffer-switcher"
+        'attrs (list (list "target" "buffer-switcher")
+                     (list "title" "about this buffer"))))
+
+;; The window's mode line carries the state: the mode, the model and the
+;; lane, each a key and a value, ranked so a narrow window sheds the lane
+;; first and the model next. A preset names the whole setup and stands
+;; alone. The header line carries identity only, so these live here.
+;; Each fact is (KEY VALUE TONE RANK); the client draws one c-fact each.
+(define (dash--modeline-facts buf preset-cell)
+  (let* ((preset (if preset-cell (car preset-cell) (dash--preset buf)))
+         (mode (or (buffer-local buf 'mode-name) "Fundamental"))
+         (icon (mode-own-icon mode))
+         (mode-text (dashboard--mode-name mode)))
+    (append
+      (list (list "mode" (if icon (string-append icon " " mode-text) mode-text) "glyph" 0))
+      (if preset
+          (list (list "preset" preset "" 1))
+          (list (list "llm" (dash--model buf) "" 1)
+                (list "lane" (dash--lane buf) "ok" 2))))))
+
+;; What a buffer can say about itself, as rows for the switcher's narrow:
+;; the dashboard panel, the summary log of a chat, and for an agent
+;; transcript how much of it to show. Each row is (LABEL COMMAND).
+(define (buffer-switcher-rows buf)
+  (append
+    (list (list "buffer info" "modeline-expand"))
+    (if (chat-buffer? buf) (list (list "summary log" "buffer-summary-log")) '())
+    (if (equal? (buffer-local buf 'render-mode) "agent")
+        (list (list "transcript: info" "agent-verbosity-info")
+              (list "transcript: log" "agent-verbosity-log")
+              (list "transcript: debug" "agent-verbosity-debug"))
+        '())))
+
+(define-command "buffer-switcher"
+  "About this buffer: its info, its log, or how much of its transcript to show"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (rows (buffer-switcher-rows buf)))
+      (completing-read "about this buffer: " (map car rows)
+        (lambda (label)
+          (let ((row (assoc label rows)))
+            (when row
+              (with-current-buffer buf (lambda () (run-command (cadr row)))))))
+        'require-match #t))))
 
 (define (dash--preset buf)
   (and (boundp (quote llm-config-preset-name))
@@ -12973,27 +13035,26 @@
          (preset (if preset-cell (car preset-cell) (dash--preset buf)))
          ;; every segment carries its name, so a narrow window keeps the
          ;; ones its mode declared and drops the rest
+         ;; The header line is identity: the group pin, the title, the open
+         ;; change. The mode, the model and the lane are state, and state
+         ;; lives on the mode line (dash--modeline-facts). PRESET is read
+         ;; here so one read serves both bars.
          (cells
            (append
              (list
-               (list 'mode (dash--seg "mode" (dash--mode-segs buf) 'left))
-               (list 'group (dash--group-badge buf))
-               ;; the preset names the whole setup, so it stands alone: the model
-               ;; and the lane are what it chose, and repeating them says nothing
-               (list 'llm
-                 (if preset
-                     (dash--seg "preset" (list (list "dseg-strong" preset)) 'right)
-                     (list 'tag "div" 'class "dseg-stack"
-                           'children
-                           (list (dash--seg "llm" (dash--model-segs buf) 'right "dseg-inline")
-                                 (dash--seg "lane"
-                                   (list (list "f-ok dseg-strong" (dash--lane buf)))
-                                   'right "dseg-inline"))))))
+               (list 'group (dash--group-badge buf)))
              ;; the wide segments wrap to two lines with the key inline. The
              ;; title leads; the open jj change of the repo follows it, kept
              ;; fresh by jj.scm, and steps back when a chat writes a summary.
              ;; A click on either opens the log of every line it showed.
-             (append (list (list 'wide (dash--wide-seg #f title "dseg-chat-title")))
+             ;; the title's face follows what the name is: a chat's own
+             ;; summary is a sentence and takes the serif face, a buffer
+             ;; name is a machine name and keeps the mono face
+             (append (list (list 'wide
+                             (dash--wide-seg #f title
+                               (if (dash--summary buf)
+                                   "dseg-chat-title"
+                                   "dseg-chat-title dseg-title-mono"))))
                      (if (and vcs (not (dash--summary buf)))
                          (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
          (width (buffer-cols buf))
@@ -13002,8 +13063,8 @@
          ;; whether the window is narrow enough to stack the metadata beneath
          ;; the title at all. A wide window shares one row with every segment.
          (narrow? (< width narrow-cols)))
-    ;; the state marker rides last: it draws nothing, so it takes no rule
-    ;; beside it, and no keep list can drop it
+    ;; the state tag and the switcher ride last, after everything the
+    ;; buffer says about itself, and no keep list can drop them
     (let* ((group? (lambda (cell) (equal? (car cell) 'group)))
            (wide? (lambda (cell) (equal? (car cell) 'wide)))
            (tail (remove group? cells))
@@ -13027,16 +13088,17 @@
 ;; stacks META on a second row beneath the title (dseg-meta); a wide window
 ;; keeps every surviving segment on one row, ruled together.
 (define (dash--assemble-headline top meta narrow? buf)
-  (if narrow?
-      (append
-        (dash--ruled (map cadr top))
-        (if (pair? meta)
-            (list (list 'tag "div" 'class "dseg-meta" 'children (map cadr meta)))
-            '())
-        (list (dash--state-mark buf)))
-      (append
-        (dash--ruled (append (map cadr top) (map cadr meta)))
-        (list (dash--state-mark buf)))))
+  (let ((tail (list (dash--state-mark buf) (dash--switcher buf))))
+    (if narrow?
+        (append
+          (dash--ruled (map cadr top))
+          (if (pair? meta)
+              (list (list 'tag "div" 'class "dseg-meta" 'children (map cadr meta)))
+              '())
+          tail)
+        (append
+          (dash--ruled (append (map cadr top) (map cadr meta)))
+          tail))))
 
 (define (dash--wide-seg key text &optional title-class)
   (let ((base (dash--seg key (list (list (if title-class "dseg-strong" "f-dim") text))
@@ -13282,13 +13344,16 @@
   (desktop-skip! buf 'modeline-name)
   (desktop-skip! buf 'modeline-name-segments)
   (desktop-skip! buf 'modeline-project)
-  ;; one preset read for the line and the blocks; one change for the five
-  ;; locals, so the frame refreshes once for the sync
+  (desktop-skip! buf 'modeline-facts)
+  ;; one preset read for the line, the blocks and the facts; one change for
+  ;; the six locals, so the frame refreshes once for the sync
   (let ((preset-cell (list (dash--preset buf))))
     (buffer-set-locals! buf
       (list 'dashboard-dirty #f
             'dashboard-line (dashboard-one-line buf preset-cell)
             'dashboard-line-blocks (dashboard-line-blocks buf preset-cell)
+            ;; the state the window's mode line draws: mode, llm, lane
+            'modeline-facts (dash--modeline-facts buf preset-cell)
             'modeline-name (buffer-modeline-name buf)
             ;; the same name as the spans that draw it: the client shows
             ;; these and falls back to the plain string only without them
@@ -13815,13 +13880,23 @@
       (sexp-open-before p 0 #f)
       (atom-start p)))
 
-(define-command "eval-last-sexp" "Evaluate sexp before point and echo the value"
+(define-command "eval-last-sexp" "Evaluate the region, else the sexp before point, and echo the value"
   (lambda ()
-    (let* ((p (eval-skip-ws-back (point)))
-           (s (last-sexp-start p)))
-      (if (< s p)
-          (echo-value (eval-region (current-buffer) s p))
-          (message "No sexp before point")))))
+    ;; A selection is an explicit statement of what to run, so it wins
+    ;; over the sexp before point. With no selection this is the Emacs
+    ;; command unchanged. region-action-bounds, not the raw mark, so a
+    ;; mode's region lifter still says what its selection covers.
+    (let* ((buf (current-buffer))
+           (bounds (region-action-bounds))
+           (rs (car bounds))
+           (re (cadr bounds)))
+      (if (< rs re)
+          (echo-value (eval-region buf rs re))
+          (let* ((p (eval-skip-ws-back (point)))
+                 (s (last-sexp-start p)))
+            (if (< s p)
+                (echo-value (eval-region buf s p))
+                (message "No sexp before point")))))))
 
 (define-command "eval-buffer" "Evaluate the current buffer as Scheme"
   (lambda () (echo-value (eval-buffer (current-buffer)))))
@@ -14598,7 +14673,9 @@
          (run-command cmd))
         ;; the modeline's name is the dashboard's click target
         ((equal? cmd "modeline-expand") (run-command cmd))
-        ((member cmd '("dismiss-buffer" "listing-peek-dismiss")) (run-command cmd))
+        ;; the header line's theme word opens the theme picker
+        ((member cmd '("dismiss-buffer" "listing-peek-dismiss" "load-theme"))
+         (run-command cmd))
         ;; a mode name in the modeline toggles that mode
         ((and (string? cmd) (string-prefix? "mode:" cmd))
          (modeline-toggle-mode! (string-join (cdr (string-split cmd ":")) ":")))

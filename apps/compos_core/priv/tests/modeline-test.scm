@@ -721,3 +721,62 @@
       (check-true! (pair? (buffer-local buf 'dashboard-line-blocks))
                    "the first display supplies presentation")
       (buffer-kill! buf))))
+
+;;; --- the two bars (docs/DESIGN-PORT.md, stage 2) ----------------------------
+;;; The header line is identity: pin, title, the open change, the state tag
+;;; and one switcher. The mode line is state: mode, llm, lane, ranked.
+
+(deftest 'the-header-line-carries-identity-and-the-mode-line-carries-state
+  "mode, llm and lane are mode-line facts; the header line keeps the title, the tag and one switcher"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-identity*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (let* ((blocks (dashboard-line-blocks buf))
+             (last (car (reverse blocks)))
+             (tag (cadr (reverse blocks))))
+        (check-false! (t--dseg-value blocks "mode") "the header line names no mode")
+        (check-false! (t--dseg-value blocks "llm") "and no model")
+        (check-equal! (plist-get last 'click) "buffer-switcher"
+                      "one switcher closes the header line")
+        (check-equal! (plist-get tag 'text) "focus"
+                      "the state tag says the design's word"))
+      (let ((facts (dash--modeline-facts buf #f)))
+        (check-equal! (map car facts) '("mode" "llm" "lane")
+                      "the mode line carries the state")
+        (check-equal! (list-ref (caddr facts) 3) 2 "the lane sheds first"))
+      (check-equal! (map car (dash--modeline-facts buf (list "review")))
+                    '("mode" "preset")
+                    "a preset names the whole setup and stands alone")
+      (buffer-kill! buf))))
+
+(deftest 'an-editing-buffer-wears-the-cua-tag
+  "the design's word for a buffer that stays put"
+  (lambda ()
+    (let ((buf "*zz-modeline-cua*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "text-mode")
+      (editing-state-on! buf)
+      (check-equal! (plist-get (dash--state-mark buf) 'text) "cua" "editing is cua")
+      (editing-state-off! buf)
+      (check-equal! (plist-get (dash--state-mark buf) 'text) "focus" "a landing is focus")
+      (buffer-kill! buf))))
+
+(deftest 'the-switcher-offers-what-the-buffer-can-say-about-itself
+  "every buffer has info; a chat adds its log; an agent transcript adds how much to show"
+  (lambda ()
+    (let ((buf "*zz-modeline-switcher*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "text-mode")
+      (check-equal! (map car (buffer-switcher-rows buf)) '("buffer info")
+                    "a plain buffer offers its info")
+      (buffer-kill! buf))
+    (let ((buf "*chat:zz-modeline-switcher*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (buffer-set-local! buf 'render-mode "agent")
+      (check-equal! (map car (buffer-switcher-rows buf))
+                    '("buffer info" "summary log"
+                      "transcript: info" "transcript: log" "transcript: debug")
+                    "a chat transcript offers its log and its verbosity")
+      (buffer-kill! buf))))

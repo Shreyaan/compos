@@ -25,14 +25,19 @@ stage. Each stage is one commit, verified live and by a screenshot.
    file path leave the header line. The key hints move to the echo area
    after the message and a rule. DONE.
 2. **Window bars.** Header line = identity: pin only when the group differs
-   from the frame's, title, state dot, rule, cua/focus tag, one switcher.
-   Mode line = state: dot, name, mode/llm/lane facts ranked, rule, position.
-   The three verbosity icons become one switcher that opens a narrow.
-   A window at rest keeps both bars and steps its ink down; it does not
-   hide its facts.
-3. **Three window states.** At rest: kept down. Current cua: sits (paper,
-   hairline, shallow shadow). Current focus: floats (lifted ground, deep
-   shadow). The inset group-colour ring goes.
+   from the frame's (`modeline_pin` in editor.ex sets `data-pin`), title,
+   the open change, the cua/focus tag, one switcher (`ⓘ`, M-x
+   `buffer-switcher`: a narrow over buffer info, summary log, transcript
+   verbosity). Mode line = state: dot, name, context, mode/llm/lane facts
+   (`dash--modeline-facts`, the `modeline-facts` local, ranked so the lane
+   sheds first), position. A window at rest keeps both bars whole and
+   steps its ink down. DONE.
+3. **Three window states.** At rest: kept down (`.window.inactive` remaps
+   the text and surface tokens). Current cua: sits (paper, hairline, the
+   theme's `chrome shadow`). Current focus: floats (lifted ground, nearer
+   hairline, `chrome shadow-deep`). The inset group-colour ring is gone.
+   A window is now a container, so its bars shed facts by its own width.
+   DONE.
 4. **Keys bar.** Every list-mode buffer carries `c-keys-bar` at its bottom
    corner: facts, the main keys, `? all N`. `?` grows it into the full
    `c-keys` grids. Scheme derives it from the mode keymap.
@@ -43,6 +48,13 @@ stage. Each stage is one commit, verified live and by a screenshot.
    direction; a cua window refuses through the echo area.
 
 ## Open questions
+
+- Mode glyphs come from a Nerd Font (`mode-icons`). The brief says Unicode
+  glyphs only, derived from the mode: `λ` code, `◍` chat, `✉` mail. A
+  later stage swaps the registry.
+- Two `editor_live_test.exs` tests assert the old `phx-value-cmd="mode:..."`
+  click on the expanded panel; the panel moved to `block_click` with
+  `dash-mode:` before this port. They fail at HEAD too.
 
 - The echo area's key hints are a static list in `editor_live.ex`. They
   should come from Scheme (which-key is the model). Stage 2 or later.

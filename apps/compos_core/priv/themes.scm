@@ -240,9 +240,12 @@
     (list 'diff-add-word 'bg "rgba(61, 107, 79, 0.30)")
     (list 'diff-del-word 'bg "rgba(160, 48, 32, 0.26)")
     (list 'code-scope 'bg "rgba(38, 53, 107, 0.07)")
+    ;; shadow lifts the current pane; shadow-deep is the floating one, a
+    ;; window that can move (the design's shadow-modal)
     (list 'chrome 'gap "5px" 'radius "0"
           'border "1px solid #cbc4b1"
-          'shadow "0 14px 40px rgba(27, 26, 23, 0.13)")))
+          'shadow "0 14px 40px rgba(27, 26, 23, 0.13)"
+          'shadow-deep "0 22px 60px rgba(27, 26, 23, 0.13)")))
 
 (define-theme "paper-night"          ; the design's warm dark
   (list
@@ -327,7 +330,8 @@
     (list 'code-scope 'bg "rgba(213, 172, 102, 0.10)")
     (list 'chrome 'gap "5px" 'radius "0"
           'border "1px solid #4a4238"
-          'shadow "0 14px 40px rgba(0, 0, 0, 0.7)")))
+          'shadow "0 14px 40px rgba(0, 0, 0, 0.7)"
+          'shadow-deep "0 22px 60px rgba(0, 0, 0, 0.7)")))
 
 (define-theme "compos-dark"
   (list

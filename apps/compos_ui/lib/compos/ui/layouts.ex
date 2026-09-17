@@ -299,25 +299,69 @@ defmodule Compos.Ui.Layouts do
             min-width: min(520px, 100%);
             height: 62%;
           }
-          /* A pane keeps the same box whether or not it has the point:
-             a 1px border that is transparent at rest and takes the frame's
-             edge when current, so nothing in the layout moves. The current
-             pane also lifts off the canvas; a pane at rest sits flat on the
-             sunken ground. */
+          /* Three states, no more. The box is the same in all three -- a
+             1px border, transparent at rest -- so nothing in the layout
+             moves when the point moves. At rest a window is kept down: its
+             ground goes toward the canvas, and every voice inside it (ink,
+             accent, keys) steps one toward the paper; only the state dots
+             keep their colour, because a live process is live whether or
+             not you are looking at it. The current cua window sits: paper,
+             a hairline, the shallow shadow. The current focus window
+             floats: a lifted ground, a nearer hairline, the deep shadow.
+             Nothing eases. */
           .window {
             display: flex; flex-direction: column;
-            background: var(--surface-sunken);
+            background: var(--surface-pane);
             border: 1px solid transparent;
-            border-radius: var(--chrome-radius, 0);
+            border-radius: 0;
             box-shadow: none;
             overflow: hidden;
             min-width: 0; min-height: 0;
             position: relative;
+            /* a window measures its own bars: the facts shed by rank
+               against the window's width, not the frame's */
+            container-type: inline-size;
           }
+          .window.inactive {
+            --text-strong: var(--dim-fg, #8a857a);
+            --text-body: var(--dim-fg, #8a857a);
+            --text-soft: var(--faint-fg, #b3ac9c);
+            --text-faint: var(--faint-fg, #b3ac9c);
+            --text-dim: color-mix(in srgb, var(--faint-fg, #b3ac9c) 70%, var(--paper-bg, #efeadf));
+            --accent: var(--faint-fg, #b3ac9c);
+            --accent-wash: transparent;
+            --ok: var(--faint-fg, #b3ac9c);
+            --warn: var(--faint-fg, #b3ac9c);
+            --edge: var(--border-soft-bg, #e2dbc9);
+            --surface-pane: color-mix(in srgb, var(--window-inactive-bg, #f4f0e6) 45%, var(--default-bg, #e6e0d2));
+            --surface-sunken: var(--surface-pane);
+            --surface-chrome: var(--surface-pane);
+            --surface-select: color-mix(in srgb, var(--window-inactive-bg, #f4f0e6) 80%, var(--default-bg, #e6e0d2));
+            background: var(--surface-pane);
+          }
+          .window.inactive .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
           .window.active {
+            --surface-pane: var(--paper-bg, #efeadf);
+            --surface-chrome: var(--paper-bg, #efeadf);
             background: var(--surface-pane);
             border-color: var(--edge);
             box-shadow: var(--chrome-shadow, 0 14px 40px rgba(0, 0, 0, 0.28));
+          }
+          /* Floating is a ground, not only a shadow: on a near-black canvas
+             a shadow barely reads, so the window that can move also lifts
+             to the raised paper, and its hairline goes with it (a brighter
+             rule is a nearer edge). The state tag in the header line
+             (dash-state-focus) is what this rule reads. */
+          .window.active:has(.dash-state-focus) {
+            --surface-pane: color-mix(in srgb, var(--window-bg, #fdfcf8) 55%, var(--hl-line-bg, #f5f1e6));
+            --surface-chrome: var(--surface-pane);
+            --surface-sunken: color-mix(in srgb, var(--window-bg, #fdfcf8) 80%, var(--hl-line-bg, #f5f1e6));
+            --surface-select: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 70%, var(--faint-fg, #b3ac9c));
+            background: var(--surface-pane);
+            border-color: color-mix(in srgb, var(--border-bg, #cbc4b1) 60%, var(--faint-fg, #b3ac9c));
+            box-shadow: 0 1px 0 var(--surface-pane) inset,
+                        var(--chrome-shadow-deep, 0 22px 60px rgba(0, 0, 0, 0.5)),
+                        0 0 0 1px var(--default-bg, #e6e0d2);
           }
 
           .window.preview-highlight {
@@ -1127,11 +1171,6 @@ defmodule Compos.Ui.Layouts do
             background: var(--window-inactive-bg, #f4f0e6);
             border-bottom: 1px solid var(--border-bg, #e2dbc9);
           }
-          .ml-caret {
-            font-family: var(--font-mono); font-size: 10.5px; cursor: pointer;
-            color: var(--accent-fg, #26356b); flex: 0 0 auto; opacity: 0.7;
-          }
-          .ml-caret:hover { opacity: 1; }
           .ml-dot {
             width: 6px; height: 6px; border-radius: 0;
             background: var(--linenum-fg, #c3bcac); flex: 0 0 auto;
@@ -1162,12 +1201,25 @@ defmodule Compos.Ui.Layouts do
           .ml-info { color: inherit; }
           .ml-toggle { cursor: pointer; }
           .ml-toggle:hover { opacity: 1; text-decoration: underline; }
-          .ml-group {
-            font-family: var(--font-mono); font-size: var(--fs-meta);
-            color: var(--buffer-group-color, var(--accent-fg, #26356b)); opacity: 0.85;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-            max-width: 16ch; flex: 0 1 auto;
+          /* the context beside the name: a file's project, a chat's working
+             directory. Dim, and the first thing to give way. */
+          .ml-project {
+            color: var(--text-dim); white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; flex: 0 1 auto; min-width: 0;
+            text-transform: none; font-size: var(--fs-meta);
           }
+          /* The mode line's facts: mode, llm, lane, each a key and a value.
+             Both of a window's bars degrade by rank, not by slicing: the
+             lane (rank 2) goes first, then the model (rank 1). */
+          .ml-facts {
+            display: inline-flex; align-items: baseline; gap: var(--s8);
+            flex: 0 1 auto; min-width: 0; overflow: hidden;
+          }
+          .ml-fact { display: inline-flex; align-items: baseline; gap: var(--s4); white-space: nowrap; }
+          .ml-fact[tone="glyph"] .ml-fact-v { font-size: 13px; }
+          @container (max-width: 700px) { .modeline .ml-fact[rank="2"] { display: none; } }
+          @container (max-width: 620px) { .modeline .ml-fact[rank="1"] { display: none; } }
+          @container (max-width: 400px) { .modeline .ml-fact { display: none; } }
           /* The frame's header line. It carries the furniture: the wordmark,
              the group tabs, the frame's path, the facts, the key legend. It
              is chrome, so it is square, hairlined, mono and quiet, and it

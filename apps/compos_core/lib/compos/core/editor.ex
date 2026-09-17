@@ -3144,6 +3144,26 @@ defmodule Compos.Core.Editor do
 
   defp modeline_group(_groups, _current), do: nil
 
+  # The frame names its current group once, in the header line. A window
+  # whose buffer is in that group wears no pin; a window from another group
+  # wears that group's name. CURRENT is the frame's label, which may carry
+  # a decoration after the name.
+  defp modeline_pin(groups, current) when is_list(groups) do
+    names = Enum.filter(groups, &is_binary/1)
+
+    here? =
+      current in names or
+        (is_binary(current) and Enum.any?(names, &String.starts_with?(current, &1 <> " ")))
+
+    cond do
+      names == [] or here? -> nil
+      length(names) == 1 -> hd(names)
+      true -> "#{hd(names)} (#{length(names) - 1} more)"
+    end
+  end
+
+  defp modeline_pin(_groups, _current), do: nil
+
   # exists? then call still races a dying buffer (registry entries linger);
   # a dead buffer renders empty instead of crashing the Editor
   # The read model answers this without a message, which is why the walk
@@ -3283,6 +3303,9 @@ defmodule Compos.Core.Editor do
       modeline_name_segments: Map.get(locals, "modeline-name-segments"),
       modeline_file: Map.get(locals, "modeline-file"),
       modeline_project: Map.get(locals, "modeline-project"),
+      # the state the mode line draws as key/value facts: mode, llm, lane.
+      # Scheme builds them (dash--modeline-facts); each is (KEY VALUE TONE RANK).
+      modeline_facts: Map.get(locals, "modeline-facts"),
       # free-form per-buffer modeline segment (agent connector, etc.)
       modeline_info: Map.get(locals, "modeline-info"),
       # the LLM tool preset alone, for a modeline too narrow for the line
@@ -3304,6 +3327,9 @@ defmodule Compos.Core.Editor do
       # presentational compaction must happen per frame: one buffer can be
       # visible on two monitors whose current groups differ.
       group: modeline_group(Map.get(locals, "modeline-groups"), frame_group),
+      # the pin: the buffer's group only when it is not the frame's. The
+      # frame names its group once; a window in that group does not repeat it.
+      pin: modeline_pin(Map.get(locals, "modeline-groups"), frame_group),
       # Scheme selects the buffer-owned group that supplies its color.
       # The frame group remains separate context for the bottom bar.
       group_color: Map.get(locals, "modeline-group-color"),

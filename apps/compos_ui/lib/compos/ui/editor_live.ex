@@ -1947,12 +1947,8 @@ defmodule Compos.Ui.EditorLive do
         read_only: assigns.node.read_only,
         dismissible?: Map.get(assigns.node, :dismissible, false),
         peek?: String.contains?(assigns.node.window_class || "", "listing-peek"),
-        # the transcript's reader mode, hoisted out of the transcript: the
-        # headerline draws it, and a preview card draws no controls at all
-        verbosity?:
-          assigns.node.render_mode == "agent" and
-            not String.contains?(assigns.node.window_class || "", "listing-peek"),
-        verbosity: Map.get(Map.get(assigns.node, :agent) || %{}, :verbosity, "info"),
+        # the state the mode line draws, normalised: (KEY VALUE TONE RANK)
+        facts: ml_facts(assigns.node),
         active?: assigns.node.id == assigns.active
       )
 
@@ -2007,40 +2003,22 @@ defmodule Compos.Ui.EditorLive do
         phx-value-win={@node.id} phx-value-cmd="dismiss-buffer"
         aria-label="Dismiss child or go back (q)"><kbd>q</kbd></button>
       <c-headerline :if={@node.header_line} class="buffer-header">{@node.header_line}</c-headerline>
-      <c-group :if={@node.dash || @node.dashboard_line_blocks || (@verbosity? && @active?)} class="dash-top">
+      <c-group :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
+        <%!-- The window's header line: identity. Scheme builds every block
+               (dashboard-line-blocks): the group pin, the title, the open
+               change, the cua/focus tag and the one switcher. data-pin marks
+               a window whose buffer is in a group other than the frame's;
+               only then does the pin show. --%>
         <c-headerline
-          :if={@node.dashboard_line_blocks || (@verbosity? && @active?)}
+          :if={@node.dashboard_line_blocks}
           class="dash-persistent"
           title="open dashboard"
+          data-pin={Map.get(@node, :pin)}
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
         >
           <.blk :for={b <- @node.dashboard_line_blocks || []} b={block_view(b)} line={-1} win={@node.id} />
-          <%!-- How much of the transcript to show is a fact about this window,
-                 so it rides the headline itself, at the end of the row, as the
-                 three states of one radio. Inside the scroll it moved with the
-                 reader and covered the conversation, and a bar of its own spent
-                 a whole row on three glyphs. The headline opens the dashboard
-                 on a click and these do not: the nearest phx-click to the
-                 target is the one that fires, so a press on a state never
-                 reaches the row underneath it. It answers for the window you
-                 are in, so an inactive one draws no buttons and puts none in
-                 the tab order. --%>
-          <c-group :if={@verbosity? && @active?} class="dash-verbosity" role="radiogroup" aria-label="Transcript verbosity">
-            <button
-              :for={{level, icon} <- [{"info", "ⓘ"}, {"log", "≡"}, {"debug", "⌗"}]}
-              type="button"
-              role="radio"
-              class={"dvb #{if @verbosity == level, do: "on"}"}
-              title={level}
-              aria-label={level}
-              aria-checked={to_string(@verbosity == level)}
-              phx-click="ui_cmd"
-              phx-value-win={@node.id}
-              phx-value-cmd={"agent-verbosity-" <> level}
-            >{icon}</button>
-          </c-group>
         </c-headerline>
         <c-group :if={@node.dash} class="dash-live">
           <c-text>L{@line}:C{@col}</c-text>
@@ -2274,44 +2252,37 @@ defmodule Compos.Ui.EditorLive do
         {@node.footer_line}
       </c-group>
       <c-modeline class="modeline">
-        <c-text
-          class="ml-caret"
-          title="expand (C-x ?)"
-          phx-click="ui_cmd"
-          phx-value-win={@node.id}
-          phx-value-cmd="modeline-expand"
-        >{if @node.dash, do: "▾", else: "▸"}</c-text>
         <c-text class={"ml-dot #{if @node.modified, do: "modified"}"}></c-text>
         <c-buffer-name
           buffer={@node.buffer}
           modified={to_string(@node.modified)}
           class="name"
-          style="cursor:pointer"
           title={@node.buffer}
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
         ><%= if ml_segs(@node) != [] do %><c-text :for={{c, t} <- ml_segs(@node)} class={c}>{t}</c-text><% else %>{ml_name(@node)}<% end %></c-buffer-name>
-        <c-field name="project" :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
-          · {@node.modeline_project}
-        </c-field>
-        <c-field name="group" :if={@node.group} class="ml-group">· {@node.group}</c-field>
+        <c-field name="project" :if={@node.modeline_project && @node.modeline_project != ""} class="ml-project">{@node.modeline_project}</c-field>
         <c-status state="selected" :if={@node.selected} class="ml-mode ml-selected">● selected</c-status>
         <c-mode :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</c-mode>
         <c-field name="info"
           :if={@node.modeline_info}
           class="ml-mode"
-          style="cursor:pointer"
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-buf={@node.buffer}
         >{@node.modeline_info}</c-field>
+        <%!-- the facts: mode, llm, lane (or the preset alone), each a key
+               and a value, ranked so a narrow window sheds them in order --%>
+        <c-group :if={@facts != []} class="ml-facts">
+          <c-field :for={{k, v, tone, rank} <- @facts} name={k} class="ml-fact" tone={tone} rank={rank}><c-label class="ml-fact-k">{k}</c-label><c-value class={"ml-fact-v #{tone}"}>{v}</c-value></c-field>
+        </c-group>
         <c-text class="mb-spacer"></c-text>
         <c-position class="ml-pos" line={@line} column={@col}>
           <%= if @node.render_mode == "terminal" do %>
-            <c-text class="ml-icon">▣</c-text> PTY · transcript {ml_bytes(@node.text)}
+            PTY · transcript {ml_bytes(@node.text)}
           <% else %>
-            <c-text class="ml-icon">≡</c-text> {ml_bytes(@node.text)} · <c-text class="ml-icon">⌖</c-text> L{@line}:C{@col} · {pct(@node)}
+            {ml_bytes(@node.text)} · L{@line}:C{@col} · {pct(@node)}
           <% end %>
         </c-position>
       </c-modeline>
@@ -4264,6 +4235,15 @@ defmodule Compos.Ui.EditorLive do
         [{"a", [{"href", url}], [url], meta}]
     end
   end
+
+  # The mode line's facts, as Scheme built them: a list of (KEY VALUE TONE
+  # RANK). A row of another shape is skipped, never a crash in the render.
+  defp ml_facts(%{modeline_facts: facts}) when is_list(facts) do
+    for [k, v, tone, rank] <- facts,
+        do: {to_string(k), to_string(v), to_string(tone), to_string(rank)}
+  end
+
+  defp ml_facts(_node), do: []
 
   # the modeline names the buffer the short way; the tooltip keeps the
   # absolute path. Scheme decides what short means (project.scm).

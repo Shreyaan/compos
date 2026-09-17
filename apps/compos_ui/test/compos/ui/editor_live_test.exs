@@ -120,16 +120,46 @@ defmodule Compos.Ui.EditorLiveTest do
     assert html =~ "--buffer-group-color: #9b6ab3"
   end
 
-  test "a pinned group name appears in the window modeline", %{conn: conn} do
+  # The frame names its group once. A window in another group wears a pin
+  # on its header line (data-pin lets the pin show); the mode line never
+  # repeats a group.
+  test "a foreign group pins the window's header line, not its mode line", %{conn: conn} do
     {:ok, view, mounted} = live(conn, "/")
     [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, mounted)
     buf = Compos.Core.Editor.render_state(frame).tree.buffer
     Compos.Core.Buffer.set_local(buf, "modeline-groups", ["pinned-group"])
-    Compos.Core.Editor.set_frame_group_style("pinned-group ", "#9b6ab3", frame)
+    Compos.Core.Editor.set_frame_group_style("pinned-group ", "#9b6ab3", frame)
+    # the header line exists once the dashboard rendered for this buffer
+    {:ok, _} =
+      Compos.Core.Session.eval(
+        ~s{(with-current-buffer "#{buf}" (lambda () (run-command "buffer-dashboard-refresh")))}
+      )
+
+    html = render(view)
+    assert html =~ "dash-persistent"
+
+    # the frame stands in the buffer's group: no pin, and no group anywhere
+    refute html =~ ~s(data-pin=)
+    refute html =~ ~s(class="ml-group")
+
+    Compos.Core.Editor.set_frame_group_style("other-group ", "#9b6ab3", frame)
     html = render(view)
 
-    assert html =~ ~s(class="ml-group")
-    assert html =~ "· pinned-group "
+    assert html =~ ~s(data-pin="pinned-group")
+  end
+
+  # The mode line carries the state as ranked facts Scheme built; the
+  # header line carries none of them.
+  test "the mode line draws the buffer's facts and the header line does not", %{conn: conn} do
+    {:ok, view, mounted} = live(conn, "/")
+    [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, mounted)
+    buf = Compos.Core.Editor.render_state(frame).tree.buffer
+    Compos.Core.Buffer.set_local(buf, "modeline-facts", [["mode", "text", "glyph", 0], ["lane", "api", "ok", 2]])
+    html = render(view)
+
+    assert html =~ ~s(class="ml-fact" tone="ok" rank="2")
+    assert html =~ ~s(<c-value class="ml-fact-v ok">api</c-value>)
+    refute html =~ "dash-verbosity"
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:compos_core, key)
