@@ -786,7 +786,7 @@
     ("/" "list-filter") ("f" "list-filter") ("\\" "list-filter-pop")
     ("<" "list-cycle-grouping") (">" "list-cycle-sorting")
     ("n" "list-next") ("p" "list-prev")
-    ("SPC" "list-mark") ("m" "list-mark")
+    ("SPC" "list-toggle-mark") ("m" "list-mark")
     ("u" "list-unmark") ("U" "list-unmark-all") ("*" "list-mark-all")
     ("x" "list-execute") ("g" "list-revert")))
 
