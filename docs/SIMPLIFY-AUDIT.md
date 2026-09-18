@@ -1204,6 +1204,17 @@ What each step must not do: move a file another session holds (groups,
 layouts, ibuffer are Phase 2), change a binding, or grow Elixir policy.
 Step 5 needs the owner's go; steps 1-4 are mechanism and can start.
 
+**Step 1, started (2026-09-19).** The live dashboard is gone: the
+/dashboard route, Compos.Ui.Telemetry (the metrics supervisor and its
+poller) and the three dependencies only it used (phoenix_live_dashboard,
+telemetry_metrics, telemetry_poller). M-x perf is the sample; the
+telemetry ring is the stream. Two pieces stay for a ruling, because
+each is a working tool with tests: M-x profile (Profiler + profile.scm,
+a per-command trace, not a duplicate of the telemetry rows) and the SVG
+panels of perf.scm (perf-toggle-text already gives the plain table).
+The lane slow-job warning stays beside its telemetry row: the freeze
+triage of 2026-08 read the log, and the line is one Logger call.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,

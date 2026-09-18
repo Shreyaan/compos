@@ -1,7 +1,6 @@
 defmodule Compos.Ui.Router do
   use Phoenix.Router
   import Phoenix.LiveView.Router
-  import Phoenix.LiveDashboard.Router
 
   pipeline :browser do
     plug(:accepts, ["html"])
@@ -36,10 +35,6 @@ defmodule Compos.Ui.Router do
     # query gives one. The name is one percent-encoded segment, so a file
     # buffer (named after its path) keeps its slashes.
     live("/b/:buffer", Compos.Ui.EditorLive)
-
-    # the BEAM, graphically: processes by reductions, memory, and message
-    # queue; request and VM charts. The dashboard brings its own layout.
-    live_dashboard("/dashboard", metrics: Compos.Ui.Telemetry)
   end
 
   # the same buffer as plain text, for a terminal or an agent that holds a

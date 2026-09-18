@@ -23,7 +23,6 @@ defmodule Compos.Ui.Application do
 
     children =
       [
-        Compos.Ui.Telemetry,
         {Phoenix.PubSub, name: Compos.Ui.PubSub},
         Compos.Ui.Oembed,
         Compos.Ui.Endpoint
