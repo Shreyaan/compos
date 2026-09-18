@@ -288,7 +288,8 @@ defmodule Compos.Core.Telemetry do
       detail:
         "state #{measurements[:state] || 0}ms decorate #{measurements[:decorate] || 0}ms" <>
           case metadata[:slowest] do
-            {buffer, ms} -> " slowest #{buffer} #{ms}ms"
+            {buffer, ms, split} when is_binary(split) -> " slowest #{buffer} #{ms}ms (#{split})"
+            {buffer, ms, _} -> " slowest #{buffer} #{ms}ms"
             _ -> ""
           end
     })

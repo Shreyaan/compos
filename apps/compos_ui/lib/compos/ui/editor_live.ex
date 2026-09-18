@@ -679,11 +679,14 @@ defmodule Compos.Ui.EditorLive do
 
     {state, socket} = hold_which_key(state, socket)
 
-    # cache entries for windows that left the tree die with them (S15)
+    # cache entries for windows that left the tree die with them (S15);
+    # the block caches are per buffer and die when the buffer leaves the tree
     ids = state.tree |> leaf_ids() |> MapSet.new()
+    buffers = state.tree |> event_buffers() |> MapSet.new()
 
     line_cache =
       Map.filter(line_cache, fn
+        {{_kind, buffer}, _} when is_binary(buffer) -> MapSet.member?(buffers, buffer)
         {{_kind, id}, _} -> MapSet.member?(ids, id)
         {id, _} -> MapSet.member?(ids, id)
       end)
@@ -829,8 +832,10 @@ defmodule Compos.Ui.EditorLive do
 
       case Process.get(:decorate_slowest) do
         {_, worst} when worst >= ms -> :ok
-        _ -> Process.put(:decorate_slowest, {leaf.buffer, ms})
+        _ -> Process.put(:decorate_slowest, {leaf.buffer, ms, Process.get(:decorate_agent_split)})
       end
+
+      Process.delete(:decorate_agent_split)
 
       result
     end
@@ -905,17 +910,24 @@ defmodule Compos.Ui.EditorLive do
        ) do
     # Input edits do not change the transcript mark or block model. Reuse the
     # complete block tree so typing and RET do not scan large tool results.
+    # keyed by the BUFFER, not the window: a retile hands window ids out
+    # by leaf order, so after one move a window shows a different chat and
+    # a per-window entry misses on every arrow, re-rendering every block
     old =
-      case cache[{:agent, leaf.id}] do
+      case cache[{:agent, leaf.buffer}] do
         %{block_cache: block_cache} = entry -> {entry, block_cache}
         _ -> {%{}, %{}}
       end
 
     {old_entry, old_blocks} = old
+    t_sig = System.monotonic_time(:microsecond)
     signature = {ag.blocks, ag.open_cards, ag.mark}
+    hit? = old_entry[:signature] == signature
+    t_sig = System.monotonic_time(:microsecond) - t_sig
+    t_blocks = System.monotonic_time(:microsecond)
 
     {blocks, block_cache} =
-      if old_entry[:signature] == signature do
+      if hit? do
         {old_entry.blocks, old_blocks}
       else
         {rendered, block_cache} =
@@ -937,15 +949,26 @@ defmodule Compos.Ui.EditorLive do
         {Enum.reject(rendered, &is_nil/1), block_cache}
       end
 
+    t_blocks = System.monotonic_time(:microsecond) - t_blocks
     entry = %{signature: signature, blocks: blocks, block_cache: block_cache}
+    t_input = System.monotonic_time(:microsecond)
+    input = ag_input(leaf, ag)
+    t_input = System.monotonic_time(:microsecond) - t_input
+
+    # the refresh row's slowest-leaf detail carries this split while the
+    # resize cost of a chat pane is under investigation
+    Process.put(
+      :decorate_agent_split,
+      "sig #{div(t_sig, 1000)}ms hit #{hit?} blocks #{div(t_blocks, 1000)}ms input #{div(t_input, 1000)}ms n #{length(ag.blocks)}"
+    )
 
     {Map.merge(leaf, %{
        lines: [],
        ag_blocks: blocks,
-       ag_input: ag_input(leaf, ag),
+       ag_input: input,
        ag_activity: Map.get(ag, :activity),
        ag_queued: Map.get(ag, :queued) || []
-     }), Map.put(cache, {:agent, leaf.id}, entry)}
+     }), Map.put(cache, {:agent, leaf.buffer}, entry)}
   end
 
   # rich diff: the buffer text IS the unified diff, so the cards are parsed
@@ -959,7 +982,7 @@ defmodule Compos.Ui.EditorLive do
     key = {leaf.buffer, leaf.version, :erlang.phash2(raw)}
 
     blocks =
-      case cache[{:blocks, leaf.id}] do
+      case cache[{:blocks, leaf.buffer}] do
         {^key, blocks} -> blocks
         _ -> Enum.map(raw, &block_view/1)
       end
@@ -967,7 +990,7 @@ defmodule Compos.Ui.EditorLive do
     line = Compos.Core.Text.line_index(leaf.text, leaf.point) + 1
 
     {Map.merge(leaf, %{lines: [], blk: blocks, blk_line: line, blk_root: block_root(Map.get(leaf, :blocks_root))}),
-     Map.put(cache, {:blocks, leaf.id}, {key, blocks})}
+     Map.put(cache, {:blocks, leaf.buffer}, {key, blocks})}
   end
 
   # Select source lines before fontification and segmentation. The rope in

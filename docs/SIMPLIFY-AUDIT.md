@@ -1038,6 +1038,17 @@ measured before it is named.
 **Wanted later (owner, 2026-09-19):** a hot refresh that unloads and
 loads all Scheme, so a registry migration does not need a restart.
 
+**4a, the slow layout prompt, found (2026-09-19).** The rows named it:
+every arrow in the layout prompt cost 100-140 ms per chat pane in
+EditorLive's decorate, with `hit false` on the agent block cache and
+575 blocks re-rendered. The cache was keyed by window id, and the tiler
+hands window ids out by leaf order, so after one move the window held a
+different chat than the entry and every block re-rendered, markdown and
+all. The agent and block caches are keyed by buffer now and die when the
+buffer leaves the tree. On the way: the prompt applies a candidate to
+the visible panes without restoring first, the refresh row names the
+slowest leaf, and the slow-job log names the callback.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:

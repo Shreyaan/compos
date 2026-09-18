@@ -28,6 +28,7 @@ list to make a run green.
 | movie_test.exs, chosen_pane_test.exs, spotify_test.exs | 1 each | opt-in apps |
 | chrome_test.exs | 1 | "returning from a page a buffer already on screen is selected" |
 | load_test.exs | 0 | was red on calendar.scm, which init.scm never loaded; now expected |
+| compos_ui agent_view_test.exs | 3 of 13 | the verbosity control, the text-scale rule and the modeline name markup; red at HEAD 53f4b07b |
 | desktop_restore_test.exs | 2 | "every literal mode-name write names a registered mode": ibuffer-test.scm writes `aa-other-mode` (d293b2d9) and no define-mode registers it; "LLM configuration history survives desktop restore": the history rows are plists now, the test expects bare lists |
 
 ## Scheme (priv/tests)
