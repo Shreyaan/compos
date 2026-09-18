@@ -509,10 +509,13 @@ defmodule Compos.Scheme.Env do
         # would spin every eval forever: reap it instead of waiting.
         :ets.update_counter(tid, {:eval, self()}, -1, {{:eval, self()}, 0})
 
+        # Poll at 1 ms: a sweep takes tens of ms, so a waiter starts at
+        # most 1 ms after it ends. A message wake would leave a stray
+        # message in a GenServer's mailbox when a waiter gives up.
         if is_pid(pid) and not Process.alive?(pid) do
           :ets.delete_object(tid, claim)
         else
-          Process.sleep(5)
+          Process.sleep(1)
         end
 
         enter(tid)
