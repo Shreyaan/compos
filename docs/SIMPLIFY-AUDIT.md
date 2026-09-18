@@ -1008,6 +1008,22 @@ buffer), and llm-mode handles both chats and documents. Wanted later: a
 gptel-like `C-u M-o` that directs the output (at point, to the group's
 chat, to a new buffer, over the region). Nothing in-buffer goes.
 
+**The chat merge, the plan (2026-09-19, agreed in outline):** the
+transport is the chat runtime, one session, one backend, `permit?`, the
+tools, the record. A document that talks gets a companion chat, one per
+buffer, made on the first M-o and hidden until opened; it is the
+conversation of record for that document, and the group chat is not
+touched. Where the reply lands is a render target: plain M-o renders the
+turn into the document at the mark, gptel style, and `C-u M-o` picks the
+target (at point, the companion pane, a new buffer, over the region).
+llm-mode keeps its prompt and response faces, the mark that chases
+edits, C-g abort and M-| for a region; it loses its own dispatcher,
+context function and permission stub. Steps: (1) llm-mode sends through
+the companion, rendering unchanged; (2) the companion's turn-end feeds
+the in-buffer render from the record; (3) `C-u M-o` targets; (4) the
+llm-mode dispatcher, context fn and permission stub go; (5) 5.12's twin
+transcript primitives collapse onto one set.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:
