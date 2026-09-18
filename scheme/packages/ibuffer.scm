@@ -891,11 +891,13 @@
   (let ((fields (ibuffer-fields buf all)))
     (if (ibuffer-heading? b)
         (ibuffer-heading-cells buf b (length fields))
+        ;; the mode says what a buffer is, so it reads as metadata (dim);
+        ;; the size and the age are the quiet columns (faint)
         (append (ibuffer-cell-head buf b)
                 (map (lambda (f)
                        (list (ibuffer-field-fill
                                (ibuffer-field-cell b (ibuffer-field-tag f)))
-                             "faint"))
+                             (if (equal? (ibuffer-field-tag f) 'mode) "dim" "faint")))
                      fields)))))
 
 (define (ibuffer-narrow-columns buf) (ibuffer-columns-for buf *ibuffer-narrow-fields*))

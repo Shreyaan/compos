@@ -323,11 +323,14 @@ defmodule Compos.Ui.Layouts do
             container-type: inline-size;
           }
           .window.inactive {
-            --text-strong: var(--dim-fg, #8a857a);
-            --text-body: var(--dim-fg, #8a857a);
-            --text-soft: var(--faint-fg, #b3ac9c);
-            --text-faint: var(--faint-fg, #b3ac9c);
-            --text-dim: color-mix(in srgb, var(--faint-fg, #b3ac9c) 70%, var(--paper-bg, #efeadf));
+            /* one step down for the bright voices; the quiet ones stay
+               where they are, because a word that was faint has no
+               step left before it is gone */
+            --text-strong: var(--body-fg, #3f3b33);
+            --text-body: var(--modeline-fg, #57534a);
+            --text-soft: var(--dim-fg, #8a857a);
+            --text-faint: var(--dim-fg, #8a857a);
+            --text-dim: var(--faint-fg, #b3ac9c);
             --accent: var(--faint-fg, #b3ac9c);
             --accent-wash: transparent;
             --ok: var(--faint-fg, #b3ac9c);

@@ -383,8 +383,9 @@
     (list 'border 'bg "#15161a")
     (list 'warn 'fg "#e0af68")
     ;; the list faces: a column label and a rule are fainter than
-    ;; `dim`, and a list says good and bad in one word
-    (list 'faint 'fg "#4a4d59")
+    ;; `dim`, and a list says good and bad in one word. Faint is still
+    ;; text: the line-number grey is a mark, not a word.
+    (list 'faint 'fg "#6f7387")
     (list 'ok 'fg "#9ece6a")
     (list 'alert 'fg "#f7768e")
     ;; the mail faces: the index columns and the show-view header
@@ -455,7 +456,7 @@
     (list 'warn 'fg "#fab387")
     ;; the list faces: a column label and a rule are fainter than
     ;; `dim`, and a list says good and bad in one word
-    (list 'faint 'fg "#45475a")
+    (list 'faint 'fg "#7f849c")
     (list 'ok 'fg "#a6e3a1")
     (list 'alert 'fg "#f38ba8")
     ;; the mail faces: the index columns and the show-view header
