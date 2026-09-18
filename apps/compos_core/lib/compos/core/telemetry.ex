@@ -285,7 +285,12 @@ defmodule Compos.Core.Telemetry do
       owner: frame_owner(metadata[:frame]),
       label: "refresh",
       tid: metadata[:tid],
-      detail: "state #{measurements[:state] || 0}ms decorate #{measurements[:decorate] || 0}ms"
+      detail:
+        "state #{measurements[:state] || 0}ms decorate #{measurements[:decorate] || 0}ms" <>
+          case metadata[:slowest] do
+            {buffer, ms} -> " slowest #{buffer} #{ms}ms"
+            _ -> ""
+          end
     })
   end
 

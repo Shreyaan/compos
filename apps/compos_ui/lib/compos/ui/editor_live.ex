@@ -572,13 +572,15 @@ defmodule Compos.Ui.EditorLive do
     # the boot id rides every render: a hot-swapped page module bumps it,
     # and the client's boot check reloads the page when it moves
     socket = assign(socket, boot_id: :persistent_term.get(:compos_boot_id, "dev"))
+    Process.delete(:decorate_slowest)
     {socket, state_ms} = refresh_state(socket)
     total = System.monotonic_time(:millisecond) - t0
+    slowest = Process.get(:decorate_slowest)
 
     :telemetry.execute(
       [:compos, :ui, :refresh],
       %{duration: total, state: state_ms, decorate: total - state_ms},
-      %{frame: socket.assigns[:frame]}
+      %{frame: socket.assigns[:frame], slowest: slowest}
     )
 
     socket
@@ -819,7 +821,18 @@ defmodule Compos.Ui.EditorLive do
          (Map.get(leaf, :display_updating, false) || Events.display_updating?(leaf.buffer)) do
       {old, cache}
     else
-      decorate(leaf, cache, faces, active)
+      # the refresh row names the slowest leaf: a resize that costs a
+      # quarter second says which pane paid it
+      t0 = System.monotonic_time(:millisecond)
+      result = decorate(leaf, cache, faces, active)
+      ms = System.monotonic_time(:millisecond) - t0
+
+      case Process.get(:decorate_slowest) do
+        {_, worst} when worst >= ms -> :ok
+        _ -> Process.put(:decorate_slowest, {leaf.buffer, ms})
+      end
+
+      result
     end
   end
 
