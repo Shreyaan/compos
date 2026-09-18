@@ -1302,6 +1302,18 @@ must keep its group when a foreign buffer shows, which no code does
 now. The remaining six names (headings, MRU cache, SPC marking) date
 from the other session's switcher commits and wait with it.
 
+The other two files, bisected the same way: layout-policy-test.scm is
+8 red at 66d2ea54 (2026-09-11, before the foreign flip, the day of its
+own last commit 05109325), so its target-layout tests were committed
+red as a spec of work in progress; detail-test.scm is 2 red at its own
+last commit b5123dce (2026-09-15: the detail window after a swap, and
+the kept detail's rename), and its third name passes alone (verified in
+a scratch file) and is red only behind those two. Nothing in the three
+files went red under the simplification except make-frame!. The Phase 2
+gate is therefore the other session's unfinished switcher and
+target-layout work, and making those tests pass is their design, not a
+cleanup; it waits for them or for a ruling that those specs stand.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
