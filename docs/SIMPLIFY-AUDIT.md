@@ -1156,6 +1156,54 @@ WT/_build/` (the priv links inside are relative), never a symlink to the
 main tree's _build, or the run reads the main tree's init.scm against
 the worktree's packages.
 
+**Phase 3, the plan (2026-09-19).** Five steps, one commit each, in the
+order of least risk and most unlocking. A step starts only when the
+previous step's tests are green and its measurement is recorded before
+and after. The numbers today: env.ex 546 lines, gc.ex 91, lane.ex 371,
+session.ex 2,228, buffer.ex 3,511, editor.ex 3,580, editor_live.ex
+4,319; `:compos_escaped_closures` is referenced from 19 files.
+
+1. *One event stream and one sample* (section 8, item 15). Telemetry's
+   ring is the stream; SysMon is the sample; perf.scm draws both.
+   Profiler, live_dashboard and the hand-rolled SVG builders go.
+   Elixir only. Tests: the telemetry rows read over the socket, M-x
+   perf renders. Measure: nothing to measure; count the lines.
+2. *Keymaps are Scheme data* (item 12). editor.ex keeps one lookup
+   (`key-binding` over the buffer's map list); the 360 lines of ladder
+   resolution and the ~30 handle_calls move to Scheme, where
+   keymap-test.scm and keys-sweep-test.scm already read the maps as
+   data. Measure: the per-key telemetry row before and after; a key
+   must not cost more.
+3. *One store, one read model, one wake path* (items 5-8, 15). The Loro
+   log is the text and the author record; the catalog is derived at
+   boot; the ETS row is the only read model for live and dormant
+   buffers; `wake(name)` starts from the log and runs one
+   `buffer-woken!` on the buffer's lane, always async. Tests: buffer,
+   desktop restore, dormant buffers, provenance. Measure: boot time
+   (3 s today) and the restore-loss history (six losses).
+4. *One Display row model and one LiveView* (item 9, item 14 of section
+   10). The "agent" render mode folds into "blocks"; Scheme composes the
+   modeline and header blocks; static app.js and editor.css. Tests: the
+   editor_live tests, blocks rendering, the per-command cost triage.
+   Measure: the per-key render cost from the full-stack telemetry.
+5. *The world collapse* (item 4, the Phase 4 decision). One serial
+   Scheme process evaluates every policy; env.ex keeps ETS for the
+   globals and a process map for frames, and the escape, promote, flush,
+   roots, heir and retry machinery goes (~900 lines), because a closure
+   never crosses a process. Two preconditions, both before the step
+   starts: (a) the full hot-refresh the owner asked for (unload and load
+   all Scheme), because C-g on a runaway eval in one world restarts the
+   world, and a restart must rebuild every command and mode from source;
+   (b) the benchmark (test/bench/ui_latency_bench.exs) run on the branch
+   before and after. Acceptance: :ui p99 under the 1,500-chunk turn no
+   worse than today's, and the worst keystroke wait behind a burst
+   under one 25 ms frame. SchemeTask stays for pure reads until the
+   benchmark says it can go.
+
+What each step must not do: move a file another session holds (groups,
+layouts, ibuffer are Phase 2), change a binding, or grow Elixir policy.
+Step 5 needs the owner's go; steps 1-4 are mechanism and can start.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
