@@ -1241,6 +1241,16 @@ primitives; nothing else. Tests: window-config, detail, peek, popup
 tests read `side` and `owner` as data. Measure: the window-rearrange
 timings of 4a before and after.
 
+**Amended by the owner (2026-09-19): "we are not doing side windows.
+popups will be the floating overlay. you can get rid of everything
+else. the ux philosophy is of minimal movement. efficient everything."**
+So the leaf gains `owner` only. There is no `side`: the popup is not a
+window kind, it is the one floating overlay over the panes, outside
+the window tree, and dock, side and hidden windows go with the class
+string. A window is a pane of work or it is owned by one; the popup
+floats. Every design below reads with that in mind: minimal movement
+of windows, focus and point; nothing that costs the user a step.
+
 *4.6 The `display-preview` action.* One action in the display chain,
 `(display-preview NAME OWNER)`: show NAME in the window OWNER owns (make
 it with `owner` set when there is none), never bump the buffer MRU,
