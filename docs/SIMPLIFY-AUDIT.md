@@ -909,6 +909,29 @@ y-or-n-p one continuation; yes-or-no-p takes a word. They are four
 readers, not five copies. Merging y-or-n into y-or-n-p means rewriting
 23 call sites; it waits.
 
+**Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
+groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
+starts when all four hold, and not before:
+
+1. The layout tests are green at HEAD: layout-policy, group-switch,
+   autolayout, window-config, detail and the ibuffer prompt tests (26
+   names in docs/KNOWN-FAILURES.md, red today from the listing-preview
+   work in the other session). A redesign with a red baseline cannot
+   tell its own breakage from the inherited one.
+2. The other session has landed its groups, layouts and ibuffer work;
+   git status shows none of those files dirty for a day.
+3. A one-page design for each item, agreed first: the window leaf with
+   `side` and `owner` (4.2), the `display-preview` action (4.6), the
+   config record (5.10), and what M-o does once llm-mode is gone (5.1).
+4. The measurements in 4a repeated on the design branch before and
+   after, since window rearrangement time is first class.
+
+Order inside Phase 2 once open: the config record (5.10, tests in
+transient-test and llm-setup-test), permit? (5.9), the display-preview
+action (4.6, tests in display-buffer, peek and detail), then the chat
+merge (5.1, 5.11, 5.12) last because every chat test that could guard
+it is red on the fake transport today.
+
 **Next three steps, in order.**
 
 1. `load-path`: the defvar in editor.scm, `load` searching it in Scheme over
