@@ -15,9 +15,11 @@ defmodule Compos.Scheme.GC do
 
   Roots are the global frame plus every closure found in the caller's
   root terms (recent results, command tables, escaped-handler
-  registries, buffer locals). Closure *bodies* are never scanned: they
-  are reader output and cannot contain closure terms, and scanning them
-  would make each sweep proportional to the loaded source.
+  registries, buffer locals). Closure *bodies* are never scanned, and
+  they never leave ETS: `Env.edges/1` reads each closure's frame ref
+  with a match spec. A body is reader output and cannot hold a closure
+  term, and copying bodies out made each sweep proportional to the
+  loaded source.
   """
 
   require Logger
@@ -37,13 +39,11 @@ defmodule Compos.Scheme.GC do
         t0 = System.monotonic_time(:millisecond)
 
         try do
-          frames = Env.snapshot(store)
+          {graph, shared} = Env.edges(store)
           work = Enum.reduce(roots, [global], &closure_refs/2)
-          live = mark(frames, work, MapSet.new())
+          live = mark(graph, work, MapSet.new())
 
-          for {ref, {vars, _parent, :ets}} <- frames, not MapSet.member?(live, ref) do
-            Env.delete_frame(store, ref, vars)
-          end
+          for ref <- shared, not MapSet.member?(live, ref), do: Env.drop_frame(store, ref)
 
           ms = System.monotonic_time(:millisecond) - t0
 
@@ -52,12 +52,12 @@ defmodule Compos.Scheme.GC do
           if Code.ensure_loaded?(:telemetry) do
             :telemetry.execute(
               [:compos, :scheme, :gc],
-              %{duration: ms, frames: map_size(frames), live: MapSet.size(live)},
+              %{duration: ms, frames: map_size(graph), live: MapSet.size(live)},
               %{}
             )
           end
 
-          Logger.info("scheme gc: #{map_size(frames)} frames, #{MapSet.size(live)} live, #{ms}ms")
+          Logger.info("scheme gc: #{map_size(graph)} frames, #{MapSet.size(live)} live, #{ms}ms")
 
           local = store.local |> Map.filter(fn {ref, _} -> MapSet.member?(live, ref) end)
           %{interp | store: %{store | local: local}}
@@ -67,23 +67,15 @@ defmodule Compos.Scheme.GC do
     end
   end
 
-  defp mark(_frames, [], seen), do: seen
+  defp mark(_graph, [], seen), do: seen
 
-  defp mark(frames, [ref | rest], seen) do
+  defp mark(graph, [ref | rest], seen) do
     if MapSet.member?(seen, ref) do
-      mark(frames, rest, seen)
+      mark(graph, rest, seen)
     else
-      case Map.fetch(frames, ref) do
-        # stale ref: possible only if a root outlived a frame a prior sweep
-        # dropped — don't crash the editor over it
-        :error ->
-          mark(frames, rest, MapSet.put(seen, ref))
-
-        {:ok, {vars, parent, _tier}} ->
-          work = if parent in [nil, :unknown], do: rest, else: [parent | rest]
-          work = Enum.reduce(vars, work, fn {_name, val}, acc -> closure_refs(val, acc) end)
-          mark(frames, work, MapSet.put(seen, ref))
-      end
+      # a ref with no entry is stale (a root outlived a frame a prior
+      # sweep dropped): mark it and go on, never crash the editor
+      mark(graph, Map.get(graph, ref, []) ++ rest, MapSet.put(seen, ref))
     end
   end
 

@@ -417,35 +417,53 @@ defmodule Compos.Scheme.Env do
   end
 
   @doc """
-  Both tiers as `%{ref => {vars, parent, :ets | :local}}` — the GC's
-  working copy. The local tier shadows the shared one.
+  The frame graph for the GC: `%{ref => [ref]}`, both tiers, each frame
+  with its parent and the frames its values capture. The shared tier is
+  read by match specs, so a closure's body never leaves ETS: a closure
+  value yields only its captured frame ref. Only compound values that are
+  not closures (lists, maps, other tuples) are copied out and scanned;
+  scalars are skipped. Also answers the set of shared frame refs.
   """
-  def snapshot(%__MODULE__{tid: tid, local: local}) do
-    shared =
-      :ets.tab2list(tid)
-      |> Enum.reduce(%{}, fn
-        {{:frame, ref}, parent}, acc ->
-          Map.update(acc, ref, {%{}, parent}, fn {vars, _} -> {vars, parent} end)
+  def edges(%__MODULE__{tid: tid, local: local}) do
+    v = :"$2"
 
-        {{:var, ref, name}, val}, acc ->
-          Map.update(acc, ref, {%{name => val}, :unknown}, fn {vars, parent} ->
-            {Map.put(vars, name, val), parent}
-          end)
+    parents = :ets.select(tid, [{{{:frame, :"$1"}, v}, [], [{{:"$1", v}}]}])
+    var_refs = :ets.select(tid, [{{{:var, :"$1", :_}, :_}, [], [:"$1"]}])
+    closures = :ets.select(tid, [{{{:var, :"$1", :_}, {:closure, :_, :_, v}}, [], [{{:"$1", v}}]}])
 
-        _lock_row, acc ->
-          acc
+    not_closure_tuple =
+      {:andalso, {:is_tuple, v},
+       {:andalso, {:>, {:tuple_size, v}, 0}, {:"=/=", {:element, 1, v}, :closure}}}
+
+    compound_guard = {:orelse, {:is_list, v}, {:orelse, {:is_map, v}, not_closure_tuple}}
+    compound = :ets.select(tid, [{{{:var, :"$1", :_}, v}, [compound_guard], [{{:"$1", v}}]}])
+
+    add = fn acc, ref, out -> Map.update(acc, ref, out, &(out ++ &1)) end
+
+    graph =
+      Enum.reduce(parents, %{}, fn {ref, parent}, acc ->
+        add.(acc, ref, if(parent, do: [parent], else: []))
       end)
-      |> Map.new(fn {ref, {vars, parent}} -> {ref, {vars, parent, :ets}} end)
 
-    Enum.reduce(local, shared, fn {ref, {vars, parent}}, acc ->
-      Map.put(acc, ref, {vars, parent, :local})
-    end)
+    graph = Enum.reduce(var_refs, graph, fn ref, acc -> Map.put_new(acc, ref, []) end)
+    shared = graph |> Map.keys() |> MapSet.new()
+    graph = Enum.reduce(closures, graph, fn {ref, c}, acc -> add.(acc, ref, [c]) end)
+    graph = Enum.reduce(compound, graph, fn {ref, val}, acc -> add.(acc, ref, closure_refs(val, [])) end)
+
+    # the local tier shadows the shared one
+    graph =
+      Enum.reduce(local, graph, fn {ref, {vars, parent}}, acc ->
+        out = Enum.reduce(vars, if(parent, do: [parent], else: []), fn {_n, val}, a -> closure_refs(val, a) end)
+        Map.put(acc, ref, out)
+      end)
+
+    {graph, shared}
   end
 
-  @doc "Delete a shared frame and all its bindings."
-  def delete_frame(%__MODULE__{tid: tid}, ref, vars) do
+  @doc "Delete a shared frame and all its bindings (one key range)."
+  def drop_frame(%__MODULE__{tid: tid}, ref) do
     :ets.delete(tid, {:frame, ref})
-    Enum.each(vars, fn {name, _} -> :ets.delete(tid, {:var, ref, name}) end)
+    :ets.match_delete(tid, {{:var, ref, :_}, :_})
     :ok
   end
 

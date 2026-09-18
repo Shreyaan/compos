@@ -28,6 +28,28 @@ defmodule Compos.Scheme.GCTest do
     assert val == 2
   end
 
+  test "a swept frame leaves no binding rows, and a live frame keeps its own" do
+    interp = Scheme.new() |> Scheme.flush()
+
+    {:ok, _, interp} =
+      Scheme.exec(interp, fn interp ->
+        Scheme.eval_string(interp, """
+        (define keep (let ((a 1) (b 2)) (lambda () (+ a b))))
+        (define drop (let ((c 3) (d 4)) (lambda () (+ c d))))
+        """)
+      end)
+
+    {:ok, _, interp} = Scheme.eval_string(interp, "(set! drop #f)")
+    swept = Scheme.gc(interp, [])
+    tid = swept.store.tid
+
+    frames = :ets.select(tid, [{{{:frame, :"$1"}, :_}, [], [:"$1"]}]) |> MapSet.new()
+    orphans = :ets.select(tid, [{{{:var, :"$1", :_}, :_}, [], [:"$1"]}]) |> Enum.reject(&MapSet.member?(frames, &1))
+
+    assert orphans == []
+    assert {:ok, 3, _} = Scheme.eval_string(swept, "(keep)")
+  end
+
   test "roots keep otherwise-unreachable closures alive" do
     interp = Scheme.new()
     {:ok, closure, interp} = Scheme.eval_string(interp, "(let ((x 42)) (lambda () x))")
