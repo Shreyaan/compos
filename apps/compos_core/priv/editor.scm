@@ -269,17 +269,21 @@
          (rest (if (and (pair? args) (string? (car args))) (cdr args) args))
          (spec (and (pair? rest) (interactive-spec? (car rest)) (car rest)))
          (fn (if spec (cadr rest) (car rest)))
-         ;; run-command calls with no arguments: a spec collects them. A
-         ;; command-call passes 'direct first: the function runs as given.
-         (thunk (lambda (&rest args)
-                  (cond ((and (pair? args) (equal? (car args) 'direct))
-                         (if spec (apply fn (cdr args)) (fn)))
-                        ((null? args) (if spec (call-interactively--spec spec fn) (fn)))
-                        (spec (apply fn args))
-                        (else (fn))))))
+         ;; A command with no spec is its own function: run-command calls
+         ;; it with no arguments and describe-function shows its body. A
+         ;; command with a spec is wrapped: run-command's empty call
+         ;; collects the arguments, and command-call passes 'direct first
+         ;; so the function runs as given.
+         (entry (if spec
+                    (lambda (&rest args)
+                      (cond ((and (pair? args) (equal? (car args) 'direct))
+                             (apply fn (cdr args)))
+                            ((null? args) (call-interactively--spec spec fn))
+                            (else (apply fn args))))
+                    fn)))
     (if (> (string-length doc) 0)
-        (define-command--raw name doc thunk)
-        (define-command--raw name thunk))
+        (define-command--raw name doc entry)
+        (define-command--raw name entry))
     (catalog-register! 'command name doc
       'use (string-append "(run-command \"" name "\")")
       'spec (or spec #f))
@@ -291,8 +295,11 @@
 ;; (command-call NAME ARG ...): run the command with ARGS. A command with
 ;; no spec takes none; with none given, a spec collects them.
 (define (command-call name &rest args)
-  (let ((fn (command-function name)))
-    (if fn (apply fn (cons 'direct args)) (run-command name))))
+  (let ((fn (command-function name))
+        (spec (let ((e (catalog-entry 'command name))) (and e (plist-get e 'spec)))))
+    (cond ((not fn) (run-command name))
+          (spec (apply fn (cons 'direct args)))
+          (else (fn)))))
 
 ;; Emacs call-interactively: run NAME as a key would
 (define (call-interactively name) (run-command name))

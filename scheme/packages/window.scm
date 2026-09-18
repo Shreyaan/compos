@@ -1940,10 +1940,14 @@
           ("main-bottom" "2/3 + 1/3 (companion below)")
           ("main-top" "2/3 + 1/3 (companion above)")
           ("free" "no target: a display may split a window"))
+        ;; A move applies the candidate to the panes on screen, and only
+        ;; those: applying a layout is idempotent, so no restore comes
+        ;; first and no vacancy fills from the pool. The panes keep their
+        ;; windows, and a pane keeps its window's render. The original
+        ;; arrangement comes back once, on cancel, or under the choice.
         (lambda (name)
-          (restore-preview!)
           (unless (equal? name "free")
-            (window-layout-preview-without-history! name saved-order)))
+            (window-layout-preview-without-history! name saved-panes)))
         (lambda (name) (restore-preview!) (window-layout-choose! saved name saved-order))
         (lambda () (restore-preview!))
         #f #f #f #f
