@@ -222,7 +222,7 @@ defmodule Compos.Core do
   end
 
   def kill_buffer(name) do
-    case Registry.lookup(@registry, name) do
+    case live_pid(name) do
       [{pid, _}] ->
         # An editor always has somewhere live to land. In particular, a
         # bulk kill may remove *scratch* early and then remove the final
@@ -285,7 +285,7 @@ defmodule Compos.Core do
   guard the idle sweep reads too.
   """
   def sleep_buffer(name) do
-    case Registry.lookup(@registry, name) do
+    case live_pid(name) do
       [{pid, _}] ->
         case sleep_refusal(name, Buffer.eviction_info(name).locals) do
           nil ->
@@ -301,6 +301,18 @@ defmodule Compos.Core do
     end
   catch
     :exit, _ -> {:error, :not_found}
+  end
+
+  @doc """
+  NAME's live process as a registry entry, or []. The registry drops a
+  dead process a moment after it goes; an entry for a dead pid is no
+  process, and a call through the name would wake the buffer instead.
+  """
+  def live_pid(name) do
+    case Registry.lookup(@registry, name) do
+      [{pid, _}] = entry -> if Process.alive?(pid), do: entry, else: []
+      [] -> []
+    end
   end
 
   @doc """

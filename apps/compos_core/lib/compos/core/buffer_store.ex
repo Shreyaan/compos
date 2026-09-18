@@ -9,6 +9,11 @@ defmodule Compos.Core.BufferStore do
   it (`Compos.Core.BufferHistoryStore`). A buffer may therefore be known
   here without consuming a process.
 
+  A checkpoint of version 1 carries the text as well; one of version 2
+  carries it only when the log cannot answer for it. `migrate/1` rewrites
+  the version 1 files once, at the first boot after the change, and only
+  a file whose log holds the same text byte for byte.
+
   The read model of a dormant buffer is its row in `Compos.Core.BufferView`.
   This process writes those rows from the checkpoints at boot, and again
   when the view restarts; it keeps no copy of them. `catalog.etf` holds
@@ -182,6 +187,7 @@ defmodule Compos.Core.BufferStore do
   @impl true
   def init(_) do
     File.mkdir_p!(dir())
+    migrate(checkpoint_files())
     disk = scan_checkpoints()
 
     history =
@@ -244,7 +250,7 @@ defmodule Compos.Core.BufferStore do
       # Never wait on a buffer from this process: the worker keeps this
       # process free to answer a load while the buffer checkpoints.
       Task.start(fn ->
-        case Registry.lookup(Compos.Core.BufferRegistry, name) do
+        case Compos.Core.live_pid(name) do
           [{pid, _}] ->
             if Buffer.prepare_evict(name, generation),
               do: DynamicSupervisor.terminate_child(Compos.Core.BufferSupervisor, pid)
@@ -264,7 +270,7 @@ defmodule Compos.Core.BufferStore do
   # The idle timer fired for one generation of one buffer. The buffer must
   # still be that buffer, still idle, and free to sleep by the one guard.
   defp safe_to_evict?(name, id, generation) do
-    case Registry.lookup(Compos.Core.BufferRegistry, name) do
+    case Compos.Core.live_pid(name) do
       [{_pid, _}] ->
         info = Buffer.eviction_info(name)
 
@@ -307,11 +313,71 @@ defmodule Compos.Core.BufferStore do
       :ok
   end
 
+  defp checkpoint_files do
+    Path.wildcard(Path.join(dir(), "*.etf")) |> Enum.reject(&(&1 == catalog_path()))
+  end
+
+  @migrated_marker ".checkpoints-v2"
+
+  @doc """
+  The one-shot migration of a home to version 2 checkpoints: once, at the
+  first boot after the change. A version 1 file is rewritten without its
+  text only when its log holds the same text byte for byte and the buffer
+  records; every other file is left as it is, and reads as before. The
+  marker file in the directory says the pass ran.
+  """
+  def migrate(paths) do
+    marker = Path.join(dir(), @migrated_marker)
+
+    unless File.exists?(marker) do
+      done = Enum.count(paths, &migrate_checkpoint/1)
+      Logger.info("buffer store: #{done} of #{length(paths)} checkpoints now keep their text in the log")
+      File.write(marker, "checkpoints are version 2 since #{DateTime.to_iso8601(DateTime.utc_now())}\n")
+    end
+
+    :ok
+  rescue
+    e ->
+      Logger.warning("buffer store: the checkpoint migration stopped: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp migrate_checkpoint(path) do
+    case read_term(path) do
+      %{version: 1, id: id, text: text} = cp when is_binary(id) and is_binary(text) ->
+        recording? =
+          case cp[:provenance] do
+            %{enabled: false} -> false
+            _ -> true
+          end
+
+        log_text =
+          case recording? and Compos.Core.BufferHistoryStore.load(id) do
+            %Compos.Core.BufferHistory{} = weave -> Compos.Core.BufferHistory.text(weave)
+            _ -> nil
+          end
+
+        if log_text == text do
+          rewritten = cp |> Map.delete(:text) |> Map.merge(%{version: 2, size: byte_size(text)})
+          atomic_write(path, :erlang.term_to_binary(rewritten))
+          true
+        else
+          false
+        end
+
+      _ ->
+        false
+    end
+  rescue
+    e ->
+      Logger.warning("buffer store: #{Path.basename(path)} was not migrated: #{Exception.message(e)}")
+      false
+  end
+
   # Every checkpoint in the directory becomes a dormant row, unless its
   # name already has one (a live buffer). Answers the names it found.
   defp scan_checkpoints do
-    Path.wildcard(Path.join(dir(), "*.etf"))
-    |> Enum.reject(&(&1 == catalog_path()))
+    checkpoint_files()
     |> Enum.flat_map(fn path ->
       case read_term(path) do
         %{version: v, id: id, name: name} = checkpoint

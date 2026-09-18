@@ -100,6 +100,7 @@ defmodule Compos.Core.Buffer do
             history_actor: nil,
             history_group: nil,
             history_persisted: nil,
+            log_current: false,
             changeset_id: nil,
             pending_ops: [],
             pending_actor: nil,
@@ -165,8 +166,15 @@ defmodule Compos.Core.Buffer do
     registry_name(name)
   end
 
-  def exists?(%Ref{id: id}), do: Registry.lookup(@registry, {:id, id}) != []
-  def exists?(name), do: Registry.lookup(@registry, name) != []
+  # The registry drops a dead process on its own monitor, a moment after the
+  # process goes. A name whose process is dead does not exist: a write to it
+  # must wake the buffer, not call a pid that cannot answer.
+  def exists?(%Ref{id: id}), do: alive_entry?(Registry.lookup(@registry, {:id, id}))
+  def exists?(name), do: alive_entry?(Registry.lookup(@registry, name))
+
+  defp alive_entry?([{pid, _}]) when node(pid) == node(), do: Process.alive?(pid)
+  defp alive_entry?([_ | _]), do: true
+  defp alive_entry?([]), do: false
 
   # Every read takes the published row: a live buffer's own, or the dormant
   # row its last checkpoint left. A live row is written by the owning
@@ -801,6 +809,16 @@ defmodule Compos.Core.Buffer do
   end
 
   defp checkpoint_text(%{text: text}) when is_binary(text), do: text
+
+  defp checkpoint_text(%{id: id}) do
+    case BufferHistoryStore.load(id) do
+      nil -> ""
+      weave -> with text when is_binary(text) <- History.text(weave), do: text, else: (_ -> "")
+    end
+  rescue
+    _ -> ""
+  end
+
   defp checkpoint_text(_checkpoint), do: ""
 
   # The whole checkpoint of a dormant buffer: the file. Only the text and
@@ -919,6 +937,7 @@ defmodule Compos.Core.Buffer do
   defp upgrade(state) do
     state
     |> Map.put_new(:narrow_range, Map.get(state, :display_range))
+    |> Map.put_new(:log_current, false)
     |> Map.put_new(:fontify, %{task: nil, timer: nil, pending: [], cache: []})
   end
 
@@ -957,6 +976,10 @@ defmodule Compos.Core.Buffer do
   @view_fields ~w(name id rope bin version saved_version path read_only
                   point mark locals overlays overlay_gen hidden narrow_range win_points fontify
                   persistent discard dirty)a
+
+  # A killed buffer publishes nothing more: the kill forgot its row, and a
+  # late write must not put the row back for the moment before it dies.
+  defp publish(%{discard: true} = state, _before), do: state
 
   defp publish(state, before) do
     if Enum.any?(@view_fields, &(Map.fetch!(state, &1) != Map.fetch!(before, &1))),
@@ -1976,12 +1999,22 @@ defmodule Compos.Core.Buffer do
   # there is no nil case here.
   defp attach_history(%{provenance: %{enabled: false}} = state), do: state
 
+  # the text came out of the log at restore: the document is the text
+  defp attach_history(%{history: %History{} = weave} = state),
+    do: %{state | history_persisted: History.version(weave)}
+
   defp attach_history(state) do
     {text, state} = fetch_text(state)
 
     case restore_history(state, text) do
-      nil -> %{state | history: seed_history(state, text)}
-      weave -> %{state | history: weave, history_persisted: History.version(weave)}
+      nil ->
+        %{state | history: seed_history(state, text)}
+
+      # The version on disk is the one before the reconcile, so the next
+      # persist writes the reconcile change too. The log is the text only
+      # when it already held these bytes.
+      {weave, persisted, same?} ->
+        %{state | history: weave, history_persisted: persisted, log_current: same?}
     end
   rescue
     # A history is not worth losing a buffer over. Without one the buffer
@@ -2025,7 +2058,12 @@ defmodule Compos.Core.Buffer do
       blobs ->
         weave = History.new(History.replica_peer())
         Enum.each(blobs, &History.import(weave, &1))
-        reconcile_history(state, weave, text)
+        persisted = History.version(weave)
+
+        case reconcile_history(state, weave, text) do
+          nil -> nil
+          {weave, same?} -> {weave, persisted, same?}
+        end
     end
   rescue
     e ->
@@ -2039,7 +2077,7 @@ defmodule Compos.Core.Buffer do
   defp reconcile_history(state, weave, text) do
     case History.text(weave) do
       ^text ->
-        weave
+        {weave, true}
 
       other when is_binary(other) ->
         History.update(weave, text)
@@ -2053,7 +2091,7 @@ defmodule Compos.Core.Buffer do
           )
         )
 
-        weave
+        {weave, false}
 
       _ ->
         nil
@@ -2207,7 +2245,7 @@ defmodule Compos.Core.Buffer do
 
       {:error, reason} ->
         Logger.error("history unreadable in #{state.name}: #{inspect(reason)}")
-        state
+        %{state | log_current: false}
     end
   end
 
@@ -2237,18 +2275,26 @@ defmodule Compos.Core.Buffer do
     case exported do
       updates when is_binary(updates) and Kernel.byte_size(updates) > 0 ->
         written = BufferHistoryStore.append(state.id, updates)
-        state = %{state | history_persisted: History.version(state.history)}
-        if written > 0, do: maybe_compact(state), else: state
+
+        if written > 0 do
+          %{state | history_persisted: History.version(state.history), log_current: true}
+          |> maybe_compact()
+        else
+          # the append failed: the next checkpoint carries the text, and
+          # the next persist exports from the version the log does hold
+          %{state | log_current: false}
+        end
 
       _ ->
         state
     end
   rescue
     e ->
-      # The text is safe in the checkpoint either way. Losing the log costs
-      # history, which is worth a loud message and not a dead buffer.
+      # The checkpoint carries the text while the log is behind. Losing the
+      # log costs history, which is worth a loud message and not a dead
+      # buffer.
       Logger.error("could not persist the document for #{state.name}: #{inspect(e)}")
-      state
+      %{state | log_current: false}
   end
 
   # A snapshot of an 85 KB source file is about 75 KB, so a log several times
@@ -2260,8 +2306,9 @@ defmodule Compos.Core.Buffer do
          max(@history_log_slack * Rope.byte_size(state.rope), 64 * 1024) do
       case History.export_snapshot(state.history) do
         snapshot when is_binary(snapshot) ->
-          BufferHistoryStore.compact(state.id, snapshot)
-          %{state | history_persisted: History.version(state.history)}
+          if BufferHistoryStore.compact(state.id, snapshot) > 0,
+            do: %{state | history_persisted: History.version(state.history)},
+            else: %{state | log_current: false}
 
         _ ->
           state
@@ -2480,9 +2527,11 @@ defmodule Compos.Core.Buffer do
 
   defp read_checkpoint(nil), do: nil
 
+  # Version 1 carries the text. Version 2 carries the text only when the
+  # log could not answer for it (see `checkpoint/1`).
   defp read_checkpoint(path) do
     with {:ok, bin} <- File.read(path),
-         %{version: 1} = cp <- :erlang.binary_to_term(bin),
+         %{version: v} = cp when v in [1, 2] <- :erlang.binary_to_term(bin),
          do: cp,
          else: (_ -> nil)
   rescue
@@ -2492,13 +2541,17 @@ defmodule Compos.Core.Buffer do
   defp restored_state(cp) do
     version = cp[:buffer_version] || 0
     saved_version = if cp[:modified], do: max(version - 1, 0), else: version
+    {text, weave} = restored_text(cp)
+    size = Kernel.byte_size(text)
 
     %__MODULE__{
       name: cp.name,
       id: cp.id,
-      rope: Rope.new(cp[:text] || ""),
+      rope: Rope.new(text),
+      history: weave,
+      log_current: weave != nil,
       path: cp[:path],
-      point: min(cp[:point] || 0, Kernel.byte_size(cp[:text] || "")),
+      point: min(cp[:point] || 0, size),
       mark: cp[:mark],
       read_only: cp[:read_only] || false,
       encoding: cp[:encoding] || :utf8,
@@ -2506,33 +2559,63 @@ defmodule Compos.Core.Buffer do
       hidden: cp[:hidden] || %{},
       version: version,
       saved_version: saved_version,
-      authors: restored_authors(cp),
+      authors: restored_authors(cp, size),
       origins: cp[:origins] || %{},
       provenance: cp[:provenance]
     }
   end
 
+  # Where the text is: in the checkpoint when it carries one, else in the
+  # log, which then becomes the document as well. A checkpoint without
+  # text and without a log has lost its text; that is said loudly, and the
+  # buffer comes back empty rather than not at all.
+  defp restored_text(%{text: text}) when is_binary(text), do: {text, nil}
+
+  defp restored_text(%{id: id, name: name}) do
+    case BufferHistoryStore.load(id, History.replica_peer()) do
+      nil ->
+        Logger.error("buffer #{name}: no text in the checkpoint and no log #{id}; restored empty")
+        {"", nil}
+
+      weave ->
+        case History.text(weave) do
+          text when is_binary(text) ->
+            {text, weave}
+
+          other ->
+            Logger.error("buffer #{name}: the log #{id} has no readable text: #{inspect(other)}")
+            {"", nil}
+        end
+    end
+  rescue
+    e ->
+      Logger.error("buffer #{name}: could not read the log #{id}: #{inspect(e)}")
+      {"", nil}
+  end
+
   # A checkpoint written before the fold existed restores no spans, and a
   # span cannot outlive the text it describes: a file re-read from disk can
   # be shorter than the buffer that wrote the checkpoint.
-  defp restored_authors(cp) do
-    size = Kernel.byte_size(cp[:text] || "")
-
+  defp restored_authors(cp, size) do
     (cp[:authors] || [])
     |> Enum.map(fn {s, e, id} -> {min(s, size), min(e, size), id} end)
     |> Enum.reject(fn {s, e, _} -> s >= e end)
   end
 
+  # The log is the text. The checkpoint carries the text only when the log
+  # cannot answer for it: a mode that opted out of recording, a mirror
+  # that failed, or a log write that failed. `write_checkpoint/1` runs
+  # `verify_history` and `persist_history` first, so "the log is current"
+  # means the log on disk holds the same bytes as the rope.
   defp checkpoint(state) do
-    {text, _} = fetch_text(state)
     modified = state.version != state.saved_version
 
-    %{
-      version: 1,
+    base = %{
+      version: 2,
       id: state.id,
       name: state.name,
       path: state.path,
-      text: text,
+      size: Rope.byte_size(state.rope),
       point: state.point,
       mark: state.mark,
       read_only: state.read_only,
@@ -2545,6 +2628,18 @@ defmodule Compos.Core.Buffer do
       authors: state.authors,
       origins: Map.take(state.origins, Enum.map(state.authors, fn {_, _, id} -> id end))
     }
+
+    if log_holds_text?(state) do
+      base
+    else
+      {text, _} = fetch_text(state)
+      Map.put(base, :text, text)
+    end
+  end
+
+  defp log_holds_text?(state) do
+    mirroring?(state) and Map.get(state, :log_current, false) and
+      BufferHistoryStore.size(state.id) > 0
   end
 
   # Provenance flushes on every checkpoint boundary, including the ones that

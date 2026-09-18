@@ -344,12 +344,8 @@ defmodule Compos.Core.BufferView do
 
   @impl true
   def handle_cast({:track, pid, name, id}, watched) do
-    if Map.has_key?(watched, pid) do
-      {:noreply, watched}
-    else
-      Process.monitor(pid)
-      {:noreply, Map.put(watched, pid, {name, id})}
-    end
+    unless Map.has_key?(watched, pid), do: Process.monitor(pid)
+    {:noreply, Map.put(watched, pid, {name, id})}
   end
 
   @impl true
@@ -362,9 +358,20 @@ defmodule Compos.Core.BufferView do
   def handle_info({:DOWN, _mref, :process, pid, _reason}, watched) do
     {tracked, watched} = Map.pop(watched, pid)
 
+    # The id names the row whatever the buffer is called now: a rename
+    # moves the row under a new name, and the name tracked at start is old.
     case tracked do
-      {name, id} when is_binary(name) -> settle(name, id)
-      _ -> :ok
+      {_name, id} when is_binary(id) ->
+        case lookup({:id, id}) do
+          [{_, current}] -> settle(current, id)
+          [] -> :ok
+        end
+
+      {name, id} when is_binary(name) ->
+        settle(name, id)
+
+      _ ->
+        :ok
     end
 
     {:noreply, watched}
