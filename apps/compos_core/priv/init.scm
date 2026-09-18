@@ -23,6 +23,8 @@
 ; the list buffer comes first: a package declares its lists at load, and
 ; dired is the first such package
 ; the transient menus come first: a package defines its prefixes at load
+; the one-shot buffer migrations: packages register theirs at load
+(load "migrations.scm")
 (load "transient.scm")
 (load "tabulated-list.scm")
 ; windows: display-buffer, popups, peek, layouts, special-mode, tiling;

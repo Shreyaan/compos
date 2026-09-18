@@ -36,7 +36,7 @@
   ;; modes whose setup needs a file, a process, a connection, or the
   ;; locals the command that opens them writes first
   '("Dired" "dired-mode" "pdf-reader-mode" "pdf-edit-mode" "browser-file-mode"
-    "chat-mode" "spreadsheet-mode" "term-mode" "shell-mode" "comint-shell-mode"
+    "chat-mode" "spreadsheet-mode" "term-mode" "comint-shell-mode"
     "occur-ts-mode" "telemetry-detail-mode"))
 
 (deftest 'every-major-mode-key-leads-to-a-live-command

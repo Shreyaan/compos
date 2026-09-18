@@ -1869,7 +1869,6 @@
 (mode-icon! "rust-mode" "")
 (mode-icon! "html-mode" "")
 (mode-icon! "chat-mode" "")
-(mode-icon! "shell-mode" "")
 (mode-icon! "term-mode" "")
 (mode-icon! "comint-shell-mode" "")
 (mode-icon! "tail-mode" "")
@@ -2368,6 +2367,9 @@
         (lambda ()
           (with-buffer-waking
             (lambda ()
+              ;; the one-shot migrations run first: a mode setup reads the
+              ;; shape they write (migrations.scm)
+              (run-hook-with-args 'buffer-restore-hook buf)
               (let ((mode (buffer-local buf 'mode-name)))
                 (when mode (set-mode! mode)))
               (restore-minor-modes! buf)

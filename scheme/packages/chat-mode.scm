@@ -1111,10 +1111,6 @@
             (when (chat-turn-stale? buf) (chat-drop-stale-turn! buf))
             (debounce! (string-append "chat-recover:" buf) 100
                        chat-recover-interrupted! buf)))
-      ;; a chat saved before the conversation of record existed carries the
-      ;; old (role text) pairs — read them once, here, so a restored chat
-      ;; has a record like any other
-      (chat-record-migrate! buf)
       ;; the companion directory is identity: stamped once, never derived
       (unless (buffer-local buf 'chat-directory)
         (chat-stamp-directory! buf))
@@ -1126,24 +1122,10 @@
                  (not (buffer-local buf 'agent-saved-mark))
                  (boundp (quote chat-file-init!)))
         (chat-file-init! buf))
-      ;; legacy: pre-group companions carried a 'companion-of pointer —
-      ;; upgrade both ends to the 'group tag (idempotent, so desktop
-      ;; restore migrates old sessions by itself)
-      (let ((doc (buffer-local buf 'companion-of)))
-        (when (and doc (not (buffer-local buf 'group)))
-          (let ((g (or (and (buffer-exists? doc) (buffer-local doc 'group))
-                       doc)))
-            (buffer-set-local! buf 'group g)
-            (when (and (buffer-exists? doc)
-                       (not (buffer-local doc 'group)))
-              (buffer-set-local! doc 'group g)))))
       (when (buffer-local buf 'agent-saved-mark)
         ;; the view is identity: default it only when never chosen (S11)
         (unless (buffer-local buf 'render-mode)
           (buffer-set-local! buf 'render-mode "agent"))
-        ;; the live input carries no marker bytes; a chat from before
-        ;; that change still has them at the mark, and loses them here
-        (chat-input-migrate! buf)
         ;; Rebuild presentation from the CONVERSATION locals — overlays and
         ;; folds come back, and chrome belonging to a runtime that didn't
         ;; survive the restart is dropped. None of this depends on there
@@ -1709,7 +1691,6 @@
          (mark (or (buffer-local buf 'agent-saved-mark) (chat-legacy-mark buf)))
          (said (string-trim (agent-seed-transcript buf))))
     (buffer-set-local! buf 'agent-saved-mark mark)
-    (chat-input-migrate! buf)
     ;; a fresh ACP session starts empty and has to be seeded; the api lane
     ;; replays the record on every request anyway
     (buffer-set-local! buf 'agent-seed-context
@@ -1933,9 +1914,6 @@
 (persist-global! 'llm-bundles
   (lambda () *llm-bundles*)
   (lambda (v) (set! *llm-bundles* (llm-bundles-assign-keys (or v '())))))
-
-;; Hot reload also migrates bundles already restored into this process.
-(set! *llm-bundles* (llm-bundles-assign-keys *llm-bundles*))
 
 ;; The three parts that are always cheap to read: buffer-locals, and no
 ;; walk to find the session. The menu redraws on every keystroke, so what
@@ -2234,20 +2212,25 @@
 
 ;; a chat from before the marker left the live input still carries the
 ;; marker bytes at its mark: remove them, keep the draft after them, and
-;; record that the input starts at the mark. Runs on mode setup and on
-;; attach, and does nothing to a chat that is already in the new layout.
+;; record that the input starts at the mark. A chat with the marker in
+;; its text and no mark gets its mark from the last marker first. The
+;; migration pass runs this once per buffer (migrations.scm); a chat in
+;; the new layout is left as it is.
 (define (chat-input-migrate! buf)
-  (when (buffer-local buf 'agent-saved-mark)
-    (let* ((size (buffer-size buf))
-           (m (chat-mark buf))
-           (mb (string-byte-length *chat-input-marker*)))
-      (when (and (<= (+ m mb) size)
-                 (equal? (substring-bytes (buffer-text buf) m (+ m mb))
-                         *chat-input-marker*))
-        (buffer-delete-range! buf m mb))
-      ;; the local cannot sit past the end after the delete
-      (buffer-set-local! buf 'agent-saved-mark (chat-mark buf))
-      (buffer-set-local! buf 'agent-marker-bytes 0))))
+  (let ((mb (string-byte-length *chat-input-marker*)))
+    (when (and (not (buffer-local buf 'agent-saved-mark))
+               (pair? (re-find* *chat-input-marker* (buffer-text buf))))
+      (buffer-set-local! buf 'agent-saved-mark (chat-legacy-mark buf)))
+    (when (buffer-local buf 'agent-saved-mark)
+      (let ((size (buffer-size buf))
+            (m (chat-mark buf)))
+        (when (and (<= (+ m mb) size)
+                   (equal? (substring-bytes (buffer-text buf) m (+ m mb))
+                           *chat-input-marker*))
+          (buffer-delete-range! buf m mb))
+        ;; the local cannot sit past the end after the delete
+        (buffer-set-local! buf 'agent-saved-mark (chat-mark buf))
+        (buffer-set-local! buf 'agent-marker-bytes 0)))))
 
 ;; (START END) of the LIVE input — what RET sends
 (define (chat-input-region buf)
@@ -2379,3 +2362,29 @@
 (global-set-key "C-c w" "chat-companion")
 
 (global-set-key "C-c RET" "chat-companion-ask")
+
+;;; --- the one-shot migrations of a chat ---------------------------------------
+;;; Each names a shape an older desktop can carry; migrations.scm runs
+;;; them once per buffer on restore, before the mode setup, and deletes
+;;; them at the cut-off.
+
+;; pre-group companions carried a 'companion-of pointer: both ends get
+;; the 'group tag
+(define (chat-companion-of-migrate! buf)
+  (let ((doc (buffer-local buf 'companion-of)))
+    (when (and doc (not (buffer-local buf 'group)))
+      (let ((g (or (and (buffer-exists? doc) (buffer-local doc 'group))
+                   doc)))
+        (buffer-set-local! buf 'group g)
+        (when (and (buffer-exists? doc)
+                   (not (buffer-local doc 'group)))
+          (buffer-set-local! doc 'group g))))))
+
+;; by name, in a lambda: chat.scm defines chat-record-migrate! after this
+;; file loads, and a reload must reach the new definition
+(define-buffer-migration! 'chat-record "2026-08-20"
+  (lambda (buf) (chat-record-migrate! buf)))
+(define-buffer-migration! 'chat-companion-group "2026-08-20"
+  (lambda (buf) (chat-companion-of-migrate! buf)))
+(define-buffer-migration! 'chat-input-marker "2026-09-05"
+  (lambda (buf) (chat-input-migrate! buf)))

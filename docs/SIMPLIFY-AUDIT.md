@@ -1100,6 +1100,23 @@ Attribution: the same test files at HEAD 4f0a0be9 in a worktree fail
 by the same names (chat_reset_test, llm_tools_test, the two excision
 tests), so the collapse adds no red. The chat merge is complete.
 
+**Item 14 is in (2026-09-19): one migration pass with a cut-off.**
+scheme/packages/migrations.scm holds the registry: `(define-buffer-migration!
+NAME SINCE FN)`; `migrate-buffer!` runs on `buffer-restore-hook` (the
+kernel runs it in restore-buffer-runtime! before the mode setup) and
+stamps the buffer's persisted 'migrations local, so each migration runs
+once per buffer. A migration lives 90 days from SINCE, then goes with its
+test; M-x list-migrations shows the dates. Registered: chat-record
+('chat-turns to the record), chat-companion-group ('companion-of to
+'group), chat-input-marker (the marker bytes; it also finds a missing
+mark from the last marker, so chat-attach! no longer migrates), and
+shell-mode-name (shell-mode to term-mode; the shell-mode alias mode and
+its icon are gone). The hot-reload re-assignment of bundle keys at load
+is gone; the persist-global! reader still normalizes. Left in place: the
+'llm-responses mirror (five writers keep the old range local current for
+a list-row count and a legacy fallback; it is a mirror, not a one-shot,
+and goes with the llm-mode block cleanup). Tests: migrations-test.scm.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,

@@ -42,6 +42,7 @@ list. The local table lives in Scheme, keyed by buffer name.
 | `winner-restore-hook` | | winner-undo or winner-redo put an arrangement back; layouts.scm makes it autolayout's current panes |
 | `window-state-change-hook` | | `window-state-changed!` ran: a window command or a layout moved something; groups.scm recalculates the current group here |
 | `theme-change-hook` | | after `load-theme` |
+| `buffer-restore-hook` | BUF | a restored buffer, before its mode setup; migrations.scm runs the one-shot migrations here |
 | `buffer-created-hook` | NAME | a new buffer has its text |
 | `buffer-woken-hook` | NAME | a dormant buffer came back |
 | `buffer-renamed-hook` | OLD NEW | `rename-buffer!` |
