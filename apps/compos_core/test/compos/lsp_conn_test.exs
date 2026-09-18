@@ -9,6 +9,7 @@ defmodule Compos.LSPConnTest do
 
   alias Compos.Core.{Buffer, LSP}
   alias Compos.Core.LSP.Conn
+  alias Compos.Core.JsonRpc
 
   @fixture Path.expand("../support/fake_lsp_server.exs", __DIR__)
   @root "/tmp"
@@ -190,11 +191,11 @@ defmodule Compos.LSPConnTest do
     body = Jason.encode!(%{"jsonrpc" => "2.0", "method" => "m", "params" => %{}})
 
     assert {[%{"method" => "m"}], ""} =
-             Conn.split_frames("Content-Length: #{byte_size(body)}\n\n" <> body)
+             JsonRpc.split_content_length("Content-Length: #{byte_size(body)}\n\n" <> body)
 
     frame = "Content-Length: #{byte_size(body)}\r\n\r\n" <> body
     {half, rest} = String.split_at(frame, 20)
-    assert {[], ^half} = Conn.split_frames(half)
-    assert {[%{"method" => "m"}], ""} = Conn.split_frames(half <> rest)
+    assert {[], ^half} = JsonRpc.split_content_length(half)
+    assert {[%{"method" => "m"}], ""} = JsonRpc.split_content_length(half <> rest)
   end
 end

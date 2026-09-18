@@ -31,6 +31,7 @@ defmodule Compos.Core.LSP.Conn do
   use GenServer, restart: :temporary
   require Logger
 
+  alias Compos.Core.JsonRpc
   alias Compos.Core.{Buffer, Events, Session}
   alias Compos.Core.LSP
   alias Compos.Core.LSP.Pos
@@ -220,7 +221,7 @@ defmodule Compos.Core.LSP.Conn do
 
   @impl true
   def handle_info({port, {:data, chunk}}, %{port: port} = state) do
-    {frames, buf} = split_frames(state.buf <> chunk)
+    {frames, buf} = JsonRpc.split_content_length(state.buf <> chunk)
     state = Enum.reduce(frames, %{state | buf: buf}, &handle_message/2)
     {:noreply, state}
   end
@@ -297,8 +298,11 @@ defmodule Compos.Core.LSP.Conn do
       Port.close(state.port)
 
       case os do
-        {:os_pid, pid} -> System.cmd("/bin/kill", ["-TERM", to_string(pid)], stderr_to_stdout: true)
-        _ -> :ok
+        {:os_pid, pid} ->
+          System.cmd("/bin/kill", ["-TERM", to_string(pid)], stderr_to_stdout: true)
+
+        _ ->
+          :ok
       end
     end
 
@@ -390,7 +394,7 @@ defmodule Compos.Core.LSP.Conn do
   defp dispatch(%{"id" => id, "method" => "workspace/configuration"} = msg, state) do
     items = get_in(msg, ["params", "items"]) || []
     settings = state.spec["settings"]
-    send_msg(state, %{jsonrpc: "2.0", id: id, result: List.duplicate(settings, length(items))})
+    send_msg(state, JsonRpc.response(id, List.duplicate(settings, length(items))))
   end
 
   defp dispatch(%{"id" => id, "method" => method}, state)
@@ -400,14 +404,10 @@ defmodule Compos.Core.LSP.Conn do
               "window/workDoneProgress/create",
               "window/showMessageRequest"
             ],
-       do: send_msg(state, %{jsonrpc: "2.0", id: id, result: nil})
+       do: send_msg(state, JsonRpc.response(id, nil))
 
   defp dispatch(%{"id" => id, "method" => method}, state) when is_binary(method) do
-    send_msg(state, %{
-      jsonrpc: "2.0",
-      id: id,
-      error: %{code: -32_601, message: "method not found: #{method}"}
-    })
+    send_msg(state, JsonRpc.error(id, -32_601, "method not found: #{method}"))
   end
 
   # server notifications
@@ -520,20 +520,18 @@ defmodule Compos.Core.LSP.Conn do
 
   defp send_req(state, method, params, tag) do
     id = state.next_id
-    msg = %{jsonrpc: "2.0", id: id, method: method, params: params}
 
     %{state | next_id: id + 1, pending: Map.put(state.pending, id, tag)}
-    |> send_msg(msg)
+    |> send_msg(JsonRpc.request(id, method, params))
   end
 
   defp send_notification(state, method, params),
-    do: send_msg(state, %{jsonrpc: "2.0", method: method, params: params})
+    do: send_msg(state, JsonRpc.notification(method, params))
 
   defp send_msg(state, msg), do: state |> log(:out, msg) |> transmit(msg)
 
   defp transmit(%{port: port} = state, msg) when port != nil do
-    json = Jason.encode!(msg)
-    Port.command(port, "Content-Length: #{byte_size(json)}\r\n\r\n" <> json)
+    Port.command(port, JsonRpc.encode_content_length(msg))
     state
   end
 
@@ -548,67 +546,6 @@ defmodule Compos.Core.LSP.Conn do
   # --- framing ---------------------------------------------------------------
 
   @doc false
-  # Content-Length framing; tolerates bare \n\n header separators.
-  def split_frames(buf, acc \\ []) do
-    case header_split(buf) do
-      nil ->
-        {Enum.reverse(acc), buf}
-
-      {header, rest} ->
-        case content_length(header) do
-          nil ->
-            split_frames(rest, acc)
-
-          len when byte_size(rest) >= len ->
-            body = binary_part(rest, 0, len)
-            tail = binary_part(rest, len, byte_size(rest) - len)
-
-            case Jason.decode(body) do
-              {:ok, msg} -> split_frames(tail, [msg | acc])
-              _ -> split_frames(tail, acc)
-            end
-
-          _ ->
-            {Enum.reverse(acc), buf}
-        end
-    end
-  end
-
-  defp header_split(buf) do
-    crlf = :binary.match(buf, "\r\n\r\n")
-    lf = :binary.match(buf, "\n\n")
-
-    case first_match(crlf, lf) do
-      nil -> nil
-      {pos, len} -> {binary_part(buf, 0, pos), binary_part(buf, pos + len, byte_size(buf) - pos - len)}
-    end
-  end
-
-  defp first_match(:nomatch, :nomatch), do: nil
-  defp first_match({p, l}, :nomatch), do: {p, l}
-  defp first_match(:nomatch, {p, l}), do: {p, l}
-  defp first_match({p1, l1}, {p2, _}) when p1 <= p2, do: {p1, l1}
-  defp first_match(_, {p2, l2}), do: {p2, l2}
-
-  defp content_length(header) do
-    header
-    |> String.split(~r/\r?\n/)
-    |> Enum.find_value(fn line ->
-      case String.split(line, ":", parts: 2) do
-        [k, v] ->
-          if String.downcase(String.trim(k)) == "content-length" do
-            case Integer.parse(String.trim(v)) do
-              {n, _} -> n
-              _ -> nil
-            end
-          end
-
-        _ ->
-          nil
-      end
-    end)
-  end
-
   # --- misc ------------------------------------------------------------------
 
   defp log(state, dir, msg) do
