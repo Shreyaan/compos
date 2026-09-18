@@ -1341,6 +1341,25 @@
 (define (frame-attached!)
   (run-hooks 'frame-attach-hook))
 
+;;; --- the older spellings -------------------------------------------------------
+;;; A package outside the repo (the user's own, another checkout) may name a
+;;; door by the name it had before the keyed hooks. Each old name is one
+;;; line over the new one, so such a package boots; new code uses the new
+;;; name, and the catalog lists only that one.
+
+(define (on-block-click! name fn) (add-hook! (list 'block-click name) fn))
+(define (on-preview-link! verb fn) (add-hook! (list 'preview-link verb) fn))
+(define (on-endpoint-event! name fn) (add-hook! (list 'endpoint-event name) fn))
+(define (on-lsp-event! name fn) (add-hook! (list 'lsp-event name) fn))
+(define (on-agent-turn-end! name fn) (add-hook! (list 'agent-turn-end name) fn))
+(define (on-input-intent! type fn) (add-hook! (list 'input-intent type) fn))
+(define (on-fs-change! fn) (add-hook! 'fs-change-hook fn))
+(define (on-buffer-created! fn) (add-hook! 'buffer-created-hook fn))
+(define (on-buffer-woken! fn) (add-hook! 'buffer-woken-hook fn))
+(define (on-buffer-shown! fn) (add-hook! 'buffer-shown-hook fn))
+(define (on-buffer-renamed! fn) (add-hook! 'buffer-renamed-hook fn))
+(define (take-n lst n) (take lst n))
+
 ;;; --- variables: a default and a buffer-local value --------------------------
 ;;; Emacs gives a variable one default and, in a buffer that set it, a
 ;;; local value. Here a global is a Scheme binding and a buffer-local is a
