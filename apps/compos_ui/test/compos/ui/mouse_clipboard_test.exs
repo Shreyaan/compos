@@ -177,15 +177,18 @@ defmodule Compos.Ui.MouseClipboardTest do
     buf =
       fresh_buffer("*chat: mc-heal-#{System.unique_integer([:positive])}*", "text\n>>> you: hi")
 
-    marker = "\n>>> you: "
-    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "render-mode", "blocks")
     Buffer.set_local(buf, "agent-slug", "mc-heal")
     Buffer.set_local(buf, "agent-saved-mark", Buffer.byte_size(buf) + 12)
-    Buffer.set_local(buf, "agent-marker-bytes", byte_size(marker))
-    {:ok, _view, html} = live(conn, "/")
+    Buffer.set_local(buf, "agent-marker-bytes", 0)
+    Compos.Core.Session.call_named("chat-view-sync!", [buf])
+    {:ok, view, html} = live(conn, "/")
 
+    # the view clamps the stranded start: the input draws, empty, with
+    # its hint, and the transcript still draws
     assert html =~ "agent-view"
-    agent = Editor.render_state().tree.agent
-    assert agent.mark == Buffer.byte_size(buf) - byte_size(marker)
+    assert Editor.render_state().tree.blocks_input == Buffer.byte_size(buf) + 12
+    assert has_element?(view, "c-input.ag-input")
+    assert has_element?(view, ".input-hint")
   end
 end

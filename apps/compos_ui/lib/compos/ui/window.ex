@@ -2,7 +2,7 @@ defmodule Compos.Ui.Window do
   @moduledoc """
   One window of the editor, isolated in a LiveComponent.
 
-  The isolation is the mechanism, the same one `Compos.Ui.AgentTranscript`
+  The isolation is the mechanism, the same one `Compos.Ui.BlockList`
   uses: the component's `assign` skips a value equal to the one it holds,
   so a window whose node, active flag, and completion did not change has
   no changed assign, renders nothing, and the diff carries a skip

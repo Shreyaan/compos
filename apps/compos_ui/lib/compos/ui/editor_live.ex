@@ -202,8 +202,6 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # a tool card's summary: toggle its one open-state (S6) — the chat
-  # local drives this view, the plain view's fold, and save/restore
   # a click on the frame tab rail: stand in that group. The chip that
   # counts the groups the rail left out opens the board instead.
   def handle_event("frame_tab", %{"id" => id}, socket) when is_binary(id) and id != "" do
@@ -220,55 +218,6 @@ defmodule Compos.Ui.EditorLive do
     end)
 
     {:noreply, socket |> drain() |> refresh()}
-  end
-
-  def handle_event("agent_card", %{"win" => win, "id" => id}, socket) do
-    with {wid, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Compos.Core.Editor.set_active(wid)
-
-        Compos.Core.Session.call_named("agent-card-toggle!", [
-          Compos.Core.Editor.current_buffer(),
-          id
-        ])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  def handle_event(
-        "agent_answer",
-        %{"win" => win, "slug" => slug, "question" => question_id, "answer" => answer},
-        socket
-      ) do
-    with {wid, ""} <- Integer.parse(to_string(win)),
-         {qid, ""} <- Integer.parse(to_string(question_id)) do
-      Input.run(socket.assigns.frame, fn ->
-        Compos.Core.Editor.set_active(wid)
-        Compos.Core.Session.call_named("agent-answer-question!", [slug, qid, answer])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  # the transcript follow flag and reader position (S7): runtime locals,
-  # so a refresh keeps the reader's place and a restart resets to follow
-  def handle_event("ag_stick", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
-      when is_boolean(stick) and is_integer(top) do
-    if Compos.Core.Buffer.exists?(buf) do
-      # inverted on purpose: the cleared (#f) local must mean "follow"
-      Compos.Core.Buffer.set_local(buf, "agent-unstick", not stick)
-      Compos.Core.Buffer.set_local(buf, "agent-scroll-top", top)
-
-      anchor = if is_integer(params["anchor"]), do: params["anchor"], else: nil
-      offset = if is_integer(params["offset"]), do: params["offset"], else: 0
-      Compos.Core.Buffer.set_local(buf, "agent-scroll-anchor", anchor)
-      Compos.Core.Buffer.set_local(buf, "agent-scroll-offset", offset)
-    end
-
-    {:noreply, socket}
   end
 
   # the reader's place in a followed block list: a runtime mirror, so a
@@ -914,60 +863,6 @@ defmodule Compos.Ui.EditorLive do
     {Map.merge(leaf, %{lines: [], file_url: LocalFile.url(path)}), cache}
   end
 
-  # rich agent transcript: blocks (from agent.scm's block model) become
-  # typed DOM — serif prose, tool cards, permission buttons. The buffer
-  # text stays canonical; this is a pure view over byte ranges.
-  defp decorate(
-         %{type: :leaf, render_mode: "agent", agent: %{} = ag} = leaf,
-         cache,
-         _faces,
-         _active
-       ) do
-    # Input edits do not change the transcript mark or block model. Reuse the
-    # complete block tree so typing and RET do not scan large tool results.
-    old =
-      case cache[{:agent, leaf.id}] do
-        %{block_cache: block_cache} = entry -> {entry, block_cache}
-        _ -> {%{}, %{}}
-      end
-
-    {old_entry, old_blocks} = old
-    signature = {ag.blocks, ag.open_cards, ag.mark}
-
-    {blocks, block_cache} =
-      if old_entry[:signature] == signature do
-        {old_entry.blocks, old_blocks}
-      else
-        {rendered, block_cache} =
-          ag.blocks
-          |> Enum.reverse()
-          |> Enum.with_index()
-          |> Enum.map_reduce(%{}, fn {b, i}, acc ->
-            key = agent_block_cache_key(b, ag)
-
-            view =
-              case old_blocks[i] do
-                {^key, view} -> view
-                _ -> ag_block(b, leaf.text, ag.open_cards)
-              end
-
-            {view, Map.put(acc, i, {key, view})}
-          end)
-
-        {Enum.reject(rendered, &is_nil/1), block_cache}
-      end
-
-    entry = %{signature: signature, blocks: blocks, block_cache: block_cache}
-
-    {Map.merge(leaf, %{
-       lines: [],
-       ag_blocks: blocks,
-       ag_input: ag_input(leaf, ag),
-       ag_activity: Map.get(ag, :activity),
-       ag_queued: Map.get(ag, :queued) || []
-     }), Map.put(cache, {:agent, leaf.id}, entry)}
-  end
-
   # rich diff: the buffer text IS the unified diff, so the cards are parsed
   # out of the same bytes the plain view shows. Only the controlled state —
   # which cards are open, git's status letters — rides the payload.
@@ -1042,18 +937,6 @@ defmodule Compos.Ui.EditorLive do
       end
     end)
   end
-
-  defp block_open?([_s, _e, "tool", id | _], open_cards), do: id in open_cards
-  defp block_open?(_, _), do: false
-
-  # A completed block is immutable in the rich chat model. Its range and
-  # metadata identify its rendered value. A running tool can add body text
-  # before its range closes, so the transcript mark also keys that block.
-  defp agent_block_cache_key([_s, _e, "tool", _id, _title, _kind, "running" | _] = block, ag),
-    do: {block, block_open?(block, ag.open_cards), ag.mark}
-
-  defp agent_block_cache_key(block, ag),
-    do: {block, block_open?(block, ag.open_cards)}
 
   defp safe_int(v) when is_integer(v), do: v
 
@@ -1690,10 +1573,6 @@ defmodule Compos.Ui.EditorLive do
                   class={"blocks-view #{@node.blk_root.class}"} style={@node.style}>
                   <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
                 </.dynamic_tag>
-              <% @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) -> %>
-                <Compos.Ui.AgentTranscript.composml blocks={@node.ag_blocks}
-                  win={@node.id} buf={@node.buffer} verbosity={@node.agent.verbosity}
-                  stick={false} scroll_top={0} scroll_anchor={nil} scroll_offset={0} follow_seq={0} peek={true} />
               <% Map.get(@node, :semantic_records) not in [nil, false, []] -> %>
                 <.peek_text node={@node} />
               <% true -> %>
@@ -1764,82 +1643,6 @@ defmodule Compos.Ui.EditorLive do
         <.dynamic_tag :if={@node.blk_root.tag != "c-buffer"} tag_name={@node.blk_root.tag} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" {@node.blk_root.attrs}>
           <.blocks_body node={@node} active?={@active?} completion={@completion} />
         </.dynamic_tag>
-      <% else %>
-      <%= if @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) do %>
-        <c-buffer
-          class="agent-view"
-          id={"agent-#{@node.id}"}
-          style={@node.style}
-        >
-          <%!-- the transcript is its own component so a keystroke in the
-               input row diffs to a skip placeholder: the client must not
-               walk one DOM node per block of the whole conversation per
-               key. blocks comes from the decorate cache, so the list is
-               reference-equal until the block model changes. --%>
-          <.live_component
-            module={Compos.Ui.AgentTranscript}
-            id={"agtx-#{@node.id}"}
-            blocks={@node.ag_blocks}
-            win={@node.id}
-            buf={@node.buffer}
-            verbosity={@node.agent.verbosity}
-            stick={@node.agent.stick}
-            scroll_top={@node.agent.scroll_top}
-            scroll_anchor={@node.agent.scroll_anchor}
-            scroll_offset={@node.agent.scroll_offset}
-        follow_seq={@node.agent.follow_seq}
-          />
-          <%!-- messages queued mid-turn: muted rows from 'chat-queued,
-               not transcript text. Outside the component, so a streamed
-               event never moves them and their churn never diffs the
-               block list — excise + re-insert per event was the flicker.
-               C-c C-d takes the newest one back into the input. --%>
-          <c-user :for={q <- @node.ag_queued} state="queued" class="ag-user ag-queued ag-queued-row">
-            <c-label class="ag-label">YOU</c-label>
-            <c-group class="ag-user-text">{q}</c-group>
-          </c-user>
-          <%!-- the turn pulse: the activity word agent.scm sets on every
-               event, alive until turn-end clears it. The transcript alone
-               cannot say working vs done once paragraphs stream. Outside
-               the component and the scroll area, so it never moves and
-               its churn never diffs the block list. "disconnected" is a
-               dead chat, not motion — the [agent exited] line says it. --%>
-          <c-activity
-            :if={@node.ag_activity && @node.ag_activity != "disconnected"}
-            id={"ag-activity-#{@node.id}"}
-            class="ag-wait ag-activity"
-          ><c-text class="ag-activity-text">⋯ {@node.ag_activity}</c-text></c-activity>
-          <c-prompt class="ag-inputrow">
-            <c-label class="ag-label">YOU</c-label>
-            <c-input class="ag-input">{@node.ag_input.pre}<c-cursor
-                :if={@node.ag_input.cur != "" && Map.get(@node, :cursor_visible, true)}
-                class="cursor"
-              >{@node.ag_input.cur}</c-cursor>{@node.ag_input.post}</c-input>
-            <%!-- completion-at-point, at the prompt. The transcript is not
-                 drawn from .line rows, so the popup the line renderer carries
-                 never reaches a chat: this is the same card, anchored to the
-                 input row and opening upward, because the row sits at the
-                 window's foot and there is no room below it. --%>
-            <%= if @active? && @completion do %><c-text
-              class="cap-pop cap-pop-up"
-              contenteditable="false"
-            ><c-text class="cap-title">completion-at-point · {@completion.total}</c-text><c-text
-              :for={c <- @completion.candidates}
-              class={"cap-row #{if c.selected, do: "selected"}"}
-            ><c-text class="cap-label">{c.label}</c-text><c-text class="cap-kind">{c.hint}</c-text></c-text><c-text
-              :for={c <- @completion.candidates}
-              :if={c.selected}
-              class="cap-doc"
-              popover="manual"
-              role="note"
-              aria-label="Completion documentation"
-            ><c-text class="cap-doc-name">{c.label}</c-text><c-text class="cap-doc-body">{completion_doc(c)}</c-text></c-text></c-text><% end %>
-            <c-key-hints
-              :if={@node.ag_input.pre == "" and @node.ag_input.post == ""}
-              class="ag-hint"
-            >RET sends · C-RET interrupts</c-key-hints>
-          </c-prompt>
-        </c-buffer>
       <% else %>
       <%= if @node.render_mode == "file" and Map.has_key?(@node, :file_url) do %>
         <c-preview kind="file" source={@node.file_url} buffer={@node.buffer} style="display: contents">
@@ -1951,7 +1754,6 @@ defmodule Compos.Ui.EditorLive do
         <% end %>
         <% end %>
       </.dynamic_tag>
-      <% end %>
       <% end %>
       <% end %>
       <% end %>
@@ -2129,128 +1931,8 @@ defmodule Compos.Ui.EditorLive do
 
   # both previews follow the live theme; `(buffer-set-local! buf
   # 'preview-authored #t)` renders html exactly as authored instead
-  # --- agent transcript blocks ------------------------------------------------
-
-  # block offsets can go stale (they're laid down at insert time, and text
-  # before them may be edited); a mid-codepoint slice is invalid UTF-8 and
-  # kills the whole render (Earmark, HEEx).
-  defp safe_slice(text, s, e), do: Text.slice(text, s, e)
-
-  defp ag_block([s, e, "user" | meta], text, _open) do
-    text_of =
-      case meta do
-        [msg | _] when is_binary(msg) -> msg
-        _ -> text |> safe_slice(s, e) |> String.trim() |> String.replace_prefix(">>> you: ", "")
-      end
-
-    %{kind: :user, text: text_of}
-  end
-
-  # a message queued mid-turn: the user line, muted until the model reads it
-  defp ag_block([s, e, "queued" | meta], text, _open) do
-    text_of =
-      case meta do
-        [msg | _] when is_binary(msg) -> msg
-        _ -> text |> safe_slice(s, e) |> String.trim() |> String.replace_prefix(">>> you: ", "")
-      end
-
-    %{kind: :queued, text: text_of}
-  end
-
-  defp ag_block([s, e, "prose" | _], text, _open) do
-    %{kind: :prose, html: text |> safe_slice(s, e) |> prose_html() |> wrap_tables()}
-  end
-
-  defp ag_block([s, e, "thought" | _], text, _open),
-    do: %{kind: :thought, text: String.trim(safe_slice(text, s, e))}
-
-  defp ag_block([_s, e, "tool", id, title, kind, status, body_start | rest], text, open_cards) do
-    raw_body = String.trim_trailing(safe_slice(text, body_start, e))
-    body = tool_display_body(raw_body)
-
-    # "name: arg" from agent-tool-title — the arg is the interesting part,
-    # so the card styles it apart from the tool name
-    {name, arg} =
-      case String.split(title, ": ", parts: 2) do
-        [n, a] -> {n, a}
-        _ -> {title, ""}
-      end
-
-    %{
-      kind: :tool,
-      id: id,
-      title: title,
-      name: name,
-      arg: arg,
-      verb: kind,
-      status: status,
-      open: id in open_cards,
-      body: body,
-      preview: tool_preview(body),
-      duration: tool_duration_label(List.first(rest)),
-      # what the call added to the context: its arguments and its result
-      tokens: token_estimate_label(byte_size(title) + byte_size(raw_body))
-    }
-  end
-
-  defp ag_block([s, e, "plan" | _], text, _open),
-    do: %{kind: :plan, text: String.trim(safe_slice(text, s, e))}
-
-  defp ag_block([_s, _e, "permission", title | _], _text, _open),
-    do: %{kind: :permission, title: title}
-
-  defp ag_block([_s, _e, "question", id, slug, question, answers | _], _text, _open),
-    do: %{kind: :question, id: id, slug: slug, question: question, answers: answers || []}
-
-  # the waiting block anchors the "⋯ thinking" text for restore sweeps and
-  # the plain view; the rich view shows the activity row instead — both at
-  # once would pulse twice for one wait
-  defp ag_block([_s, _e, "waiting" | _], _text, _open), do: nil
-
-  defp ag_block([s, e, "status" | _], text, _open),
-    do: %{kind: :status, text: String.trim(safe_slice(text, s, e))}
-
-  # a pasted attachment: the bytes are a file, the block names it, and the
-  # transcript shows the picture rather than the path
-  defp ag_block([_s, _e, "image", path | _], _text, _open),
-    do: %{kind: :image, src: Compos.Ui.LocalImage.url(path), name: Path.basename(path)}
-
-  # the chat prompt is a REPL: the expression and the value it printed are
-  # code, so they keep their own spacing instead of reflowing as prose
-  defp ag_block([s, e, "eval" | _], text, _open),
-    do: %{kind: :eval, text: String.trim(safe_slice(text, s, e))}
-
-  defp ag_block([s, e, "meta" | _], text, _open),
-    do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
-
-  defp ag_block(_, _, _), do: nil
-
   # The transcript is markdown; the page renderer draws it (core).
   defp prose_html(md), do: Compos.Core.Markdown.Html.prose(md)
-
-  # "340ms", "1.4s", "2m 05s" — nil when the block predates the field
-  defp tool_duration_label(ms) when is_integer(ms) and ms >= 0 do
-    cond do
-      ms < 1000 -> "#{ms}ms"
-      ms < 60_000 -> "#{Float.round(ms / 1000, 1)}s"
-      true -> "#{div(ms, 60_000)}m #{String.pad_leading("#{rem(div(ms, 1000), 60)}", 2, "0")}s"
-    end
-  end
-
-  defp tool_duration_label(_), do: nil
-
-  # bytes/4 is the standard rough token estimate; no tokenizer ships here
-  defp token_estimate_label(bytes) when bytes < 4, do: nil
-
-  defp token_estimate_label(bytes) do
-    tokens = div(bytes, 4)
-
-    if tokens < 1000 do
-      "~#{tokens} tok"
-    else
-      "~#{Float.round(tokens / 1000, 1)}k tok"
-    end
-  end
 
   # A folded call still says what it returned. New calls separate input and
   # output with a blank line. Older calls contain only their result.
@@ -2470,7 +2152,7 @@ defmodule Compos.Ui.EditorLive do
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
       {@b.attrs}
-    ><c-text :if={{"marked", "true"} in @b.attrs} class="list-mark" aria-label="Marked">✱</c-text><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></#{tag}>
+    ><c-text :if={{"marked", "true"} in @b.attrs} class="list-mark" aria-label="Marked">✱</c-text><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} {[{"face", block_faces(c)}]}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></#{tag}>
     """
 
     defp blk_node(%{b: %{tag: unquote(tag)}} = var!(assigns)) do
@@ -2838,31 +2520,6 @@ defmodule Compos.Ui.EditorLive do
     html
     |> String.replace(~r/<table(?=[\s>])/, ~s(<div class="ag-table"><table))
     |> String.replace("</table>", "</table></div>")
-  end
-
-  # the input region: [live text][cursor when point is home]
-  defp ag_input(leaf, ag) do
-    live_start = ag.input_start
-    live = safe_slice(leaf.text, live_start, byte_size(leaf.text))
-
-    # A restored window can carry an old transcript point. Rich chat hides
-    # that position, so draw the caret at the input end until Scheme repairs it.
-    rel =
-      if leaf.point >= live_start do
-        (leaf.point - live_start) |> min(byte_size(live)) |> then(&Text.floor_utf8(live, &1))
-      else
-        byte_size(live)
-      end
-
-    rest = binary_part(live, rel, byte_size(live) - rel)
-
-    {pre, cur, post} =
-      case String.next_grapheme(rest) do
-        nil -> {live, " ", ""}
-        {g, more} -> {binary_part(live, 0, rel), g, more}
-      end
-
-    %{pre: pre, cur: cur, post: post}
   end
 
   @doc false

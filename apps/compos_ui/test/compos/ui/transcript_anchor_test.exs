@@ -1,6 +1,6 @@
 defmodule Compos.Ui.TranscriptAnchorTest do
   @moduledoc """
-  The AgentScroll hook's `lastVisible`, run as the code it is.
+  The BlockFollow hook's `lastVisible`, run as the code it is.
 
   The hook names the block the reader last saw, so a server update can put
   them back on it. It found that block by measuring every block in the
@@ -40,7 +40,7 @@ defmodule Compos.Ui.TranscriptAnchorTest do
     for (let i = 0; i < COUNT; i++) {
       const top = (i - firstVisible) * HEIGHT;
       const block = {
-        dataset: { agIndex: String(i) },
+        dataset: { index: String(i) },
         top: top,
         bottom: top + HEIGHT,
         getBoundingClientRect: () => rect(top, top + HEIGHT)

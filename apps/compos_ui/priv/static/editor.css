@@ -1134,7 +1134,7 @@ body.unfocused .window.active .cursor {
 /* queued rows under the transcript: outside .ag-scroll, so they
    align with the input row, not the padded scroll area */
 .ag-queued-row { margin: 2px 18px; flex-shrink: 0; }
-.ag-hint, .input-hint { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.65); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
+.input-hint { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.65); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
 .ml-extra {
   display: flex; align-items: baseline; gap: var(--s7);
   flex: 0 0 auto; min-width: 0;

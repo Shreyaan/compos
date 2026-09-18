@@ -2799,7 +2799,7 @@ defmodule Compos.Core.Editor do
       cond do
         # a block tree renders blocks, not lines — fold geometry is the
         # line view's cost, not this one's (S16)
-        Map.get(locals, "render-mode") in ["agent", "blocks"] ->
+        Map.get(locals, "render-mode") == "blocks" ->
           {{snap.total_lines, snap.cursor_line, MapSet.new(), nil},
            Map.delete(leaf, :fold_geometry)}
 
@@ -2919,8 +2919,6 @@ defmodule Compos.Core.Editor do
       # hl-line-mode: the page highlights the current line unless the
       # buffer turned it off
       hl_line: Map.get(locals, "hl-line-mode") != "off",
-      # Version and text come from the same immutable snapshot.
-      agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
       # a block tree's caret input and its reader place, both nil for a
       # tree that declares neither
@@ -2973,53 +2971,6 @@ defmodule Compos.Core.Editor do
   # strictly inside a hidden range (the range's own start line stays
   # visible — that's the folded headline). Ranges are clamped: they can
   # be momentarily stale after an undo swaps the rope out from under them.
-  # everything the rich agent transcript renderer needs, straight from the
-  # buffer-locals agent.scm maintains — nil unless the buffer opted in
-  defp agent_leaf(%{"render-mode" => "agent"} = locals, text) do
-    marker_bytes = Map.get(locals, "agent-marker-bytes") || 0
-    mark = Map.get(locals, "agent-saved-mark") || 0
-
-    # the mark is a plain local, so text edits it doesn't know about (undo,
-    # edits before it) can strand it past the end of the buffer — clamp so
-    # the input region and cursor never vanish
-    mark = mark |> min(byte_size(text) - marker_bytes) |> max(0)
-
-    %{
-      blocks: Map.get(locals, "agent-blocks") || [],
-      mark: mark,
-      marker_bytes: marker_bytes,
-      # where the input region begins, computed once. The client used to
-      # add these two together itself, which made it a fourth place that
-      # had to agree with Scheme about what a chat's layout is.
-      input_start: mark + marker_bytes,
-      slug: Map.get(locals, "agent-slug"),
-      # controlled card state (S6): the ids whose tool cards show open
-      open_cards: Map.get(locals, "agent-open-cards") || [],
-      verbosity: Map.get(locals, "agent-verbosity") || "info",
-      # transcript follow flag + reader position (S7) — runtime locals,
-      # so a page refresh keeps the reader's place and a restart resets
-      # to following. Stored INVERTED (agent-unstick): a cleared local is
-      # #f, and cleared must mean "follow".
-      stick: Map.get(locals, "agent-unstick") != true,
-      scroll_top: Map.get(locals, "agent-scroll-top") || 0,
-      scroll_anchor: Map.get(locals, "agent-scroll-anchor"),
-      scroll_offset: Map.get(locals, "agent-scroll-offset") || 0,
-      # a counter chat-to-bottom bumps. The reader's own scrolling is
-      # reported on a debounce, so a plain stick flag from the server is
-      # sometimes 250ms stale and would snap a reader who just scrolled
-      # up back down. A token only ever changes when someone ASKED to
-      # follow again, so the hook can adopt it with no ambiguity.
-      follow_seq: Map.get(locals, "agent-follow-seq") || 0,
-      # the activity word agent.scm sets on every event ("waiting…",
-      # "thinking…", "streaming", "tool · X"); nil when no turn runs
-      activity: Map.get(locals, "chat-activity"),
-      # messages typed mid-turn that the model did not read yet — muted
-      # rows between the transcript and the input, not transcript text
-      queued: Map.get(locals, "chat-queued") || []
-    }
-  end
-
-  defp agent_leaf(_, _), do: nil
 
   # the diff card model. The cards are a projection of the buffer text —
   # the unified diff — so the card view and the plain view read the same

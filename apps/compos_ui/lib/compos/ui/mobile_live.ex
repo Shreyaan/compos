@@ -259,33 +259,6 @@ defmodule Compos.Ui.MobileLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  def handle_event("agent_card", %{"win" => win, "id" => id}, socket) do
-    with {wid, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Editor.set_active(wid)
-        Session.call_named("agent-card-toggle!", [Editor.current_buffer(), id])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  def handle_event(
-        "agent_answer",
-        %{"win" => win, "slug" => slug, "question" => question_id, "answer" => answer},
-        socket
-      ) do
-    with {wid, ""} <- Integer.parse(to_string(win)),
-         {qid, ""} <- Integer.parse(to_string(question_id)) do
-      Input.run(socket.assigns.frame, fn ->
-        Editor.set_active(wid)
-        Session.call_named("agent-answer-question!", [slug, qid, answer])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
   # the reader's place in a followed block list, as the editor keeps it
   def handle_event("follow_place", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
       when is_boolean(stick) and is_integer(top) do
@@ -638,35 +611,6 @@ defmodule Compos.Ui.MobileLive do
   defp content(%{leaf: nil} = assigns) do
     ~M"""
     <c-buffer class="hh-content"></c-buffer>
-    """
-  end
-
-  defp content(%{leaf: %{render_mode: "agent"}} = assigns) do
-    ~M"""
-    <c-buffer class="hh-content agent-view" presentation="agent" buffer={@leaf.buffer}>
-      <.live_component
-        :if={Map.has_key?(@leaf, :ag_blocks)}
-        module={Compos.Ui.AgentTranscript}
-        id={"agtx-#{@leaf.id}"}
-        blocks={@leaf.ag_blocks}
-        verbosity={@leaf.agent.verbosity}
-        win={@leaf.id}
-        buf={@leaf.buffer}
-        stick={@leaf.agent.stick}
-        scroll_top={@leaf.agent.scroll_top}
-        scroll_anchor={@leaf.agent.scroll_anchor}
-        scroll_offset={@leaf.agent.scroll_offset}
-        follow_seq={@leaf.agent.follow_seq}
-      />
-      <c-user state="queued" :for={q <- Map.get(@leaf, :ag_queued, [])} class="ag-user ag-queued ag-queued-row">
-        <c-label class="ag-label">YOU</c-label>
-        <c-group class="ag-user-text">{q}</c-group>
-      </c-user>
-      <c-activity
-        :if={Map.get(@leaf, :ag_activity) && @leaf.ag_activity != "disconnected"}
-        class="ag-wait ag-activity"
-      ><c-text class="hh-blink"></c-text> <c-text class="ag-activity-text">{@leaf.ag_activity}</c-text> · C-g interrupts</c-activity>
-    </c-buffer>
     """
   end
 
@@ -1156,7 +1100,6 @@ defmodule Compos.Ui.MobileLive do
   defp key_glyph(%{pending: pending}), do: Enum.join(pending, " ")
 
   defp placeholder(_leaf, %{minibuffer: mb}) when is_map(mb), do: "type to narrow · RET accepts"
-  defp placeholder(%{render_mode: "agent"}, _state), do: "ask, instruct, or type a chord"
   defp placeholder(%{render_mode: "blocks", blocks_input: n}, _state) when is_integer(n),
     do: "ask, instruct, or type a chord"
   defp placeholder(%{buffer: buf}, _state), do: "ask about #{buf} · or a chord"

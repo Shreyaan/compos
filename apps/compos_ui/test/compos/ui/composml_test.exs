@@ -107,7 +107,7 @@ defmodule Compos.Ui.ComposMLTest do
           Compos.Ui.MobileLive,
           Compos.Ui.HomepageLive,
           Compos.Ui.Window,
-          Compos.Ui.AgentTranscript
+          Compos.Ui.BlockList
         ] do
       Code.ensure_loaded!(view)
       assert function_exported?(view, :composml, 1)

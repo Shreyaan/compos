@@ -385,6 +385,8 @@ defmodule Compos.Core.BufferView do
     %{view | locals: small}
   end
 
+  defp split_big(view), do: view
+
   defp big_seen?(seen, k) do
     case Map.get(seen, k) do
       {_, :small} -> false
@@ -392,8 +394,6 @@ defmodule Compos.Core.BufferView do
       nil -> false
     end
   end
-
-  defp split_big(view), do: view
 
   defp resolve(_name, {@big, _, _, _} = ref), do: big_value(ref)
   defp resolve(_name, value), do: value
@@ -419,7 +419,9 @@ defmodule Compos.Core.BufferView do
   def big_ref?({@big, _, _, _}), do: true
   def big_ref?(_), do: false
 
-  defp resolve_locals(name, locals, lazy \\ []) when is_map(locals),
+  defp resolve_locals(name, locals, lazy \\ [])
+
+  defp resolve_locals(name, locals, lazy) when is_map(locals),
     do: Map.new(locals, fn {k, v} -> {k, if(k in lazy, do: v, else: resolve(name, v))} end)
 
   defp resolve_locals(_name, locals, _lazy), do: locals
