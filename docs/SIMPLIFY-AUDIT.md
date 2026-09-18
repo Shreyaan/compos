@@ -1314,6 +1314,19 @@ gate is therefore the other session's unfinished switcher and
 target-layout work, and making those tests pass is their design, not a
 cleanup; it waits for them or for a ruling that those specs stand.
 
+Tried and reverted (2026-09-19 night): the 09-11 intent, "the frame
+keeps its group while any pane still belongs to it", as a sticky case
+in group-current-choice. It turns
+`a-switch-to-a-foreign-buffer-takes-a-window-and-the-frame-stays-in-its-group`
+green and turns three older tests red that assert the derived rule:
+`current-group-is-derived-from-every-visible-work-buffer`,
+`a-foreign-pane-saves-the-layout-it-leaves-and-the-switch-back-restores-it`,
+`group-switch-preserves-mru-in-a-mixed-frame`. The 2026-08-30 sealed
+groups ruling ("a foreign pane takes the frame out of the group and
+saves the layout") and the 2026-09-11 test ("takes a window; the group
+holds") cannot both stand. The ruling to give: which one, and then the
+losing tests are deleted, not fixed.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
