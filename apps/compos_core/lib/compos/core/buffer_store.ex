@@ -11,7 +11,7 @@ defmodule Compos.Core.BufferStore do
 
   require Logger
 
-  alias Compos.Core.{Buffer, Editor, Proc}
+  alias Compos.Core.Buffer
 
   @catalog_version 1
 
@@ -288,23 +288,15 @@ defmodule Compos.Core.BufferStore do
     {:noreply, state}
   end
 
+  # The idle timer fired for one generation of one buffer. The buffer must
+  # still be that buffer, still idle, and free to sleep by the one guard.
   defp safe_to_evict?(name, id, generation) do
-    displayed =
-      if Process.whereis(Editor),
-        do: Enum.any?(Editor.list_windows_all(), fn {_win, b, _frame} -> b == name end),
-        else: false
-
-    active_process = Proc.running?(name)
-
     case Registry.lookup(Compos.Core.BufferRegistry, name) do
       [{_pid, _}] ->
         info = Buffer.eviction_info(name)
-        agent = info.locals["agent-slug"] || info.locals["chat-agent"]
-        pinned = info.locals["buffer-pinned"] not in [nil, false]
-        active_agent = is_binary(agent) and Compos.Core.Agent.running?(agent)
 
-        info.id == id and info.idle_gen == generation and not displayed and not active_process and
-          not active_agent and not pinned
+        info.id == id and info.idle_gen == generation and
+          Compos.Core.sleep_refusal(name, info.locals) == nil
 
       _ ->
         false

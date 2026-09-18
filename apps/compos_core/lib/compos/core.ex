@@ -223,31 +223,19 @@ defmodule Compos.Core do
   @doc """
   Put a live buffer back to dormancy: checkpoint it, stop its process, keep
   it known. The inverse of `ensure_buffer/1`. Refuses a buffer that is on
-  screen, runs a process or agent, or is pinned — the same guards idle
-  eviction applies in `BufferStore.safe_to_evict?/3`.
+  screen, runs a process or agent, or is pinned: `sleep_refusal/2`, the
+  guard the idle sweep reads too.
   """
   def sleep_buffer(name) do
     case Registry.lookup(@registry, name) do
       [{pid, _}] ->
-        displayed =
-          if Process.whereis(Compos.Core.Editor),
-            do:
-              Enum.any?(Compos.Core.Editor.list_windows_all(), fn {_win, b, _frame} ->
-                b == name
-              end),
-            else: false
-
-        info = Buffer.eviction_info(name)
-        agent = info.locals["agent-slug"] || info.locals["chat-agent"]
-
-        cond do
-          displayed -> {:error, :displayed}
-          Compos.Core.Proc.running?(name) -> {:error, :busy}
-          is_binary(agent) and Compos.Core.Agent.running?(agent) -> {:error, :busy}
-          info.locals["buffer-pinned"] not in [nil, false] -> {:error, :pinned}
-          true ->
+        case sleep_refusal(name, Buffer.eviction_info(name).locals) do
+          nil ->
             :ok = Buffer.checkpoint_now(name)
             DynamicSupervisor.terminate_child(@buffer_sup, pid)
+
+          reason ->
+            {:error, reason}
         end
 
       [] ->
@@ -255,6 +243,30 @@ defmodule Compos.Core do
     end
   catch
     :exit, _ -> {:error, :not_found}
+  end
+
+  @doc """
+  Why NAME may not sleep now: `:displayed` (a window shows it), `:busy`
+  (a process or an agent writes it) or `:pinned`; nil when it may. The
+  one guard for `sleep_buffer/1` and for the idle sweep in
+  `Compos.Core.BufferStore`. LOCALS are the buffer's locals.
+  """
+  def sleep_refusal(name, locals) do
+    agent = locals["agent-slug"] || locals["chat-agent"]
+
+    cond do
+      displayed?(name) -> :displayed
+      Compos.Core.Proc.running?(name) -> :busy
+      is_binary(agent) and Compos.Core.Agent.running?(agent) -> :busy
+      locals["buffer-pinned"] not in [nil, false] -> :pinned
+      true -> nil
+    end
+  end
+
+  defp displayed?(name) do
+    if Process.whereis(Compos.Core.Editor),
+      do: Enum.any?(Compos.Core.Editor.list_windows_all(), fn {_win, b, _frame} -> b == name end),
+      else: false
   end
 
   @doc """
