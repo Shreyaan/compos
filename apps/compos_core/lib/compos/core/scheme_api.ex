@@ -2050,6 +2050,12 @@ defmodule Compos.Core.SchemeAPI do
           if ok, do: Compos.Core.Frame.put(id)
           ok
         end,
+      # a frame of its own: the multi-frame tests and a script that opens a
+      # second workspace ask for one
+      {"make-frame!", "(make-frame!) — create a frame and return its id."} => fn [] ->
+        {:ok, id} = Editor.attach_frame(nil)
+        id
+      end,
       # every window everywhere: ((id buffer frame-id) ...) — the cross-frame
       # walk for kill-buffer replacement, agent window release
       {"window-list-all",

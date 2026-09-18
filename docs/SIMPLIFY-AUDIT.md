@@ -1280,6 +1280,28 @@ before and after (951, 713, 419 today).
 *5.1 M-o.* Decided and shipped as the chat merge above: llm-mode stays
 the lane, a hidden chat per document, `C-u M-o` picks the target.
 
+**The layout reds, bisected (2026-09-19 night).** group-switch-test.scm
+in a worktree with its own build and the current harness: 2 red at
+66d2ea54 (the two switcher-heading tests), 5 at 8f859bba (an agent
+commit of 2026-09-11 that changed the `(category foreign)` rule from
+`popup` to `(reuse-window use-some-window pop-up-window)` and rewrote
+the switch-to-buffer! doc to "takes another window"), 6 at f6ad9f51
+(the group MRU cache), 9 at 0a3bfa57 (SPC for marking), 11 at HEAD
+(make-frame! deleted in 7c37b1b2 as "no caller outside a test";
+restored now, two tests green again). The file holds two generations
+of the foreign policy: `confirm-floats-a-buffer-of-another-group...`
+and `switching-to-an-ungrouped-buffer-floats-it...` want the popup and
+"the frame stays in its group"; `a-foreign-buffer-is-a-display-of-
+category-foreign` (newer) wants the window chain and "nothing floats".
+Putting the popup rule back turns the newer test red and leaves the
+older two red on the group assertion, so neither generation passes
+today. RULING NEEDED: which foreign policy stands (the popup, per the
+sealed-groups ruling; or the other window, per the 2026-09-11 commit
+and the open-in-the-other-window ruling), and in both cases the frame
+must keep its group when a foreign buffer shows, which no code does
+now. The remaining six names (headings, MRU cache, SPC marking) date
+from the other session's switcher commits and wait with it.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
