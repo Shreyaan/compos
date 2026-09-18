@@ -197,7 +197,7 @@ itself.)
 
 That reasoning is right, and the boundary drawn from it is wrong. The client
 does not send the measurement. It sends the decision. Five separate routines
-in `layouts.ex` (`visualLineMove`, `visualLineEdge`, `exactSpot`,
+in `app.js` (`visualLineMove`, `visualLineEdge`, `exactSpot`,
 `sourceSpot`, `previewSpot`) each work out what a key MEANS by probing the
 DOM. Each can be wrong in its own way, and none can be tested from here: the
 file has no coverage, and the code-change skill forbids driving compos through

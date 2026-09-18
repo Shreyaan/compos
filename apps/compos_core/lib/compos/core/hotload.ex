@@ -9,6 +9,9 @@ defmodule Compos.Core.Hotload do
     * `.scm` reloads through `Compos.Core.Session.reload_files/1`. That
       evaluates only the top-level forms whose text changed, then re-runs
       mode setup on the buffers that wear a mode the reload redefined.
+    * `.css` and `.js` in a page asset directory (`:hotload_page_assets`)
+      are served as they are, so a save only bumps the boot id and every
+      open page reloads itself.
     * `.ex` and `.heex` recompile through `Compos.Core.Hotload.Compile`. A
       child `mix compile` writes the new beams; the VM then swaps in only
       the modules whose code changed, and it loads each new version before
@@ -143,7 +146,8 @@ defmodule Compos.Core.Hotload do
       root ->
         Enum.filter(
           Path.wildcard(Path.join(root, "apps/*/lib")) ++
-            [Path.join(root, "apps/compos_core/priv"), Path.join(root, "scheme")],
+            [Path.join(root, "apps/compos_core/priv"), Path.join(root, "scheme")] ++
+            Enum.map(page_asset_dirs(), &Path.join(root, &1)),
           &File.dir?/1
         )
     end
@@ -174,7 +178,7 @@ defmodule Compos.Core.Hotload do
   def source?(path) do
     base = Path.basename(path)
 
-    Path.extname(path) in @source_exts and
+    (Path.extname(path) in @source_exts or page_asset?(path)) and
       not String.starts_with?(base, ".") and
       # an editor's own scratch file is not a save: Emacs writes `.#name`
       # and `name~`, and a partial write is not compilable Elixir
@@ -191,6 +195,16 @@ defmodule Compos.Core.Hotload do
     Path.extname(path) == ".scm" and
       (String.ends_with?(Path.basename(path), "-test.scm") or "tests" in Path.split(path))
   end
+
+  @doc false
+  # A stylesheet or a script the page loads as a file. Anywhere else a .js
+  # or a .css is not source this module reloads.
+  def page_asset?(path) do
+    Path.extname(path) in ~w(.css .js) and
+      Enum.any?(page_asset_dirs(), &String.contains?(path, "/" <> String.trim(&1, "/") <> "/"))
+  end
+
+  defp page_asset_dirs, do: Application.get_env(:compos_core, :hotload_page_assets, [])
 
   defp noisy?(path) do
     parts = Path.split(path)
@@ -223,9 +237,10 @@ defmodule Compos.Core.Hotload do
   defp apply_changes([]), do: nil
 
   defp apply_changes(paths) do
+    {assets, paths} = Enum.split_with(paths, &page_asset?/1)
     {scheme, elixir} = Enum.split_with(paths, &(Path.extname(&1) == ".scm"))
 
-    [recompile(elixir), reload_scheme(scheme)]
+    [reload_assets(assets), recompile(elixir), reload_scheme(scheme)]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" · ")
     |> case do
@@ -285,14 +300,21 @@ defmodule Compos.Core.Hotload do
   """
   def reboot_pages(reloaded) do
     pages = Application.get_env(:compos_core, :hotload_page_modules, [])
+    Enum.any?(reloaded, &(&1 in pages)) and reboot!()
+  end
 
-    if Enum.any?(reloaded, &(&1 in pages)) do
-      :persistent_term.put(:compos_boot_id, Integer.to_string(System.system_time(:millisecond)))
-      Compos.Core.Events.broadcast_editor(:reboot)
-      true
-    else
-      false
-    end
+  # a static stylesheet or script changed: nothing compiles, the pages reload
+  defp reload_assets([]), do: nil
+
+  defp reload_assets(paths) do
+    reboot!()
+    "#{count(length(paths), "page asset")} changed, pages reload"
+  end
+
+  defp reboot! do
+    :persistent_term.put(:compos_boot_id, Integer.to_string(System.system_time(:millisecond)))
+    Compos.Core.Events.broadcast_editor(:reboot)
+    true
   rescue
     e ->
       Logger.error("Compos.Core.Hotload: page reboot failed: #{Exception.message(e)}")

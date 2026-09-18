@@ -12,12 +12,12 @@ defmodule Compos.Ui.TranscriptAnchorTest do
 
   use ExUnit.Case, async: true
 
-  @layouts Path.expand("../../../lib/compos/ui/layouts.ex", __DIR__)
+  @app_js Path.expand("../../../priv/static/app.js", __DIR__)
 
   defp last_visible_source do
-    src = File.read!(@layouts)
+    src = File.read!(@app_js)
     [_, rest] = String.split(src, "this.lastVisible = () => {", parts: 2)
-    [body, _] = String.split(rest, "\n                };", parts: 2)
+    [body, _] = String.split(rest, "\n        };", parts: 2)
     "const lastVisible = () => {" <> body <> "\n};"
   end
 

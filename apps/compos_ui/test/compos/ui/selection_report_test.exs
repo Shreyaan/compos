@@ -2,7 +2,7 @@ defmodule Compos.Ui.SelectionReportTest do
   use ExUnit.Case, async: true
 
   test "selection reports require a gesture and cannot outlive a patch or typing" do
-    src = File.read!(Path.expand("../../../lib/compos/ui/layouts.ex", __DIR__))
+    src = File.read!(Path.expand("../../../priv/static/app.js", __DIR__))
     [_, rest] = String.split(src, "this.selChangeH = () => {", parts: 2)
     [body, _] = String.split(rest, "document.addEventListener(\"selectionchange\"", parts: 2)
     script = """
@@ -51,7 +51,7 @@ defmodule Compos.Ui.SelectionReportTest do
     end
   end
   test "native line motion crosses a slice edge but keeps wrapped rows native" do
-    src = File.read!(Path.expand("../../../lib/compos/ui/layouts.ex", __DIR__))
+    src = File.read!(Path.expand("../../../priv/static/app.js", __DIR__))
     [_, rest] = String.split(src, "this.moveEditable = (buf, alter, dir, granularity, count) => {", parts: 2)
     [body, _] = String.split(rest, "this.handleEvent(\"select\"", parts: 2)
     script = """

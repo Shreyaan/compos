@@ -10,10 +10,10 @@ defmodule Compos.Ui.KeySpecTest do
 
   use ExUnit.Case, async: true
 
-  @layouts Path.expand("../../../lib/compos/ui/layouts.ex", __DIR__)
+  @app_js Path.expand("../../../priv/static/app.js", __DIR__)
 
   defp encoder_script do
-    src = File.read!(@layouts)
+    src = File.read!(@app_js)
     [_, rest] = String.split(src, "const NAMED = {", parts: 2)
     [body, _] = String.split(rest, "const WHICH_KEY_MODIFIERS", parts: 2)
     "const NAMED = {" <> body

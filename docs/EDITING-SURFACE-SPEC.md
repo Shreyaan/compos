@@ -7,7 +7,7 @@ Status: proposal, 2026-08-30. Prototype: `docs/examples/contenteditable-proto.ht
 
 The editor cannot reach Word-level fidelity because the browser's text-entry
 stack never runs. The client listens to `keydown`, calls `preventDefault` on
-every key, and sends a key name to the server (`layouts.ex` `keySpec`). That
+every key, and sends a key name to the server (`app.js` `keySpec`). That
 path drops everything the browser does for text:
 
 - dead keys (`e.key === "Dead"` is dropped; Option is claimed as Meta, so
@@ -92,7 +92,7 @@ Motion commands that need layout call the browser's own layout:
 `character | word | line | lineboundary | paragraph | documentboundary`.
 `next-line` in visual-line mode is `modify("move","forward","line")` on the
 client followed by a `selectionchange`. The wrap map and its measurement pass
-(`layouts.ex` 2080-2258, `visual-row-move!`) go away.
+(`app.js`, `visual-row-move!`) go away.
 
 Plain arrows, Home, End, Page keys, and Shift-arrows can be either native or
 server commands. Proposal: native when `cua-mode` is on; server commands
@@ -129,7 +129,7 @@ a chat is a conversation you type in without pause, so a chat that held the
 Cmd-arrows while armed would never answer the window motion again. A chat
 still arms `cua-mode-map`, so Shift there extends a region. A buffer the
 server draws (the chat) is handled here alone. The client mirrors the state
-for a contenteditable surface (`editingAfterKey` in `layouts.ex`), because
+for a contenteditable surface (`editingAfterKey` in `app.js`), because
 the native-or-key decision for a Cmd-arrow must run inside `keydown`; a
 Cmd-arrow the client keeps native never reaches the server map.
 

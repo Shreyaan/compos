@@ -45,8 +45,13 @@ defmodule Compos.Ui.Endpoint do
   plug(Plug.Static, at: "/phx", from: {:phoenix, "priv/static"})
   plug(Plug.Static, at: "/lv", from: {:phoenix_live_view, "priv/static"})
 
-  # the PWA manifest and icons — Chrome installs the editor as its own app
-  plug(Plug.Static, at: "/", from: :compos_ui, only: ~w(manifest.webmanifest icons images composml.css))
+  # the PWA manifest and icons (Chrome installs the editor as its own app),
+  # and the editor's own stylesheet and script
+  plug(Plug.Static,
+    at: "/",
+    from: :compos_ui,
+    only: ~w(manifest.webmanifest icons images composml.css editor.css app.js)
+  )
 
   if code_reloading? do
     plug(Phoenix.LiveReloader)

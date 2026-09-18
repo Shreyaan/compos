@@ -8,7 +8,7 @@ stage. Each stage is one commit, verified live and by a screenshot.
 
 ## Already in the app before this port
 
-- The token layer in `layouts.ex` (surfaces, text, edge, accent, scale,
+- The token layer in `editor.css` (surfaces, text, edge, accent, scale,
   space) resolves through the faces a theme owns. Radii are 0.
 - Fonts: IBM Plex Mono for chrome, Spectral for prose, Plex Sans outside.
 - `paper` (light) and `paper-night` (dark) themes exist in `themes.scm`.

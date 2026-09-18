@@ -1,0 +1,1901 @@
+/* default palette = the Modern Emacs design's "paper" tokens;
+   themes override via CSS custom properties from Scheme */
+:root {
+  /* Plex draws the text; the Nerd Font draws the mode icons, which
+     live in the private-use area Plex leaves empty. Both are
+     monospace, so one icon still spends one cell. */
+  /* Each stack is the fallback of a face variable, so the
+     'mono, 'sans and 'serif faces choose the font from Scheme
+     (appearance.scm: mono-font-family and friends). A face that
+     names no family leaves the stack below. */
+  --font-mono: var(--mono-family,
+               'IBM Plex Mono', 'Symbols Nerd Font Mono',
+               'JetBrainsMonoNL Nerd Font Mono', 'JetBrainsMono Nerd Font Mono',
+               'Hack Nerd Font Mono', ui-monospace, Menlo, monospace);
+  --font-sans: var(--sans-family, 'IBM Plex Sans', system-ui, sans-serif);
+  --font-serif: var(--serif-family, Spectral, Georgia, serif);
+
+  /* --- the design's token layer --------------------------------
+     The Modern Emacs design names two layers: a base palette and
+     a semantic layer over it. Compos keeps the palette in Scheme,
+     where a theme owns it, so each token here resolves through the
+     face variable that draws the same thing. The literal after the
+     comma is the design's own light value, and it only shows
+     before the faces arrive with the LiveView. Chrome reads these
+     names and never a face variable, so one theme moves every bar
+     at once. */
+  --surface-canvas: var(--default-bg, #e6e0d2);
+  --surface-pane: var(--paper-bg, #efeadf);
+  --surface-chrome: var(--paper-bg, #efeadf);
+  --surface-sunken: var(--window-inactive-bg, #f4f0e6);
+  --surface-raised: var(--window-bg, #fdfcf8);
+  --surface-select: var(--hl-line-bg, #f5f1e6);
+  --surface-mark: color-mix(in srgb, var(--warn-fg, #7a5a1a) 13%, transparent);
+
+  --text-strong: var(--default-fg, #1b1a17);
+  --text-body: var(--body-fg, #3f3b33);
+  --text-soft: var(--modeline-fg, #57534a);
+  --text-faint: var(--dim-fg, #8a857a);
+  --text-dim: var(--faint-fg, #b3ac9c);
+
+  --edge: var(--border-bg, #cbc4b1);
+  --edge-soft: var(--border-soft-bg, #e2dbc9);
+
+  --accent: var(--accent-fg, #26356b);
+  --accent-wash: var(--select-bg, #e7e9f1);
+  --ok: var(--ok-fg, #2e6b45);
+  --warn: var(--warn-fg, #7a5a1a);
+  --alert: var(--alert-fg, #a83a2b);
+  --dot: var(--linenum-fg, #b3ac9c);
+  --diff-add: var(--diff-add-bg, rgba(46, 107, 69, 0.1));
+  --diff-del: var(--diff-del-bg, rgba(168, 58, 43, 0.09));
+
+  /* Compos has no curved lines. Every surface is square: chrome,
+     rows, panes, overlays, cards. The radius names stay so a rule
+     can still be expressive, and they all resolve to 0. */
+  --r-none: 0;
+  --r-xs: 0;
+  --r-sm: 0;
+  --r-md: 0;
+  --r-lg: 0;
+  --r-pane: 0;
+  --border: 1px solid var(--edge);
+  --border-soft: 1px solid var(--edge-soft);
+  --border-dash: 1px dashed var(--edge);
+  --edge-current: 2px solid var(--accent);
+  --edge-none: 2px solid transparent;
+  --hair: 1px;
+
+  /* The chrome scale is deliberately narrow: five steps carry
+     every bar, list and label in the product. */
+  --fs-micro: 10px;
+  --fs-label: 11px;
+  --fs-meta: 11.5px;
+  --fs-small: 12.5px;
+  --fs-code: 13px;
+  --fs-ui: 13.5px;
+  --fs-input: 14.5px;
+  --fs-body: 14.5px;
+  --fs-lead: 15px;
+  --fs-subhead: 19px;
+  --fs-title: 30px;
+
+  --ls-label: 0.16em;
+  --ls-caps: 0.14em;
+  --ls-wide: 0.2em;
+  --ls-code: -0.1px;
+  --ls-title: -0.4px;
+
+  --lh-ui: 1.45;
+  --lh-code: 1.62;
+  --lh-prose: 1.55;
+  --lh-title: 1.15;
+
+  --fw-reg: 400;
+  --fw-med: 500;
+  --fw-semi: 600;
+
+  --s1: 2px;
+  --s2: 3px;
+  --s3: 4px;
+  --s4: 6px;
+  --s5: 8px;
+  --s6: 10px;
+  --s7: 12px;
+  --s8: 14px;
+  --s9: 16px;
+  --s10: 18px;
+  --s11: 22px;
+  --s12: 26px;
+  --s14: 34px;
+  --s16: 44px;
+
+  /* the numbers that make a bar feel like Emacs rather than like
+     a web app: a row is 3px tall in padding, not 12 */
+  --row-py: 3px;
+  --row-px: 16px;
+  --chrome-py: 6px;
+  --chrome-px: 12px;
+  --bar-py: 4px;
+  --mark-col: 20px;
+  --glyph-col: 16px;
+  --num-col: 30px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--default-bg, #e6e0d2);
+  color: var(--default-fg, #1b1a17);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+.editor-root {
+  /* the frame echo area is configurable: top = -1, bottom = 10 */
+  display: flex; flex-direction: column; position: relative;
+  overflow: hidden;
+  /* The frame's default face is mono: the design sets the whole
+     editor in IBM Plex Mono and spends Spectral only on prose and
+     titles. Sans stays on body, for the pages outside the editor. */
+  font: var(--fw-reg) var(--fs-ui) / var(--lh-ui) var(--font-mono);
+  color: var(--text-strong);
+  /* the frame is the container every bar measures itself against,
+     so a bar degrades by the frame's width and not the screen's */
+  container-type: inline-size;
+  /* the application text scale (appearance.scm ui-scale): the
+     'ui face's zoom is a root variable, and the whole page
+     grows by it, rendered pages included. A viewport unit does
+     not shrink under zoom, so the height divides by it, or the
+     modeline lands below the fold. */
+  zoom: var(--ui-zoom, 1);
+  /* Engines disagree on viewport units inside CSS zoom: Chrome
+     leaves 100dvh unzoomed, WebKit divides it by the zoom. Both
+     scale a px length by the zoom, so the boot script writes the
+     viewport height in px and the root divides it once. 100dvh
+     is only the fallback before the script runs. */
+  height: calc(var(--viewport-h, 100dvh) / var(--ui-zoom, 1));
+}
+.editor-root.instance-identified::before {
+  content: attr(data-instance);
+  position: absolute; top: 0; right: 14px; z-index: 70;
+  padding: 4px 10px 5px;
+  border-radius: 0 0 6px 6px;
+  background: var(--instance-accent);
+  color: #fff; font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.06em; text-transform: uppercase;
+  pointer-events: none;
+}
+.editor-root.instance-identified::after {
+  content: "";
+  position: absolute; inset: 0; z-index: 69;
+  border: 4px solid var(--instance-accent);
+  pointer-events: none;
+}
+.workspace-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  min-height: 38px; padding: 7px 14px;
+  border-bottom: 2px solid color-mix(in srgb, var(--alert-fg, #d13b32) 72%, #111);
+  background:
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--alert-fg, #d13b32) 22%, #171312),
+      #171312 62%);
+  color: #fff8ee; font: 600 11px/1.25 var(--font-mono);
+  letter-spacing: 0.015em;
+  box-shadow: none;
+  z-index: 40;
+}
+.workspace-bar-kind, .workspace-bar-port {
+  padding: 4px 8px; border-radius: 0;
+  background: var(--alert-fg, #d13b32); color: white;
+  font-weight: 750; letter-spacing: 0.08em;
+}
+.workspace-bar-root {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #f1d8c8;
+}
+.workspace-bar-help { margin-left: auto; white-space: nowrap; color: #cdbfb6; }
+/* window chrome is themable: a 'chrome face maps to these vars
+   (gap, radius, border, shadow, anim) — zero values reproduce the
+   flat flush look */
+/* position: relative so a floating popup measures itself
+   against the whole frame. Against its own split instead, a
+   popup opened from a window in the middle of the layout would
+   float in the middle of the layout — the frame edge is the
+   only anchor that puts it in the same place every time. */
+.windows {
+  order: 0;
+  flex: 1; display: flex; position: relative; min-height: 0;
+  background: var(--default-bg, #d5cdb9);
+  padding: var(--chrome-gap, 0);
+}
+.windows > * { flex: 1; min-width: 0; min-height: 0; }
+.split { flex: 1; display: flex; min-width: 0; min-height: 0; gap: var(--chrome-gap, 0); }
+.split.h { flex-direction: row; }
+.split.v { flex-direction: column; }
+.split-child {
+  display: flex; min-width: 0; min-height: 0;
+  transition: flex-grow var(--chrome-anim, 0ms) ease-out;
+}
+.split-child > * { flex: 1; min-width: 0; min-height: 0; }
+/* A popup stays in the window tree, so editor commands can reach it.
+   Its split leaves the visual flow. The sibling then fills that split.
+   The popup measures itself against .windows, which is the frame. */
+.split-child:has(> .window.popup) {
+  flex: 0 0 0 !important; overflow: visible; transition: none;
+}
+.split:has(> .split-child > .window.popup)
+  > .split-child:not(:has(> .window.popup)) {
+  flex-grow: 1 !important;
+}
+.window.popup-right,
+.window.popup-left,
+.window.popup-top,
+.window.popup-bottom,
+.window.popup-center {
+  position: absolute; z-index: 20;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.30);
+  border: var(--chrome-border, none);
+  border-radius: var(--chrome-radius, 0);
+
+}
+.window.popup-right,
+.window.popup-left {
+  top: 0; bottom: 0;
+  width: var(--popup-size, 33.333%);
+}
+.window.popup-right { right: 0; }
+.window.popup-left { left: 0; }
+.window.popup-top,
+.window.popup-bottom {
+  left: 0; right: 0;
+  height: var(--popup-size, 33.333%);
+}
+.window.popup-top { top: 0; }
+.window.popup-bottom { bottom: 0; }
+.window.popup-center {
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: var(--popup-size, 56%); max-width: 1100px;
+  min-width: min(520px, 100%);
+  height: 62%;
+}
+/* Three states, no more. The box is the same in all three -- a
+   1px border, transparent at rest -- so nothing in the layout
+   moves when the point moves. At rest a window is kept down: its
+   ground goes toward the canvas, and every voice inside it (ink,
+   accent, keys) steps one toward the paper; only the state dots
+   keep their colour, because a live process is live whether or
+   not you are looking at it. The current cua window sits: paper,
+   a hairline, the shallow shadow. The current focus window
+   floats: a lifted ground, a nearer hairline, the deep shadow.
+   Nothing eases. */
+.window {
+  display: flex; flex-direction: column;
+  background: var(--surface-pane);
+  border: 1px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
+  min-width: 0; min-height: 0;
+  position: relative;
+  /* a window measures its own bars: the facts shed by rank
+     against the window's width, not the frame's */
+  container-type: inline-size;
+}
+.window.inactive {
+  /* one step down for the bright voices; the quiet ones stay
+     where they are, because a word that was faint has no
+     step left before it is gone */
+  --text-strong: var(--body-fg, #3f3b33);
+  --text-body: var(--modeline-fg, #57534a);
+  --text-soft: var(--dim-fg, #8a857a);
+  --text-faint: var(--dim-fg, #8a857a);
+  --text-dim: var(--faint-fg, #b3ac9c);
+  --accent: var(--faint-fg, #b3ac9c);
+  --accent-wash: transparent;
+  --ok: var(--faint-fg, #b3ac9c);
+  --warn: var(--faint-fg, #b3ac9c);
+  --edge: var(--border-soft-bg, #e2dbc9);
+  --surface-pane: color-mix(in srgb, var(--window-inactive-bg, #f4f0e6) 45%, var(--default-bg, #e6e0d2));
+  --surface-sunken: var(--surface-pane);
+  --surface-chrome: var(--surface-pane);
+  --surface-select: color-mix(in srgb, var(--window-inactive-bg, #f4f0e6) 80%, var(--default-bg, #e6e0d2));
+  background: var(--surface-pane);
+}
+.window.inactive .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
+.window.active {
+  --surface-pane: var(--paper-bg, #efeadf);
+  --surface-chrome: var(--paper-bg, #efeadf);
+  background: var(--surface-pane);
+  border-color: var(--edge);
+  box-shadow: var(--chrome-shadow, 0 14px 40px rgba(0, 0, 0, 0.28));
+}
+/* Floating is a ground, not only a shadow: on a near-black canvas
+   a shadow barely reads, so the window that can move also lifts
+   to the raised paper, and its hairline goes with it (a brighter
+   rule is a nearer edge). The state tag in the header line
+   (dash-state-focus) is what this rule reads. */
+.window.active:has(.dash-state-focus) {
+  /* The design's float, to the letter: the ground lifts to the
+     raised paper mixed with the select ground, the hairline
+     brightens toward the dim ink (a nearer edge), and the deep
+     shadow does the rest. No accent anywhere. */
+  --surface-pane: color-mix(in srgb, var(--window-bg, #fdfcf8) 55%, var(--hl-line-bg, #f5f1e6));
+  --surface-chrome: var(--surface-pane);
+  --surface-sunken: color-mix(in srgb, var(--window-bg, #fdfcf8) 80%, var(--hl-line-bg, #f5f1e6));
+  --surface-select: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 70%, var(--faint-fg, #b3ac9c));
+  background: var(--surface-pane);
+  border-color: color-mix(in srgb, var(--border-bg, #cbc4b1) 60%, var(--faint-fg, #b3ac9c));
+  box-shadow: 0 1px 0 var(--surface-pane) inset,
+              var(--chrome-shadow-deep, 0 22px 60px rgba(0, 0, 0, 0.5)),
+              0 0 0 1px var(--default-bg, #e6e0d2);
+}
+/* a sitting window: paper, a hairline, no lift */
+.window.active:has(.dash-state-editing) {
+  box-shadow: none;
+}
+
+.window.preview-highlight {
+  outline: 1px solid color-mix(in srgb, var(--accent-fg, #8f9cdb) 65%, transparent);
+  outline-offset: -1px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-fg, #8f9cdb) 20%, transparent);
+}
+/* A peek is a detached card, never a pane or editable surface. */
+.window.listing-peek {
+  position: fixed; z-index: 50; inset: auto;
+  visibility: hidden; width: auto; height: auto;
+  max-width: calc(100vw - 48px); min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent-fg, #8f9cdb) 65%, transparent);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--window-bg, #25231f) 92%, var(--accent-fg, #8f9cdb) 8%);
+  box-shadow: 0 28px 70px #0008, 0 9px 22px #0006,
+              0 2px 3px #0005, inset 0 1px 0 #ffffff30;
+  transform: none; overflow: hidden; user-select: none;
+}
+.peek-card-header {
+  display: flex; align-items: center; gap: 12px; flex: 0 0 auto;
+  padding: 12px 16px; border-bottom: 1px solid #ffffff18;
+  background: color-mix(in srgb, var(--accent-fg, #8f9cdb) 12%, transparent);
+}
+.peek-card-label { text-transform: uppercase; font-size: 10px; letter-spacing: .14em;
+  font-weight: 700; color: var(--accent-fg, #aab5ef); }
+.peek-card-title { flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .8; }
+.peek-card-dismiss { border: 1px solid #ffffff30; border-radius: 0;
+  background: transparent; color: inherit; padding: 2px 7px; cursor: pointer; }
+.peek-card-dismiss:hover { background: #ffffff16; }
+.peek-card-body { margin: 0; padding: 18px 20px 34px; flex: 1; min-height: 0;
+  font: inherit; font-size: 1em; line-height: 1.6;
+  overflow-wrap: anywhere; overflow: auto; overscroll-behavior: contain; }
+.peek-document { display: block; width: 100%; min-height: 300px; border: 0; pointer-events: none; }
+.peek-card-body pre { white-space: pre-wrap; font: inherit; margin: 0; }
+.peek-card-body .peek-plain, .peek-text { font-family: var(--font-mono); }
+.peek-text .line { display: block; white-space: pre; }
+.peek-text .semantic-record { display: contents; }
+.windows:has(.listing-peek) * { transition: none !important; animation: none !important; }
+.peek-card-body .ag-scroll { overflow: visible; flex: none; }
+.peek-connector { position: fixed; inset: 0; width: 100vw; height: 100vh;
+  z-index: 49; overflow: visible; pointer-events: none;
+  color: var(--accent-fg, #aab5ef); filter: drop-shadow(0 2px 3px #0008); }
+.peek-source-row { outline: 1px solid color-mix(in srgb, var(--accent-fg, #aab5ef) 60%, transparent);
+  outline-offset: -1px; background: color-mix(in srgb, var(--accent-fg, #aab5ef) 12%, transparent); }
+
+.window.workspace-pending {
+  position: relative;
+  box-shadow:
+    inset 0 0 0 2px var(--alert-fg, #d13b32),
+    inset 0 0 22px color-mix(in srgb, var(--alert-fg, #d13b32) 18%, transparent),
+    0 0 18px color-mix(in srgb, var(--alert-fg, #d13b32) 24%, transparent);
+}
+.window.workspace-pending::before {
+  content: "UNMERGED WORKTREE";
+  position: absolute; z-index: 18; top: 8px; right: 10px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--alert-fg, #d13b32) 72%, white);
+  border-radius: 0;
+  background: var(--alert-fg, #d13b32);
+  color: white;
+  font: 700 10px/1.2 var(--font-mono);
+  letter-spacing: 0.09em;
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--alert-fg, #d13b32) 42%, transparent);
+  pointer-events: none;
+}
+.buffer-header {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border-bg, #cbc4b1);
+  background: var(--modeline-active-bg, #e7e9f1);
+  color: var(--modeline-active-fg, #1b1a17);
+  font: 650 11px/1.3 var(--font-mono);
+  letter-spacing: 0.015em;
+}
+/* The keymap every list-mode buffer carries: a bar at the foot of
+   the window, full width, above the mode line and never over the
+   rows. One line: the main keys the mode declared and `? all N`.
+   `?` grows the bar into the whole map; the rows keep the point. */
+.buffer-footer {
+  flex: none; min-width: 0;
+  display: flex; flex-direction: column; gap: var(--s4);
+  max-height: 45%; overflow: auto;
+  padding: var(--s3) var(--row-px) var(--s4);
+  background: var(--surface-sunken);
+  border-top: var(--border-soft);
+  font-family: var(--font-mono); font-size: var(--fs-meta);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.buffer-footer:has(.c-keys-bar.expanded) { padding: var(--s5) var(--row-px) var(--s6); }
+.buffer-footer .c-keys-bar { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+.buffer-footer .keys-line {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: var(--s3) var(--s9); min-width: 0;
+}
+/* a card is not a bar: when the room runs out its keys wrap onto
+   a second line rather than clipping */
+/* the strip's rows and the more-control share one wrapping line,
+   so `? all N` follows the last key instead of taking a line */
+.buffer-footer .keys-line > .c-keymap { display: contents; }
+.buffer-footer .keys-line { gap: var(--s3) var(--s8); }
+.buffer-footer .keys-more {
+  flex: none; padding-left: var(--s5);
+  border-left: var(--border-soft); color: var(--text-faint);
+  white-space: nowrap; cursor: default;
+}
+.buffer-footer .keys-more:hover { color: var(--text-strong); }
+.buffer-footer .keys-more c-action-key { margin-right: var(--s3); }
+/* the whole map: a grid per keymap, key then verb, read down the
+   columns like describe-keymap */
+.buffer-footer .c-keys {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 0 var(--s10); align-content: start;
+}
+.buffer-footer .c-keys:first-of-type { margin-top: var(--s3); padding-top: var(--s5); border-top: var(--border-soft); }
+.buffer-footer .c-keys-head {
+  grid-column: 1 / -1; display: flex; align-items: baseline; gap: var(--s5);
+  padding: var(--s2) 0;
+  font-size: var(--fs-label); letter-spacing: var(--ls-label); text-transform: uppercase;
+  color: var(--text-faint);
+}
+.buffer-footer .c-keys-head .name { color: var(--text-strong); font-weight: var(--fw-semi); }
+.buffer-footer .c-keys-head .count { color: var(--text-dim); }
+.buffer-footer .c-binding {
+  display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--s5);
+  align-items: baseline; padding: 1px var(--s4);
+  font-size: var(--fs-small); color: var(--text-soft); white-space: nowrap;
+}
+.buffer-footer .c-binding c-action-key { display: block; text-align: right; overflow: hidden; text-overflow: ellipsis; }
+.buffer-footer .c-binding .do { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.window.workspace-pending .buffer-header {
+  border-bottom-color: color-mix(in srgb, var(--alert-fg, #d13b32) 68%, transparent);
+  background: color-mix(in srgb, var(--alert-fg, #d13b32) 12%, var(--window-bg, #fdfcf8));
+  color: var(--alert-fg, #a8342a);
+}
+.buf {
+  flex: 1;
+  /* the server owns vertical scrolling (viewport windowing); a row
+     wider than the window (a CSV table) scrolls right */
+  overflow: auto hidden;
+  padding: 12px 0 22px;
+  /* default face drives the text font; themes/customize set the
+     vars, buffer-face! overrides them per window via inline style */
+  font-family: var(--default-family, var(--font-mono));
+  /* the buffer text scale (text-scale-increase) is a factor in
+     the same inline style; the size a remap names still holds */
+  font-size: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
+  line-height: var(--default-line-height, 1.7);
+  font-variant-ligatures: common-ligatures;
+  letter-spacing: -0.1px;
+}
+.terminal-view {
+  flex: 1; min-width: 0; min-height: 0; overflow: hidden;
+  padding: 7px 8px;
+  background: var(--window-bg, #111318);
+}
+.terminal-view .xterm { height: 100%; }
+.terminal-view .xterm-viewport { overflow-y: auto !important; }
+.terminal-view .xterm-screen { margin: 0; }
+/* buffers under the ship-all threshold get every line at once
+   (editor_live.ex) — the browser owns scroll position natively
+   here, no server round-trip per scroll tick */
+.buf.client-scroll { overflow: auto auto; }
+.line { display: flex; align-items: flex-start; gap: 12px; padding: 0 16px 0 8px;
+        /* empty lines must keep their height even with .linenum hidden (no-nums, writing-mode) */
+        min-height: 1lh; }
+.window.active .line.hl-line { background: var(--hl-line-bg, #f5f1e6); }
+/* A select overlay names complete logical rows. Paint each touched
+   display line across the window, including its line-number area. */
+.window .line.selected-line,
+.window.active .line.selected-line {
+  background: var(--select-bg, #e7e9f1);
+}
+.linenum {
+  flex: 0 0 30px; text-align: right;
+  font-size: 11px; color: var(--linenum-fg, #b3ac9c);
+  user-select: none;
+}
+.line-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; position: relative; }
+/* the editable surface: the browser's text pipeline feeds
+   beforeinput intents; the server still draws the caret */
+.buf[contenteditable] { outline: none; caret-color: transparent; position: relative; }
+/* the ghost caret: where point stands while the page does not own
+   the keyboard (a hollow box, as Emacs draws for an inactive frame) */
+.buf[contenteditable] .caret-ghost {
+  display: none; position: absolute; width: 2px; pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
+}
+body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: block; }
+.buf[contenteditable] .linenum { user-select: none; }
+/* while the surface owns the keyboard the browser draws the caret
+   and the selection; the server's cursor block and region fall
+   silent. Away from the keyboard the server's drawing returns,
+   so a reader still sees where point stands. */
+.buf[contenteditable]:focus { caret-color: var(--cursor-bg, #26356b); }
+.buf[contenteditable]:focus .cursor {
+  background: transparent; color: inherit;
+}
+.buf[contenteditable]:focus .region { background: transparent; }
+.buf[contenteditable] ::selection { background: var(--region-bg, #e7e9f1); }
+/* Preview keeps markup hidden. Morg owns source editing. */
+.f-md-marker { display: none; }
+/* chrome: text the buffer does not hold, drawn beside the text;
+   a zero-length island the caret walks over */
+.chrome-seg { user-select: none; white-space: nowrap; }
+.chrome-seg[phx-click] { cursor: pointer; }
+/* Inline llm-mode activity is chrome, not document text. Give it a
+   strong, stable pulse so a long reasoning/tool step never looks hung. */
+.llm-thinking-spinner {
+  display: inline-flex; align-items: center; gap: .62em;
+  margin: .32em .35em .32em 0; padding: .42em .8em;
+  border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 42%, transparent);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--accent-fg, #26356b) 10%, var(--window-bg, #fdfcf8));
+  color: var(--accent-fg, #26356b); box-shadow: 0 2px 10px rgba(0,0,0,.08);
+  font-family: var(--font-mono); font-size: .78em; font-weight: 750;
+  letter-spacing: .055em; text-transform: uppercase;
+}
+.llm-thinking-spinner::before {
+  content: ""; width: .9em; height: .9em; flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--accent-fg, #26356b) 24%, transparent);
+  border-top-color: var(--accent-fg, #26356b); border-radius: 50%;
+  animation: llm-thinking-spin var(--chrome-anim, 0s) linear infinite;
+}
+@keyframes llm-thinking-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .llm-thinking-spinner::before { animation: none; }
+}
+
+/* the block shapes of a drawn page: the marker stepped back, the
+   row takes the shape */
+/* A section heading in a list is a band across the table. It is
+   painted on the line, so it reaches both edges however short
+   the heading is, and it is a different colour from hl-line:
+   the section a reader is in and the row they are on must
+   never read as the same thing. On the heading itself the two
+   stack, and the band deepens rather than being replaced. */
+.line.row-list-section {
+  background: color-mix(in srgb, var(--accent-fg, #26356b) 11%, transparent);
+}
+.window.active .line.row-list-section.hl-line {
+  background: color-mix(in srgb, var(--accent-fg, #26356b) 24%, transparent);
+}
+.line.row-li .line-content { padding-left: 1.4em; }
+.line.row-li .line-content::before {
+  content: "\2022"; display: inline-block; width: 1.4em; margin-left: -1.4em;
+  text-align: center; color: var(--dim-fg, #8a857a);
+}
+.line.row-oli .line-content { padding-left: 1.4em; text-indent: -1.4em; }
+.line.row-quote .line-content {
+  border-left: 3px solid var(--border-bg, #cfc8b6); padding-left: 12px;
+  color: var(--dim-fg, #57534a); font-style: italic;
+}
+.line.row-hr .line-content { position: relative; }
+.line.row-hr .line-content::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: 1px solid var(--border-bg, #cfc8b6);
+}
+/* a block reads as one shape: its rows share a background and a
+   left edge that hold in any theme (translucent grey) */
+.line.row-code .line-content, .line.row-fence .line-content {
+  font-family: var(--font-mono);
+  background: var(--window-inactive-bg, rgba(127, 127, 127, 0.09));
+  border-left: 3px solid rgba(127, 127, 127, 0.28);
+  padding-left: 10px; padding-right: 10px;
+}
+.line.row-code .line-content { font-size: .88em; }
+/* a picture's caption (markdown-mode md--caption): centred and
+   small under the picture, as the page draws its figcaption */
+.line.row-caption .line-content { text-align: center; font-size: .9em; }
+/* a line that is one picture (row-picture): centred, as the
+   page centres a figure's image */
+.line.row-picture .line-content { text-align: center; }
+.line.row-picture img.img-embed { margin: 6px 0; }
+.line.row-fence .line-content { font-size: .72em; color: var(--dim-fg, #8a857a); }
+/* hl-line-mode off: the current line draws like any other */
+.buf[data-hl-line="false"] .line.hl-line { background: transparent; }
+/* a table (markdown-mode md--table-row-spans): each source row is
+   its own table box, so the columns divide the width evenly and
+   line up down the run. Every bar is a cell of its own, which is
+   what puts the text between two bars in a column of its own —
+   a cell holding inline markup is several spans, and no one of
+   them could carry the column. */
+.line.row-table .line-content {
+  display: table; width: 100%; table-layout: fixed;
+}
+.line.row-table .f-md-table-bar {
+  display: table-cell; width: 0; padding: 0 8px;
+  overflow: hidden; color: transparent;
+}
+.line.row-table-head .line-content { font-weight: 600; }
+/* a CSV row keeps its columns at their width: the sheet scrolls
+   right instead of folding into the window */
+.line.row-csv .line-content {
+  width: max-content; min-width: 100%; table-layout: auto; white-space: nowrap;
+}
+.line.row-csv .f-md-table-bar { width: auto; padding: 0 12px; }
+/* the rule row draws the line under the head, as row-hr does */
+.line.row-table-rule .line-content { position: relative; }
+.line.row-table-rule .line-content::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: 1px solid var(--border-bg, #cfc8b6);
+}
+/* visual-line-mode off: continuation lines, wrapped wherever the
+   window ends (Emacs's default); on: wrapped at words */
+.buf[data-visual-lines="false"] .line-content { word-break: break-all; }
+/* whitespace-mode: a dot per space, a mark per tab, a pilcrow
+   at the newline; every mark is paint, the text keeps its bytes */
+.f-ws-space {
+  background-image: radial-gradient(circle, var(--dim-fg, #8a857a) 0.9px, transparent 1px);
+  background-size: .5em 100%; background-position: center; background-repeat: repeat-x;
+}
+.f-ws-tab { position: relative; }
+.f-ws-tab::before {
+  content: "»"; position: absolute; left: 0; color: var(--dim-fg, #8a857a);
+  opacity: .6; pointer-events: none;
+}
+.buf[data-ws="true"] .line-content::after {
+  content: "¶"; color: var(--dim-fg, #8a857a); opacity: .45;
+  font-size: .85em; user-select: none; pointer-events: none;
+}
+/* an empty line carries a <br> to hold the caret. An inline mark
+   after that <br> starts a second line box and makes the row twice
+   as tall. Take the mark out of the flow and paint it at column 0. */
+.buf[data-ws="true"] .line-content:has(> .empty-row) { position: relative; }
+.buf[data-ws="true"] .line-content:has(> .empty-row)::after {
+  position: absolute; left: 0; top: 0;
+}
+/* an X post island: the card in the URL's place */
+/* inline-level on purpose: the browser's caret motion walks a line
+   of inline boxes; a block inside the row throws it off by lines */
+.x-card {
+  display: inline-block; width: 100%; max-width: 480px; margin: 6px 0; padding: 12px 14px;
+  vertical-align: top;
+  border: 1px solid var(--border-bg, #e2dbc9); border-radius: 12px;
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.4;
+  user-select: all;
+}
+.x-card .tw-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.x-card .tw-avatar { width: 36px; height: 36px; border-radius: 50%; }
+.x-card .tw-name { font-weight: 700; }
+.x-card .tw-handle { color: var(--dim-fg, #8a857a); margin-left: 6px; text-decoration: none; }
+.x-card .tw-text { margin: 0 0 8px; }
+.x-card .tw-media { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+.x-card .tw-date { color: var(--dim-fg, #8a857a); font-size: 12px; text-decoration: none; }
+.x-card .x-pending { color: var(--dim-fg, #8a857a); font-family: var(--font-mono); font-size: 12px; }
+/* a YouTube island: an inert thumbnail that opens the video */
+.youtube-card {
+  position: relative; display: inline-block; width: 100%; max-width: 640px;
+  margin: 6px 0; overflow: hidden; vertical-align: top;
+  border-radius: 8px; background: #111; color: white; text-decoration: none;
+}
+.youtube-card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.youtube-play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: grid; place-items: center; width: 64px; height: 44px;
+  border-radius: 12px; background: #f00; color: white;
+  font: 24px/1 sans-serif; box-shadow: 0 2px 10px #0008;
+}
+/* completion-at-point popup: inline card anchored under the prefix */
+.cap-pop {
+  position: absolute; top: calc(100% + 3px); z-index: 15;
+  display: block; min-width: 18em; max-width: 28em;
+  background: var(--window-bg, #fdfcf8);
+  border: 1px solid var(--default-fg, #1b1a17);
+  box-shadow: 3px 3px 0 rgba(27, 26, 23, 0.18);
+
+  white-space: nowrap;
+}
+/* the prompt's own card: the input row is the window's last
+   line, so the card opens above it and hangs off its left edge */
+.cap-pop-up { top: auto; bottom: calc(100% + 3px); left: 0; }
+.cap-title {
+  display: flex; padding: 4px 10px 5px;
+  border-bottom: 1px solid var(--border-bg, #e2dbc9);
+  font-size: .75em; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--dim-fg, #8a857a);
+}
+.cap-row {
+  display: flex; align-items: baseline; gap: 10px; padding: 3px 10px;
+  border-left: 2px solid transparent; font-size: 1em;
+}
+.cap-row.selected {
+  background: var(--select-bg, #e7e9f1);
+  border-left-color: var(--accent-fg, #26356b);
+}
+.cap-row.selected .cap-label { color: var(--accent-fg, #26356b); font-weight: 600; }
+.cap-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cap-kind {
+  margin-left: auto; font-size: .75em; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--dim-fg, #8a857a);
+}
+.cap-doc {
+  position: fixed; inset: auto; margin: 0; z-index: 16;
+  width: 24em; max-height: 18em; overflow: auto;
+  padding: 12px 14px; box-sizing: border-box;
+  background: var(--window-bg, #fdfcf8);
+  color: var(--default-fg, #1b1a17);
+  border: 2px solid var(--accent-fg, #26356b);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.22);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font-size: .9em; line-height: 1.45;
+}
+.cap-doc-name {
+  display: block; font-weight: 700; margin: -12px -14px 12px; padding: 10px 14px;
+  background: var(--select-bg, #e7e9f1); color: var(--accent-fg, #26356b);
+  border-bottom: 1px solid var(--accent-fg, #26356b);
+}
+.cap-doc-body { display: block; }
+.cursor {
+  background: var(--cursor-bg, #26356b);
+  color: var(--window-bg, #fdfcf8);
+  border-radius: 0;
+}
+/* A window at rest hollows its caret: the block becomes a 1px
+   outline, so the frame says which caret is live without moving
+   a pixel or hiding where point is. */
+.window.inactive .cursor {
+  background: transparent;
+  color: inherit;
+  box-shadow: inset 0 0 0 1px var(--cursor-bg, var(--accent));
+}
+.window.dismissible { outline: 1px solid color-mix(in srgb, var(--cursor-bg, #26356b) 25%, transparent); outline-offset: -1px; }
+/* one key, one corner. The chip floats over the top right of the
+   window, so a dismissible buffer spends no row on saying so. */
+.dismiss-action { position: absolute; top: 3px; right: 5px; z-index: 4; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; opacity: .6; }
+/* a window with a header line has the switcher in that corner;
+   the dismiss key stays on q and draws no chip over it */
+.window:has(> .dash-top) > .dismiss-action { display: none; }
+.dismiss-action kbd { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 0; background: var(--cursor-bg, #26356b); color: var(--cursor-fg, #fff); font: 700 11px var(--font-mono); }
+.dismiss-action:hover, .dismiss-action:focus-visible { opacity: 1; outline: none; }
+.dismiss-action:focus-visible kbd { outline: 2px solid var(--cursor-bg, #26356b); outline-offset: 2px; }
+.window.active .cursor { }
+.window.inactive .cursor {
+  background: transparent;
+  color: inherit;
+  box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
+
+}
+/* The frame does not own the keyboard, so the cursor stops
+   blinking and goes hollow. It does NOT go away: a reader who
+   looks at the editor from a terminal must still see where point
+   stands, and Emacs draws a hollow box for the same reason. */
+/* The caret is the editing state made visible: in the movement
+   state (a landing, ESC, C-g) it is gone, and the floating
+   window says where the keys go instead. */
+.window.active[data-editing="false"] .buf .cursor { visibility: hidden; }
+body.unfocused .window.active .cursor {
+  background: transparent !important;
+  color: inherit !important;
+  box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
+
+}
+.no-nums .linenum { display: none; }
+/* an img-embed seg: the picture, in the text's place */
+/* a drawn link says it can be followed */
+.buf [data-href] { cursor: pointer; }
+.buf [data-href]:hover { text-decoration: underline; }
+
+.line img.img-embed {
+  display: inline-block; max-width: min(100%, 640px); height: auto;
+  border-radius: 0; margin: 6px 8px 6px 0; vertical-align: middle;
+}
+.line-content:has(> img.img-avatar) {
+  display: inline-flex; align-items: flex-end;
+}
+.line img.img-avatar {
+  width: 36px; height: 36px; flex: 0 0 36px; object-fit: cover;
+  border-radius: 50%; margin: 0 8px 0 0; vertical-align: bottom;
+}
+.line-content:has(> .f-web-separator) {
+  display: flex; justify-content: center;
+}
+.line .f-web-separator {
+  display: block; width: 50%; height: 1px; margin: 16px 0;
+  color: transparent; font-size: 0;
+  background: linear-gradient(90deg, transparent, var(--dim-fg), transparent);
+}
+/* --- writing-mode: centered measure, quiet chrome ---------------- */
+.window.writing .buf { padding-top: clamp(20px, 6vh, 90px); }
+.window.writing .line {
+  max-width: var(--writing-measure, 62ch);
+  width: 100%; margin: 0 auto; box-sizing: border-box;
+  padding: 0 16px;
+}
+.window.writing.active .line.hl-line { background: transparent; }
+.window.writing .modeline { opacity: 1; }
+/* HTML preview: sandboxed (no scripts), styles/images allowed */
+.html-preview {
+  flex: 1; width: 100%; border: 0;
+  background: var(--window-inactive-bg, #f4f0e6);
+  /* a rendered page is its own document and reads no variable
+     of ours; the buffer text scale zooms the frame instead */
+  zoom: var(--text-scale-factor, 1);
+}
+.window.active .html-preview { background: var(--window-bg, #fdfcf8); }
+.file-preview {
+  flex: 1; width: 100%; min-height: 0; border: 0;
+  background: var(--window-bg, #fdfcf8);
+}
+/* an app paints its own background — the editor supplies none */
+.app-preview {
+  flex: 1; width: 100%; min-height: 0; border: 0; background: #fff;
+}
+.region { background: var(--region-bg, #e7e9f1); }
+/* native drag-selection matches the editor region it becomes */
+::selection { background: var(--region-bg, #e7e9f1); }
+/* --- block views -------------------------------------------------- */
+/* only the container: a mode composes blocks and ships its own
+   stylesheet via define-style! (diff-mode.scm is the precedent) */
+.blocks-view {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  font-family: var(--default-family, var(--font-mono));
+  font-size: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
+}
+.blocks-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 8px; }
+/* --- agent transcript (the Modern Emacs agent-chat design) ------- */
+.agent-view {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  /* every size in the transcript is a share of this one base, so
+     a big buffer font does not leave the tool rows behind */
+  --ag-base: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
+  font-size: var(--ag-base);
+}
+.ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
+.ag-label {
+  font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.55); letter-spacing: 0.12em;
+  color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; padding-top: 3px;
+}
+.ag-user {
+  display: flex; gap: 12px; margin: 10px 0;
+  background: var(--agent-you-bg, rgba(99, 110, 200, 0.10));
+  border-radius: 0; padding: 8px 12px;
+}
+.ag-user-text {
+  min-width: 0; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.92);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+/* a pasted attachment is shown, not described. It is bounded so
+   one screenshot cannot own the whole transcript. */
+.ag-image-img {
+  min-width: 0; max-width: 100%; max-height: 320px;
+  object-fit: contain; border-radius: 0; display: block;
+}
+/* The measure belongs to the text, not to the block: five table
+   columns do not fit in 62ch. `overflow-wrap: anywhere` made it
+   worse. `anywhere` counts every character as a wrap opportunity
+   when the browser computes a cell's minimum width, so the table
+   algorithm shrank a "Rating" header to one letter per line.
+   `break-word` still breaks a long URL, and it leaves the
+   minimum width alone. */
+.ag-prose {
+  font-family: var(--chat-family, var(--font-serif)); font-size: var(--ag-base); line-height: 1.6;
+  margin: 8px 0; overflow-wrap: break-word;
+}
+.ag-prose > * { max-width: 62ch; }
+.ag-prose > pre, .ag-prose > .ag-table, .ag-prose > .code-block { max-width: 100%; }
+.ag-prose .code-block pre { margin: 6px 0; }
+.ag-prose code, .ag-prose pre {
+  font-family: var(--font-mono); font-size: var(--ag-base);
+  background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 0;
+}
+.ag-prose code { padding: 1px 4px; }
+.ag-prose pre { padding: 8px 10px; overflow-x: auto; margin: 6px 0; }
+.ag-prose pre code { background: none; padding: 0; }
+.ag-prose p { margin: 6px 0; }
+.ag-prose ul, .ag-prose ol { margin: 6px 0 6px 1.4em; }
+/* A link takes the theme's link face. The browser default paints
+   it #0000EE and marks a visited link purple, which no theme can
+   read. The underline stays, because a link says it is a link,
+   but it is thin, offset from the descenders, and fainter than
+   the text until the pointer is on it. */
+.ag-prose a, .ag-prose a:visited {
+  color: var(--link-fg, var(--accent-fg, #7aa2f7));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+.ag-prose a:hover { text-decoration-color: currentColor; }
+/* The wrapper scrolls, the table does not (see wrap_tables/1).
+   The table takes the pane width and wraps its cells while that
+   still fits. When even the longest word no longer fits, the
+   table grows past the wrapper and the wrapper scrolls. */
+.ag-table { overflow-x: auto; margin: 10px 0; }
+.ag-prose table {
+  width: auto; max-width: 100%; border-collapse: collapse;
+  font-family: var(--font-sans); font-size: var(--ag-base);
+  font-variant-numeric: tabular-nums;
+}
+.ag-prose th, .ag-prose td {
+  border: 1px solid var(--agent-card-border, rgba(0,0,0,0.12));
+  padding: 5px 9px; text-align: left; vertical-align: top;
+}
+/* a header names the column: it never reads better wrapped */
+.ag-prose th { font-weight: 600; white-space: nowrap; }
+/* Transcript verbosity is deliberately local and CSS-driven: info
+   keeps only the last title row in each live tool burst, log keeps
+   every compact card, and debug opens the call contents visually.
+   Thought is supporting machinery, not a fourth reader mode.
+   The picker itself is .dash-verbosity, drawn in the dashboard
+   headline (editor.scm); only these reader rules live here. */
+.ag-thought { display: none; }
+.ag-scroll.ag-verbosity-info > c-toolcall:has(+ c-toolcall) { display: none; }
+.ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool {
+  margin: 2px 0; border-color: transparent; background: transparent; opacity: .76;
+}
+.ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool summary {
+  min-height: 25px; padding-block: 1px;
+}
+.ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-preview,
+.ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-duration,
+.ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-tokens { display: none; }
+.ag-scroll.ag-verbosity-debug > c-toolcall > .ag-tool > c-result > .ag-body { display: block; }
+.ag-scroll.ag-verbosity-debug > c-toolcall > .ag-tool .ag-preview { display: none; }
+.ag-tool, .ag-thought {
+  margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
+  border-radius: 0; font-family: var(--font-mono); font-size: var(--ag-base);
+  background: color-mix(in srgb, var(--window-bg, #fdfcf8) 96%, var(--agent-tool-fg, #26356b));
+}
+.ag-tool summary, .ag-thought summary {
+  display: flex; align-items: center; gap: 7px; min-height: 32px;
+  padding: 4px 9px 4px 7px; cursor: pointer; list-style: none; user-select: none;
+}
+.ag-tool summary::-webkit-details-marker { display: none; }
+.ag-tool.running summary { position: relative; overflow: hidden; }
+.ag-tool.running summary::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    color-mix(in srgb, var(--agent-tool-fg, #26356b) 13%, transparent) 46%,
+    transparent 72%
+  );
+  transform: translateX(-120%);
+}
+.ag-tool[open] {
+  margin: 8px 0;
+  border-color: color-mix(in srgb, var(--agent-tool-fg, #26356b) 35%, transparent);
+}
+.ag-chevron {
+  width: 11px; flex: 0 0 11px; color: var(--agent-meta-fg, #8a8577);
+  font-family: var(--font-sans); font-size: calc(var(--ag-base) * 1.0); line-height: 1;
+  transform: rotate(0deg); transition: transform var(--chrome-anim, 0ms) ease;
+}
+.ag-tool[open] .ag-chevron { transform: rotate(90deg); }
+.ag-dot { width: 7px; height: 7px; border-radius: 0; background: var(--agent-meta-fg, #999); }
+.ag-dot.running { background: var(--warn-fg, #e0af68); }
+.ag-dot.done { background: var(--ok-fg, #4a7a4a); }
+.ag-dot.failed { background: var(--alert-fg, #a8342a); }
+.ag-kind {
+  padding: 1px 5px; border-radius: 0; color: var(--agent-tool-fg, #26356b);
+  background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 10%, transparent);
+  font-family: var(--font-sans); font-size: calc(var(--ag-base) * 0.5); font-weight: 700;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.ag-summary-copy {
+  display: flex; flex: 1; min-width: 0; flex-direction: column;
+  justify-content: center; gap: 1px;
+}
+.ag-title {
+  display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--window-fg, inherit); font-size: calc(var(--ag-base) * 0.8);
+}
+/* the argument is the interesting part: the tool name steps back,
+   the argument carries the accent. A card with no argument keeps
+   its name in the normal color. */
+.ag-tool-name { color: var(--agent-meta-fg, #8a8577); }
+.ag-title .ag-tool-name:only-child { color: var(--window-fg, inherit); }
+.ag-arg { margin-left: 7px; color: var(--agent-tool-fg, #26356b); font-weight: 600; }
+.ag-preview {
+  display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--agent-meta-fg, #8a8577);
+  font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.72); line-height: 1.25;
+}
+.ag-preview::before { content: "↳ "; color: var(--agent-tool-fg, #26356b); }
+.ag-tstatus {
+  color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
+  font-size: calc(var(--ag-base) * 0.65); letter-spacing: 0.02em;
+}
+.ag-tstatus.done::before { content: "✓ "; color: var(--ok-fg, #4a7a4a); }
+.ag-tstatus.failed { color: var(--alert-fg, #a8342a); }
+.ag-duration {
+  color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
+  font-size: calc(var(--ag-base) * 0.65); letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.ag-body {
+  border-top: 1px solid var(--agent-card-border, rgba(0,0,0,0.08));
+  font-size: calc(var(--ag-base) * 0.8);
+  margin: 0; padding: 10px 12px; overflow-x: auto; max-height: 320px; overflow-y: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--agent-thought-fg, #6a675e);
+  background: color-mix(in srgb, var(--agent-code-bg, rgba(0,0,0,0.06)) 60%, transparent);
+}
+.ag-thought summary { color: var(--agent-thought-fg, #8a8577); font-size: calc(var(--ag-base) * 0.75); }
+.ag-thought-text { padding: 6px 10px; white-space: pre-wrap; color: var(--agent-thought-fg, #8a8577); }
+.ag-plan {
+  font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85); margin: 8px 0;
+  padding: 8px 12px; border-left: 2px solid var(--agent-card-border, rgba(0,0,0,0.15));
+  white-space: pre-wrap;
+}
+.ag-perm {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0;
+  border: 1px solid var(--agent-permission-fg, #e0af68); border-radius: 0;
+  padding: 8px 12px; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85);
+}
+.ag-perm-title {
+  flex: 1 1 24ch; min-width: 0; overflow-wrap: anywhere;
+  color: var(--agent-permission-fg, #a8741a);
+}
+.ag-perm-actions { display: flex; flex: 0 1 auto; flex-wrap: wrap; gap: 10px; max-width: 100%; }
+.ag-question {
+  margin: 10px 0; padding: 11px 12px;
+  border: 1px solid var(--agent-tool-fg, #26356b); border-radius: 0;
+  background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 6%, transparent);
+  font-family: var(--font-mono);
+}
+.ag-question-title { color: var(--agent-tool-fg, #26356b); font-weight: 650; }
+.ag-question-answers { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.ag-question .ag-btn.answer {
+  border-color: color-mix(in srgb, var(--agent-tool-fg, #26356b) 55%, transparent);
+  color: var(--agent-tool-fg, #26356b);
+}
+.ag-question .ag-btn.answer:hover {
+  background: var(--agent-tool-fg, #26356b);
+  color: var(--window-bg, #fdfcf8);
+}
+.ag-question-hint {
+  margin-top: 9px; color: var(--agent-meta-fg, #8a8577); font-size: calc(var(--ag-base) * 0.65);
+}
+.ag-btn {
+  font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.75); padding: 3px 12px;
+  border-radius: 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.2));
+  background: transparent; color: inherit; cursor: pointer;
+}
+/* bb's hierarchy: affirmative filled, session-scope outlined, deny
+   a quiet ghost that stays visible without competing */
+.ag-btn.allow {
+  background: var(--ok-fg, #4a7a4a); border-color: var(--ok-fg, #4a7a4a);
+  color: var(--window-bg, #fdfcf8); font-weight: 600;
+}
+.ag-btn.session { border-color: var(--ok-fg, #4a7a4a); color: var(--ok-fg, #4a7a4a); }
+.ag-btn.deny { border-color: transparent; color: var(--alert-fg, #a8342a); opacity: 0.8; }
+.ag-wait {
+  font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85); margin: 8px 0;
+  color: var(--agent-thought-fg, #8a8577);
+}
+/* the turn pulse under the transcript: outside .ag-scroll, so it
+   aligns with the input row, not the padded scroll area */
+.ag-activity { margin: 2px 18px 4px; flex-shrink: 0; }
+/* The preview sentence changes every few tokens. Pin the row to
+   one line and clip, so a word that wraps can't push the input
+   row up and down and flash the transcript. */
+.ag-activity-text {
+  display: block; height: 1.5em; line-height: 1.5em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ag-status {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline;
+  margin: 16px 0; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--accent-fg, #26356b) 28%, transparent);
+  border-left: 4px solid var(--accent-fg, #26356b); border-radius: 0;
+  color: var(--window-fg, inherit);
+  background: color-mix(in srgb, var(--accent-fg, #26356b) 9%, var(--window-bg, #fdfcf8));
+  box-shadow: 0 2px 10px rgba(0,0,0,.05);
+}
+.ag-status .ag-label { margin: 0; color: var(--accent-fg, #26356b); font-weight: 750; letter-spacing: .08em; }
+.ag-status-text { min-width: 0; font-size: calc(var(--ag-base) * .94); line-height: 1.55; font-weight: 500; }
+/* what the chat prompt evaluated, and what it printed: code, so
+   it keeps its columns and scrolls sideways rather than wrapping */
+.ag-eval {
+  display: block; margin: 10px 0; padding: 10px 13px; border-radius: 0;
+  border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
+  background: color-mix(in srgb, var(--accent-fg, #26356b) 5%, var(--window-bg, #fdfcf8));
+}
+.ag-eval-text {
+  margin: 0; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.84);
+  line-height: 1.5; color: var(--window-fg, inherit);
+  white-space: pre; overflow-x: auto;
+}
+.ag-meta { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.8); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
+.ag-inputrow {
+  position: relative;
+  display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;
+  border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
+  border-radius: 0; padding: 9px 14px;
+  background: var(--window-bg, rgba(255,255,255,0.5));
+}
+.ag-input {
+  flex: 1; min-width: 0; font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.92);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.ag-queued { color: var(--agent-queued-fg, #9a958a); }
+/* queued rows under the transcript: outside .ag-scroll, so they
+   align with the input row, not the padded scroll area */
+.ag-queued-row { margin: 2px 18px; flex-shrink: 0; }
+.ag-hint { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.65); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
+.ml-extra {
+  display: flex; align-items: baseline; gap: var(--s7);
+  flex: 0 0 auto; min-width: 0;
+  font-family: var(--font-mono); font-size: var(--fs-meta);
+  white-space: nowrap;
+}
+.ml-extra .ml-segment { color: var(--text-faint); text-transform: none; }
+.ml-extra .ml-attention { color: var(--agent-permission-fg, #a8741a); font-weight: 600; }
+/* A segment reads as Markdown: ml-strong is `*bold*`, and ml-tight
+   joins a segment to the one before it with no gap between them.
+   The pair is the design's terse settings fact: the label stays a
+   label and the value carries no weight of its own, so layout:free
+   reads as one setting and not as a sentence. */
+.ml-extra .ml-strong {
+  font-weight: var(--fw-reg); color: var(--text-faint);
+}
+.ml-extra .ml-tight {
+  margin-left: calc(-1 * var(--s7)); color: var(--text-soft);
+}
+/* font-lock scopes (tree-sitter): the .ts-SCOPE rules come from the
+   ts-SCOPE faces, see Compos.Ui.FaceCSS. A theme or a defface! owns
+   every syntax colour, weight and slant. */
+/* A window's mode line is not a coloured band. It is the same
+   ground as the window's header line with a hairline above it,
+   one line tall, and the buffer's name is the only thing on it
+   at full strength. A window at rest dims the whole line. */
+.modeline {
+  display: flex; align-items: center; gap: var(--s9);
+  padding: 3px var(--s7);
+  flex: none; min-width: 0; overflow: hidden;
+  background: var(--surface-chrome);
+  border-top: var(--border-soft);
+  color: var(--text-dim);
+  font-family: var(--font-mono); font-size: var(--fs-meta);
+}
+.window.active .modeline {
+  background: var(--surface-chrome);
+  color: var(--text-faint);
+}
+/* a mode line is always exactly one line tall: its trailing value
+   never wraps and never pushes past its box */
+.modeline > .ml-pos { flex: none; white-space: nowrap; }
+.window.buffer-selected .modeline {
+  box-shadow: inset 3px 0 var(--accent-fg, #26356b);
+}
+.window.buffer-selected {
+  outline: 2px solid var(--accent-fg, #26356b);
+  outline-offset: -2px;
+}
+.window.buffer-selected .modeline {
+  box-shadow: inset 3px 0 var(--accent-fg, #26356b);
+}
+.dash-live {
+  display: flex; gap: 16px; padding: 6px 16px;
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--dim-fg, #8a857a);
+  border-bottom: 1px solid var(--border-bg, #e2dbc9);
+}
+.dash-live-mod { color: var(--warn-fg, #7a5a1a); }
+.dash-top {
+  flex: 0 0 auto; max-height: 46%; overflow-y: auto;
+  background: var(--window-inactive-bg, #f4f0e6);
+  border-bottom: 1px solid var(--border-bg, #e2dbc9);
+}
+.ml-dot {
+  width: 6px; height: 6px; border-radius: 0;
+  background: var(--linenum-fg, #c3bcac); flex: 0 0 auto;
+}
+.ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
+/* The buffer-name grammar (editor.scm): every chrome that shows a
+   buffer or a group draws these classes and never the raw name.
+   *Messages* is bold and keeps no asterisks; :mode: is the icon. */
+.bn-strong { font-weight: 800; }
+.bn-dim { opacity: 0.6; font-weight: 500; }
+.bn-code { font-family: var(--font-mono); font-size: 0.95em; }
+.bn-icon {
+  display: inline-block; min-width: 1.1em; text-align: center;
+  color: var(--accent-fg, #26356b); font-weight: 500;
+}
+.ml-tab .bn-icon, .ml-tab-on .bn-icon { color: inherit; }
+.ml-icon { display: inline-block; min-width: 1.1em; color: var(--accent-fg, #26356b); font-weight: 700; text-align: center; }
+.ml-pos { font-family: var(--font-mono); font-size: var(--fs-meta); opacity: 1; white-space: nowrap; }
+.ml-mode { font-family: var(--font-mono); font-size: var(--fs-meta); opacity: 1; white-space: nowrap; }
+.ml-group-item { color: var(--buffer-group-color, var(--accent-fg, #26356b)); }
+.ml-state-modified { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
+.ml-info { color: inherit; }
+.ml-toggle { cursor: pointer; }
+.ml-toggle:hover { opacity: 1; text-decoration: underline; }
+/* the context beside the name: a file's project, a chat's working
+   directory. Dim, and the first thing to give way. */
+.ml-project {
+  color: var(--text-dim); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; flex: 0 1 auto; min-width: 0;
+  text-transform: none; font-size: var(--fs-meta);
+}
+/* The mode line's facts: mode, llm, lane, each a key and a value.
+   Both of a window's bars degrade by rank, not by slicing: the
+   lane (rank 2) goes first, then the model (rank 1). */
+.ml-facts {
+  display: inline-flex; align-items: baseline; gap: var(--s8);
+  flex: none;
+}
+.ml-fact { display: inline-flex; align-items: baseline; gap: var(--s4); white-space: nowrap; }
+.ml-fact[tone="glyph"] .ml-fact-v { font-size: 13px; }
+/* The hierarchy of the mode line, from the first to give way to the
+   last: the position's size, then its percentage, then the whole
+   position, then the context, then the lane, then the model or
+   preset. The mode stays. Nothing is clipped: what does not fit
+   is dropped whole, by rank. */
+@container (max-width: 760px) { .modeline .ml-pos-size { display: none; } }
+@container (max-width: 680px) { .modeline .ml-pos-pct { display: none; } }
+@container (max-width: 600px) { .modeline .ml-pos { display: none; } }
+@container (max-width: 520px) { .modeline .ml-project { display: none; } }
+@container (max-width: 440px) { .modeline .ml-fact[rank="2"] { display: none; } }
+@container (max-width: 360px) { .modeline .ml-fact[rank="1"] { display: none; } }
+/* The frame's header line. It carries the furniture: the wordmark,
+   the group tabs, the frame's path, the facts, the key legend. It
+   is chrome, so it is square, hairlined, mono and quiet, and it
+   clips its own overflow rather than growing tall. */
+.echo-bar {
+  order: -1;
+  display: flex; align-items: center; gap: var(--s9);
+  /* one short line: the tabs set the height, the bar adds 3px */
+  padding: var(--s2) var(--chrome-px);
+  flex: none; min-width: 0; overflow: hidden;
+  background: var(--surface-chrome);
+  border-bottom: var(--border);
+  font-family: var(--font-mono); font-size: var(--fs-meta);
+  color: var(--text-faint);
+}
+/* the wordmark leads the bar: the emblem at cap height, the name
+   tracked wide, both at full strength */
+.ml-wordmark {
+  display: inline-flex; align-items: center; gap: var(--s5);
+  flex: 0 0 auto;
+  font-weight: var(--fw-semi); letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--text-strong);
+}
+.ml-wordmark img { width: 15px; height: 15px; display: block; }
+/* a visible hairline holds the two halves of the bar apart, in
+   place of an invisible spacer */
+.ml-rule {
+  display: block; flex: 1 1 auto; min-width: 8px;
+  height: var(--hair); background: var(--edge-soft);
+}
+.ml-divider {
+  display: block; flex: 0 0 auto;
+  width: var(--hair); height: 13px; background: var(--edge);
+}
+/* a fact is a label and a value, never one string: the label stays
+   tracked and dim while the value stays full strength. The pair
+   closes the bar's own gap so the two read as one thing, and the
+   rule is symmetric, because a quantity puts its value first and
+   wears the label as a unit (650 MiB VM). */
+.ml-fact-k {
+  font-size: var(--fs-micro); letter-spacing: var(--ls-label);
+  text-transform: uppercase; color: var(--text-dim);
+  white-space: nowrap;
+}
+.ml-fact-v {
+  font-size: var(--fs-meta); color: var(--text-strong);
+  white-space: nowrap;
+}
+.ml-fact-v.ok { color: var(--ok); }
+.ml-fact-v.warn { color: var(--warn); }
+.ml-fact-v.alert { color: var(--alert); }
+.ml-fact-v.accent { color: var(--accent); }
+.ml-extra .ml-fact-k + .ml-fact-v,
+.ml-extra .ml-fact-v + .ml-fact-k {
+  margin-left: calc(-1 * var(--s7)); padding-left: var(--s4);
+}
+/* The echo area is the frame's own bar, under the mode line and
+   below every window. It is the sunken ground, hairlined on top,
+   and it wraps rather than clipping: a message is the one thing
+   in the frame that must be read whole. */
+.echo-area {
+  order: var(--ui-echo-order, -1);
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--s4) var(--s9);
+  padding: var(--bar-py) var(--row-px) 5px;
+  flex: none; min-width: 0;
+  background: var(--surface-sunken);
+  border-top: var(--border);
+  font-family: var(--font-mono); font-size: var(--fs-meta);
+  color: var(--text-faint);
+}
+/* A message is text, not a chip: it reads at full strength on the
+   echo ground and holds its exact characters. An empty echo draws
+   nothing. */
+.echo {
+  color: var(--text-strong); white-space: pre;
+  min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
+  text-transform: none; letter-spacing: 0;
+}
+.ml-frame-path {
+  min-width: 0; max-width: 62vw; flex: 0 1 auto;
+  overflow: hidden; text-overflow: ellipsis;
+  color: var(--text-dim); font-size: var(--fs-small);
+  white-space: nowrap; text-transform: none; letter-spacing: 0;
+}
+.ml-frame-group {
+  color: var(--frame-group-color, var(--accent)); font-size: var(--fs-small);
+  font-weight: var(--fw-semi); white-space: nowrap; text-transform: none;
+}
+/* The frame's groups as tabs (the design's c-groups-bar): every
+   group projected once, tracked uppercase like the rest of the
+   header line. The group you stand in is full-strength ink on the
+   select ground with a hairline, the same treatment as a selected
+   chip. Uppercase is a typographic device: the name underneath
+   keeps its case. */
+.ml-tabs {
+  display: flex; align-items: center; gap: 1px;
+  min-width: 0; flex: 0 1 auto; overflow: hidden;
+  align-self: center;
+}
+.ml-tab {
+  cursor: default; white-space: nowrap;
+  font-size: var(--fs-label); font-weight: var(--fw-reg);
+  letter-spacing: var(--ls-label); text-transform: uppercase;
+  padding: 2px var(--s5);
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  max-width: 20ch; overflow: hidden; text-overflow: ellipsis;
+  transition: background var(--chrome-anim, 0ms) ease, color var(--chrome-anim, 0ms) ease;
+}
+.ml-tab:hover { color: var(--text-strong); background: transparent; }
+.ml-tab-on, .ml-tab-on:hover {
+  color: var(--text-strong); max-width: 26ch;
+  background: var(--surface-select);
+  border-color: var(--edge);
+}
+.ml-tab-more { background: transparent; color: var(--text-dim); }
+.ml-tab-more:hover { color: var(--text-strong); }
+/* the key legend: the key carries the accent, the verb stays a
+   label. No separators — the gap does that work. */
+.echo-hint {
+  display: inline-flex; align-items: baseline;
+  gap: var(--s4) var(--s9);
+  flex: 0 0 auto; min-width: 0; overflow: hidden;
+  white-space: nowrap;
+  color: var(--text-faint); font-size: var(--fs-meta);
+}
+/* in the echo area the hints sit after the message; the rule
+   between them takes the slack, so a message never moves a key */
+.echo-area .ml-rule { align-self: center; }
+.echo-area:has(.echo:empty) .echo { display: none; }
+/* A pressable key is one element, c-action-key, and it is always
+   the same: accent, semibold, mono, its exact characters. The
+   echo hints, the keys card, the transient legends and the
+   which-key panel all draw it; a wrapper adds a box or a size,
+   never a colour. */
+c-action-key {
+  font-family: var(--font-mono); font-weight: var(--fw-semi);
+  color: var(--accent); white-space: nowrap;
+  text-transform: none; letter-spacing: 0;
+}
+.ml-do { color: var(--text-faint); text-transform: none; }
+.echo-hint c-action-key + .ml-do {
+  margin-left: calc(var(--s4) - var(--s9));
+}
+/* Chrome never spills: a bar clips its own overflow rather than
+   pushing the frame wider, and the key hints are the first thing
+   to give way. The frame is the container, so the bar answers the
+   frame's width and not the screen's. */
+@container (max-width: 1280px) {
+  .echo-area .echo-hint,
+  .echo-area .echo-hint + .ml-rule { display: none; }
+}
+.mb-spacer { flex: 1; }
+/* in a bar the spacer is a visible hairline, the way the design
+   holds a bar's two halves apart */
+.modeline > .mb-spacer {
+  align-self: center; min-width: 8px;
+  height: var(--hair); background: var(--edge-soft);
+}
+.prompt { color: var(--accent-fg, #26356b); font-weight: 600; white-space: pre; flex-shrink: 0; }
+.mb-input { white-space: pre; flex-shrink: 0; font-family: var(--font-mono); }
+.mb-input .cursor { background: var(--cursor-bg, #26356b); }
+/* Every minibuffer read owns the keyboard. Show that modal state
+   directly, without changing the window tree below it. */
+.mb-modal-layer {
+  position: fixed; inset: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center;
+  padding: clamp(16px, 4vw, 48px);
+  background: rgba(15, 18, 24, 0.24);
+}
+.mb-panel {
+  position: relative; z-index: 1;
+  width: min(760px, 100%); max-height: min(72dvh, 680px);
+  display: flex; flex-direction: column;
+  background: var(--window-bg, #fdfcf8);
+  border: 1px solid var(--border-bg, #e2dbc9);
+  border-top: 3px solid var(--accent-fg, #26356b);
+  border-radius: 0;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+/* palette style: the prompt floats centered over the windows,
+   input on top, candidates below — the buffer switcher asks
+   for this shape. The echo bar keeps the bottom row, so the
+   window tree does not reflow while the palette is open. */
+.mb-panel.palette {
+  position: relative;
+  /* FIXED geometry: the box never changes size while you type —
+     fewer candidates leave empty rows, never a smaller panel */
+  width: min(1100px, 96vw);
+  height: 62dvh;
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border-bg, #e2dbc9);
+  border-top: 2px solid var(--accent-fg, #26356b);
+  border-radius: 0;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  z-index: 40;
+
+  /* A patched node stays visible without an entry animation. It does not
+     fade or scale while the prompt is open.
+     at its first frame and leave the palette painted at
+     opacity 0 — an open, working, invisible prompt */
+}
+.mb-panel.palette .mb-input-row {
+  order: -1;
+  border-top: none;
+  border-bottom: 1px solid var(--border-bg, #e2dbc9);
+  flex: 0 0 auto;
+}
+.mb-panel.palette .mb-label-row { order: -2; flex: 0 0 auto; }
+.mb-panel.palette .mb-cands {
+  max-height: none; flex: 1;
+  /* rows keep their natural height — no stretching to fill */
+  align-content: start;
+}
+/* the name is the point: give it the room, ellipsize later. The
+   palette reads at the transient's size: names 20px, hints 17px,
+   one head row with the prompt's name and its key legend. */
+.mb-panel.palette { width: min(1480px, 100%); height: 74dvh; }
+.mb-panel.palette .mb-cand {
+  font-size: 20px; padding: 7px 24px; min-height: 42px; column-gap: 22px;
+  border-left-width: 3px;
+}
+.mb-panel.palette .mb-label { max-width: 80ch; }
+.mb-panel.palette .mb-hint { font-size: 17px; }
+.mb-panel.palette .mb-sep { padding: 14px 24px 6px; }
+.mb-panel.palette .mb-sep-label { font-size: 13px; }
+.mb-panel.palette .mb-input-row { padding: 12px 24px 13px; font-size: 20px; }
+.mb-panel.palette .mb-count { font-size: 15px; }
+.mb-head {
+  order: -2; flex: 0 0 auto;
+  display: flex; align-items: baseline; gap: 18px;
+  padding: 18px 28px 14px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
+  font-family: var(--font-mono);
+}
+.mb-head-title { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+.mb-head-spacer { flex: 1; }
+.mb-head-legend {
+  display: inline-flex; flex-wrap: wrap; gap: 6px 22px;
+  color: var(--dim-fg, #8a857a); font-size: 15px;
+}
+.mb-panel.palette .mb-preview {
+  flex: 0 0 30%; padding: 22px 28px 26px; gap: 4px; font-size: 18px;
+}
+.mb-panel.palette .mb-preview-title {
+  font-size: 22px; font-weight: 700; letter-spacing: 0; text-transform: none;
+  color: var(--default-fg, #1b1a17); margin-bottom: 14px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-bg, #e2dbc9);
+}
+.mb-panel.palette .mb-preview-fact { min-height: 40px; align-items: center; gap: 16px; }
+.mb-panel.palette .mb-preview-k { flex: 0 0 11ch; }
+.mb-panel.palette .mb-preview-note {
+  padding: 16px 18px; border-radius: 0; font-size: 17px; line-height: 1.45;
+  border: 1px solid var(--border-bg, #e2dbc9); background: var(--window-bg, #fdfcf8);
+  color: var(--default-fg, #1b1a17);
+}
+/* The transient: a keyboard menu read across the room. One
+   header line names the menu and the scope; the body is the key
+   columns, with a facts rail on the right when the menu has one;
+   the footer legend comes from the menu's own keys. Type is sized
+   for reading at a distance: names 21px, keys in boxes, rail 18px. */
+.mb-panel.palette.transient-panel {
+  position: fixed; left: 50%; top: 9dvh;
+  transform: translateX(-50%);
+  height: auto; max-height: 78dvh;
+  width: min(1480px, 96vw);
+  font-family: var(--font-mono);
+}
+.transient-head {
+  display: flex; align-items: baseline; gap: 18px;
+  padding: 20px 28px 16px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
+}
+.transient-title {
+  font-size: 28px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--default-fg, #1b1a17);
+}
+.transient-subtitle { font-size: 18px; color: var(--dim-fg, #8a857a); }
+.transient-head-spacer { flex: 1; }
+.transient-chips { display: inline-flex; gap: 8px; align-items: center; }
+.transient-chip {
+  padding: 4px 14px; border-radius: 0; font-size: 16px;
+  border: 1px solid var(--border-bg, #e2dbc9); color: var(--dim-fg, #8a857a);
+}
+.transient-chip.active {
+  background: var(--accent-fg, #26356b); border-color: var(--accent-fg, #26356b);
+  color: var(--window-bg, #fdfcf8); font-weight: 600;
+}
+.transient-context { font-size: 16px; color: var(--dim-fg, #8a857a); }
+.transient-body { display: flex; min-height: 0; flex: 1; }
+/* The menu decides its columns (the 'columns option): the frame
+   draws each as a stack of groups, and left/right move between
+   them. A grid put every group on its own row and left the
+   space under a short column empty. The area scrolls, and the
+   hook keeps the selected row in view. */
+.transient-groups {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; align-items: flex-start; gap: 40px;
+  padding: 22px 28px 26px; overflow: auto;
+}
+.transient-column {
+  flex: 0 0 auto; width: 460px; max-width: 100%;
+  display: flex; flex-direction: column; gap: 26px;
+}
+.transient-group { flex: 0 0 auto; min-height: max-content; }
+.transient-group-title {
+  margin-bottom: 10px; font-size: 13px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--dim-fg, #8a857a);
+}
+.transient-item {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 16px; align-items: center; min-height: 46px; padding: 5px 12px 5px 8px;
+  border-radius: 0; border-left: 3px solid transparent; font-size: 21px;
+}
+.transient-item.selected {
+  background: var(--select-bg, #e7e9f1); border-left-color: var(--accent-fg, #26356b);
+}
+.transient-key {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 36px; border-radius: 0;
+  background: var(--default-bg, #f4f0e6);
+  font-size: 19px; font-weight: var(--fw-semi);
+}
+.transient-item.selected .transient-key {
+  background: var(--accent-fg, #26356b); color: var(--window-bg, #fdfcf8);
+}
+.transient-item.stay .transient-key { color: var(--ok-fg, #2e6b45); }
+.transient-item.selected.stay .transient-key { color: var(--window-bg, #fdfcf8); }
+/* a row's text is the reason the row exists: it wraps to a second
+   line rather than losing its tail behind an ellipsis */
+.transient-description {
+  min-width: 0; overflow-wrap: anywhere; line-height: 1.25;
+  font-weight: 600; color: var(--default-fg, #1b1a17);
+}
+.transient-item.selected .transient-description { color: var(--accent-fg, #26356b); }
+.transient-value {
+  color: var(--dim-fg, #8a857a); white-space: nowrap; font-size: 18px;
+  max-width: 22ch; overflow: hidden; text-overflow: ellipsis;
+}
+.transient-rail {
+  flex: 0 0 34%; min-width: 0; overflow: auto;
+  border-left: 1px solid var(--border-bg, #e2dbc9);
+  background: var(--default-bg, #f4f0e6);
+  padding: 22px 28px 26px; display: flex; flex-direction: column; gap: 4px;
+}
+.transient-rail-title {
+  font-size: 22px; font-weight: 700; margin-bottom: 14px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-bg, #e2dbc9);
+}
+.transient-rail-title::before {
+  content: "resolves to"; display: block; font-size: 13px; font-weight: 400;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--dim-fg, #8a857a);
+  margin-bottom: 8px;
+}
+.transient-rail-row {
+  display: grid; grid-template-columns: 15ch minmax(0, 1fr); gap: 16px;
+  font-size: 18px; min-height: 40px; align-items: center;
+}
+.transient-rail-k { color: var(--dim-fg, #8a857a); }
+.transient-rail-v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transient-rail-row.drift .transient-rail-v { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
+.transient-rail-row.dim .transient-rail-v { color: var(--dim-fg, #8a857a); }
+.transient-rail-note {
+  margin-top: auto; padding: 16px 18px; border-radius: 0; font-size: 17px;
+  border: 1px solid var(--border-bg, #e2dbc9); background: var(--window-bg, #fdfcf8);
+  color: var(--default-fg, #1b1a17); white-space: pre-line;
+}
+.transient-help {
+  display: flex; flex-wrap: wrap; gap: 8px 26px;
+  padding: 14px 28px 16px; border-top: 1px solid var(--border-bg, #e2dbc9);
+  color: var(--dim-fg, #8a857a); font-size: 16px;
+}
+.transient-legend-key { margin-right: var(--s3); }
+/* the palette body: candidates left, the facts panel right */
+.mb-body { display: flex; flex: 1; min-height: 0; }
+.mb-body .mb-cands { flex: 1; min-width: 0; }
+.mb-preview {
+  flex: 0 0 172px;
+  /* min-width:auto would let the long title win over the
+     basis and swallow half the palette */
+  /* every member of a group is a fact row, so the rail
+     scrolls rather than swallowing the tail of a long group */
+  min-width: 0; overflow: hidden auto;
+  border-left: 1px solid var(--border-bg, #e2dbc9);
+  background: var(--default-bg, #efeadf);
+  padding: 11px 12px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-family: var(--font-mono); font-size: 10.5px;
+}
+.mb-preview-title {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--dim-fg, #8a857a); margin-bottom: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mb-preview-fact { display: flex; gap: 8px; align-items: baseline; }
+.mb-preview-k { flex: 0 0 44px; color: var(--dim-fg, #8a857a); }
+.mb-preview-v { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mb-preview-note {
+  margin-top: auto; padding-top: 8px;
+  color: var(--dim-fg, #8a857a); font-size: 10.5px; line-height: 1.5;
+}
+/* the rail as a second list: the group's buffers, ibuffer's own
+   columns at a smaller size. Only one of the two lists holds the
+   arrows, so the focused one wears the paper and the accent edge
+   and the other keeps a flat highlight — the pane you are in is
+   never a guess. */
+.mb-preview.mb-rail { padding: 0; gap: 0; }
+/* buffer names run long — a chat title, a browse URL — and the
+   candidates beside them are short group names. So the rail takes
+   half the panel, while the facts panel it stands in for keeps
+   the narrower share that suits key/value rows. */
+.mb-panel.palette .mb-preview.mb-rail { padding: 22px 0 26px; flex-basis: 50%; }
+.mb-panel.palette .mb-preview.mb-rail .mb-preview-title {
+  margin: 0 28px 10px; padding-bottom: 12px;
+}
+.mb-rail-row {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 3px 12px; min-height: 21px;
+  border-left: 2px solid transparent;
+  font-size: 11px; line-height: 1.35;
+}
+/* the palette reads at a distance, so the rail's rows do too:
+   smaller than a group card, larger than the facts they replace */
+.mb-panel.palette .mb-rail-row {
+  padding: 4px 16px 4px 28px; min-height: 28px;
+  border-left-width: 3px; font-size: 15px;
+}
+.mb-panel.palette .mb-rail-hint { font-size: 13px; }
+.mb-rail-name {
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mb-rail-hint { flex: 0 0 auto; font-size: 10px; color: var(--dim-fg, #8a857a); }
+.mb-preview.mb-rail.focused { background: var(--window-bg, #fdfcf8); }
+.mb-rail-row.selected { background: var(--default-bg, #efeadf); }
+.mb-preview.mb-rail.focused .mb-rail-row.selected {
+  background: var(--select-bg, #e7e9f1);
+  border-left-color: var(--accent-fg, #26356b);
+}
+/* the arrows are in the rail: the candidate list keeps its place
+   but stops claiming them */
+.mb-body.rail-focus .mb-cand.selected {
+  background: var(--default-bg, #efeadf);
+  border-left-color: var(--border-bg, #e2dbc9);
+}
+/* A group is a row, like everything else in the list. It used to
+   be a card with its own box, dot, verb and chips, and that card
+   was its own layout problem every time the list changed. One row
+   shape for every candidate: the name, and its count beside it. */
+
+.mb-label-row {
+  padding: 6px 14px 5px;
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--dim-fg, #8a857a);
+}
+/* a prompt that carries its own legend says keys, and a key is
+   not a word: the row keeps its size and drops the uppercase */
+.mb-label-row:has(.transient-legend) {
+  display: flex; flex-wrap: wrap; gap: 3px 18px;
+  letter-spacing: 0.02em; text-transform: none;
+}
+.mb-label-row .transient-legend-key {
+  color: var(--accent-fg, #26356b); font-weight: 600; margin-right: 4px;
+}
+/* the names column expands to the longest name in the whole set
+   (--mb-label-w, from the core) — marginalia sits immediately
+   after it and the column never reflows while narrowing */
+.mb-cands {
+  max-height: 40dvh; overflow-y: auto;
+  display: grid;
+  /* The column used to BE --mb-label-w. A row is a subgrid item
+     with 14px of side padding, and that padding comes out of the
+     tracks — so the column ran narrower than the width the core
+     asked for, and the longest name ran into its annotation.
+     max-content sizes the column to the labels themselves,
+     padding included, and the floor below keeps the column from
+     reflowing as narrowing shortens the longest visible name. */
+  /* the second track takes the slack. It used to be `auto`,
+     which sizes to content and leaves the rest of the pane
+     empty: a group card spans both tracks, so it stopped where
+     the longest hint stopped and left a hole between the cards
+     and the rail. A name column that never reflows is still the
+     point; 1fr only decides where the row ENDS. */
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+/* a section heading inside the candidate list: it labels the rows
+   under it and never takes the selection */
+.mb-sep {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 14px 4px;
+}
+.mb-sep-label {
+  font-family: var(--font-mono); font-size: 10.5px;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--dim-fg, #8a857a); white-space: nowrap;
+}
+.mb-sep::after {
+  content: ""; flex: 1; height: 1px;
+  background: var(--border-bg, #e2dbc9);
+}
+.mb-cand {
+  display: grid; grid-template-columns: subgrid; grid-column: 1 / -1;
+  align-items: baseline; column-gap: 12px;
+  padding: 3px 14px;
+  border-left: 2px solid transparent;
+  font-family: var(--font-mono); font-size: 14px;
+}
+.mb-cand.selected {
+  background: var(--select-bg, #e7e9f1);
+  border-left-color: var(--accent-fg, #26356b);
+}
+.mb-cand.selected .mb-label:not([class*="f-group-color-"]) { color: var(--accent-fg, #26356b); }
+.mb-cand.selected .mb-label { font-weight: 600; }
+/* the floor: the widest label in the WHOLE set, from the core.
+   The ceiling matches the cap the core applies to that width —
+   one very long name must not push the annotations off the
+   panel, so past it a name truncates instead. */
+.mb-label {
+  white-space: nowrap;
+  min-width: var(--mb-label-w, 0); max-width: 64ch;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.mb-hint {
+  color: var(--dim-fg, #8a857a); font-size: 12.5px;
+  /* an annotation is COLUMNS, padded with spaces by the
+     annotator — nowrap collapses a run of spaces to one and the
+     columns fell apart. pre keeps them and still does not wrap. */
+  white-space: pre; overflow: hidden; text-overflow: ellipsis;
+}
+.mb-input-row {
+  display: flex; align-items: baseline;
+  padding: 7px 14px 8px; font-size: 14px;
+  border-top: 1px solid var(--border-bg, #e2dbc9);
+  background: var(--default-bg, #efeadf);
+}
+/* the prompt line holds the selection: the input names a directory */
+.mb-input-row.selected { background: var(--select-bg, #e7e9f1); }
+.mb-panel:not(.palette) .mb-label-row {
+  order: -2; padding: 12px 20px 9px;
+  border-bottom: 1px solid var(--border-bg, #e2dbc9);
+}
+/* the input is the last row of the frame, the candidates sit
+   above it: Emacs' minibuffer shape */
+.mb-panel:not(.palette) .mb-input-row {
+  padding: 10px 20px 11px; font-size: 18px;
+}
+.mb-panel:not(.palette) .mb-body { flex: 0 1 auto; min-height: 0; }
+.mb-panel:not(.palette) .mb-cands { max-height: min(48dvh, 440px); }
+.mb-panel:not(.palette) .prompt { font-size: 18px; margin-right: 8px; }
+.mb-panel:not(.palette) .mb-input { font-size: 18px; }
+/* A plain completion prompt IS the minibuffer (editor.scm,
+   minibuffer-read*): the bottom rows of the frame, in the flow.
+   It takes its height from the window tree, which shrinks by
+   exactly that much and keeps every pane readable — it covers
+   nothing and dims nothing. Only .palette floats over them. */
+.mb-modal-layer:has(.mb-panel.mb-geom-minibuffer) {
+  position: static; inset: auto;
+  order: 100; flex: 0 0 auto;
+  display: block; padding: 0; background: none;
+}
+.mb-panel.mb-geom-minibuffer,
+.mb-panel.mb-geom-panel {
+  width: 100%; max-width: none; max-height: none;
+  border: none; border-top: 2px solid var(--accent-fg, #26356b);
+  border-radius: 0; box-shadow: none;
+}
+/* The popup takes the minibuffer's rows without the minibuffer's
+   cost: it covers the windows instead of taking their space, so
+   opening and closing the prompt reflows nothing. The layer keeps
+   the keyboard and drops the scrim, so nothing below is dimmed. */
+.mb-modal-layer:has(.mb-panel.mb-geom-panel) {
+  display: block; padding: 0; background: none;
+  /* the layer covers the frame but claims none of it: a click
+     lands on the window under the popup, not on empty air */
+  pointer-events: none;
+}
+.mb-panel.mb-geom-panel { max-height: 44dvh; pointer-events: auto; }
+.mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 11.5px; }
+/* The popup shape, and every surface that takes it says so with
+   this class. It docks to the bottom edge above the echo bar and
+   sits over the windows: it keeps the buffer geometry unchanged,
+   dims nothing and moves nothing. which-key was the only surface
+   with this shape; a completion prompt now asks for it by name. */
+.mb-geom-panel {
+  position: absolute; left: 0; right: 0; bottom: 30px; z-index: 50;
+  background: var(--window-bg, #fdfcf8);
+  border-top: 2px solid var(--accent-fg, #26356b);
+  max-height: 44vh;
+  overflow-y: auto;
+  box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
+}
+.which-key {
+  padding: 10px 14px 12px;
+  /* No animation here any more. Hiding the panel for the idle
+     delay still BUILT it on the first key of every chord, so
+     C-x b rendered 219 nodes and threw them away, and a busy
+     main thread painted the panel the moment the delay ended.
+     EditorLive now holds the render itself (hold_which_key), so
+     a fast chord draws nothing at all. */
+}
+.wk-title {
+  display: flex; justify-content: space-between; gap: 18px;
+  font-family: var(--font-mono); font-size: 11.5px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--dim-fg, #8a857a); padding-bottom: 8px;
+}
+.wk-filter { letter-spacing: 0.04em; text-transform: none; }
+.wk-groups { display: flex; flex-direction: column; gap: 10px; }
+.wk-group[hidden] { display: none; }
+.wk-item[hidden] { display: none; }
+.wk-empty {
+  padding: 10px 0 3px;
+  color: var(--dim-fg, #8a857a);
+  font-family: var(--font-mono); font-size: 13.5px;
+}
+.wk-group-title {
+  display: flex; align-items: baseline; gap: 7px;
+  margin: 0 0 4px; padding-bottom: 3px;
+  border-bottom: 1px solid var(--border-bg, #e2dbc9);
+  color: var(--accent-fg, #26356b);
+  font-family: var(--font-mono); font-size: 12.5px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.wk-group-title c-text {
+  color: var(--dim-fg, #8a857a); font-size: 10.5px; font-weight: 400;
+}
+.wk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 3px 22px;
+}
+.wk-item {
+  display: grid; grid-template-columns: minmax(8ch, auto) 1fr;
+  align-items: baseline; gap: 8px;
+  min-width: 0; font-family: var(--font-mono); font-size: 13.5px;
+}
+.wk-key {
+  justify-self: start;
+  min-width: 3ch; padding: 1px 5px;
+  border: 1px solid var(--border-bg, #d8d0c0); border-radius: 0;
+  background: var(--select-bg, #e7e9f1);
+  font-weight: var(--fw-semi);
+}
+.wk-cmd {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dim-fg, #57534a);
+}
+

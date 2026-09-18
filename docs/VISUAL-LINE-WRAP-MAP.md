@@ -26,7 +26,7 @@ and zoom, so the browser is the only place that knows it. That part is true and
 stays true.
 
 The mistake is what crosses the wire. The client currently sends decisions, not
-measurements. Five routines in `apps/compos_ui/lib/compos/ui/layouts.ex` each work
+measurements. Five routines in `apps/compos_ui/priv/static/app.js` each work
 out what a key MEANS by firing pixel probes at the DOM:
 
 | routine | asked to answer |

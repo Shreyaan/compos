@@ -732,10 +732,11 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, _view, html} = live(conn, "/")
     assert html =~ ~r/class="window [^"]*popup popup-right"/
     assert html =~ "--popup-size:33.33333333333333%"
-    assert html =~ ".split-child:has(> .window.popup)"
-    assert html =~ ".window.popup-right { right: 0; }"
-    assert html =~ "width: var(--popup-size, 33.333%);"
-    assert html =~ ".window.popup-bottom { bottom: 0; }"
+    css = File.read!(Path.expand("../../../priv/static/editor.css", __DIR__))
+    assert css =~ ".split-child:has(> .window.popup)"
+    assert css =~ ".window.popup-right { right: 0; }"
+    assert css =~ "width: var(--popup-size, 33.333%);"
+    assert css =~ ".window.popup-bottom { bottom: 0; }"
   end
 
   test "undo works through the window", %{conn: conn} do

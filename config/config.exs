@@ -55,7 +55,10 @@ if config_env() == :dev do
     hotload_recompile: {Compos.Core.Hotload.Compile, :compile, []},
     # the modules that hold a page's stylesheet and script: a swap of one
     # bumps the boot id, so every open page reloads itself
-    hotload_page_modules: [Compos.Ui.Layouts, Compos.Ui.MobileLayouts]
+    hotload_page_modules: [Compos.Ui.Layouts, Compos.Ui.MobileLayouts],
+    # the directories that hold a page's static stylesheet and script: a
+    # saved .css or .js there bumps the boot id the same way
+    hotload_page_assets: ["apps/compos_ui/priv/static"]
 
   # code_reloader runs `mix compile` inside this VM on a browser request, and
   # purges the modules an outside compile changed before it starts. Both steps

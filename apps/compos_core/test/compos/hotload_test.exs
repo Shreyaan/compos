@@ -191,6 +191,29 @@ defmodule Compos.HotloadTest do
       assert_receive {:editor_change, :reboot}
     end
 
+    # The stylesheet and the script are static files. A save of one compiles
+    # nothing; it bumps the boot id so every open page loads it again.
+    test "a saved page asset bumps the boot id and compiles nothing" do
+      Application.put_env(:compos_core, :hotload_page_assets, ["apps/compos_ui/priv/static"])
+      on_exit(fn -> Application.delete_env(:compos_core, :hotload_page_assets) end)
+
+      assert Hotload.source?("/p/apps/compos_ui/priv/static/app.js")
+      assert Hotload.source?("/p/apps/compos_ui/priv/static/editor.css")
+      refute Hotload.source?("/p/scheme/packages/web/page.js")
+      refute Hotload.source?("/p/apps/compos_ui/priv/static/icons/compos.png")
+
+      server = start_hotload()
+      before = :persistent_term.get(:compos_boot_id, "dev")
+      Compos.Core.Events.subscribe_editor()
+      Process.sleep(2)
+
+      report = Hotload.reload(["/p/apps/compos_ui/priv/static/app.js"], server)
+
+      assert report =~ "1 page asset"
+      assert :persistent_term.get(:compos_boot_id, "dev") != before
+      assert_receive {:editor_change, :reboot}
+    end
+
     test "a compile failure is reported, and the daemon stays up" do
       Application.put_env(
         :compos_core,
