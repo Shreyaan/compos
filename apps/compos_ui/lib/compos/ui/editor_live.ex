@@ -12,6 +12,7 @@ defmodule Compos.Ui.EditorLive do
   import Compos.Ui.ComposML, only: [sigil_M: 2]
 
   alias Compos.Core.{Events, Input, Rope}
+  alias Compos.Core.Markdown.Classic
   alias Compos.Scheme.Text
   alias Compos.Ui.{AppServer, LocalFile, LocalImage}
 
@@ -864,14 +865,13 @@ defmodule Compos.Ui.EditorLive do
     key =
       {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
        leaf.hidden_lines, :erlang.phash2(leaf.overlays), Compos.Ui.Oembed.generation(),
-       preview_engine(leaf.buffer, rm),
        Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode"),
        csv_preview_file_key(leaf.buffer, leaf.text, rm)}
 
     {html, cache} =
       case cache[{:preview, leaf.id}] do
         {^key, html} -> {html, cache}
-        _ -> render_preview(preview_engine(leaf.buffer, rm), rm, leaf, pt, mark, faces, cache)
+        _ -> render_preview(rm, leaf, pt, mark, faces, cache)
       end
 
     shown_html =
@@ -2489,13 +2489,13 @@ defmodule Compos.Ui.EditorLive do
         <c-text id={@id} class="x-card" contenteditable="false" data-len={@len}><%= case @card do %><% {:ok, html} -> %>{Phoenix.HTML.raw(html)}<% _ -> %><c-text class="x-pending">{@txt}</c-text><% end %></c-text>
         """
 
-      cls =~ "youtube-embed" and youtube_id(txt) ->
-        id = youtube_id(txt)
+      cls =~ "youtube-embed" and Classic.youtube_id(txt) ->
+        id = Classic.youtube_id(txt)
 
         assigns =
           assign(assigns,
             len: byte_size(txt),
-            thumbnail: youtube_thumbnail(id)
+            thumbnail: Classic.youtube_thumbnail(id)
           )
 
         ~M"""
@@ -2702,25 +2702,8 @@ defmodule Compos.Ui.EditorLive do
 
   defp ag_block(_, _, _), do: nil
 
-  # The transcript is markdown, and the page renderer draws it: the same
-  # renderer as the preview, with CommonMark reflow and no block chrome.
-  # Earmark remains only where the markdown grammar is not installed. One
-  # bad block must not kill the transcript that holds it.
-  defp prose_html(md) do
-    case Compos.Core.Markdown.Html.render(md, [], soft_breaks: true, chrome: false) do
-      {:ok, html} -> html
-      {:error, _} -> prose_html_fallback(md)
-    end
-  rescue
-    _ -> "<pre>" <> html_escape(md) <> "</pre>"
-  end
-
-  defp prose_html_fallback(md) do
-    case Earmark.as_html(md, compact_output: false) do
-      {:ok, html, _} -> html
-      {:error, html, _} -> html
-    end
-  end
+  # The transcript is markdown; the page renderer draws it (core).
+  defp prose_html(md), do: Compos.Core.Markdown.Html.prose(md)
 
   # "340ms", "1.4s", "2m 05s" — nil when the block predates the field
   defp tool_duration_label(ms) when is_integer(ms) and ms >= 0 do
@@ -3052,30 +3035,6 @@ defmodule Compos.Ui.EditorLive do
     %{pre: pre, cur: cur, post: post}
   end
 
-  # The cursor in a markdown preview: a private-use sentinel goes into the
-  # source at POINT, rides through Earmark as plain text, and comes out as
-  # the .pt span. If point sits inside markdown syntax the one construct
-  # can render off for a moment; the sandbox runs no scripts, so a mangled
-  # span is a display blemish and nothing more.
-  @pt_sentinel "\uE000"
-
-  # A font face belongs to one document. The preview runs in its own
-  # about:blank frame, so the root layout's link does not reach it: the
-  # frame rendered Georgia and Menlo while the chrome rendered Spectral
-  # and IBM Plex Mono. The frame must ask for the fonts itself.
-  @preview_fonts """
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-  """
-  # one marker per source line that draws text; it becomes a .ln span that
-  # names the line's byte offset, so a key in the page can say which source
-  # line the reader moved to
-  @anchor "\uE005"
-  @llm_start "\uE002"
-  @llm_end "\uE003"
-  @llm_meta_end "\uE004"
-  @csv_preview_lines 5
-
   @doc false
   # Preview folds keep source byte offsets stable. Hidden lines become spaces.
   # A closing fence stays present so the Markdown tree remains valid.
@@ -3124,59 +3083,68 @@ defmodule Compos.Ui.EditorLive do
 
   defp preview_first_hidden_line(_hidden, 0), do: 0
 
-  # One engine draws a Markdown page. The Earmark pipeline remains as the
-  # mechanical fallback where the markdown grammar is not installed, and as
-  # the path for the non-markdown render modes.
-  defp preview_engine(_buffer, "markdown"), do: :tree_sitter
-  defp preview_engine(_buffer, _rm), do: :earmark
-
+  # The page is Markdown.Html's; the LiveView keeps the parse cache.
   # Parsing a document costs a hundred times what drawing it does, and the
   # tree does not change when the caret moves. So the tree is cached against
   # the buffer's version: a keystroke that moves point redraws and nothing
   # more, and only an edit parses again.
-  defp render_preview(:tree_sitter, rm, leaf, pt, mark, faces, cache) do
+  defp render_preview("markdown" = rm, leaf, pt, mark, faces, cache) do
     {text, pt, mark} =
       preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
 
     leaf = %{leaf | text: text}
-
-    dir = preview_dir(leaf.buffer)
-
-    opts = [
-      whitespace: Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true,
-      hidden_lines: leaf.hidden_lines,
-      # a pasted image is a path, not a URL, and a browser will not load one
-      image_src: &local_image_src(&1, dir),
-      url_embed: &youtube_embed_html/1,
-      csv_source: csv_source_reader(leaf.buffer)
-    ]
-
-    tree_key = {leaf.buffer, leaf.version, leaf.hidden_lines}
-
-    case md_tree(leaf, tree_key, cache) do
-      {nil, cache} ->
-        # no grammar installed: draw the page rather than nothing
-        render_preview(:earmark, rm, leaf, pt, mark, faces, cache)
-
-      {tree, cache} ->
-        {:ok, html} = preview_doc_ts(tree, leaf.text, pt, mark, faces, leaf.overlays, opts)
-        {html, cache}
-    end
-  end
-
-  defp render_preview(:earmark, rm, leaf, pt, mark, faces, cache) do
-    {text, pt, mark} =
-      preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
-
-    leaf = %{leaf | text: text}
+    {tree, cache} = md_tree(leaf, {leaf.buffer, leaf.version, leaf.hidden_lines}, cache)
 
     html =
-      preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays,
-        csv_source: csv_source_reader(leaf.buffer),
-        base_dir: preview_dir(leaf.buffer)
+      Compos.Core.Markdown.Html.document(
+        leaf.text,
+        pt,
+        mark,
+        faces,
+        preview_opts(leaf.buffer) ++
+          [
+            tree: tree,
+            overlays: leaf.overlays,
+            whitespace: Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true,
+            hidden_lines: leaf.hidden_lines
+          ]
       )
 
     {html, cache}
+  end
+
+  defp render_preview(rm, leaf, pt, mark, faces, cache) do
+    {text, pt, mark} = preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
+    {preview_doc(rm, text, pt, mark, faces, leaf.preview_authored, leaf.overlays), cache}
+  end
+
+  # What only the web client knows: how a local path becomes a URL the
+  # page can load, and how an X post becomes a card.
+  defp preview_opts(buffer) do
+    [
+      base_dir: preview_dir(buffer),
+      csv_source: csv_source_reader(buffer),
+      local_url: &Compos.Ui.LocalImage.url/1,
+      tweet_card: &Compos.Ui.Oembed.card/1
+    ]
+  end
+
+  @doc """
+  The Earmark page (`Compos.Core.Markdown.Classic`) with this client's
+  image and card hooks: the renderer of a home with no Markdown grammar.
+  """
+  def preview_doc(rm, text, point, faces, authored),
+    do: preview_doc(rm, text, point, nil, faces, authored, [])
+
+  def preview_doc(rm, text, point, mark, faces, authored),
+    do: preview_doc(rm, text, point, mark, faces, authored, [])
+
+  def preview_doc(rm, text, point, mark, faces, authored, overlays),
+    do: preview_doc(rm, text, point, mark, faces, authored, overlays, [])
+
+  def preview_doc(rm, text, point, mark, faces, authored, overlays, opts) do
+    ui = [local_url: &Compos.Ui.LocalImage.url/1, tweet_card: &Compos.Ui.Oembed.card/1]
+    Compos.Core.Markdown.Classic.preview_doc(rm, text, point, mark, faces, authored, overlays, Keyword.merge(ui, opts))
   end
 
   defp csv_source_reader(buffer) do
@@ -3205,1061 +3173,10 @@ defmodule Compos.Ui.EditorLive do
         {tree, cache}
 
       _ ->
-        case Compos.Core.Markdown.parse(ts_overlay_source(leaf.text, leaf.overlays)) do
+        case Compos.Core.Markdown.parse(Compos.Core.Markdown.Html.overlay_source(leaf.text, leaf.overlays)) do
           {:ok, tree} -> {tree, Map.put(cache, {:md_tree, leaf.id}, {tree_key, tree})}
           {:error, _} -> {nil, cache}
         end
-    end
-  end
-
-  @doc """
-  Render a Markdown preview through the tree-sitter renderer.
-
-  Every node knows the source it came from, so the caret is cut in at its
-  byte rather than placed by a rule about the construct it landed in.
-  Answers `{:error, :no_grammar}` when the Markdown grammar is missing, and
-  the caller falls back rather than drawing nothing.
-  """
-  def preview_doc_ts(tree, text, point, mark, faces, overlays, opts \\ []) do
-    size = byte_size(text)
-    p = point |> max(0) |> min(size)
-    m = if is_integer(mark), do: mark |> max(0) |> min(size), else: nil
-
-    marks =
-      ts_line_marks(text) ++
-        [{p, ~s(<span class="pt"></span>)}] ++
-        if(m, do: [{m, ~s(<span class="mk"></span>)}], else: [])
-
-    body =
-      Compos.Core.Markdown.Html.render_tree(
-        tree,
-        ts_overlay_source(text, overlays),
-        marks,
-        opts
-      )
-
-    {:ok, markdown_page(body, faces)}
-  end
-
-  defp ts_line_marks(text) do
-    [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
-    |> Enum.reject(&(&1 > byte_size(text)))
-    |> Enum.map(fn at -> {at, ~s(<span class="ln" data-p="#{at}"></span>)} end)
-  end
-
-  # An overlay only ever adds markup, which draws no character, so the marks
-  # keep the source's own offsets and need no correction.
-  defp ts_overlay_source(text, overlays) do
-    text
-    |> preview_overlay_positions(overlays)
-    |> Enum.sort_by(fn {at, _} -> -at end)
-    |> Enum.reduce(text, fn {at, insert}, acc ->
-      at = acc |> Text.floor_utf8(at) |> max(0) |> min(byte_size(acc))
-      binary_part(acc, 0, at) <> insert <> binary_part(acc, at, byte_size(acc) - at)
-    end)
-  end
-
-  def preview_doc(rm, text, point, faces, authored),
-    do: preview_doc(rm, text, point, nil, faces, authored, [])
-
-  def preview_doc(rm, text, point, mark, faces, authored),
-    do: preview_doc(rm, text, point, mark, faces, authored, [])
-
-  def preview_doc("markdown", text, point, mark, faces, authored, overlays) do
-    preview_doc("markdown", text, point, mark, faces, authored, overlays, [])
-  end
-
-  def preview_doc(rm, text, _point, _mark, faces, authored, _overlays),
-    do: preview_html(rm, text, faces, authored)
-
-  def preview_doc("markdown", text, point, mark, faces, authored, overlays, opts) do
-    p = point |> max(0) |> min(byte_size(text))
-    m = if is_integer(mark), do: mark |> max(0) |> min(byte_size(text)), else: nil
-
-    blank = blank_point_line(text, p, overlays)
-    anchors = line_anchors(text, blank)
-    marked = mark_preview_positions(text, p, m, overlays, anchors, blank)
-
-    "markdown"
-    |> preview_html(marked, faces, authored, opts)
-    |> place_anchors(anchors)
-  end
-
-  def preview_doc(rm, text, _point, _mark, faces, authored, _overlays, _opts),
-    do: preview_html(rm, text, faces, authored)
-
-  defp mark_preview_positions(text, point, mark, overlays, anchors, blank) do
-    positions =
-      point_position(text, point, blank) ++
-        mark_position(text, mark) ++
-        Enum.map(preview_overlay_positions(text, overlays), fn {at, s} -> {at, 2, s} end) ++
-        (anchors |> Enum.reject(&(&1 == blank)) |> Enum.map(&{&1, 1, @anchor}))
-
-    positions =
-      positions
-      |> Enum.reject(fn {at, _rank, _s} -> is_nil(at) end)
-      # a sentinel inside a character makes the document invalid UTF-8, and
-      # the Markdown parser then raises on the whole page
-      |> Enum.map(fn {at, rank, s} -> {Text.floor_utf8(text, at), rank, s} end)
-      # Later insertions at one offset land BEFORE earlier ones, so the rank
-      # here is the reverse of the order in the page: a quote marker the
-      # overlay adds keeps the start of its line, the line's anchor sits
-      # after it, and the cursor stays innermost, right at point.
-      |> Enum.sort_by(fn {at, rank, _s} -> {-at, rank} end)
-
-    Enum.reduce(positions, text, fn {at, _rank, s}, acc ->
-      binary_part(acc, 0, at) <> s <> binary_part(acc, at, byte_size(acc) - at)
-    end)
-  end
-
-  # The point's own blank line draws an empty paragraph, and that paragraph
-  # needs a blank line on each side or it joins the block above or below. The
-  # anchor rides inside it, so the client still reads the source line the
-  # caret stands on.
-  defp point_position(_text, _point, ls) when is_integer(ls),
-    do: [{ls, 0, "\n" <> @anchor <> @pt_sentinel <> "\n"}]
-
-  defp point_position(text, point, nil), do: [{cursor_spot(text, point), 0, @pt_sentinel}]
-
-  defp mark_position(_text, nil), do: []
-  defp mark_position(text, mark), do: [{cursor_spot(text, mark), 0, "\uE001"}]
-
-  # A blank line has no Markdown node, so a cursor on it has nowhere to draw.
-  # The old answer moved the cursor to the next line that draws text. The
-  # caret then stood in front of another block's words while every keystroke
-  # went to the blank line: RET at the end of a document looked like it did
-  # nothing, and RET above a table threw the caret into the first cell. Give
-  # the line its own empty paragraph instead. An llm overlay quotes the lines
-  # it covers, so leave those to it.
-  defp blank_point_line(text, p, overlays) do
-    ls = line_start(text, p)
-
-    if blank_line?(text, ls) and not overlaid?(overlays, ls), do: ls, else: nil
-  end
-
-  # A blank line inside a fence is literal text. It draws, so it is not blank
-  # for this purpose.
-  defp blank_line?(text, ls),
-    do: text |> line_at(ls) |> String.trim() == "" and not inside_fence?(text, ls)
-
-  defp overlaid?(overlays, ls) do
-    Enum.any?(overlays || [], fn
-      {start, finish, _face} when is_integer(start) and is_integer(finish) ->
-        ls >= start and ls <= finish
-
-      _ ->
-        false
-    end)
-  end
-
-  # Preview formatting belongs to llm-mode, not to the Markdown document.
-  # Render its response overlay through a temporary blockquote so Earmark can
-  # still parse headings, lists, and emphasis inside the answer. The private
-  # sentinels let us distinguish this from a blockquote the author typed.
-  defp preview_overlay_positions(text, overlays) do
-    Enum.flat_map(overlays || [], fn
-      {start, finish, face}
-      when is_integer(start) and is_integer(finish) and face in ["llm-response", :llm_response] ->
-        start = start |> max(0) |> min(byte_size(text))
-        finish = finish |> max(start) |> min(byte_size(text))
-
-        continuation_prefixes =
-          text
-          |> binary_part(start, finish - start)
-          |> :binary.matches("\n")
-          |> Enum.map(fn {offset, _length} -> {start + offset + 1, "> "} end)
-
-        metadata = "#{start}:#{finish}"
-
-        [
-          {start, "> " <> @llm_start <> metadata <> @llm_meta_end},
-          {finish, @llm_end} | continuation_prefixes
-        ]
-
-      _ ->
-        []
-    end)
-  end
-
-  # A rendered row belongs to a source line, and the page is the only place
-  # that knows which rows exist: a wrapped paragraph is many rows, a fence
-  # line is none. So mark every source line that draws text, at the spot the
-  # cursor would take on it. The client reads the nearest marker above the
-  # row it moved to, and point follows the source.
-  defp line_anchors(text, blank) do
-    text
-    |> line_starts()
-    |> Enum.map(fn ls -> {ls, line_anchor_spot(text, ls, blank)} end)
-    |> Enum.filter(fn {ls, spot} -> spot != nil and line_start(text, spot) == ls end)
-    |> Enum.map(&elem(&1, 1))
-  end
-
-  # The point's blank line draws its own paragraph, so it anchors to itself.
-  # Every other blank line draws nothing, and an anchor there would join the
-  # line to the block above and end it.
-  defp line_anchor_spot(_text, ls, ls), do: ls
-
-  defp line_anchor_spot(text, ls, _blank) do
-    if blank_line?(text, ls), do: nil, else: cursor_spot(text, ls)
-  end
-
-  defp line_starts(text) do
-    [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
-    |> Enum.reject(&(&1 > byte_size(text)))
-  end
-
-  # The markers come back in source order, so the Nth marker in the page is
-  # the Nth anchored line. A parser that drops one would shift every offset
-  # after it, so a count that does not match gives up and leaves the page
-  # without anchors: the fragment mapping still works.
-  defp place_anchors(html, anchors) do
-    if length(:binary.matches(html, @anchor)) == length(anchors) do
-      html |> String.split(@anchor) |> weave_anchors(anchors)
-    else
-      String.replace(html, @anchor, "")
-    end
-  end
-
-  defp weave_anchors([head | parts], anchors) do
-    Enum.zip(parts, anchors)
-    |> Enum.reduce(head, fn {part, at}, acc ->
-      acc <> ~s(<span class="ln" data-p="#{at}"></span>) <> part
-    end)
-  end
-
-  # Point often sits inside a line's BLOCK marker — byte 0 of "# Title" is
-  # where a freshly opened file rests — and a sentinel inside the marker
-  # un-headings the line. Snap the cursor to the marker's end.
-  #
-  # Some lines draw no text of their own: a fence, a rule, a Setext
-  # underline, a table's alignment row, an empty line. A sentinel there
-  # breaks the block it belongs to, and hiding the cursor loses point. So
-  # the cursor moves to the nearest line that DOES draw text — the code
-  # inside the fence, the heading above the underline, the first row of the
-  # table. The depth guard stops a run of such lines from looping.
-  defp cursor_spot(text, p), do: cursor_spot(text, p, 0)
-
-  defp cursor_spot(_text, _p, depth) when depth > 4, do: nil
-
-  defp cursor_spot(text, p, depth) do
-    ls = line_start(text, p)
-    line = line_at(text, ls)
-    trimmed = String.trim_leading(line)
-    below = ls + byte_size(line) + 1
-    above = ls - 1
-
-    cond do
-      # The opening fence draws the block's head, the closing fence draws
-      # nothing: put the cursor at the near end of the code itself.
-      String.starts_with?(trimmed, "```") ->
-        if fence_opens?(text, ls),
-          do: spot_below(text, below, p, depth),
-          else: spot_above(text, above, p, depth)
-
-      # Inside a fenced block every character is literal, so a sentinel is
-      # safe wherever point stands.
-      inside_fence?(text, ls) ->
-        p
-
-      # An empty line has no Markdown node of its own. Keep it attached to
-      # the nearest rendered node so the sentinel cannot turn a blank line
-      # into a paragraph and break tables or adjacent blocks.
-      String.trim(trimmed) == "" ->
-        spot_below(text, below, p, depth)
-
-      # The underline belongs to the heading above it.
-      setext_underline?(text, ls, trimmed) ->
-        spot_above(text, above, p, depth)
-
-      rule_line?(trimmed) ->
-        spot_below(text, below, p, depth)
-
-      # The alignment row makes the table a table, and it draws nothing.
-      table_delimiter_row?(trimmed) ->
-        spot_below(text, below, p, depth)
-
-      table_row?(trimmed) ->
-        line |> table_row_spot(ls, p) |> link_target_spot(line, ls)
-
-      true ->
-        p |> marker_spot(line, ls) |> link_target_spot(line, ls)
-    end
-  end
-
-  defp spot_below(text, below, _p, depth) when below <= byte_size(text),
-    do: cursor_spot(text, below, depth + 1)
-
-  defp spot_below(_text, _below, p, _depth), do: p
-
-  defp spot_above(text, above, _p, depth) when above >= 0,
-    do: cursor_spot(text, above, depth + 1)
-
-  defp spot_above(_text, _above, p, _depth), do: p
-
-  defp line_start(text, p) do
-    case :binary.matches(binary_part(text, 0, p), "\n") do
-      [] -> 0
-      ms -> ms |> List.last() |> elem(0) |> Kernel.+(1)
-    end
-  end
-
-  defp line_at(text, ls),
-    do: text |> binary_part(ls, byte_size(text) - ls) |> String.split("\n", parts: 2) |> hd()
-
-  # A fence line opens a block when an even number of fences stands above it.
-  defp fence_opens?(text, ls), do: rem(fences_above(text, ls), 2) == 0
-
-  defp inside_fence?(text, ls), do: rem(fences_above(text, ls), 2) == 1
-
-  defp fences_above(text, ls) do
-    text
-    |> binary_part(0, ls)
-    |> String.split("\n")
-    |> Enum.count(&String.starts_with?(String.trim_leading(&1), "```"))
-  end
-
-  # `===` under text is a heading. The same run under a blank line is a rule.
-  defp setext_underline?(text, ls, trimmed) do
-    Regex.match?(~r/^[=-]+[ \t]*$/, trimmed) and ls > 0 and
-      text |> line_at(line_start(text, ls - 1)) |> String.trim() != ""
-  end
-
-  defp rule_line?(trimmed),
-    do: Regex.match?(~r/^([-*_])[ \t]*(\1[ \t]*){2,}$/, trimmed)
-
-  defp marker_spot(p, line, ls) do
-    case Regex.run(~r/^(?:\s{0,3}(?:\#{1,6}|[-*+]|\d+\.|>)\s+)+/, line, return: :index) do
-      [{0, len}] when p < ls + len -> ls + len
-      _ -> p
-    end
-  end
-
-  # A link target renders as an attribute, not as text, so a cursor inside
-  # it never draws. Keep it at the end of the label the reader can see.
-  defp link_target_spot(nil, _line, _ls), do: nil
-
-  defp link_target_spot(p, line, ls) do
-    Regex.scan(~r/\]\([^)]*\)/, line, return: :index)
-    |> List.flatten()
-    |> Enum.reduce(p, fn {at, len}, acc ->
-      if acc > ls + at and acc < ls + at + len, do: ls + at, else: acc
-    end)
-  end
-
-  # A row stays a table row only while its pipes stand at the line edges.
-  # Point rests at column 0 after every vertical move, and a sentinel there
-  # ends the table at that row: everything below it falls back to raw text.
-  # So keep the cursor inside the first and the last cell.
-  defp table_row_spot(line, ls, p) do
-    first =
-      case Regex.run(~r/^\s*\|[ \t]*/, line, return: :index) do
-        [{0, len}] -> len
-        _ -> 0
-      end
-
-    last =
-      case Regex.run(~r/[ \t]*\|[ \t]*$/, line, return: :index) do
-        [{at, _}] -> at
-        _ -> byte_size(line)
-      end
-
-    cond do
-      first >= last -> nil
-      p < ls + first -> ls + first
-      p > ls + last -> ls + last
-      true -> p
-    end
-  end
-
-  defp table_row?(trimmed) do
-    String.starts_with?(trimmed, "|") and length(:binary.matches(trimmed, "|")) >= 2
-  end
-
-  defp table_delimiter_row?(trimmed) do
-    String.contains?(trimmed, "-") and Regex.match?(~r/^\|[\s:|-]*$/, trimmed)
-  end
-
-  defp preview_html("html", text, _faces, true), do: text
-
-  # shr-style theming (Emacs eww): authored LAYOUT and typography survive,
-  # authored COLORS don't — half-themed documents (authored light panel,
-  # themed light text) are unreadable, so colors are all-or-nothing
-  defp preview_html("html", text, faces, _authored) do
-    p = preview_palette(faces)
-
-    style = """
-    <style>
-    body{background:#{p.bg} !important;color:#{p.fg} !important}
-    *,*::before,*::after{background-color:transparent !important;color:inherit !important;border-color:#{p.border} !important}
-    a,a:visited{color:#{p.link} !important}
-    code,pre,kbd{background-color:#{p.inset} !important}
-    blockquote{color:#{p.dim} !important}
-    th{background-color:#{p.inset} !important}
-    ::highlight(region){background-color:color-mix(in srgb,#{p.link} 32%,transparent) !important}
-    </style>
-    """
-
-    case String.split(text, ~r{</body>}i, parts: 2) do
-      [before, rest] -> before <> style <> "</body>" <> rest
-      [_] -> text <> style
-    end
-  end
-
-  defp preview_html("markdown", text, faces, _authored),
-    do: markdown_page(earmark_body(text), faces)
-
-  defp preview_html("markdown", text, faces, _authored, opts),
-    do: markdown_page(earmark_body(text, opts), faces)
-
-  defp earmark_body(text, opts \\ []) do
-    fence_labels = markdown_fence_labels(text)
-    dir = Keyword.get(opts, :base_dir)
-
-    case earmark_ast(markdown_preview_source(text)) do
-      {:ok, ast} ->
-        ast
-        |> label_code_blocks(fence_labels)
-        |> tag_llm_responses()
-        |> embed_urls(dir)
-        |> Earmark.Transform.transform(compact_output: false)
-        |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
-        |> String.replace("\uE001", ~s(<span class="mk"></span>))
-
-      {:error, why} ->
-        unparsed_body(text, why)
-    end
-  end
-
-  # Earmark raises on some documents instead of answering {:error, ast, _}.
-  # An inline `{...}` reads as an attribute list, and one the parser cannot
-  # make sense of is a FunctionClauseError deep inside it. The raise reaches
-  # the LiveView, which dies, remounts, draws the same buffer and dies again:
-  # one document takes the whole client down, and the page never comes back.
-  #
-  # A parser that cannot read a document must say so and draw the source.
-  # The preview shows the document the author typed. A newline the author put
-  # inside a paragraph is a line the reader must see, so a soft break draws as
-  # a line break. Markdown joins those lines into one paragraph, which
-  # reflowed the text and moved every line away from its source.
-  defp earmark_ast(src) do
-    case Earmark.as_ast(src, compact_output: false, breaks: true) do
-      {:ok, ast, _} -> {:ok, ast}
-      {:error, ast, _} -> {:ok, ast}
-    end
-  rescue
-    e -> {:error, Exception.message(e)}
-  end
-
-  # The document as it stands, plus what stopped the renderer. The reader
-  # keeps their text and learns why it is not a page.
-  defp unparsed_body(text, why) do
-    ~s(<div class="preview-error"><strong>This page did not render.</strong> ) <>
-      html_escape(why) <>
-      ~s(</div><pre class="preview-raw">) <> html_escape(text) <> ~s(</pre>)
-  end
-
-  defp html_escape(text) do
-    text
-    |> String.replace("&", "&amp;")
-    |> String.replace("<", "&lt;")
-    |> String.replace(">", "&gt;")
-  end
-
-  # The page around a rendered body: the reader's typography and palette.
-  # Both renderers draw into it, so the only difference between them is the
-  # body itself.
-  defp markdown_page(body, faces) do
-    %{bg: bg, fg: fg, accent: accent, link: link, dim: dim, border: border, inset: inset} =
-      preview_palette(faces)
-
-    # typography is policy: the 'preview face carries it (appearance.scm
-    # defcustoms; themes and init.scm may set it like any face)
-    family = face(faces, "preview", "family", "Spectral,Georgia,serif")
-    # an empty preview size means the default face's size, as in a buffer
-    size =
-      case face(faces, "preview", "size", "") do
-        "" -> face(faces, "default", "size", "18.7px")
-        s -> s
-      end
-
-    # the measure is the readability lever. 44em of Spectral ran to 94
-    # characters a line; prose reads fastest between 65 and 75.
-    measure = face(faces, "preview", "measure", "33em")
-
-    """
-    <!DOCTYPE html><html><head><meta charset="utf-8">#{@preview_fonts}<style>
-    body{margin:0 auto;padding:30px 34px 70px;max-width:#{measure};overflow-wrap:break-word;
-         word-break:normal;font:#{size}/1.7 #{family};color:#{fg};background:#{bg};
-         -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-    /* The renderer draws block gaps. CSS margins would count them twice. */
-    p{margin:0}
-    /* a heading must separate the sections, so its space above is much
-       larger than the space below it */
-    h1,h2,h3,h4{font-family:#{family};line-height:1.2;font-weight:700;letter-spacing:-0.012em}
-    /* every size on the page is an em of the body, so the page keeps its
-       proportions at any default face size */
-    h1{font-size:1.82em;margin:0}
-    /* one scale, no rules: a section heading is bigger and sits higher
-       above its text than a paragraph; the renderer's gap does the rest */
-    h2{font-size:1.39em;margin:0;padding-top:.45em}
-    h3{font-size:1.12em;margin:0;padding-top:.3em;color:#{accent}}
-    h4{font-size:.76em;margin:0;padding-top:.2em;color:#{dim};font-weight:600;
-       text-transform:uppercase;letter-spacing:.06em}
-    /* the browser default indents a list 40px and puts no space between
-       the items: a list of requirements then reads as one block */
-    ul,ol{margin:0;padding-left:1.35em}
-    li{margin:0}
-    li>ul,li>ol{margin:0}
-    li::marker{color:#{dim}}
-    code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.82em}
-    code{background:#{inset};padding:1px 4px;border-radius:2px}
-    /* a name in a heading is still the heading: the code span must not
-       shrink it to body size, nor box it */
-    h1 code,h2 code,h3 code,h4 code{background:none;padding:0;font-size:.92em}
-    pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
-    pre code{background:none;padding:0}
-    /* Plain-text blocks are prose-like payloads such as prompts and logs.
-       Wrap them to the page measure; source-code fences keep horizontal scroll. */
-    pre:has(> code.text){white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:hidden}
-    .code-block{margin:0;border:1px solid #{border};border-radius:6px;overflow:hidden;background:#{inset}}
-    .code-block-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 10px;
-      border-bottom:1px solid #{border};color:#{dim};font:.73em/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace}
-    .code-lang{margin-right:auto;color:#{accent};font-weight:700;text-transform:uppercase;letter-spacing:.06em}
-    .code-action{white-space:nowrap}
-    .code-action kbd{padding:1px 4px;border:1px solid #{border};border-radius:3px;color:#{fg};background:#{bg}}
-    .code-action code{padding:0;color:#{fg};background:none}
-    .code-block pre{margin:0;border:0;border-radius:0}
-    a,a:visited{color:#{link};text-decoration-thickness:1px;text-underline-offset:2px;
-      text-decoration-color:color-mix(in srgb,currentColor 45%,transparent)}
-    a:hover{text-decoration-color:currentColor}
-    a:empty{display:none}
-    blockquote{margin:0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
-    blockquote.llm-response{margin:18px 0;padding:12px 16px;border:1px solid #{border};
-         border-left:4px solid #{accent};border-radius:7px;background:#{inset};color:#{fg};user-select:text}
-    blockquote.llm-response>:first-child{margin-top:0}
-    blockquote.llm-response>:last-child{margin-bottom:0}
-    table{border-collapse:collapse;font-size:.85em;display:block;overflow-x:auto;
-          max-width:100%;margin:0}
-    /* rules between rows, none around them: a reference table reads as
-       columns, not as a grid of boxes */
-    th,td{border:0;border-bottom:1px solid #{border};padding:6px 14px 6px 0;
-          vertical-align:top}
-    th{background:none;text-align:left;color:#{dim};font:600 .79em/1.7 "IBM Plex Mono",ui-monospace,Menlo,monospace;
-       letter-spacing:.09em;text-transform:uppercase}
-    tr:last-child td{border-bottom:0}
-    img{max-width:100%;height:auto;border-radius:3px}
-    figure{margin:1.4em 0}
-    figure img{display:block;margin:0 auto}
-    figcaption{margin-top:.55em;text-align:center;font-size:.9em;font-style:italic;color:var(--dim-fg,#8a857a)}
-    hr{border:0;border-top:1px solid #{border};margin:0}
-    .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:10px;
-           max-width:32em;background:#{inset};font-size:.88em}
-    .tweet blockquote{margin:0;padding:0;border:0;color:#{fg}}
-    .tweet blockquote p{margin:0 0 8px}
-    .tweet-pending{color:#{dim}}
-    .tw-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-    .tw-avatar{width:38px;height:38px;border-radius:50%}
-    .tw-name{font-weight:600;display:block;line-height:1.2}
-    .tw-handle{color:#{dim};text-decoration:none;font-size:.9em}
-    .tw-text{margin:0 0 10px}
-    .tweet .tw-media{width:100%;border-radius:8px;margin:2px 0 8px}
-    .tw-date{color:#{dim};font-size:.9em;text-decoration:none}
-    .youtube-card{position:relative;display:block;max-width:40em;margin:12px 0;
-      color:white;text-decoration:none;border-radius:8px;overflow:hidden;background:#111}
-    .youtube-card img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:0}
-    .youtube-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-      display:grid;place-items:center;width:64px;height:44px;border-radius:12px;
-      background:#f00;color:white;font:24px/1 sans-serif;box-shadow:0 2px 10px #0008}
-    ::highlight(region){background:color-mix(in srgb,#{accent} 32%,transparent)}
-    /* The caret is an inline box with a painted left border and no content,
-       so it is invisible to line breaking: an inline-block is an atomic
-       inline, and the browser may wrap at it, even inside a word, and then
-       measure rows the caret itself moved. The negative margin keeps the
-       border from pushing the text along. */
-    .pt{display:inline;border-left:2px solid #{accent};margin:0 -1px;
-        animation:ptb var(--chrome-anim, 0s) step-end infinite}
-    /* a zero-width character gives the caret a line box of its own after a
-       trailing break: RET at the end of a paragraph shows the new line */
-    .pt::after{content:"\\200B"}
-    /* The window does not own the keyboard, so the caret stops blinking.
-       It still draws: a reader who looks at the page from another window
-       must still see where point stands. Emacs draws a hollow box here. */
-    .pt.idle{animation:none;opacity:0.45}
-    /* whitespace-mode: the newline the author typed, drawn where it is.
-       Muted enough to read past, present enough to aim at. */
-    /* A blank line the author typed is one line tall, always: a separator
-       that grew when point reached it moved every line below it. The
-       source shows one blank line between paragraphs, and so does the page. */
-    .gap{height:1.7em}
-    .bl{height:1.7em}
-    /* whitespace-mode. Every mark is a pseudo-element painted over the
-       character the author typed, so the text keeps its own bytes and the
-       page does not reflow when the marks come on. */
-    .ws{position:relative}
-    .ws.nl::before{content:"¶";color:#{dim};opacity:.5;font-size:.85em}
-    /* a run of spaces, marked along its whole width rather than one span
-       per space: the dots repeat, the text keeps its own bytes */
-    .ws.sp{background-image:radial-gradient(circle,#{dim} 0.9px,transparent 1px);
-           background-size:.32em 100%;background-position:center;
-           background-repeat:repeat-x;opacity:.55}
-    .ws.tab::before{content:"»";position:absolute;left:0;color:#{dim};opacity:.45;
-                    pointer-events:none}
-    .mk{display:inline-block;width:0;height:0}
-    .ln{display:inline-block;width:0;height:0}
-    @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
-    </style></head><body>#{body}</body></html>
-    """
-  end
-
-  # Morg adds Org-style header arguments after a fenced block's language.
-  # Earmark accepts one language token only. It otherwise renders the whole
-  # fence as inline code. Keep the arguments in the buffer, but hide them
-  # from the preview parser so the body remains a real code block.
-  defp markdown_preview_source(text) do
-    text
-    |> then(fn source ->
-      Regex.replace(
-        ~r/^([ \t]*```[ \t]*[A-Za-z0-9_+.-]+)[ \t]+(?=:[A-Za-z])[^\r\n]*$/m,
-        source,
-        "\\1"
-      )
-    end)
-    |> recover_unmatched_inline_backticks()
-  end
-
-  # Earmark keeps an unmatched inline backtick open until the end of the
-  # document. Escape an unmatched delimiter so later blocks still parse.
-  # Fenced code blocks keep their backticks because they define structure.
-  defp recover_unmatched_inline_backticks(text) do
-    {parts, segment, _fenced?} =
-      text
-      |> String.split("\n", trim: false)
-      |> Enum.with_index()
-      |> Enum.reduce({[], "", false}, fn {raw_line, index}, {parts, segment, fenced?} ->
-        line = if index == 0, do: raw_line, else: "\n" <> raw_line
-
-        if Regex.match?(~r/^\s*```/, raw_line) do
-          # parts is reversed at the end, so the fence line goes in FIRST and
-          # the text it closes goes in after it. The other order rebuilt the
-          # document with every fence line ahead of the text above it: the
-          # first fence landed on the first heading, and the whole page
-          # rendered as the code that fence opened.
-          {[line, recover_inline_backticks(segment) | parts], "", not fenced?}
-        else
-          if fenced?,
-            do: {[line | parts], segment, fenced?},
-            else: {parts, segment <> line, fenced?}
-        end
-      end)
-
-    Enum.reverse([recover_inline_backticks(segment) | parts]) |> IO.iodata_to_binary()
-  end
-
-  defp recover_inline_backticks(segment) do
-    delimiters = Regex.scan(~r/(?<!`)`(?!`)/, segment)
-
-    if rem(length(delimiters), 2) == 1 do
-      Regex.replace(~r/(?<!`)`(?!`)/, segment, fn _ -> "\\`" end)
-    else
-      segment
-    end
-  end
-
-  defp markdown_fence_labels(text) do
-    Regex.scan(
-      ~r/^[ \t]*```[ \t]*([A-Za-z0-9_+.-]+)([^\r\n]*)$/m,
-      text,
-      capture: :all_but_first
-    )
-    |> Enum.map(fn [language, arguments] ->
-      tangle =
-        case Regex.run(~r/:tangle[ \t]+([^ \t]+)/i, arguments, capture: :all_but_first) do
-          [target] -> if(String.downcase(target) == "no", do: nil, else: target)
-          _ -> nil
-        end
-
-      lines =
-        case Regex.run(~r/:(?:lines|preview)[ \t]+([0-9]+)/i, arguments, capture: :all_but_first) do
-          [count] ->
-            case Integer.parse(count) do
-              {value, ""} when value > 0 -> value
-              _ -> @csv_preview_lines
-            end
-
-          _ ->
-            @csv_preview_lines
-        end
-
-      %{
-        language: language,
-        morg?: Regex.match?(~r/(^|\s):[A-Za-z]/, arguments),
-        tangle: tangle,
-        lines: lines
-      }
-    end)
-  end
-
-  defp label_code_blocks(nodes, labels) when is_list(nodes) do
-    {nodes, _labels} = Enum.map_reduce(nodes, labels, &label_code_block/2)
-    nodes
-  end
-
-  defp label_code_block(
-         {"pre", _, [{"code", code_attrs, _, _}], _} = pre,
-         [%{language: language} = label | labels]
-       ) do
-    case List.keyfind(code_attrs, "class", 0) do
-      {"class", ^language} -> {code_block(pre, label), labels}
-      _ -> {pre, [label | labels]}
-    end
-  end
-
-  defp label_code_block({tag, attrs, children, meta}, labels) when is_list(children) do
-    {children, labels} = Enum.map_reduce(children, labels, &label_code_block/2)
-    {{tag, attrs, children, meta}, labels}
-  end
-
-  defp label_code_block(other, labels), do: {other, labels}
-
-  defp code_block(pre, label) do
-    actions =
-      if label.morg? do
-        run =
-          if String.downcase(label.language) in ~w(scheme sh bash zsh shell python py elixir exs js javascript node ruby) do
-            [{"span", [{"class", "code-action"}], [{"kbd", [], ["C-c C-c"], %{}}, " run"], %{}}]
-          else
-            []
-          end
-
-        tangle =
-          if label.tangle do
-            [
-              {"span", [{"class", "code-action"}],
-               [
-                 {"kbd", [], ["C-c C-x"], %{}},
-                 " tangle → ",
-                 {"code", [], [label.tangle], %{}}
-               ], %{}}
-            ]
-          else
-            []
-          end
-
-        run ++ tangle
-      else
-        []
-      end
-
-    header =
-      {"div", [{"class", "code-block-head"}, {"data-chrome", "1"}],
-       [{"span", [{"class", "code-lang"}], [label.language], %{}} | actions], %{}}
-
-    content =
-      if String.downcase(label.language) == "result-csv" do
-        csv_preview(pre, label.lines, nil)
-      else
-        pre
-      end
-
-    {"div", [{"class", "code-block"}], [header, content], %{}}
-  end
-
-  defp csv_preview({"pre", _, [{"code", _, children, _}], _} = pre, limit, source) do
-    rows =
-      (source || code_text(children))
-      |> String.split(~r/\r?\n/, trim: true)
-      |> Enum.take(limit)
-      |> Enum.map(&csv_row/1)
-
-    case rows do
-      [] when is_binary(source) ->
-        {"table", [{"class", "csv-preview"}], [], %{}}
-
-      [headers | body] ->
-        head =
-          {"thead", [], [{"tr", [], Enum.map(headers, &{"th", [], [&1], %{}}), %{}}], %{}}
-
-        body =
-          {"tbody", [],
-           Enum.map(body, fn row ->
-             {"tr", [], Enum.map(row, &{"td", [], [&1], %{}}), %{}}
-           end), %{}}
-
-        {"table", [{"class", "csv-preview"}], [head, body], %{}}
-
-      _ ->
-        pre
-    end
-  end
-
-  defp code_text(nodes) when is_list(nodes), do: Enum.map_join(nodes, &code_text/1)
-  defp code_text(text) when is_binary(text), do: text
-  defp code_text({_tag, _attrs, children, _meta}), do: code_text(children)
-  defp code_text(_), do: ""
-
-  defp csv_row(line), do: csv_row(line, "", [], false)
-
-  defp csv_row(<<>>, field, fields, _quoted), do: Enum.reverse([field | fields])
-
-  defp csv_row(<<?", ?", rest::binary>>, field, fields, true),
-    do: csv_row(rest, field <> "\"", fields, true)
-
-  defp csv_row(<<?", rest::binary>>, field, fields, quoted),
-    do: csv_row(rest, field, fields, not quoted)
-
-  defp csv_row(<<?,, rest::binary>>, field, fields, false),
-    do: csv_row(rest, "", [field | fields], false)
-
-  defp csv_row(<<char::utf8, rest::binary>>, field, fields, quoted),
-    do: csv_row(rest, field <> <<char::utf8>>, fields, quoted)
-
-  defp tag_llm_responses(nodes) when is_list(nodes), do: Enum.map(nodes, &tag_llm_response/1)
-
-  defp tag_llm_response({"blockquote", attrs, children, meta}) do
-    case llm_range(children) do
-      {start, finish} ->
-        response_attrs = [
-          {"class", "llm-response"},
-          {"data-start", Integer.to_string(start)},
-          {"data-end", Integer.to_string(finish)}
-        ]
-
-        {"blockquote", response_attrs ++ attrs, strip_llm_markers(children), meta}
-
-      nil ->
-        {"blockquote", attrs, tag_llm_responses(children), meta}
-    end
-  end
-
-  defp tag_llm_response({tag, attrs, children, meta}) when is_list(children),
-    do: {tag, attrs, tag_llm_responses(children), meta}
-
-  defp tag_llm_response(other), do: other
-
-  defp llm_range(nodes) do
-    case Regex.run(
-           ~r/#{@llm_start}(\d+):(\d+)#{@llm_meta_end}/u,
-           llm_marker_text(nodes),
-           capture: :all_but_first
-         ) do
-      [start, finish] -> {String.to_integer(start), String.to_integer(finish)}
-      _ -> nil
-    end
-  end
-
-  defp llm_marker_text(nodes) when is_list(nodes), do: Enum.map_join(nodes, &llm_marker_text/1)
-  defp llm_marker_text(text) when is_binary(text), do: text
-  defp llm_marker_text({_tag, _attrs, children, _meta}), do: llm_marker_text(children)
-  defp llm_marker_text(_), do: ""
-
-  defp strip_llm_markers(nodes) when is_list(nodes), do: Enum.map(nodes, &strip_llm_markers/1)
-
-  defp strip_llm_markers(text) when is_binary(text),
-    do:
-      text
-      |> String.replace(~r/#{@llm_start}\d+:\d+#{@llm_meta_end}/u, "")
-      |> String.replace(@llm_end, "")
-
-  defp strip_llm_markers({tag, attrs, children, meta}),
-    do: {tag, attrs, strip_llm_markers(children), meta}
-
-  defp strip_llm_markers(other), do: other
-
-  # A bare URL in the source becomes a link whose text is the URL
-  # (Earmark pure links). Images and X posts upgrade automatically. A bare
-  # YouTube URL upgrades only as a complete paragraph. The #+embed directive
-  # also upgrades it. A written
-  # link — [text](url) — has text different from the href and stays a
-  # link. The point sentinel can sit inside the pasted URL; the compare
-  # ignores it and the embed re-emits it as a sibling.
-  @image_exts ~w(.png .jpg .jpeg .gif .webp .svg .avif .bmp)
-  # the share sheet appends ?s=20 and friends; a query or fragment after
-  # the status id still names the same tweet
-  @tweet_re ~r{\Ahttps?://(?:mobile\.)?(?:twitter|x)\.com/[^/]+/status(?:es)?/\d+(?:[?#]\S*)?\z}
-
-  defp embed_urls(nodes, dir) when is_list(nodes),
-    do: Enum.flat_map(nodes, &embed_node(&1, dir))
-
-  defp embed_node({"p", atts, children, meta}, dir) do
-    source = llm_marker_text(children)
-
-    clean =
-      source
-      |> String.replace(@pt_sentinel, "")
-      |> String.replace("\uE001", "")
-      |> String.replace(@anchor, "")
-
-    url = embed_directive_url(clean) || String.trim(clean)
-
-    case youtube_id(url) do
-      nil -> [{"p", atts, embed_urls(children, dir), meta}]
-      id -> [youtube_card_node(url, id, meta), preview_markers(source)]
-    end
-  end
-
-  defp embed_node({"a", atts, [text], meta} = node, _dir) when is_binary(text) do
-    url = String.replace(text, @pt_sentinel, "")
-
-    # the href carries the sentinel percent-encoded; the text carries it raw
-    href =
-      case List.keyfind(atts, "href", 0) do
-        {_, h} ->
-          h
-          |> String.replace(@pt_sentinel, "")
-          |> String.replace(URI.encode(@pt_sentinel), "")
-
-        nil ->
-          nil
-      end
-
-    tail = if text == url, do: [], else: [@pt_sentinel]
-
-    cond do
-      href != url -> [node]
-      image_url?(url) -> [{"img", [{"src", url}, {"alt", ""}], [], meta} | tail]
-      tweet_url?(url) -> tweet_card(url, meta) ++ tail
-      true -> [node]
-    end
-  end
-
-  defp embed_node({"img", atts, children, meta}, dir) do
-    atts =
-      Enum.map(atts, fn
-        {"src", src} when is_binary(src) -> {"src", local_image_src(src, dir)}
-        attr -> attr
-      end)
-
-    [{"img", atts, children, meta}]
-  end
-
-  defp embed_node({tag, atts, children, meta}, dir) when is_list(children),
-    do: [{tag, atts, embed_urls(children, dir), meta}]
-
-  defp embed_node(other, _dir), do: [other]
-
-  # A document's picture is a file path: absolute, or relative to the document
-  # itself. A relative link is the one that survives another checkout, so the
-  # preview resolves it against the document's directory. A URL is left alone.
-  defp local_image_src(src, dir) do
-    path =
-      if String.starts_with?(src, "<") and String.ends_with?(src, ">") do
-        binary_part(src, 1, byte_size(src) - 2)
-      else
-        src
-      end
-
-    cond do
-      Path.type(path) == :absolute -> Compos.Ui.LocalImage.url(path)
-      not is_nil(URI.parse(path).scheme) -> src
-      is_binary(dir) -> Compos.Ui.LocalImage.url(Path.expand(path, dir))
-      true -> src
-    end
-  end
-
-  defp image_url?(url) do
-    case URI.parse(url) do
-      %URI{scheme: s, path: p} when s in ["http", "https"] and is_binary(p) ->
-        (p |> Path.extname() |> String.downcase()) in @image_exts
-
-      _ ->
-        false
-    end
-  end
-
-  defp tweet_url?(url), do: Regex.match?(@tweet_re, url)
-
-  defp embed_directive_url(text) do
-    case Regex.run(~r/\A#\+embed:[ \t]+(\S+)[ \t]*\z/i, text, capture: :all_but_first) do
-      [url] -> url
-      _ -> nil
-    end
-  end
-
-  defp preview_markers(text) do
-    text
-    |> String.graphemes()
-    |> Enum.filter(&(&1 in [@pt_sentinel, "\uE001", @anchor]))
-    |> Enum.join()
-  end
-
-  defp youtube_id(url) do
-    uri = URI.parse(url)
-    host = uri.host && String.downcase(uri.host)
-    path = String.split(uri.path || "", "/", trim: true)
-
-    id =
-      cond do
-        host in ["youtu.be", "www.youtu.be"] ->
-          List.first(path)
-
-        host in ["youtube.com", "www.youtube.com", "m.youtube.com"] and path == ["watch"] ->
-          youtube_query_id(uri.query)
-
-        host in ["youtube.com", "www.youtube.com", "m.youtube.com"] and
-            List.first(path) in ["shorts", "live", "embed"] ->
-          Enum.at(path, 1)
-
-        true ->
-          nil
-      end
-
-    if is_binary(id) and Regex.match?(~r/\A[A-Za-z0-9_-]{11}\z/, id), do: id
-  end
-
-  defp youtube_query_id(nil), do: nil
-
-  defp youtube_query_id(query) do
-    URI.decode_query(query)["v"]
-  rescue
-    ArgumentError -> nil
-  end
-
-  defp youtube_card_node(url, id, meta) do
-    {"a",
-     [
-       {"class", "youtube-card"},
-       {"href", url},
-       {"target", "_blank"},
-       {"rel", "noopener noreferrer"},
-       {"aria-label", "Watch this video on YouTube"}
-     ],
-     [
-       {"img", [{"src", youtube_thumbnail(id)}, {"alt", "YouTube video thumbnail"}], [], meta},
-       {"span", [{"class", "youtube-play"}, {"aria-hidden", "true"}], ["▶"], meta}
-     ], meta}
-  end
-
-  defp youtube_embed_html(source) do
-    url = embed_directive_url(source) || String.trim(source)
-
-    case url && youtube_id(url) do
-      nil ->
-        nil
-
-      id ->
-        safe_url = url |> html_escape() |> String.replace("\"", "&quot;")
-
-        ~s(<a class="youtube-card" href="#{safe_url}" target="_blank" rel="noopener noreferrer" aria-label="Watch this video on YouTube"><img src="#{youtube_thumbnail(id)}" alt="YouTube video thumbnail"><span class="youtube-play" aria-hidden="true">▶</span></a>)
-    end
-  end
-
-  defp youtube_thumbnail(id), do: "https://i.ytimg.com/vi/#{id}/hqdefault.jpg"
-
-  defp tweet_card(url, meta) do
-    case Compos.Ui.Oembed.card(url) do
-      {:ok, html} ->
-        # the card html renders verbatim; Oembed strips script tags, and
-        # the iframe sandbox runs no scripts either way
-        [{"div", [{"class", "tweet"}], [html], Map.put(meta, :verbatim, true)}]
-
-      :pending ->
-        [
-          {"div", [{"class", "tweet tweet-pending"}],
-           ["Loading tweet — ", {"a", [{"href", url}], [url], meta}], meta}
-        ]
-
-      :error ->
-        [{"a", [{"href", url}], [url], meta}]
     end
   end
 
@@ -4312,21 +3229,6 @@ defmodule Compos.Ui.EditorLive do
   defp pop_col(text, line_start, comp_start) do
     len = comp_start |> max(line_start) |> min(byte_size(text))
     text |> binary_part(line_start, len - line_start) |> String.length()
-  end
-
-  defp face(faces, name, attr, fallback),
-    do: get_in(faces, [name, attr]) || fallback
-
-  defp preview_palette(faces) do
-    %{
-      bg: face(faces, "window", "bg", "#fdfcf8"),
-      fg: face(faces, "default", "fg", "#1b1a17"),
-      accent: face(faces, "accent", "fg", "#26356b"),
-      link: face(faces, "link", "fg", face(faces, "accent", "fg", "#26356b")),
-      dim: face(faces, "dim", "fg", "#8a857a"),
-      border: face(faces, "border", "bg", "#cbc4b1"),
-      inset: face(faces, "window-inactive", "bg", "#f4f0e6")
-    }
   end
 
   @impl true

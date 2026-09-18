@@ -15,6 +15,8 @@ defmodule Compos.Core.Markdown.Html do
   """
 
   alias Compos.Core.{Markdown, TS}
+  alias Compos.Scheme.Text
+  alias Compos.Core.Markdown.Classic
 
   @csv_preview_lines 5
 
@@ -819,4 +821,318 @@ defmodule Compos.Core.Markdown.Html do
       Process.put(:compos_md_nobreak, was)
     end
   end
+
+  # --- the document ----------------------------------------------------------
+
+  @doc """
+  The whole preview page for the Markdown TEXT, with the caret at POINT
+  and the mark at MARK. This module owns it: the LiveView only frames it.
+
+  OPTS: `tree` (a parse of TEXT with the overlays applied, which the
+  caller caches against the buffer version), `overlays`, `faces`, and the
+  hooks `image_src`, `url_embed`, `csv_source`, `local_url`, `tweet_card`,
+  `base_dir`, `whitespace`, `hidden_lines`. With no tree and no grammar,
+  `Compos.Core.Markdown.Classic` draws the page through Earmark.
+  """
+  def document(text, point, mark, faces, opts \\ []) do
+    overlays = opts[:overlays] || []
+
+    tree =
+      case opts[:tree] do
+        nil ->
+          case Markdown.parse(overlay_source(text, overlays)) do
+            {:ok, tree} -> tree
+            {:error, _} -> nil
+          end
+
+        tree ->
+          tree
+      end
+
+    if tree do
+      {:ok, html} =
+        preview_doc_ts(tree, text, point, mark, faces, overlays,
+          whitespace: opts[:whitespace] == true,
+          hidden_lines: opts[:hidden_lines] || MapSet.new(),
+          image_src: opts[:image_src] || (&Classic.local_image_src(&1, opts)),
+          url_embed: opts[:url_embed] || (&Classic.youtube_embed_html/1),
+          csv_source: opts[:csv_source]
+        )
+
+      html
+    else
+      Classic.preview_doc("markdown", text, point, mark, faces, false, overlays, opts)
+    end
+  end
+
+  @doc """
+  A chat paragraph: CommonMark reflow and no block chrome. One bad block
+  must not kill the transcript that holds it, so a failure draws the text.
+  """
+  def prose(md) do
+    case render(md, [], soft_breaks: true, chrome: false) do
+      {:ok, html} ->
+        html
+
+      {:error, _} ->
+        case Earmark.as_html(md, compact_output: false) do
+          {:ok, html, _} -> html
+          {:error, html, _} -> html
+        end
+    end
+  rescue
+    _ -> "<pre>" <> Classic.html_escape(md) <> "</pre>"
+  end
+
+  @doc """
+  Render a Markdown preview through the tree-sitter renderer.
+
+  Every node knows the source it came from, so the caret is cut in at its
+  byte rather than placed by a rule about the construct it landed in.
+  Answers `{:error, :no_grammar}` when the Markdown grammar is missing, and
+  the caller falls back rather than drawing nothing.
+  """
+  def preview_doc_ts(tree, text, point, mark, faces, overlays, opts \\ []) do
+    size = byte_size(text)
+    p = point |> max(0) |> min(size)
+    m = if is_integer(mark), do: mark |> max(0) |> min(size), else: nil
+
+    marks =
+      ts_line_marks(text) ++
+        [{p, ~s(<span class="pt"></span>)}] ++
+        if(m, do: [{m, ~s(<span class="mk"></span>)}], else: [])
+
+    body =
+      render_tree(
+        tree,
+        overlay_source(text, overlays),
+        marks,
+        opts
+      )
+
+    {:ok, page(body, faces)}
+  end
+
+  defp ts_line_marks(text) do
+    [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
+    |> Enum.reject(&(&1 > byte_size(text)))
+    |> Enum.map(fn at -> {at, ~s(<span class="ln" data-p="#{at}"></span>)} end)
+  end
+
+  # An overlay only ever adds markup, which draws no character, so the marks
+  # keep the source's own offsets and need no correction.
+  @doc "TEXT with the LLM response overlays written in as quote markers; parse this."
+  def overlay_source(text, overlays) do
+    text
+    |> Classic.overlay_positions(overlays)
+    |> Enum.sort_by(fn {at, _} -> -at end)
+    |> Enum.reduce(text, fn {at, insert}, acc ->
+      at = acc |> Text.floor_utf8(at) |> max(0) |> min(byte_size(acc))
+      binary_part(acc, 0, at) <> insert <> binary_part(acc, at, byte_size(acc) - at)
+    end)
+  end
+
+  # A font face belongs to one document. The preview runs in its own
+  # about:blank frame, so the root layout's link does not reach it: the
+  # frame rendered Georgia and Menlo while the chrome rendered Spectral
+  # and IBM Plex Mono. The frame must ask for the fonts itself.
+  @preview_fonts """
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  """
+
+  @doc """
+  The page around a rendered BODY: the reader's typography and palette,
+  from FACES. Both renderers draw into it, so the only difference between
+  them is the body itself.
+  """
+  def page(body, faces) do
+    %{bg: bg, fg: fg, accent: accent, link: link, dim: dim, border: border, inset: inset} =
+      palette(faces)
+
+    # typography is policy: the 'preview face carries it (appearance.scm
+    # defcustoms; themes and init.scm may set it like any face)
+    family = face(faces, "preview", "family", "Spectral,Georgia,serif")
+    # an empty preview size means the default face's size, as in a buffer
+    size =
+      case face(faces, "preview", "size", "") do
+        "" -> face(faces, "default", "size", "18.7px")
+        s -> s
+      end
+
+    # the measure is the readability lever. 44em of Spectral ran to 94
+    # characters a line; prose reads fastest between 65 and 75.
+    measure = face(faces, "preview", "measure", "33em")
+
+    """
+    <!DOCTYPE html><html><head><meta charset="utf-8">#{@preview_fonts}<style>
+    body{margin:0 auto;padding:30px 34px 70px;max-width:#{measure};overflow-wrap:break-word;
+         word-break:normal;font:#{size}/1.7 #{family};color:#{fg};background:#{bg};
+         -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+    /* The renderer draws block gaps. CSS margins would count them twice. */
+    p{margin:0}
+    /* a heading must separate the sections, so its space above is much
+       larger than the space below it */
+    h1,h2,h3,h4{font-family:#{family};line-height:1.2;font-weight:700;letter-spacing:-0.012em}
+    /* every size on the page is an em of the body, so the page keeps its
+       proportions at any default face size */
+    h1{font-size:1.82em;margin:0}
+    /* one scale, no rules: a section heading is bigger and sits higher
+       above its text than a paragraph; the renderer's gap does the rest */
+    h2{font-size:1.39em;margin:0;padding-top:.45em}
+    h3{font-size:1.12em;margin:0;padding-top:.3em;color:#{accent}}
+    h4{font-size:.76em;margin:0;padding-top:.2em;color:#{dim};font-weight:600;
+       text-transform:uppercase;letter-spacing:.06em}
+    /* the browser default indents a list 40px and puts no space between
+       the items: a list of requirements then reads as one block */
+    ul,ol{margin:0;padding-left:1.35em}
+    li{margin:0}
+    li>ul,li>ol{margin:0}
+    li::marker{color:#{dim}}
+    code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.82em}
+    code{background:#{inset};padding:1px 4px;border-radius:2px}
+    /* a name in a heading is still the heading: the code span must not
+       shrink it to body size, nor box it */
+    h1 code,h2 code,h3 code,h4 code{background:none;padding:0;font-size:.92em}
+    pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
+    pre code{background:none;padding:0}
+    /* Plain-text blocks are prose-like payloads such as prompts and logs.
+       Wrap them to the page measure; source-code fences keep horizontal scroll. */
+    pre:has(> code.text){white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:hidden}
+    .code-block{margin:0;border:1px solid #{border};border-radius:6px;overflow:hidden;background:#{inset}}
+    .code-block-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 10px;
+      border-bottom:1px solid #{border};color:#{dim};font:.73em/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace}
+    .code-lang{margin-right:auto;color:#{accent};font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+    .code-action{white-space:nowrap}
+    .code-action kbd{padding:1px 4px;border:1px solid #{border};border-radius:3px;color:#{fg};background:#{bg}}
+    .code-action code{padding:0;color:#{fg};background:none}
+    .code-block pre{margin:0;border:0;border-radius:0}
+    a,a:visited{color:#{link};text-decoration-thickness:1px;text-underline-offset:2px;
+      text-decoration-color:color-mix(in srgb,currentColor 45%,transparent)}
+    a:hover{text-decoration-color:currentColor}
+    a:empty{display:none}
+    blockquote{margin:0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
+    blockquote.llm-response{margin:18px 0;padding:12px 16px;border:1px solid #{border};
+         border-left:4px solid #{accent};border-radius:7px;background:#{inset};color:#{fg};user-select:text}
+    blockquote.llm-response>:first-child{margin-top:0}
+    blockquote.llm-response>:last-child{margin-bottom:0}
+    table{border-collapse:collapse;font-size:.85em;display:block;overflow-x:auto;
+          max-width:100%;margin:0}
+    /* rules between rows, none around them: a reference table reads as
+       columns, not as a grid of boxes */
+    th,td{border:0;border-bottom:1px solid #{border};padding:6px 14px 6px 0;
+          vertical-align:top}
+    th{background:none;text-align:left;color:#{dim};font:600 .79em/1.7 "IBM Plex Mono",ui-monospace,Menlo,monospace;
+       letter-spacing:.09em;text-transform:uppercase}
+    tr:last-child td{border-bottom:0}
+    img{max-width:100%;height:auto;border-radius:3px}
+    figure{margin:1.4em 0}
+    figure img{display:block;margin:0 auto}
+    figcaption{margin-top:.55em;text-align:center;font-size:.9em;font-style:italic;color:var(--dim-fg,#8a857a)}
+    hr{border:0;border-top:1px solid #{border};margin:0}
+    .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:10px;
+           max-width:32em;background:#{inset};font-size:.88em}
+    .tweet blockquote{margin:0;padding:0;border:0;color:#{fg}}
+    .tweet blockquote p{margin:0 0 8px}
+    .tweet-pending{color:#{dim}}
+    .tw-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+    .tw-avatar{width:38px;height:38px;border-radius:50%}
+    .tw-name{font-weight:600;display:block;line-height:1.2}
+    .tw-handle{color:#{dim};text-decoration:none;font-size:.9em}
+    .tw-text{margin:0 0 10px}
+    .tweet .tw-media{width:100%;border-radius:8px;margin:2px 0 8px}
+    .tw-date{color:#{dim};font-size:.9em;text-decoration:none}
+    .youtube-card{position:relative;display:block;max-width:40em;margin:12px 0;
+      color:white;text-decoration:none;border-radius:8px;overflow:hidden;background:#111}
+    .youtube-card img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:0}
+    .youtube-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+      display:grid;place-items:center;width:64px;height:44px;border-radius:12px;
+      background:#f00;color:white;font:24px/1 sans-serif;box-shadow:0 2px 10px #0008}
+    ::highlight(region){background:color-mix(in srgb,#{accent} 32%,transparent)}
+    /* The caret is an inline box with a painted left border and no content,
+       so it is invisible to line breaking: an inline-block is an atomic
+       inline, and the browser may wrap at it, even inside a word, and then
+       measure rows the caret itself moved. The negative margin keeps the
+       border from pushing the text along. */
+    .pt{display:inline;border-left:2px solid #{accent};margin:0 -1px;
+        animation:ptb var(--chrome-anim, 0s) step-end infinite}
+    /* a zero-width character gives the caret a line box of its own after a
+       trailing break: RET at the end of a paragraph shows the new line */
+    .pt::after{content:"\\200B"}
+    /* The window does not own the keyboard, so the caret stops blinking.
+       It still draws: a reader who looks at the page from another window
+       must still see where point stands. Emacs draws a hollow box here. */
+    .pt.idle{animation:none;opacity:0.45}
+    /* whitespace-mode: the newline the author typed, drawn where it is.
+       Muted enough to read past, present enough to aim at. */
+    /* A blank line the author typed is one line tall, always: a separator
+       that grew when point reached it moved every line below it. The
+       source shows one blank line between paragraphs, and so does the page. */
+    .gap{height:1.7em}
+    .bl{height:1.7em}
+    /* whitespace-mode. Every mark is a pseudo-element painted over the
+       character the author typed, so the text keeps its own bytes and the
+       page does not reflow when the marks come on. */
+    .ws{position:relative}
+    .ws.nl::before{content:"¶";color:#{dim};opacity:.5;font-size:.85em}
+    /* a run of spaces, marked along its whole width rather than one span
+       per space: the dots repeat, the text keeps its own bytes */
+    .ws.sp{background-image:radial-gradient(circle,#{dim} 0.9px,transparent 1px);
+           background-size:.32em 100%;background-position:center;
+           background-repeat:repeat-x;opacity:.55}
+    .ws.tab::before{content:"»";position:absolute;left:0;color:#{dim};opacity:.45;
+                    pointer-events:none}
+    .mk{display:inline-block;width:0;height:0}
+    .ln{display:inline-block;width:0;height:0}
+    @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
+    </style></head><body>#{body}</body></html>
+    """
+  end
+
+  @doc """
+  An HTML document themed by FACES the way Emacs shr does. AUTHORED true
+  draws the document exactly as written.
+  """
+  def html_document(text, _faces, true), do: text
+
+  # shr-style theming (Emacs eww): authored LAYOUT and typography survive,
+  # authored COLORS don't — half-themed documents (authored light panel,
+  # themed light text) are unreadable, so colors are all-or-nothing
+  def html_document(text, faces, _authored) do
+    p = palette(faces)
+
+    style = """
+    <style>
+    body{background:#{p.bg} !important;color:#{p.fg} !important}
+    *,*::before,*::after{background-color:transparent !important;color:inherit !important;border-color:#{p.border} !important}
+    a,a:visited{color:#{p.link} !important}
+    code,pre,kbd{background-color:#{p.inset} !important}
+    blockquote{color:#{p.dim} !important}
+    th{background-color:#{p.inset} !important}
+    ::highlight(region){background-color:color-mix(in srgb,#{p.link} 32%,transparent) !important}
+    </style>
+    """
+
+    case String.split(text, ~r{</body>}i, parts: 2) do
+      [before, rest] -> before <> style <> "</body>" <> rest
+      [_] -> text <> style
+    end
+  end
+
+  defp face(faces, name, attr, fallback),
+    do: get_in(faces, [name, attr]) || fallback
+
+  @doc "The page colours, read from FACES, with the paper theme as the default."
+  def palette(faces) do
+    %{
+      bg: face(faces, "window", "bg", "#fdfcf8"),
+      fg: face(faces, "default", "fg", "#1b1a17"),
+      accent: face(faces, "accent", "fg", "#26356b"),
+      link: face(faces, "link", "fg", face(faces, "accent", "fg", "#26356b")),
+      dim: face(faces, "dim", "fg", "#8a857a"),
+      border: face(faces, "border", "bg", "#cbc4b1"),
+      inset: face(faces, "window-inactive", "bg", "#f4f0e6")
+    }
+  end
+
 end

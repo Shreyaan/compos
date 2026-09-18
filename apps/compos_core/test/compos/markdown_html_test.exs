@@ -414,4 +414,21 @@ defmodule Compos.MarkdownHtmlTest do
     refute html =~ ~s(src="<br>)
     refute html =~ ~s(alt="<br>)
   end
+
+  # The document is this module's: the page, its palette and the caret.
+  test "document draws the whole page around the body, with the caret" do
+    faces = %{"window" => %{"bg" => "#101010"}}
+    page = Html.document("# Title\n\nbody\n", 12, nil, faces)
+
+    assert page =~ "<!DOCTYPE html>"
+    assert page =~ "background:#101010"
+    assert page =~ @pt
+    assert bare(page) =~ ~r{<h1[^>]*>Title}
+  end
+
+  test "html_document themes a page unless it is authored" do
+    faces = %{"window" => %{"bg" => "#101010"}}
+    assert Html.html_document("<p>x</p>", faces, true) == "<p>x</p>"
+    assert Html.html_document("<p>x</p>", faces, false) =~ "background:#101010 !important"
+  end
 end
