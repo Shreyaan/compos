@@ -793,6 +793,10 @@ Second move: the chat buffer, the LLM pipes, the chat locals lists, the
 `scheme/packages/chat-mode.scm`, loaded third from init.scm; the block
 had inherited the terminal section's catalog scope (domain processes),
 so the file now declares domain chat. editor.scm is 10,962 lines.
+Third move: the modeline dashboard and the buffer-name grammar (1,219
+lines) are `scheme/packages/modeline.scm`, loaded fourth; desktop-skip!
+stayed in the kernel beside its callers in the buffer cache. editor.scm
+is 9,744 lines.
 
 **Next three steps, in order.**
 

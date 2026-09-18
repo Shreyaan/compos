@@ -27,6 +27,8 @@
 ; the chat buffer and the LLM pipes: every package that opens a chat
 ; reads the chat locals lists at load
 (load "chat-mode.scm")
+; the modeline and the buffer-name grammar: every chrome names buffers
+(load "modeline.scm")
 (load "advice.scm")
 (load "custom.scm")
 (load "tools.scm")
