@@ -929,6 +929,17 @@ the MCP servers, and llm-config.scm's 951 lines of pickers over the
 bundle. Both are surfaces a person uses; folding them into one picker
 is a design and a ruling, not a cut.
 
+**Phase 2, item 5.1, measured (2026-09-19):** llm-mode is not a stray
+second lane. code-agent-mode turns it on in a code buffer, writing-mode
+turns it on in the document's scratch, scratch.scm copies it to a
+scratch, the MCP proxy targets the buffer that wears it, prompts.scm and
+the buffer lifecycle reset its runtime, and M-o, M-|, C-c m and C-c b
+are its keys; ten test files specify it. Removing it means redesigning
+code-agent-mode, the writing scratch and the proxy's target rule, and
+deciding where an inline answer goes. That is the chat merge (5.1, 5.11,
+5.12) as one project, and it is last in the Phase 2 order for that
+reason.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:
