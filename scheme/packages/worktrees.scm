@@ -785,13 +785,15 @@
         url)))
 
 (define (worktree--provision-daemon! buf id root)
-  (let* ((info (daemon-provision-workspace! root id))
-         (url (car info))
-         (home (cadr info)))
-    (daemon-assign-workspace! (string-append "worktree-" id)
-                              url home root)
-    (worktree--navigate-to-owner! url buf)
-    url))
+  ;; #f: this editor starts no workspace daemons, so the file stays here
+  (let ((info (daemon-provision-workspace! root id)))
+    (and info
+         (let ((url (car info))
+               (home (cadr info)))
+           (daemon-assign-workspace! (string-append "worktree-" id)
+                                     url home root)
+           (worktree--navigate-to-owner! url buf)
+           url))))
 
 (define (worktree--daemon-owner! buf id root)
   (let ((owner (and (boundp (quote daemon-workspace-owner))

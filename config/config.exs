@@ -106,7 +106,9 @@ if config_env() == :test do
     provenance_path: ":memory:",
     desktop_path: "/tmp/compos-desktop-test-#{suffix}.etf",
     daemon_registry_path: "/tmp/compos-daemons-test-#{suffix}.json",
-    desktop_autorestore: false
+    desktop_autorestore: false,
+    # a visit of a file in a worktree checkout must not boot a daemon for it
+    workspace_daemons: false
 
   config :logger, level: :warning
 

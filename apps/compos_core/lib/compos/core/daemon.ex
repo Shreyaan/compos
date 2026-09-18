@@ -134,9 +134,17 @@ defmodule Compos.Core.Daemon do
   def provision_workspace(workspace, name) do
     workspace = Path.expand(workspace)
 
+    # A test stub answers first. Then the switch: a test VM starts no
+    # daemon of its own, so a visit of a file in a worktree checkout never
+    # waits for one to boot.
     case Application.get_env(:compos_core, :workspace_daemon_provisioner) do
-      fun when is_function(fun, 2) -> fun.(workspace, name)
-      _ -> provision_workspace!(workspace, name)
+      fun when is_function(fun, 2) ->
+        fun.(workspace, name)
+
+      _ ->
+        if Application.get_env(:compos_core, :workspace_daemons, true),
+          do: provision_workspace!(workspace, name),
+          else: {:error, :disabled}
     end
   end
 

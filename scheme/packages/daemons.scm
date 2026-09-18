@@ -195,13 +195,16 @@
        (let* ((project (plist-get owner 'workspace-project))
               (name (plist-get owner 'workspace-name))
               (info (daemon-provision-workspace!
-                      workspace (daemon--workspace-id owner)))
-              (url (car info))
-              (home (cadr info)))
-         (daemon-assign-workspace! (plist-get owner 'name) url home workspace)
-         (when (and project name)
-           (daemon-name-workspace! workspace project name))
-         url))
+                      workspace (daemon--workspace-id owner))))
+         ;; #f: this editor starts no workspace daemons; keep the owner's URL
+         (if (not info)
+             (plist-get owner 'url)
+             (let ((url (car info))
+                   (home (cadr info)))
+               (daemon-assign-workspace! (plist-get owner 'name) url home workspace)
+               (when (and project name)
+                 (daemon-name-workspace! workspace project name))
+               url))))
       (else (plist-get owner 'url)))))
 
 (define (daemon--ensure-entry! entry)

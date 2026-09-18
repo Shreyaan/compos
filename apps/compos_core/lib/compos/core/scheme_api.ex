@@ -1401,11 +1401,14 @@ defmodule Compos.Core.SchemeAPI do
           true
         end,
       {"daemon-provision-workspace!",
-       "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT)."} =>
+       "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT), or #f when this editor starts no workspace daemons."} =>
         fn [workspace, name] ->
           case Compos.Core.Daemon.provision_workspace(workspace, name) do
             {:ok, %{url: url, home: home, port: port}} ->
               [url, home, port]
+
+            {:error, :disabled} ->
+              false
 
             {:error, reason} ->
               raise Compos.Scheme.Eval.Error,
