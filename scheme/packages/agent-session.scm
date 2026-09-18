@@ -324,7 +324,7 @@
       (when (boundp 'agent-adopt-prose-tail!) (agent-adopt-prose-tail! buf))
       (let* ((start (chat-render! buf text))
              (end (+ start (string-byte-length text))))
-        (chat-blocks-push! buf start end "eval" '())))
+        (agent-block-push! buf start end "eval" '())))
     (end-of-buffer!)
     (message (if ok "ok" (cadr result)))))
 
@@ -577,10 +577,7 @@
             (agent-finalize-running-tools! buf "cancelled")
             (agent-discard-queued! buf)
             (llm-session-cancel! slug)
-            ;; both waiting markers: a thread renders its own ('agent-waiting),
-            ;; a chat that never attached a runtime renders 'chat-waiting
-            (agent-clear-waiting! slug)
-            (chat-clear-waiting! buf)
+            (agent-clear-waiting! buf)
             ;; C-g is a quit either way: the buffer returns to the
             ;; movement state, and the Cmd-arrows move the focus again
             (editing-quit!)

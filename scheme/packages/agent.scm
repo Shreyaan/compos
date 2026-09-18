@@ -63,7 +63,7 @@
     ;; any sign of life ends the waiting state; a pending chunk keeps the
     ;; waiting line until its first paragraph reveals
     (unless (member type '(user-msg status chunk thought))
-      (agent-clear-waiting! slug))
+      (agent-clear-waiting! buf))
     ;; a thought run streams into memory; the event that follows it
     ;; reveals the whole reasoning as ONE block (agent-thought-reveal!)
     (unless (member type

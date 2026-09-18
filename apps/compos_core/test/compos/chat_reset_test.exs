@@ -20,13 +20,14 @@ defmodule Compos.ChatResetTest do
       (buffer-create "#{name}")
       (buffer-append! "#{name}" "conversation survives")
       (buffer-set-local! "#{name}" 'agent-saved-mark (buffer-size "#{name}"))
-      (buffer-set-local! "#{name}" 'chat-waiting '(46161 46169))
+      (buffer-set-local! "#{name}" 'agent-waiting '(46161 46169))
       (buffer-set-local! "#{name}" 'agent-blocks '((46161 46169 "waiting")))
-      (chat-clear-waiting! "#{name}"))])
+      (agent-clear-waiting! "#{name}"))])
 
     assert Buffer.exists?(name)
     assert Buffer.text(name) == "conversation survives"
-    assert Buffer.get_local(name, "chat-waiting") in [nil, false]
+    assert Buffer.get_local(name, "agent-waiting") in [nil, false]
+    assert eval!(~s{(agent-blocks "#{name}")}) == "()"
   end
 
   test "a rich group chat resets to its meta card, keeping the group" do
@@ -151,7 +152,7 @@ defmodule Compos.ChatResetTest do
 
     eval!(~s{(let* ((buf (current-buffer)) (s (buffer-size buf)))
       (buffer-append! buf "what shipped today?")
-      (chat-blocks-push! buf s (buffer-size buf) "user" '())
+      (agent-block-push! buf s (buffer-size buf) "user" '())
       (buffer-set-local! buf 'agent-saved-mark (buffer-size buf))
       #t)})
     tail = eval!(~s{(agent-seed-transcript (current-buffer))})

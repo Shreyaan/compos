@@ -379,7 +379,7 @@
 (define (agent-note-stopped! slug)
   (unless (equal? (agent-status slug) 'dead)
     (let ((buf (agent-buf slug)))
-      (agent-clear-waiting! slug)
+      (agent-clear-waiting! buf)
       (agent-block-drop-kind! buf "permission")
       (let ((start (agent-render! slug "\n[agent stopped]\n" "agent-meta")))
         (agent-block-push! buf start (agent-mark slug) "meta" '())))))

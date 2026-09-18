@@ -1084,8 +1084,21 @@ stays as the document render, fed by the chat's event handler, and reads
 the chat; the global `*llm-inline-sends*` table and the two closures per
 send (completion, chunk) are gone, so a send is one call with data. The
 document's context function (`llm-context-text`, the narrowing range)
-stays: it is the document's wire, and a chat has no such range. Next:
-the twin transcript primitives (5.12).
+stays: it is the document's wire, and a chat has no such range.
+
+**5.12 is in (2026-09-19): the transcript primitives are one set.**
+chat-blocks-push!, chat-blocks-drop! and chat-clear-waiting! are gone;
+their callers use agent-block-push!, agent-block-drop-kind! and
+agent-clear-waiting!, which now takes the buffer (the buffer is the
+identity; a slug caller passes the buffer it holds). The 'chat-waiting
+local was never set anywhere and is gone from chat-runtime-locals.
+chat-render! and agent-render! stay: they are not twins. agent-render!
+inserts through the runtime, so the edit's source is `{:agent, slug}`
+and provenance names the agent; chat-render! inserts as the editor, for
+a chat with no runtime (a restored chat, a REPL result, a summary).
+Attribution: the same test files at HEAD 4f0a0be9 in a worktree fail
+by the same names (chat_reset_test, llm_tools_test, the two excision
+tests), so the collapse adds no red. The chat merge is complete.
 
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target

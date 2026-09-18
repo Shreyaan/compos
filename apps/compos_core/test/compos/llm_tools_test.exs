@@ -110,11 +110,11 @@ defmodule Compos.LLMToolsTest do
       assert out =~ "closest name"
 
       # internals stay out of the default scope, reachable via scope "all"
-      out = eval!(~s{(llm-tool-call "apropos" (list 'query "chat-blocks-push"))})
-      refute out =~ "chat-blocks-push!"
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "agent-block-push"))})
+      refute out =~ "agent-block-push!"
 
-      out = eval!(~s{(llm-tool-call "apropos" (list 'query "chat-blocks-push" 'scope "all"))})
-      assert out =~ "chat-blocks-push!"
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "agent-block-push" 'scope "all"))})
+      assert out =~ "agent-block-push!"
 
       # a category lists one area whole
       out = eval!(~s{(llm-tool-call "apropos" (list 'query "" 'category "discovery"))})

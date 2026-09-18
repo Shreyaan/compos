@@ -518,7 +518,7 @@
   (let ((full (agent-thought-full slug)))
     (when (and full (member slug (agent-list)))
       (let ((buf (agent-buf slug)))
-        (agent-clear-waiting! slug)
+        (agent-clear-waiting! buf)
         (let ((start (agent-render! slug full "agent-thought")))
           (agent-block-extend-or-push! buf start (agent-mark slug) "thought"))))
     (agent-thought-forget! slug)))
@@ -563,9 +563,8 @@
         ;; the waiting line is invisible text in the buffer
         (agent-block-push! buf start end "waiting" '())))))
 
-(define (agent-clear-waiting! slug)
-  (let* ((buf (agent-buf slug))
-         (w (buffer-local buf 'agent-waiting)))
+(define (agent-clear-waiting! buf)
+  (let ((w (buffer-local buf 'agent-waiting)))
     (when w
       (let* ((start (car w))
              (end (car (cdr w)))
@@ -627,7 +626,7 @@
                          (if brk (+ brk 2) #f))
                        (string-byte-length tail))))
         (when (and keep (> keep 0))
-          (agent-clear-waiting! slug)
+          (agent-clear-waiting! buf)
           (let* ((from (buffer-local buf 'agent-prose-from))
                  (cut (+ from keep)))
             (agent-block-extend-or-push! buf from cut "prose")

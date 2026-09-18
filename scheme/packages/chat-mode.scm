@@ -1181,7 +1181,7 @@
               (buffer-set-local! buf 'modeline-info #f)
               (buffer-set-local! buf 'modeline-info-command #f)
               (buffer-set-local! buf 'modeline-preset #f)))
-        (chat-clear-waiting! buf)
+        (agent-clear-waiting! buf)
         ;; ONE key set for every chat: RET is agent-send everywhere — a
         ;; chat without a runtime attaches the api backend on first send
         (when (boundp (quote agent-install-keys!))
@@ -1315,7 +1315,7 @@
 (define (chat-surface-init! buf title lines)
   (let ((help (string-append title "\n" lines)))
     (buffer-append! buf help)
-    (chat-blocks-push! buf 0 (string-byte-length help) "meta" '())
+    (agent-block-push! buf 0 (string-byte-length help) "meta" '())
     (buffer-set-local! buf 'agent-saved-mark (string-byte-length help))
     (buffer-set-local! buf 'agent-marker-bytes 0)
     buf))
@@ -1503,7 +1503,7 @@
                                   ((equal? role "status")
                                    (string-append "\n" (cadr t) "\n\n"))
                                   (else (string-append (cadr t) "\n"))))))
-              (chat-blocks-push! buf start (chat-mark buf)
+              (agent-block-push! buf start (chat-mark buf)
                 (cond ((equal? role "user") "user")
                       ((equal? role "status") "status")
                       (else "prose"))
@@ -1595,7 +1595,7 @@
 ;; "queued" blocks now — but stays listed so old sessions' stale values
 ;; are still swept)
 (define chat-runtime-locals
-  '(agent-slug agent-queued agent-waiting chat-waiting chat-activity
+  '(agent-slug agent-queued agent-waiting chat-activity
     inline-target inline-turn
     agent-cancelling agent-seed-context agent-tool-bodies
     agent-turn-text agent-turn-any chat-compacting
@@ -2203,16 +2203,6 @@
     (if (> saved size)
         (begin (buffer-set-local! buf 'agent-saved-mark size) size)
         saved)))
-
-(define (chat-blocks-push! buf start end kind meta)
-  (buffer-set-local! buf 'agent-blocks
-    (cons (append (list start end kind) meta)
-          (or (buffer-local buf 'agent-blocks) '()))))
-
-(define (chat-blocks-drop! buf kind)
-  (buffer-set-local! buf 'agent-blocks
-    (filter (lambda (b) (not (equal? (car (cdr (cdr b))) kind)))
-            (or (buffer-local buf 'agent-blocks) '()))))
 
 ;; append at the mark — after every recorded range, so stored offsets
 ;; never shift; the input region past the marker slides along

@@ -407,25 +407,6 @@
                                         (number->string n) " orphaned tool "
                                         (if (= n 1) "block" "blocks")))))))))
 
-(define (chat-clear-waiting! buf)
-  (let ((w (buffer-local buf 'chat-waiting)))
-    (when w
-      (let* ((start (car w))
-             (end (car (cdr w)))
-             (size (buffer-size buf))
-             ;; Positions are runtime state and may be stale after edits or
-             ;; an interrupted legacy turn. Delete only the exact chrome we
-             ;; put there; never trust the range enough to delete prose.
-             (valid? (and (>= start 0) (>= end start) (<= end size)
-                          (equal? (substring-bytes (buffer-text buf) start end)
-                                  "⋯ thinking\n"))))
-        (when valid?
-          (buffer-delete-range! buf start (- end start))
-          (buffer-set-local! buf 'agent-saved-mark
-            (- (chat-mark buf) (- end start)))))
-      (chat-blocks-drop! buf "waiting")
-      (buffer-set-local! buf 'chat-waiting #f))))
-
 ;; presets (packages/mcp.scm) add MCP tool specs per chat; usage lands in
 ;; buffer-locals so every chat knows what it cost (persists with the chat)
 (define (chat-extra-specs buf)
@@ -1470,7 +1451,7 @@
     (let* ((rendered (string-append "\n" text "\n\n"))
            (start (chat-render! buf rendered))
            (end (+ start (string-byte-length rendered))))
-      (chat-blocks-push! buf start end "status" '())
+      (agent-block-push! buf start end "status" '())
       (when (boundp 'agent-add-overlay!)
         (agent-add-overlay! buf start end "agent-meta"))))
   ;; the bar shows the paragraph now, not after the next command
