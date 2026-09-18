@@ -1086,6 +1086,12 @@
 
 (add-hook! 'buffer-shown-hook 'dashboard--catchup!)
 (add-hook! 'window-configuration-change-hook 'dashboard--catchup-visible!)
+;; The state tag lives in this line and the window's ground reads it, so a
+;; buffer that enters or leaves the editing state renders its line again at
+;; once: a cua window sits, a focus window floats. Nothing else invalidates
+;; the line when the state's maps go in or out.
+(add-hook! 'editing-state-hook 'dashboard--sync!)
+
 ;; The dashboard line reads the model, lane and preset from locals, so an
 ;; llm-config change re-renders the headline. llm-config runs this hook on
 ;; exit; the handler refreshes the configured buffer and its session.
