@@ -32,6 +32,10 @@ list to make a run green.
 | compos_ui, 15 of 300 (preview_cursor 1, peek_card 2, app_server 1 (spreadsheet-open! unbound), agent_view 3, dismiss 2, composml_list 1, island 1, buffer_link 1, composml_text_list 1, editor_live 2 (the modeline name and minor-mode clicks)) | 15 | the same 15 names at 47735078 in a worktree with its own build, before the live-dashboard removal of 2026-09-19; sentry--apply-detail! unbound in two of them |
 | compos_ui agent_view_test.exs | 3 of 13 | the verbosity control, the text-scale rule and the modeline name markup; red at HEAD 53f4b07b |
 | desktop_session_restart_test.exs | 1 | "every live buffer gets its Scheme runtime rebuilt, not only the visible ones": one Session death recovered 2 times; red 3 of 3 alone at HEAD 22ba6cd2 in a worktree with its own build |
+| listing_window_test.exs | 2 | "ibuffer opens here with an inert card and retains the listing on quit", "ichat opens here ..."; red at 243fc29b in a worktree with its own build |
+| chat_peek_render_test.exs | 1 | "peek enables an arbitrary source mode and preserves its rich projection"; red at 243fc29b |
+| spreadsheet_mode_test.exs | 1 | "running spreadsheet mode on the JSON source does not replace its data": the JSON buffer is pretty-printed; red at 243fc29b |
+| compos_ui composml_text_list_test.exs | 0 to 1 | "ibuffer owns semantic records while retaining its text lines and navigation": `list-refresh!` of *ibuffer* raises substring-bytes on an empty buffer, 2 of 9 runs after step 4 and 0 of 7 at 243fc29b; no step 4 change touches the list path; intermittent |
 | desktop_restore_test.exs | 2 | "every literal mode-name write names a registered mode": ibuffer-test.scm writes `aa-other-mode` (d293b2d9) and no define-mode registers it; "LLM configuration history survives desktop restore": the history rows are plists now, the test expects bare lists |
 
 ## Scheme (priv/tests and the package tests)

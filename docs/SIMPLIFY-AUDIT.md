@@ -1539,6 +1539,72 @@ through the LiveView end to end in the test client):
 | .ag-* and .agent-view CSS rules (layouts.ex / mobile_layouts.ex) | 85 / 51 |
 | Markdown: markdown.ex, markdown/html.ex, the Earmark path in editor_live.ex, oembed.ex | 181, 822, ~570, 188 |
 
+**Step 4, done in a worktree (2026-09-19).** Six code commits on
+243fc29b, one per sub-item, plus the script ejection the owner ruled
+("all js in its own files"; the doom and spreadsheet scripts "should
+not be in core").
+
+- *(a) done.* `Markdown.Html.document/5` draws the preview page; the
+  page, the palette and the transcript prose (`Html.prose/1`) are core.
+  Earmark stays as `Markdown.Classic`: the Markdown grammar is not
+  compiled in, so a home without it draws every preview and chat
+  paragraph through Earmark (a screenshot of such a home shows the
+  tables and emphasis a plain fallback would lose).
+- *(e) done.* app.js and editor.css in priv/static, loaded with the boot
+  id; Hotload's `:hotload_page_assets` watch bumps the boot id on a
+  save. The files keep the parsed script byte for byte (same syntax
+  tree). The handheld layout (mobile.js, mobile.css) and the app
+  origin's bridge (app-bridge.js) followed.
+- *(c) done.* The window mode line is the `mode-line-format` custom
+  (appearance.scm), a list of constructs; the view fills `%I %l %c %p`.
+  The echo hints (`echo-key-hints`), the workspace bar help and the
+  more-tab title reach every frame through `frame-chrome-set!`; the
+  transient default legend is Scheme data. `modeline_group` is gone
+  from editor.ex. The frame header's wordmark and tabs markup stay in
+  the view.
+- *(d) done in part.* `Compos.Core.Display.window/3` answers a text
+  window's rows, memoized by version in an entry the caller keeps; the
+  LiveView and the handheld view (through `decorate_tree`) draw it. A
+  peek card builds at most 2,000 rows. Left: the memo is still one per
+  client process, not one per window in core; /raw serves text and does
+  not read rows.
+- *(b) left.* The fold needs the Scheme half in chat-mode.scm and
+  agent-fleet.scm, which another session edits now, and four block
+  kinds the generic renderer lacks (raw HTML prose, a disclosure card,
+  a caret input, the reference-equal list the chat-input-perf fix
+  needs). It is a design of its own, not a day's move.
+- *Scripts.* The spreadsheet grid script is
+  scheme/packages/spreadsheet/spreadsheet.js, served from the buffer's
+  `app-directory`; the doom page script is scheme/packages/doom/doom.js,
+  copied beside doom.html. The app server's three spreadsheet routes
+  are one bridge, `_compos/app`, that runs the keyed `app-request` hook.
+  No `<script>` with a body is left in apps/ or scheme/ outside tests.
+
+Measured the same way as the design (render_bench, p50 microseconds, the
+second of two alternating runs):
+
+| window | state before / after | cold before / after | key before / after |
+|---|---|---|---|
+| file, C-f / C-b | 46 / 47 | 451 / 453 | 10,244 / 10,337 |
+| file, typing | 88 / 81 | 456 / 514 | 11,187 / 11,077 |
+| chat, 300 blocks | 64 / 56 | 138,487 / 135,541 | 23,648 / 23,630 |
+| blocks, 200 rows | 73 / 89 | 236 / 234 | 6,152 / 6,308 |
+| markdown page | 15 / 16 | 69,946 / 69,147 | 4,704 / 4,744 |
+
+The per-key cost does not change; the render path moved, it did not
+grow. The root page is 247,222 bytes before and 1,579 after, with the
+script and the stylesheet cached by the browser; the handheld root is
+38,163 and 1,285. Lines: editor_live.ex 4,335 to 2,753, layouts.ex
+4,873 to 50, mobile_layouts.ex 645 to 55, editor.ex 3,115 to 3,100;
+new in core: display.ex 557, markdown/classic.ex 886, markdown/html.ex
+822 to 1,138. Screenshots of a file, a chat, ibuffer, a Markdown page
+and the handheld view, at 243fc29b and after, differ only in the clock
+and memory figures of the header line and the ages in ibuffer.
+
+Landing needs a daemon restart: the Endpoint's static list and the
+Hotload roots are read at start, and the root layout now links files
+that a running page does not have.
+
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
 
