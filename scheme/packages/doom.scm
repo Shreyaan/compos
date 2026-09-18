@@ -49,7 +49,8 @@
   (filter (lambda (f) (not (file-exists? (doom--file f)))) *doom-assets*))
 
 (define (doom--installed?) (and (null? (doom--missing))
-                                (file-exists? (doom--file "doom.html"))))
+                                (file-exists? (doom--file "doom.html"))
+                                (file-exists? (doom--file "doom.js"))))
 
 ;;; --- the page -----------------------------------------------------------------
 
@@ -86,54 +87,10 @@
 </style>
 </head>
 <body>
-<div id=\"wrap\"><canvas id=\"canvas\" tabindex=\"1\" oncontextmenu=\"event.preventDefault()\"></canvas></div>
+<div id=\"wrap\"><canvas id=\"canvas\" tabindex=\"1\"></canvas></div>
 <div id=\"status\">loading doom<div class=\"sub\">arrows or W A S D move, Ctrl fires, SPC opens, Ctrl-G gives the keyboard back to compos</div></div>
 
-<script>
-(function () {
-  var statusEl = document.getElementById(\"status\");
-  var canvas = document.getElementById(\"canvas\");
-
-  function say(text) {
-    if (!text) return;
-    statusEl.firstChild.nodeValue = text;
-  }
-
-  // The canvas must hold the keyboard, or SDL sees nothing. A click
-  // anywhere in the frame gives it back.
-  function focusCanvas() { try { canvas.focus(); } catch (e) {} }
-  window.addEventListener(\"click\", focusCanvas);
-  window.addEventListener(\"focus\", focusCanvas);
-
-  window.Module = {
-    canvas: canvas,
-    noInitialRun: true,
-    preRun: [function () {
-      Module.FS.createPreloadedFile(\"\", \"doom1.wad\", \"doom1.wad\", true, true);
-      Module.FS.createPreloadedFile(\"\", \"default.cfg\", \"default.cfg\", true, true);
-    }],
-    print: function (text) { console.log(text); },
-    printErr: function (text) { console.error(text); },
-    setStatus: function (text) { say(text || \"starting\"); },
-    onRuntimeInitialized: function () {
-      statusEl.className = \"gone\";
-      focusCanvas();
-      // the engine glue defines callMain as a plain global, not on Module
-      var main = window.callMain || Module.callMain;
-      main([\"-iwad\", \"doom1.wad\", \"-window\", \"-nogui\", \"-nomusic\",
-            \"-config\", \"default.cfg\"]);
-      setTimeout(focusCanvas, 300);
-    },
-    onAbort: function (what) { statusEl.className = \"\"; say(\"doom stopped: \" + what); }
-  };
-
-  window.addEventListener(\"error\", function (e) {
-    statusEl.className = \"\";
-    say(\"doom failed to start\");
-    console.error(e && e.error);
-  });
-})();
-</script>
+<script src=\"doom.js\"></script>
 <script src=\"websockets-doom.js\"></script>
 </body>
 </html>
@@ -170,7 +127,7 @@
 
 (define (doom--install! k)
   (make-directory! (doom--dir))
-  (write-file! (doom--file "doom.html") *doom-page*)
+  (doom--sync-page!)
   (let ((want (doom--missing)))
     (if (null? want)
         (k #t)
@@ -178,12 +135,17 @@
 
 ;;; --- opening the game ---------------------------------------------------------
 
-;; The page is code, and this package owns it. A page that does not match
-;; the package is stale, so put the current one back before the app runs.
+;; The page and its script are code, and this package owns them. A copy
+;; that does not match the package is stale, so put the current one back
+;; before the app runs. The script lives beside this file as doom/doom.js.
+(define (doom--sync-file! name text)
+  (let ((file (doom--file name)))
+    (unless (and (file-exists? file) (equal? (read-file file) text))
+      (write-file! file text))))
+
 (define (doom--sync-page!)
-  (let ((page (doom--file "doom.html")))
-    (unless (and (file-exists? page) (equal? (read-file page) *doom-page*))
-      (write-file! page *doom-page*))))
+  (doom--sync-file! "doom.html" *doom-page*)
+  (doom--sync-file! "doom.js" (read-file (locate-library "doom/doom.js"))))
 
 (define (doom--open!)
   (let ((page (doom--file "doom.html")))

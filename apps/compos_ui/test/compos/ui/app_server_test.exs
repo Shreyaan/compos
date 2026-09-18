@@ -119,7 +119,7 @@ defmodule Compos.Ui.AppServerTest do
   test "the spreadsheet bridge reads and writes through Scheme", %{dir: dir} do
     path = Path.join(dir, "workbook.sheet.json")
     {:ok, sheet} = Compos.Core.Session.call_named("spreadsheet-open!", [path])
-    endpoint = url(sheet, "/_compos/spreadsheet")
+    endpoint = url(sheet, "/_compos/app")
 
     read = get(endpoint)
     assert read.status == 200
@@ -153,7 +153,44 @@ defmodule Compos.Ui.AppServerTest do
     Compos.Core.kill_buffer(sheet)
   end
 
-  test "the spreadsheet bridge refuses an ordinary app", %{buffer: b} do
-    assert get(url(b, "/_compos/spreadsheet")).status == 404
+  test "the app bridge answers nothing for an app no package owns", %{buffer: b} do
+    assert get(url(b, "/_compos/app")).status == 404
+  end
+
+  # One door for every package: the app server hands the request to Scheme
+  # as data, and the handler the package keys on 'app-request answers.
+  test "the app bridge hands the request to the package's handler", %{buffer: b} do
+    {:ok, _} =
+      Compos.Core.Session.eval("""
+      (add-hook! '(app-request zz-app-test)
+        (lambda (buf method body)
+          (and (equal? buf #{inspect(b)}) (list 201 (string-append method ":" body)))))
+      """)
+
+    on_exit(fn -> Compos.Core.Session.eval("(remove-hook! '(app-request zz-app-test))") end)
+
+    got = get(url(b, "/_compos/app"))
+    assert got.status == 201
+    assert got.resp_body == "GET:"
+    assert put(url(b, "/_compos/app"), "x").resp_body == "PUT:x"
+    assert post(url(b, "/_compos/app"), "y").resp_body == "POST:y"
+    assert get("/a/wrong/b/#{URI.encode(b, &URI.char_unreserved?/1)}/_compos/app").status == 404
+  end
+
+  # A page a package writes has no file, so its relative files come from
+  # the directory the package names.
+  test "a buffer with no file serves relative files from its app-directory", %{dir: dir} do
+    name = "*zz-app-dir-#{System.unique_integer([:positive])}*"
+    {:ok, _} = Compos.Core.create_buffer(name)
+    Buffer.append(name, "<p>x</p>", source: :editor)
+    Buffer.set_local(name, "render-mode", "app")
+    on_exit(fn -> Compos.Core.kill_buffer(name) end)
+
+    assert get(url(name, "/app.js")).status == 404
+    Buffer.set_local(name, "app-directory", dir)
+    got = get(url(name, "/app.js"))
+    assert got.status == 200
+    assert got.resp_body == "console.log(1)"
+    assert get(url(name, "/../outside.txt")).status == 404
   end
 end

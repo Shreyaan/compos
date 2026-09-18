@@ -202,3 +202,37 @@
       (set! *spreadsheet-backends*
         (remove (lambda (entry) (equal? (car entry) backend))
                 *spreadsheet-backends*)))))
+
+(deftest 'the-app-bridge-reaches-a-spreadsheet-through-its-handler
+  "app-request hands the HTTP method to the spreadsheet handler, and an app no package owns gets a 404"
+  (lambda ()
+    (let ((buffer "*zz-sheet-bridge*")
+          (other "*zz-sheet-bridge-other*")
+          (backend 'zz-sheet-bridge-memory)
+          (stored "{\"version\":1,\"sheets\":[{\"name\":\"Bridge\",\"data\":[[1]]}]}"))
+      (spreadsheet-register-backend! backend
+        (lambda (source) stored)
+        (lambda (source text) (set! stored text) #t))
+      (buffer-create buffer)
+      (buffer-create other)
+      (buffer-set-local! buffer 'mode-name "spreadsheet-mode")
+      (buffer-set-local! buffer 'spreadsheet-backend backend)
+      (buffer-set-local! buffer 'spreadsheet-source "memory:bridge")
+      (check-contains! (cadr (app-request buffer "GET" "")) "Bridge" "GET reads the workbook")
+      (check-equal! (car (app-request buffer "PUT" "{\"version\":1,\"sheets\":[{\"name\":\"Put\",\"data\":[[2]]}]}"))
+                    200 "PUT writes it")
+      (check-contains! stored "Put" "the backend holds the write")
+      (check-equal! (car (app-request other "GET" "")) 404 "no handler answers for another buffer")
+      (buffer-kill! buffer)
+      (buffer-kill! other)
+      (set! *spreadsheet-backends*
+        (remove (lambda (entry) (equal? (car entry) backend)) *spreadsheet-backends*)))))
+
+(deftest 'the-grid-page-loads-its-script-from-the-package-directory
+  "the page has no inline script; the app-directory holds spreadsheet.js"
+  (lambda ()
+    (let ((dir (spreadsheet--app-directory)))
+      (check-true! (string? dir) "the package directory is on load-path")
+      (check-true! (file-exists? (string-append dir "/spreadsheet.js")) "the script is there")
+      (check-contains! (spreadsheet--app-html) "<script src=\"spreadsheet.js\"></script>" "the page names it")
+      (check-false! (string-contains? (spreadsheet--app-html) "<script>") "and holds no inline script"))))

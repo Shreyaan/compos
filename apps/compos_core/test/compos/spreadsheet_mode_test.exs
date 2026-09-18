@@ -38,57 +38,66 @@ defmodule Compos.SpreadsheetModeTest do
     assert Jason.decode!(File.read!(path))["version"] == 1
     assert Buffer.get_local(buffer, "mode-name") == "spreadsheet-mode"
     assert Buffer.get_local(buffer, "render-mode") == "app"
-    assert Buffer.text(buffer) =~ "@univerjs/presets@0.25.1"
-    assert Buffer.text(buffer) =~ "@univerjs/preset-sheets-core@0.25.1"
-    assert Buffer.text(buffer) =~ "@univerjs/preset-sheets-drawing@0.25.1"
-    assert Buffer.text(buffer) =~ "UniverSheetsCorePreset"
-    assert Buffer.text(buffer) =~ "UniverSheetsDrawingPreset"
-    assert Buffer.text(buffer) =~ "api.registerComponent('ComposChart',ComposChart)"
+    page = Buffer.text(buffer)
+    # the grid script is a file beside the package, served from the
+    # buffer's app-directory; the page names it and carries the theme
+    dir = Buffer.get_local(buffer, "app-directory")
+    script = File.read!(Path.join(dir, "spreadsheet.js"))
+    assert page =~ ~s(<script src="spreadsheet.js"></script>)
+    refute page =~ "<script>"
+    assert page =~ "@univerjs/presets@0.25.1"
+    assert page =~ "@univerjs/preset-sheets-core@0.25.1"
+    assert page =~ "@univerjs/preset-sheets-drawing@0.25.1"
+    assert script =~ "UniverSheetsCorePreset"
+    assert script =~ "UniverSheetsDrawingPreset"
+    assert script =~ "api.registerComponent('ComposChart',ComposChart)"
+    assert script =~ "var dark=document.documentElement.dataset.theme==='dark'"
+    assert script =~ "create(Object.assign(dark?{darkMode:true}:{},{"
+    assert script =~ "dark?'dark':null"
+    assert script =~ "if(dark&&api.toggleDarkMode)api.toggleDarkMode(true)"
     assert {:ok, _} = Session.eval(~s{(load-theme "compos-dark")})
+    assert Buffer.text(buffer) =~ ~s(<html data-theme="dark">)
     assert Buffer.text(buffer) =~ ~s(<meta name="color-scheme" content="dark">)
     assert Buffer.text(buffer) =~ "color-scheme:dark"
-    assert Buffer.text(buffer) =~ "made=create({darkMode:true,locale:"
-    assert Buffer.text(buffer) =~ "echarts.init(ref.current,'dark')"
-    assert Buffer.text(buffer) =~ "if(api.toggleDarkMode)api.toggleDarkMode(true)"
     refute Buffer.text(buffer) =~ "prefers-color-scheme"
 
     assert {:ok, _} = Session.eval(~s{(load-theme "paper")})
+    assert Buffer.text(buffer) =~ ~s(<html data-theme="light">)
     assert Buffer.text(buffer) =~ ~s(<meta name="color-scheme" content="light">)
     assert Buffer.text(buffer) =~ "color-scheme:light"
-    assert Buffer.text(buffer) =~ "made=create({locale:"
-    refute Buffer.text(buffer) =~ "made=create({darkMode:true,locale:"
-    assert Buffer.text(buffer) =~ "echarts.init(ref.current,null)"
-    refute Buffer.text(buffer) =~ "if(api.toggleDarkMode)api.toggleDarkMode(true)"
 
     assert {:ok, _} = Session.eval(~s{(load-theme "compos-dark")})
-    assert Buffer.text(buffer) =~ "addFloatDomToPosition"
-    refute Buffer.text(buffer) =~ "addFloatDomToRange"
-    assert Buffer.text(buffer) =~ "initialChartPosition"
-    assert Buffer.text(buffer) =~ "getCellRect()"
-    assert Buffer.text(buffer) =~ "allowTransform:true"
-    assert Buffer.text(buffer) =~ "eventPassThrough:true"
-    assert Buffer.text(buffer) =~ "initPosition:initialChartPosition(sheet,spec.anchor)"
-    assert Buffer.text(buffer) =~ "api.Enum.DrawingType.DRAWING_CHART"
-    assert Buffer.text(buffer) =~ "existing.type!==chartType"
+    assert script =~ "addFloatDomToPosition"
+    refute script =~ "addFloatDomToRange"
+    assert script =~ "initialChartPosition"
+    assert script =~ "getCellRect()"
+    assert script =~ "allowTransform:true"
+    assert script =~ "eventPassThrough:true"
+    assert script =~ "initPosition:initialChartPosition(sheet,spec.anchor)"
+    assert script =~ "api.Enum.DrawingType.DRAWING_CHART"
+    assert script =~ "existing.type!==chartType"
     assert Buffer.text(buffer) =~ ".compos-chart>*{pointer-events:none}"
-    refute Buffer.text(buffer) =~ "allowTransform:false"
-    assert Buffer.text(buffer) =~ "getFloatDomById"
-    assert Buffer.text(buffer) =~ "updateFloatDom"
-    assert Buffer.text(buffer) =~ "getAllFloatDoms"
-    assert Buffer.text(buffer) =~ "removeFloatDom"
-    assert Buffer.text(buffer) =~ "getDisplayValues()"
-    assert Buffer.text(buffer) =~ "ResizeObserver"
-    assert Buffer.text(buffer) =~ "chartRefreshTimer=setTimeout"
-    assert Buffer.text(buffer) =~ "api.Event.LifeCycleChanged"
-    assert Buffer.text(buffer) =~ "api.Enum.LifecycleStages.Rendered"
-    assert Buffer.text(buffer) =~ "markChartDrawn(spec.id)"
+    refute script =~ "allowTransform:false"
+    assert script =~ "getFloatDomById"
+    assert script =~ "updateFloatDom"
+    assert script =~ "getAllFloatDoms"
+    assert script =~ "removeFloatDom"
+    assert script =~ "getDisplayValues()"
+    assert script =~ "ResizeObserver"
+    assert script =~ "chartRefreshTimer=setTimeout"
+    assert script =~ "api.Event.LifeCycleChanged"
+    assert script =~ "api.Enum.LifecycleStages.Rendered"
+    assert script =~ "markChartDrawn(spec.id)"
     assert Buffer.text(buffer) =~ ~s(id="app" tabindex="0")
-    assert Buffer.text(buffer) =~ "univerSnapshot"
-    assert Buffer.text(buffer) =~ "book.save()"
-    assert Buffer.text(buffer) =~ "getRange('A1').activate()"
-    assert Buffer.text(buffer) =~ "compos:'request-focus'"
-    assert Buffer.text(buffer) =~ "book.setActiveSheet(sheets[wanted])"
-    assert Buffer.text(buffer) =~ "_compos/spreadsheet"
+    assert script =~ "univerSnapshot"
+    assert script =~ "book.save()"
+    assert script =~ "getRange('A1').activate()"
+    assert script =~ "compos:'request-focus'"
+    assert script =~ "book.setActiveSheet(sheets[wanted])"
+    assert script =~ "var endpoint='_compos/app'"
+
+    # the app bridge reaches the spreadsheet through the one door
+    assert [200, _] = call!("app-request", [buffer, "GET", ""])
 
     stored = File.read!(path)
     assert :ok = KeyDispatch.handle_key("C-x")
@@ -294,7 +303,7 @@ defmodule Compos.SpreadsheetModeTest do
     Buffer.set_local(buffer, "render-mode", false)
 
     assert {:ok, _} = Session.eval(~s{(set-mode! "spreadsheet-mode")})
-    assert Buffer.text(buffer) =~ "UniverSheetsCorePreset"
+    assert Buffer.text(buffer) =~ ~s(<script src="spreadsheet.js"></script>)
     assert Buffer.get_local(buffer, "render-mode") == "app"
 
     generation = Buffer.get_local(buffer, "app-generation")

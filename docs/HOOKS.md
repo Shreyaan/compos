@@ -75,6 +75,7 @@ dispatcher runs one key or every key with the same `run-hook` call.
 | `find-file-group-reader` | a package name | RECEIVE | the first reader runs; none means RECEIVE gets the frame's group (project.scm) |
 | `buffer-kill-repair` | a package name | NAME | the first thunk answered runs after the kill (groups.scm) |
 | `switch-buffer-source` | a package name | CANDIDATES | the first source shapes the switcher's pool (chrome.scm) |
+| `app-request` | a package name | BUF METHOD BODY | the first (STATUS BODY) answered owns an app page's `_compos/app` request; none is a 404 (preview.scm, spreadsheet.scm) |
 
 `add-paste-hook!` is not a hook on purpose: it keys a handler by mode and
 runs the first that answers.

@@ -5,8 +5,10 @@ defmodule Compos.Ui.AppServer do
   The editor is one origin (localhost:4004). A previewed app is a different
   one (127.0.0.1:4005). The browser keeps the two apart, so the app runs its
   own JavaScript, keeps its own storage, and cannot read the editor. This
-  server answers two things and nothing else: the live text of a buffer in
-  "app" render-mode, and the files beside that buffer's file.
+  server answers three things and nothing else: the live text of a buffer
+  in "app" render-mode, the files beside that buffer's file (or in the
+  'app-directory of a buffer with no file), and the app bridge
+  (`_compos/app`), which hands a request to the package's Scheme handler.
 
   The URL carries a boot token in its PATH, not in a query string, because
   every relative URL in the app (`<script src="app.js">`, `fetch("d.json")`)
@@ -40,22 +42,19 @@ defmodule Compos.Ui.AppServer do
     end
   end
 
-  get "/a/:tok/b/:buf/_compos/spreadsheet" do
-    spreadsheet_request(conn, tok, buf, "read", "")
+  # The app bridge: the page talks back to the package that made it. The
+  # method and the body go to Scheme as data (app-request, preview.scm),
+  # and the package's handler answers (STATUS BODY).
+  get "/a/:tok/b/:buf/_compos/app" do
+    app_request(conn, tok, buf, "GET", "")
   end
 
-  put "/a/:tok/b/:buf/_compos/spreadsheet" do
-    case read_request_body(conn) do
-      {:ok, body, conn} -> spreadsheet_request(conn, tok, buf, "write", body)
-      {:error, conn} -> send_resp(conn, 413, ~s({"error":"workbook is too large"}))
-    end
+  put "/a/:tok/b/:buf/_compos/app" do
+    with_body(conn, fn conn, body -> app_request(conn, tok, buf, "PUT", body) end)
   end
 
-  post "/a/:tok/b/:buf/_compos/spreadsheet" do
-    case read_request_body(conn) do
-      {:ok, body, conn} -> spreadsheet_request(conn, tok, buf, "chart-status", body)
-      {:error, conn} -> send_resp(conn, 413, ~s({"error":"chart status is too large"}))
-    end
+  post "/a/:tok/b/:buf/_compos/app" do
+    with_body(conn, fn conn, body -> app_request(conn, tok, buf, "POST", body) end)
   end
 
   get "/a/:tok/b/:buf/*rest" do
@@ -110,12 +109,29 @@ defmodule Compos.Ui.AppServer do
   end
 
   defp safe_path(buffer, rest) do
-    with path when is_binary(path) <- buffer_path(buffer) do
-      root = path |> Path.expand() |> Path.dirname()
+    with root when is_binary(root) <- app_root(buffer) do
       want = Path.expand(Path.join([root | rest]))
 
       if inside?(root, want) and File.regular?(want), do: want
     end
+  end
+
+  # The directory an app's relative files come from: its file's own, or,
+  # for a buffer with no file (a page a package writes), the
+  # 'app-directory local the package sets.
+  defp app_root(buffer) do
+    case buffer_path(buffer) do
+      path when is_binary(path) ->
+        Path.dirname(path)
+
+      nil ->
+        case Buffer.locals(buffer)["app-directory"] do
+          dir when is_binary(dir) -> if File.dir?(dir), do: Path.expand(dir)
+          _ -> nil
+        end
+    end
+  catch
+    :exit, _ -> nil
   end
 
   defp inside?(root, want), do: want == root or String.starts_with?(want, root <> "/")
@@ -149,25 +165,26 @@ defmodule Compos.Ui.AppServer do
     |> send_resp(200, body)
   end
 
-  # An app cannot write files from its isolated origin. This narrow bridge
-  # sends workbook requests to Scheme, where the selected backend owns policy.
-  defp spreadsheet_request(conn, tok, buffer, method, body) do
+  # An app cannot write files from its isolated origin. The bridge sends
+  # its request to Scheme, where the package that owns the buffer decides.
+  defp app_request(conn, tok, buffer, method, body) do
     with true <- Plug.Crypto.secure_compare(tok, token()),
          true <- app_buffer?(buffer),
          {:ok, [status, response]} when is_integer(status) and is_binary(response) <-
-           Session.call_named(
-             "spreadsheet-app-request",
-             [buffer, method, body],
-             nil,
-             30_000,
-             {:spreadsheet, buffer}
-           ) do
+           Session.call_named("app-request", [buffer, method, body], nil, 30_000, {:app, buffer}) do
       conn
       |> put_resp_header("cache-control", "no-store")
       |> put_resp_content_type("application/json")
       |> send_resp(status, response)
     else
-      _ -> send_resp(conn, 404, ~s({"error":"no spreadsheet"}))
+      _ -> send_resp(conn, 404, ~s({"error":"no app answers"}))
+    end
+  end
+
+  defp with_body(conn, fun) do
+    case read_request_body(conn) do
+      {:ok, body, conn} -> fun.(conn, body)
+      {:error, conn} -> send_resp(conn, 413, ~s({"error":"the request is too large"}))
     end
   end
 

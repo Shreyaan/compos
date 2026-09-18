@@ -484,6 +484,16 @@
           ((app-buffer? (car bs)) (loop (cdr bs) (cons (car bs) acc)))
           (else (loop (cdr bs) acc)))))
 
+;; An app talks back to the package that made it through one door. The
+;; app server hands GET, PUT and POST on the page's relative URL
+;; _compos/app to this function as data. A package keys one handler on
+;; 'app-request, (add-hook! '(app-request NAME) FN); FN answers (STATUS
+;; BODY) for a buffer of its own and #f for any other. The first answer
+;; wins; no answer is a 404.
+(define (app-request buf method body)
+  (or (run-hook-with-args-until-success 'app-request buf method body)
+      (list 404 (json-encode (list 'error "No package answers for this app.")))))
+
 (define-command "app-preview" "Run the current buffer as an HTML app"
   (lambda ()
     (let ((buf (current-buffer)))
