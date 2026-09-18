@@ -397,59 +397,79 @@
             (llm-mode-reset-runtime! buf #t)
             (message (string-append "M-o · " model))))))))
 
-;; Inline/document requests use the same session facade, connector resolution,
-;; normalized event stream and tool loop as chat; only their presentation
-;; differs. One entry exists while the buffer's durable session is running a
-;; turn; completion removes the entry, not the session.
-(define *llm-inline-sends* '())
+;; The live inline turn is data on the document's chat, not a registry of
+;; its own: the chat knows its document ('inline-target) and its session,
+;; so the turn ('inline-turn, a runtime local) only says which response
+;; block grows and what arrived. One entry exists while the session runs
+;; a turn for the document; the finish clears it, not the session.
+(define (llm-inline--chat id)
+  (let ((chat (agent-buf id)))
+    (and chat (buffer-exists? chat) chat)))
 
-(define (llm-inline-put! entry)
-  (let ((id (car entry)))
-    (set! *llm-inline-sends*
-      (cons entry
-            (remove (lambda (e) (equal? (car e) id)) *llm-inline-sends*)))))
+(define (llm-inline--doc id)
+  (let* ((chat (llm-inline--chat id))
+         (doc (and chat (buffer-local chat 'inline-target))))
+    (and doc (buffer-exists? doc) doc)))
 
+(define (llm-inline--turn id)
+  (let ((chat (llm-inline--chat id)))
+    (and chat (buffer-local chat 'inline-turn))))
+
+(define (llm-inline--turn-set! id turn)
+  (let ((chat (llm-inline--chat id)))
+    (when chat (buffer-set-local! chat 'inline-turn turn))))
+
+;; TURN: (response ID insert-at N context-size N streamed BOOL text "" error #f)
+(define (llm-inline-begin! id response-id insert-at context-size)
+  (llm-inline--turn-set! id
+    (list 'response response-id 'insert-at insert-at 'context-size context-size
+          'streamed #f 'text "" 'error #f)))
+
+;; the response belongs in its document as it arrives: waiting for the
+;; turn-end hid useful prose when a later tool call stalled or failed
 (define (llm-inline-add-chunk! id text)
-  (let ((e (assoc id *llm-inline-sends*)))
-    (when (and e (not (equal? text "")))
-      ;; (id buffer completion accumulated error chunk-handler)
-      (llm-inline-put!
-        (list id (car (cdr e)) (car (cdr (cdr e)))
-              (string-append (car (cdr (cdr (cdr e)))) text)
-              (car (cdr (cdr (cdr (cdr e)))))
-              (car (cdr (cdr (cdr (cdr (cdr e))))))))
-      ;; The response belongs in its document as it arrives. Waiting for
-      ;; turn-end hid useful prose when a later tool call stalled or failed.
-      ((car (cdr (cdr (cdr (cdr (cdr e)))))) text))))
+  (let ((turn (llm-inline--turn id))
+        (doc (llm-inline--doc id)))
+    (when (and turn doc (not (equal? text "")))
+      (let ((landed (llm-mode--append-response! doc (plist-get turn 'response) text)))
+        (llm-inline--turn-set! id
+          (plist-put (plist-put turn 'text (string-append (plist-get turn 'text) text))
+                     'streamed (and (or (plist-get turn 'streamed) landed) #t)))))))
 
 (define (llm-inline-error! id text)
-  (let ((e (assoc id *llm-inline-sends*)))
-    (when e
-      (llm-inline-put!
-        (list id (car (cdr e)) (car (cdr (cdr e)))
-              (car (cdr (cdr (cdr e)))) text)))))
+  (let ((turn (llm-inline--turn id)))
+    (when turn (llm-inline--turn-set! id (plist-put turn 'error text)))))
 
+;; the turn ends: a non-streaming backend still returns one final result,
+;; and both paths use the reserved response block. An insertion in the
+;; middle dirties the native thread, because its untouched suffix was sent.
 (define (llm-inline-finish! id)
-  (let ((e (assoc id *llm-inline-sends*)))
-    (when e
-      ;; Remove before invoking user presentation code: completion may start
-      ;; another turn on this same session.
-      (set! *llm-inline-sends*
-        (remove (lambda (x) (equal? (car x) id)) *llm-inline-sends*))
-      (let ((result (car (cdr (cdr (cdr e)))))
-            (error (car (cdr (cdr (cdr (cdr e))))))
-            (completion (car (cdr (cdr e)))))
-        ;; Completion closes a streamed range. It also keeps a partial reply
-        ;; readable when the backend reports an error after one or more chunks.
-        (completion result error)
-        (when error (message (string-append "LLM failed · " error)))))))
+  (let ((turn (llm-inline--turn id))
+        (doc (llm-inline--doc id)))
+    (when turn
+      ;; clear before the presentation: a completion may start another
+      ;; turn on this same session
+      (llm-inline--turn-set! id #f)
+      (if (not doc)
+          (message "LLM reply discarded — its buffer was killed")
+          (let* ((response-id (plist-get turn 'response))
+                 (text (plist-get turn 'text))
+                 (error (plist-get turn 'error))
+                 (streamed (or (plist-get turn 'streamed)
+                               (and (not (equal? text ""))
+                                    (llm-mode--append-response! doc response-id text)
+                                    #t))))
+            (llm-mode--finish-response! doc response-id streamed error)
+            (when streamed
+              (buffer-set-local! doc 'llm-session-dirty
+                (< (plist-get turn 'insert-at) (plist-get turn 'context-size))))
+            (if error
+                (message (string-append "LLM failed · " error))
+                (message "LLM response inserted")))))))
 
 (define (llm-inline-note-activity! id event)
-  (let ((entry (assoc id *llm-inline-sends*)))
-    (when entry
-      (let ((buf (cadr entry)))
-        (when (buffer-exists? buf)
-          (llm-mode--note-activity! buf event))))))
+  (let ((doc (and (llm-inline--turn id) (llm-inline--doc id))))
+    (when doc (llm-mode--note-activity! doc event))))
 
 (define (llm-inline-events! id events)
   (for-each
@@ -460,10 +480,9 @@
         (cond ((equal? type 'chunk)
                (llm-inline-add-chunk! id (or (plist-get event 'text) "")))
               ((equal? type 'thread-id)
-               (let ((e (assoc id *llm-inline-sends*)))
-                 (when e
-                   (buffer-set-local! (cadr e) 'llm-thread-id
-                     (plist-get event 'id)))))
+               (let ((doc (llm-inline--doc id)))
+                 (when doc
+                   (buffer-set-local! doc 'llm-thread-id (plist-get event 'id)))))
               ((equal? type 'error)
                ;; A failed turn ends in turn-failed, which the status machine
                ;; consumes: no turn-end ever reaches this buffer. Finish here.
@@ -507,8 +526,7 @@
            (or (plist-get event 'raw) "")))
 
 (define (llm-inline-permission! id event)
-  (let* ((e (assoc id *llm-inline-sends*))
-         (buf (and e (cadr e)))
+  (let* ((buf (llm-inline--doc id))
          (rpc (plist-get event 'rpc-id))
          (verdict (llm-inline-permission-verdict buf event)))
     (when rpc
@@ -572,10 +590,10 @@
 ;; the send: the chat's session carries the document's wire; the chat
 ;; records DISPLAY as the user's turn, and the reply comes back through
 ;; the chat's handler, which forwards it to the inline render
-(define (llm-mode--complete buf wire display model mark handler chunk-handler)
+(define (llm-mode--complete buf wire display model response-id insert-at)
   (let* ((companion (llm-mode--companion! buf model))
          (id (buffer-local companion 'agent-slug)))
-    (llm-inline-put! (list id buf handler "" #f chunk-handler))
+    (llm-inline-begin! id response-id insert-at (string-byte-length display))
     (llm-session-send! id wire display)))
 
 (define-command "llm-companion-show" "Show this document's hidden chat in the other window"
@@ -910,37 +928,11 @@
              (message "Nothing new to send"))
             (else
               ;; Claim both sides of the turn before the request begins. The
-              ;; response marker is the only place callbacks may write.
+              ;; response block is the only place the reply may land.
               (let* ((turn (llm-mode--begin-turn! buf at insert-at model))
-                     (response-id (plist-get turn 'response))
-                     (response (block-resolve-id buf response-id))
-                     (streamed #f))
+                     (response-id (plist-get turn 'response)))
                 (message (string-append "LLM thinking · " model))
-                (llm-mode--complete buf wire context model
-                  (plist-get response 'start)
-                  (lambda (result error)
-                    (if (not (buffer-exists? buf))
-                        (message "LLM reply discarded — its buffer was killed")
-                        (begin
-                          ;; A non-streaming backend can still return one final
-                          ;; result. Both paths use the reserved response block.
-                          (when (and (not streamed) (not (equal? result "")))
-                            (when (llm-mode--append-response! buf response-id result)
-                              (set! streamed #t)))
-                          (llm-mode--finish-response!
-                            buf response-id streamed error)
-                          (when streamed
-                            ;; An insertion in the middle dirties the native
-                            ;; thread because its untouched suffix was sent.
-                            (buffer-set-local! buf 'llm-session-dirty
-                              (< insert-at (string-byte-length context))))
-                          (when (not error)
-                            (message "LLM response inserted")))))
-                  (lambda (chunk)
-                    (when (and (buffer-exists? buf)
-                               (not (equal? chunk "")))
-                      (when (llm-mode--append-response! buf response-id chunk)
-                        (set! streamed #t))))))))))))
+                (llm-mode--complete buf wire context model response-id insert-at))))))))
 
 ;; the chat target: the same send with no inline render, and the chat
 ;; comes into the other window to show the reply. The document keeps no
@@ -1604,7 +1596,7 @@
 ;; are still swept)
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-waiting chat-activity
-    inline-target
+    inline-target inline-turn
     agent-cancelling agent-seed-context agent-tool-bodies
     agent-turn-text agent-turn-any chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty

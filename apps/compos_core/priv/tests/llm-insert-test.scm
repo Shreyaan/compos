@@ -124,9 +124,12 @@
                (or (string-prefix? "chrome-b:llm-thinking-spinner:" (caddr (car ovs)))
                    (loop (cdr ovs)))))
         "a prominent thinking chrome stands at the reserved result")
-      (llm-inline-put!
-        (list "inline-block-test" t--li-buf (lambda (_result _error) #t)
-              "" #f (lambda (_chunk) #t)))
+      ;; a chat that owns the session and points at the document is the
+      ;; whole registration: the turn is data on it
+      (test-buffer! "zz-li-chat" "")
+      (buffer-set-local! "zz-li-chat" 'agent-slug "inline-block-test")
+      (buffer-set-local! "zz-li-chat" 'inline-target t--li-buf)
+      (llm-inline-begin! "inline-block-test" (plist-get response 'id) 13 13)
       (llm-inline-events! "inline-block-test"
         (list (list 'type 'thought 'text "checking the types\nmore detail")))
       (check-equal!
@@ -139,9 +142,7 @@
         (plist-get (plist-get (block-resolve-id t--li-buf thinking-id) 'metadata)
                    'label)
         "Running · inspect schema" "tool calls reuse the interim block")
-      (set! *llm-inline-sends*
-        (remove (lambda (entry) (equal? (car entry) "inline-block-test"))
-                *llm-inline-sends*))
+      (buffer-kill! "zz-li-chat")
       (llm-mode--retire-thinking! t--li-buf (plist-get response 'id))
       (check-equal! (plist-get (block-resolve-id t--li-buf thinking-id) 'state)
                     'deleted "interim activity is not preserved")

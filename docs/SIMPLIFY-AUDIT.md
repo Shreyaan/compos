@@ -1075,8 +1075,17 @@ prompt is copied into `*llm:DOC*`, which is an llm-mode document with a
 hidden chat of its own), and over the region as a rewrite (`llm-rewrite`).
 Every target talks through a hidden chat; only the landing differs.
 Tests: llm-insert-test.scm, three deftests, through the stub backend.
-Next: the inline dispatcher and context function fold into the chat's,
-then the twin transcript primitives (5.12).
+
+**Step 4 is in (2026-09-19): the inline registry is gone.** The live
+inline turn is data on the document's chat: `'inline-turn` (a runtime
+local: the response block, the insertion point, the context size, what
+arrived, the error) next to `'inline-target`. `llm-inline-events!`
+stays as the document render, fed by the chat's event handler, and reads
+the chat; the global `*llm-inline-sends*` table and the two closures per
+send (completion, chunk) are gone, so a send is one call with data. The
+document's context function (`llm-context-text`, the narrowing range)
+stays: it is the document's wire, and a chat has no such range. Next:
+the twin transcript primitives (5.12).
 
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
