@@ -1359,12 +1359,28 @@
 (define (variable-doc name)
   (let ((e (assoc name *variable-docs*))) (and e (cadr e))))
 
-;; (defvar NAME DEFAULT [DOC]): NAME takes DEFAULT unless it is bound
-;; already, as in Emacs; a reload keeps the value a session set
-(define (defvar name default &optional doc)
-  (unless (boundp name) (set-symbol-value! name default))
-  (when doc (variable-doc! name doc))
-  name)
+;; (defvar NAME DEFAULT [DOC] ['persist #t]): NAME takes DEFAULT unless it
+;; is bound already, as in Emacs; a reload keeps the value a session set.
+;; 'persist #t makes the value ride in the desktop under NAME without its
+;; stars: a restore puts the saved value back, or DEFAULT when the file
+;; holds none (see the savehist section).
+(define (defvar name default &rest opts)
+  (let ((doc (if (and (pair? opts) (string? (car opts))) (car opts) (plist-get opts 'doc)))
+        (persist (plist-get opts 'persist)))
+    (unless (boundp name) (set-symbol-value! name default))
+    (when doc (variable-doc! name doc))
+    (when persist
+      (persist-global! (defvar--key name)
+        (lambda () (symbol-value name))
+        (lambda (v) (set-symbol-value! name (if (equal? v #f) default v)))))
+    name))
+
+;; the desktop key of a variable: *peek-recent* rides as peek-recent
+(define (defvar--key name)
+  (string->symbol
+    (string-join (filter (lambda (s) (not (equal? s "")))
+                         (string-split (symbol->string name) "*"))
+                 "*")))
 
 (define (make-variable-buffer-local! name)
   (unless (member name *automatically-local*)
@@ -4305,16 +4321,12 @@
 ;;; candidates history-first keeps them first among equal matches — the
 ;;; empty prompt shows pure recency, typing re-ranks fuzzily within it.
 
-(defvar '*minibuffer-history* '())  ; ((key (item ...)) ...), most recent first
+(defvar '*minibuffer-history* '() 'persist #t)  ; ((key (item ...)) ...), most recent first
 (define *minibuffer-history-max* 50)
 
 ;; savehist: which commands, themes and searches you use is worth more
 ;; than one session. Every keyed history rides in this one variable, so
 ;; M-x, apropos, project, ripgrep and the theme prompt all persist here.
-(persist-global! 'minibuffer-history
-  (lambda () *minibuffer-history*)
-  (lambda (v) (set! *minibuffer-history* v)))
-
 (define (history-items key)
   (let ((e (assoc key *minibuffer-history*)))
     (if e (cadr e) '())))

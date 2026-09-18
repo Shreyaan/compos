@@ -1069,12 +1069,8 @@
 ;;; recent: what a peek showed and let go. An entry is
 ;;; (LABEL KIND KEY TIME): KIND names the reviver, KEY is what it needs.
 
-(defvar '*peek-recent* '())
+(defvar '*peek-recent* '() 'persist #t)
 (define *peek-recent-max* 50)
-
-(persist-global! 'peek-recent
-  (lambda () *peek-recent*)
-  (lambda (v) (set! *peek-recent* (if (or (pair? v) (null? v)) v '()))))
 
 (define (peek-recent-find key)
   (let ((hits (filter (lambda (x) (equal? (nth 2 x) key)) *peek-recent*)))

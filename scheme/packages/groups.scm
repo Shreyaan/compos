@@ -2759,7 +2759,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;;; the revival says how many. The graveyard keeps the last twenty and
 ;;; persists with the desktop.
 
-(defvar '*group-graveyard* '())
+(defvar '*group-graveyard* '() 'persist #t)
 (define *group-graveyard-depth* 20)
 
 ;; (NAME META LAYOUT NOISE CHAT-ID COLOR KILLED-AT ((BUFFER PATH) ...) SETTINGS)
@@ -2843,10 +2843,6 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (public! 'group-revive!
   "(group-revive! NAME) — make the killed group NAME again, with every member that still exists; #f when none was killed by that name")
-
-(persist-global! 'group-graveyard
-  (lambda () *group-graveyard*)
-  (lambda (saved) (when (pair? saved) (set! *group-graveyard* saved))))
 
 (define-command "group-kill" "Kill every buffer in the current group; in the board, the marked groups"
   (lambda ()

@@ -831,6 +831,13 @@ stay in the kernel under their own header. editor.scm is 5,685 lines.
 Landmine met: the test home keeps files between runs, and a note.txt a
 run left on 2026-09-15 turned a plain write-file test into an overwrite
 question; the fresh-dir helper now empties its directory first.
+One defvar with persist (item 7, second half): `(defvar '*x* DEFAULT
+'persist #t)` registers the desktop global itself, keyed by the name
+without its stars, and a restore puts the saved value back or the
+default. Seven of the fourteen persist-global! pairs are one line now;
+the seven that normalise or rebuild on restore (llm-config-history,
+llm-bundles, group-mru, groups-v2, hidden-windows, layout-targets,
+and the composite ones) keep persist-global! as the door.
 
 **Next three steps, in order.**
 

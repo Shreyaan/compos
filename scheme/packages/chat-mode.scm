@@ -357,11 +357,7 @@
 ;; Runtime ids are buffer identities, not turn identities. The local survives
 ;; desktop restore and buffer rename; the persisted counter prevents a new
 ;; buffer from colliding with an old renamed one.
-(defvar '*llm-inline-next* 0)
-
-(persist-global! 'llm-inline-next
-  (lambda () *llm-inline-next*)
-  (lambda (v) (set! *llm-inline-next* v)))
+(defvar '*llm-inline-next* 0 'persist #t)
 
 (define (llm-mode--session-id buf)
   (or (buffer-local buf 'llm-session-id)
@@ -1980,11 +1976,7 @@
 ;; next chat on that connector — and the picker aimed at a connector nothing
 ;; is attached to — offers the same list, instead of a hand-written seed
 ;; that ages the day the provider ships a model.
-(defvar '*llm-connector-models* '())
-
-(persist-global! 'llm-connector-models
-  (lambda () *llm-connector-models*)
-  (lambda (v) (set! *llm-connector-models* (or v '()))))
+(defvar '*llm-connector-models* '() 'persist #t)
 
 (define (llm-models-remembered connector)
   (let ((e (assoc connector *llm-connector-models*)))
@@ -2017,11 +2009,7 @@
 ;; menu offer them to a chat that has not attached yet, and to one whose
 ;; session is still restarting after a backend switch — the wait for the
 ;; first mode-state event is why the row used to read "none".
-(defvar '*llm-connector-modes* '())
-
-(persist-global! 'llm-connector-modes
-  (lambda () *llm-connector-modes*)
-  (lambda (v) (set! *llm-connector-modes* (or v '()))))
+(defvar '*llm-connector-modes* '() 'persist #t)
 
 (define (llm-modes-remembered connector)
   (let ((e (assoc connector *llm-connector-modes*)))
