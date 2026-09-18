@@ -141,8 +141,11 @@ defmodule Compos.Core.Git do
 
   # --- running git -----------------------------------------------------------
 
+  # stderr goes to /dev/null: "not a git repository" is an answer here, and
+  # without this every such probe wrote a fatal: line into the daemon log.
+  # A failure reads the reason with a second run (failure_message/3).
   defp run(dir, args) do
-    case System.cmd("git", args, cd: dir, stderr_to_stdout: false) do
+    case System.cmd("/bin/sh", ["-c", ~s(exec git "$@" 2>/dev/null), "git" | args], cd: dir) do
       {out, 0} -> {:ok, out}
       {_out, code} -> {:error, failure_message(dir, args, code)}
     end

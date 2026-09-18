@@ -21,6 +21,7 @@ list to make a run green.
 | cache_economics_test.exs | 4 of 8 | the system prompt no longer names the other group buffers, the frozen tool list, the cancelled-turn ledger row; red at HEAD ba6d2c45 |
 | permission_test.exs | 6 of 8 | same root: the `a1` chat never gets its agent, so every lane test stops at agent-prompt!; red at HEAD e08f34d4 |
 | chat_agent_test.exs | 3 | same root; at e6e388af the three are "a failed inline turn says why and clears its pending send", "api threads pin a per-chat model and take a switch in place", "execute* gives a spawned chat an explicit working directory" |
+| git_test.exs | 1 | "diff of a binary file reports binary? and no hunks"; red at 6ad021f0 |
 | db_test.exs | 1 | "with PostgreSQL a transaction handle cannot escape its procedure": the error now says "transaction belongs to another execution lane", not "no longer active"; red at e6e388af |
 | transient_test.exs | 2 | the LLM menu no longer applies a saved combination |
 | project_search_test.exs | 4 | group membership after project-switch and dired-in-group; the ripgrep hint carries an `M-1` prefix |
