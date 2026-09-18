@@ -376,9 +376,13 @@ defmodule Compos.CacheEconomicsTest do
 
     on_exit(fn -> :persistent_term.erase(:compos_llmdb) end)
 
-    assert ModelCatalog.max_tokens("claude-sonnet-5") == 64_000
-    assert ModelCatalog.max_tokens("anthropic:claude-sonnet-5") == 64_000
-    assert ModelCatalog.max_tokens("openrouter:anthropic/claude-sonnet-5") == 64_000
+    # the figure is the bundled catalog's, whatever it says this release;
+    # the assertion is that every spelling reads the same entry and an
+    # unknown model reads nothing
+    n = ModelCatalog.max_tokens("claude-sonnet-5")
+    assert is_integer(n) and n > 0
+    assert ModelCatalog.max_tokens("anthropic:claude-sonnet-5") == n
+    assert ModelCatalog.max_tokens("openrouter:anthropic/claude-sonnet-5") == n
     assert ModelCatalog.max_tokens("no-such-model") == nil
   end
 
