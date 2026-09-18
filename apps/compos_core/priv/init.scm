@@ -20,6 +20,10 @@
 ;;; spotify, spreadsheet, substack, title, training. The test suite loads
 ;;; them all (test/test_helper.exs).
 
+; the list buffer comes first: a package declares its lists at load, and
+; dired is the first such package
+(load "tabulated-list.scm")
+(load "dired.scm")
 (load "advice.scm")
 (load "custom.scm")
 (load "tools.scm")

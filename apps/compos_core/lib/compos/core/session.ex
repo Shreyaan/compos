@@ -78,7 +78,7 @@ defmodule Compos.Core.Session do
   # 30s, so a runaway predicate must give up first and answer #f.
   @wait_cap 10_000
 
-  @bootstrap_files ~w(editor.scm transient.scm dired.scm themes.scm chrome.scm init.scm)
+  @bootstrap_files ~w(editor.scm transient.scm themes.scm chrome.scm init.scm)
 
   # user config, in load order: saved customizations load last so they win
   @user_config_files ~w(ai-config.scm init.scm custom.scm)
@@ -793,8 +793,7 @@ defmodule Compos.Core.Session do
         interp,
         fn file, interp ->
           path = Application.app_dir(:compos_core, "priv/#{file}")
-          # one file is one package here too: dired.scm carried transient's
-          # stamp before this, so every dired command was filed under it
+          # one file is one package here too
           interp = Hotload.Scheme.stamp_load_unit(interp, path, :bundled)
 
           case Scheme.eval_string(interp, File.read!(path)) do

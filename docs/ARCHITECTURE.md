@@ -125,7 +125,8 @@ round-trip. Everything the GUI can do, the socket can do.
 All of it, and this is the point: commands, keybindings, modes + auto-mode,
 hooks, dired (complete), themes, completion sources (capf), display-buffer
 rules and popups, quit-window, the chat buffer, LLM pipes, isearch, file
-completion. `priv/editor.scm`, `priv/dired.scm`, `priv/themes.scm`.
+completion. `priv/editor.scm`, `priv/themes.scm`; dired is `priv/dired.scm`,
+loaded from init.scm after `scheme/packages/tabulated-list.scm`.
 
 The rules each subsystem keeps are written down beside it: `docs/groups.md`
 (groups and the current group), `docs/LISTS.md` (the list mode, pages, the

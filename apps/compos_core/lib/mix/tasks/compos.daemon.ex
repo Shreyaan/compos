@@ -99,7 +99,7 @@ defmodule Mix.Tasks.Compos.Reload do
 
     core =
       Enum.map(
-        ~w(editor.scm transient.scm dired.scm themes.scm chrome.scm init.scm),
+        Compos.Core.Session.bootstrap_files(),
         &Path.join(priv, &1)
       )
 

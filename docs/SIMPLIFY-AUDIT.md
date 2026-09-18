@@ -780,6 +780,14 @@ holds a list of actions per type, not a function; `*paste-hooks*` keeps
 registration order and replaces in place, which a keyed hook does not.
 Still to do in this item: the re-`set!` seams and the remaining boundp
 guards.
+Sections out of editor.scm, first move: the tabulated list (2,014 lines)
+is `scheme/packages/tabulated-list.scm`, the first load in init.scm;
+dired.scm reads the list registry at load, so it left the Elixir
+bootstrap list and loads second from init.scm. editor.scm is 13,147
+lines. The move is a cut: no definition changed. Rule for the next
+moves: cut on a section header, check that nothing outside the block
+names a block definition at load time (a top-level call, or the value of
+a `define`), and put the new file in init.scm ahead of its first caller.
 
 **Next three steps, in order.**
 
