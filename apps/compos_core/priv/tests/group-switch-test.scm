@@ -1126,38 +1126,36 @@
     (set-frame-local! 'current-group current)
     (list current foreign)))
 
-(deftest 'a-broadened-switcher-lists-every-buffer-under-two-headings
-  "C-u lists the group's own first, then the other groups by name"
+(deftest 'the-buffer-prompt-lists-the-pool-flat-with-the-buffer-you-are-on-last
+  "ibuffer-prompt is the plain list: the window's history first, then the rest, the buffer you are on last, and no heading"
   (lambda ()
     (t--sw-setup!)
     (t--sw-three-groups!)
     (t--sw-open-all!)
     (let ((labels (t--sw-labels)))
-      (check-true! (member "in this group" labels) "the first heading")
-      (check-true! (member "zzsw-foreign" labels) "the stranger's group is the second")
       (check-true! (member t--sw-second labels) "a member is listed")
-      (check-true! (member t--sw-first labels) "and so is the buffer we are in"))
-    (check-true! (< (t--sw-at "in this group") (t--sw-at t--sw-second))
-                 "the heading comes before its member")
-    (check-true! (< (t--sw-at t--sw-second) (t--sw-at t--sw-first))
-                 "the buffer we are in comes after the rest of its section")
-    (check-true! (< (t--sw-at t--sw-first) (t--sw-at "zzsw-foreign"))
-                 "and before the next heading")
+      (check-true! (member t--sw-third labels) "so is the stranger")
+      (check-true! (member t--sw-first labels) "and so is the buffer we are in")
+      (check-equal! (filter (lambda (h) (member h labels)) t--sw-headings) '()
+                    "no heading is a candidate"))
+    (check-equal! (filter (lambda (l) (member l (list t--sw-first t--sw-second t--sw-third)))
+                          (t--sw-labels))
+                  (list t--sw-third t--sw-second t--sw-first)
+                  "the window's history, most recent first, and the buffer we are in last")
 
-    ;; the panel renders a WINDOW of rows, so filter to the stranger
+    ;; typing narrows to the stranger, whatever its group
     (t--sw-type! t--sw-third)
     (check-true! (member t--sw-third (t--sw-labels)) "the stranger is reachable")
-    (check-true! (< (t--sw-at "zzsw-foreign") (t--sw-at t--sw-third))
-                 "under its group's heading")
+    (check-false! (member t--sw-second (t--sw-labels)) "and the rest are gone")
     (t--sw-done!)))
 
-(deftest 'a-heading-takes-no-selection-and-no-count
-  "no number of steps lands on one"
+(deftest 'the-selection-starts-on-the-first-row-and-never-lands-on-a-heading
+  "the selection starts on the most recent buffer of the window's history, and no number of steps lands on a heading"
   (lambda ()
     (t--sw-setup!)
     (t--sw-three-groups!)
     (t--sw-open-all!)
-    (check-equal! (t--sw-selected) t--sw-second "the first selection is a real buffer")
+    (check-equal! (t--sw-selected) t--sw-third "the first selection is the most recent other buffer")
 
     (t--sw-key! "next-candidate")
     (check-true! (t--sw-selected) "the next row is a row")
@@ -1178,8 +1176,8 @@
           ((equal? (car es) label) i)
           (else (loop (cdr es) (+ i 1))))))
 
-(deftest 'the-modal-switcher-lists-the-same-sections-as-the-prompt
-  "C-x b in the editor: this group first, then the rest, and a heading is never the row at point"
+(deftest 'the-modal-switcher-sections-by-group-name-with-this-group-first
+  "switch-to-buffer in the editor: every section wears its group's name, this group leads, and a heading is never the row at point"
   (lambda ()
     (t--sw-setup!)
     (when (buffer-known? "*switch*") (buffer-kill! "*switch*"))
@@ -1187,10 +1185,11 @@
     (run-command "switch-to-buffer")
     (check-equal! (current-buffer) "*switch*" "the modal opened")
     (let ((names (map car (list-entries "*switch*"))))
-      (check-true! (and (member "in this group" names) #t) "the first heading")
+      (check-true! (and (member "zzsw-current" names) #t) "the first heading is this group's name")
+      (check-false! (member "in this group" names) "and not a phrase")
       (check-true! (and (member "zzsw-foreign" names) #t) "the stranger's group is the second")
       (check-true! (and (member t--sw-first names) #t) "the buffer we came from is a row too")
-      (check-true! (< (t--sw-modal-at "in this group") (t--sw-modal-at t--sw-second))
+      (check-true! (< (t--sw-modal-at "zzsw-current") (t--sw-modal-at t--sw-second))
                    "the heading comes before its member")
       (check-true! (< (t--sw-modal-at t--sw-second) (t--sw-modal-at "zzsw-foreign"))
                    "and the member before the next heading")
@@ -1202,7 +1201,7 @@
     (list-set-query! "*switch*" t--sw-third)
     (let ((names (map car (list-keep "*switch*" (list-entries "*switch*")))))
       (check-true! (and (member t--sw-third names) #t) "the stranger survives the filter")
-      (check-false! (member "in this group" names) "the empty heading is gone"))
+      (check-false! (member "zzsw-current" names) "the empty heading is gone"))
     (run-command "switch-quit")
     (when (buffer-known? "*switch*") (buffer-kill! "*switch*"))
     (t--sw-done!)))
@@ -1294,8 +1293,8 @@
       (check-equal! (buffer-group t--sw-first) left "the other buffer kept its group"))
     (t--sw-done!)))
 
-(deftest 'switching-context-removes-foreign-panes-from-a-saved-layout
-  "a stale layout cannot reintroduce work that no longer belongs to the group"
+(deftest 'switching-context-hides-a-foreign-pane-and-the-snapshot-keeps-its-name
+  "a stale layout cannot reintroduce work that left the group; the snapshot still names it, so the layout returns whole once the buffer is a member again"
   (lambda ()
     (t--sw-setup!)
     (let ((docs (group-record-create! "zzsw-docs"))
@@ -1323,8 +1322,11 @@
 
       (check-false! (member t--sw-third (map cadr (window-list)))
                     "the foreign pane was removed")
-      (check-false! (member t--sw-third (window-tree-buffers (group-layout docs)))
-                    "the healed snapshot no longer remembers it")
+      ;; only a restore that reproduced the saved tree writes it back: a
+      ;; sanitized one dropped a pane, and saving that would erase the
+      ;; arrangement instead of hiding it (switch-to-group!)
+      (check-true! (and (member t--sw-third (window-tree-buffers (group-layout docs))) #t)
+                   "the snapshot still names the pane it hid")
       (for-each
         (lambda (window)
           (check-true! (buffer-in-group? (cadr window) docs)
@@ -1952,15 +1954,17 @@
       (check-false! (frame-group) "the frame is in no group")
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
-(deftest 'a-switch-to-a-member-takes-the-selected-window
-  "the redirect is for foreign buffers only"
+(deftest 'a-switch-to-a-visible-member-selects-the-window-that-shows-it
+  "a member already on screen is not shown twice: the switch selects its window and the selected window keeps its buffer"
   (lambda ()
     (t--sw-setup!)
     (let* ((pair (t--sw-sealed-frame!)) (foreign (cadr pair))
            (win (active-window)))
       (switch-to-buffer! t--sw-first)
       (check-false! (popup-open?) "no popup")
-      (check-equal! (window-buffer win) t--sw-first "the selected window shows the member")
+      (check-equal! (current-buffer) t--sw-first "the member is current")
+      (check-equal! (active-window) (window-showing t--sw-first) "in the window that already showed it")
+      (check-equal! (window-buffer win) t--sw-second "the window we left keeps its buffer")
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
 
