@@ -689,7 +689,7 @@ defmodule Compos.Ui.EditorLive do
         caret_owner
       )
 
-    state = %{state | tree: tree}
+    state = %{state | tree: with_mode_line(tree, chrome(state, "mode-line-format"))}
 
     {state, socket} = hold_which_key(state, socket)
 
@@ -770,6 +770,15 @@ defmodule Compos.Ui.EditorLive do
 
     {socket, state_ms}
   end
+
+  # A window draws its buffer's mode-line format, else the frame default.
+  defp with_mode_line(%{type: :split, children: children} = split, default),
+    do: %{split | children: Enum.map(children, &with_mode_line(&1, default))}
+
+  defp with_mode_line(%{type: :leaf} = leaf, default),
+    do: Map.put(leaf, :mode_line_format, Map.get(leaf, :mode_line_format) || default)
+
+  defp with_mode_line(node, _default), do: node
 
   defp line_param(params) do
     case Integer.parse(to_string(params["line"] || "")) do
@@ -1428,7 +1437,7 @@ defmodule Compos.Ui.EditorLive do
         </strong>
         <c-text class="workspace-bar-port">PORT {workspace_port(@state.workspace.url)}</c-text>
         <c-text class="workspace-bar-root">{@state.workspace.root}</c-text>
-        <c-text class="workspace-bar-help">C-x w new tab · C-x d switch daemon</c-text>
+        <c-text class="workspace-bar-help">{chrome(@state, "workspace-help", "")}</c-text>
       </c-group>
       <.frame_header_line state={@state} tabs={@tabs} />
       <.frame_echo state={@state} />
@@ -1584,14 +1593,7 @@ defmodule Compos.Ui.EditorLive do
               </aside>
             </c-group>
             <c-group class="transient-help">
-              <%= if @state.transient[:legend] not in [nil, []] do %>
-                <c-text :for={row <- @state.transient.legend} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
-              <% else %>
-                <c-text class="transient-legend"><c-action-key class="transient-legend-key">RET</c-action-key> invoke</c-text>
-                <c-text class="transient-legend"><c-action-key class="transient-legend-key">C-g</c-action-key> quit</c-text>
-                <c-text class="transient-legend"><c-action-key class="transient-legend-key">↑↓</c-action-key> select</c-text>
-                <c-text class="transient-legend"><c-action-key class="transient-legend-key">?</c-action-key> help</c-text>
-              <% end %>
+              <c-text :for={row <- @state.transient[:legend] || []} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
             </c-group>
           </c-minibuffer>
         <% else %>
@@ -1624,7 +1626,7 @@ defmodule Compos.Ui.EditorLive do
         <c-tab
           :if={@tabs.more > 0}
           class="ml-tab ml-tab-more"
-          title="every group (C-x C-g l)"
+          title={chrome(@state, "tabs-more-title", "")}
           phx-click="frame_tab"
         >{@tabs.more} more</c-tab>
       </c-tabs>
@@ -1643,25 +1645,20 @@ defmodule Compos.Ui.EditorLive do
       <c-echo class="echo">{@state.echo}</c-echo>
       <c-text class="ml-rule"></c-text>
       <c-key-hints class="echo-hint">
-        <c-text :for={{k, v} <- header_keys()} class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
+        <c-text :for={{k, v} <- echo_hints(@state)} class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
       </c-key-hints>
     </c-statusbar>
     """
   end
 
-  # The echo area's key hints. Each entry is a key and the verb it runs; an
-  # empty verb draws the key alone, the way the design does for the keys
-  # every Emacs user already knows.
-  @header_keys [
-    {"C-x C-f", ""},
-    {"C-x b", ""},
-    {"C-x d", ""},
-    {"C-c a", "agent"},
-    {"M-x", ""},
-    {"C-g", ""}
-  ]
+  # The echo area's key hints, as Scheme publishes them (echo-key-hints in
+  # appearance.scm): (KEY VERB) pairs. An empty verb draws the key alone.
+  defp echo_hints(state) do
+    for [k, v] <- chrome(state, "echo-hints"), is_binary(k), is_binary(v), do: {k, v}
+  end
 
-  defp header_keys, do: @header_keys
+  defp chrome(state, key, default \\ []),
+    do: Map.get(Map.get(state, :chrome) || %{}, key, default)
 
   # The groups the frame modeline offers as tabs. Scheme decides which
   # ones and how many, and this asks again only when the frame's group or
@@ -2271,43 +2268,36 @@ defmodule Compos.Ui.EditorLive do
         <.blk :for={b <- Map.get(@node, :footer_line_blocks) || []} b={block_view(b)} line={-1} win={@node.id} />
         {@node.footer_line}
       </c-group>
-      <c-modeline class="modeline">
-        <%!-- the header line names the buffer; the mode line does not say
-               it again. The dot is the state and opens the dashboard. --%>
-        <c-text
+      <%!-- The mode line is Scheme's mode-line-format (appearance.scm): a list
+             of constructs in order. The view draws each construct and fills
+             the %-constructs only it can know: %I the size, %l the line,
+             %c the column, %p the scroll position. --%>
+      <c-modeline class="modeline"><%= for {name, args} <- ml_format(@node) do %><%= case name do %>
+        <% "dot" -> %><c-text
           class={"ml-dot #{if @node.modified, do: "modified"}"}
           title={@node.buffer}
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
         ></c-text>
-        <c-field name="project" :if={@node.modeline_project && @node.modeline_project != ""} class="ml-project">{@node.modeline_project}</c-field>
-        <c-status state="selected" :if={@node.selected} class="ml-mode ml-selected">● selected</c-status>
-        <c-mode :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</c-mode>
-        <c-field name="info"
+        <% "project" -> %><c-field name="project" :if={@node.modeline_project && @node.modeline_project != ""} class="ml-project">{@node.modeline_project}</c-field>
+        <% "selected" -> %><c-status state="selected" :if={@node.selected} class="ml-mode ml-selected">{ml_arg(args)}</c-status>
+        <% "preview" -> %><c-mode :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">{ml_arg(args)}</c-mode>
+        <% "info" -> %><c-field name="info"
           :if={@node.modeline_info}
           class="ml-mode"
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-buf={@node.buffer}
         >{@node.modeline_info}</c-field>
-        <%!-- the facts: mode, llm, lane (or the preset alone), each a key
-               and a value, ranked so a narrow window sheds them in order --%>
-        <c-group :if={@facts != []} class="ml-facts">
+        <% "facts" -> %><c-group :if={@facts != []} class="ml-facts">
           <c-field :for={{k, v, tone, rank} <- @facts} name={k} class="ml-fact" tone={tone} rank={rank}><c-label class="ml-fact-k">{k}</c-label><c-value class={"ml-fact-v #{tone}"}>{v}</c-value></c-field>
         </c-group>
-        <c-text class="mb-spacer"></c-text>
-        <%!-- the position sheds by rank too: the size first, then the
-               percentage, then the whole of it. The name is identity and
-               is the last thing on the line to give way. --%>
-        <c-position class="ml-pos" line={@line} column={@col}>
-          <%= if @node.render_mode == "terminal" do %>
-            PTY · <c-text class="ml-pos-size">transcript {ml_bytes(@node.text)}</c-text>
-          <% else %>
-            <c-text class="ml-pos-size">{ml_bytes(@node.text)} · </c-text>L{@line}:C{@col}<c-text class="ml-pos-pct"> · {pct(@node)}</c-text>
-          <% end %>
-        </c-position>
-      </c-modeline>
+        <% "spacer" -> %><c-text class="mb-spacer"></c-text>
+        <% "text" -> %><c-text class={Enum.at(args, 0)}>{ml_fill(Enum.at(args, 1), @node)}</c-text>
+        <% "position" -> %><c-position class="ml-pos" line={@line} column={@col}><%= for {cls, txt} <- ml_position(args, @node) do %><%= if cls == "" do %>{txt}<% else %><c-text class={cls}>{txt}</c-text><% end %><% end %></c-position>
+        <% _ -> %>
+      <% end %><% end %></c-modeline>
       <% end %>
     </c-window>
     """
@@ -3216,6 +3206,40 @@ defmodule Compos.Ui.EditorLive do
 
   defp pct(%{top: top, total_lines: total}),
     do: "#{min(div(top * 100, max(total - 1, 1)), 99)}%"
+
+  # The mode-line format: the buffer's own, else the frame default the
+  # chrome carries. Each construct is (NAME ARG ...).
+  defp ml_format(node) do
+    case Map.get(node, :mode_line_format) do
+      [_ | _] = format -> for [name | args] <- format, is_binary(name), do: {name, args}
+      _ -> []
+    end
+  end
+
+  defp ml_arg([text | _]) when is_binary(text), do: text
+  defp ml_arg(_), do: ""
+
+  # (position SEGS PTY-SEGS): a terminal draws no lines, so it has its own
+  # segments. A segment is (CLASS TEXT); an empty class is a bare text node.
+  defp ml_position(args, node) do
+    segs = if node.render_mode == "terminal", do: Enum.at(args, 1), else: Enum.at(args, 0)
+
+    for [cls, txt] <- List.wrap(segs), is_binary(cls), is_binary(txt),
+        do: {cls, ml_fill(txt, node)}
+  end
+
+  # the %-constructs of Emacs's mode-line-format that the view alone knows
+  defp ml_fill(text, node) when is_binary(text) do
+    Regex.replace(~r/%[Ilcp%]/, text, fn
+      "%I" -> ml_bytes(node.text)
+      "%l" -> to_string(node.line)
+      "%c" -> to_string(node.col)
+      "%p" -> pct(node)
+      "%%" -> "%"
+    end)
+  end
+
+  defp ml_fill(_text, _node), do: ""
 
   # popup anchor column in ch units (monospace): graphemes from line start
   # to the completion region start

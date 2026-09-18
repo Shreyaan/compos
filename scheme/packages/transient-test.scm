@@ -314,7 +314,7 @@
            (meta (transient--menu-meta prefix state '())))
       (check-equal! (cadr (assoc "subtitle" meta)) "" "a menu with no options has an empty header")
       (check-equal! (cadr (assoc "detail" meta)) #f "no rail")
-      (check-equal! (cadr (assoc "legend" meta)) '() "and the frame's default legend"))))
+      (check-equal! (cadr (assoc "legend" meta)) transient-default-legend "and the default legend"))))
 
 (deftest 'the-tools-key-opens-a-menu-not-a-buffer
   "t stays in the transient world: a child prefix over the same scope.

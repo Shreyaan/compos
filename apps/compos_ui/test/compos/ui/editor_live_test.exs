@@ -739,6 +739,24 @@ defmodule Compos.Ui.EditorLiveTest do
     assert css =~ ".window.popup-bottom { bottom: 0; }"
   end
 
+  # Scheme composes the chrome: the echo area draws the hints it publishes,
+  # and a window draws its buffer's mode-line format, %-constructs filled.
+  test "the echo hints and the mode line are the formats Scheme publishes", %{conn: conn} do
+    buf = Compos.Core.Editor.current_buffer()
+    on_exit(fn -> Compos.Core.Session.eval(~s{(frame-chrome-set! "echo-hints" echo-key-hints)}) end)
+
+    {:ok, _} = Compos.Core.Session.eval(~s{(frame-chrome-set! "echo-hints" '(("C-x z" "zz-hint")))})
+    Compos.Core.Buffer.set_local(buf, "mode-line-format", [["text", "zz-ml", "ZZ %l:%c %%"]])
+
+    {:ok, view, _} = live(conn, "/")
+    assert has_element?(view, ".echo-hint .ml-hint .ml-do", "zz-hint")
+    assert has_element?(view, ".window.active .modeline .zz-ml", "ZZ 1:0 %")
+    refute has_element?(view, ".window.active .modeline .ml-pos")
+
+    Compos.Core.Buffer.set_local(buf, "mode-line-format", false)
+    assert has_element?(view |> tap(&render/1), ".window.active .modeline .ml-pos")
+  end
+
   test "undo works through the window", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     html = type(view, "xy")

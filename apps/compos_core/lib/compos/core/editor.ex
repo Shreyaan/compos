@@ -239,6 +239,13 @@ defmodule Compos.Core.Editor do
   # one global always-visible segment in the echo bar (agent attention etc.)
   def set_modeline_extra(s), do: GenServer.call(__MODULE__, {:set_modeline_extra, s})
 
+  @doc """
+  Set the frame chrome value KEY to VALUE. Scheme composes the chrome
+  (the echo area's key hints, the mode-line format, the workspace bar's
+  help); every frame's render carries the map and the view draws it.
+  """
+  def set_chrome(key, value), do: GenServer.call(__MODULE__, {:set_chrome, key, value})
+
   # minibuffer
   def minibuffer_activate(prompt, candidates, on_confirm, on_complete \\ nil) do
     minibuffer_activate_full(prompt, candidates, %{
@@ -586,6 +593,7 @@ defmodule Compos.Core.Editor do
        next_win: 2,
        kill_ring: [],
        modeline_extra: "",
+       chrome: %{},
        faces: %{},
        styles: %{},
        undo_exempt: MapSet.new(["undo"]),
@@ -882,6 +890,7 @@ defmodule Compos.Core.Editor do
        echo: f.echo,
        workspace: workspace_context(),
        modeline_extra: state.modeline_extra,
+       chrome: Map.get(state, :chrome, %{}),
        faces: state.faces,
        styles: state.styles
      }, state}
@@ -1351,6 +1360,15 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:set_modeline_extra, s}, _from, state),
     do: changed(:ok, %{state | modeline_extra: s})
+
+  # Map.get: a hot swap keeps a state map that has no :chrome key
+  def handle_call({:set_chrome, key, value}, _from, state) do
+    chrome = Map.get(state, :chrome, %{})
+
+    if Map.get(chrome, key) == value,
+      do: {:reply, :ok, state},
+      else: changed(:ok, Map.put(state, :chrome, Map.put(chrome, key, value)))
+  end
 
   def handle_call({:mb_activate, prompt, candidates, handlers, fid}, _from, state) do
     f = frame(state, fid)
@@ -2694,38 +2712,6 @@ defmodule Compos.Core.Editor do
     {a, max(rows - a, 3)}
   end
 
-  defp modeline_group(groups, current) when is_list(groups) do
-    names = Enum.filter(groups, &is_binary/1)
-
-    current_name =
-      cond do
-        current in names -> current
-        is_binary(current) -> Enum.find(names, &String.starts_with?(current, &1 <> " "))
-        true -> nil
-      end
-
-    decorated? = is_binary(current_name) and current != current_name
-
-    cond do
-      names == [] ->
-        nil
-
-      length(names) == 1 and decorated? and hd(names) == current_name ->
-        current
-
-      length(names) == 1 ->
-        hd(names)
-
-      is_binary(current_name) and current_name in names ->
-        "#{current} (#{length(names) - 1} more)"
-
-      true ->
-        "#{length(names)} groups"
-    end
-  end
-
-  defp modeline_group(_groups, _current), do: nil
-
   # The frame names its current group once, in the header line. A window
   # whose buffer is in that group wears no pin; a window from another group
   # wears that group's name. CURRENT is the frame's label, which may carry
@@ -2897,6 +2883,9 @@ defmodule Compos.Core.Editor do
       modeline_preset: Map.get(locals, "modeline-preset"),
       # the version-control change this buffer's save would amend (jj.scm)
       modeline_vcs: Map.get(locals, "modeline-vcs"),
+      # the buffer's own mode-line format; nil draws the frame default,
+      # which Scheme publishes as the chrome's "mode-line-format"
+      mode_line_format: Map.get(locals, "mode-line-format"),
       selected: Map.get(locals, "buffer-selected", false),
       dashboard_line: Map.get(locals, "dashboard-line"),
       # the same line as keyed segments: Scheme names the classes,
@@ -2908,10 +2897,6 @@ defmodule Compos.Core.Editor do
       # the same mechanism under the content — a list's key bar pins here
       footer_line: Map.get(locals, "footer-line"),
       footer_line_blocks: Map.get(locals, "footer-line-blocks"),
-      # Scheme resolves durable ids into membership names. This last, purely
-      # presentational compaction must happen per frame: one buffer can be
-      # visible on two monitors whose current groups differ.
-      group: modeline_group(Map.get(locals, "modeline-groups"), frame_group),
       # the pin: the buffer's group only when it is not the frame's. The
       # frame names its group once; a window in that group does not repeat it.
       pin: modeline_pin(Map.get(locals, "modeline-groups"), frame_group),

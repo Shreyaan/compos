@@ -1445,6 +1445,12 @@ defmodule Compos.Core.Session do
           Editor.set_modeline_extra(modeline_extra(s))
           :void
         end,
+      {"frame-chrome-set!",
+       "(frame-chrome-set! KEY VALUE) — set the chrome value KEY (a string) that every frame draws: echo-hints, mode-line-format, workspace-help, tabs-more-title."} =>
+        fn [key, value] ->
+          Editor.set_chrome(to_string(key), value)
+          :void
+        end,
       {"llm-model", "(llm-model) — return the active LLM model id."} => fn [] ->
         Compos.Core.LLM.model()
       end,

@@ -257,6 +257,10 @@
           ((pair? fn) fn)
           (else '()))))
 
+;; The footer of a menu that names no legend of its own.
+(define transient-default-legend
+  '(("RET" "invoke") ("C-g" "quit") ("↑↓" "select") ("?" "help")))
+
 ;; The parts of the menu beyond its rows, each from a prefix option:
 ;;   'subtitle-fn (SCOPE) -> text      under the title: the state in one line
 ;;   'context-fn  (SCOPE) -> text      right of the title: what the menu acts on
@@ -277,8 +281,9 @@
           (list "chips" (transient--option-list prefix 'chips-fn scope))
           (list "detail" (or detail #f))
           (list "legend"
-                (let ((rows (transient--option-list prefix 'legend-fn scope)))
-                  (if (null? rows) (transient--option-list prefix 'legend scope) rows))))))
+                (let* ((rows (transient--option-list prefix 'legend-fn scope))
+                       (rows (if (null? rows) (transient--option-list prefix 'legend scope) rows)))
+                  (if (null? rows) transient-default-legend rows))))))
 
 ;;; --- columns ----------------------------------------------------------------
 ;;; The frame draws the groups in columns, and the keyboard moves between

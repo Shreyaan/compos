@@ -67,7 +67,8 @@ stage. Each stage is one commit, verified live and by a screenshot.
   click on the expanded panel; the panel moved to `block_click` with
   `dash-mode:` before this port. They fail at HEAD too.
 
-- The echo area's key hints are a static list in `editor_live.ex`. They
-  should come from Scheme (which-key is the model). Stage 2 or later.
+- The echo area's key hints come from Scheme: the `echo-key-hints`
+  custom in appearance.scm, published with `frame-chrome-set!`. The
+  window mode line is the `mode-line-format` custom beside it.
 - `load-theme` stays as an M-x command. The brief says one theme; the other
   themes remain loadable by name.

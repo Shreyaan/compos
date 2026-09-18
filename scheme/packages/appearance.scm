@@ -221,3 +221,46 @@
   "(text-scale-reset-all!) — give every buffer the normal text size; answer how many changed")
 (public! 'ui-scale-apply!
   "(ui-scale-apply! N) — set the whole application's text scale to step N; 0 is normal")
+
+;;; --- the frame chrome ---------------------------------------------------------
+;;; Scheme composes the chrome that every frame draws, and publishes each
+;;; value with frame-chrome-set!. The view draws what it gets and fills in
+;;; only what it alone knows: the line, the column, the size, the scroll
+;;; position. A setting set later publishes again.
+
+(domain! 'ui)
+(effects! '(write))
+
+(define (chrome-publisher key)
+  (lambda (value) (frame-chrome-set! key value)))
+
+(defcustom 'echo-key-hints
+  '(("C-x C-f" "") ("C-x b" "") ("C-x d" "") ("C-c a" "agent") ("M-x" "") ("C-g" ""))
+  "The key hints in the echo area, as (KEY VERB) pairs. An empty verb draws the key alone."
+  'group 'appearance
+  'set (chrome-publisher "echo-hints"))
+
+;; Emacs's mode-line-format, as constructs in order. (position SEGS
+;; PTY-SEGS) draws (CLASS TEXT) segments, the PTY ones in a terminal; the
+;; view fills %I (size), %l (line), %c (column), %p (Top, Bot, All, N%).
+;; (text CLASS TEXT) draws literal text. A buffer-local mode-line-format
+;; overrides this one for its buffer.
+(defcustom 'mode-line-format
+  '(("dot") ("project") ("selected" "● selected") ("preview" "preview") ("info") ("facts")
+    ("spacer")
+    ("position" (("ml-pos-size" "%I · ") ("" "L%l:C%c") ("ml-pos-pct" " · %p"))
+                (("" "PTY · ") ("ml-pos-size" "transcript %I"))))
+  "The window mode line, as a list of constructs: dot, project, selected, preview, info, facts, spacer, position, text."
+  'group 'appearance
+  'set (chrome-publisher "mode-line-format"))
+
+(define workspace-bar-help "C-x w new tab · C-x d switch daemon")
+(define frame-tabs-more-title "every group (C-x C-g l)")
+
+(frame-chrome-set! "echo-hints" echo-key-hints)
+(frame-chrome-set! "mode-line-format" mode-line-format)
+(frame-chrome-set! "workspace-help" workspace-bar-help)
+(frame-chrome-set! "tabs-more-title" frame-tabs-more-title)
+
+(domain! 'unknown)
+(effects! '(unknown))
