@@ -10,6 +10,11 @@ defmodule Compos.Core.SchemeWarmup do
     Task.start_link(fn ->
       Process.sleep(50)
 
+      # The first model lookup decodes the bundled LLMDB snapshot, about a
+      # second of CPU. A chat's first turn-end used to pay it on the chat's
+      # own lane, in front of every keystroke queued there. Pay it here.
+      Compos.Core.ModelCatalog.warm()
+
       # The embedding sync can call the network once per missing vector, so
       # the first boot after the catalog grows runs for minutes. The task is
       # temporary and owns its lane, so a long wait blocks nothing; a short

@@ -953,13 +953,24 @@ lane, and 300 on :ui with nothing running. Three runs, microseconds:
 | the chat's buffer lane, under the turn | 10-13 | 38-43 | 9,243-10,282 | 979,167-986,663 |
 
 The lanes do their job: a :ui eval under a streaming turn costs what it
-costs idle. An eval queued behind the turn's render waits up to 0.99 s,
-because the 1,500 chunks apply as one job on that lane. One serial
-Scheme world would put that wait in front of a keystroke, so the
-collapse of env.ex, gc, roots, flush, the heir dance and the retry
-loops does not hold as the runtime stands. Its precondition is an
-incremental render: the transcript applies chunks in bounded slices
-that yield to the lane between them. Measure again after that.
+costs idle. The 0.99 s on the buffer lane was one job, and timing the
+turn-end handler step by step found it: the first `chat-should-compact?`
+of the VM decodes the bundled LLMDB snapshot (942 ms) inside
+`llm-context-limit`, on the chat's own lane, in front of every keystroke
+queued there. The boot warmup task decodes the catalog now
+(ModelCatalog.warm), and a batch is bounded to 200 events as well as to
+the 25 ms frame. After the fix, the same runs:
+
+| series | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| the chat's buffer lane, under the turn | 13-15 | 49-59 | 3,448-3,730 | 9,673-11,910 |
+
+A keystroke queued behind a streaming render now waits at most ~10 ms,
+and the turn-end costs 3 ms. On this evidence one serial Scheme world is
+within reach: the worst wait behind a burst is a frame, not a second.
+The collapse of env.ex, gc, roots, flush, the heir dance and the retry
+loops is Phase 3 proper, and this benchmark is the gate it runs against
+before and after.
 
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It

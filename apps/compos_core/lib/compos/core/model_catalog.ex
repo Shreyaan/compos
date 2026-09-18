@@ -63,6 +63,14 @@ defmodule Compos.Core.ModelCatalog do
          else: (_ -> nil)
   end
 
+  @doc "Decode the bundled catalog once, off the request path; any lookup after this is milliseconds."
+  def warm do
+    lookup("anthropic:claude-sonnet-5")
+    :ok
+  rescue
+    _ -> :ok
+  end
+
   @doc "Reasoning controls for a ReqLLM model spec, or nil when it is unknown."
   def reasoning(model_spec) when is_binary(model_spec) do
     with {:ok, model} <- lookup(model_spec) do

@@ -13,7 +13,10 @@ defmodule Compos.Core.Agent do
   `Session.apply_callback` from a Task — never synchronously from this process,
   so Session -> Agent calls can't deadlock.
   Adjacent text chunks coalesce in a short frame-sized batch. A batch in flight
-  buffers the next. This keeps token streaming from monopolizing Scheme input.
+  buffers the next, and a batch is bounded in size as well as in time: a
+  burst of events applies in slices of `@batch_max_events`, so an eval queued
+  on the same lane waits behind one slice, never behind the whole burst.
+  This keeps token streaming from monopolizing Scheme input.
 
   The output mark: agent text inserts at `mark`, always before the steering
   prompt marker at buffer end. `append_at_mark/2` is called by Scheme (the
@@ -28,6 +31,7 @@ defmodule Compos.Core.Agent do
   @registry Compos.Core.AgentRegistry
   @escaped :compos_escaped_closures
   @chunk_batch_ms 25
+  @batch_max_events 200
 
   # --- api --------------------------------------------------------------------
 
@@ -1037,7 +1041,8 @@ defmodule Compos.Core.Agent do
         state
 
       handler ->
-        batch = coalesce(state.events)
+        {slice, rest} = Enum.split(state.events, @batch_max_events)
+        batch = coalesce(slice)
         slug = state.slug
         me = self()
 
@@ -1052,7 +1057,7 @@ defmodule Compos.Core.Agent do
           end
         end)
 
-        %{state | events: [], in_flight: true}
+        %{state | events: rest, in_flight: true}
     end
   end
 
