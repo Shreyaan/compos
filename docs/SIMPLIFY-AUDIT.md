@@ -810,6 +810,20 @@ force at the block's start into the new file and restores the scope the
 block left behind at the cut point. editor.scm is 8,707 lines. The mark
 ring and font-lock keywords stay: the first is an Emacs mechanism, the
 second is called from set-mode!.
+Fifth move: the window domain (display-buffer, popups, the look, peek,
+mode layouts, the pool, special-mode, winner, the window questions,
+tiling: 2,540 lines) is `scheme/packages/window.scm`, loaded second
+because a list mode derives from special-mode at load; visual lines are
+`visual-line.scm`. editor.scm is 5,964 lines. What stays and why: the
+catalog, define-command, the buffer cache, editing and the kill ring,
+the minibuffer and completing-read, hooks, variables, marginalia, hot
+reload, modes and minor modes, savehist, buffer waking, renaming and
+detaching, the name at point, providers and embark, motion, capf's
+callers, scrolling, the mark ring, font-lock (set-mode! calls it),
+files and write policy, load-path, delete-file, the remote and visit
+block (visit and find-file live in it), M-x and eval, the prefix maps,
+self-insert, the movement state, input intents, buffer links, daemon
+control and the default keymap.
 
 **Next three steps, in order.**
 

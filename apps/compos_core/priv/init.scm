@@ -23,6 +23,9 @@
 ; the list buffer comes first: a package declares its lists at load, and
 ; dired is the first such package
 (load "tabulated-list.scm")
+; windows: display-buffer, popups, peek, layouts, special-mode, tiling;
+; a list mode derives from special-mode at load, so this precedes dired
+(load "window.scm")
 (load "dired.scm")
 ; the chat buffer and the LLM pipes: every package that opens a chat
 ; reads the chat locals lists at load
@@ -31,6 +34,7 @@
 (load "modeline.scm")
 (load "isearch.scm")
 (load "capf.scm")
+(load "visual-line.scm")
 (load "collect.scm")
 (load "comint.scm")
 (load "advice.scm")
