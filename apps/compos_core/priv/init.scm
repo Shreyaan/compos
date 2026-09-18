@@ -93,7 +93,6 @@
 (load "switch.scm")
 (load "handheld.scm")
 (load "telemetry.scm")
-(load "chat-perf.scm")
 (load "perf.scm")
 (load "profile.scm")
 (load "test.scm")

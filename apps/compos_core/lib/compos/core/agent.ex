@@ -22,7 +22,7 @@ defmodule Compos.Core.Agent do
 
   use GenServer, restart: :temporary
 
-  alias Compos.Core.{Buffer, ChatPerf, Session}
+  alias Compos.Core.{Buffer, Session}
   alias Compos.Core.Agent.Backend
 
   @registry Compos.Core.AgentRegistry
@@ -202,12 +202,6 @@ defmodule Compos.Core.Agent do
     backend = Backend.module(config)
     {:ok, handle} = backend.start(Map.put(config, "slug", slug), self())
     capabilities = backend.capabilities()
-
-    ChatPerf.emit(slug, :session_start, %{
-      backend: backend,
-      buffer: buffer,
-      model: Map.get(config, "model")
-    })
 
     steering =
       cond do
@@ -557,15 +551,6 @@ defmodule Compos.Core.Agent do
 
   @impl true
   def handle_info({:backend_event, event}, state) do
-    ChatPerf.emit(state.slug, :backend_event, %{
-      epoch: state.epoch,
-      type: Backend.event_type(event),
-      id: Backend.plist_get(event, "id"),
-      status: Backend.plist_get(event, "status"),
-      title: Backend.plist_get(event, "title"),
-      duration_ms: Backend.plist_get(event, "duration-ms")
-    })
-
     {:noreply, apply_backend_event(state, event)}
   end
 
@@ -593,14 +578,7 @@ defmodule Compos.Core.Agent do
     case result do
       {:ok, context} ->
         context = context |> Map.put(:display, display) |> Map.put(:images, images)
-        t0 = System.monotonic_time(:microsecond)
         state.backend.prompt(state.handle, text, context)
-
-        ChatPerf.emit(state.slug, :backend_prompt, %{
-          epoch: epoch,
-          backend: state.backend,
-          dispatch_us: System.monotonic_time(:microsecond) - t0
-        })
 
         {:noreply, state}
 
@@ -955,8 +933,6 @@ defmodule Compos.Core.Agent do
   end
 
   defp send_prompt(state, text, display, images) do
-    ChatPerf.emit(state.slug, :turn_start, %{epoch: state.epoch + 1, input_bytes: byte_size(text)})
-
     state =
       state
       # echo the user turn into the transcript via the ordered event channel —
@@ -985,17 +961,8 @@ defmodule Compos.Core.Agent do
     epoch = state.epoch + 1
     display = display || text
 
-    ChatPerf.emit(slug, :context_start, %{epoch: epoch})
-
     Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-      t0 = System.monotonic_time(:microsecond)
       result = Backend.context(slug, display)
-
-      ChatPerf.emit(slug, :context_end, %{
-        epoch: epoch,
-        duration_us: System.monotonic_time(:microsecond) - t0
-      })
-
       send(me, {:context, epoch, text, display, images, result})
     end)
 
