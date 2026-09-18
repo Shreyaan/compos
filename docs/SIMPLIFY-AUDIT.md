@@ -1215,6 +1215,71 @@ panels of perf.scm (perf-toggle-text already gives the plain table).
 The lane slow-job warning stays beside its telemetry row: the freeze
 triage of 2026-08 read the log, and the line is one Logger call.
 
+**Phase 2, the three designs its condition 3 asks for (2026-09-19,
+proposed; each is one page and waits for the owner's agreement).**
+
+*4.2 The window leaf: `buffer history top side owner`.* Today a leaf is
+the 7-tuple `{:leaf, buffer, top, point, manual, ctop, history}` (the
+point is read and discarded), and a popup is a window whose buffer
+carries a CSS class string that editor.ex parses (popup--class? in
+Scheme, the class parse in Elixir: four ways to say "this window
+floats"). The leaf gains two fields. `side` is `#f` for a work pane or
+one of `popup`, `dock`, `minibuffer`: the frame has at most one window
+per side, `layout-visible-window?` reads `side`, and the class string
+becomes a face the renderer derives from `side`. `owner` is `#f` or the
+id of the window that asked for this one: peek-window,
+listing-preview-target, the detail window, the collect window and
+group-preview each keep that pointer in their own frame-local today;
+with `owner` on the leaf, `quit-window` in an owned window returns to
+its owner, a kill of the owner closes its owned windows, and
+window-tree-rename/sanitize walk one field. `window-tree` prints
+`(:leaf buffer top manual ctop history side owner)`; a saved tree from
+before reads with `side #f owner #f`, so no desktop migration (a
+migration in migrations.scm is the fallback if a reader needs one).
+Elixir: build_tree gains the two fields and `window-side`/`window-owner`
+primitives; nothing else. Tests: window-config, detail, peek, popup
+tests read `side` and `owner` as data. Measure: the window-rearrange
+timings of 4a before and after.
+
+*4.6 The `display-preview` action.* One action in the display chain,
+`(display-preview NAME OWNER)`: show NAME in the window OWNER owns (make
+it with `owner` set when there is none), never bump the buffer MRU,
+never move focus, never enter winner's ring, and remember nothing
+beyond the leaf. Peek (`peek-file!`, `peek-buffer!`), listing-preview
+(`listing-preview!`, `-schedule!`, `-dismiss!` in ibuffer.scm), the
+switcher's `switch-preview!`, collect, the group preview and detail's
+`display-buffer-detail!` become callers that pick OWNER and NAME; the
+rules they carry today (the 1 MB peek cap, the debounce, the projector
+for a text preview, "the other window, never a popup") stay as their
+own one-line policies in front of the action. Dismissal is one verb:
+`quit-window` in the owned window, or the owner's own dismiss, deletes
+the owned leaf. Tests: display-buffer-test, peek-test, detail-test and
+the ibuffer preview tests assert the leaf's `owner` and that MRU and
+winner did not change. Measure: the listing-preview debounce budget
+(120 ms) and the per-key cost rows.
+
+*5.10 The config record.* One record
+`(name connector cmd model effort servers stance)` where `servers` is
+a list of server NAMES. The MCP registry (`*mcp-registry*`, resolved in
+one place by `mcp-resolve-spec`) is the only server table; a bundle
+names its servers instead of carrying a copy of each spec, the hub
+lists the table, the bundle picker composes from it, setup's program
+registry becomes rows of the same table with a `program` key, and the
+workspace LLM defaults are one bundle named `workspace`. `compos`, the
+editor's own MCP server, is a row like any other with `builtin #t`, so
+the five special cases become one predicate. The bundle accessors in
+chat-mode.scm (`llm-bundle-get/put/normalize`, the key pool) stay as
+the record's API and move to a `config.scm` package with the picker.
+Persisted shape: bundles keep their plist; a `servers` value that holds
+specs (an old desktop) migrates once to names through migrations.scm.
+Tests: transient-test and llm-setup-test (the bundle picker), a new
+config-test for the record and the migration, mcp-hub-test for the one
+table. Measure: line counts of llm-config.scm, setup.scm, mcp-hub.scm
+before and after (951, 713, 419 today).
+
+*5.1 M-o.* Decided and shipped as the chat merge above: llm-mode stays
+the lane, a hidden chat per document, `C-u M-o` picks the target.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
