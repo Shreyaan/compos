@@ -9,7 +9,7 @@
 ; write into an overwrite question, and the test then waits on a prompt
 (define (t--wf-fresh-dir name)
   (let ((d (string-append t--wf-dir "/" name)))
-    (shell-command->string (string-append "rm -rf " (shell-quote d)))
+    (shell-command->string (string-append "rm -rf '" d "'"))
     (make-directory! d)
     d))
 
