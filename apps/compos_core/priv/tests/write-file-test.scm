@@ -5,8 +5,11 @@
 
 (define t--wf-dir (string-append (compos-home) "/write-file-test"))
 
+; fresh means empty: a file a previous run left behind turns a plain
+; write into an overwrite question, and the test then waits on a prompt
 (define (t--wf-fresh-dir name)
   (let ((d (string-append t--wf-dir "/" name)))
+    (shell-command->string (string-append "rm -rf " (shell-quote d)))
     (make-directory! d)
     d))
 

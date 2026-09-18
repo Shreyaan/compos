@@ -824,6 +824,13 @@ files and write policy, load-path, delete-file, the remote and visit
 block (visit and find-file live in it), M-x and eval, the prefix maps,
 self-insert, the movement state, input intents, buffer links, daemon
 control and the default keymap.
+Sixth move: the remote half of the file block (remote-ls, remote-sh!,
+the file operations that branch on /ssh:, remote-visit) is
+`scheme/packages/tramp.scm`, loaded before dired; visit and find-file
+stay in the kernel under their own header. editor.scm is 5,685 lines.
+Landmine met: the test home keeps files between runs, and a note.txt a
+run left on 2026-09-15 turned a plain write-file test into an overwrite
+question; the fresh-dir helper now empties its directory first.
 
 **Next three steps, in order.**
 

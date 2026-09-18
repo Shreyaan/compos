@@ -26,6 +26,7 @@
 ; windows: display-buffer, popups, peek, layouts, special-mode, tiling;
 ; a list mode derives from special-mode at load, so this precedes dired
 (load "window.scm")
+(load "tramp.scm")
 (load "dired.scm")
 ; the chat buffer and the LLM pipes: every package that opens a chat
 ; reads the chat locals lists at load
