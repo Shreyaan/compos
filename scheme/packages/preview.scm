@@ -275,20 +275,13 @@
         (insert! (string-append "\n" (car item) (cadr item) " ")))))
 
 ;; Every character inside a fence is literal, and a table row means nothing
-;; once it is split, so RET keeps its plain meaning on those lines.
-(define (preview--fence-line? line) (re-match "^[ \t]*```" line))
-
-(define (preview--in-fence? ls)
-  (let loop ((lines (string-split (buffer-substring 0 ls) "\n")) (n 0))
-    (if (null? lines)
-        (= (remainder n 2) 1)
-        (loop (cdr lines)
-              (if (preview--fence-line? (car lines)) (+ n 1) n)))))
-
+;; once it is split, so RET keeps its plain meaning on those lines. The
+;; fence is what morg-scan says it is, the one fence-aware scanner: a #
+;; inside a fence and a fence inside a list agree with every other view.
 (define (preview--literal-line? ls line)
-  (or (preview--fence-line? line)
-      (re-match "^[ \t]*[|]" line)
-      (preview--in-fence? ls)))
+  (or (re-match "^[ \t]*[|]" line)
+      (let ((e (morg-entry-at (morg-scan (current-buffer)) ls)))
+        (and e (member (morg-kind e) '(open close code)) #t))))
 
 ;; A rendered page the reader can type into. A read-only page — help, a
 ;; diff, a bookmark note — keeps the plain newline, and so does every

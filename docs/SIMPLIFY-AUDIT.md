@@ -1117,6 +1117,15 @@ is gone; the persist-global! reader still normalizes. Left in place: the
 a list-row count and a legacy fallback; it is a mirror, not a one-shot,
 and goes with the llm-mode block cleanup). Tests: migrations-test.scm.
 
+**Item 17 (2026-09-19): one fence finder.** morg-scan is the fence-aware
+line scanner; markdown-mode, morg, llm-mode and now preview read fences
+from it. preview.scm had the fourth finder, a parity count of backtick
+lines over the buffer prefix on every RET; preview--literal-line? now
+asks the scan entry at the line (open, close or code). web--fence-command
+is not a finder (it names the command for a fence language). The
+load-bundled-package expansion in init.scm is gone already; the block
+files' prologues are file headers and stay.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
