@@ -2950,6 +2950,15 @@ defmodule Compos.EditorTest do
   # it — C-x C-g is a group prefix now — which is a preference changing
   # and not a bug in which-key. So the test binds its own prefix and
   # reads the map back.
+  # (KEY COMMAND MODIFIERS LABEL) rows from Scheme, as EditorLive reads them
+  defp which_key_rows(pending) do
+    {:ok, rows} = Compos.Core.Session.call_named("which-key-rows", [pending], nil, 5_000, :ui)
+
+    Enum.map(rows, fn [key, command, modifiers, label] ->
+      %{key: key, command: command, modifiers: modifiers, modifier_label: label}
+    end)
+  end
+
   test "the which-key panel offers the pending prefix's own bindings" do
     {:ok, _} =
       Compos.Core.Session.eval("""
@@ -2967,7 +2976,10 @@ defmodule Compos.EditorTest do
     end)
 
     press(["<f9>"])
-    wk = Editor.render_state().which_key
+    # the state says a prefix is pending; the rows come from Scheme when
+    # the client's idle delay has passed (which-key-rows)
+    assert Editor.render_state().which_key == :pending, "a pending prefix drew no panel"
+    wk = which_key_rows(["<f9>"])
     assert is_list(wk) and wk != [], "a pending prefix drew no panel"
 
     # a panel row can name a whole sequence under the prefix, so the
@@ -3005,7 +3017,7 @@ defmodule Compos.EditorTest do
     test_keys = ["a", "z", "C-a", "C-z", "C-A", "M-a", "M-z", "A", "Z", "s-a"]
 
     ordered =
-      Editor.render_state().which_key
+      which_key_rows(["<f9>"])
       |> Enum.filter(&(&1.key in test_keys))
       |> Enum.map(fn item -> {item.modifier_label, item.modifiers, item.key} end)
 

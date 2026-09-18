@@ -597,9 +597,11 @@ defmodule Compos.Ui.EditorLive do
     pending = Map.get(state, :pending, [])
 
     cond do
-      # up already: it follows the pending keys without flickering
+      # up already: it follows the pending keys without flickering. The
+      # rows come from Scheme now, not with every key: a fast chord never
+      # pays for them (which-key-rows walks the buffer's whole ladder)
       socket.assigns[:wk_shown] ->
-        {state, socket}
+        {%{state | which_key: which_key_rows(pending, socket.assigns[:frame])}, socket}
 
       # the delay is idle time, not time since the chord began: while the
       # panel is still held back, every further prefix key restarts it. A
@@ -611,6 +613,19 @@ defmodule Compos.Ui.EditorLive do
 
       true ->
         {%{state | which_key: nil}, arm_which_key(state, socket, pending)}
+    end
+  end
+
+  # (KEY COMMAND MODIFIERS LABEL) rows from Scheme, as the panel draws them
+  defp which_key_rows(pending, fid) do
+    case Compos.Core.Session.call_named("which-key-rows", [pending], fid, 5_000, :ui) do
+      {:ok, rows} when is_list(rows) ->
+        Enum.map(rows, fn [key, command, modifiers, label] ->
+          %{key: key, command: command, modifiers: modifiers, modifier_label: label}
+        end)
+
+      _ ->
+        []
     end
   end
 

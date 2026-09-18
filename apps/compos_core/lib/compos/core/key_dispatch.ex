@@ -11,6 +11,7 @@ defmodule Compos.Core.KeyDispatch do
   `"DEL"`, `"TAB"`, `"SPC"`, `"<left>"`.
   """
 
+  require Logger
   alias Compos.Core.{Buffer, Editor, Frame, Session}
 
   @named ~w(RET DEL TAB SPC ESC <delete> <left> <right> <up> <down> <home> <end>)
@@ -152,7 +153,7 @@ defmodule Compos.Core.KeyDispatch do
   end
 
   defp completion_key(key, pending) do
-    case Editor.lookup_keymap(@completion_map, [key]) do
+    case completion_lookup(key) do
       # a printable is bound to self-insert-command in the popup's map:
       # it inserts and the popup narrows in place
       {:command, "self-insert-command"} ->
@@ -166,6 +167,15 @@ defmodule Compos.Core.KeyDispatch do
         # any other key dismisses and acts normally
         Editor.completion_dismiss()
         buffer_key(key, pending)
+    end
+  end
+
+  # what KEY means in the popup's own map, asked of Scheme
+  defp completion_lookup(key) do
+    case Session.call_named("keymap-lookup", [@completion_map, [key]], Frame.current(), 5_000, :ui) do
+      {:ok, name} when is_binary(name) -> {:command, name}
+      {:ok, {:sym, "prefix"}} -> :prefix
+      _ -> :none
     end
   end
 
@@ -329,39 +339,19 @@ defmodule Compos.Core.KeyDispatch do
     end
   end
 
-  # ESC is Meta when nothing binds it directly (Emacs: ESC x runs M-x,
-  # ESC C-f runs C-M-f). A map that binds ESC itself — evil, the
-  # completion popup — wins, because the plain sequence resolves first.
+  # THE one lookup: keymaps are Scheme data, and key-binding-dispatch
+  # walks the ladder for the frame's buffer, ESC read as Meta when
+  # nothing binds it (Emacs: ESC x runs M-x). This process is the caller
+  # (LiveView, test, RPC), never the Session, so the call is plain.
   defp lookup_esc_meta(seq) do
-    case Editor.lookup_key(seq) do
-      :none ->
-        case Enum.reverse(seq) do
-          ["ESC" | _] ->
-            :prefix
-
-          [last, "ESC" | rev] ->
-            Editor.lookup_key(Enum.reverse(rev) ++ [add_meta(last)])
-
-          _ ->
-            :none
-        end
-
-      hit ->
-        hit
+    case Session.call_named("key-binding-dispatch", [seq], Frame.current(), 5_000, :ui) do
+      {:ok, ["command", name]} -> {:command, name}
+      {:ok, ["prefix"]} -> :prefix
+      {:ok, _} -> :none
+      {:error, reason} ->
+        Logger.warning("key lookup failed: #{inspect(reason)}")
+        :none
     end
-  end
-
-  # modifier order in a key spec: s- C- M- BASE (the client builds them so)
-  defp add_meta(key) do
-    {sup, rest} = split_mod(key, "s-")
-    {ctl, rest} = split_mod(rest, "C-")
-    if String.starts_with?(rest, "M-"), do: key, else: sup <> ctl <> "M-" <> rest
-  end
-
-  defp split_mod(key, mod) do
-    if String.starts_with?(key, mod),
-      do: {mod, binary_part(key, byte_size(mod), byte_size(key) - byte_size(mod))},
-      else: {"", key}
   end
 
   # text typed since the popup opened is the popup's query (orderless narrowing)

@@ -2126,19 +2126,6 @@ defmodule Compos.Core.SchemeAPI do
           Editor.minibuffer_activate_full(prompt, candidates, map)
           :void
         end,
-      {"global-set-key",
-       "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally."} => fn [
-                                                                                                seq,
-                                                                                                command
-                                                                                              ] ->
-        Editor.bind_key(String.split(seq, " "), key_binding_value(command))
-        :void
-      end,
-      {"global-unset-key",
-       "(global-unset-key SEQ) — remove the global binding for the key sequence SEQ."} => fn [seq] ->
-        Editor.unbind_key(String.split(seq, " "))
-        :void
-      end,
       {"transient-show!",
        "(transient-show! MENU) — show this frame's Transient modal; #t locks keys with no menu; #f clears it."} =>
         fn
@@ -2163,158 +2150,19 @@ defmodule Compos.Core.SchemeAPI do
             Editor.set_transient(transient_menu(title, groups, meta))
             :void
         end,
-      {"local-set-key",
-       "(local-set-key SEQ COMMAND) — bind SEQ to COMMAND in the current buffer."} => fn [
-                                                                                           seq,
-                                                                                           command
-                                                                                         ] ->
-        Editor.local_bind_key(Editor.current_buffer(), String.split(seq, " "), command)
-        :void
-      end,
-      # explicit-buffer variant: bind without the buffer being current
-      {"local-set-key*", "(local-set-key* BUF SEQ COMMAND) — bind SEQ to COMMAND in buffer BUF."} =>
-        fn [buf, seq, command] ->
-          Editor.local_bind_key(buf, String.split(seq, " "), command)
-          :void
-        end,
-      # the inverse: a minor mode restores the map it borrowed
-      {"local-unset-key*", "(local-unset-key* BUF SEQ) — drop BUF's own binding for SEQ."} => fn [
-                                                                                                   buf,
-                                                                                                   seq
-                                                                                                 ] ->
-        Editor.local_unbind_key(buf, String.split(seq, " "))
-        :void
-      end,
-      # Emacs [remap COMMAND]: every key bound to FROM runs TO in this
-      # buffer — arrows, C-n/C-p, and user rebindings all follow at once
-      {"local-remap!",
-       "(local-remap! FROM TO) — in the current buffer, every key bound to FROM runs TO."} => fn [
-                                                                                                   from,
-                                                                                                   to
-                                                                                                 ] ->
-        Editor.local_remap(Editor.current_buffer(), from, to)
-        :void
-      end,
-      {"local-remap*!",
-       "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO."} => fn [
-                                                                                                buf,
-                                                                                                from,
-                                                                                                to
-                                                                                              ] ->
-        Editor.local_remap(buf, from, to)
-        :void
-      end,
-      {"key-for-command",
-       "(key-for-command COMMAND [BUF]) — return the tersest key sequence bound to COMMAND, in BUF's keymap and the global one, or \"\"."} =>
-        fn
-          [name] -> Editor.key_for_command(name)
-          [name, buf] -> Editor.key_for_command(name, buf)
-        end,
-      # what a key sequence means here, without pressing it
-      {"key-binding",
-       "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys."} =>
-        fn [seq] ->
-          case Editor.lookup_key(key_seq(seq)) do
-            {:command, name} -> name
-            :prefix -> {:sym, "prefix"}
-            _ -> false
-          end
-        end,
-      {"key-binding-source",
-       "(key-binding-source SEQ) — (COMMAND KEYMAP-NAME) for the binding SEQ resolves to here, 'prefix, or #f."} =>
-        fn [seq] ->
-          case Editor.lookup_key_source(key_seq(seq)) do
-            {:command, name, map} -> [name, map]
-            :prefix -> {:sym, "prefix"}
-            _ -> false
-          end
-        end,
-      # --- keymaps: named, with parents; a buffer's own map is named after it
-      {"define-keymap!",
-       "(define-keymap! NAME [PARENT]) — a named keymap; PARENT answers the keys NAME does not bind. A buffer's own map is the keymap named after the buffer."} =>
-        fn
-          [name] -> Editor.keymap_parent(plain(name), Editor.keymap_parent_of(plain(name)))
-          [name, parent] -> Editor.keymap_parent(plain(name), parent && plain(parent))
-        end,
-      {"define-key",
-       "(define-key KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap."} =>
-        fn [name, seq, command] ->
-          Editor.keymap_set(plain(name), key_seq(seq), key_binding_value(command))
-          :void
-        end,
-      {"keymap-unset!",
-       "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ."} => fn [
-                                                                                            name,
-                                                                                            seq
-                                                                                          ] ->
-        Editor.keymap_unset(plain(name), key_seq(seq))
-        :void
-      end,
-      {"keymap-parent!",
-       "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind."} =>
-        fn [name, parent] ->
-          Editor.keymap_parent(plain(name), parent && plain(parent))
-          :void
-        end,
-      {"keymap-parent", "(keymap-parent KEYMAP) — the parent's name, or #f."} => fn [name] ->
-        Editor.keymap_parent_of(plain(name)) || false
-      end,
-      {"keymap-bindings",
-       "(keymap-bindings KEYMAP) — ((KEYS COMMAND) ...), the keymap's own bindings."} => fn [name] ->
-        Enum.map(Editor.keymap_bindings(plain(name)), fn {k, c} -> [k, c] end)
-      end,
-      {"keymap-lookup",
-       "(keymap-lookup KEYMAP SEQ) — what SEQ means in the named keymap and its parents: a name, 'prefix, or #f."} =>
-        fn [name, seq] ->
-          case Editor.lookup_keymap(plain(name), key_seq(seq)) do
-            {:command, cmd} -> cmd
-            :prefix -> {:sym, "prefix"}
-            _ -> false
-          end
-        end,
-      {"keymap-names", "(keymap-names) — every keymap the editor holds."} => fn [] ->
-        Editor.keymap_names()
-      end,
-      {"use-local-map!",
-       "(use-local-map! BUF KEYMAP) — BUF's own map takes KEYMAP as its parent: the mode's map."} =>
-        fn [buf, name] ->
-          Editor.use_local_map(buf, name && plain(name))
-          :void
-        end,
-      {"buffer-local-map", "(buffer-local-map BUF) — the parent of BUF's own map, or #f."} => fn [
-                                                                                                   buf
-                                                                                                 ] ->
-        Editor.buffer_local_map(buf) || false
-      end,
-      {"clear-local-map!",
-       "(clear-local-map! BUF) — forget BUF's own bindings, parent, and remaps."} => fn [buf] ->
-        Editor.clear_local_map(buf)
-        :void
-      end,
-      {"buffer-minor-maps!",
-       "(buffer-minor-maps! BUF NAMES) — the minor-mode keymaps in force in BUF, first wins, ahead of its own map."} =>
-        fn [buf, names] ->
-          Editor.set_minor_maps(buf, Enum.map(names, &plain/1))
-          :void
-        end,
-      {"buffer-minor-maps", "(buffer-minor-maps BUF) — the minor-mode keymaps in force in BUF."} =>
-        fn [buf] -> Editor.minor_maps(buf) end,
-      {"global-minor-maps!",
-       "(global-minor-maps! NAMES) — the minor-mode keymaps in force in every buffer, after the buffer's own minor maps."} =>
-        fn [names] ->
-          Editor.set_global_minor_maps(Enum.map(names, &plain/1))
-          :void
-        end,
-      {"global-minor-maps", "(global-minor-maps) — the keymaps in force in every buffer."} =>
-        fn [] -> Editor.global_minor_maps() end,
-      {"buffer-keymaps",
-       "(buffer-keymaps BUF) — the keymap names that answer for BUF, in precedence order, \"global\" last."} =>
-        fn [buf] -> Editor.buffer_keymaps(buf) end,
-      {"where-is-internal",
-       "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first."} =>
-        fn
-          [name] -> Editor.where_is(name, Editor.current_buffer())
-          [name, buf] -> Editor.where_is(name, buf)
+      # the dispatcher's ladder reads the frame in one call
+      {"key-context",
+       "(key-context) — (BUFFER OVERRIDING) for a key lookup: the buffer the key acts on, and (KEYMAP LOCK?) for the frame's overriding keymap or #f."} =>
+        fn [] ->
+          %{buffer: buffer, overriding: over} = Editor.key_context()
+
+          [
+            buffer,
+            case over do
+              %{map: m, lock: lock} -> [m, lock == true]
+              _ -> false
+            end
+          ]
         end,
       {"overriding-map!",
        "(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?]) — the frame's overriding keymap, ahead of every other; #f clears it. LOCK? makes an unbound key undefined (Transient). UNTIL-COMMAND? drops it when the next command finishes (the prefix argument)."} =>
@@ -2331,14 +2179,6 @@ defmodule Compos.Core.SchemeAPI do
           [name, lock, until] ->
             Editor.set_overriding_map(plain(name), lock == true, until == true)
         end,
-      {"buffer-at-point-map!",
-       "(buffer-at-point-map! BUF KEYMAP) — the keymap of the thing at point in BUF (a block), ahead of the minor maps; #f clears it. Emacs's overlay keymap."} =>
-        fn [buf, name] ->
-          Editor.set_at_point_map(buf, name && plain(name))
-          :void
-        end,
-      {"buffer-at-point-map", "(buffer-at-point-map BUF) — the keymap at point in BUF, or #f."} =>
-        fn [buf] -> Editor.at_point_map(buf) || false end,
       {"completion-requery!",
        "(completion-requery!) — narrow the popup to the text between its start and point."} =>
         fn [] ->
@@ -3220,12 +3060,7 @@ defmodule Compos.Core.SchemeAPI do
   # and an Editor that dies loses every buffer's local keymap.
   # a binding is a command name, or (keymap NAME): a prefix key that leads
   # to another keymap
-  defp key_binding_value([{:sym, "keymap"}, name]), do: {:keymap, plain(name)}
-  defp key_binding_value(command), do: command
 
-  defp key_seq(seq) when is_list(seq), do: Enum.map(seq, &plain/1)
-  defp key_seq(seq) when is_binary(seq), do: String.split(seq, " ", trim: true)
-  defp key_seq(seq), do: [plain(seq)]
 
   # System.cmd has no time limit, so a hung command would hold the caller —
   # and in the inline form the caller is the Session — forever. Run through

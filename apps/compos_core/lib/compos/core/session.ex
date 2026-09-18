@@ -997,15 +997,6 @@ defmodule Compos.Core.Session do
         command_names()
       end,
       # ((KEYS COMMAND) ...) for every global binding
-      {"global-keys", "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding."} =>
-        fn [] ->
-          for {seq, cmd} <- Editor.global_keys(), do: [seq, cmd]
-        end,
-      # ((KEYS COMMAND) ...) for one buffer's own bindings
-      {"local-keys", "(local-keys BUF) — return ((KEYS COMMAND) ...) for BUF's own key bindings."} =>
-        fn [buf] ->
-          for {seq, cmd} <- Editor.local_keys(buf), do: [seq, cmd]
-        end,
       {"command-fn", "(command-fn NAME) — return the command's closure, or #f."} => fn [name] ->
         case :ets.lookup(Compos.Core.SchemeAPI.commands_table(), command_name(name)) do
           [] -> false

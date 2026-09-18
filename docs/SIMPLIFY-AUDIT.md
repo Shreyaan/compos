@@ -1218,6 +1218,48 @@ Ruled (2026-09-19): "unless there is something wrong with them they are
 all useful in their own right". M-x profile and the perf panels stay;
 step 1 closes with the dashboard removal.
 
+**Step 2, done in a worktree (2026-09-19 night): keymaps are Scheme
+data.** editor.scm gains a keymaps section: `*keymaps*` (name ->
+bindings and parent), per-buffer facts (minor maps, the map at point,
+remaps), the global minor maps, the ladder, the resolution with prefix
+keymaps, ESC as Meta, remaps, the read-only map, which-key rows, and
+every function the 29 primitives used to be (same names, same
+answers). Elixir keeps one call: KeyDispatch asks
+`key-binding-dispatch` for a sequence; `key-context` answers the
+frame's buffer and overriding map in one Editor call; the overriding
+map, the pending prefix, last-keys and the capture stay frame state.
+The which-key rows are no longer computed on every prefix key: the
+client asks `which-key-rows` once its idle delay has passed. Editor
+keeps four Scheme-backed readers for tests and RPC (lookup_key,
+local_keys, buffer_local_map, local_bind_key). Gone from Elixir: the
+keymap state, 28 handle_calls, the ladder, chain, resolve, flatten and
+which-key helpers (about 750 lines), and the primitives in scheme_api.ex
+and session.ex.
+
+Cost, measured (test/bench/key_latency_bench.exs, p50 microseconds,
+one key end to end through KeyDispatch.handle_key):
+
+| key | HEAD | Scheme keymaps |
+|---|---|---|
+| C-f, a bound motion | 443 | 545 |
+| C-x then C-g, a prefix pair | 526 | 702 |
+
+The Scheme side of one lookup is 52 microseconds interpreted and a
+table hit after the first press (a memo per buffer, overriding map,
+sequence and keymap generation); the rest is the lane call. Three
+caches carry it: the ladder per buffer, the prefix index per keymap
+(the proper prefixes of every key and the keymap-valued bindings), and
+the flattened ladder with its command-to-keys index, all dropped on any
+keymap write. Without the last one M-x annotated a thousand commands
+with key-for-command and blew the 1 GB Scheme heap.
+
+Tests: keymap-test and keys-sweep show the same three and two reds as
+HEAD; the eighteen editor_test names the port turned red in a full
+file run all pass alone (the full file is order-polluted at HEAD too:
+88 reds); the two which-key tests ask Scheme for their rows now.
+Landing needs a daemon restart at once: a hot reload defines the tables
+empty, and the bindings made at boot live in the old Elixir store.
+
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
 

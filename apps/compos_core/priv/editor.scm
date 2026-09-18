@@ -1696,6 +1696,575 @@
 (domain! 'unknown)
 (effects! '(unknown))
 
+;;; --- keymaps ------------------------------------------------------------------
+;;; Keymaps are Scheme data. A keymap is a name, its own bindings and a
+;;; parent. A binding maps a key sequence (a list of key strings) to a
+;;; command name, or to (keymap NAME): a prefix key that leads to that
+;;; keymap, as C-x leads to ctl-x-map in Emacs. A buffer's own map is the
+;;; keymap named after the buffer; use-local-map! gives it the mode's map
+;;; as its parent. A key resolves down this ladder:
+;;;
+;;;   the frame's overriding map (Transient, the prefix argument's map);
+;;;     locked, an unbound key is undefined
+;;;   the keymap of the thing at point (a block)
+;;;   the buffer's minor-mode maps, first wins
+;;;   the global minor-mode maps (cua-mode)
+;;;   the buffer's own map, then its parents
+;;;   the read-only map, when the buffer is read-only
+;;;   the global map
+;;;
+;;; An exact hit anywhere wins over a prefix anywhere: Emacs's
+;;; minor-mode-map-alist, local map and global map, in that order.
+;;; Elixir keeps one call: the dispatcher asks key-binding-dispatch for a
+;;; sequence and acts on the answer; the frame's overriding map and the
+;;; pending prefix are dispatch state and stay with the frame.
+
+(domain! 'keys)
+(effects! '(write))
+
+(define *keymaps* '())                 ; NAME -> (BINDINGS PARENT)
+;; NAME -> (PREFIXES LEADS): every proper prefix of a bound key, and the
+;; bindings whose value is a keymap, longest key first. Built on the
+;; first lookup after a change, so a key resolves with builtins alone.
+(define *keymap-index* '())
+(define *global-minor-maps* '())
+(define *buffer-key-facts* '())        ; BUF -> (minor-maps LIST at-point-map NAME remaps ALIST)
+(define keymap--minibuf " *minibuf*")
+(define keymap--read-only " *read-only*")
+
+;; any frame's minibuffer buffer shares one local keymap
+(define (keymap--key name)
+  (let ((n (if (symbol? name) (symbol->string name) name)))
+    (if (and (string? n) (string-prefix? " *minibuf" n)) keymap--minibuf n)))
+
+(define (keymap--seq seq)
+  (cond ((string? seq) (filter (lambda (k) (not (equal? k ""))) (string-split seq " ")))
+        ((null? seq) '())
+        ((pair? seq) (map (lambda (k) (if (symbol? k) (symbol->string k) k)) seq))
+        ((symbol? seq) (list (symbol->string seq)))
+        (else (list seq))))
+
+;; a binding's value: a command name, or (keymap NAME)
+(define (keymap--prefix-value? v) (and (pair? v) (equal? (car v) 'keymap)))
+(define (keymap--value v)
+  (if (keymap--prefix-value? v) (list 'keymap (keymap--key (cadr v))) v))
+
+(define (keymap--entry name) (alist-get *keymaps* (keymap--key name)))
+
+;; every write bumps the generation; a cached ladder is good while it holds
+(define *keymap-generation* 0)
+(define *keymap-memo* '())              ; (BUF OVER SEQ GENERATION) -> answer
+(define *keymap-flat* '())              ; KEY -> (GENERATION ROWS INDEX)
+(define *keymap-ladders* '())          ; BUF -> (GENERATION READ-ONLY? LADDER)
+(define (keymap--changed!)
+  (set! *keymap-generation* (+ *keymap-generation* 1))
+  (set! *keymap-ladders* '())
+  (set! *keymap-memo* '())
+  (set! *keymap-flat* '()))
+
+(define (keymap--put! name bindings parent)
+  (keymap--changed!)
+  (set! *keymap-index* (alist-delete *keymap-index* (keymap--key name)))
+  (set! *keymaps* (alist-put *keymaps* (keymap--key name) (list bindings parent))))
+
+;; the proper prefixes of KEYS: (C-x 4 f) has (C-x) and (C-x 4)
+(define (keymap--prefixes-of keys)
+  (let loop ((n 1) (out '()))
+    (if (>= n (length keys)) out (loop (+ n 1) (cons (take keys n) out)))))
+
+(define (keymap--index name)
+  (let ((key (keymap--key name)))
+    (or (alist-get *keymap-index* key)
+        (let* ((bindings (keymap--bindings key))
+               (prefixes (fold (lambda (acc e) (append (keymap--prefixes-of (car e)) acc)) '() bindings))
+               (leads (keymap--by-length-desc
+                        (filter (lambda (e) (keymap--prefix-value? (cadr e))) bindings)))
+               (index (list prefixes leads)))
+          (set! *keymap-index* (alist-put *keymap-index* key index))
+          index))))
+
+(define (keymap--bindings name)
+  (let ((e (keymap--entry name))) (if e (car e) '())))
+
+(define (keymap--update! name fn)
+  (let* ((e (or (keymap--entry name) (list '() #f))))
+    (keymap--put! name (fn (car e)) (cadr e))))
+
+;; NAME's bindings and its parents', nearest first; a parent loop ends
+(define (keymap--chain name)
+  (let loop ((n (and name (keymap--key name))) (seen '()) (acc '()))
+    (let ((e (and n (not (member n seen)) (keymap--entry n))))
+      (if (not e)
+          (reverse acc)
+          (loop (cadr e) (cons n seen) (cons (list n (car e)) acc))))))
+
+(define (keymap--facts buf) (or (alist-get *buffer-key-facts* (keymap--key buf)) '()))
+(define (keymap--fact buf key)
+  (let ((f (keymap--facts buf))) (and (pair? f) (plist-get f key))))
+(define (keymap--fact! buf key val)
+  (keymap--changed!)
+  (set! *buffer-key-facts*
+    (alist-put *buffer-key-facts* (keymap--key buf) (plist-put (keymap--facts buf) key val))))
+
+;; the (NAME BINDINGS) that answer for BUF, in precedence order; the
+;; ladder is kept per buffer until the next keymap write
+(define (keymap--ladder buf read-only?)
+  (let* ((key (keymap--key buf))
+         (kept (alist-get *keymap-ladders* key)))
+    (if (and kept (equal? (car kept) *keymap-generation*) (equal? (cadr kept) read-only?))
+        (caddr kept)
+        (let* ((minor (append (or (keymap--fact buf 'minor-maps) '()) *global-minor-maps*))
+               (at (keymap--fact buf 'at-point-map))
+               (ladder (append (if at (keymap--chain at) '())
+                               (apply append (map keymap--chain minor))
+                               (keymap--chain key)
+                               (if read-only? (keymap--chain keymap--read-only) '())
+                               (keymap--chain "global"))))
+          (set! *keymap-ladders*
+            (alist-put *keymap-ladders* key (list *keymap-generation* read-only? ladder)))
+          ladder))))
+
+;; SEQ is a proper prefix of KEYS
+(define (keymap--proper-prefix? seq keys)
+  (and (< (length seq) (length keys)) (equal? seq (take keys (length seq)))))
+
+;; (NAME VALUE) of the exact binding for SEQ, nearest map first, or #f
+(define (keymap--exact ladder seq)
+  (let loop ((ms ladder))
+    (if (null? ms)
+        #f
+        (let ((hit (assoc seq (cadr (car ms)))))
+          (if hit (list (car (car ms)) (cadr hit)) (loop (cdr ms)))))))
+
+;; longest key first
+(define (keymap--by-length-desc entries)
+  (let loop ((rest entries) (out '()))
+    (if (null? rest)
+        out
+        (loop (cdr rest)
+              (let ins ((ys out))
+                (cond ((null? ys) (list (car rest)))
+                      ((> (length (car (car rest))) (length (car (car ys)))) (cons (car rest) ys))
+                      (else (cons (car ys) (ins (cdr ys))))))))))
+
+;; (command NAME MAP), prefix, or none
+(define (keymap--resolve ladder seq)
+  (let ((exact (keymap--exact ladder seq)))
+    (cond ((and exact (keymap--prefix-value? (cadr exact))) 'prefix)
+          (exact (list 'command (cadr exact) (car exact)))
+          (else (keymap--resolve-through ladder seq)))))
+
+;; the keymap-valued bindings whose key is a proper prefix of SEQ, nearest
+;; map first, longest key first; the rest of SEQ resolves in that keymap
+(define (keymap--resolve-through ladder seq)
+  (if (null? seq)
+      ;; the empty sequence is a prefix of every binding
+      (if (let loop ((ms ladder)) (and (pair? ms) (or (pair? (cadr (car ms))) (loop (cdr ms)))))
+          'prefix
+          'none)
+      (keymap--resolve-through* ladder seq)))
+
+(define (keymap--resolve-through* ladder seq)
+  (let ((hit
+          (let loop ((ms ladder))
+            (if (null? ms)
+                #f
+                (let ((found
+                        (let try ((ps (cadr (keymap--index (car (car ms))))))
+                          (cond ((null? ps) #f)
+                                ((not (keymap--proper-prefix? (car (car ps)) seq)) (try (cdr ps)))
+                                (else
+                                  (let ((r (keymap--resolve
+                                             (keymap--chain (cadr (cadr (car ps))))
+                                             (list-tail seq (length (car (car ps)))))))
+                                    (if (equal? r 'none) (try (cdr ps)) r)))))))
+                  (or found (loop (cdr ms))))))))
+    (cond (hit hit)
+          ((let loop ((ms ladder))
+             (and (pair? ms)
+                  (or (and (member seq (car (keymap--index (car (car ms))))) #t)
+                      (loop (cdr ms)))))
+           'prefix)
+          (else 'none))))
+
+;; every binding reachable from BINDINGS, the keys of a prefix keymap
+;; joined under their prefix: what describe-bindings and where-is see.
+;; Rows are (KEYS VALUE), KEYS a list; a prefix keymap's own row carries
+;; "keymap:NAME".
+(define (keymap--flatten bindings &optional prefix seen)
+  (let ((prefix (or prefix '())) (seen (or seen '())))
+    (apply append
+      (map (lambda (e)
+             (let ((keys (append prefix (car e))) (v (cadr e)))
+               (if (keymap--prefix-value? v)
+                   (let ((m (cadr v)))
+                     (if (member m seen)
+                         '()
+                         (cons (list keys (string-append "keymap:" m))
+                               (apply append
+                                 (map (lambda (nb) (keymap--flatten (cadr nb) keys (cons m seen)))
+                                      (keymap--chain m))))))
+                   (list (list keys v)))))
+           bindings))))
+
+;; the buffer's command remaps applied to a resolved command (Emacs
+;; [remap COMMAND]): every key bound to FROM runs TO in this buffer
+(define (keymap--remap buf name)
+  (let ((r (assoc name (or (keymap--fact buf 'remaps) '()))))
+    (if r (cadr r) name)))
+
+(define (keymap--read-only-hit? buf seq)
+  (and (or (assoc seq (keymap--bindings keymap--read-only))
+           (member seq (car (keymap--index keymap--read-only))))
+       (buffer-exists? buf)
+       (buffer-read-only? buf)))
+
+;; the buffer a key acts on: the frame's minibuffer while a prompt is
+;; up, else the buffer of the selected window. Not the current buffer:
+;; an eval runs in a context buffer of its own, and a key never does.
+;; key-context answers it with the overriding map in one editor call.
+(define (keymap--frame-buffer) (car (key-context)))
+
+;; the frame's ladder for SEQ: the overriding map OVER ((KEYMAP LOCK?) or
+;; #f) first, and alone when it is locked
+(define (keymap--frame-ladder buf over seq)
+  (let ((base (lambda () (keymap--ladder buf (keymap--read-only-hit? buf seq)))))
+    (cond ((not over) (base))
+          ((cadr over) (keymap--chain (car over)))
+          (else (append (keymap--chain (car over)) (base))))))
+
+;; a resolved sequence is kept per buffer, overriding map and keymap
+;; generation: the second press of a key is one table hit
+(define (keymap--lookup-here seq)
+  (let* ((ctx (key-context))
+         (buf (car ctx))
+         (memo-key (list (keymap--key buf) (cadr ctx) seq *keymap-generation*))
+         (kept (assoc memo-key *keymap-memo*)))
+    (if kept
+        (cadr kept)
+        (let* ((r (keymap--resolve (keymap--frame-ladder buf (cadr ctx) seq) seq))
+               (answer (if (and (pair? r) (equal? (car r) 'command))
+                           (list 'command (keymap--remap buf (cadr r)) (caddr r))
+                           r)))
+          ;; a bounded memo: the newest 400 answers
+          (set! *keymap-memo* (take (cons (list memo-key answer) *keymap-memo*) 400))
+          answer))))
+
+;; modifier order in a key spec: s- C- M- BASE
+(define (keymap--add-meta key)
+  (let* ((sup (if (string-prefix? "s-" key) "s-" ""))
+         (k1 (if (equal? sup "") key (substring key 2 (string-length key))))
+         (ctl (if (string-prefix? "C-" k1) "C-" ""))
+         (k2 (if (equal? ctl "") k1 (substring k1 2 (string-length k1)))))
+    (if (string-prefix? "M-" k2) key (string-append sup ctl "M-" k2))))
+
+;; ESC is Meta when nothing binds it directly (Emacs: ESC x runs M-x): a
+;; sequence ending in ESC k asks again for M-k
+(define (keymap--esc-meta seq)
+  (let ((r (reverse seq)))
+    (and (pair? r) (pair? (cdr r)) (equal? (cadr r) "ESC")
+         (not (equal? (car r) "ESC"))
+         (reverse (cons (keymap--add-meta (car r)) (cddr r))))))
+
+(effects! '(read))
+(public! 'key-binding-dispatch
+  "(key-binding-dispatch SEQ) — the dispatcher's one lookup: (\"command\" NAME), (\"prefix\") or (\"none\") for the key sequence SEQ in the frame's buffer, ESC read as Meta when nothing binds it")
+(define (key-binding-dispatch seq)
+  (let* ((seq (keymap--seq seq))
+         (answer (lambda (r)
+                   (cond ((equal? r 'prefix) (list "prefix"))
+                         ((and (pair? r) (equal? (car r) 'command)) (list "command" (cadr r)))
+                         (else (list "none")))))
+         (r (keymap--lookup-here seq)))
+    (cond ((not (equal? r 'none)) (answer r))
+          ((and (pair? seq) (equal? (car (reverse seq)) "ESC")) (list "prefix"))
+          ((keymap--esc-meta seq) (answer (keymap--lookup-here (keymap--esc-meta seq))))
+          (else (list "none")))))
+
+(public! 'key-binding
+  "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys or a string.")
+(define (key-binding seq)
+  (let ((r (keymap--lookup-here (keymap--seq seq))))
+    (cond ((equal? r 'prefix) 'prefix)
+          ((and (pair? r) (equal? (car r) 'command)) (cadr r))
+          (else #f))))
+
+(public! 'key-binding-source
+  "(key-binding-source SEQ) — (COMMAND KEYMAP-NAME) for the binding SEQ resolves to here, 'prefix, or #f.")
+(define (key-binding-source seq)
+  (let ((r (keymap--lookup-here (keymap--seq seq))))
+    (cond ((equal? r 'prefix) 'prefix)
+          ((and (pair? r) (equal? (car r) 'command)) (list (cadr r) (caddr r)))
+          (else #f))))
+
+(public! 'keymap-lookup
+  "(keymap-lookup KEYMAP SEQ) — what SEQ means in the named keymap and its parents: a name, 'prefix, or #f.")
+(define (keymap-lookup name seq)
+  (let ((r (keymap--resolve (keymap--chain name) (keymap--seq seq))))
+    (cond ((equal? r 'prefix) 'prefix)
+          ((and (pair? r) (equal? (car r) 'command)) (cadr r))
+          (else #f))))
+
+;;; --- the which-key rows: what a pending prefix can still become ---------------
+
+(define keymap--modifier-order '("C" "M" "S" "s"))
+(define keymap--shifted-printable
+  '("!" "@" "#" "$" "%" "^" "&" "*" "(" ")" "_" "+" "{" "}" "|" ":" "\"" "<" ">" "?" "~"))
+
+;; (MODIFIERS BASE): the explicit X- modifiers of KEY, and Shift when the
+;; base is a shifted printable or an upper-case letter
+(define (keymap--modifiers key)
+  (let loop ((k key) (found '()))
+    (if (and (>= (string-length k) 2)
+             (equal? (substring k 1 2) "-")
+             (member (substring k 0 1) keymap--modifier-order))
+        (loop (substring k 2 (string-length k)) (cons (substring k 0 1) found))
+        (let* ((shifted (and (= (string-length k) 1)
+                             (or (member k keymap--shifted-printable)
+                                 (not (equal? (string-downcase k) k)))))
+               (mods (if shifted (cons "S" found) found)))
+          (list (filter (lambda (m) (member m mods)) keymap--modifier-order) k)))))
+
+(define (keymap--modifier-label mods)
+  (if (null? mods)
+      "Unmodified"
+      (string-join (map (lambda (m)
+                          (cond ((equal? m "C") "Control")
+                                ((equal? m "M") "Meta")
+                                ((equal? m "S") "Shift")
+                                (else "Super")))
+                        mods)
+                   " + ")))
+
+(public! 'which-key-rows
+  "(which-key-rows PENDING) — the keys the pending prefix PENDING can still complete to, as (KEY COMMAND MODIFIERS MODIFIER-LABEL) rows, unmodified keys first")
+(define (which-key-rows pending)
+  (let* ((pending (keymap--seq pending))
+         (buf (keymap--frame-buffer))
+         (rows (car (keymap--flat buf)))
+         (under (filter (lambda (r) (keymap--proper-prefix? pending (car r))) rows))
+         (items (map (lambda (r)
+                       (let* ((keys (list-tail (car r) (length pending)))
+                              (mb (keymap--modifiers (car keys)))
+                              (mods (car mb)))
+                         (list (string-join keys " ") (cadr r) mods (keymap--modifier-label mods)
+                               ;; the sort key: unmodified first, then the label, then the base
+                               (list (if (null? mods) 0 1) (keymap--modifier-label mods)
+                                     (cons (string-downcase (cadr mb)) (cdr keys))
+                                     (string-join keys " ")))))
+                     under))
+         (unique (let loop ((is items) (seen '()) (out '()))
+                   (cond ((null? is) (reverse out))
+                         ((member (car (car is)) seen) (loop (cdr is) seen out))
+                         (else (loop (cdr is) (cons (car (car is)) seen) (cons (car is) out))))))
+         (ordered (map cadr (sort (map (lambda (i) (list (list-ref i 4) i)) unique)))))
+    (map (lambda (i) (take i 4)) ordered)))
+
+;;; --- the API packages write keys with -----------------------------------------
+
+(effects! '(write))
+(public! 'define-keymap!
+  "(define-keymap! NAME [PARENT]) — a named keymap; PARENT answers the keys NAME does not bind. A buffer's own map is the keymap named after the buffer.")
+(define (define-keymap! name &optional parent)
+  (let ((e (keymap--entry name)))
+    (keymap--put! name (if e (car e) '())
+                  (cond (parent (keymap--key parent))
+                        (e (cadr e))
+                        (else #f)))
+    (keymap--key name)))
+
+(public! 'define-key
+  "(define-key KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap.")
+(define (define-key name seq command)
+  (keymap--update! name (lambda (b) (alist-put b (keymap--seq seq) (keymap--value command)))))
+
+(public! 'keymap-unset!
+  "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ.")
+(define (keymap-unset! name seq)
+  (keymap--update! name (lambda (b) (alist-delete b (keymap--seq seq)))))
+
+(public! 'keymap-parent!
+  "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind.")
+(define (keymap-parent! name parent)
+  (let ((e (or (keymap--entry name) (list '() #f))))
+    (keymap--put! name (car e) (and parent (keymap--key parent)))))
+
+(effects! '(read))
+(public! 'keymap-parent "(keymap-parent KEYMAP) — the parent's name, or #f.")
+(define (keymap-parent name)
+  (let ((e (keymap--entry name))) (and e (cadr e))))
+
+(public! 'keymap-bindings
+  "(keymap-bindings KEYMAP) — ((KEYS COMMAND) ...), the keymap's own bindings, KEYS as one string; a prefix key's COMMAND reads \"keymap:NAME\".")
+(define (keymap-bindings name)
+  (keymap--rows
+    (map (lambda (e)
+           (list (car e)
+                 (if (keymap--prefix-value? (cadr e))
+                     (string-append "keymap:" (cadr (cadr e)))
+                     (cadr e))))
+         (keymap--bindings name))))
+
+(public! 'keymap-names "(keymap-names) — every keymap the editor holds.")
+(define (keymap-names) (map car *keymaps*))
+
+(effects! '(write))
+(public! 'global-set-key "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally.")
+(define (global-set-key seq command) (define-key "global" seq command))
+
+(public! 'global-unset-key "(global-unset-key SEQ) — remove the global binding for the key sequence SEQ.")
+(define (global-unset-key seq) (keymap-unset! "global" seq))
+
+(public! 'use-local-map! "(use-local-map! BUF KEYMAP) — BUF's own map takes KEYMAP as its parent: the mode's map.")
+(define (use-local-map! buf name) (keymap-parent! buf name))
+
+(effects! '(read))
+(public! 'buffer-local-map "(buffer-local-map BUF) — the parent of BUF's own map, or #f.")
+(define (buffer-local-map buf) (keymap-parent buf))
+
+(effects! '(write))
+(public! 'clear-local-map! "(clear-local-map! BUF) — forget BUF's own bindings, parent, and remaps.")
+(define (clear-local-map! buf)
+  (keymap--changed!)
+  (set! *keymaps* (alist-delete *keymaps* (keymap--key buf)))
+  (keymap--fact! buf 'remaps '()))
+
+(public! 'local-set-key "(local-set-key SEQ COMMAND) — bind SEQ to COMMAND in the current buffer.")
+(define (local-set-key seq command) (define-key (current-buffer) seq command))
+
+(public! 'local-set-key* "(local-set-key* BUF SEQ COMMAND) — bind SEQ to COMMAND in buffer BUF.")
+(define (local-set-key* buf seq command) (define-key buf seq command))
+
+(public! 'local-unset-key* "(local-unset-key* BUF SEQ) — drop BUF's own binding for SEQ.")
+(define (local-unset-key* buf seq) (keymap-unset! buf seq))
+
+(public! 'local-remap! "(local-remap! FROM TO) — in the current buffer, every key bound to FROM runs TO.")
+(define (local-remap! from to) (local-remap*! (current-buffer) from to))
+
+(public! 'local-remap*! "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO.")
+(define (local-remap*! buf from to)
+  (keymap--fact! buf 'remaps (alist-put (or (keymap--fact buf 'remaps) '()) from to)))
+
+(public! 'buffer-minor-maps!
+  "(buffer-minor-maps! BUF NAMES) — the minor-mode keymaps in force in BUF, first wins, ahead of its own map.")
+(define (buffer-minor-maps! buf names)
+  (keymap--fact! buf 'minor-maps (map keymap--key names)))
+
+(effects! '(read))
+(public! 'buffer-minor-maps "(buffer-minor-maps BUF) — the minor-mode keymaps in force in BUF.")
+(define (buffer-minor-maps buf) (or (keymap--fact buf 'minor-maps) '()))
+
+(effects! '(write))
+(public! 'global-minor-maps!
+  "(global-minor-maps! NAMES) — the minor-mode keymaps in force in every buffer, after the buffer's own minor maps.")
+(define (global-minor-maps! names)
+  (keymap--changed!)
+  (set! *global-minor-maps* (map keymap--key names)))
+
+(effects! '(read))
+(public! 'global-minor-maps "(global-minor-maps) — the keymaps in force in every buffer.")
+(define (global-minor-maps) *global-minor-maps*)
+
+(effects! '(write))
+(public! 'buffer-at-point-map!
+  "(buffer-at-point-map! BUF KEYMAP) — the keymap of the thing at point in BUF (a block), ahead of the minor maps; #f clears it. Emacs's overlay keymap.")
+(define (buffer-at-point-map! buf name)
+  (keymap--fact! buf 'at-point-map (and name (keymap--key name))))
+
+(effects! '(read))
+(public! 'buffer-at-point-map "(buffer-at-point-map BUF) — the keymap at point in BUF, or #f.")
+(define (buffer-at-point-map buf) (keymap--fact buf 'at-point-map))
+
+(public! 'buffer-keymaps
+  "(buffer-keymaps BUF) — the keymap names that answer for BUF, in precedence order, \"global\" last.")
+(define (buffer-keymaps buf)
+  (map car (keymap--ladder buf (and (buffer-exists? buf) (buffer-read-only? buf)))))
+
+;; the flattened ladder of BUF (or the global map alone for #f), and
+;; its reverse index COMMAND -> ((KEYS) ...), kept until the next keymap
+;; write: M-x asks key-for-command once per command, and a flatten per
+;; ask is a heap of garbage
+(define (keymap--flat buf)
+  (let* ((key (if (string? buf) (keymap--key buf) "global"))
+         (kept (alist-get *keymap-flat* key)))
+    (if (and kept (equal? (car kept) *keymap-generation*))
+        (cdr kept)
+        (let* ((ladder (if (string? buf)
+                           (keymap--ladder buf (and (buffer-exists? buf) (buffer-read-only? buf)))
+                           (keymap--chain "global")))
+               (rows (apply append (map (lambda (m) (keymap--flatten (cadr m))) ladder)))
+               (index (fold (lambda (acc r)
+                              (alist-put acc (cadr r) (cons (car r) (or (alist-get acc (cadr r)) '()))))
+                            '() rows))
+               (entry (list *keymap-generation* rows index)))
+          (set! *keymap-flat* (alist-put *keymap-flat* key entry))
+          (cdr entry)))))
+
+;; every (KEYS COMMAND) of COMMAND across the ladder of BUF, or the global map alone
+(define (keymap--keys-of command buf)
+  (map (lambda (keys) (list keys command))
+       (reverse (or (alist-get (cadr (keymap--flat buf)) command) '()))))
+
+;; tersest first: the shortest spelling, then the alphabet
+(define (keymap--tersest specs)
+  (map cadr (sort (map (lambda (s) (list (list (string-length s) s) s)) specs))))
+
+(public! 'where-is-internal
+  "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first.")
+(define (where-is-internal command &optional buf)
+  (let loop ((ks (keymap--tersest (map (lambda (r) (string-join (car r) " "))
+                                       (keymap--keys-of command (or buf (current-buffer))))))
+             (out '()))
+    (cond ((null? ks) (reverse out))
+          ((member (car ks) out) (loop (cdr ks) out))
+          (else (loop (cdr ks) (cons (car ks) out))))))
+
+(public! 'key-for-command
+  "(key-for-command COMMAND [BUF]) — return the tersest key sequence bound to COMMAND, in BUF's keymap and the global one, or \"\".")
+(define (key-for-command command &optional buf)
+  (let ((ks (where-is-internal command (if buf buf #f))))
+    (if (pair? ks) (car ks) "")))
+
+;; ((KEYS COMMAND) ...) with the keys spelled as one string and a prefix
+;; keymap as "keymap:NAME"
+(define (keymap--rows rows)
+  (map (lambda (r) (list (string-join (car r) " ") (cadr r))) rows))
+
+(public! 'global-keys "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding.")
+(define (global-keys) (keymap--rows (keymap--flatten (keymap--bindings "global"))))
+
+(public! 'local-keys
+  "(local-keys BUF) — return ((KEYS COMMAND) ...) for every binding that answers in BUF besides the global ones; a nearer map wins.")
+(define (local-keys buf)
+  (let* ((ladder (filter (lambda (m) (not (equal? (car m) "global")))
+                         (keymap--ladder buf (and (buffer-exists? buf) (buffer-read-only? buf)))))
+         (merged (fold (lambda (acc m)
+                         (fold (lambda (acc r) (alist-put acc (car r) (cadr r))) acc (keymap--flatten (cadr m))))
+                       '()
+                       (reverse ladder))))
+    (keymap--rows merged)))
+
+(define-keymap! "global")
+
+;; a renamed buffer keeps its own map and its facts under the new name
+(add-hook! 'buffer-renamed-hook
+  (lambda (old new)
+    (let ((e (keymap--entry old)))
+      (when e
+        (keymap--changed!)
+        (set! *keymaps* (alist-delete *keymaps* (keymap--key old)))
+        (keymap--put! new (car e) (cadr e))))
+    (let ((f (alist-get *buffer-key-facts* old)))
+      (when f
+        (set! *buffer-key-facts*
+          (alist-put (alist-delete *buffer-key-facts* old) new f))))))
+
+;; a killed buffer leaves no map and no facts behind
+(define (keymap--forget-buffer! buf)
+  (keymap--changed!)
+  (set! *keymaps* (alist-delete *keymaps* (keymap--key buf)))
+  (set! *buffer-key-facts* (alist-delete *buffer-key-facts* (keymap--key buf))))
+
 ;;; --- modes ------------------------------------------------------------------
 ;;; A major mode = mode-name buffer-local + a setup fn (local keys, vars).
 ;;; One table holds every fact about every mode, major and minor:
