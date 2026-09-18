@@ -1353,6 +1353,21 @@ the other session), layout-policy 8, detail 3, ibuffer-prompt 6, all in
 the ledger; groups, group-membership, switcher-sleep, window-config
 green or ledgered.
 
+**Item 15, ruled (2026-09-19):** "the keys i want - text-scale-decrease,
+undo on C-/, keep the C-x b. in fact you can delete the other
+implementation. this is settled. C-t is telemetry." Done: the shadowed
+`C-_ undo` and `C-t transpose-chars` lines are gone (undo is C-/,
+transpose-chars has no key); switch-to-buffer-prompt and the seven
+helpers only it used are deleted, chrome's C-x b chord and the
+handheld's tab hold run ibuffer-prompt, the group-switch tests drive
+ibuffer-prompt. Two features died with the old prompt and are not in
+ibuffer-prompt: members of the frame's group listed before other
+buffers, and C-RET on a typed name founding a group; their two tests
+are deleted. goto-address-at-point leaves C-c RET (the chat companion's)
+for M-., through goto-thing-at-point: an address at point is followed,
+else code-goto-definition; lsp.scm no longer binds M-. itself (a mode
+map may still bind M-. to definition-peek and wins in its buffer).
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,

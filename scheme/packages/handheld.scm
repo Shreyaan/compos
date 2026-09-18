@@ -234,7 +234,7 @@
     (cond ((not id) (message "No such group") #f)
           (else
            (unless (equal? id (frame-group)) (switch-to-group! id))
-           (run-command "switch-to-buffer-prompt")
+           (run-command "ibuffer-prompt")
            id))))
 
 (effects! '(read))

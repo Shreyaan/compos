@@ -18,9 +18,8 @@
 ;;; A preview can wake a dormant buffer; closing the switcher puts every
 ;;; buffer nobody picked back to sleep.
 ;;;
-;;; The same rows serve as a minibuffer prompt (switch-to-buffer-prompt)
-;;; for the surfaces that draw only a prompt: a browser page under the
-;;; chrome extension. One rows fn, one act fn, two surfaces.
+;;; The same rows serve the minibuffer prompt (ibuffer-prompt, C-x b):
+;;; one rows fn, one act fn, two surfaces.
 
 (define *switch-buffer* "*switch*")
 
@@ -778,27 +777,6 @@
                             (car e))))
             (loop (cdr rs) (cons label seen) (cons (cons label (cdr r)) out)))))))
 
-;; (LABEL NAME) for every row the prompt offers: what the candidate says
-;; and what it means
-(define (switch-prompt-pairs rows)
-  (let loop ((rs rows) (cs (switch-prompt-rows rows)) (out '()))
-    (if (or (null? rs) (null? cs))
-        (reverse out)
-        (loop (cdr rs) (cdr cs)
-              (cons (list (car (car cs)) (car (car rs))) out)))))
-
-;; a pick says a label; every path past it names a buffer. Text that names
-;; no row comes back as it was typed -- it is a new group's name.
-(define (switch-prompt-name rows label)
-  (let ((p (assoc label (switch-prompt-pairs rows))))
-    (if p (nth 1 p) label)))
-
-(define (switch-prompt-label-of rows name)
-  (let loop ((ps (switch-prompt-pairs rows)))
-    (cond ((null? ps) name)
-          ((equal? (nth 1 (car ps)) name) (car (car ps)))
-          (else (loop (cdr ps))))))
-
 ;; RET with nothing typed takes the first row that is neither a heading
 ;; nor the buffer you are already on, so the prompt advertises exactly that
 (define (switch-first-choice rows &optional here)
@@ -809,18 +787,6 @@
           ;; empty input has to take you somewhere
           ((and here (equal? (car (car rs)) here)) (loop (cdr rs)))
           (else (car (car rs))))))
-
-;; TAB with an input that names exactly one group locks the prompt to it
-(define (switch-prompt-lock-target input)
-  (and (not (equal? input ""))
-       (let ((hits (filter (lambda (g) (string-contains? (group-label g) input))
-                           (group-names))))
-         (and (pair? hits) (null? (cdr hits)) (car hits)))))
-
-;; the locked rows for the prompt: the group's card with its member
-;; chips, then its buffers and its project files, as the modal lists them
-(define (switch-prompt-locked-rows g)
-  (cons (group-container-candidate g) (cdr (switch-locked-rows g))))
 
 ;; the prompt lists buffers, not group cards: the sectioned rows
 ;; without the containers, and without a heading that then has no rows.
@@ -948,129 +914,6 @@
 (define (ibuffer-prompt-last-ms) *ibuffer-prompt-last-ms*)
 
 (global-set-key "C-x b" "ibuffer-prompt")
-
-(define-command "switch-to-buffer-prompt"
-  "Switch to a buffer; with a prefix, show it in another window"
-  (lambda ()
-    (set! *mb-confirm-context* #f)
-    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
-           (other-window? (and (current-prefix-arg) #t))
-           (my-group (or (buffer-group here) (frame-local 'current-group)))
-           ;; opening the switcher snapshots this group's arrangement:
-           ;; wherever you go next, the way back is exact
-           (_ (group-layout-save-if-shown! my-group))
-           (rows (switch-buffer-only-rows
-                   (switch-sectioned-rows here my-group (active-window))))
-           (view 'buffers)
-           (fallback (switch-first-choice rows here))
-           (row-of (lambda (name) (or (assoc name rows) (list name))))
-           (restore-here! (lambda ()
-                            (when (buffer-known? here) (window-preview-buffer! here))))
-           ;; buffers the preview wakes; the close puts every one nobody
-           ;; picked back to sleep (the consult contract)
-           (woken '())
-           (sleep-woken! (lambda (keep)
-                           (for-each (lambda (b)
-                                       (unless (equal? b keep) (buffer-sleep! b)))
-                                     woken)
-                           (set! woken '()))))
-      (if (null? rows)
-          (message "No other buffer available")
-          (minibuffer-read-preview
-            (if fallback
-                (string-append
-                  (if other-window? "Other window buffer" "Switch to")
-                  " (default " (switch-prompt-label-of rows fallback) "): ")
-                (if other-window? "Other window buffer: " "Switch to: "))
-            (switch-prompt-rows rows)
-            ;; the invoking window live-previews the highlighted buffer; a
-            ;; card or a tab leaves the window alone. The primitive wakes a
-            ;; sleeper; the mode setup must follow, or switch-to-buffer!
-            ;; later sees the buffer live and skips its own restore
-            (lambda (label)
-              (let ((b (switch-prompt-name rows label)))
-                (when (buffer-known? b)
-                  (let ((sleeping (not (buffer-exists? b))))
-                    (window-preview-buffer! b)
-                    (when (and sleeping (buffer-exists? b))
-                      (restore-buffer-runtime! b)
-                      (set! woken (cons b woken)))))))
-            (lambda (name)
-              (let* ((context? (let ((x *mb-confirm-context*))
-                                 (set! *mb-confirm-context* #f)
-                                 x))
-                     (picked (if (equal? name "")
-                                 (or fallback "")
-                                 (switch-prompt-name rows name)))
-                     (e (row-of picked)))
-                (cond
-                  ((equal? picked "") #f)
-                  ((buffer-known? picked)
-                   (if (and other-window? (not context?))
-                       (begin
-                         ;; Preview borrowed this window. Restore it before splitting.
-                         (restore-here!)
-                         (let ((win (display-buffer-other-window! picked)))
-                           (when win (select-window! win)))
-                         (group-current-recalculate!)
-                         (windows-shown-catchup!))
-                       ;; A pick from outside the group takes you there:
-                       ;; the window takes back what it showed, and the
-                       ;; switch enters the buffer's own group.
-                       (switch-act! e view context?
-                         (lambda (keep)
-                           (when (and keep (display-foreign? keep))
-                             (restore-here!))))))
-                  ((assoc picked rows)
-                   ;; a card, a tab, a file or a recent row had no preview:
-                   ;; put back what the window showed, then act
-                   (restore-here!)
-                   (switch-act! e view context? (lambda (keep) #f)))
-                  (else
-                   ;; nothing matches: RET founds a group named PICKED from
-                   ;; the current windows, the real ones
-                   (restore-here!)
-                   (group-found-from-windows! picked)))
-                ;; the pick is on screen now; the sleep guard keeps awake
-                ;; anything a group restore also put on screen
-                (sleep-woken! picked)))
-            ;; C-g: put back what you were looking at; sleep the rest
-            (lambda ()
-              (set! *mb-confirm-context* #f)
-              (restore-here!)
-              (sleep-woken! #f))
-            ;; you also know a buffer by its mode, its group, or its
-            ;; project: those three fields match what you type. The icon
-            ;; leads them, so the count is four. The prompt draws on the
-            ;; bottom line; the modal (switch-to-buffer) is the centered one.
-            4 #f
-            ;; TAB: a selection completes to itself; an input that names
-            ;; ONE group locks the rows to that group — the more deliberate
-            ;; act wins over plain completion; one candidate left is taken
-            (lambda (input selected)
-              (let ((lock (switch-prompt-lock-target input)))
-                (cond
-                  (selected (list selected (switch-prompt-rows rows)))
-                  (lock
-                   (set! rows (switch-prompt-locked-rows lock))
-                   (set! view (list 'locked lock))
-                   (list "" (switch-prompt-rows rows)))
-                  ((let ((st (minibuffer-state)))
-                     (and st (= 1 (plist-get st 'total)) (minibuffer-selected)))
-                   (list (minibuffer-selected) (switch-prompt-rows rows)))
-                  (else #f))))
-            ;; C-c C-o collects the narrowed rows into ibuffer; headings
-            ;; and cards are not buffers
-            (lambda (picked)
-              (restore-here!)
-              (sleep-woken! #f)
-              (let ((buffers (filter buffer-known?
-                                     (map (lambda (r)
-                                            (switch-prompt-name rows (car r)))
-                                          picked))))
-                (if (null? buffers)
-                    (message "No buffer candidates to collect")
-                    (ibuffer-open-buffers! buffers)))))))))
 
 (category! 'buffers)
 (catalog-meta! 'command "switch-kill" 'domain 'buffers 'effects '(destroy))

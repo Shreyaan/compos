@@ -546,7 +546,6 @@
 
 (add-hook! 'after-save-hook 'lsp--after-save-hook!)
 
-(global-set-key "M-." "code-goto-definition")
 (global-set-key "M-," "lsp-pop-marker")
 
 ;;; --- status ------------------------------------------------------------------

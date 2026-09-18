@@ -1,6 +1,6 @@
 ;;; group-switch-test.scm --- the switcher, by the commands it runs.
 ;;;
-;;; The switcher's prompt form (switch-to-buffer-prompt) reads the same
+;;; The switcher's prompt form (ibuffer-prompt) reads the same
 ;;; rows as the modal. Typing is (minibuffer-change! TEXT), and every
 ;;; key it answers to is a command: minibuffer-confirm for RET,
 ;;; minibuffer-confirm-context for C-RET, minibuffer-collect for
@@ -96,15 +96,15 @@
           ((equal? (car ls) label) i)
           (else (loop (cdr ls) (+ i 1))))))
 
-(define (t--sw-open-switcher!) (run-command "switch-to-buffer-prompt"))
-(define (t--sw-open-all!) (run-command "switch-to-buffer-prompt"))
+(define (t--sw-open-switcher!) (run-command "ibuffer-prompt"))
+(define (t--sw-open-all!) (run-command "ibuffer-prompt"))
 
 ;; every heading the rows can carry; none of them is a choice
 (define t--sw-headings
   '("in this group" "other groups" "groups" "ungrouped" "zzsw-foreign" "recent"))
 
-(deftest 'switch-to-buffer-prompt-opens-its-candidate-prompt
-  "the prompt form opens the prompt under the switcher's name"
+(deftest 'ibuffer-prompt-opens-the-candidate-prompt
+  "C-x b opens the prompt under the switcher's name"
   (lambda ()
     (t--sw-setup!)
     (t--sw-open-switcher!)
@@ -1126,24 +1126,6 @@
     (set-frame-local! 'current-group current)
     (list current foreign)))
 
-(deftest 'the-switcher-lists-the-current-group-before-other-buffers
-  "members come first and foreign buffers remain reachable"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((ids (t--sw-three-groups!)))
-      (t--sw-open-switcher!)
-      (let ((labels (t--sw-labels)))
-        (check-true! (member t--sw-second labels) "the member is reachable")
-        (check-true! (member t--sw-third labels) "the stranger is reachable")
-        (check-true! (< (t--sw-at t--sw-second) (t--sw-at t--sw-third))
-                     "the member is listed before the stranger"))
-
-      (t--sw-type! t--sw-second)
-      (t--sw-key! "confirm")
-      (check-equal! (current-buffer) t--sw-second "it switched")
-      (check-equal! (frame-local 'current-group) (car ids) "and the context held"))
-    (t--sw-done!)))
-
 (deftest 'a-broadened-switcher-lists-every-buffer-under-two-headings
   "C-u lists the group's own first, then the other groups by name"
   (lambda ()
@@ -1487,26 +1469,6 @@
       (other-window!)
       (switch-to-buffer! t--sw-second)
       (check-equal! (frame-group) here "the transient pane is ignored"))
-    (t--sw-done!)))
-
-(deftest 'context-confirm-on-an-ungrouped-buffer-starts-a-group
-  "C-RET turns a new entrant into an explicit context"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-here")))
-      (buffer-add-group! t--sw-first here)
-      (switch-to-buffer! t--sw-first)
-      (t--sw-open-all!)
-      (t--sw-type! t--sw-third)
-      (t--sw-key! "confirm-context")
-      (t--sw-type! "zzsw-started")
-      (t--sw-key! "confirm")
-
-      (let ((started (group-resolve-id "zzsw-started")))
-        (check-true! started "a group was created")
-        (check-true! (buffer-in-group? t--sw-third started) "the picked buffer joined it")
-        (check-equal! (frame-group) started "the new context was entered")
-        (check-equal! (current-buffer) t--sw-third "the picked buffer has focus")))
     (t--sw-done!)))
 
 (deftest 'switch-to-group-previews-the-whole-group-under-the-highlight

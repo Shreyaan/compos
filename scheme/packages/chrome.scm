@@ -213,10 +213,10 @@
 
 ;; Chords a page should not send through raw dispatch, because returning from
 ;; outside wants different semantics than moving around inside.
-;; A page draws prompts, not editor windows. C-x b opens the switcher's
-;; prompt form: the same rows the editor's modal shows (switch.scm).
+;; A page draws prompts, not editor windows. C-x b opens the buffer
+;; prompt: the same rows the editor's modal shows (switch.scm).
 (define *chrome-chord-commands*
-  '(("C-x b" "switch-to-buffer-prompt")))
+  '(("C-x b" "ibuffer-prompt")))
 
 (define (chrome--chord-command keys)
   (let ((entry (assoc (string-join keys " ") *chrome-chord-commands*)))

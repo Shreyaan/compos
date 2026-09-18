@@ -338,7 +338,15 @@
             (run-command finder)
             (message "No URL or file path at point"))))))
 
-(global-set-key "C-c RET" "goto-address-at-point")
+;; M-. goes to the thing at point: an address (a URL, a path, a file:line)
+;; is followed; otherwise the symbol's definition (code.scm). C-c RET is
+;; the chat companion's.
+(define-command "goto-thing-at-point" "Follow the address at point, else go to the definition"
+  (lambda ()
+    (if (goto-address-href-at (current-buffer) (point))
+        (run-command "goto-address-at-point")
+        (run-command "code-goto-definition"))))
+(global-set-key "M-." "goto-thing-at-point")
 
 (catalog-meta! 'command "goto-address-at-point" 'domain "interaction" 'effects '("display"))
 

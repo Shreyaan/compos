@@ -73,7 +73,6 @@ order:
 | `project-switch-project` (`C-x p p`) | enter the project's group | choose the destination group |
 | `chat-new` (`C-c n`) | new chat in this group | choose or create its group |
 | `opencode` | this group's terminal | choose a group |
-| `switch-to-buffer-prompt` | switch here | show it in another window |
 | `chat-switch-prompt` | switch here | show it in another window |
 | `delete-file` | to the trash | delete for good |
 | `set-mark-command` (`C-SPC`) | set the mark | go back to the previous mark, pop the ring |
@@ -106,7 +105,7 @@ exactly the view a key binding would.
 ## Writing one
 
 ```scheme
-(define-command "switch-to-buffer-prompt"
+(define-command "ibuffer-prompt"
   "Switch to a buffer; with a prefix, show it in another window"
   (lambda ()
     (let ((other-window? (and (current-prefix-arg) #t)))
@@ -129,7 +128,7 @@ answer — group_switch_preview_test.exs, project_search_test.exs.
 ## Known gap
 
 `C-x b` is bound to `ibuffer-prompt`, whose body reads no prefix argument
-and passes no `WHERE` to `ibuffer-pick!`. `switch-to-buffer-prompt`, the
+and passes no `WHERE` to `ibuffer-pick!`. `ibuffer-prompt`, the
 command that does flip to the other window, has no key. switch.scm's own
 header line and docs/groups.md both describe `C-u C-x b` as the
 other-window flip, and group_switch_preview_test.exs asserts it. Either the
