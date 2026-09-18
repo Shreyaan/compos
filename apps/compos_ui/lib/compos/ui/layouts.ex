@@ -356,23 +356,20 @@ defmodule Compos.Ui.Layouts do
              rule is a nearer edge). The state tag in the header line
              (dash-state-focus) is what this rule reads. */
           .window.active:has(.dash-state-focus) {
-            /* Floating is unmistakable in any theme: the whole window
-               wears the accent as its edge, the header line's seam goes
-               to a full 2px of it, and the ground lifts to the select
-               ground -- not a shadow that a dark canvas swallows. A
-               sitting window keeps paper and a hairline. */
-            --surface-pane: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 45%, var(--window-bg, #fdfcf8));
+            /* Floating is quiet: the ground lifts a step toward the select
+               ground, the hairline brightens (a nearer edge) and the seam on
+               the header line goes to the accent. No coloured frame. */
+            --surface-pane: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 30%, var(--window-bg, #fdfcf8));
             --surface-chrome: var(--surface-pane);
-            --surface-sunken: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 25%, var(--window-bg, #fdfcf8));
+            --surface-sunken: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 15%, var(--window-bg, #fdfcf8));
             --surface-select: var(--hl-line-bg, #f5f1e6);
             background: var(--surface-pane);
-            border-color: var(--accent);
+            border-color: color-mix(in srgb, var(--accent) 35%, var(--border-bg, #cbc4b1));
             box-shadow: var(--chrome-shadow-deep, 0 22px 60px rgba(0, 0, 0, 0.5)),
                         0 0 0 1px var(--default-bg, #e6e0d2);
           }
           .window.active:has(.dash-state-focus) .dash-persistent {
-            border-top: 2px solid var(--accent);
-            padding-top: 4px;
+            border-top: 1px solid var(--accent);
           }
           /* a sitting window: paper, a hairline, no lift */
           .window.active:has(.dash-state-editing) {
