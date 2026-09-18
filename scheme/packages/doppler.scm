@@ -240,7 +240,7 @@
         (begin (message (string-trim out)) #f)
         (begin
           (dp--cache-drop! project config name)
-          (when (boundp 'key-forget!) (key-forget! name))
+          (key-forget! name)
           #t))))
 
 (define (doppler-secret-delete! project config name)
@@ -254,7 +254,7 @@
         (begin (message (string-trim out)) #f)
         (begin
           (dp--cache-drop! project config name)
-          (when (boundp 'key-forget!) (key-forget! name))
+          (key-forget! name)
           #t))))
 
 ;;; --- list app ----------------------------------------------------------------

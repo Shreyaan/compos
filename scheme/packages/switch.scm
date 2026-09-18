@@ -43,7 +43,7 @@
 ;; plus any root an open buffer implies. A switch founds its group.
 (define (switch-project-roots)
   (let ((gs (group-names)))
-    (let loop ((cs (append (if (boundp 'known-projects) (known-projects) '())
+    (let loop ((cs (append (known-projects)
                            (map buffer-project-root (buffer-list))))
                (out '()))
       (if (null? cs)
@@ -173,7 +173,7 @@
                (string-append "recent · " (symbol->string (nth 1 e)))
                "recent" (nth 2 e)))
        (filter (lambda (e) (not (buffer-known? (car e))))
-               (if (boundp '*peek-recent*) *peek-recent* '()))))
+               *peek-recent*)))
 
 ;; the locked view: ONE group, whole. The card leads as the default —
 ;; RET there keeps the group as it stands, or opens dired on a project
@@ -237,7 +237,7 @@
 ;; first label its running summary wrote stands in for it. Every other
 ;; buffer answers with its own name.
 (define (switch-chat-label name)
-  (let ((label (and (boundp 'chat-prompt-label) (chat-prompt-label name))))
+  (let ((label (chat-prompt-label name)))
     (if (and (string? label) (not (equal? label ""))) label name)))
 
 ;; File buffers are named by their absolute path. Showing that as the row

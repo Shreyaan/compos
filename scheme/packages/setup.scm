@@ -161,11 +161,10 @@
 
 (define (setup--any-llm-key?)
   "#t when the key chain resolves a key for any provider the editor knows."
-  (and (boundp 'llm-key)
-       (let loop ((ps *setup-llm-providers*))
+  (let loop ((ps *setup-llm-providers*))
          (cond ((null? ps) #f)
                ((let ((k (llm-key (car ps)))) (and k (not (equal? k "")))) #t)
-               (else (loop (cdr ps)))))))
+               (else (loop (cdr ps))))))
 
 (define *setup-interpreters* '("node" "python" "python3" "ruby" "bun" "deno" "env"))
 

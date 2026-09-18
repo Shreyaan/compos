@@ -695,21 +695,21 @@ is forgotten and that group falls back to creation order in the switcher."
   (buffer-modeline-group-refresh! b)
   ;; A compound move refreshes after entering its final group. A hidden
   ;; buffer catches up when shown, rather than building an unseen dashboard.
-  (if (or (and (boundp '*group-current-inhibit*) *group-current-inhibit*)
+  (if (or *group-current-inhibit*
           (not (member b (map cadr (window-list-all)))))
       (begin
         (desktop-skip! b 'group-display-dirty)
         (buffer-set-local! b 'group-display-dirty #t))
       (begin
         (buffer-set-local! b 'group-display-dirty #f)
-        (when (boundp 'dashboard--sync!) (dashboard--sync! b)))))
+        (dashboard--sync! b))))
 
 (define (group--display-catchup! b)
   (when (buffer-local b 'group-display-dirty)
     (buffer-group-display-refresh! b)))
 
 (define (group--visible-displays-catchup!)
-  (unless (and (boundp '*group-current-inhibit*) *group-current-inhibit*)
+  (unless *group-current-inhibit*
     (for-each (lambda (w) (group--display-catchup! (cadr w))) (window-list))))
 
 (add-hook! 'buffer-shown-hook 'group--display-catchup!)
@@ -739,8 +739,7 @@ is forgotten and that group falls back to creation order in the switcher."
       (list 'group-id id 'group-ids '() 'group-roles '()
             'group #f 'companion-of #f))
     (buffer-group-display-refresh! b)
-    (when (boundp 'group-current-recalculate!)
-      (group-current-recalculate!))
+    (group-current-recalculate!)
     id))
 
 ;; A role belongs to the membership, not globally to the buffer: one buffer
@@ -803,8 +802,7 @@ is forgotten and that group falls back to creation order in the switcher."
             (buffer-set-local! b 'group-inherited #f)
             (buffer-set-local! b 'companion-of #f)
             (buffer-group-display-refresh! b)
-            (when (boundp 'group-current-recalculate!)
-              (group-current-recalculate!))
+            (group-current-recalculate!)
             id))))
 
 (define (buffer-add-group-as! b value role)
@@ -820,8 +818,7 @@ is forgotten and that group falls back to creation order in the switcher."
             (list 'group-ids (if id (list id) '()) 'group-roles '()
                   'group #f 'group-inherited #f 'companion-of #f))
           (buffer-group-display-refresh! b)))
-    (when (boundp 'group-current-recalculate!)
-      (group-current-recalculate!))
+    (group-current-recalculate!)
     id))
 
 (define (buffer-remove-group! b value)
@@ -837,8 +834,7 @@ is forgotten and that group falls back to creation order in the switcher."
               (remove (lambda (entry) (equal? (car entry) id))
                       (or (buffer-local b 'group-roles) '())))))
       (buffer-group-display-refresh! b))
-    (when (boundp 'group-current-recalculate!)
-      (group-current-recalculate!))))
+    (group-current-recalculate!)))
 
 (define (buffer-replace-group! b old new)
   (let ((old-id (group-resolve-id old))
@@ -3892,7 +3888,7 @@ is forgotten and that group falls back to creation order in the switcher."
                 mine)
       (let ((w (window-showing (car mine))))
         (when w (select-window! w)))
-      (when (and (boundp 'autolayout-mode) autolayout-mode)
+      (when autolayout-mode
         (autolayout-apply! (car mine)))
       (group-layout-save! id))))
 

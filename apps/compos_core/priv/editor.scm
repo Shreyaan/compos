@@ -1907,7 +1907,7 @@
 
 (define (permanent-local? name)
   (or (member name *permanent-locals*)
-      (and (boundp 'chat-identity-locals) (member name chat-identity-locals))))
+      (member name chat-identity-locals)))
 
 ;; forget every local that is not permanent, and the buffer's own keys
 (define (kill-all-local-variables! buf)
@@ -5360,7 +5360,6 @@
 (global-set-key "C-x C-f" "find-file")
 (global-set-key "C-x C-s" "save-buffer")
 (global-set-key "C-x C-w" "write-file")
-(global-set-key "C-x b" "switch-to-buffer-prompt")
 (global-set-key "C-x k" "kill-buffer")
 (global-set-key "C-x n n" "narrow-to-region")
 (global-set-key "C-x n N" "narrow-context-also")

@@ -146,7 +146,7 @@
           ;; part of giving the frame back
           (unless (equal? (frame-group) group)
             (set-frame-local! 'current-group group)
-            (when (boundp 'frame-group-label-refresh!) (frame-group-label-refresh!)))
+            (frame-group-label-refresh!))
           #t))))
 
 (public! 'transient-frame-enter!

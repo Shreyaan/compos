@@ -671,7 +671,7 @@
           ;; -- what you want is the buffer you used last, not its group.
           ((equal? grouping 'none) (ibuffer-sort-rows buf rows))
           (else (ibuffer-group-sections
-                  buf rows (and (boundp 'frame-group) (frame-group)))))))
+                  buf rows (frame-group))))))
 
 (define (ibuffer-visible &optional buf)
   (let ((buf (or buf (ibuffer-view))))
@@ -1880,7 +1880,7 @@
          (close!)
          (let ((w (other-work-window-id (active-window))))
            (when w (select-window! w)))
-         (visit-in-group row (and (boundp 'group-here) (group-here))))
+         (visit-in-group row (group-here)))
         ;; the look goes first: quit-window takes a peek before it takes
         ;; the table, so a table that peeked must give the peek back here
         ;; or CLOSE! spends itself on the peek and leaves the table up.
@@ -1893,7 +1893,7 @@
         ((file-exists? row)
          (peek-dismiss!)
          (close!)
-         (visit-in-group row (and (boundp 'group-here) (group-here))))
+         (visit-in-group row (group-here)))
         (else (message "no buffer here"))))
 
 (define-command "ibuffer" "List buffers by group in a buffer"

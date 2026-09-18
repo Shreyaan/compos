@@ -425,8 +425,7 @@
       ((not sym) (message "No symbol at point"))
       ;; only a buffer with an attached server asks LSP; the fallback
       ;; below keeps answering everywhere else
-      ((and (boundp 'lsp-definition)
-            (buffer-local (current-buffer) 'lsp-server))
+      ((buffer-local (current-buffer) 'lsp-server)
        (lsp-definition sym))
       (else
         (let* ((buf (current-buffer))
@@ -1423,8 +1422,7 @@
 
 ;; -> (LINE KIND NAME DOC) rows, the outline contract
 (define (imenu-rows buf)
-  (if (and (boundp 'morg-scan)
-           (buffer-derived-mode? buf "morg-mode"))
+  (if (buffer-derived-mode? buf "morg-mode")
       (map (lambda (e)
              (list (line-number-at-pos (car e)) "heading"
                    (string-trim (cadr e)) ""))

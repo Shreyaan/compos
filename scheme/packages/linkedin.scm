@@ -169,10 +169,7 @@
 (effects! '(write display))
 
 (define (linkedin-home-group!)
-  (and (boundp 'group-ensure-record!)
-       (string? linkedin-group-name)
-       (not (equal? linkedin-group-name ""))
-       (group-ensure-record! linkedin-group-name)))
+  (and (string? linkedin-group-name) (not (equal? linkedin-group-name "")) (group-ensure-record! linkedin-group-name)))
 
 (define (linkedin-enter-group!)
   (let ((id (linkedin-home-group!)))
@@ -676,7 +673,7 @@ a{color:var(--accent);text-decoration:none}
 ;; the shape a reader already knows a tab bar by.
 (define (linkedin--composml-head buf head)
   (let* ((at (linkedin-tab buf))
-         (q (if (boundp 'list-query) (list-query buf) ""))
+         (q (list-query buf))
          (note (if (equal? q "")
                    "RET page · o recruiter · w copy · ←/→ tab · g refresh · q quit"
                    (string-append "matching \"" q "\" · \\ widens"))))

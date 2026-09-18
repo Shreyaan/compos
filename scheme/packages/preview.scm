@@ -115,7 +115,7 @@
       (list (or (buffer-local buf 'face-remap) '())
             (or (buffer-local buf 'style) #f))))
   (buffer-set-local! buf 'preview-rows #t)
-  (when (boundp 'markdown-paint-on!) (markdown-paint-on! buf))
+  (markdown-paint-on! buf)
   (preview--rows-look! buf))
 
 ;; the page's typography on the rows. writing-mode calls this too after its
@@ -140,9 +140,9 @@
 
 (define (preview--rows-off! buf)
   (buffer-set-local! buf 'preview-rows #f)
-  (when (boundp 'markdown-paint-off!) (markdown-paint-off! buf))
+  (markdown-paint-off! buf)
   ;; the plain faces come back: morg skipped its paint while the rows drew
-  (when (and (boundp 'morg-refontify!) (buffer-derived-mode? buf "morg-mode"))
+  (when (buffer-derived-mode? buf "morg-mode")
     (morg-refontify! buf))
   (let ((saved (buffer-local buf 'preview-rows-saved)))
     (when saved
@@ -151,7 +151,7 @@
         (buffer-set-local! buf 'style (face-remap--css source)))
       (buffer-set-local! buf 'preview-rows-saved #f)
       ;; the saved remap predates a scale set while the rows were on
-      (when (boundp 'text-scale-sync!) (text-scale-sync! buf)))))
+      (text-scale-sync! buf))))
 
 ;; One renderer draws a Markdown page: the tree-sitter engine. It draws
 ;; from the grammar's own tree, so it knows where every byte was drawn:
@@ -192,8 +192,8 @@
           ((and on (not rows) (equal? (preview-renderer-for buf) "rows"))
            (preview--rows-on! buf))
           ((and (not rows) (equal? (buffer-local buf 'markdown-paint) #t))
-           (when (boundp 'markdown-paint-off!) (markdown-paint-off! buf))
-           (when (and (boundp 'morg-refontify!) (buffer-derived-mode? buf "morg-mode"))
+           (markdown-paint-off! buf)
+           (when (buffer-derived-mode? buf "morg-mode")
              (morg-refontify! buf)))
           (else #f))))
 (public! 'preview-heal! "(preview-heal! BUF) — make BUF's drawn rows agree with its preview-mode")

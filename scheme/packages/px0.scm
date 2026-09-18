@@ -128,7 +128,7 @@
            ;; visit, never find-file: find-file is the quiet loading
            ;; boundary the agent tools use, and M-x px0 would then look
            ;; like it did nothing at all
-           (visit page (and (boundp 'group-here) (group-here)))
+           (visit page (group-here))
            ;; the buffer is named by its path. Never read it back from
            ;; (current-buffer): a caller off the key lane has no frame,
            ;; and the locals would land on the wrong buffer

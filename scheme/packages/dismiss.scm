@@ -35,7 +35,7 @@
 ;; the test above lets it through and the reader gets a Reading bar and a
 ;; q that means nothing. The prompt takes the whole surface away.
 (define (dismiss--prompt-surface? buf)
-  (and (boundp '*mb-list-buffer*) (equal? buf *mb-list-buffer*)))
+  (equal? buf *mb-list-buffer*))
 
 (define (dismiss--declared-mode? buf)
   (and (mode-inherited (buffer-local buf 'mode-name) 'dismissible) #t))

@@ -106,7 +106,7 @@
           (let ((hit (scheme-ide--find-def sym)))
             (cond
               (hit
-               (when (boundp 'lsp--push-marker!) (lsp--push-marker!))
+               (lsp--push-marker!)
                (if (equal? (car hit) 'buffer)
                    (switch-to-buffer! (cadr hit))
                    (visit (cadr hit)))

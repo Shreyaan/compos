@@ -366,7 +366,7 @@
            ;; peek: it is read-only, it dies when replaced, and a mode
            ;; setup is the one thing here that could move anything.
            (when (and (buffer-exists? name)
-                      (not (and (boundp 'peek-buffer?) (peek-buffer? name))))
+                      (not (peek-buffer? name)))
              (restore-buffer-runtime! name))))))
 
 (define (popup-move! side)
@@ -419,7 +419,7 @@
 ;; stack. Dead names are pruned as the stack is written, so it holds
 ;; live buffers only and cannot grow past them.
 (define (popup-stack-push! name)
-  (unless (and (boundp 'peek-buffer?) (peek-buffer? name))
+  (unless (peek-buffer? name)
     (set-frame-local! 'popup-stack
       (cons name (filter (lambda (b) (and (not (equal? b name)) (buffer-known? b)))
                          (popup-stack))))))
@@ -811,7 +811,7 @@
   (let ((popup (and (popup-open?) (popup-window))))
     (filter (lambda (w) (and (not (equal? w popup))
                              (not (window-dock? w (window-buffer w)))
-                             (not (and (boundp 'peek-buffer?) (peek-buffer? (window-buffer w))))))
+                             (not (peek-buffer? (window-buffer w)))))
             (map car (window-list)))))
 
 ;; (ROWS COLS) of WIN, as the frame measures them
@@ -927,7 +927,7 @@
       (buffer-derived-mode? buf "help-mode")))
 
 (define (window-preferred-mode win)
-  (or (and (boundp 'window-cycle-mode) (window-cycle-mode win))
+  (or (window-cycle-mode win)
       (let loop ((buffers (cons (window-buffer win) (window-prev-buffers win))))
         (cond ((null? buffers) (window-mode win))
               ((and (buffer-known? (car buffers))
@@ -1681,7 +1681,7 @@
        (not (buffer-local b 'context-only))
        (not (buffer-special? b))
        (not (popup--class? b))
-       (not (and (boundp 'peek-buffer?) (peek-buffer? b)))))
+       (not (peek-buffer? b))))
 
 (define window-fill-source (lambda () (buffer-list-mru)))
 (define window-fill-primary? (lambda (buffer) #t))
@@ -1851,7 +1851,7 @@
 
 (define (layout-request-buffers)
   (let* ((visible (layout-target-visible-buffers))
-         (hidden (if (and (boundp 'frame-group) (frame-group))
+         (hidden (if (frame-group)
                      (filter (lambda (b) (not (member b visible))) (window-fill-buffers))
                      '())))
     ;; Existing panes keep their buffers, including deliberate duplicates,

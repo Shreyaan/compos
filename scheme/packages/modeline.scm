@@ -635,7 +635,7 @@
 ;; the open jj change of the buffer's repo: jj.scm keeps a cache by root,
 ;; so a chat that lives in the repo shows the line as well as a file does
 (define (dash--vcs buf)
-  (and (boundp 'jj-modeline-line) (jj-modeline-line buf)))
+  (jj-modeline-line buf))
 
 ;; The two states of an editable buffer, in one word, and the word says
 ;; where the Cmd-arrows go. "focus" gives them to the window; "editing"

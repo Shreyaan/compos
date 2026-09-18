@@ -854,6 +854,16 @@ recounted after the moves, editor.scm has 6 commands nothing names
 delete-file, load-file); they are M-x vocabulary with Emacs names and
 stay. Left in the item: the seven boundp guards in editor.scm, all
 call-time guards for optional packages.
+Item 8 of section 3, the guards: 84 boundp guards on names that a stock
+package always defines went from function bodies (an sexp-aware script
+in the scratchpad: `(when (boundp 'x) BODY)` is BODY, `(if (boundp 'x) A
+B)` is A, `(and (boundp 'x) REST)` is REST). 61 remain: guards on
+opt-in packages, on names nothing defines (dead branches), the
+reload aliases (raw-write-file!, raw-buffer-save!, buffer-kill-raw!),
+and top-level `unless` forms that define when missing. The dead C-x b
+line in editor.scm went; switch.scm's binding was the live one. The
+C-_ and C-t overrides are deliberate per their comments (undo keeps C-/
+and C-x u), so they stand.
 Item 16 of section 3, first half: transient.scm and chrome.scm are
 packages in scheme/packages, loaded from init.scm (transient first, a
 package defines its prefixes at load; chrome after dired, sentry and

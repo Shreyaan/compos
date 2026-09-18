@@ -546,7 +546,7 @@
            (here (or (window-buffer (active-window)) (current-buffer)))
            (rows (chat-prompt-rows
                    (or (buffer-group here)
-                       (and (boundp 'frame-group) (frame-group)))))
+                       (frame-group))))
            ;; a heading is not a chat: typing its label names nothing
            (row-of (lambda (label)
                      (let ((r (assoc label rows)))
@@ -726,7 +726,7 @@
     (and e (cadr e))))
 
 (define (chat-list-search-reset!)
-  (when (boundp 'chat-list--cancel-search!) (chat-list--cancel-search!))
+  (chat-list--cancel-search!)
   (set! *chat-list-hits* '())
   (set! *chat-list-text-cache* '()))
 
@@ -1066,7 +1066,7 @@
     ;; the group is settled only now: a frame with no group yet gets one
     ;; as the windows change, and a list left ownerless is a list no
     ;; group ever reuses. It belongs to the group you opened it in
-    (when (boundp 'group-current-recalculate!) (group-current-recalculate!))
+    (group-current-recalculate!)
     (let ((group (frame-group)))
       (when (and group (not (equal? (buffer-group buf) group)))
         (buffer-move-to-group! buf group)))
@@ -1197,7 +1197,7 @@
 ;; it back lands it where you stood when you asked for it
 (define (chat-list-revive! path)
   (chat-list-back!)
-  (visit-in-group path (and (boundp 'group-here) (group-here)))
+  (visit-in-group path (group-here))
   (end-of-buffer!))
 
 (define (chat-list-leave! keep)

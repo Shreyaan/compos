@@ -446,7 +446,7 @@
             (list 405 (json-encode (list 'error "Unsupported spreadsheet request."))))))))
 
 (define (spreadsheet--app-html)
-  (let ((dark? (and (boundp 'theme-dark?) (theme-dark?))))
+  (let ((dark? (theme-dark?)))
     (string-append
     "<!doctype html><html><head><meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"

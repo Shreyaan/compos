@@ -58,8 +58,7 @@
 
 ;; the git root above DIR, when project.scm is loaded and there is one
 (define (goto-address--project-root dir)
-  (and (boundp 'project-root-cached)
-       (project-root-cached (strip-trailing-slash dir))))
+  (project-root-cached (strip-trailing-slash dir)))
 
 ;; the file PATH names, or #f. A relative path is read beside the buffer's
 ;; file first, then from the project root: a document names its files
@@ -237,7 +236,7 @@
     (and (string? mode)
          (or (equal? mode "Dired")
              (equal? mode "dired-mode")
-             (and (boundp '*list-modes*) (assoc mode *list-modes*) #t)))))
+             (and (assoc mode *list-modes*) #t)))))
 
 ;; text a reader sees: not a hidden buffer, not a process transcript,
 ;; not a listing

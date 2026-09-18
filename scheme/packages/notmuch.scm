@@ -94,10 +94,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm-home-group!)
   ;; The mail app has one home, not whichever group happened to be current
   ;; when a key was pressed. Ensure the record so the first open founds it.
-  (and (boundp 'group-ensure-record!)
-       (string? notmuch-group-name)
-       (not (equal? notmuch-group-name ""))
-       (group-ensure-record! notmuch-group-name)))
+  (and (string? notmuch-group-name) (not (equal? notmuch-group-name "")) (group-ensure-record! notmuch-group-name)))
 
 (define (nm--enter-group!)
   ;; Opening mail enters the mail group, the way opening a project enters
@@ -2207,7 +2204,7 @@ them the address is live, so a purge never follows one."
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
-      (when (and (boundp 'buffer-child!) (buffer-known? *notmuch-search-buffer*))
+      (when (buffer-known? *notmuch-search-buffer*)
         (buffer-child! *notmuch-search-buffer* buf))
       (let ((th (buffer-local buf 'notmuch-thread)))
         (when th

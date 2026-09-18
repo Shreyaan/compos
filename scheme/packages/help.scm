@@ -605,11 +605,10 @@
 ;;; defining form. `M-.` asks the same question about the name at point.
 
 (define (help--goto-source name &optional kind)
-  (let ((hit (and (boundp 'scheme-ide--find-def)
-                  (scheme-ide--find-def name kind))))
+  (let ((hit (scheme-ide--find-def name kind)))
     (cond
       (hit
-       (when (boundp 'lsp--push-marker!) (lsp--push-marker!))
+       (lsp--push-marker!)
        ;; the page is a popup over the frame: keep it open and it covers
        ;; the code the reader asked for
        (when (equal? (current-buffer) *help-buffer*) (run-command "quit-window"))

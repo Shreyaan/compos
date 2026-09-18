@@ -25,7 +25,7 @@
 (define *peek* #f)
 
 (define (peek--chars)
-  (if (boundp '*scheme-ide-chars*) *scheme-ide-chars* *symbol-chars*))
+  *scheme-ide-chars*)
 
 (define (peek--name) (symbol-at-point-in (peek--chars)))
 
@@ -33,7 +33,7 @@
 ;; the Scheme catalog sources. A file target is a path; a file buffer is
 ;; named by its path, so the target is also the buffer name.
 (define (definition-locate name &optional kind)
-  (and (boundp 'scheme-ide--find-def) (scheme-ide--find-def name kind)))
+  (scheme-ide--find-def name kind))
 
 (define (peek--window-live? win) (assoc win (window-list)))
 
@@ -88,7 +88,7 @@
 (define (peek-go!)
   (let ((p *peek*))
     (set! *peek* #f)
-    (when (boundp 'lsp--push-marker!) (lsp--push-marker!))
+    (lsp--push-marker!)
     (select-window! (list-ref p 1))
     (message (string-append "Definition of " (car p)))))
 

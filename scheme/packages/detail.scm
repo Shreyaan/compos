@@ -51,7 +51,7 @@
   (let* ((b (or buf (current-buffer)))
          (of (and (buffer-known? b) (buffer-local b 'detail-of))))
     (or (and of (buffer-known? of) of)
-        (and (boundp 'buffer-parent) (buffer-parent b)))))
+        (buffer-parent b))))
 
 ;; the walk order: this buffer, then the other details of the same list,
 ;; most recently used first. Open buffers only, exactly as a chat pane walks.
@@ -90,7 +90,7 @@
     (buffer-set-local! name 'detail-of owner)
     (when (and (boundp 'buffer-child!)
                (not (buffer-local name 'detail-kept))
-               (not (equal? (and (boundp 'buffer-parent) (buffer-parent name)) owner)))
+               (not (equal? (buffer-parent name) owner)))
       (buffer-child! owner name)))
   (unless (minor-mode-on? name "detail-mode")
     (enable-minor-mode! name "detail-mode"))
@@ -171,7 +171,7 @@
             (else
               (buffer-set-local! new 'detail-of owner)
               (buffer-set-local! new 'detail-kept #t)
-              (when (boundp 'buffer-unchild!) (buffer-unchild! new))
+              (buffer-unchild! new)
               (message (string-append "Kept as " new))
               new)))))))
 

@@ -1474,7 +1474,7 @@
       (when (boundp 'agent-add-overlay!)
         (agent-add-overlay! buf start end "agent-meta"))))
   ;; the bar shows the paragraph now, not after the next command
-  (when (boundp 'dashboard--sync!) (dashboard--sync! buf))
+  (dashboard--sync! buf)
   ;; between turns no save is coming -- the archive takes the fresh
   ;; paragraph now; mid-turn the turn-end save carries it
   (unless (buffer-local buf 'chat-turn-active)
@@ -1493,10 +1493,8 @@
                           (cond ((pair? log) log)
                                 ((and (string? now) (not (equal? now ""))) (list (list 0 now)))
                                 (else '())))))
-        (changes (if (boundp 'jj-line-history)
-                     (map (lambda (e) (list (car e) 'jj (cadr e)))
-                          (jj-line-history buf))
-                     '())))
+        (changes (map (lambda (e) (list (car e) 'jj (cadr e)))
+                          (jj-line-history buf))))
     (sort (append summaries changes))))
 
 (define (buffer-summary-log--markdown buf)
@@ -1518,9 +1516,7 @@
             "\n")))))
 
 (define (buffer-summary-log! buf)
-  (if (boundp 'help-doc!)
-      (help-doc! (string-append "Summary log: " buf) (buffer-summary-log--markdown buf))
-      (message (buffer-summary-log--markdown buf))))
+  (help-doc! (string-append "Summary log: " buf) (buffer-summary-log--markdown buf)))
 
 (define-command "buffer-summary-log"
   "Show this buffer's summaries and jj changes, interleaved by time"

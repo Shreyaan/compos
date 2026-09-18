@@ -70,7 +70,7 @@
                                              (min (cadr b) mark)))))))))))
 
 (define (agent-seed-transcript buf)
-  (or (and (boundp 'chat-model-flatten) (chat-model-flatten buf))
+  (or (chat-model-flatten buf)
       (agent-conversation-text buf)))
 
 ;;; --- pasted images ------------------------------------------------------------
@@ -421,7 +421,7 @@
       (unless (member chat-scheme--capf cur)
         (buffer-set-local! buf 'capf-sources (cons chat-scheme--capf cur))))
     (desktop-skip! buf 'capf-sources)
-    (when (boundp 'capf-auto-watch!) (capf-auto-watch! buf))))
+    (capf-auto-watch! buf)))
 
 (add-hook! 'chat-mode-hook 'chat-scheme--mode-hook!)
 

@@ -72,7 +72,7 @@
 (define (web--want buf)
   (web--reading
     (or (buffer-local buf 'browse-want)
-        (if (boundp 'browse-reading) browse-reading "calm"))))
+        browse-reading)))
 
 ;;; --- sites ----------------------------------------------------------------------
 ;;; One row per site the readings get wrong on their own. Two sites need
@@ -1369,9 +1369,7 @@
         (string-append (if (pair? parts) (car parts) "page") ".html"))))
 
 (define (web--download! url)
-  (let* ((dir (if (boundp 'browse-download-directory)
-                  browse-download-directory
-                  (string-append (getenv "HOME") "/Downloads")))
+  (let* ((dir browse-download-directory)
          (file (string-append dir "/" (web--download-name url))))
     (message (string-append "downloading " url " …"))
     (shell-command->string
@@ -1422,9 +1420,7 @@
           (run-command "switch-to-buffer")))))
 
 (define (web--browse-group!)
-  (if (boundp 'group-ensure-record!)
-      (group-ensure-record! "browse")
-      "browse"))
+  (group-ensure-record! "browse"))
 
 ;; A fresh tab joins the group of the window that opened it, the way any
 ;; new buffer lands where the work that made it lives. The frame's group
@@ -1434,7 +1430,7 @@
 (define (web--tab-group!)
   (if (boundp 'group-spawn-target)
       (or (group-spawn-target) (web--browse-group!))
-      (or (and (boundp 'frame-group) (frame-group))
+      (or (frame-group)
           (web--browse-group!))))
 
 (define (web--view-label view)
@@ -1468,11 +1464,10 @@
 ;; The painter belongs to markdown-mode, and browse is not in it. Ask for
 ;; it by name, so a build without that package still browses.
 (define (web--paint-source! buf)
-  (when (boundp 'markdown-paint-on!) (markdown-paint-on! buf)))
+  (markdown-paint-on! buf))
 
 (define (web--unpaint-source! buf)
-  (when (and (boundp 'markdown-paint-off!)
-             (equal? (buffer-local buf 'markdown-paint) #t))
+  (when (equal? (buffer-local buf 'markdown-paint) #t)
     (markdown-paint-off! buf)))
 
 (define-command "browse-cycle-view"
@@ -1506,13 +1501,11 @@
       (buffer-set-local! buf 'window-class "writing")
       (buffer-set-local! buf 'line-numbers "off")
       (buffer-set-local! buf 'visual-line-mode #t)
-      (when (boundp 'writing-measure)
-        (face-remap-in! buf 'writing (list 'measure writing-measure)))
-      (when (boundp 'writing-font-family)
-        (face-remap-in! buf 'default
+      (face-remap-in! buf 'writing (list 'measure writing-measure))
+      (face-remap-in! buf 'default
           (list 'family writing-font-family
                 'size writing-font-size
-                'line-height writing-line-height)))
+                'line-height writing-line-height))
       ;; Generated browse buffers have no .md suffix, so declare the
       ;; renderer. A page is rendered Markdown, in the type every rendered
       ;; page uses.
@@ -1604,9 +1597,7 @@ the tabs. C-s searches to any link.")
 
 ;; the question a search URL carries, or #f for an ordinary page
 (define (web--query url)
-  (let ((base (if (boundp 'browse-search-url)
-                  browse-search-url
-                  "https://html.duckduckgo.com/html/?q=")))
+  (let ((base browse-search-url))
     (and (string-prefix? base url)
          (not (equal? url base))
          (url-decode (substring-bytes url (string-byte-length base)
@@ -1667,9 +1658,7 @@ the tabs. C-s searches to any link.")
   (let ((t (string-trim text)))
     (cond ((string-contains? t "://") t)
           ((web--url? t) (string-append "https://" t))
-          (else (string-append (if (boundp 'browse-search-url)
-                                   browse-search-url
-                                   "https://html.duckduckgo.com/html/?q=")
+          (else (string-append browse-search-url
                                (url-encode t))))))
 
 (define (browse url)

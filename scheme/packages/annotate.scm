@@ -262,8 +262,7 @@
 ;; file outside any project uses the home store.
 (define (annotate--store-file buf)
   (and (string-prefix? "/" buf)
-       (let ((root (and (boundp 'project-root-cached)
-                        (project-root-cached (parent-dir buf)))))
+       (let ((root (project-root-cached (parent-dir buf))))
          (if root
              (string-append
                root "/.compos/annotations/"

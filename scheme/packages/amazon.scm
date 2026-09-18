@@ -229,10 +229,7 @@
 (effects! '(write display))
 
 (define (amazon-home-group!)
-  (and (boundp 'group-ensure-record!)
-       (string? amazon-group-name)
-       (not (equal? amazon-group-name ""))
-       (group-ensure-record! amazon-group-name)))
+  (and (string? amazon-group-name) (not (equal? amazon-group-name "")) (group-ensure-record! amazon-group-name)))
 
 (define (amazon-enter-group!)
   (let ((id (amazon-home-group!)))
@@ -679,10 +676,8 @@
                       #f))))))
 
 (define (amazon-open-external! asin)
-  (if (boundp 'tab-open)
-      (begin (tab-open (amazon-product-url asin))
-             (message (string-append "Opened " asin " in the browser")))
-      (message "No browser is connected")))
+  (begin (tab-open (amazon-product-url asin))
+             (message (string-append "Opened " asin " in the browser"))))
 
 ;; the page's own blocks, pressed in Scheme
 (add-hook! (list 'block-click 'amazon)

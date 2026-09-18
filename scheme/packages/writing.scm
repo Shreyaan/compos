@@ -273,7 +273,7 @@
       (writing--present! buf)))
 
 (define (writing--present! buf)
-  (when (boundp 'preview-heal!) (preview-heal! buf))
+  (preview-heal! buf)
   ;; remember what we clobber, once — the saved alist persists, and the
   ;; restore path re-runs this fn, which must not re-save writing's own look
   (let ((entering? (not (buffer-local buf 'writing-saved))))
@@ -322,7 +322,7 @@
   (writing--update-count! buf))
   ;; last word: the rows agree with the mode list, and the drawn page keeps
   ;; its own look over writing's typography
-  (when (boundp 'preview-heal!) (preview-heal! buf))
+  (preview-heal! buf)
   (when (and (buffer-local buf 'preview-rows) (boundp 'preview--rows-look!))
     (preview--rows-look! buf)))
 
@@ -333,7 +333,7 @@
   (buffer-set-local! buf 'face-remap (or (writing--saved buf 'face-remap) '()))
   (buffer-set-local! buf 'style (writing--saved buf 'style))
   ;; the saved remap predates a scale set while writing; the local wins
-  (when (boundp 'text-scale-sync!) (text-scale-sync! buf))
+  (text-scale-sync! buf)
   (buffer-set-local! buf 'line-numbers (writing--saved buf 'line-numbers))
   (buffer-set-local! buf 'preview-renderer (writing--saved buf 'preview-renderer))
   (buffer-set-local! buf 'visual-line-mode (writing--saved buf 'visual-line-mode))

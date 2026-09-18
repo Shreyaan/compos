@@ -161,7 +161,7 @@
 ;; not be taking the merge decision anyway. Ask the guard's question directly
 ;; and decline: the buffer stays dirty and the message says why.
 (define (jj-savable? buf)
-  (let ((base (and (boundp 'auto-revert-base) (auto-revert-base buf))))
+  (let ((base (auto-revert-base buf)))
     (or (not (string? base))
         (let ((disk (read-file (buffer-path buf))))
           (or (not (string? disk)) (equal? disk base))))))
@@ -265,15 +265,14 @@
   (jj-read-line! root)
   ;; the chat that caused the commit watches it go by too
   (let ((chat (and slug (boundp 'agent-buf) (agent-buf slug))))
-    (when (boundp 'dashboard--sync!)
-      (let loop ((bufs (append (map cadr (window-list)) (if chat (list chat) '())))
+    (let loop ((bufs (append (map cadr (window-list)) (if chat (list chat) '())))
                  (done '()))
         (when (pair? bufs)
           (let ((b (car bufs)))
             (unless (member b done)
               (when (or (equal? b chat) (equal? (jj-buffer-root b) root))
                 (dashboard--sync! b)))
-            (loop (cdr bufs) (cons b done))))))))
+            (loop (cdr bufs) (cons b done)))))))
 
 ;;; --- the hook -----------------------------------------------------------
 

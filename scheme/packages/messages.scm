@@ -22,8 +22,7 @@
 ;; it has one: a reader who resized this list keeps their size, including
 ;; the 0 that text-scale-reset writes.
 (define (messages--scale! name)
-  (when (and (boundp 'text-scale-sync!)
-             (not (number? (buffer-local name 'text-scale))))
+  (when (not (number? (buffer-local name 'text-scale)))
     (buffer-set-local! name 'text-scale messages-text-scale)
     (text-scale-sync! name)))
 
@@ -175,14 +174,11 @@
 ;; records the event and updates the echo area.
 (define (message text &optional level)
   (let* ((source (current-buffer))
-         (group-id (and (boundp 'buffer-group)
-                        (buffer-known? source)
-                        (buffer-group source)))
+         (group-id (and (buffer-known? source) (buffer-group source)))
          (group (if (and group-id (boundp 'group-display-name))
                     (group-display-name group-id)
                     ""))
-         (project (if (and (boundp 'buffer-project-label)
-                           (buffer-known? source))
+         (project (if (buffer-known? source)
                       (buffer-project-label source)
                       "")))
     (messages--note-mode! source)
