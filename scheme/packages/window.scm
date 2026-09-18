@@ -1921,6 +1921,9 @@
          (message (string-append "Layout " name " is the target")))
         (else #f)))
 
+;; the rest an arrow takes before the prompt applies its candidate
+(define window-layout-preview-delay-ms 120)
+
 (define-command "window-layout" "Choose a tiling layout for visible buffers; the choice is the frame's target layout"
   (lambda ()
     (let ((saved (window-tree))
@@ -1945,9 +1948,13 @@
         ;; first and no vacancy fills from the pool. The panes keep their
         ;; windows, and a pane keeps its window's render. The original
         ;; arrangement comes back once, on cancel, or under the choice.
+        ;; and it waits for the arrow to rest: a held key applies one
+        ;; layout, not one per step (the owner's ruling, 2026-09-19)
         (lambda (name)
           (unless (equal? name "free")
-            (window-layout-preview-without-history! name saved-panes)))
+            (debounce! "window-layout-preview" window-layout-preview-delay-ms
+              (lambda (n) (window-layout-preview-without-history! n saved-panes))
+              name)))
         (lambda (name) (restore-preview!) (window-layout-choose! saved name saved-order))
         (lambda () (restore-preview!))
         #f #f #f #f
