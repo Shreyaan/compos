@@ -356,15 +356,27 @@ defmodule Compos.Ui.Layouts do
              rule is a nearer edge). The state tag in the header line
              (dash-state-focus) is what this rule reads. */
           .window.active:has(.dash-state-focus) {
-            --surface-pane: color-mix(in srgb, var(--window-bg, #fdfcf8) 55%, var(--hl-line-bg, #f5f1e6));
+            /* Floating is unmistakable in any theme: the whole window
+               wears the accent as its edge, the header line's seam goes
+               to a full 2px of it, and the ground lifts to the select
+               ground -- not a shadow that a dark canvas swallows. A
+               sitting window keeps paper and a hairline. */
+            --surface-pane: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 45%, var(--window-bg, #fdfcf8));
             --surface-chrome: var(--surface-pane);
-            --surface-sunken: color-mix(in srgb, var(--window-bg, #fdfcf8) 80%, var(--hl-line-bg, #f5f1e6));
-            --surface-select: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 70%, var(--faint-fg, #b3ac9c));
+            --surface-sunken: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 25%, var(--window-bg, #fdfcf8));
+            --surface-select: var(--hl-line-bg, #f5f1e6);
             background: var(--surface-pane);
-            border-color: color-mix(in srgb, var(--border-bg, #cbc4b1) 60%, var(--faint-fg, #b3ac9c));
-            box-shadow: 0 1px 0 var(--surface-pane) inset,
-                        var(--chrome-shadow-deep, 0 22px 60px rgba(0, 0, 0, 0.5)),
+            border-color: var(--accent);
+            box-shadow: var(--chrome-shadow-deep, 0 22px 60px rgba(0, 0, 0, 0.5)),
                         0 0 0 1px var(--default-bg, #e6e0d2);
+          }
+          .window.active:has(.dash-state-focus) .dash-persistent {
+            border-top: 2px solid var(--accent);
+            padding-top: 4px;
+          }
+          /* a sitting window: paper, a hairline, no lift */
+          .window.active:has(.dash-state-editing) {
+            box-shadow: none;
           }
 
           .window.preview-highlight {
