@@ -1221,6 +1221,28 @@ changes, none of which removes a lane:
   files before). eval-resolve! takes its entry in one step, and
   debounce-cancel! deletes only the generation it read.
 
+**Tests live with their packages (2026-09-19).** The owner: "a
+package's tests should live with it. like in emacs" and "we do not need
+to test the packages when we test core. we can test them separately".
+103 of the 141 Scheme test files move beside their packages as
+scheme/packages/NAME-test.scm; 38 kernel files stay in priv/tests
+(chats-list-test.scm stays too while the other session edits it). The
+default mix test runs the kernel suite (scheme_suite_test.exs); the
+package suite (package_suite_test.exs) runs with --include packages, and
+M-x run-package-tests runs it in the editor. Hotload never evaluates a
+test file on save. A test VM starts no workspace daemon
+(workspace_daemons: false): two kernel tests each waited 30 s for one in
+a worktree.
+
+| run, in a worktree | before | after |
+|---|---|---|
+| one Scheme suite, 141 files | 249 s, 82 red | |
+| kernel suite, 38 files | | 40 s, 18 red |
+| package suite, 103 files | | 138 s |
+
+Every red name in the two new runs is red in the old run or passes when
+its file runs alone (order only).
+
 What each step must not do: move a file another session holds (groups,
 layouts, ibuffer are Phase 2), change a binding, or grow Elixir policy.
 Step 5 needs the owner's go; steps 1-4 are mechanism and can start.

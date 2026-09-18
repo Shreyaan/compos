@@ -25,7 +25,8 @@ Before an RL benchmark run or benchmark harness change, load
 ```sh
 bin/test-fast                               # the suite in 4 partitions; all four apps must stay green
 mix test                                    # one lane — use it when one readable log matters
-SCHEME_TESTS=morg mix test apps/compos_core/test/compos/scheme_suite_test.exs   # one priv/tests file
+SCHEME_TESTS=keymap mix test apps/compos_core/test/compos/scheme_suite_test.exs   # one kernel test file (priv/tests)
+SCHEME_TESTS=morg mix test --include packages apps/compos_core/test/compos/package_suite_test.exs   # a package's tests
 mix compos.reload scheme/packages/foo.scm   # a file outside the watched roots
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 ```
@@ -130,9 +131,12 @@ loader; call `namespace!` only when the public vocabulary differs.
 - Terse replies: outcome first, bullets, no recaps, no verification narration.
 - Test everything, especially the Scheme kernel. Test an interaction
   through `KeyDispatch.handle_key/1` — the same path the GUI uses. Test
-  policy in Scheme: put a `deftest` in `priv/tests/*.scm`, where the test
-  calls the function and reads the value. `mix test` runs both;
-  `M-x run-scheme-tests` runs the Scheme half alone.
+  policy in Scheme: put a `deftest` where the test calls the function and
+  reads the value. A package's tests live beside it, as in Emacs:
+  `scheme/packages/NAME-test.scm`; the kernel's live in `priv/tests`.
+  `mix test` runs the kernel's; the package tests run apart
+  (`--include packages`, or `M-x run-package-tests`).
+  `M-x run-scheme-tests` runs the kernel's Scheme tests alone.
 - A test names the command, never the key that happens to run it. A
   binding moves; the behaviour is what the test is for. **Never assert a
   production binding at all** — not `C-x b` names the switcher, not the

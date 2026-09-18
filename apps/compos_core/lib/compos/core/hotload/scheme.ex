@@ -174,7 +174,10 @@ defmodule Compos.Core.Hotload.Scheme do
   defp project_source_paths do
     case Compos.Core.project_dir() do
       nil -> []
-      root -> Path.wildcard(Path.join([root, "scheme", "**/*.scm"]))
+      root ->
+        Path.join([root, "scheme", "**/*.scm"])
+        |> Path.wildcard()
+        |> Enum.reject(&String.ends_with?(&1, "-test.scm"))
     end
   end
 

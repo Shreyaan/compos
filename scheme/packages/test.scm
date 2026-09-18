@@ -177,24 +177,67 @@
             (set! *test-failures* '())
             out))))))
 
-;; Load every .scm under priv/tests. The package loader does not reach
-;; them: a test is not a package, and the catalog should not carry one
-;; unless somebody asked for it.
+;; Two suites, as in Emacs. The kernel's tests live in priv/tests. A
+;; package's tests live beside it: scheme/packages/NAME-test.scm, or
+;; NAME-test.scm inside a package's own directory. The kernel run does not
+;; load the package tests; `run-package-tests' and the package run of
+;; mix test do. The package loader never reaches a test file: a test is
+;; not a package, and the catalog should not carry one.
 (define (test-dir) (string-append (compos-priv-dir) "/tests"))
 
-(define (load-tests!)
-  (let ((dir (test-dir)))
-    (set! *disposable-only-tests* '())
-    (for-each
-      (lambda (name)
-        (when (string-suffix? ".scm" name)
-          ;; the declaration is per file, so it must not leak to the next
-          (set! *test-file-needs-disposable* #f)
-          (load (string-append dir "/" name))))
-      (list-dir dir))
-    (set! *test-file-needs-disposable* #f)
-    (length *tests*)))
+(define (test-files--in dir pred)
+  (map (lambda (name) (string-append dir "/" name))
+       (filter pred (if (file-exists? dir) (list-dir dir) '()))))
 
+(define (test-file? name) (string-suffix? "-test.scm" name))
+
+(define (package-test-dir)
+  (let ((root (compos-project-dir)))
+    (and root (string-append root "/scheme/packages"))))
+
+;; KIND is 'core or 'packages
+(define (test-files kind)
+  (if (equal? kind 'core)
+      (test-files--in (test-dir) (lambda (n) (string-suffix? ".scm" n)))
+      (let ((dir (package-test-dir)))
+        (if (not dir)
+            '()
+            (append
+              (test-files--in dir test-file?)
+              (apply append
+                (map (lambda (sub) (test-files--in (string-append dir "/" sub) test-file?))
+                     (filter (lambda (n) (file-directory? (string-append dir "/" n)))
+                             (list-dir dir)))))))))
+
+(define (load-test-files! files)
+  (for-each
+    (lambda (path)
+      ;; the declaration is per file, so it must not leak to the next
+      (set! *test-file-needs-disposable* #f)
+      (load path))
+    files)
+  (set! *test-file-needs-disposable* #f)
+  (length *tests*))
+
+;; the names each suite registered, so each command runs its own
+(defvar '*core-test-names* '())
+(defvar '*package-test-names* '())
+
+(define (load-test-files--names! files)
+  (let ((before (test-names)))
+    (load-test-files! files)
+    (filter (lambda (n) (not (member n before))) (test-names))))
+
+(define (load-tests!)
+  (set! *disposable-only-tests* '())
+  (set! *core-test-names* (load-test-files--names! (test-files 'core)))
+  (length *tests*))
+
+(define (package-test-names) *package-test-names*)
+
+(define (load-package-tests!)
+  (set! *package-test-names* (load-test-files--names! (test-files 'packages)))
+  (length *tests*))
 
 ;; The suite is 124 files. Loading it costs most of an eval's heap budget, so
 ;; an eval that loads AND runs a test passed the 1024 MB limit and died. This
@@ -208,46 +251,65 @@
     (set! *tests-loaded* #t))
   (length *tests*))
 
+(defvar '*package-tests-loaded* #f)
+
+(define (load-package-tests-once!)
+  (unless *package-tests-loaded*
+    (load-package-tests!)
+    (set! *package-tests-loaded* #t))
+  (length *tests*))
+
 ;; A reload of a test file must be visible to the next run.
 (define (reload-tests!)
   (set! *tests-loaded* #f)
   (load-tests-once!))
 
+(define (run-tests--report! names skipped)
+  (let ((buf "*test-results*")
+        (failed 0)
+        (lines '()))
+    (for-each
+      (lambda (name)
+        (let ((fs (run-test name)))
+          (if (null? fs)
+              (set! lines (append lines (list (string-append "  ok    "
+                                                (symbol->string name)))))
+              (begin
+                (set! failed (+ failed 1))
+                (set! lines
+                  (append lines
+                    (list (string-append "  FAIL  " (symbol->string name)))
+                    (map (lambda (f) (string-append "          " f)) fs)))))))
+      names)
+    (test-buffer! buf
+      (string-append
+        (number->string (length names)) " tests, "
+        (number->string failed) " failing"
+        (if (> skipped 0)
+            (string-append ", " (number->string skipped)
+                           " skipped — they reset buffer names this editor uses;"
+                           " run them with mix test")
+            "")
+        "\n\n"
+        (string-join lines "\n") "\n"))
+    (display-buffer buf)
+    (message (string-append (number->string failed) " failing"))))
+
 (define-command "run-scheme-tests"
-  "Run the Scheme test suite and report it in *test-results*"
+  "Run the kernel's Scheme tests and report them in *test-results*"
   (lambda ()
     (load-tests-once!)
-    (let* ((buf "*test-results*")
-           (failed 0)
-           (lines '())
-           (names (test-names-here))
-           (skipped (- (length (test-names)) (length names))))
-      (for-each
-        (lambda (name)
-          (let ((fs (run-test name)))
-            (if (null? fs)
-                (set! lines (append lines (list (string-append "  ok    "
-                                                  (symbol->string name)))))
-                (begin
-                  (set! failed (+ failed 1))
-                  (set! lines
-                    (append lines
-                      (list (string-append "  FAIL  " (symbol->string name)))
-                      (map (lambda (f) (string-append "          " f)) fs)))))))
-        names)
-      (test-buffer! buf
-        (string-append
-          (number->string (length names)) " tests, "
-          (number->string failed) " failing"
-          (if (> skipped 0)
-              (string-append ", " (number->string skipped)
-                             " skipped — they reset buffer names this editor uses;"
-                             " run them with mix test")
-              "")
-          "\n\n"
-          (string-join lines "\n") "\n"))
-      (display-buffer buf)
-      (message (string-append (number->string failed) " failing")))))
+    (let* ((here (test-names-here))
+           (names (filter (lambda (n) (member n here)) *core-test-names*)))
+      (run-tests--report! names (- (length *core-test-names*) (length names))))))
+
+(define-command "run-package-tests"
+  "Run the tests that live beside the packages and report them in *test-results*"
+  (lambda ()
+    (load-package-tests-once!)
+    (let* ((here (test-names-here))
+           (names (filter (lambda (n) (member n here)) *package-test-names*)))
+      (run-tests--report! names (- (length *package-test-names*) (length names))))))
 
 (effects! '(read))
 
@@ -274,7 +336,10 @@
 (public! 'test-forget-catalog!
   "(test-forget-catalog! KIND NAME) — drop a test's catalog entry; the M-x name stays until a restart")
 (public! 'load-tests-once! "(load-tests-once!) — load every test file the first time only; answers the test count")
-(public! 'reload-tests! "(reload-tests!) — forget the loaded suite and read priv/tests again")
-(public! 'load-tests! "(load-tests!) — load every .scm under priv/tests; answers the test count")
+(public! 'reload-tests! "(reload-tests!) — forget the loaded kernel suite and read priv/tests again")
+(public! 'load-tests! "(load-tests!) — load the kernel's tests, every .scm under priv/tests; answers the test count")
+(public! 'load-package-tests-once! "(load-package-tests-once!) — load the package tests (scheme/packages/**/NAME-test.scm) the first time only")
+(public! 'package-test-names "(package-test-names) — the names the package tests registered")
+(public! 'test-files "(test-files KIND) — the test files of KIND, 'core (priv/tests) or 'packages (beside each package)")
 
 (message "test.scm loaded")

@@ -34,9 +34,13 @@ list to make a run green.
 | desktop_session_restart_test.exs | 1 | "every live buffer gets its Scheme runtime rebuilt, not only the visible ones": one Session death recovered 2 times; red 3 of 3 alone at HEAD 22ba6cd2 in a worktree with its own build |
 | desktop_restore_test.exs | 2 | "every literal mode-name write names a registered mode": ibuffer-test.scm writes `aa-other-mode` (d293b2d9) and no define-mode registers it; "LLM configuration history survives desktop restore": the history rows are plists now, the test expects bare lists |
 
-## Scheme (priv/tests)
+## Scheme (priv/tests and the package tests)
 
-Run one file with `SCHEME_TESTS=name mix test apps/compos_core/test/compos/scheme_suite_test.exs`.
+Run one kernel file with `SCHEME_TESTS=name mix test apps/compos_core/test/compos/scheme_suite_test.exs`,
+and one package's tests with `SCHEME_TESTS=name mix test --include packages apps/compos_core/test/compos/package_suite_test.exs`.
+Since 2026-09-19 the package tests live beside their packages (scheme/packages/NAME-test.scm).
+In the full package run, 20 layout-policy names, 4 notmuch names and one each in web-browse and
+writing go red by order only; each passes when its file runs alone (see "Tests live with their packages" in SIMPLIFY-AUDIT.md).
 
 | Test | Note |
 |---|---|

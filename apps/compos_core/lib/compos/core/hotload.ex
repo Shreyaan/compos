@@ -180,7 +180,16 @@ defmodule Compos.Core.Hotload do
       # and `name~`, and a partial write is not compilable Elixir
       not String.ends_with?(base, "~") and
       not String.starts_with?(base, "#") and
+      not test_file?(path) and
       not noisy?(path)
+  end
+
+  # A Scheme test file is not source for the live editor: a save must
+  # never evaluate a test's fixtures in it. The suites load the files
+  # themselves (load-tests-once!, load-package-tests-once!).
+  defp test_file?(path) do
+    Path.extname(path) == ".scm" and
+      (String.ends_with?(Path.basename(path), "-test.scm") or "tests" in Path.split(path))
   end
 
   defp noisy?(path) do

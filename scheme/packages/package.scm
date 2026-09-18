@@ -97,7 +97,8 @@
                (map (lambda (f)
                       (list (car (string-split f ".scm"))
                             (string-append dir "/" f)))
-                    (filter (lambda (f) (string-suffix? ".scm" f))
+                    (filter (lambda (f) (and (string-suffix? ".scm" f)
+                                             (not (string-suffix? "-test.scm" f))))
                             (if (file-exists? dir) (list-dir dir) '()))))))
     (apply append (map scm (append load-path (list (package-dir)))))))
 

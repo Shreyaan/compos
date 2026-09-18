@@ -52,9 +52,9 @@ markdown_grammar? =
       Compos.Core.TS.ts_load_grammar(name, lib, File.read!(query)) == "ok"
   end)
 
-unless markdown_grammar? do
-  ExUnit.configure(exclude: [:markdown_grammar])
-end
+# The package tests (scheme/packages/**/NAME-test.scm) run apart from the
+# kernel's: `mix test --include packages test/compos/package_suite_test.exs`.
+ExUnit.configure(exclude: [:packages] ++ if(markdown_grammar?, do: [], else: [:markdown_grammar]))
 
 # The apps the stock boot leaves out (see priv/init.scm) still have tests;
 # the suite loads them once here, so a test sees the same world a user

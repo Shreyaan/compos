@@ -96,6 +96,9 @@ defmodule Compos.HotloadTest do
 
       refute Hotload.source?("/p/apps/compos_core/lib/compos/core/native/thing.rs")
       refute Hotload.source?("/p/README.md")
+      # a test file is loaded by its suite, never evaluated in the live editor on save
+      refute Hotload.source?("/p/scheme/packages/morg-test.scm")
+      refute Hotload.source?("/p/apps/compos_core/priv/tests/keymap-test.scm")
       refute Hotload.source?("/p/apps/compos_core/priv/packages")
     end
 
