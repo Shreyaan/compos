@@ -101,8 +101,8 @@ dispatch it to another worker.
   Elixir owns HTTP transport and parsing. One Scheme handler owns all routes
   and returns the status, headers, and body for each request.
 - **BufferView** — the buffer read model. Each buffer publishes one public ETS
-  row; every other process reads the row instead of sending the buffer a
-  message. A render therefore never queues behind a reparse, a checkpoint, or a
+  row, and a dormant buffer keeps the row of its last checkpoint; every other
+  process reads the row instead of sending the buffer a message. A render therefore never queues behind a reparse, a checkpoint, or a
   save in the buffer it draws. The buffer process stays the only writer, and it
   publishes before it announces the change. This process owns the table alone,
   so a buffer crash cannot take the model with it.

@@ -1374,6 +1374,35 @@ answer per-byte authorship.
 
 The bench is `apps/compos_core/test/bench/store_scan_bench.exs`.
 
+**Step 3, done in a worktree (2026-09-19).** Four code commits on
+22ba6cd2: one sleep guard (`Compos.Core.sleep_refusal/2`); one wake door
+(`Compos.Core.wake/2`, the rebuild queued on the buffer's lane, the
+process-kind branch and `:compos_inline_runtime_restore` gone); the
+dormant rows in `BufferView` (the `BufferStore` table and
+`fact/local/locals/note` gone, `catalog.etf` is the MRU list only);
+checkpoint version 2 (the log is the text; the migration in
+`BufferStore.migrate/1`). Measured the same way:
+
+| measure | before | after |
+|---|---|---|
+| boot proxy, two runs each, alternating | 5.1 s, 7.0 s | 5.2 s, 5.2 s |
+| bench: checkpoint bytes, 200 buffers | 4,034,473 | 124,092 |
+| bench: log bytes | 3,968,981 | 3,968,981 |
+| bench: boot scan of every checkpoint | 4 ms | 4 ms |
+| bench: one wake with its text | 6 ms mean, 8 max | 1 ms mean, 3 max |
+| lines: buffer.ex / buffer_store.ex / buffer_view.ex / desktop.ex / core.ex | 3,511 / 414 / 328 / 557 / 338 | 3,508 / 424 / 410 / 594 / 424 |
+
+The checkpoints shrink 32 times, because the text lives once. The line
+count does not fall: the dormant row, the migration and the wake door
+are new code, and the three read paths they replace were short.
+
+Left undone, on purpose: the authorship spans and origins still ride in
+the checkpoint beside the log (item 5), because the log does not yet
+answer per-byte authorship; `desktop.etf` is unchanged. The restore-loss
+history cannot be measured in a worktree; what changed for it is that a
+desktop restore never waits on a rebuild. Landing needs a daemon
+restart: the checkpoint format and the `BufferView` table shape change.
+
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
 

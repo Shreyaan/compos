@@ -203,8 +203,24 @@ This slice keeps one cell per buffer. It does not implement semantic hunks, mult
 Supported fields are `path`, `size`, `modified`, `read_only`, `point`, `mark`,
 and `id`. Local keys are selected explicitly.
 
-Each live row is projected inside ETS. Unrequested locals, text, and overlays
-are not copied. A missing live read-model row falls back to its buffer process.
-Dormant rows use the catalog, loading one checkpoint only when a requested
-local is too large to index. Reading metadata does not wake a dormant buffer.
-This is a snapshot per buffer, not a transaction across all buffers.
+Each row is projected inside ETS. Unrequested locals, text, and overlays
+are not copied. The read model holds a row for every known buffer: a live
+buffer publishes its own, and a dormant buffer has the row of its last
+checkpoint. A live buffer with no row asks its process. A dormant row loads
+one checkpoint only when a requested local is too large to index. Reading
+metadata does not wake a dormant buffer. This is a snapshot per buffer, not a
+transaction across all buffers.
+
+## Store and wake
+
+The log (`docs/<id>.loro`) is the text and the author record. The checkpoint
+(`buffers/<id>.etf`, version 2) holds the identity, the facts, the locals, the
+folds and the recording policy. It holds the text only when the log cannot
+answer for it: a mode that stopped recording, or a failed log write. A
+version 1 checkpoint still restores; the first boot strips its text when its
+log holds the same bytes.
+
+`Compos.Core.wake/2` is the one door back from dormancy. It starts the process
+from the files and queues `restore-buffer-runtime!` on the buffer's lane. It
+never waits. `switch-to-buffer!` rebuilds inline itself, so a switch shows a
+whole buffer.
