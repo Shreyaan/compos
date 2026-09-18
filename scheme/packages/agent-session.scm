@@ -717,6 +717,19 @@
                 ((chat-buffer? (cadr (car ws))) (cadr (car ws)))
                 (else (loop (cdr ws))))))))
 
+;; The transcript scroller keeps a reader position of its own, apart from
+;; point: agent-unstick records that the reader left the bottom, and the
+;; anchor pair records the block they left it on. Every relayout re-places
+;; the view from those, so moving point alone is invisible — the hook puts
+;; the transcript straight back on the saved block. Clearing them, and
+;; bumping the token the hook watches, is what makes a chat follow the
+;; newest message again.
+(define (chat-follow-again! buf)
+  (let ((seq (buffer-local buf 'agent-follow-seq)))
+    (for-each (lambda (k) (buffer-set-local! buf k #f))
+              '(agent-unstick agent-scroll-top agent-scroll-anchor agent-scroll-offset))
+    (buffer-set-local! buf 'agent-follow-seq (+ 1 (if (number? seq) seq 0)))))
+
 (define-command "chat-to-bottom" "Scroll this chat to the newest message"
   (lambda ()
     (let ((buf (chat-to-bottom-target)))
@@ -724,7 +737,14 @@
           (message "no chat here")
           (begin
             (with-current-buffer buf (lambda () (end-of-buffer!)))
+            (chat-follow-again! buf)
             (buffer-windows-follow-point! buf))))))
+
+;; M-> is end-of-buffer everywhere else, and in a chat the end of the
+;; buffer IS the newest message — but point alone does not move the
+;; transcript. On chat-mode's own map the key keeps its meaning and
+;; gains the scroller.
+(mode-keys! "chat-mode" '(("M->" "chat-to-bottom")))
 
 (effects! '(write))
 

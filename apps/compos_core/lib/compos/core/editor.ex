@@ -3478,6 +3478,12 @@ defmodule Compos.Core.Editor do
       scroll_top: Map.get(locals, "agent-scroll-top") || 0,
       scroll_anchor: Map.get(locals, "agent-scroll-anchor"),
       scroll_offset: Map.get(locals, "agent-scroll-offset") || 0,
+      # a counter chat-to-bottom bumps. The reader's own scrolling is
+      # reported on a debounce, so a plain stick flag from the server is
+      # sometimes 250ms stale and would snap a reader who just scrolled
+      # up back down. A token only ever changes when someone ASKED to
+      # follow again, so the hook can adopt it with no ambiguity.
+      follow_seq: Map.get(locals, "agent-follow-seq") || 0,
       # the activity word agent.scm sets on every event ("waiting…",
       # "thinking…", "streaming", "tool · X"); nil when no turn runs
       activity: Map.get(locals, "chat-activity"),

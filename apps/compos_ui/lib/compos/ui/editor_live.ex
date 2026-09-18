@@ -572,15 +572,13 @@ defmodule Compos.Ui.EditorLive do
     # the boot id rides every render: a hot-swapped page module bumps it,
     # and the client's boot check reloads the page when it moves
     socket = assign(socket, boot_id: :persistent_term.get(:compos_boot_id, "dev"))
-    Process.delete(:decorate_slowest)
     {socket, state_ms} = refresh_state(socket)
     total = System.monotonic_time(:millisecond) - t0
-    slowest = Process.get(:decorate_slowest)
 
     :telemetry.execute(
       [:compos, :ui, :refresh],
       %{duration: total, state: state_ms, decorate: total - state_ms},
-      %{frame: socket.assigns[:frame], slowest: slowest}
+      %{frame: socket.assigns[:frame]}
     )
 
     socket
@@ -679,14 +677,11 @@ defmodule Compos.Ui.EditorLive do
 
     {state, socket} = hold_which_key(state, socket)
 
-    # cache entries for windows that left the tree die with them (S15);
-    # the block caches are per buffer and die when the buffer leaves the tree
+    # cache entries for windows that left the tree die with them (S15)
     ids = state.tree |> leaf_ids() |> MapSet.new()
-    buffers = state.tree |> event_buffers() |> MapSet.new()
 
     line_cache =
       Map.filter(line_cache, fn
-        {{_kind, buffer}, _} when is_binary(buffer) -> MapSet.member?(buffers, buffer)
         {{_kind, id}, _} -> MapSet.member?(ids, id)
         {id, _} -> MapSet.member?(ids, id)
       end)
@@ -824,20 +819,7 @@ defmodule Compos.Ui.EditorLive do
          (Map.get(leaf, :display_updating, false) || Events.display_updating?(leaf.buffer)) do
       {old, cache}
     else
-      # the refresh row names the slowest leaf: a resize that costs a
-      # quarter second says which pane paid it
-      t0 = System.monotonic_time(:millisecond)
-      result = decorate(leaf, cache, faces, active)
-      ms = System.monotonic_time(:millisecond) - t0
-
-      case Process.get(:decorate_slowest) do
-        {_, worst} when worst >= ms -> :ok
-        _ -> Process.put(:decorate_slowest, {leaf.buffer, ms, Process.get(:decorate_agent_split)})
-      end
-
-      Process.delete(:decorate_agent_split)
-
-      result
+      decorate(leaf, cache, faces, active)
     end
   end
 
@@ -910,24 +892,17 @@ defmodule Compos.Ui.EditorLive do
        ) do
     # Input edits do not change the transcript mark or block model. Reuse the
     # complete block tree so typing and RET do not scan large tool results.
-    # keyed by the BUFFER, not the window: a retile hands window ids out
-    # by leaf order, so after one move a window shows a different chat and
-    # a per-window entry misses on every arrow, re-rendering every block
     old =
-      case cache[{:agent, leaf.buffer}] do
+      case cache[{:agent, leaf.id}] do
         %{block_cache: block_cache} = entry -> {entry, block_cache}
         _ -> {%{}, %{}}
       end
 
     {old_entry, old_blocks} = old
-    t_sig = System.monotonic_time(:microsecond)
     signature = {ag.blocks, ag.open_cards, ag.mark}
-    hit? = old_entry[:signature] == signature
-    t_sig = System.monotonic_time(:microsecond) - t_sig
-    t_blocks = System.monotonic_time(:microsecond)
 
     {blocks, block_cache} =
-      if hit? do
+      if old_entry[:signature] == signature do
         {old_entry.blocks, old_blocks}
       else
         {rendered, block_cache} =
@@ -949,26 +924,15 @@ defmodule Compos.Ui.EditorLive do
         {Enum.reject(rendered, &is_nil/1), block_cache}
       end
 
-    t_blocks = System.monotonic_time(:microsecond) - t_blocks
     entry = %{signature: signature, blocks: blocks, block_cache: block_cache}
-    t_input = System.monotonic_time(:microsecond)
-    input = ag_input(leaf, ag)
-    t_input = System.monotonic_time(:microsecond) - t_input
-
-    # the refresh row's slowest-leaf detail carries this split while the
-    # resize cost of a chat pane is under investigation
-    Process.put(
-      :decorate_agent_split,
-      "sig #{div(t_sig, 1000)}ms hit #{hit?} blocks #{div(t_blocks, 1000)}ms input #{div(t_input, 1000)}ms n #{length(ag.blocks)}"
-    )
 
     {Map.merge(leaf, %{
        lines: [],
        ag_blocks: blocks,
-       ag_input: input,
+       ag_input: ag_input(leaf, ag),
        ag_activity: Map.get(ag, :activity),
        ag_queued: Map.get(ag, :queued) || []
-     }), Map.put(cache, {:agent, leaf.buffer}, entry)}
+     }), Map.put(cache, {:agent, leaf.id}, entry)}
   end
 
   # rich diff: the buffer text IS the unified diff, so the cards are parsed
@@ -982,7 +946,7 @@ defmodule Compos.Ui.EditorLive do
     key = {leaf.buffer, leaf.version, :erlang.phash2(raw)}
 
     blocks =
-      case cache[{:blocks, leaf.buffer}] do
+      case cache[{:blocks, leaf.id}] do
         {^key, blocks} -> blocks
         _ -> Enum.map(raw, &block_view/1)
       end
@@ -990,7 +954,7 @@ defmodule Compos.Ui.EditorLive do
     line = Compos.Core.Text.line_index(leaf.text, leaf.point) + 1
 
     {Map.merge(leaf, %{lines: [], blk: blocks, blk_line: line, blk_root: block_root(Map.get(leaf, :blocks_root))}),
-     Map.put(cache, {:blocks, leaf.buffer}, {key, blocks})}
+     Map.put(cache, {:blocks, leaf.id}, {key, blocks})}
   end
 
   # Select source lines before fontification and segmentation. The rope in
@@ -1472,7 +1436,7 @@ defmodule Compos.Ui.EditorLive do
               <h3 class="wk-group-title">{label}<c-text>{length(bindings)}</c-text></h3>
               <c-group class="wk-grid">
                 <c-group :for={w <- bindings} class="wk-item" data-command={String.downcase(w.command)}>
-                  <c-action-key class="wk-key">{w.key}</c-action-key>
+                  <c-text class="wk-key">{w.key}</c-text>
                   <c-text class="wk-cmd">{w.command}</c-text>
                 </c-group>
               </c-group>
@@ -1494,14 +1458,14 @@ defmodule Compos.Ui.EditorLive do
               <c-text class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</c-text>
               <c-text class="mb-head-spacer"></c-text>
               <c-text class="mb-head-legend">
-                <c-text :for={row <- palette_legend(@state.minibuffer)} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
+                <c-text :for={row <- palette_legend(@state.minibuffer)} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
               </c-text>
             </c-group>
           <% else %>
             <c-group class="mb-label-row">
               <%= case Map.get(@state.minibuffer, :legend, []) do %>
                 <% [_ | _] = legend -> %>
-                  <c-text :for={row <- legend} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
+                  <c-text :for={row <- legend} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
                 <% _ -> %>
                   {label_row(@state.minibuffer)}
               <% end %>
@@ -1588,7 +1552,7 @@ defmodule Compos.Ui.EditorLive do
                       :for={item <- group.items}
                       class={"transient-item #{if item.selected, do: "selected"} #{item.behavior}"}
                     >
-                      <c-action-key class="transient-key">{item.key}</c-action-key>
+                      <c-text class="transient-key">{item.key}</c-text>
                       <c-text class="transient-description">{item.description}</c-text>
                       <c-text :if={item.value != ""} class="transient-value">{item.value}</c-text>
                     </c-group>
@@ -1606,12 +1570,12 @@ defmodule Compos.Ui.EditorLive do
             </c-group>
             <c-group class="transient-help">
               <%= if @state.transient[:legend] not in [nil, []] do %>
-                <c-text :for={row <- @state.transient.legend} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
+                <c-text :for={row <- @state.transient.legend} class="transient-legend"><c-text class="transient-legend-key">{row.key}</c-text> {row.label}</c-text>
               <% else %>
-                <c-text class="transient-legend"><c-action-key class="transient-legend-key">RET</c-action-key> invoke</c-text>
-                <c-text class="transient-legend"><c-action-key class="transient-legend-key">C-g</c-action-key> quit</c-text>
-                <c-text class="transient-legend"><c-action-key class="transient-legend-key">↑↓</c-action-key> select</c-text>
-                <c-text class="transient-legend"><c-action-key class="transient-legend-key">?</c-action-key> help</c-text>
+                <c-text class="transient-legend"><c-text class="transient-legend-key">RET</c-text> invoke</c-text>
+                <c-text class="transient-legend"><c-text class="transient-legend-key">C-g</c-text> quit</c-text>
+                <c-text class="transient-legend"><c-text class="transient-legend-key">↑↓</c-text> select</c-text>
+                <c-text class="transient-legend"><c-text class="transient-legend-key">?</c-text> help</c-text>
               <% end %>
             </c-group>
           </c-minibuffer>
@@ -1664,7 +1628,7 @@ defmodule Compos.Ui.EditorLive do
       <c-echo class="echo">{@state.echo}</c-echo>
       <c-text class="ml-rule"></c-text>
       <c-key-hints class="echo-hint">
-        <c-text :for={{k, v} <- header_keys()} class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
+        <c-text :for={{k, v} <- header_keys()} class="ml-key">{k}<%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
       </c-key-hints>
     </c-statusbar>
     """
@@ -2026,7 +1990,7 @@ defmodule Compos.Ui.EditorLive do
               <% @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) -> %>
                 <Compos.Ui.AgentTranscript.composml blocks={@node.ag_blocks}
                   win={@node.id} buf={@node.buffer} verbosity={@node.agent.verbosity}
-                  stick={false} scroll_top={0} scroll_anchor={nil} scroll_offset={0} peek={true} />
+                  stick={false} scroll_top={0} scroll_anchor={nil} scroll_offset={0} follow_seq={0} peek={true} />
               <% Map.get(@node, :semantic_records) not in [nil, false, []] -> %>
                 <.peek_text node={@node} />
               <% true -> %>
@@ -2117,6 +2081,7 @@ defmodule Compos.Ui.EditorLive do
             scroll_top={@node.agent.scroll_top}
             scroll_anchor={@node.agent.scroll_anchor}
             scroll_offset={@node.agent.scroll_offset}
+        follow_seq={@node.agent.follow_seq}
           />
           <%!-- messages queued mid-turn: muted rows from 'chat-queued,
                not transcript text. Outside the component, so a streamed
@@ -2291,15 +2256,16 @@ defmodule Compos.Ui.EditorLive do
         {@node.footer_line}
       </c-group>
       <c-modeline class="modeline">
-        <%!-- the header line names the buffer; the mode line does not say
-               it again. The dot is the state and opens the dashboard. --%>
-        <c-text
-          class={"ml-dot #{if @node.modified, do: "modified"}"}
+        <c-text class={"ml-dot #{if @node.modified, do: "modified"}"}></c-text>
+        <c-buffer-name
+          buffer={@node.buffer}
+          modified={to_string(@node.modified)}
+          class="name"
           title={@node.buffer}
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
-        ></c-text>
+        ><%= if ml_segs(@node) != [] do %><c-text :for={{c, t} <- ml_segs(@node)} class={c}>{t}</c-text><% else %>{ml_name(@node)}<% end %></c-buffer-name>
         <c-field name="project" :if={@node.modeline_project && @node.modeline_project != ""} class="ml-project">{@node.modeline_project}</c-field>
         <c-status state="selected" :if={@node.selected} class="ml-mode ml-selected">● selected</c-status>
         <c-mode :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</c-mode>
@@ -2903,7 +2869,7 @@ defmodule Compos.Ui.EditorLive do
   # outside the list draws as a div, an attribute outside it is dropped.
   @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre kbd p h1 h2 h3 h4 table thead tbody tr th td ul ol li
                  svg g path rect circle ellipse line polyline polygon text tspan title img)
-  @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target glyph style d viewBox preserveAspectRatio fill stroke stroke-width
+  @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target style d viewBox preserveAspectRatio fill stroke stroke-width
                   stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
                   stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
                   width height points transform vector-effect text-anchor font-size
@@ -4301,6 +4267,9 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp ml_segs(_), do: []
+
+  defp ml_name(%{modeline_name: name}) when is_binary(name) and name != "", do: name
+  defp ml_name(%{buffer: buffer}), do: buffer
 
   defp ml_bytes(text) do
     b = Kernel.byte_size(text)

@@ -530,55 +530,59 @@
 ;; Presets supply the complete tool surface. The runtime opens lazily on the
 ;; first send, stays attached to BUF, and (for Codex) records a native thread
 ;; id that a restored buffer resumes.
-(define (llm-mode--complete buf wire display model mark handler chunk-handler)
-  (let* ((id (llm-mode--session-id buf))
+;;; --- the hidden chat behind M-o ------------------------------------------------
+;;; One transport (the owner's ruling, 2026-09-19): a document that talks
+;;; gets a chat of its own, *chat:<document>*, made on the first send and
+;;; hidden until asked for (llm-companion-show). The chat holds the record,
+;;; the tools, the stance and the session; the document keeps building the
+;;; wire from its own text, gptel style, and the reply renders into the
+;;; document through the inline path while the chat records it.
+
+(define (llm-mode--companion-name buf) (string-append "*chat:" buf "*"))
+
+;; the document's chat, made and attached when it is missing or its
+;; session is gone (a restart brings the buffer back, not the session)
+(define (llm-mode--companion! buf &optional model)
+  (let* ((name (or (buffer-local buf 'llm-companion) (llm-mode--companion-name buf)))
          (connector (buffer-llm-connector buf))
-         ;; the name this connector knows the model by: the API lane says
-         ;; "openai:gpt-5.6-luna" and Codex says "gpt-5.6-luna"
-         (model (or (connector-model-id connector model) model))
-         (effort (buffer-local buf 'llm-effort))
-         (config (agent-resolve-config
-                   (append
-                     (list 'connector connector 'model model
-                           'buffer buf 'mark mark
-                           ;; ReqLLM consumes SPECS above directly. ACP
-                           ;; sessions instead mount the MCP servers named by
-                           ;; these same presets at session/new, exactly as a
-                           ;; chat buffer does. Without this, an ACP-backed
-                           ;; llm-mode buffer advertises the companion by name
-                           ;; but has no editor tool with which to read it.
-                           'presets (if (boundp (quote chat-presets-of))
-                                        (chat-presets-of buf)
-                                        '())
-                           'persist-thread #t)
-                     (let ((thread (buffer-local buf 'llm-thread-id)))
-                       (if thread (list 'thread-id thread) '()))
-                     (if effort (list 'effort effort) '())))))
-    (when (and (member id (agent-list)) (equal? (agent-status id) 'dead))
-      (llm-session-close! id))
+         (model (or model (buffer-llm-model buf)))
+         (opts (or (buffer-local buf 'llm-companion-opts) '())))
+    (unless (buffer-exists? name)
+      (buffer-create name)
+      (let ((dir (buffer-local buf 'default-directory)))
+        (when dir
+          (buffer-set-local! name 'default-directory dir)
+          (buffer-set-local! name 'chat-directory dir)))
+      (buffer-set-local! name 'chat-presets (chat-presets-of buf))
+      (let ((pm (buffer-local buf 'chat-permission-mode)))
+        (when pm (buffer-set-local! name 'chat-permission-mode pm)))
+      (buffer-set-local! name 'chat-companion-of buf)
+      (chat-task-init! name buf))
+    (buffer-set-local! buf 'llm-companion name)
+    (let ((slug (buffer-local name 'agent-slug)))
+      (unless (and slug (member slug (agent-list))
+                   (not (equal? (agent-status slug) 'dead)))
+        (chat-attach-agent! name connector model opts)))
+    (buffer-set-local! name 'inline-target buf)
+    (buffer-set-local! buf 'llm-session-id (buffer-local name 'agent-slug))
+    name))
+
+;; the send: the chat's session carries the document's wire; the chat
+;; records DISPLAY as the user's turn, and the reply comes back through
+;; the chat's handler, which forwards it to the inline render
+(define (llm-mode--complete buf wire display model mark handler chunk-handler)
+  (let* ((companion (llm-mode--companion! buf model))
+         (id (buffer-local companion 'agent-slug)))
     (llm-inline-put! (list id buf handler "" #f chunk-handler))
-    (unless (llm-mode--runtime-live? buf)
-      (llm-session-open! id config
-        (lambda (_id _display)
-          (list 'turns '()
-                'system
-                (if (boundp (quote chat-prompt-live-parts))
-                    (prompt-parts-text (chat-prompt-live-parts buf))
-                    (chat-tool-system buf))
-                'tools (if (boundp (quote chat-extra-tool-specs))
-                           (chat-extra-tool-specs buf)
-                           '())
-                'dispatcher llm-tool-call))
-        (lambda (_id events) (llm-inline-events! id events))
-        (lambda (_id _role _blocks _wire) #t)
-        ;; the direct lane asks the same decision; an ask comes back as a
-        ;; permission event and llm-inline-permission! puts the question
-        (lambda (_id name kind raw)
-          (let ((v (permit? buf name kind raw)))
-            (cond ((equal? v 'reject) 'reject)
-                  ((equal? v 'ask) 'ask)
-                  (else 'allow))))))
     (llm-session-send! id wire display)))
+
+(define-command "llm-companion-show" "Show this document's hidden chat in the other window"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (name (buffer-local buf 'llm-companion)))
+      (if (and name (buffer-exists? name))
+          (display-buffer-other-window! name)
+          (message "This document has no chat yet: M-o starts one")))))
 
 (define (llm-mode--last-response-range buf)
   (let loop ((ranges (llm-mode--response-ranges buf)) (latest #f))
@@ -1475,7 +1479,7 @@
     code-agent-saved
     workspace-id workspace-name workspace-root workspace-project-root
     workspace-backend workspace-daemon workspace-llm-defaults
-    workspace-isolation-choice project-defaults-inherited))
+    workspace-isolation-choice project-defaults-inherited chat-companion-of))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
@@ -1519,11 +1523,13 @@
 ;; are still swept)
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-waiting chat-activity
+    inline-target
     agent-cancelling agent-seed-context agent-tool-bodies
     agent-turn-text agent-turn-any chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty
     chat-history-pos chat-history-draft
-    agent-unstick agent-scroll-top
+    agent-unstick agent-scroll-top agent-scroll-anchor agent-scroll-offset
+    agent-follow-seq
     code-agent-switch-pending prompt-parts editing-state))
 
 (define (chat-clear-locals! buf keys)

@@ -32,6 +32,7 @@ defmodule Compos.Ui.AgentTranscript do
       data-scroll-top={@scroll_top}
       data-scroll-anchor={@scroll_anchor}
       data-scroll-offset={@scroll_offset}
+      data-follow-seq={@follow_seq}
     >
       <%= for {b, block_index} <- Enum.with_index(@blocks) do %>
         <%= case b.kind do %>

@@ -658,6 +658,7 @@ defmodule Compos.Ui.MobileLive do
         scroll_top={@leaf.agent.scroll_top}
         scroll_anchor={@leaf.agent.scroll_anchor}
         scroll_offset={@leaf.agent.scroll_offset}
+        follow_seq={@leaf.agent.follow_seq}
       />
       <c-user state="queued" :for={q <- Map.get(@leaf, :ag_queued, [])} class="ag-user ag-queued ag-queued-row">
         <c-label class="ag-label">YOU</c-label>

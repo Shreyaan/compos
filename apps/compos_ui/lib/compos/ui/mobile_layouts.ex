@@ -356,6 +356,7 @@ defmodule Compos.Ui.MobileLayouts do
             AgentScroll: {
               mounted() {
                 this.stick = this.el.dataset.stick !== "false";
+                this.followSeq = parseInt(this.el.dataset.followSeq || "0", 10);
                 this.scrollH = () => {
                   const s = this.el;
                   if (!s.isConnected || s.clientHeight === 0) return;
@@ -377,7 +378,14 @@ defmodule Compos.Ui.MobileLayouts do
                 this.el.addEventListener("click", this.linkH);
                 this.place();
               },
-              updated() { if (this.el.dataset.buf !== this.buf) { this.buf = this.el.dataset.buf; this.stick = true; } if (this.stick) this.place(); },
+              updated() {
+                const seq = parseInt(this.el.dataset.followSeq || "0", 10);
+                if (this.el.dataset.buf !== this.buf) { this.buf = this.el.dataset.buf; this.stick = true; }
+                // chat-to-bottom asked to follow again
+                else if (seq !== this.followSeq) { this.stick = true; }
+                this.followSeq = seq;
+                if (this.stick) this.place();
+              },
               place() { const s = this.el; if (this.stick) s.scrollTop = s.scrollHeight; },
               destroyed() { this.el.removeEventListener("scroll", this.scrollH); this.el.removeEventListener("click", this.linkH); clearTimeout(this.report); }
             },

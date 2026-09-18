@@ -1055,9 +1055,17 @@ M-o session answers a permission through `permit?` under the document's
 stance, on both lanes (the direct lane's permission function and the
 ACP-lane permission event). An `ask` is a y-or-n question in the
 minibuffer, because the hidden chat has no pane for a card; a refusal is
-silent. The allow-everything stub is gone. Next: the hidden companion
-chat as the session (one per document, `*chat:<buffer>*`), then the
-in-buffer render fed from its record, then `C-u M-o` targets.
+silent. The allow-everything stub is gone. Step 2 is in: the first M-o
+in a document makes `*chat:<document>*`, a real chat buffer attached
+through chat-attach-agent! with the document's connector, model,
+presets, directory and stance, hidden until `M-x llm-companion-show`.
+The document's session is that chat's; the document still builds the
+wire from its own text and the chat records the turn; the chat's event
+handler forwards every event but the permission to the inline render,
+and an ask in a hidden chat is a y-or-n question in the minibuffer.
+The `inline-N` sessions, the inline event handler's own session open
+and the permission stub are gone. Next: `C-u M-o` targets, then the
+inline dispatcher and context function fold into the chat's.
 
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It

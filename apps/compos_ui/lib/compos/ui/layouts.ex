@@ -2917,6 +2917,7 @@ defmodule Compos.Ui.Layouts do
                 this.stick = this.el.dataset.stick !== "false";
                 this.anchor = this.el.dataset.scrollAnchor ? parseInt(this.el.dataset.scrollAnchor, 10) : null;
                 this.offset = parseInt(this.el.dataset.scrollOffset || "0", 10);
+                this.followSeq = parseInt(this.el.dataset.followSeq || "0", 10);
                 this.report = null;
                 this.placing = false;
                 this.ro = null;
@@ -3057,15 +3058,29 @@ defmodule Compos.Ui.Layouts do
                 // id. Adopt that buffer's saved position once; within one
                 // chat the local flag wins over a lagging server patch.
                 const buf = this.el.dataset.buf;
+                const seq = parseInt(this.el.dataset.followSeq || "0", 10);
                 if (buf !== this.buf) {
                   this.buf = buf;
+                  this.followSeq = seq;
                   this.stick = this.el.dataset.stick !== "false";
                   this.anchor = this.el.dataset.scrollAnchor ? parseInt(this.el.dataset.scrollAnchor, 10) : null;
                   this.offset = parseInt(this.el.dataset.scrollOffset || "0", 10);
                   this.place();
-                } else if (this.stick) {
-                  this.place();
+                  return;
                 }
+                // chat-to-bottom said, in so many words, follow again. A
+                // token is unambiguous where the stick flag is not: it
+                // changes only when someone asked, never because a report
+                // is in flight, so adopting it cannot fight the reader.
+                if (seq !== this.followSeq) {
+                  this.followSeq = seq;
+                  this.stick = true;
+                  this.anchor = null;
+                  this.offset = 0;
+                  this.place();
+                  return;
+                }
+                if (this.stick) this.place();
               },
               destroyed() {
                 this.el.removeEventListener("click", this.linkH);

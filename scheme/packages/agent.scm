@@ -249,6 +249,14 @@
                              "  (file tools are set to deny — C-c b f changes this)\n"
                              "agent-meta")))
                 (agent-block-push! buf start (agent-mark slug) "meta" '()))))
+           ;; a hidden chat has no pane for a card: its document's frame
+           ;; gets the question in the minibuffer, and the answer is the
+           ;; same answer C-c C-y or C-c C-n would give
+           ((buffer-local buf 'inline-target)
+            (buffer-set-local! buf 'permission-asked (list title kind raw))
+            (y-or-n (string-append "Allow " title "?")
+              (lambda () (agent-answer-permission! slug "allow_always" "allow"))
+              (lambda () (agent-answer-permission! slug "reject_once" "reject"))))
            (else
              ;; what was asked, kept for the answer: the backend's pending
              ;; record holds no arguments, and "Always" needs them to
@@ -403,6 +411,12 @@
                          (if t (symbol->string t) "?"))
                        " failed — transcript may be missing a piece"))))
         events)
+      ;; a document's hidden chat renders its reply into the document too:
+      ;; every event but the permission, which this handler answered
+      (let ((target (buffer-local (agent-buf slug) 'inline-target)))
+        (when (and target (buffer-exists? target))
+          (llm-inline-events! slug
+            (filter (lambda (e) (not (equal? (plist-get e 'type) 'permission))) events))))
       ;; fleet surfaces track every batch: the modeline says at once who
       ;; needs you, and the list settles once the burst stops
       (agents-note-event! slug))))
