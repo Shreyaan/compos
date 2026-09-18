@@ -31,6 +31,15 @@ defmodule Compos.Ui.AppServer do
     "http://127.0.0.1:#{port}/a/#{token()}/b/#{name}/?v=#{gen}"
   end
 
+  get "/a/:tok/_compos/bridge.js" do
+    if Plug.Crypto.secure_compare(tok, token()) do
+      path = Application.app_dir(:compos_ui, "priv/static/app-bridge.js")
+      respond(conn, "text/javascript", File.read!(path))
+    else
+      send_resp(conn, 404, "no")
+    end
+  end
+
   get "/a/:tok/b/:buf/_compos/spreadsheet" do
     spreadsheet_request(conn, tok, buf, "read", "")
   end
@@ -176,34 +185,18 @@ defmodule Compos.Ui.AppServer do
 
   # The app is a document in another origin, so the editor cannot reach into
   # it: the keys that scroll a preview, and the C-g that gives the keyboard
-  # back, both travel as messages. This is the app's half of that wire.
-  @bridge """
-  <script>(function(){
-  var t=null;
-  function el(){return document.scrollingElement||document.documentElement}
-  addEventListener("message",function(e){
-    if(e.data&&e.data.compos==="scroll"){el().scrollTop=e.data.top}
-  });
-  addEventListener("scroll",function(){
-    clearTimeout(t);
-    t=setTimeout(function(){
-      parent.postMessage({compos:"scroll",top:Math.round(el().scrollTop)},"*")
-    },250)
-  },true);
-  addEventListener("keydown",function(e){
-    if(e.ctrlKey&&!e.altKey&&!e.metaKey&&e.key.toLowerCase()==="g"){
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      parent.postMessage({compos:"release"},"*")
-    }
-  },true);
-  })()</script>
-  """
+  # back, both travel as messages. This is the app's half of that wire, a
+  # static file (priv/static/app-bridge.js) this origin serves under the
+  # token; the boot id in its URL makes a new boot load it again.
+  defp bridge do
+    boot = :persistent_term.get(:compos_boot_id, "dev")
+    ~s(<script src="/a/#{token()}/_compos/bridge.js?v=#{URI.encode_www_form(boot)}"></script>)
+  end
 
   defp with_bridge(text) do
     case String.split(text, ~r{</body>}i, parts: 2) do
-      [before, rest] -> before <> @bridge <> "</body>" <> rest
-      [_] -> text <> @bridge
+      [before, rest] -> before <> bridge() <> "</body>" <> rest
+      [_] -> text <> bridge()
     end
   end
 end

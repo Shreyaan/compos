@@ -50,7 +50,7 @@ defmodule Compos.Ui.Endpoint do
   plug(Plug.Static,
     at: "/",
     from: :compos_ui,
-    only: ~w(manifest.webmanifest icons images composml.css editor.css app.js)
+    only: ~w(manifest.webmanifest icons images composml.css editor.css app.js mobile.css mobile.js)
   )
 
   if code_reloading? do

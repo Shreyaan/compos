@@ -51,10 +51,16 @@ defmodule Compos.Ui.AppServerTest do
     # the buffer, not the file: what you typed is what the app runs
     assert conn.resp_body =~ "<!-- unsaved -->"
     assert conn.resp_body =~ "<h1>hi</h1>"
-    # and the bridge the editor talks to the app over
-    assert conn.resp_body =~ ~s{compos==="scroll"}
-    assert conn.resp_body =~ ~s{compos:"release"}
-    assert conn.resp_body =~ "stopImmediatePropagation"
+    # and the bridge the editor talks to the app over, a script this origin
+    # serves under the token
+    [_, src] = Regex.run(~r{<script src="([^"]+/_compos/bridge\.js[^"]*)"></script></body>}, conn.resp_body)
+    bridge = get(src)
+    assert bridge.status == 200
+    assert get_resp_header(bridge, "content-type") == ["text/javascript; charset=utf-8"]
+    assert bridge.resp_body =~ ~s{compos==="scroll"}
+    assert bridge.resp_body =~ ~s{compos:"release"}
+    assert bridge.resp_body =~ "stopImmediatePropagation"
+    assert get("/a/wrong-token/_compos/bridge.js").status == 404
   end
 
   test "serves a sibling file from the app's own directory", %{buffer: b} do
