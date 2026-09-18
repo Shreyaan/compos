@@ -208,7 +208,7 @@ defmodule Compos.BufferViewTest do
       assert view!(renamed).name == renamed
     end
 
-    test "a dead buffer keeps no row, and reads fall back to its checkpoint" do
+    test "a dead buffer keeps a dormant row, and the text reads from its checkpoint" do
       name = "*view-dormant-#{System.unique_integer([:positive])}*"
       {:ok, ^name} = Compos.Core.create_buffer(name, text: "persisted")
       on_exit(fn -> BufferStore.forget(name) end)
@@ -220,9 +220,14 @@ defmodule Compos.BufferViewTest do
       assert_receive {:DOWN, ^ref, :process, ^pid, _}
 
       # the registry drops its own entry on its own monitor, so a moment
-      # after ours; the row and the entry both go, in whichever order
-      wait_until(fn -> BufferView.fetch(name) == :error and not Buffer.exists?(name) end)
+      # after ours; the row settles and the entry goes, in whichever order
+      wait_until(fn ->
+        match?({:ok, %{live: false}}, BufferView.fetch(name)) and not Buffer.exists?(name)
+      end)
+
+      assert BufferView.field(name, :size) == {:ok, 9}
       assert Buffer.text(name) == "persisted"
+      refute Buffer.exists?(name)
     end
 
     test "a crash of the model heals, and no buffer dies with it", %{name: name} do

@@ -1,34 +1,44 @@
 defmodule Compos.Core.BufferView do
   @moduledoc """
-  The buffer read model: one public ETS row per live buffer, holding what a
-  reader needs and no process to ask for it.
+  The buffer read model: one public ETS row per known buffer, live or
+  dormant, holding what a reader needs and no process to ask for it.
 
-  The buffer process owns its row and is the only writer. Every other
+  A live buffer publishes its own row and is its only writer. Every other
   process reads the row directly, so a render never queues behind a
   reparse, a checkpoint, or a save in the buffer that it draws. Before
   this, `Compos.Core.Editor` called each visible buffer from inside its own
   `handle_call`, which made one busy buffer stall every client.
 
-  This process owns the TABLE and nothing else. It creates the table and it
-  deletes the row of a buffer that dies. It runs no buffer code and holds no
-  buffer state, so a buffer crash cannot take the read model with it.
+  A dormant buffer has a row too: the facts of its last checkpoint (path,
+  size, modified, read_only, point, mark, version), the locals small
+  enough to index, and the names of the rest. `Compos.Core.BufferStore`
+  writes those rows from the checkpoint directory at boot; a buffer that
+  stops leaves one behind, written here on its `DOWN` from the live row it
+  published. A reader therefore never asks which of the two it holds: a
+  fact reads the same way for both, and only the text and a local too big
+  to index reach the files of a dormant buffer.
 
-  A row holds the rope handle, not the flattened text. The rope is an
+  This process owns the TABLE and nothing else. It creates the table, and
+  it settles the row of a buffer that dies. It runs no buffer code and
+  holds no buffer state, so a buffer crash cannot take the read model with
+  it.
+
+  A live row holds the rope handle, not the flattened text. The rope is an
   immutable Rustler resource: every edit returns a new handle, so a reader
   may hold one and call the NIF while the writer edits on. The reader
   flattens the bytes in its OWN process, which moves that O(n) copy off the
   serial path. The writer publishes `bin` as well whenever it already holds
   the flattened text, and `text/1` takes it when it is there.
 
-  A name with no row is not an error. The reader falls back to the buffer
-  process, and then to the checkpoint of a dormant buffer, exactly as
-  before. The row is an accelerator, never the only answer.
+  A name with no row is not an error: it is a name nobody knows, or a live
+  buffer in the moment after this process restarted. The reader falls back
+  to the buffer process for the second case.
   """
 
   use GenServer
 
   alias Compos.Core.Buffer.Ref
-  alias Compos.Core.Rope
+  alias Compos.Core.{BufferStore, Rope}
 
   @table :compos_buffer_view
 
@@ -38,11 +48,11 @@ defmodule Compos.Core.BufferView do
   def table, do: @table
 
   @doc """
-  Watch PID so its row goes when it does. A buffer calls this once, from
-  `init`; `terminate` also forgets the row, and this covers the kill that
-  runs no `terminate`.
+  Watch PID so its row settles when it goes. A buffer calls this once,
+  from `init`, with its id, so a row another buffer took under the same
+  name after a rename is never touched on its behalf.
   """
-  def track(pid, name), do: GenServer.cast(__MODULE__, {:track, pid, name})
+  def track(pid, name, id \\ nil), do: GenServer.cast(__MODULE__, {:track, pid, name, id})
 
   @doc "Drop NAME's row. The rename path calls this for the name it leaves."
   def forget(name) do
@@ -69,6 +79,20 @@ defmodule Compos.Core.BufferView do
     ArgumentError -> :ok
   end
 
+  @doc """
+  Publish a dormant VIEW only when its name has no row. The boot scan
+  writes rows this way, so a checkpoint never writes over the row of a
+  buffer that is already live.
+  """
+  def put_new(%{name: name, id: id} = view) do
+    :ets.insert_new(@table, [{name, view}, {{:id, id}, name}])
+  rescue
+    ArgumentError -> false
+  end
+
+  @doc "Whether VIEW is the row of a live buffer. A row from before the flag holds a rope."
+  def live?(view), do: Map.get(view, :live, Map.has_key?(view, :rope))
+
   @doc "VIEW for a name or a `Ref`. `:error` when the buffer has no row."
   def fetch(%Ref{id: id}) do
     case lookup({:id, id}) do
@@ -91,6 +115,22 @@ defmodule Compos.Core.BufferView do
   # honest answer in that window is "no row", not a crash in the reader.
   defp lookup(key) do
     :ets.lookup(@table, key)
+  rescue
+    ArgumentError -> []
+  end
+
+  @doc "Whether NAME has a row, live or dormant, without copying it."
+  def has_row?(name) when is_binary(name) do
+    :ets.select(@table, [{{name, :_}, [], [true]}]) != []
+  rescue
+    ArgumentError -> false
+  end
+
+  def has_row?(_), do: false
+
+  @doc "The names of every dormant row."
+  def dormant_names do
+    :ets.select(@table, [{{:"$1", %{live: false}}, [{:is_binary, :"$1"}], [:"$1"]}])
   rescue
     ArgumentError -> []
   end
@@ -123,7 +163,7 @@ defmodule Compos.Core.BufferView do
 
   @doc """
   One field of a buffer's view, as `{:ok, value}`, or `:error` when the
-  buffer has no row.
+  buffer has no row or the row lacks the key.
 
   The match spec projects the field inside ETS, so the caller copies that
   field and nothing else. `fetch/1` copies the whole row: every local,
@@ -159,10 +199,12 @@ defmodule Compos.Core.BufferView do
   another key (a chat's block index, a list-mode's row cache) must not
   copy that other value to find this one.
 
-  `{:ok, VALUE}` when the buffer holds the local, `:absent` when it has a
-  row and no such local, `:error` when it has no row. The caller needs the
-  two misses apart: a row is the whole truth about a live buffer, so an
-  absent key there is nil and no other store may answer for it.
+  `{:ok, VALUE}` when the row holds the local, `:absent` when it has a
+  row and no such local, `:unindexed` when a dormant row names the local
+  but holds it in the checkpoint (too big to index), `:error` when it has
+  no row. The caller needs the misses apart: a live row is the whole
+  truth about its buffer, so an absent key there is nil and no other
+  store may answer for it.
   """
   def local(%Ref{id: id}, key) do
     case lookup({:id, id}) do
@@ -180,21 +222,20 @@ defmodule Compos.Core.BufferView do
     ]
 
     case :ets.select(@table, spec) do
-      [value] -> {:ok, value}
-      [] -> if has_row?(name), do: :absent, else: :error
+      [value] ->
+        {:ok, value}
+
+      [] ->
+        case field(name, :local_keys) do
+          {:ok, keys} -> if key in keys, do: :unindexed, else: :absent
+          :error -> if has_row?(name), do: :absent, else: :error
+        end
     end
   rescue
     ArgumentError -> :error
   end
 
   def local(_, _), do: :error
-
-  # whether NAME has a row, without copying it
-  defp has_row?(name) do
-    :ets.select(@table, [{{name, :_}, [], [true]}]) != []
-  rescue
-    ArgumentError -> false
-  end
 
   @doc """
   The buffer text. The writer's flattened copy when it published one,
@@ -217,7 +258,8 @@ defmodule Compos.Core.BufferView do
   def hidden(%{hidden: by_tag}), do: by_tag |> Map.values() |> Enum.concat() |> Enum.sort()
 
   @doc """
-  The render payload for one window, or nil when the buffer has no row.
+  The render payload for one window, or nil when the buffer has no live
+  row: a dormant buffer draws empty rather than waking for a render.
 
   Same shape as `Buffer.render_snapshot/2`, computed from the row. The
   geometry is the WINDOW's: a stored per-window point wins over the buffer
@@ -226,7 +268,7 @@ defmodule Compos.Core.BufferView do
   """
   def snapshot(name, win_id \\ nil) do
     case fetch(name) do
-      {:ok, view} -> snapshot_of(view, win_id)
+      {:ok, view} -> if live?(view), do: snapshot_of(view, win_id), else: nil
       :error -> nil
     end
   end
@@ -277,52 +319,85 @@ defmodule Compos.Core.BufferView do
     # buffer only publishes when something about it changes. Adopt every live
     # buffer now: ask it to republish, and watch it again. Otherwise the model
     # heals one edit at a time, and the buffers that died meanwhile leave rows
-    # nobody deletes.
+    # nobody deletes. The dormant rows come back from the checkpoint scan.
     watched =
       Compos.Core.BufferRegistry
       |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
       |> Enum.reduce(%{}, fn {key, pid}, acc ->
-        name = if is_binary(key), do: key, else: Map.get(acc, pid)
         send(pid, :republish_view)
 
-        if Map.has_key?(acc, pid) do
-          Map.put(acc, pid, name || acc[pid])
-        else
-          Process.monitor(pid)
-          Map.put(acc, pid, name)
-        end
+        {name, id} =
+          case {key, Map.get(acc, pid)} do
+            {name, nil} when is_binary(name) -> {name, nil}
+            {{:id, id}, nil} -> {nil, id}
+            {name, {_, id}} when is_binary(name) -> {name, id}
+            {{:id, id}, {name, _}} -> {name, id}
+          end
+
+        unless Map.has_key?(acc, pid), do: Process.monitor(pid)
+        Map.put(acc, pid, {name, id})
       end)
 
+    send(self(), :reindex)
     {:ok, watched}
   end
 
   @impl true
-  def handle_cast({:track, pid, name}, watched) do
+  def handle_cast({:track, pid, name, id}, watched) do
     if Map.has_key?(watched, pid) do
       {:noreply, watched}
     else
       Process.monitor(pid)
-      {:noreply, Map.put(watched, pid, name)}
+      {:noreply, Map.put(watched, pid, {name, id})}
     end
   end
 
   @impl true
-  def handle_info({:DOWN, _mref, :process, pid, _reason}, watched) do
-    {name, watched} = Map.pop(watched, pid)
+  def handle_info(:reindex, watched) do
+    # At a cold boot the store is not up yet; its own init writes the rows.
+    if Process.whereis(BufferStore), do: BufferStore.reindex()
+    {:noreply, watched}
+  end
 
-    # A rename moved the row under a new name while we still hold the old
-    # one. Forget the name the row itself claims, so a rename cannot strand
-    # a row, and a dead buffer cannot delete the row of the live buffer that
-    # took its old name.
-    if name do
-      case :ets.lookup(@table, name) do
-        [{^name, %{name: current}}] -> forget(current)
-        _ -> forget(name)
-      end
+  def handle_info({:DOWN, _mref, :process, pid, _reason}, watched) do
+    {tracked, watched} = Map.pop(watched, pid)
+
+    case tracked do
+      {name, id} when is_binary(name) -> settle(name, id)
+      _ -> :ok
     end
 
     {:noreply, watched}
   end
 
   def handle_info(_, watched), do: {:noreply, watched}
+
+  # A buffer stopped. Its live row becomes the dormant row of its last
+  # checkpoint, from the row's own facts when the checkpoint holds them
+  # and from the file when the buffer died with an unwritten change. A
+  # killed buffer (`discard`) and a buffer that keeps no checkpoint leave
+  # no row. A rename moved the row under a new name while we still hold
+  # the old one, so the row is settled by the name it claims and only
+  # when it carries the dead buffer's id.
+  defp settle(name, id) do
+    case lookup(name) do
+      [{^name, %{id: row_id} = view}] when id in [nil, row_id] ->
+        cond do
+          not live?(view) ->
+            :ok
+
+          Map.get(view, :discard, false) or not Map.get(view, :persistent, true) ->
+            forget(name)
+
+          true ->
+            case BufferStore.row_of_view(view) do
+              nil -> forget(name)
+              row -> put(row)
+            end
+        end
+
+      _ ->
+        :ok
+    end
+  end
 end

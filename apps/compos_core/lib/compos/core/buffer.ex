@@ -135,26 +135,24 @@ defmodule Compos.Core.Buffer do
 
   @doc "Return a buffer's immutable persisted id."
   def id(%Ref{id: id}), do: id
-  def id(name), do: viewed(name, :id, fn -> dormant_read(name, :id, :id) end)
+  def id(name), do: viewed(name, :id, :id, nil)
 
   @doc "Resolve a buffer handle to its current mutable name."
-  def name(%Ref{id: id} = ref) do
-    if exists?(ref) do
-      GenServer.call(registry_name(ref), :name)
-    else
-      case BufferStore.lookup_id(id) do
-        %{name: name} -> name
-        nil -> nil
-      end
+  def name(%Ref{} = ref) do
+    case BufferView.field(ref, :name) do
+      {:ok, name} -> name
+      :error -> live_call(ref, :name, nil)
     end
   end
 
   def name(name) when is_binary(name), do: name
 
-  def via(%Ref{id: id} = ref) do
+  # A write to a dormant buffer wakes it: the one door, Compos.Core.wake,
+  # starts the process and queues its runtime rebuild on its lane.
+  def via(%Ref{} = ref) do
     if not exists?(ref) do
-      case BufferStore.lookup_id(id) do
-        %{name: name} -> Compos.Core.ensure_buffer(name)
+      case name(ref) do
+        name when is_binary(name) -> Compos.Core.wake(name)
         nil -> :ok
       end
     end
@@ -163,60 +161,52 @@ defmodule Compos.Core.Buffer do
   end
 
   def via(name) do
-    if not exists?(name) and BufferStore.known?(name), do: Compos.Core.ensure_buffer(name)
+    if not exists?(name), do: Compos.Core.wake(name)
     registry_name(name)
   end
 
   def exists?(%Ref{id: id}), do: Registry.lookup(@registry, {:id, id}) != []
   def exists?(name), do: Registry.lookup(@registry, name) != []
 
-  # Reads take the published row when the buffer has one. A row is written
-  # by the owning process before it answers the write that made it, so a
-  # reader never sees a state older than its own last write. Without a row
-  # the read falls back to the process, and then to the checkpoint.
+  # Every read takes the published row: a live buffer's own, or the dormant
+  # row its last checkpoint left. A live row is written by the owning
+  # process before it answers the write that made it, so a reader never
+  # sees a state older than its own last write. Only a live buffer with no
+  # row (the moment after the read model restarts) is asked directly.
   #
-  # A name with neither a process nor a checkpoint reads as empty, not as
-  # nil: a list renders a row for every name the catalog holds, and one
-  # buffer that died mid-render used to raise out of the whole render.
+  # A name with no row and no process reads as empty, not as nil: a list
+  # renders a row for every name it shows, and one buffer that died
+  # mid-render used to raise out of the whole render.
   #
   # `BufferView.field/2` copies the one field, not the row. A local read
   # from a chat buffer must not copy its overlay set.
-  defp viewed(name, key, fallback) do
+  defp viewed(name, key, message, default) do
     case BufferView.field(name, key) do
       {:ok, value} -> value
-      :error -> fallback.()
+      :error -> live_call(name, message, default)
     end
+  end
+
+  # The process, when there is one; DEFAULT when there is none, or when it
+  # died between the check and the call.
+  defp live_call(name, message, default) do
+    if exists?(name), do: GenServer.call(registry_name(name), message), else: default
+  catch
+    :exit, _ -> default
   end
 
   def text(name) do
     case BufferView.fetch(name) do
-      {:ok, view} -> BufferView.text(view)
-      :error -> dormant_read(name, :text, :text) || ""
+      {:ok, view} -> if BufferView.live?(view), do: BufferView.text(view), else: dormant_text(view)
+      :error -> live_call(name, :text, "")
     end
   end
 
-  # The size is the one row fact a checkpoint does not carry under its own
-  # name: the file holds the text, and the size is its length. So this
-  # reads the catalog by hand rather than through `dormant_read/3`, whose
-  # last resort is the checkpoint's own key.
-  def byte_size(name) do
-    viewed(name, :size, fn ->
-      case catalog_fact(name, :size) do
-        {:ok, size} when is_integer(size) -> size
-        _ -> Kernel.byte_size(text(name))
-      end
-    end)
-  end
-
-  def version(name),
-    do: viewed(name, :version, fn -> dormant_read(name, :buffer_version, :version) end)
-
-  def path(name), do: viewed(name, :path, fn -> dormant_read(name, :path, :path) end)
-
-  def modified?(name),
-    do: viewed(name, :modified, fn -> dormant_read(name, :modified, :modified?) end)
-
-  def point(name), do: viewed(name, :point, fn -> dormant_read(name, :point, :point) end)
+  def byte_size(name), do: viewed(name, :size, :byte_size, 0)
+  def version(name), do: viewed(name, :version, :version, 0)
+  def path(name), do: viewed(name, :path, :path, nil)
+  def modified?(name), do: viewed(name, :modified, :modified?, false)
+  def point(name), do: viewed(name, :point, :point, nil)
 
   @doc """
   Whether this buffer writes a checkpoint and comes back at the next boot.
@@ -224,11 +214,7 @@ defmodule Compos.Core.Buffer do
   A file over `large-file-warning-threshold` opens as `false`: it holds the
   file for this session and costs no later boot anything.
   """
-  def persistent?(name) do
-    GenServer.call(via(name), :persistent?)
-  catch
-    :exit, _ -> false
-  end
+  def persistent?(name), do: viewed(name, :persistent, :persistent?, false)
 
   @doc """
   Where the caret stands, as the buffer's own fact: the byte offset, and
@@ -277,11 +263,10 @@ defmodule Compos.Core.Buffer do
 
   def goto(name, pos), do: GenServer.call(via(name), {:goto, pos})
 
-  def mark(name), do: viewed(name, :mark, fn -> dormant_read(name, :mark, :mark) end)
+  def mark(name), do: viewed(name, :mark, :mark, nil)
   def set_mark(name, pos), do: GenServer.call(via(name), {:set_mark, pos})
 
-  def read_only?(name),
-    do: viewed(name, :read_only, fn -> dormant_read(name, :read_only, :read_only?) end)
+  def read_only?(name), do: viewed(name, :read_only, :read_only?, false)
 
   def set_read_only(name, bool), do: GenServer.call(via(name), {:set_read_only, bool})
 
@@ -299,89 +284,77 @@ defmodule Compos.Core.Buffer do
   def read_many(names, fields, keys) do
     Enum.map(names, fn name ->
       values =
-        case BufferView.project(name, fields, keys) do
-          {:ok, values} ->
-            values
-
-          :error ->
-            read_many_fallback(name, fields, keys)
+        case BufferView.project(name, fields ++ [:local_keys], keys) do
+          {:ok, values} -> read_many_row(name, values, fields, keys)
+          :error -> live_call(name, {:read_metadata, fields, keys}, List.duplicate(nil, length(fields) + length(keys)))
         end
 
       [name | Enum.map(values, &(&1 || false))]
     end)
   end
 
-  defp read_many_fallback(name, fields, keys) do
-    if exists?(name) do
-      try do
-        GenServer.call(via(name), {:read_metadata, fields, keys})
-      catch
-        :exit, _ -> read_catalog_metadata(name, fields, keys)
+  # A dormant row names the locals it holds in the file. Load at most one
+  # checkpoint, and only when a requested local is among them.
+  defp read_many_row(name, values, fields, keys) do
+    {facts, [local_keys | locals]} = Enum.split(values, length(fields))
+
+    unindexed =
+      case local_keys do
+        keys_in_file when is_list(keys_in_file) ->
+          Enum.filter(keys, &(&1 in keys_in_file and BufferView.local(name, &1) == :unindexed))
+
+        _ ->
+          []
       end
-    else
-      read_catalog_metadata(name, fields, keys)
-    end
-  end
 
-  defp read_catalog_metadata(name, fields, keys) do
-    meta = BufferStore.lookup(name) || %{}
-    indexed = Map.get(meta, :locals, %{})
-    known_keys = Map.get(meta, :local_keys, [])
-    # Load at most one checkpoint if a requested local is too large to index.
     locals =
-      if Enum.any?(keys, &(&1 in known_keys and not Map.has_key?(indexed, &1))),
-        do: locals(name),
-        else: indexed
+      if unindexed == [] do
+        locals
+      else
+        file = locals(name)
+        Enum.map(keys, &Map.get(file, &1))
+      end
 
-    Enum.map(fields, &Map.get(meta, &1)) ++ Enum.map(keys, &Map.get(locals, &1))
+    facts ++ locals
   end
 
   def get_local(name, key) do
     case BufferView.local(name, key) do
       {:ok, value} -> value
       :absent -> nil
-      :error -> dormant_local(name, key)
+      :unindexed -> Map.get(dormant_locals(name), key)
+      :error -> live_call(name, {:get_local, key}, nil)
     end
   end
 
-  # The catalog indexes a dormant buffer's small locals and names the rest,
-  # so a mode name reads from memory and an absent key answers without any
-  # read at all. Only a local too big to index reaches the checkpoint.
-  defp dormant_local(name, key) do
-    if exists?(name) do
-      Map.get(locals(name), key)
-    else
-      case BufferStore.local(name, key) do
-        {:ok, value} -> value
-        :absent -> nil
-        :error -> Map.get(locals(name), key)
-      end
-    end
-  end
-
+  # A live row holds every local. A dormant row holds the ones small
+  # enough to index and names the rest, so a buffer with one local too big
+  # to index answers from its checkpoint.
   def locals(name) do
-    viewed(name, :locals, fn ->
-      if exists?(name),
-        do: GenServer.call(registry_name(name), :locals),
-        else: dormant_locals(name)
-    end)
-  end
+    case BufferView.field(name, :local_keys) do
+      {:ok, keys} ->
+        case BufferView.field(name, :locals) do
+          {:ok, indexed} when map_size(indexed) == length(keys) -> indexed
+          _ -> dormant_locals(name)
+        end
 
-  defp dormant_locals(name) do
-    case BufferStore.locals(name) do
-      {:ok, locals} -> locals
-      :error -> name |> dormant() |> Map.get(:locals, %{})
+      :error ->
+        viewed(name, :locals, :locals, %{})
     end
   end
+
+  defp dormant_locals(name), do: name |> dormant() |> Map.get(:locals, %{})
 
   # overlays: per-tag face ranges (fontification). Byte positions auto-adjust
   # on edits (like mark); modes replace their whole tag set on recompute.
   def set_overlays(name, tag, ranges), do: GenServer.call(via(name), {:set_overlays, tag, ranges})
   def clear_overlays(name, tag \\ :all), do: GenServer.call(via(name), {:clear_overlays, tag})
 
+  # The live row carries the ranges. A dormant row does not, and a dormant
+  # buffer asked for them wakes, as it did when it had no row at all.
   def overlays(name) do
-    case BufferView.fetch(name) do
-      {:ok, view} -> BufferView.overlays(view)
+    case BufferView.field(name, :overlays) do
+      {:ok, by_tag} -> BufferView.overlays(%{overlays: by_tag})
       :error -> GenServer.call(via(name), :overlays)
     end
   end
@@ -389,8 +362,12 @@ defmodule Compos.Core.Buffer do
   @doc "One tag's overlay ranges, unmerged: a painter reads back only its own."
   def overlays(name, tag), do: GenServer.call(via(name), {:overlays, tag})
 
-  def overlay_gen(name),
-    do: viewed(name, :overlay_gen, fn -> GenServer.call(via(name), :overlay_gen) end)
+  def overlay_gen(name) do
+    case BufferView.field(name, :overlay_gen) do
+      {:ok, gen} -> gen
+      :error -> GenServer.call(via(name), :overlay_gen)
+    end
+  end
 
   # hidden: folded byte ranges — filtered out of the display, skipped by
   # line motion. Auto-adjusted like overlays.
@@ -411,8 +388,8 @@ defmodule Compos.Core.Buffer do
   # the row carries the union the display asks for; one tag still asks the
   # buffer, because only it knows which owner wrote which range
   def hidden(name, :all) do
-    case BufferView.fetch(name) do
-      {:ok, view} -> BufferView.hidden(view)
+    case BufferView.field(name, :hidden) do
+      {:ok, by_tag} -> BufferView.hidden(%{hidden: by_tag})
       :error -> GenServer.call(via(name), {:hidden, :all})
     end
   end
@@ -428,9 +405,9 @@ defmodule Compos.Core.Buffer do
   def widen(name), do: GenServer.call(via(name), :widen)
 
   def narrow_range(name) do
-    case BufferView.fetch(name) do
-      {:ok, view} -> Map.get(view, :narrow_range, Map.get(view, :display_range))
-      :error -> if exists?(name), do: GenServer.call(via(name), :narrow_range), else: nil
+    case BufferView.field(name, :narrow_range) do
+      {:ok, range} -> range
+      :error -> live_call(name, :narrow_range, nil)
     end
   end
 
@@ -559,12 +536,7 @@ defmodule Compos.Core.Buffer do
 
   defp dormant_author_lines(name) do
     cp = dormant(name)
-
-    line_rows(
-      Map.get(cp, :text) || "",
-      Map.get(cp, :authors) || [],
-      Map.get(cp, :origins) || %{}
-    )
+    line_rows(checkpoint_text(cp), Map.get(cp, :authors) || [], Map.get(cp, :origins) || %{})
   end
 
   @doc "The mutation journal, newest first: [{version, author, pos, ins, del}]."
@@ -820,36 +792,19 @@ defmodule Compos.Core.Buffer do
   # up here without threading an argument through the whole call chain
   defp author(opts), do: Keyword.get(opts, :author, Process.get(:compos_edit_author))
 
-  defp dormant_read(name, key, message) do
-    try do
-      if exists?(name),
-        do: GenServer.call(registry_name(name), message),
-        else: dormant_fact(name, key)
-    catch
-      # A buffer can die after exists?/1 and before the call. Fall back to
-      # its checkpoint; a truly stale name/ref reads as absent, never :noproc.
-      :exit, _ -> dormant_fact(name, key)
+  # The text of a dormant buffer: its checkpoint holds it, or its log does.
+  defp dormant_text(%{id: id}) do
+    case BufferStore.load_id(id) do
+      %{} = checkpoint -> checkpoint_text(checkpoint)
+      nil -> ""
     end
   end
 
-  # A dormant buffer's small facts live in the catalog, next to its name.
-  # Reading one there costs a table lookup. Reading it from the checkpoint
-  # costs the whole file: the text, every local and every overlay, decoded
-  # to answer one field. A buffer list asks a dozen such questions per row.
-  defp dormant_fact(name, key) do
-    case catalog_fact(name, key) do
-      {:ok, value} -> value
-      :error -> Map.get(dormant(name), key)
-    end
-  end
+  defp checkpoint_text(%{text: text}) when is_binary(text), do: text
+  defp checkpoint_text(_checkpoint), do: ""
 
-  # A live buffer answers for itself. The catalog holds what its last
-  # checkpoint said, which is the truth about a dormant buffer and stale
-  # about a running one.
-  defp catalog_fact(name, key) do
-    if exists?(name), do: :error, else: BufferStore.fact(name, key)
-  end
-
+  # The whole checkpoint of a dormant buffer: the file. Only the text and
+  # a local too big to index are worth it; every fact is in the row.
   defp dormant(%Ref{id: id}) do
     case BufferStore.load_id(id) do
       %{} = checkpoint -> checkpoint
@@ -927,7 +882,7 @@ defmodule Compos.Core.Buffer do
 
     # publish before the first caller can look: this process is registered
     # from `start_link`, so a reader can already resolve the name here
-    BufferView.track(self(), state.name)
+    BufferView.track(self(), state.name, state.id)
     BufferView.put(view(state))
     {:ok, state}
   end
@@ -1000,7 +955,8 @@ defmodule Compos.Core.Buffer do
   # message that only reads costs one pointer comparison each and writes
   # nothing.
   @view_fields ~w(name id rope bin version saved_version path read_only
-                  point mark locals overlays overlay_gen hidden narrow_range win_points fontify)a
+                  point mark locals overlays overlay_gen hidden narrow_range win_points fontify
+                  persistent discard dirty)a
 
   defp publish(state, before) do
     if Enum.any?(@view_fields, &(Map.fetch!(state, &1) != Map.fetch!(before, &1))),
@@ -1017,6 +973,13 @@ defmodule Compos.Core.Buffer do
     %{
       name: state.name,
       id: state.id,
+      live: true,
+      # what the row of a stopped buffer becomes: nothing for a buffer that
+      # keeps no checkpoint or was killed; the checkpoint's facts otherwise,
+      # from the file when the last change never reached it
+      persistent: state.persistent,
+      discard: state.discard,
+      dirty: state.dirty,
       rope: state.rope,
       bin: state.bin,
       size: Rope.byte_size(state.rope),
@@ -1078,7 +1041,7 @@ defmodule Compos.Core.Buffer do
   # BufferView restarted with an empty table and asked for our row back.
   # `publish/2` writes only what changed, so the row has to be forced.
   defp on_info(:republish_view, state) do
-    BufferView.track(self(), state.name)
+    BufferView.track(self(), state.name, state.id)
     BufferView.put(view(state))
     {:noreply, state}
   end
@@ -1180,9 +1143,10 @@ defmodule Compos.Core.Buffer do
     :ok
   end
 
+  # The row is not dropped here: the read model rewrites it as the dormant
+  # row of the checkpoint this writes, when it sees the process go.
   def terminate(_reason, state) do
     cancel_fontification(state)
-    BufferView.forget(state.name)
     write_checkpoint(state)
   end
 
@@ -1234,7 +1198,7 @@ defmodule Compos.Core.Buffer do
         BufferView.forget(old)
         state = %{state | name: new_name, path: new_path} |> checkpoint_later() |> touch_state()
         state = write_checkpoint(state)
-        BufferStore.renamed(old, metadata(state))
+        BufferStore.renamed(old, new_name)
         {:reply, :ok, state}
 
       {:error, {:already_registered, _}} ->
@@ -1248,7 +1212,6 @@ defmodule Compos.Core.Buffer do
   defp on_call(:detach, _from, state) do
     state = %{state | path: nil} |> touch_state() |> checkpoint_later()
     state = write_checkpoint(state)
-    BufferStore.renamed(state.name, metadata(state))
     Events.broadcast_editor(:locals)
     broadcast(state, state.point, "", 0, :locals)
     {:reply, :ok, state}
@@ -2574,37 +2537,13 @@ defmodule Compos.Core.Buffer do
       mark: state.mark,
       read_only: state.read_only,
       encoding: state.encoding,
-      locals: checkpoint_locals(state.locals, modified),
+      locals: BufferStore.checkpoint_locals(state.locals, modified),
       hidden: state.hidden,
       buffer_version: state.version,
       modified: modified,
       provenance: state.provenance,
       authors: state.authors,
       origins: Map.take(state.origins, Enum.map(state.authors, fn {_, _, id} -> id end))
-    }
-  end
-
-  # The catalog row: the buffer's identity, and the facts a list reads for
-  # a row it never opens. `BufferStore.facts/1` builds the same shape from
-  # a checkpoint on the boot scan, so the two agree.
-  defp metadata(state) do
-    # the locals the checkpoint would hold, so the catalog and the file on
-    # disk answer a dormant read alike
-    locals = checkpoint_locals(state.locals, state.version != state.saved_version)
-
-    %{
-      id: state.id,
-      name: state.name,
-      path: state.path,
-      checkpoint: BufferStore.checkpoint_path(state.id),
-      size: Rope.byte_size(state.rope),
-      modified: state.version != state.saved_version,
-      read_only: state.read_only,
-      point: clamp(state.point, state),
-      mark: state.mark && clamp(state.mark, state),
-      buffer_version: state.version,
-      locals: BufferStore.small_locals(locals),
-      local_keys: Map.keys(locals)
     }
   end
 
@@ -2635,7 +2574,6 @@ defmodule Compos.Core.Buffer do
       :erlang.term_to_binary(checkpoint(state))
     )
 
-    BufferStore.note(metadata(state))
     %{state | dirty: false}
   rescue
     _ -> state
@@ -2695,42 +2633,6 @@ defmodule Compos.Core.Buffer do
           )
     }
   end
-
-  # The auto-revert base is the text a buffer last agreed with its file on.
-  # A clean buffer agrees with its file by definition, and waking re-seeds
-  # the base from disk, so a checkpoint that carried it wrote the file into
-  # the checkpoint a second time: 21.4 MB across 294 checkpoints here, and
-  # 11.7 MB of that had drifted from the buffer's own text, so it described
-  # nothing. Only a buffer with unsaved work keeps it, because there it is
-  # the merge base and nothing on disk can rebuild it.
-  defp checkpoint_locals(locals, true), do: serializable_locals(locals)
-
-  defp checkpoint_locals(locals, false),
-    do: locals |> Map.drop(["auto-revert-base"]) |> serializable_locals()
-
-  defp serializable_locals(locals) do
-    skip =
-      case locals["desktop-skip-locals"] do
-        list when is_list(list) -> Enum.map(list, &local_key/1)
-        _ -> []
-      end
-
-    locals |> Map.drop(skip) |> Map.filter(fn {_k, v} -> serializable?(v) end)
-  end
-
-  defp local_key({:sym, key}), do: key
-  defp local_key(key), do: to_string(key)
-
-  defp serializable?(v) when is_function(v) or is_pid(v) or is_reference(v) or is_port(v),
-    do: false
-
-  defp serializable?(v) when is_list(v), do: Enum.all?(v, &serializable?/1)
-  defp serializable?(v) when is_tuple(v), do: v |> Tuple.to_list() |> Enum.all?(&serializable?/1)
-
-  defp serializable?(v) when is_map(v),
-    do: Enum.all?(v, fn {k, val} -> serializable?(k) and serializable?(val) end)
-
-  defp serializable?(_), do: true
 
   # --- mutation helpers ------------------------------------------------------
 
