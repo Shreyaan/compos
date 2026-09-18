@@ -735,6 +735,16 @@ today is done. What remains, and why it waits:
   under active design in the other session.
 - Phase 4, the execution model: a latency benchmark first.
 
+**Later on 2026-09-19:** the LSP client speaks through the shared JSON-RPC
+framer (four of the five framers are one now); ChatPerf is gone;
+chat-dismiss works again and nine dead definitions went; 25 redundant
+package! stamps went; one clock for the connection logs. Checked and left
+in place, with the reason: the buffer batch fields serve the public
+buffer-provenance-start! primitive (item 8.5 was wrong about that); the
+bookmark commands are two-line delegations, not stubs (6.7 was wrong);
+display-memory-mode is on by default, so its boot timer is right (6.8 was
+wrong).
+
 **Next three steps, in order.**
 
 1. `load-path`: the defvar in editor.scm, `load` searching it in Scheme over
