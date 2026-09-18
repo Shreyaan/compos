@@ -299,3 +299,28 @@
         (llm-session-close! (buffer-local c 'agent-slug))
         (buffer-kill! c)
         (buffer-kill! doc)))))
+
+(deftest 'm-o-lands-the-reply-in-the-document-and-the-hidden-chat-records-it
+  "one transport end to end: the stub's chunk streams into the document at
+   the response block, and the document's chat holds the turn"
+  (lambda ()
+    (let ((doc (test-buffer! "zz-doc-roundtrip.md" "Say hi.\n")))
+      (buffer-set-local! doc 'llm-connector "api")
+      (buffer-set-local! doc 'llm-companion-opts
+        '(backend "stub" script (((type chunk text "hi there.")))))
+      (with-current-buffer doc
+        (lambda ()
+          (goto-char! (buffer-size doc))
+          (run-command "llm-send-buffer")))
+      (let ((c (buffer-local doc 'llm-companion)))
+        (check-true! (and c (buffer-exists? c) #t) "the send made the document's chat")
+        (wait-until (lambda () (string-contains? (buffer-text doc) "hi there.")) 5000)
+        (check-true! (string-contains? (buffer-text doc) "hi there.")
+                     "the reply landed in the document")
+        (check-false! (window-showing c) "and the chat stayed hidden")
+        (wait-until (lambda () (string-contains? (buffer-text c) "hi there.")) 3000)
+        (check-true! (string-contains? (buffer-text c) "hi there.")
+                     "and the chat holds the reply too, for when it is shown")
+        (llm-session-close! (buffer-local c 'agent-slug))
+        (buffer-kill! c)
+        (buffer-kill! doc)))))
