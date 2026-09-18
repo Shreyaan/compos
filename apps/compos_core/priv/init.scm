@@ -22,12 +22,16 @@
 
 ; the list buffer comes first: a package declares its lists at load, and
 ; dired is the first such package
+; the transient menus come first: a package defines its prefixes at load
+(load "transient.scm")
 (load "tabulated-list.scm")
 ; windows: display-buffer, popups, peek, layouts, special-mode, tiling;
 ; a list mode derives from special-mode at load, so this precedes dired
 (load "window.scm")
 (load "tramp.scm")
 (load "dired.scm")
+; the browser tabs join the switcher and the tools; sentry and code read it at load
+(load "chrome.scm")
 ; the chat buffer and the LLM pipes: every package that opens a chat
 ; reads the chat locals lists at load
 (load "chat-mode.scm")

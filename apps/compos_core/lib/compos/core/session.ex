@@ -78,7 +78,7 @@ defmodule Compos.Core.Session do
   # 30s, so a runaway predicate must give up first and answer #f.
   @wait_cap 10_000
 
-  @bootstrap_files ~w(editor.scm transient.scm themes.scm chrome.scm init.scm)
+  @bootstrap_files ~w(editor.scm themes.scm init.scm)
 
   # user config, in load order: saved customizations load last so they win
   @user_config_files ~w(ai-config.scm init.scm custom.scm)

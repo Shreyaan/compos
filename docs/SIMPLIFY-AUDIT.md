@@ -850,6 +850,11 @@ recounted after the moves, editor.scm has 6 commands nothing names
 delete-file, load-file); they are M-x vocabulary with Emacs names and
 stay. Left in the item: the seven boundp guards in editor.scm, all
 call-time guards for optional packages.
+Item 16 of section 3, first half: transient.scm and chrome.scm are
+packages in scheme/packages, loaded from init.scm (transient first, a
+package defines its prefixes at load; chrome after dired, sentry and
+code read it at load). The Elixir bootstrap list is editor.scm,
+themes.scm, init.scm.
 
 **Next three steps, in order.**
 
