@@ -357,15 +357,17 @@
 ;; Runtime ids are buffer identities, not turn identities. The local survives
 ;; desktop restore and buffer rename; the persisted counter prevents a new
 ;; buffer from colliding with an old renamed one.
-(defvar '*llm-inline-next* 0 'persist #t)
+;; the document's session is its hidden chat's (llm-mode--companion!); a
+;; document that never sent has none
+(define (llm-mode--session-id buf) (buffer-local buf 'llm-session-id))
 
-(define (llm-mode--session-id buf)
-  (or (buffer-local buf 'llm-session-id)
-      (begin
-        (set! *llm-inline-next* (+ *llm-inline-next* 1))
-        (let ((id (string-append "inline-" (number->string *llm-inline-next*))))
-          (buffer-set-local! buf 'llm-session-id id)
-          id))))
+;; the reply lands in the document at its response block, which grows
+;; with an insert at its end. The session's own mark belongs to the
+;; hidden chat and is never the document's insertion point.
+(define (llm-mode--emit! buf response-id text)
+  (let ((response (block-resolve-id buf response-id)))
+    (when response
+      (buffer-insert! buf (plist-get response 'end) text))))
 
 (define (llm-mode--runtime-live? buf)
   (let ((id (buffer-local buf 'llm-session-id)))
@@ -772,7 +774,7 @@
         #f
         (begin
           (llm-mode--retire-thinking! buf response-id)
-          (agent-append! (llm-mode--session-id buf) text)
+          (llm-mode--emit! buf response-id text)
           (block-set-state! buf response-id 'streaming)
           (when result-id (block-set-state! buf result-id 'streaming))
           (llm-mode--sync-addressable-responses! buf)
@@ -820,7 +822,7 @@
          (cancelled (equal? (plist-get response 'state) 'cancelled))
          (state (if cancelled 'cancelled (if error 'failed 'complete))))
     (llm-mode--retire-thinking! buf response-id)
-    (when streamed (agent-append! (llm-mode--session-id buf) "\n"))
+    (when streamed (llm-mode--emit! buf response-id "\n"))
     ;; The final line break belongs to the document, not to either result span.
     (block-close-end! buf response-id end)
     (when result-id (block-close-end! buf result-id end))
