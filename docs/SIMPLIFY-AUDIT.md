@@ -1126,6 +1126,25 @@ is not a finder (it names the command for a fence language). The
 load-bundled-package expansion in init.scm is gone already; the block
 files' prologues are file headers and stay.
 
+**Item 16, the faces, measured (2026-09-19).** themes.scm names 63
+faces. The UI makes `.f-NAME` and `--NAME-ATTR` from every face
+(face_css.ex), and a tree-sitter capture head becomes the face `ts-HEAD`
+(editor_live.ex). The seven installed grammars emit these heads:
+punctuation, operator, string, keyword, text, comment, function,
+constant, attribute, variable, tag, property, number, module, type,
+namespace, escape. Fourteen ts faces have no producer among them
+(boolean, character, conditional, constructor, delimiter, exception,
+field, float, include, label, macro, method, parameter, repeat); each
+is a `defface!` that inherits the nearest coloured face, so a grammar a
+user installs (Rust, Python) lands on a sensible colour. They stay. The
+22 Emacs aliases with zero references (font-lock-*, mode-line-*,
+minibuffer-prompt, vertical-border, variable-pitch, bold-italic) are
+the compatibility layer the file announces, and Emacs is the reference;
+deleting them is a ruling, not a cleanup. The four full palettes restate
+the same faces because a palette is data, one colour per face per
+theme; define-theme-from already covers a derived palette (tokyo-night).
+Nothing in this item is deleted without a ruling.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
