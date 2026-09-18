@@ -10,7 +10,7 @@ defmodule Compos.CacheEconomicsTest do
 
   use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, LLMDb, Session}
+  alias Compos.Core.{Agent, Buffer, Editor, ModelCatalog, Session}
 
   defp focus(buf),
     do: {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!))])
@@ -376,10 +376,10 @@ defmodule Compos.CacheEconomicsTest do
 
     on_exit(fn -> :persistent_term.erase(:compos_llmdb) end)
 
-    assert LLMDb.max_tokens("claude-sonnet-5") == 64_000
-    assert LLMDb.max_tokens("anthropic:claude-sonnet-5") == 64_000
-    assert LLMDb.max_tokens("openrouter:anthropic/claude-sonnet-5") == 64_000
-    assert LLMDb.max_tokens("no-such-model") == nil
+    assert ModelCatalog.max_tokens("claude-sonnet-5") == 64_000
+    assert ModelCatalog.max_tokens("anthropic:claude-sonnet-5") == 64_000
+    assert ModelCatalog.max_tokens("openrouter:anthropic/claude-sonnet-5") == 64_000
+    assert ModelCatalog.max_tokens("no-such-model") == nil
   end
 
   defp eventually(fun, tries \\ 40) do
