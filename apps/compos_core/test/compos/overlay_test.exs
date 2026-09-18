@@ -97,7 +97,7 @@ defmodule Compos.OverlayTest do
     {:ok, hidden} =
       Compos.Core.Session.eval("""
       (begin
-        (buffer-set-hidden! "#{b}" (list (list 5 11)))
+        (fold-set! "#{b}" 'test (list (list 5 11)))
         (buffer-hidden "#{b}"))
       """)
 

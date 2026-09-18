@@ -37,7 +37,7 @@ Render pipeline:
 Hidden **byte ranges** stored in Buffer, auto-adjusted like mark; converted to hidden-line sets at render time. (Dired-style buffer regeneration rejected: org buffers are real file buffers — regeneration breaks editing/saving/undo/point.)
 
 - `buffer.ex`: defstruct `hidden: []` (`{start, end}` ranges = folded subtree bodies); `set_hidden/2`, `hidden/1`; adjust in `do_insert/do_delete`. `next_line/prev_line` motions loop past hidden ranges so the cursor never lands in a fold (`goto-char!` stays unclamped; org commands reveal-before-move).
-- `scheme_api.ex`: `(buffer-set-hidden! buf ranges)`, `(buffer-hidden buf)`.
+- `scheme_api.ex`: `(fold-set! buf tag ranges)`, `(buffer-hidden buf)`.
 - `editor.ex` `render_walk` leaf (`:632-668`): compute `hidden_lines` MapSet from ranges + text; `total_lines` and `cursor_line` become **visible-line** based so top clamp/auto-follow (`:640-648`) and modeline `pct` work unchanged; add `hidden_lines` to the leaf.
 - `editor_live.ex` `decorate` (`:98`): `static |> Enum.reject(hidden) |> Enum.slice(top, rows + 4)`. Static cache unaffected (hiding only filters the slice). Line numbers keep logical `num` (gaps, like Emacs). Optional: `" …"` fold-marker seg on lines whose successor is hidden.
 

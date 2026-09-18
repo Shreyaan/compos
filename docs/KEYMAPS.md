@@ -98,7 +98,7 @@ as one key.
 | `(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?])` | the frame's overriding map |
 | `(buffer-at-point-map! BUF KEYMAP)` | the keymap at point |
 | `(define-keymap! NAME [PARENT])` | a named keymap |
-| `(define-key KEYMAP KEYS COMMAND)`, `(keymap-set! ...)` | one binding |
+| `(define-key KEYMAP KEYS COMMAND)` | one binding |
 | `(keymap-unset! KEYMAP KEYS)` | drop the keymap's own binding |
 | `(keymap-parent! KEYMAP PARENT)`, `(keymap-parent KEYMAP)` | the parent |
 | `(keymap-bindings KEYMAP)` | the keymap's own bindings |

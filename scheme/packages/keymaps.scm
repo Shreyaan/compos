@@ -151,7 +151,7 @@
 (define (keys--bind! km seq cmd)
   (if (equal? km "global")
       (global-set-key seq cmd)
-      (keymap-set! km seq cmd)))
+      (define-key km seq cmd)))
 
 (define (keys--unbind! km seq)
   (if (equal? km "global")

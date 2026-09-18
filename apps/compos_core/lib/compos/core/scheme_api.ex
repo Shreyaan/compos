@@ -741,14 +741,6 @@ defmodule Compos.Core.SchemeAPI do
       # A buffer has several fold owners, so ranges are tagged and each
       # owner replaces only its own tag. The display hides the union.
       # The untagged pair below writes and reads the "default" tag.
-      {"buffer-set-hidden!",
-       "(buffer-set-hidden! BUF RANGES) — hide (fold) the given (START END) byte ranges."} => fn [
-                                                                                                   name,
-                                                                                                   ranges
-                                                                                                 ] ->
-        :ok = Buffer.set_hidden(name, Enum.map(ranges, fn [s, e] -> {s, e} end))
-        :void
-      end,
       {"buffer-hidden",
        "(buffer-hidden BUF) — return the hidden (folded) byte ranges as (START END) pairs."} =>
         fn [name] ->
@@ -2238,17 +2230,8 @@ defmodule Compos.Core.SchemeAPI do
           [name] -> Editor.keymap_parent(plain(name), Editor.keymap_parent_of(plain(name)))
           [name, parent] -> Editor.keymap_parent(plain(name), parent && plain(parent))
         end,
-      {"keymap-set!",
-       "(keymap-set! KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap."} => fn [
-                                                                                              name,
-                                                                                              seq,
-                                                                                              command
-                                                                                            ] ->
-        Editor.keymap_set(plain(name), key_seq(seq), key_binding_value(command))
-        :void
-      end,
       {"define-key",
-       "(define-key KEYMAP SEQ COMMAND) — the Emacs name of keymap-set!. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap."} =>
+       "(define-key KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap."} =>
         fn [name, seq, command] ->
           Editor.keymap_set(plain(name), key_seq(seq), key_binding_value(command))
           :void

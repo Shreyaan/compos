@@ -855,6 +855,14 @@ packages in scheme/packages, loaded from init.scm (transient first, a
 package defines its prefixes at load; chrome after dired, sentry and
 code read it at load). The Elixir bootstrap list is editor.scm,
 themes.scm, init.scm.
+Item 13 of section 7 (dual spellings), checked: of the nine pairs only
+two were the same function under two names. keymap-set! (define-key)
+and buffer-set-hidden! (fold-set! without a tag) are gone. The other
+seven differ in what they take: the current buffer against a named one
+(point, goto-char!, local-set-key), the selected frame against every
+frame (window-list), the active window against one by id
+(delete-window!), the window against the frame root (split-window!),
+and minibuffer-read against its handler-alist form; they stay.
 
 **Next three steps, in order.**
 
