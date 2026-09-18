@@ -983,6 +983,13 @@ the four rewrites (one store, one read model, one wake path; Scheme
 keymaps; one Display row model and one LiveView; one event stream) and
 the world collapse behind the Phase 4 gate.
 
+**Ruling 2026-09-19 (the owner): mcp-hub stays.** The hub is the inventory
+of the MCP servers the system can run; a bundle is a selection from it.
+Two roles, two surfaces. Item 5.10 keeps both and collapses the record:
+one server table that the hub, the bundle picker, setup's program
+registry and the workspace defaults all read, and a bundle names its
+servers by name instead of carrying a copy of each.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:
