@@ -1403,6 +1403,19 @@ history cannot be measured in a worktree; what changed for it is that a
 desktop restore never waits on a rebuild. Landing needs a daemon
 restart: the checkpoint format and the `BufferView` table shape change.
 
+**Step 3, landed (2026-09-19, 7a123044..be8ed4e8).** The seven commits
+landed on 5b84c082 as the same tree the worktree tested. A backup of
+buffers/, docs/ and desktop.etf is in ~/.compos/step3-backup-20260919-011351. The owner restarted
+the daemon at 01:14; the migration ran at 01:14:27. Of 686 checkpoints,
+549 are now version 2 and 137 stay version 1 (chats, which do not
+record, and one buffer whose log differs). A check against the backup
+found every version 2 file equal to its old facts, with the old text
+size, and every log byte for byte the same, except three buffers that
+woke and appended to their logs. The 11 chats that saved again since
+the restart keep their text in the checkpoint. Six version 2 buffers,
+35 bytes to 1.6 MB, read back through the live daemon at their backup
+size. The graveyard (buffers/dead/, 2138 files) is not migrated.
+
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
 
