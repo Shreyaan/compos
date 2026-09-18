@@ -1274,6 +1274,106 @@ ruling applies: Emacs names, Scheme spelling. Both readers stay; the
 google.scm, models.scm, docs/COMPLETION.md). No alias stays: a hot
 reload leaves the old names bound in the live daemon until a restart.
 
+**Step 3, design (2026-09-19): one store, one read model, one wake
+path.** Items 5 to 8 and 15 of section 8. Written before the code, in
+a worktree at 22ba6cd2.
+
+*The store.* A persistent buffer has two files: `buffers/<id>.etf`, the
+checkpoint, and `docs/<id>.loro`, the log. Today the checkpoint holds
+the text and the log holds the text again. After this step the log is
+the text: the checkpoint (version 2) carries the identity, the path,
+the size, the point and mark, the flags, the locals, the folds, the
+recording policy and the authorship spans, and no text. A buffer writes
+the text into its checkpoint only when the log cannot answer for it: a
+mode that opted out of recording (chat-mode), a mirror that failed, or
+a log append that failed. A wake reads the log and builds the rope from
+it; a dormant text read does the same. Every checkpoint written before
+this step (version 1) still restores: the reader takes the text from
+the file when the file has it, and the log reconciles against it as it
+does today. A one-shot migration runs at boot, once per home: it
+rewrites a version 1 checkpoint without its text only when the log's
+text equals the checkpoint's text byte for byte, and it marks the
+directory done. `catalog.etf` stays what it is today: the MRU list of
+buffer names. Nothing else is derived from it.
+
+*The read model.* One table, `:compos_buffer_view`, owned by
+`Compos.Core.BufferView`, holds one row per known buffer: a live row,
+which the buffer process publishes and which carries the rope, and a
+dormant row, which carries the facts of the last checkpoint (id, path,
+size, modified, read_only, point, mark, version), the locals under 1 KB
+and the names of the rest. The boot scan of the checkpoint directory
+writes the dormant rows. A buffer that stops demotes its own row: the
+`DOWN` handler of `BufferView` rewrites a live row as a dormant row
+from the row's own facts, and deletes a row whose buffer was killed
+(the row carries `discard`). `BufferStore` keeps the MRU list, the boot
+scan, the eviction sweep and the graveyard, and its own table goes.
+Every reader in `Compos.Core.Buffer` reads the row first; a live buffer
+with no row (the moment after `BufferView` restarts) asks its process;
+a dormant buffer reaches its files only for the text and for a local
+too big to index. `Buffer.point/1` tries one path.
+
+*The wake door.* `Compos.Core.wake(name, opts)` is the one way a
+dormant buffer comes back: it starts the process from the checkpoint
+and the log, then queues one Scheme call, `restore-buffer-runtime!`
+(which ends in `buffer-woken!`), on the buffer's lane, without waiting.
+The queued job runs only when the buffer is still live. `restore:
+false` starts the process and queues nothing, for a caller that
+rebuilds the runtime itself or puts the buffer back to sleep at once.
+`ensure_buffer/2` is the door for any name: live answers at once, known
+wakes, unknown creates. The branch on the caller's process kind and the
+`:compos_inline_runtime_restore` flag go. The seven paths become:
+
+1. `create_buffer` on a known name: `wake`.
+2. `ensure_buffer`: `wake`.
+3. The `Editor` wrappers `set_window_buffer`, `window_set_buffer`,
+   `preview_buffer`: no wrapper logic; the handler's `ensure_buffer`
+   is the door.
+4. `Editor.restore_tree`: the same handler door.
+5. The `window-switch-buffer!` primitive: `wake(name, restore: false)`,
+   then `switch-to-buffer-here!` in editor.scm runs
+   `restore-buffer-runtime!` inline, as it does today. Scheme decides
+   that a switch shows a whole buffer; Elixir does not guess it from
+   the process.
+6. `Buffer.via/1`, the wake by a write: `wake`.
+7. `Desktop.restore_world`: wakes every buffer a saved tree names with
+   `restore: false`, lays the trees, installs the globals, then queues
+   the restores, in that order, because a mode setup reads the group
+   records. `Desktop.restore_now/0`, the test API, waits on each
+   buffer's lane after the call so a test sees the finished runtime.
+   The Session-restart rebuild keeps its synchronous sweep: it is not a
+   wake.
+8. `rename_buffer` and `rename_file` on a dormant name: `wake(name,
+   restore: false)`; `rename_buffer` queues the restore under the new
+   name, `rename_file` sleeps the buffer again.
+
+The eviction guard (`displayed`, `busy`, `agent`, `pinned`) becomes one
+function, `Compos.Core.sleep_refusal/2`, read by `sleep_buffer/1` and
+by the idle sweep.
+
+*Behaviour that changes.* A wake from outside a lane (a test process,
+an RPC caller) restored the runtime before it returned; now every wake
+restores on the buffer's lane after it returns. Tests that read the
+runtime right after a wake wait for it. A daemon older than this step
+must not run over a home this step wrote: it reads a version 2
+checkpoint as no checkpoint. Attribution still lives three times
+(item 5); the authorship spans stay in the checkpoint until the log can
+answer per-byte authorship.
+
+*Measured before* (a test daemon in the worktree, 22ba6cd2):
+
+| measure | before |
+|---|---|
+| boot of a test daemon (the migrations run: wall minus test time) | 10.7 s - 5.6 s = 5.1 s |
+| test home after that run: `buffers/` | 2 files, 8 KB (catalog.etf 75 B) |
+| test home after that run: `docs/` | 14 MB, kept across runs |
+| store scan bench, 200 dormant buffers of 19 KB: checkpoint bytes | 4,034,473 |
+| the same: log bytes | 3,968,981 |
+| the same: boot scan of every checkpoint | 4 ms |
+| the same: one wake with its text | 6 ms mean, 8 ms max |
+| lines: buffer.ex, buffer_store.ex, buffer_view.ex, desktop.ex, core.ex | 3,511 / 414 / 328 / 557 / 338 |
+
+The bench is `apps/compos_core/test/bench/store_scan_bench.exs`.
+
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
 
