@@ -1168,6 +1168,194 @@
         if (this.ro) { this.ro.disconnect(); this.ro = null; }
       }
     },
+    // a block list that follows its tail (a chat transcript): it
+    // keeps the newest child in view until the reader scrolls up.
+    BlockFollow: {
+      mounted() {
+        // The hook lives on the block list LiveComponent itself.
+        // Its lifecycle therefore runs after the child patch has
+        // supplied the transcript's final scrollHeight.
+        this.scroller = this.el;
+        this.buf = this.el.dataset.buf;
+        this.stick = this.el.dataset.stick !== "false";
+        this.anchor = this.el.dataset.scrollAnchor ? parseInt(this.el.dataset.scrollAnchor, 10) : null;
+        this.offset = parseInt(this.el.dataset.scrollOffset || "0", 10);
+        this.followSeq = parseInt(this.el.dataset.followSeq || "0", 10);
+        this.report = null;
+        this.placing = false;
+        this.ro = null;
+        this.reader = false;
+        this.raf = null;
+        this.linkH = (e) => {
+          const link = e.target.closest && e.target.closest("a[href]");
+          if (!link || !this.el.contains(link)) return;
+          const href = link.getAttribute("href") || "";
+          if (href === "" || href.startsWith("#")) return;
+          e.preventDefault();
+          this.pushEvent(e.shiftKey ? "preview_link_to_group" : "preview_link", {
+            win: parseInt(this.el.dataset.win, 10),
+            href: href
+          });
+        };
+        this.el.addEventListener("click", this.linkH);
+        this.scrollH = () => {
+          const s = this.scroller;
+          // hiding the window forces scrollTop to 0 and fires this
+          // event; only a scroll the reader can see may move the
+          // saved place, or a long chat comes back at the top
+          if (!s.isConnected || s.clientHeight === 0) return;
+          // the hook's own placement is not a scroll the reader
+          // made, so it must not move the place they left
+          if (this.placing) return;
+          this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
+          // A modal overlay covers the hit test point. Keep the
+          // place the reader left rather than dropping it.
+          const anchor = this.lastVisible();
+          if (anchor) {
+            this.anchor = anchor.index;
+            this.offset = Math.round(anchor.offset);
+          }
+          clearTimeout(this.report);
+          this.report = setTimeout(() => {
+            this.pushEvent("follow_place", {
+              buf: this.el.dataset.buf,
+              stick: this.stick,
+              top: Math.round(s.scrollTop),
+              anchor: this.anchor,
+              offset: this.offset
+            });
+          }, 250);
+        };
+        // The last visible block, found with one hit test. A scan
+        // of every block calls getBoundingClientRect per block, and
+        // each call flushes layout: on a long transcript that is one
+        // layout per block on every scroll event, which blocks the
+        // page until the reader stops. One hit test costs one flush,
+        // whatever the transcript holds.
+        this.lastVisible = () => {
+          const r = this.scroller.getBoundingClientRect();
+          const x = r.left + r.width / 2;
+          const y = Math.min(r.bottom, window.innerHeight) - 1;
+          if (y <= r.top) return null;
+          const hit = document.elementFromPoint(x, y);
+          const block = hit && hit.closest && hit.closest("[data-index]");
+          if (!block || !this.scroller.contains(block)) return null;
+          const b = block.getBoundingClientRect();
+          return {
+            index: parseInt(block.dataset.index, 10),
+            offset: b.top - r.top
+          };
+        };
+        this.scroller.addEventListener("scroll", this.scrollH);
+        // A scroll event is an effect and cannot tell the
+        // reader's hand from the hook's own assignment. A
+        // gesture is the cause, so it is what ends the settle.
+        this.inputH = () => { this.reader = true; };
+        ["wheel", "touchstart", "pointerdown"].forEach((t) =>
+          this.scroller.addEventListener(t, this.inputH, { passive: true })
+        );
+        this.settle();
+      },
+      // Put the transcript where the reader left it. A window that
+      // is hidden or not laid out yet reports no height and a
+      // short scrollHeight, so placing then lands a long chat near
+      // its top and nothing runs again to correct it. Wait for a
+      // real size, and never move a scroller already there.
+      place() {
+        const s = this.scroller;
+        if (!s.isConnected) return;
+        if (s.clientHeight === 0) {
+          if (this.ro || typeof ResizeObserver === "undefined") return;
+          this.ro = new ResizeObserver(() => {
+            if (this.scroller.clientHeight === 0) return;
+            this.ro.disconnect();
+            this.ro = null;
+            this.place();
+          });
+          this.ro.observe(s);
+          return;
+        }
+        const max = Math.max(0, s.scrollHeight - s.clientHeight);
+        const saved = this.anchor !== null ? this.el.querySelector(`[data-index="${this.anchor}"]`) : null;
+        if (!this.stick && saved) {
+          const r = this.scroller.getBoundingClientRect();
+          const delta = saved.getBoundingClientRect().top - r.top - this.offset;
+          if (Math.abs(delta) <= 1) return;
+          this.placing = true;
+          this.scroller.scrollTop += delta;
+          requestAnimationFrame(() => { this.placing = false; });
+          return;
+        }
+        const want = this.stick
+          ? max
+          : Math.min(parseInt(this.el.dataset.scrollTop || "0", 10), max);
+        if (Math.abs(s.scrollTop - want) <= 1) return;
+        this.placing = true;
+        s.scrollTop = want;
+        requestAnimationFrame(() => { this.placing = false; });
+      },
+      // A transcript keeps growing for a moment after a page
+      // load: fonts land, images decode, late patches arrive.
+      // Each one moves the place under the reader, so hold the
+      // place until the height stops changing, then stop. The
+      // reader's first gesture ends it early: their input wins,
+      // and nothing here moves the view again.
+      settle() {
+        let last = -1;
+        let still = 0;
+        const t0 = Date.now();
+        const step = () => {
+          this.raf = null;
+          const s = this.scroller;
+          if (this.reader || !s || !s.isConnected) return;
+          still = s.scrollHeight === last ? still + 1 : 0;
+          last = s.scrollHeight;
+          this.place();
+          if (still >= 3 || Date.now() - t0 > 2000) return;
+          this.raf = requestAnimationFrame(step);
+        };
+        this.raf = requestAnimationFrame(step);
+      },
+      updated() {
+        // A window may show another chat without replacing the DOM
+        // id. Adopt that buffer's saved position once; within one
+        // chat the local flag wins over a lagging server patch.
+        const buf = this.el.dataset.buf;
+        const seq = parseInt(this.el.dataset.followSeq || "0", 10);
+        if (buf !== this.buf) {
+          this.buf = buf;
+          this.followSeq = seq;
+          this.stick = this.el.dataset.stick !== "false";
+          this.anchor = this.el.dataset.scrollAnchor ? parseInt(this.el.dataset.scrollAnchor, 10) : null;
+          this.offset = parseInt(this.el.dataset.scrollOffset || "0", 10);
+          this.place();
+          return;
+        }
+        // chat-to-bottom said, in so many words, follow again. A
+        // token is unambiguous where the stick flag is not: it
+        // changes only when someone asked, never because a report
+        // is in flight, so adopting it cannot fight the reader.
+        if (seq !== this.followSeq) {
+          this.followSeq = seq;
+          this.stick = true;
+          this.anchor = null;
+          this.offset = 0;
+          this.place();
+          return;
+        }
+        if (this.stick) this.place();
+      },
+      destroyed() {
+        this.el.removeEventListener("click", this.linkH);
+        this.scroller.removeEventListener("scroll", this.scrollH);
+        ["wheel", "touchstart", "pointerdown"].forEach((t) =>
+          this.scroller.removeEventListener(t, this.inputH)
+        );
+        clearTimeout(this.report);
+        if (this.raf) cancelAnimationFrame(this.raf);
+        if (this.ro) { this.ro.disconnect(); this.ro = null; }
+      }
+    },
     // point moves in the buffer, so the mark moves in the block
     // view — and the reader has to be able to see where it went.
     // The renderer stamps data-current on marked, anchored blocks;
@@ -2522,7 +2710,7 @@
           // still using the windowed path
           if (
             e.target.closest &&
-            e.target.closest(".ag-scroll, .blocks-scroll, .buf.client-scroll, .terminal-view")
+            e.target.closest(".ag-scroll, [data-block-list], .blocks-scroll, .buf.client-scroll, .terminal-view")
           )
             return;
           e.preventDefault();

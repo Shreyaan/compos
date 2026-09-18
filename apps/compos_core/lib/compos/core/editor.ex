@@ -2920,6 +2920,10 @@ defmodule Compos.Core.Editor do
       # Version and text come from the same immutable snapshot.
       agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
+      # a block tree's caret input and its reader place, both nil for a
+      # tree that declares neither
+      blocks_input: blocks_input(locals),
+      blocks_follow: blocks_follow(locals),
       blocks_root: Map.get(locals, "render-root"),
       text_root: Map.get(locals, "render-text-root"),
       semantic_records: Map.get(locals, "render-records"),
@@ -3026,6 +3030,40 @@ defmodule Compos.Core.Editor do
     do: Map.get(locals, "render-blocks") || []
 
   defp blocks_leaf(_), do: nil
+
+  # The byte where a block tree's caret input starts. 'render-input names
+  # the local that holds it, so a marker local that the buffer moves on
+  # each edit stays the one authority. The view clamps the value.
+  defp blocks_input(%{"render-mode" => "blocks", "render-input" => name} = locals)
+       when is_binary(name) do
+    case Map.get(locals, name) do
+      n when is_integer(n) -> n
+      _ -> nil
+    end
+  end
+
+  defp blocks_input(_), do: nil
+
+  # The reader's place in a followed block list: the client reports it
+  # ('follow-place), a command asks to follow again ('follow-seq). The
+  # place is stored inverted, so a cleared local means "follow".
+  defp blocks_follow(%{"render-mode" => "blocks"} = locals) do
+    {unstick, top, anchor, offset} =
+      case Map.get(locals, "follow-place") do
+        [u, t, a, o] -> {u == true, t, a, o}
+        _ -> {false, 0, nil, 0}
+      end
+
+    %{
+      stick: not unstick,
+      top: if(is_integer(top), do: top, else: 0),
+      anchor: if(is_integer(anchor), do: anchor, else: nil),
+      offset: if(is_integer(offset), do: offset, else: 0),
+      seq: Map.get(locals, "follow-seq") || 0
+    }
+  end
+
+  defp blocks_follow(_), do: nil
 
   # A mode that takes a buffer over inherits the locals of the mode before
   # it, and `render-mode` says which view draws the window. "blocks" with

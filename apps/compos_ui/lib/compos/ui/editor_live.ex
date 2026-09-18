@@ -271,6 +271,19 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket}
   end
 
+  # the reader's place in a followed block list: a runtime mirror, so a
+  # page refresh keeps the place. Stored inverted: a cleared local follows.
+  def handle_event("follow_place", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
+      when is_boolean(stick) and is_integer(top) do
+    if Compos.Core.Buffer.exists?(buf) do
+      anchor = if is_integer(params["anchor"]), do: params["anchor"], else: false
+      offset = if is_integer(params["offset"]), do: params["offset"], else: 0
+      Compos.Core.Buffer.set_local(buf, "follow-place", [not stick, top, anchor, offset])
+    end
+
+    {:noreply, socket}
+  end
+
   # clicking a block that carries a click id. The id is the mode's own
   # word; the view hands it back and knows nothing else. diff-mode
   # registered the handler with block-on-click!.
@@ -961,20 +974,38 @@ defmodule Compos.Ui.EditorLive do
   # a generic block tree the mode composed. This clause converts plists to
   # maps and finds the buffer line point is on; it does not know what any
   # block means.
+  #
+  # The tree can hold byte ranges of the buffer (`range`), so the key is the
+  # tree and the text up to the last range end: a key typed after that end
+  # reuses the whole converted tree. The children of an isolated list keep
+  # their views by their own plist and bytes, so a changed tree gives each
+  # unchanged child the same term, and the list component skips it.
   defp decorate(%{type: :leaf, render_mode: "blocks"} = leaf, cache, _faces, _active) do
     raw = Map.get(leaf, :blocks) || []
-    key = {leaf.buffer, leaf.version, :erlang.phash2(raw)}
+    text = leaf.text
+    entry = cache[{:blocks, leaf.id}]
 
-    blocks =
-      case cache[{:blocks, leaf.id}] do
-        {^key, blocks} -> blocks
-        _ -> Enum.map(raw, &block_view/1)
+    entry =
+      case entry do
+        %{raw: ^raw, span: span, bytes: bytes} = e
+        when span <= byte_size(text) and binary_part(text, 0, span) == bytes ->
+          e
+
+        _ ->
+          memo = if is_map(entry), do: Map.get(entry, :memo, %{}), else: %{}
+          {blocks, {span, memo}} = blocks_build(raw, text, memo)
+          %{raw: raw, span: span, bytes: binary_part(text, 0, min(span, byte_size(text))), blocks: blocks, memo: memo}
       end
 
-    line = Compos.Core.Text.line_index(leaf.text, leaf.point) + 1
+    line = Compos.Core.Text.line_index(text, leaf.point) + 1
 
-    {Map.merge(leaf, %{lines: [], blk: blocks, blk_line: line, blk_root: block_root(Map.get(leaf, :blocks_root))}),
-     Map.put(cache, {:blocks, leaf.id}, {key, blocks})}
+    {Map.merge(leaf, %{
+       lines: [],
+       blk: entry.blocks,
+       blk_line: line,
+       blk_root: block_root(Map.get(leaf, :blocks_root)),
+       blk_input: caret_input(leaf, Map.get(leaf, :blocks_input))
+     }), Map.put(cache, {:blocks, leaf.id}, entry)}
   end
 
   # A text window: the rows of its viewport, from the core display model.
@@ -1649,7 +1680,7 @@ defmodule Compos.Ui.EditorLive do
                   sandbox="allow-same-origin" tabindex="-1" title={@node.header_line || @node.buffer}></iframe>
               <% @node.render_mode == "blocks" and Map.has_key?(@node, :blk) -> %>
                 <.dynamic_tag tag_name={@node.blk_root.tag} {@node.blk_root.attrs}
-                  class="blocks-view" style={@node.style}>
+                  class={"blocks-view #{@node.blk_root.class}"} style={@node.style}>
                   <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
                 </.dynamic_tag>
               <% @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) -> %>
@@ -1718,9 +1749,9 @@ defmodule Compos.Ui.EditorLive do
         ></c-group>
       <% else %>
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
-        <.dynamic_tag tag_name={@node.blk_root.tag} class="blocks-view" style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" {@node.blk_root.attrs}>
+        <.dynamic_tag tag_name={@node.blk_root.tag} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" {@node.blk_root.attrs}>
           <c-buffer class="blocks-scroll">
-            <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
+            <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} ctx={blk_ctx(@node, @active?, @completion)} />
           </c-buffer>
         </.dynamic_tag>
       <% else %>
@@ -2277,15 +2308,110 @@ defmodule Compos.Ui.EditorLive do
   # with a mark class and a line range gets that class while point's line is
   # inside the range — and, when it also has an anchor, a data-current
   # attribute the scroll hook follows.
-  defp blk(%{b: %{tag: "pre"}} = assigns) do
+  def blk(assigns), do: assigns |> assign_new(:ctx, fn -> %{} end) |> blk_node()
+
+  defp blk_node(%{b: %{empty: true}} = assigns), do: ~M||
+
+  # An isolated list: its children draw inside the list component, so a
+  # render that does not change them diffs to a skip placeholder. A peek
+  # or a header has no component, and draws the list in place.
+  defp blk_node(%{b: %{isolate: true}, ctx: %{live: true}} = assigns) do
+    ~M"""
+    <.live_component module={Compos.Ui.BlockList} id={"blist-#{@win}-#{@b.anchor || "list"}"}
+      b={Map.delete(@b, :children)} children={@b.children} win={@win} buf={@ctx[:buf]}
+      follow={@b.follow && @ctx[:follow]} />
+    """
+  end
+
+  defp blk_node(%{b: %{isolate: true}} = assigns) do
+    ~M"""
+    <.dynamic_tag tag_name={@b.tag} class={@b.class} {@b.attrs}><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></.dynamic_tag>
+    """
+  end
+
+  # The caret input: the text past the window's input start, with the
+  # caret at point. The hint shows while the input is empty. The
+  # completion card opens upward, because the input sits at the foot.
+  defp blk_node(%{b: %{input: true}} = assigns) do
+    ~M"""
+    <c-input class={@b.class}><%= if @ctx[:input] do %>{@ctx.input.pre}<c-cursor
+        :if={@ctx.input.cur != "" && Map.get(@ctx, :cursor, true)}
+        class="cursor"
+      >{@ctx.input.cur}</c-cursor>{@ctx.input.post}<% end %></c-input><%= if @ctx[:completion] do %><c-text
+      class="cap-pop cap-pop-up"
+      contenteditable="false"
+    ><c-text class="cap-title">completion-at-point · {@ctx.completion.total}</c-text><c-text
+      :for={c <- @ctx.completion.candidates}
+      class={"cap-row #{if c.selected, do: "selected"}"}
+    ><c-text class="cap-label">{c.label}</c-text><c-text class="cap-kind">{c.hint}</c-text></c-text><c-text
+      :for={c <- @ctx.completion.candidates}
+      :if={c.selected}
+      class="cap-doc"
+      popover="manual"
+      role="note"
+      aria-label="Completion documentation"
+    ><c-text class="cap-doc-name">{c.label}</c-text><c-text class="cap-doc-body">{completion_doc(c)}</c-text></c-text></c-text><% end %><c-key-hints
+      :if={@b.hint && (@ctx[:input] == nil or (@ctx.input.pre == "" and @ctx.input.post == ""))}
+      class="input-hint"
+    >{@b.hint}</c-key-hints>
+    """
+  end
+
+  # A disclosure. `open` is the mode's state; a summary with a click is
+  # controlled, so the browser must not toggle it on its own.
+  defp blk_node(%{b: %{tag: "details"}} = assigns) do
+    ~M"""
+    <details class={blk_class(@b, @line)} open={@b.open} {@b.attrs}><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></details>
+    """
+  end
+
+  defp blk_node(%{b: %{tag: "summary"}} = assigns) do
+    ~M"""
+    <summary
+      class={if @b.class != "", do: @b.class}
+      phx-click={@b.click && "block_click"}
+      phx-value-win={@b.click && @win}
+      phx-value-id={@b.click}
+      onclick={@b.click && "event.preventDefault()"}
+      {@b.attrs}
+    ><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></summary>
+    """
+  end
+
+  defp blk_node(%{b: %{tag: "button"}} = assigns) do
+    ~M"""
+    <button
+      type="button"
+      class={@b.class}
+      phx-click={@b.click && "block_click"}
+      phx-value-win={@b.click && @win}
+      phx-value-id={@b.click}
+      {@b.attrs}
+    ><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></button>
+    """
+  end
+
+  # a range drawn as Markdown: the prose HTML goes in as it is
+  defp blk_node(%{b: %{html: html}} = assigns) when is_binary(html) do
+    ~M"""
+    <.dynamic_tag tag_name={@b.tag} class={blk_class(@b, @line)} {@b.attrs}>{Phoenix.HTML.raw(@b.html)}</.dynamic_tag>
+    """
+  end
+
+  # The one renderer for block trees. Structure only: tags, classes, segs,
+  # click ids and the point mark all come from the mode. The mark: a block
+  # with a mark class and a line range gets that class while point's line is
+  # inside the range — and, when it also has an anchor, a data-current
+  # attribute the scroll hook follows.
+  defp blk_node(%{b: %{tag: "pre"}} = assigns) do
     ~M|<pre class={blk_class(@b, @line)}>{@b.text}</pre>|
   end
 
-  defp blk(%{b: %{tag: "span"}} = assigns) do
+  defp blk_node(%{b: %{tag: "span"}} = assigns) do
     ~M|<c-text class={blk_class(@b, @line)}><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %></c-text>|
   end
 
-  defp blk(%{b: %{tag: "div"}} = assigns) do
+  defp blk_node(%{b: %{tag: "div"}} = assigns) do
     ~M"""
     <c-group
       class={blk_class(@b, @line)}
@@ -2295,18 +2421,18 @@ defmodule Compos.Ui.EditorLive do
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
       {@b.attrs}
-    ><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></c-group>
+    ><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></c-group>
     """
   end
 
   # a product photo or an embedded picture, drawn from its src attr
-  defp blk(%{b: %{tag: "img"}} = assigns) do
+  defp blk_node(%{b: %{tag: "img"}} = assigns) do
     ~M|<img class={blk_class(@b, @line)} {@b.attrs} loading="lazy" />|
   end
 
   # any other tag: an SVG chart, a table, a label. The attributes are the
   # mode's, filtered by the allowlist below; a click still routes by id.
-  defp blk(assigns) do
+  defp blk_node(assigns) do
     ~M"""
     <.dynamic_tag
       tag_name={@b.tag}
@@ -2319,7 +2445,7 @@ defmodule Compos.Ui.EditorLive do
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
       {@b.attrs}
-    ><c-text :if={{"marked", "true"} in @b.attrs} class="list-mark" aria-label="Marked">✱</c-text><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></.dynamic_tag>
+    ><c-text :if={{"marked", "true"} in @b.attrs} class="list-mark" aria-label="Marked">✱</c-text><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></.dynamic_tag>
     """
   end
 
@@ -2347,13 +2473,14 @@ defmodule Compos.Ui.EditorLive do
   # Presentation only: style, and the SVG geometry and paint attributes.
   # Nothing that loads a resource, runs a script, or submits a form. A tag
   # outside the list draws as a div, an attribute outside it is dropped.
-  @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre kbd p h1 h2 h3 h4 table thead tbody tr th td ul ol li
+  @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre kbd p h1 h2 h3 h4 table thead tbody tr th td ul ol li details summary button
                  svg g path rect circle ellipse line polyline polygon text tspan title img)
   @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target glyph style d viewBox preserveAspectRatio fill stroke stroke-width
                   stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
                   stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
                   width height points transform vector-effect text-anchor font-size
-                  dominant-baseline shape-rendering title colspan rowspan src alt)
+                  dominant-baseline shape-rendering title colspan rowspan src alt
+                  author call verbosity aria-label aria-hidden)
 
   defp semantic_line(%{fields: []} = assigns) do
     ~M"""
@@ -2444,10 +2571,20 @@ defmodule Compos.Ui.EditorLive do
 
   defp block_root(pl) do
     block = block_view(pl || [])
-    %{tag: if(block.tag == "div", do: "c-buffer", else: block.tag), attrs: block.attrs}
+    %{tag: if(block.tag == "div", do: "c-buffer", else: block.tag), attrs: block.attrs, class: block.class}
   end
 
   defp block_view(pl) do
+    %{block_node(pl) | children: Enum.map(pget(pl, "children") || [], &block_view/1)}
+  end
+
+  # One block without its children. The keys past `attrs` are the kinds
+  # a mode may use: `range` draws the buffer's own bytes in a `format`,
+  # `open` is a disclosure's state, `isolate` draws the children in their
+  # own component, `follow` keeps that list at its tail, `input` is the
+  # caret input and `hint` the words it shows while empty, `file` is a
+  # local picture.
+  defp block_node(pl) do
     tag = pget(pl, "tag") || "div"
 
     %{
@@ -2463,7 +2600,141 @@ defmodule Compos.Ui.EditorLive do
       segs: for([c, t | _] <- pget(pl, "segs") || [], do: {c, t}),
       semantic_segs: for([c, t | tags] <- pget(pl, "segs") || [], do: {c, t, if(List.first(tags) in @block_tags, do: List.first(tags), else: "c-text")}),
       attrs: block_attrs(pget(pl, "attrs") || []),
-      children: Enum.map(pget(pl, "children") || [], &block_view/1)
+      children: [],
+      range: block_range(pget(pl, "range")),
+      format: pget(pl, "format"),
+      html: nil,
+      empty: false,
+      open: pget(pl, "open") == true,
+      isolate: pget(pl, "isolate") == true,
+      follow: pget(pl, "follow") == true,
+      input: pget(pl, "input") == true,
+      hint: falsy(pget(pl, "hint")),
+      file: falsy(pget(pl, "file"))
+    }
+  end
+
+  defp block_range([a, b]) when is_integer(a) and is_integer(b) and a <= b, do: {a, b}
+  defp block_range(_), do: nil
+
+  # A tree as the window draws it: every range filled from TEXT, every
+  # isolated list's children kept in MEMO by position, plist and bytes.
+  # The accumulator is {last range end, the memo for the next build}.
+  defp blocks_build(raw, text, memo) do
+    Enum.map_reduce(raw, {0, %{}}, &block_build(&1, text, memo, &2))
+  end
+
+  defp block_build(pl, text, memo, acc) do
+    view = block_node(pl)
+    {span, fresh} = acc
+    span = if view.range, do: max(span, elem(view.range, 1)), else: span
+    raw_children = pget(pl, "children") || []
+
+    {children, acc} =
+      if view.isolate,
+        do: isolated_children(raw_children, text, memo, {span, fresh}),
+        else: Enum.map_reduce(raw_children, {span, fresh}, &block_build(&1, text, memo, &2))
+
+    {block_fill(%{view | children: Enum.reject(children, & &1.empty)}, text), acc}
+  end
+
+  defp isolated_children(raw_children, text, memo, acc) do
+    raw_children
+    |> Enum.with_index()
+    |> Enum.map_reduce(acc, fn {c, i}, {span, fresh} ->
+      ranges = block_ranges(c, [])
+      key = {i, c, Enum.map(ranges, fn {a, b} -> Text.slice(text, a, b) end)}
+
+      view =
+        case Map.get(memo, key) do
+          nil ->
+            {v, _} = block_build(c, text, %{}, {0, %{}})
+            %{v | attrs: v.attrs ++ [{"data-index", Integer.to_string(i)}]}
+
+          v ->
+            v
+        end
+
+      span = Enum.reduce(ranges, span, fn {_, b}, m -> max(m, b) end)
+      {view, {span, Map.put(fresh, key, view)}}
+    end)
+  end
+
+  defp block_ranges(pl, acc) do
+    acc =
+      case block_range(pget(pl, "range")) do
+        nil -> acc
+        r -> [r | acc]
+      end
+
+    Enum.reduce(pget(pl, "children") || [], acc, &block_ranges/2)
+  end
+
+  # Fill a block's range and file. A range that draws nothing and has no
+  # children is empty, and the renderer skips it.
+  defp block_fill(%{range: {a, b}} = view, text) do
+    view =
+      case range_content(Text.slice(text, a, b), view.format) do
+        {:html, html} -> %{view | html: html}
+        {:text, t} -> %{view | text: t}
+      end
+
+    %{view | empty: (view.html || view.text || "") == "" and view.children == []}
+    |> block_file()
+  end
+
+  defp block_fill(view, _text), do: block_file(view)
+
+  defp block_file(%{file: path} = view) when is_binary(path),
+    do: %{view | attrs: view.attrs ++ [{"src", LocalImage.url(path)}]}
+
+  defp block_file(view), do: view
+
+  # The formats a range draws in. "text" trims the bytes; "markdown" is
+  # prose HTML; the two "mcp-result" formats unwrap a tool result envelope,
+  # whole or as its first line.
+  defp range_content(t, "markdown"), do: {:html, t |> prose_html() |> wrap_tables()}
+  defp range_content(t, "raw"), do: {:text, t}
+  defp range_content(t, "mcp-result"), do: {:text, t |> String.trim_trailing() |> tool_display_body()}
+
+  defp range_content(t, "mcp-result-line"),
+    do: {:text, t |> String.trim_trailing() |> tool_display_body() |> tool_preview()}
+
+  defp range_content(t, _), do: {:text, String.trim(t)}
+
+  # The caret input: the window's text from START to the end, split at
+  # point. A point before START draws the caret at the end.
+  defp caret_input(_leaf, nil), do: nil
+
+  defp caret_input(leaf, start) do
+    start = start |> min(byte_size(leaf.text)) |> max(0)
+    live = binary_part(leaf.text, start, byte_size(leaf.text) - start)
+
+    rel =
+      if leaf.point >= start do
+        (leaf.point - start) |> min(byte_size(live)) |> then(&Text.floor_utf8(live, &1))
+      else
+        byte_size(live)
+      end
+
+    rest = binary_part(live, rel, byte_size(live) - rel)
+
+    case String.next_grapheme(rest) do
+      nil -> %{pre: live, cur: " ", post: ""}
+      {g, more} -> %{pre: binary_part(live, 0, rel), cur: g, post: more}
+    end
+  end
+
+  # What the top of a block tree hands down: the list component's buffer
+  # and reader place, the caret input, and the completion at point.
+  defp blk_ctx(node, active?, completion) do
+    %{
+      live: true,
+      buf: node.buffer,
+      follow: Map.get(node, :blocks_follow),
+      input: Map.get(node, :blk_input),
+      cursor: Map.get(node, :cursor_visible, true),
+      completion: active? && completion
     }
   end
 
