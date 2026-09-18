@@ -990,6 +990,15 @@ one server table that the hub, the bundle picker, setup's program
 registry and the workspace defaults all read, and a bundle names its
 servers by name instead of carrying a copy of each.
 
+**Item 5.10 closed by measurement (2026-09-19).** Under the ruling above
+the code already has the shape it asks for: `*mcp-registry*` in mcp.scm
+is the one server table; mcp-hub reads it directly (mcp-hub-names,
+mcp-hub-spec); a preset is a named set of server names; a bundle names
+presets; the workspace defaults hold a bundle plist; setup.scm asks one
+predicate. No copy of a server record exists to collapse. The two
+"compos" special cases are the editor bridge, whose tools are not an
+MCP server on the wire, and they stay. Nothing to do.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:
