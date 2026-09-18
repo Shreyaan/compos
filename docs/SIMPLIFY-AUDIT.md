@@ -1145,6 +1145,17 @@ the same faces because a palette is data, one colour per face per
 theme; define-theme-from already covers a derived palette (tokyo-night).
 Nothing in this item is deleted without a ruling.
 
+**The Phase 2 gate, measured (2026-09-19, HEAD 74ee9cb2).** The six
+layout files in one lane: 48 red. Alone: detail 3, layout-policy 9,
+group-switch 11, window-config 1, autolayout 1, ibuffer-prompt 0; ten
+names are red only in the combined lane (order pollution, listed in
+KNOWN-FAILURES). Two names were missing from the ledger and are red at
+4e14e5f2 too, before today's window work. Condition 1 does not hold yet.
+Worktree attribution needs the worktree's OWN build: `cp -a _build/test
+WT/_build/` (the priv links inside are relative), never a symlink to the
+main tree's _build, or the run reads the main tree's init.scm against
+the worktree's packages.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
