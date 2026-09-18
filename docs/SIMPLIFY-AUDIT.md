@@ -1207,6 +1207,20 @@ stay: one process per lane, the escape, promote, flush, roots, heir and
 retry machinery stays, and SchemeTask stays. Do not propose one serial
 Scheme world again. Phase 3 ends with step 4.
 
+**The lane machinery, tuned (2026-09-19).** The owner: "the lanes are
+loadbearing and those 900 lines keep everything snappy ... if there is
+some improvement you can make to the machinery i am all ears". Four
+changes, none of which removes a lane:
+- A frame GC sweep is a row in the telemetry ring (kind gc), so M-x
+  telemetry and M-x perf show each pause.
+- The GC mark reads frame edges with match specs and never copies a
+  closure body out of ETS. Mark 38 ms to 21 ms median in a full editor
+  boot (test/bench/gc_sweep_bench.exs), with the same live set.
+- An eval that waits on a sweep polls every 1 ms, not 5.
+- Compos.Core.Roots owns the GC root table (80 raw ETS calls in 19
+  files before). eval-resolve! takes its entry in one step, and
+  debounce-cancel! deletes only the generation it read.
+
 What each step must not do: move a file another session holds (groups,
 layouts, ibuffer are Phase 2), change a binding, or grow Elixir policy.
 Step 5 needs the owner's go; steps 1-4 are mechanism and can start.
