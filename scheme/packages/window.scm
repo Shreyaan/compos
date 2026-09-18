@@ -1910,16 +1910,22 @@
 
 ;; the commit: the chosen layout is the frame's target from here on
 (define (window-layout-choose! saved name &optional requested)
-  ;; Commit from the original arrangement so winner records one real
-  ;; layout change, not an intermediate preview arrangement.
-  (window-tree-set! saved)
+  ;; One visible step: the choice applies from wherever the preview left
+  ;; the panes (applying a layout is idempotent), and winner gets the
+  ;; arrangement the prompt started from by hand, so one undo returns to
+  ;; it. Restoring first and applying again was the two-step flash.
+  (debounce-cancel! "window-layout-preview")
   (cond ((equal? name "free")
+         (window-tree-set! saved)
          (layout-target-set! #f)
          (message "Layout free: a display may split a window again"))
-        ((window-layout-preview! name requested)
-         (layout-target-set! (string->symbol name))
-         (message (string-append "Layout " name " is the target")))
-        (else #f)))
+        (else
+          (winner-push! saved)
+          (if (window-layout-preview-without-history! name requested)
+              (begin
+                (layout-target-set! (string->symbol name))
+                (message (string-append "Layout " name " is the target")))
+              #f))))
 
 ;; the rest an arrow takes before the prompt applies its candidate
 (define window-layout-preview-delay-ms 120)
@@ -1930,6 +1936,7 @@
           (saved-panes (layout-target-visible-buffers))
           (saved-order (layout-request-buffers)))
       (define (restore-preview!)
+        (debounce-cancel! "window-layout-preview")
         (window-tree-set! saved)
         (layout-target-note-slots! saved-panes))
       (minibuffer-read-preview "Window layout: "
@@ -1955,7 +1962,8 @@
             (debounce! "window-layout-preview" window-layout-preview-delay-ms
               (lambda (n) (window-layout-preview-without-history! n saved-panes))
               name)))
-        (lambda (name) (restore-preview!) (window-layout-choose! saved name saved-order))
+        ;; the choice applies from the preview, one step; cancel restores
+        (lambda (name) (window-layout-choose! saved name saved-order))
         (lambda () (restore-preview!))
         #f #f #f #f
         '(("a" "adaptive") ("2" "two-pane")
@@ -2114,11 +2122,16 @@
 
 (define (winner-save!)
   (unless *winner-inhibit*
-    (let ((ring (or (frame-local 'winner-ring) '()))
-          (now (window-tree)))
-      (unless (and (pair? ring) (equal? (car ring) now))
-        (set-frame-local! 'winner-ring (take (cons now ring) *winner-depth*)))
-      (set-frame-local! 'winner-pos #f))))
+    (winner-push! (window-tree))))
+
+;; TREE goes onto the ring as the arrangement about to be destroyed. The
+;; layout prompt pushes the arrangement it started from, so its previews
+;; never enter the ring and one undo returns to before the prompt.
+(define (winner-push! tree)
+  (let ((ring (or (frame-local 'winner-ring) '())))
+    (unless (and (pair? ring) (equal? (car ring) tree))
+      (set-frame-local! 'winner-ring (take (cons tree ring) *winner-depth*)))
+    (set-frame-local! 'winner-pos #f)))
 
 (define (winner--restore idx)
   (let ((ring (or (frame-local 'winner-ring) '())))
