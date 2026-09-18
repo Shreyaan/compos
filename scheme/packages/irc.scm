@@ -16,7 +16,6 @@
 ;;;
 ;;; Elixir parses and formats one line (Compos.Core.IRC); the endpoint
 ;;; package owns the socket. Everything else is here.
-(package! 'irc)
 (domain! 'network)
 (effects! '(write external execute))
 

@@ -13,7 +13,6 @@
 ;;;   squiggles: tree-sitter ERROR nodes, when the scheme grammar is
 ;;;   installed (M-x ts-install-grammar scheme)
 
-(package! 'scheme-ide)
 (category! 'code)
 (domain! 'code)
 (effects! '(read))

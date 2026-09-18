@@ -1,6 +1,5 @@
 ;;; training.scm --- the Emacs-style tutorial and its optional companion.
 
-(package! 'training)
 (domain! 'learning)
 (effects! '(read write external))
 

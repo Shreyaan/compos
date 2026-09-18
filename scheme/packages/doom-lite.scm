@@ -24,7 +24,6 @@
 ;;; game in progress and the mode setup fn draws it again after a
 ;;; restart. Only the render blocks and the frame timing are runtime.
 
-(package! 'doom-lite)
 (domain! 'games)
 (effects! '(read write display))
 

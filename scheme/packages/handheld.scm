@@ -11,7 +11,6 @@
 ;;; "M-x NAME" runs the named command. Anything else goes to the group's
 ;;; chat as a message.
 
-(package! 'handheld)
 (category! 'interaction)
 (domain! 'interaction)
 (effects! '(read))

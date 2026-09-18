@@ -4,7 +4,6 @@
 ;;; a normal list, so preview, narrowing, restore, and keyboard motion use the
 ;;; same contracts as ibuffer and the other result modes.
 
-(package! 'occur)
 (category! 'search)
 (effects! '(read))
 
@@ -128,7 +127,6 @@
             ("q" "quit-window"))))
 
 ;; define-list-mode! records the prose before define-mode registers its default
-;; catalog row. Restamp the catalog row after both registrations exist.
 (mode-doc! "occur-ts-mode" *occur-ts-doc*)
 
 (define (occur-ts-open source language query)

@@ -17,7 +17,6 @@
 ;;; M-x doom-install fetches the engine and the IWAD. M-x doom runs the
 ;;; install first when the directory is not complete yet.
 
-(package! 'doom)
 (domain! 'games)
 (effects! '(read write display external))
 

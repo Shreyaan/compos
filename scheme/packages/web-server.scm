@@ -3,7 +3,6 @@
 ;;; Elixir and Bandit own listeners, HTTP parsing, limits, and response writes.
 ;;; Scheme handlers own routes and all callback or webhook policy.
 
-(package! 'web-server)
 (category! 'system)
 (domain! 'web-servers)
 (effects! '(write external))

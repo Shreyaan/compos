@@ -19,7 +19,6 @@
 ;;;; Desktop restore runs after every package loads, so a restored chat
 ;;;; finds these definitions in place.
 
-(package! 'chat)
 (category! 'chat)
 (domain! 'chat)
 (effects! '(read))
@@ -922,7 +921,6 @@
 
 ;; Reset deliberately forgets 'chat-log-id, so recovery cannot depend on the
 ;; current buffer remembering which conversation came before it.  Present the
-;; local archive newest first instead; the timestamped basenames are unique and
 ;; concise enough for completion, while the callback resolves the full path.
 (define (chat-log-files-newest)
   (map cadr
@@ -1562,7 +1560,6 @@
 (effects! '(write external execute))
 
 ;;; --- where a chat works -------------------------------------------------------
-;;; ONE local says it: 'chat-directory. editor.scm stamps it at birth (the git
 ;;; root of the buffer the chat was started from), buffer-directory answers from
 ;;; it, and the modeline's context slot, relative paths and the project root all
 ;;; move with it. The agent process is the other half: an ACP session is told its

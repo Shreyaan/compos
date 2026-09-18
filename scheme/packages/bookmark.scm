@@ -5,7 +5,6 @@
 ;;; The store is Scheme data under <compos-home>. The list supports marks, filters,
 ;;; delete flags, annotations, rename, relocation, sorting, and import/export.
 
-(package! 'bookmark)
 (category! 'navigation)
 (domain! 'navigation)
 (effects! '(read))

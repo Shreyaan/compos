@@ -3,7 +3,6 @@
 ;;; Poppler turns one page into a PNG and extracts its text. Scheme owns the
 ;;; reader/editor state, commands, keys, HTML projection, and desktop rebuild.
 
-(package! 'pdf)
 (domain! 'documents)
 (effects! '(read write execute))
 

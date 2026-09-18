@@ -17,7 +17,6 @@
 ;;;   C-c C-c run the code block at point · C-c C-x tangle marked blocks
 ;;;   C-x n n narrow to the heading · C-x n w widen
 
-(package! 'morg)
 (category! 'writing)
 (domain! 'writing)
 (effects! '(read))

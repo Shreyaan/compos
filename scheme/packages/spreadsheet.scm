@@ -4,7 +4,6 @@
 ;;; Univer 0.25.1 supplies the isolated browser workbook.
 ;;; Univer uses the Apache-2.0 license.
 
-(package! 'spreadsheet)
 (namespace! 'spreadsheet)
 (domain! 'data)
 (effects! '(read write))

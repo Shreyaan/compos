@@ -7,7 +7,6 @@
 ;;; the rows share a trace id. This package owns the policy: row shape,
 ;;; slow threshold, filtering, and commands.
 
-(package! 'telemetry)
 (domain! 'diagnostics)
 (effects! '(read))
 

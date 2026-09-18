@@ -4,7 +4,6 @@
 ;;; package owns shared prose, the canonical join, and the user-facing view.
 ;;; It loads after skills.scm, so every bundled fragment provider is ready.
 
-(package! 'prompts)
 (category! 'chat)
 (domain! 'chat)
 (effects! '(read))

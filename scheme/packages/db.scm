@@ -8,7 +8,6 @@
 ;;; A query never renders by itself. `db-query` answers with data, and
 ;;; `db-render-table` turns that data into text only when somebody asks.
 
-(package! 'db)
 (category! 'system)
 (domain! 'data)
 (effects! '(write external))

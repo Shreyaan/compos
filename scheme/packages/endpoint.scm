@@ -9,7 +9,6 @@
 ;;; the transport, the framing, and the request queue. This package owns
 ;;; the registry, the event fan-out, and what a caller sees.
 
-(package! 'endpoint)
 (category! 'system)
 (domain! 'endpoints)
 (effects! '(write external execute))

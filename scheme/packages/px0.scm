@@ -11,7 +11,6 @@
 ;;; answers there reports this root. A package reload or a daemon restart
 ;;; therefore loses nothing and starts nothing twice.
 
-(package! 'px0)
 (domain! 'code)
 (effects! '(read write display external execute))
 

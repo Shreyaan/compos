@@ -14,7 +14,6 @@
 ;;; five times slower and samples nothing; a shown buffer samples every
 ;;; perf-tick-ms. A killed buffer ends the chain.
 
-(package! 'perf)
 (domain! 'diagnostics)
 (effects! '(read))
 

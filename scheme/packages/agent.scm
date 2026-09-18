@@ -464,4 +464,3 @@
 
 ;; Session and fleet APIs depend on the event coordinator above.
 (load "agent-session.scm")
-(package! 'agent)

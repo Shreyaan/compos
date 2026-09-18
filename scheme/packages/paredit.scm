@@ -8,7 +8,6 @@
 ;;; M-x paredit-mode toggles the mode in one buffer. scheme-mode buffers
 ;;; enable it through their mode hook (see paredit-in-scheme-mode).
 
-(package! 'paredit)
 (category! 'edit)
 (domain! 'edit)
 (effects! '(write))

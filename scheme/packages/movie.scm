@@ -1,6 +1,5 @@
 ;;; movie.scm --- play a buffer's Provenance inside compos.
 
-(package! 'movie)
 (domain! 'buffers)
 (effects! '(read write display execute))
 

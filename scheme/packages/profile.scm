@@ -18,7 +18,6 @@
 ;;; the counters in Compos.Core.Profiler; this package owns when to arm,
 ;;; what the report says, and where it shows.
 
-(package! 'profile)
 (domain! 'diagnostics)
 (effects! '(read))
 

@@ -5,7 +5,6 @@
 ;;; already loaded, selects the local Gemini Nano connector, and teaches the
 ;;; user how to continue with M-x.
 
-(package! 'setup)
 (domain! 'system)
 (effects! '(read write external))
 
