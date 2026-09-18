@@ -802,6 +802,14 @@ list-mode-show!) joined tabulated-list.scm, the cost commands joined
 chat-mode.scm, and the public! and catalog-meta! lines of every moved
 definition moved into its file under the catalog scope they had; three
 global bindings that rode along came back. editor.scm is 9,482 lines.
+Fourth move, four files at once: collect.scm (embark-collect), comint.scm
+(term-mode, comint-shell-mode, tail-mode), isearch.scm (isearch, lazy
+highlight, hl-line, replace) and capf.scm (completion at point). The cut
+script keeps each block's ambient catalog scope: it writes the scope in
+force at the block's start into the new file and restores the scope the
+block left behind at the cut point. editor.scm is 8,707 lines. The mark
+ring and font-lock keywords stay: the first is an Emacs mechanism, the
+second is called from set-mode!.
 
 **Next three steps, in order.**
 

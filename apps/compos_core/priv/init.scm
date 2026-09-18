@@ -29,6 +29,10 @@
 (load "chat-mode.scm")
 ; the modeline and the buffer-name grammar: every chrome names buffers
 (load "modeline.scm")
+(load "isearch.scm")
+(load "capf.scm")
+(load "collect.scm")
+(load "comint.scm")
 (load "advice.scm")
 (load "custom.scm")
 (load "tools.scm")
