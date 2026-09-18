@@ -324,3 +324,68 @@
         (llm-session-close! (buffer-local c 'agent-slug))
         (buffer-kill! c)
         (buffer-kill! doc)))))
+
+;;; --- C-u M-o: where the reply goes ------------------------------------------
+
+(deftest 'c-u-m-o-opens-the-send-menu
+  "the prefix asks where the reply goes; a bare M-o never asks"
+  (lambda ()
+    (let ((doc (test-buffer! "zz-doc-menu.md" "Say hi.\n")))
+      (with-current-buffer doc
+        (lambda ()
+          (set-prefix-arg! '(4))
+          (run-command "llm-send-buffer")
+          (set-prefix-arg! #f)))
+      (let ((state (transient--active)))
+        (check-equal! (and state (plist-get state 'prefix)) "llm-send-to"
+                      "C-u M-o opens the send menu")
+        (check-equal! (and state (plist-get state 'scope)) doc
+                      "over the document that asked")
+        (check-false! (buffer-local doc 'llm-companion)
+                      "and nothing was sent yet"))
+      (run-command "transient-quit-all")
+      (check-false! (transient--active) "the menu closes")
+      (buffer-kill! doc))))
+
+(deftest 'the-chat-target-shows-the-chat-and-leaves-the-document-alone
+  "the reply arrives in the document's chat, shown in the other window"
+  (lambda ()
+    (let ((doc (test-buffer! "zz-doc-chat-target.md" "Say hi.\n")))
+      (buffer-set-local! doc 'llm-connector "api")
+      (buffer-set-local! doc 'llm-companion-opts
+        '(backend "stub" script (((type chunk text "hi there.")))))
+      (let ((c (with-frame-windows (lambda () (llm-send-in-chat! doc)))))
+        (check-equal! c "*chat:zz-doc-chat-target.md*" "the send made the document's chat")
+        (check-true! (and (with-frame-windows (lambda () (window-showing c))) #t)
+                     "the chat is shown")
+        (wait-until (lambda () (string-contains? (buffer-text c) "hi there.")) 5000)
+        (check-true! (string-contains? (buffer-text c) "hi there.")
+                     "the reply landed in the chat")
+        (check-equal! (buffer-text doc) "Say hi.\n" "and the document is untouched")
+        (llm-session-close! (buffer-local c 'agent-slug))
+        (buffer-kill! c)
+        (buffer-kill! doc)))))
+
+(deftest 'the-new-document-target-carries-the-prompt-and-the-reply
+  "a document of its own holds the prompt and the reply, with a chat of its own"
+  (lambda ()
+    (let ((doc (test-buffer! "zz-doc-new-target.md" "Say hi.\n")))
+      (buffer-set-local! doc 'llm-connector "api")
+      (buffer-set-local! doc 'llm-companion-opts
+        '(backend "stub" script (((type chunk text "hi there.")))))
+      (let ((new (with-frame-windows (lambda () (llm-send-in-new-document! doc)))))
+        (check-equal! new "*llm:zz-doc-new-target.md*" "named after the source document")
+        (check-true! (string-contains? (buffer-text new) "Say hi.") "it carries the prompt")
+        (check-true! (and (with-frame-windows (lambda () (window-showing new))) #t)
+                     "and is shown")
+        (wait-until (lambda () (string-contains? (buffer-text new) "hi there.")) 5000)
+        (check-true! (string-contains? (buffer-text new) "hi there.")
+                     "the reply landed in the new document")
+        (check-equal! (buffer-text doc) "Say hi.\n" "the source document is untouched")
+        (check-false! (buffer-local doc 'llm-companion) "and has no chat of its own from this")
+        (let ((c (buffer-local new 'llm-companion)))
+          (check-equal! c "*chat:*llm:zz-doc-new-target.md**" "the new document has its own chat")
+          (llm-session-close! (buffer-local c 'agent-slug))
+          (buffer-kill! c))
+        (buffer-kill! new)
+        (buffer-kill! doc)))))

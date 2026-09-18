@@ -1064,8 +1064,29 @@ wire from its own text and the chat records the turn; the chat's event
 handler forwards every event but the permission to the inline render,
 and an ask in a hidden chat is a y-or-n question in the minibuffer.
 The `inline-N` sessions, the inline event handler's own session open
-and the permission stub are gone. Next: `C-u M-o` targets, then the
-inline dispatcher and context function fold into the chat's.
+and the permission stub are gone.
+
+**Step 3 is in (2026-09-19): `C-u M-o` picks where the reply goes.** The
+send menu (`llm-send-to`, a transient over the document) offers four
+targets: at point (the bare M-o), in the document's chat shown in the
+other window (`llm-send-chat`: the same send with no inline render), in
+a new document shown in the other window (`llm-send-new-document`: the
+prompt is copied into `*llm:DOC*`, which is an llm-mode document with a
+hidden chat of its own), and over the region as a rewrite (`llm-rewrite`).
+Every target talks through a hidden chat; only the landing differs.
+Tests: llm-insert-test.scm, three deftests, through the stub backend.
+Next: the inline dispatcher and context function fold into the chat's,
+then the twin transcript primitives (5.12).
+
+**Winner and the layout engine (2026-09-19).** winner-undo restored the
+tree and the configuration hook tiled it back to the target: the target
+compares the visible pane count to the count it noted at the last tile,
+and a columns tile fills a third pane from the buffer list. A restore
+now runs `winner--settle!`: it notes the target's slots from the restored
+windows and runs `winner-restore-hook`, where layouts.scm makes the
+restored panes autolayout's current panes. The target and autolayout-mode
+stay set. Tests: winner-test.scm. The layout prompt confirms in one step
+and the preview is debounced (120 ms).
 
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It

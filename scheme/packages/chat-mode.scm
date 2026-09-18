@@ -882,14 +882,19 @@
             (buffer-set-local! buf 'llm-active-prompt #f)
             (llm-mode--sync-addressable-responses! buf)
             (message "LLM response cancelled"))))))
-(define-command "llm-send-buffer" "Send this document to the LLM and stream its reply below the block at point"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (at (point))
-           (context (llm-context-text buf (buffer-text buf)))
+;;; --- where the reply goes -----------------------------------------------------
+;;; M-o answers at point. C-u M-o asks where (gptel: the send menu directs
+;;; the output): at point, in the document's chat shown in the other
+;;; window, in a new document, or over the region as a rewrite. Every
+;;; target talks through the document's hidden chat; only the landing
+;;; differs.
+
+;; the reply streams into BUF below the block AT sits in
+(define (llm-send-at-point! buf at)
+    (let* ((context (llm-context-text buf (buffer-text buf)))
            ;; Where the answer belongs: after the block point sits in.
            (insert-at (llm-mode--insert-at buf at))
-           (model (buffer-llm-model (current-buffer))))
+           (model (buffer-llm-model buf)))
       (unless (minor-mode-on? buf "llm-mode")
         (enable-minor-mode! buf "llm-mode"))
       ;; A rewritten earlier turn cannot be reconciled with a native thread.
@@ -935,13 +940,87 @@
                     (when (and (buffer-exists? buf)
                                (not (equal? chunk "")))
                       (when (llm-mode--append-response! buf response-id chunk)
-                        (set! streamed #t)))))))))))))
+                        (set! streamed #t))))))))))))
+
+;; the chat target: the same send with no inline render, and the chat
+;; comes into the other window to show the reply. The document keeps no
+;; block for this turn, so its next M-o sends the whole document again.
+(define (llm-send-in-chat! buf)
+  (let* ((context (llm-context-text buf (buffer-text buf)))
+         (companion (llm-mode--companion! buf (buffer-llm-model buf)))
+         (id (buffer-local companion 'agent-slug))
+         (wire (llm-mode--wire-text buf context)))
+    (unless (minor-mode-on? buf "llm-mode")
+      (enable-minor-mode! buf "llm-mode"))
+    (cond ((and (llm-mode--runtime-live? buf)
+                (not (equal? (agent-status id) 'idle)))
+           (message "LLM is still working") #f)
+          ((and (llm-mode--stateful? buf) (equal? wire ""))
+           (message "Nothing new to send") #f)
+          (else
+            (llm-session-send! id wire context)
+            (display-buffer-other-window! companion)
+            (message (string-append "LLM answers in " companion))
+            companion))))
+
+(define (llm-send--new-document-name buf)
+  (let loop ((n 1))
+    (let ((name (string-append "*llm:" buf
+                               (if (= n 1) "" (string-append "<" (number->string n) ">"))
+                               "*")))
+      (if (buffer-exists? name) (loop (+ n 1)) name))))
+
+;; the new-document target: a document of its own carries the prompt and
+;; the reply, with the source document's model and connector. It is an
+;; llm-mode document like any other, so it gets a hidden chat of its own
+;; and its next M-o continues there.
+(define (llm-send-in-new-document! buf)
+  (let ((name (llm-send--new-document-name buf))
+        (text (llm-context-text buf (buffer-text buf))))
+    (buffer-create name)
+    (for-each (lambda (key)
+                (let ((v (buffer-local buf key)))
+                  (when v (buffer-set-local! name key v))))
+              '(llm-connector llm-model llm-companion-opts chat-presets
+                chat-permission-mode default-directory))
+    (buffer-insert! name 0 text)
+    (with-current-buffer name (lambda () (set-mode! "morg-mode")))
+    (enable-minor-mode! name "llm-mode")
+    (display-buffer-other-window! name)
+    (llm-send-at-point! name (buffer-size name))
+    name))
+
+(define (llm-send--groups buf)
+  (list
+    (list "Where the reply goes"
+      (transient-suffix "p" "At point, in this document" "llm-send-here")
+      (transient-suffix "c" "In the document's chat, in the other window" "llm-send-chat")
+      (transient-suffix "n" "In a new document, in the other window" "llm-send-new-document")
+      (transient-suffix "r" "Over the region, as a rewrite" "llm-rewrite"))))
+
+(transient-define-prefix "llm-send-to" "Choose where the LLM reply goes" llm-send--groups)
+
+(define-command "llm-send-here" "Send this document and stream the reply below the block at point"
+  (lambda ()
+    (let ((buf (or (transient-scope) (current-buffer))))
+      (with-current-buffer buf (lambda () (llm-send-at-point! buf (point)))))))
+(define-command "llm-send-chat" "Send this document; the reply shows in its chat in the other window"
+  (lambda () (llm-send-in-chat! (or (transient-scope) (current-buffer)))))
+(define-command "llm-send-new-document" "Send this document; a new document in the other window carries the reply"
+  (lambda () (llm-send-in-new-document! (or (transient-scope) (current-buffer)))))
+
+(define-command "llm-send-buffer" "Send this document to the LLM and stream its reply below the block at point; with C-u, choose where the reply goes"
+  (lambda ()
+    (if (current-prefix-arg)
+        (transient-setup "llm-send-to" (current-buffer))
+        (llm-send-at-point! (current-buffer) (point)))))
 
 (global-set-key "M-o" "llm-send-buffer")
 (global-set-key "C-c m" "llm-set-model")
 (global-set-key "C-c b" "llm-configure")
-(catalog-meta! 'command "llm-send-buffer"
-  'domain "llm" 'effects '("write" "external" "spend"))
+(for-each (lambda (c) (catalog-meta! 'command c 'domain "llm" 'effects '("write" "external" "spend")))
+  '("llm-send-buffer" "llm-send-here" "llm-send-chat" "llm-send-new-document"))
+(catalog-meta! 'command "llm-send-to" 'domain "llm" 'effects '("read"))
 (catalog-meta! 'command "llm-mode" 'domain "llm" 'effects '("write"))
 (catalog-meta! 'mode "llm-mode" 'domain "llm" 'effects '("write"))
 
