@@ -218,7 +218,8 @@ defmodule Compos.Ui.MobileLiveTest do
     {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-group! (group-record-create! "#{other}"))})
     render(view)
     hook(view, "tab", %{"buf" => g})
-    assert has_element?(view, ~s(c-buffer[presentation="agent"]))
+    # the chat draws as its block tree, the chat's own layout
+    assert has_element?(view, ~s(c-buffer.hh-blocks.agent-view))
   end
 
   test "the rail moves point to the line the drag names", %{conn: conn} do

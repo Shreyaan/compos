@@ -96,13 +96,26 @@ defmodule Compos.Ui.RenderBench do
         [[t, e, "tool", "t#{i}", "tool #{i}", "run", "done", b], [p, t, "prose"], [u, p, "user", "question #{i}"]]
       end)
       |> Enum.reverse()
-    mark = Buffer.byte_size(chat)
     Buffer.append(chat, "\n>>> you: ", source: :editor)
-    Buffer.set_local(chat, "render-mode", "agent")
+    mark = Buffer.byte_size(chat)
+    Buffer.set_local(chat, "render-mode", "blocks")
     Buffer.set_local(chat, "agent-slug", "zz-render-bench")
     Buffer.set_local(chat, "agent-saved-mark", mark)
-    Buffer.set_local(chat, "agent-marker-bytes", byte_size("\n>>> you: "))
+    Buffer.set_local(chat, "agent-marker-bytes", 0)
     Buffer.set_local(chat, "agent-blocks", blocks)
+    # Scheme composes the rich view: a whole tree, then one pushed block
+    # (the common streamed event), each timed alone
+    sync = fn -> Compos.Core.Session.call_named("chat-view-sync!", [chat]) end
+    full = us(sync)
+    push =
+      for i <- 1..@n do
+        Buffer.set_local(chat, "agent-blocks", [[mark, mark, "meta"] | Enum.drop(blocks, 0)] |> then(&if(rem(i, 2) == 0, do: blocks, else: &1)))
+        us(sync)
+      end
+    idle = for _ <- 1..@n, do: us(sync)
+    IO.puts("chat tree (Scheme)     full #{full}  push #{p50(push)}  unchanged #{p50(idle)}")
+    Buffer.set_local(chat, "agent-blocks", blocks)
+    sync.()
     Editor.set_window_buffer(chat)
     Buffer.goto(chat, Buffer.byte_size(chat))
     measure("chat 300 blocks type", ["x", "DEL"])

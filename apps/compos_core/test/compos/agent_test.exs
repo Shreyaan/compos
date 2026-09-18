@@ -725,7 +725,7 @@ defmodule Compos.AgentTest do
 
     input_and_result = "foo.ex\n\ndefmodule Foo"
     assert binary_part(text, body_start, byte_size(input_and_result)) == input_and_result
-    assert Buffer.get_local(buf, "render-mode") == "agent"
+    assert Buffer.get_local(buf, "render-mode") == "blocks"
   end
 
   # a tool call is transient status: it goes to the echo area and the

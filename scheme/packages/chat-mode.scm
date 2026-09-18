@@ -1124,8 +1124,8 @@
         (chat-file-init! buf))
       (when (buffer-local buf 'agent-saved-mark)
         ;; the view is identity: default it only when never chosen (S11)
-        (unless (buffer-local buf 'render-mode)
-          (buffer-set-local! buf 'render-mode "agent"))
+        (when (member (buffer-local buf 'render-mode) '(#f "agent"))
+          (buffer-set-local! buf 'render-mode "blocks"))
         ;; Rebuild presentation from the CONVERSATION locals — overlays and
         ;; folds come back, and chrome belonging to a runtime that didn't
         ;; survive the restart is dropped. None of this depends on there
@@ -1260,7 +1260,7 @@
                     ;; plain chat: give it the marker structure threads use
                     (let ((m (buffer-size buf)))
                       (buffer-set-local! buf 'agent-marker-bytes 0)
-                      (buffer-set-local! buf 'render-mode "agent")
+                      (buffer-set-local! buf 'render-mode "blocks")
                       m))))
       (buffer-set-local! buf 'agent-saved-mark mark)
       (agent-install-keys! buf)
@@ -1492,7 +1492,7 @@
                 (if (equal? role "user") (list (cadr t)) '()))))
           turns)
         (buffer-set-local! buf 'agent-marker-bytes 0)
-        (buffer-set-local! buf 'render-mode "agent")
+        (buffer-set-local! buf 'render-mode "blocks")
         ;; a fresh ACP session has to be told what was already said; the
         ;; api lane replays the record on every request anyway
         (buffer-set-local! buf 'agent-seed-context
@@ -1516,7 +1516,7 @@
 ;; who the chat IS — survives reset, restart, and save
 ;; ('default-directory is on every buffer, chats included: where it was
 ;; opened from, which is identity, not conversation or runtime)
-;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
+;; 'render-mode is the chat's chosen VIEW ("blocks" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
   '(group group-id modeline-groups chat-id group-meta group-layout group-noise
@@ -1591,8 +1591,9 @@
     agent-turn-text agent-turn-any chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty
     chat-history-pos chat-history-draft
-    agent-unstick agent-scroll-top agent-scroll-anchor agent-scroll-offset
-    agent-follow-seq
+    ;; the rich view's tree, rebuilt from the conversation by
+    ;; chat-view-sync!, and the reader's place in it
+    render-blocks render-root render-input follow-place follow-seq
     code-agent-switch-pending prompt-parts editing-state))
 
 (define (chat-clear-locals! buf keys)

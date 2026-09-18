@@ -715,17 +715,16 @@
                 (else (loop (cdr ws))))))))
 
 ;; The transcript scroller keeps a reader position of its own, apart from
-;; point: agent-unstick records that the reader left the bottom, and the
-;; anchor pair records the block they left it on. Every relayout re-places
+;; point: 'follow-place records that the reader left the bottom, and the
+;; block they left it on. Every relayout re-places
 ;; the view from those, so moving point alone is invisible — the hook puts
 ;; the transcript straight back on the saved block. Clearing them, and
 ;; bumping the token the hook watches, is what makes a chat follow the
 ;; newest message again.
 (define (chat-follow-again! buf)
-  (let ((seq (buffer-local buf 'agent-follow-seq)))
-    (for-each (lambda (k) (buffer-set-local! buf k #f))
-              '(agent-unstick agent-scroll-top agent-scroll-anchor agent-scroll-offset))
-    (buffer-set-local! buf 'agent-follow-seq (+ 1 (if (number? seq) seq 0)))))
+  (let ((seq (buffer-local buf 'follow-seq)))
+    (buffer-set-local! buf 'follow-place #f)
+    (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0)))))
 
 (define-command "chat-to-bottom" "Scroll this chat to the newest message"
   (lambda ()
@@ -746,11 +745,18 @@
 (effects! '(write))
 
 ;; the chat keeps point in its input around every command
+;; the commands that edit only the input: the transcript model cannot
+;; change under them, so the rich view does not sync after them
+(define chat-view-input-commands
+  '("self-insert-command" "chat-delete-backward" "chat-delete-forward"
+    "delete-backward-char" "delete-char"))
+
 (define (chat-input-post-command!)
   (chat-snap-to-input!)
   ;; a command can change the model the rich view draws (a send, a card,
   ;; the verbosity); a key that only types leaves it as it was
-  (chat-view-sync! (current-buffer)))
+  (unless (member (editing--command-name) chat-view-input-commands)
+    (chat-view-sync! (current-buffer))))
 
 (add-hook! 'pre-command-hook 'chat-snap-to-input!)
 (add-hook! 'post-command-hook 'chat-input-post-command!)

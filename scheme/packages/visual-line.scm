@@ -147,7 +147,7 @@
        ;; only the plain text view is an editable surface; a rendered page,
        ;; a block view, a transcript, and a terminal draw something else
        (not (member (buffer-local buf 'render-mode)
-                    '("markdown" "html" "app" "blocks" "agent" "terminal")))))
+                    '("markdown" "html" "app" "blocks" "terminal")))))
 
 (define (visual--client-move! alter dir granularity &optional count)
   (client-select! alter (if (< dir 0) "backward" "forward") granularity (or count 1))

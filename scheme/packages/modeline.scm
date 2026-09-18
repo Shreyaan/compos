@@ -698,7 +698,7 @@
   (append
     (list (list "buffer info" "modeline-expand"))
     (if (chat-buffer? buf) (list (list "summary log" "buffer-summary-log")) '())
-    (if (equal? (buffer-local buf 'render-mode) "agent")
+    (if (chat-rich-view? buf)
         (list (list "transcript: info" "agent-verbosity-info")
               (list "transcript: log" "agent-verbosity-log")
               (list "transcript: debug" "agent-verbosity-debug"))
@@ -831,7 +831,7 @@
 ;; end of the header line, the current one in ink with an accent seam.
 ;; Any other buffer has no such switch and draws nothing here.
 (define (dash--verbosity buf)
-  (and (equal? (buffer-local buf 'render-mode) "agent")
+  (and (chat-rich-view? buf)
        (let ((now (or (buffer-local buf 'agent-verbosity) "info")))
          (list 'tag "div" 'class "dseg-verbosity"
                'children

@@ -24,6 +24,18 @@ defmodule Compos.Ui.AgentViewTest do
     {:ok, conn: build_conn()}
   end
 
+  # The rich view of a chat: Scheme composes the block tree from the model,
+  # with the input past the mark. A legacy marker after the mark moves the
+  # mark past it, as chat-input-migrate! does.
+  defp rich!(buf) do
+    mark = Buffer.get_local(buf, "agent-saved-mark")
+    marker = Buffer.get_local(buf, "agent-marker-bytes") || 0
+    Buffer.set_local(buf, "agent-saved-mark", mark + marker)
+    Buffer.set_local(buf, "agent-marker-bytes", 0)
+    Buffer.set_local(buf, "render-mode", "blocks")
+    Session.call_named("chat-view-sync!", [buf])
+  end
+
   # build a rich thread without any runtime: buffer + locals only —
   # the renderer is a pure view over text + block model
   test "agent render-mode draws blocks, tool card, input row", %{conn: conn} do
@@ -49,7 +61,6 @@ defmodule Compos.Ui.AgentViewTest do
     Buffer.append(buf, "\n>>> you: ", source: :editor)
     Buffer.append(buf, "half-typed", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "view-test")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
@@ -62,47 +73,23 @@ defmodule Compos.Ui.AgentViewTest do
       [u_start, p_start, "user", "profile redisplay"]
     ])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, view, html} = live(conn, "/")
 
     assert html =~ "agent-view"
     # The scroll lifecycle belongs to the async transcript component, so its
     # mounted/updated callbacks see the child's final scroll height.
-    assert has_element?(view, ~s(.ag-scroll[phx-hook="AgentScroll"][data-stick="true"]))
+    assert has_element?(view, ~s(.ag-scroll[phx-hook="BlockFollow"][data-stick="true"]))
     assert has_element?(view, ~s(.ag-scroll.ag-verbosity-info))
-    assert has_element?(view, ~s(.ag-verbosity[aria-label="Transcript verbosity"]))
 
-    assert has_element?(
-             view,
-             ~s(.ag-verbosity button.active[phx-value-cmd="agent-verbosity-info"]),
-             "info"
-           )
-
-    assert has_element?(
-             view,
-             ~s(.ag-verbosity button[phx-value-cmd="agent-verbosity-log"]),
-             "log"
-           )
-
-    assert has_element?(
-             view,
-             ~s(.ag-verbosity button[phx-value-cmd="agent-verbosity-debug"]),
-             "debug"
-           )
-
-    view
-    |> element(~s(.ag-verbosity button[phx-value-cmd="agent-verbosity-log"]))
-    |> render_click()
-
+    # the verbosity is the chat's model: a change redraws the list class
+    Session.eval(~s{(with-current-buffer "#{buf}" (lambda () (agent-set-verbosity! "log")))})
+    Session.call_named("chat-view-sync!", [buf])
+    render_hook(view, "key", %{"k" => "C-g"})
     assert Buffer.get_local(buf, "agent-verbosity") == "log"
     assert has_element?(view, ~s(.ag-scroll.ag-verbosity-log))
-
-    assert has_element?(
-             view,
-             ~s(.ag-verbosity button.active[phx-value-cmd="agent-verbosity-log"])
-           )
-
-    refute has_element?(view, ~s(.agent-view[phx-hook="AgentScroll"]))
+    refute has_element?(view, ~s(.agent-view[phx-hook="BlockFollow"]))
     assert has_element?(view, "c-user", "profile redisplay")
     assert has_element?(view, "c-agent.ag-prose")
     assert has_element?(view, "c-toolcall[call][name][state]")
@@ -121,14 +108,13 @@ defmodule Compos.Ui.AgentViewTest do
     assert html =~ "ag-verb"
     assert html =~ "ag-chevron"
     assert html =~ "ag-tool done"
-    assert html =~ "ag-shimmer"
     assert html =~ "run M-x profile, done. Toggle call details"
     assert html =~ "M-x profile"
     refute html =~ "structuredContent"
     assert has_element?(view, ".ag-preview", "p95 9.4ms")
     refute has_element?(view, "details.ag-tool[open]")
 
-    view |> element(~s(summary[phx-click="agent_card"])) |> render_click()
+    view |> element(~s(summary[phx-click="block_click"])) |> render_click()
     assert has_element?(view, "details.ag-tool[open] pre.ag-body", "p95 9.4ms")
     refute has_element?(view, "details.ag-tool[open] pre.ag-body", result)
     refute has_element?(view, ".ag-preview")
@@ -150,13 +136,13 @@ defmodule Compos.Ui.AgentViewTest do
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: ", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "queued-test")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     Buffer.set_local(buf, "agent-blocks", [])
     Buffer.set_local(buf, "chat-queued", ["wait for me", "and for me"])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, _view, html} = live(conn, "/")
 
@@ -181,11 +167,11 @@ defmodule Compos.Ui.AgentViewTest do
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: ", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     Buffer.set_local(buf, "agent-blocks", [[0, byte_size(label), "image", path, "image/png"]])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, view, _html} = live(conn, "/")
 
@@ -203,11 +189,11 @@ defmodule Compos.Ui.AgentViewTest do
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: draft", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     Buffer.set_local(buf, "agent-blocks", [[0, mark, "prose"]])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, _} = Session.eval(~s{(text-scale-apply! "#{buf}" 2)})
     {:ok, view, html} = live(conn, "/")
@@ -235,7 +221,6 @@ defmodule Compos.Ui.AgentViewTest do
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: ", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "arg-test")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
@@ -246,6 +231,7 @@ defmodule Compos.Ui.AgentViewTest do
       [0, t2, "tool", "t1", "compos:apropos: split window", "other", "done", b1]
     ])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, view, _html} = live(conn, "/")
 
@@ -261,7 +247,6 @@ defmodule Compos.Ui.AgentViewTest do
     {:ok, _} = Compos.Core.create_buffer(buf)
 
     Buffer.append(buf, "first\nsecond\n", source: :editor)
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-saved-mark", Buffer.byte_size(buf))
     Buffer.set_local(buf, "agent-marker-bytes", 0)
 
@@ -270,11 +255,9 @@ defmodule Compos.Ui.AgentViewTest do
       [0, 6, "user", "first"]
     ])
 
-    Buffer.set_local(buf, "agent-unstick", true)
-    Buffer.set_local(buf, "agent-scroll-top", 312)
-    Buffer.set_local(buf, "agent-scroll-anchor", 1)
-    Buffer.set_local(buf, "agent-scroll-offset", -24)
+    Buffer.set_local(buf, "follow-place", [true, 312, 1, -24])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, view, _html} = live(conn, "/")
 
@@ -283,10 +266,10 @@ defmodule Compos.Ui.AgentViewTest do
              ~s(.ag-scroll[data-stick="false"][data-scroll-top="312"][data-scroll-anchor="1"][data-scroll-offset="-24"])
            )
 
-    assert has_element?(view, ~s(.ag-user[data-ag-index="0"]))
-    assert has_element?(view, ~s(.ag-prose[data-ag-index="1"]))
+    assert has_element?(view, ~s(.ag-user[data-index="0"]))
+    assert has_element?(view, ~s(.ag-prose[data-index="1"]))
 
-    render_hook(view, "ag_stick", %{
+    render_hook(view, "follow_place", %{
       "buf" => buf,
       "stick" => false,
       "top" => 480,
@@ -294,10 +277,7 @@ defmodule Compos.Ui.AgentViewTest do
       "offset" => -11
     })
 
-    assert Buffer.get_local(buf, "agent-unstick")
-    assert Buffer.get_local(buf, "agent-scroll-top") == 480
-    assert Buffer.get_local(buf, "agent-scroll-anchor") == 0
-    assert Buffer.get_local(buf, "agent-scroll-offset") == -11
+    assert Buffer.get_local(buf, "follow-place") == [true, 480, 0, -11]
   end
 
   # the transcript lives in its own LiveComponent so a keystroke diffs to a
@@ -314,7 +294,6 @@ defmodule Compos.Ui.AgentViewTest do
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: dra", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "type-test")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
@@ -323,6 +302,7 @@ defmodule Compos.Ui.AgentViewTest do
       [t_start, mark, "tool", "t1", "M-x probe", "run", "done", b_start]
     ])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, view, html} = live(conn, "/")
     assert html =~ "ag-tool done"
@@ -350,7 +330,6 @@ defmodule Compos.Ui.AgentViewTest do
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: ", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     Buffer.set_local(buf, "agent-open-cards", ["json-1"])
@@ -359,6 +338,7 @@ defmodule Compos.Ui.AgentViewTest do
       [0, mark, "tool", "json-1", "inspect result", "read", "done", body_start]
     ])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, _view, html} = live(conn, "/")
 
@@ -372,12 +352,12 @@ defmodule Compos.Ui.AgentViewTest do
     {:ok, _} = Compos.Core.create_buffer(buf)
     Buffer.append(buf, "x\n── needs permission: Write foo.ex ──\n>>> you: ", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "perm-test")
     Buffer.set_local(buf, "agent-saved-mark", 37)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     Buffer.set_local(buf, "agent-blocks", [[1, 37, "permission", "Write foo.ex"]])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, view, html} = live(conn, "/")
 
@@ -397,7 +377,6 @@ defmodule Compos.Ui.AgentViewTest do
     {:ok, _} = Compos.Core.create_buffer(buf)
     Buffer.append(buf, "\n── question: Open a workspace? ──\n>>> you: ", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "question-test")
     Buffer.set_local(buf, "agent-saved-mark", 39)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
@@ -406,18 +385,19 @@ defmodule Compos.Ui.AgentViewTest do
       [0, 39, "question", 42, "question-test", "Open a workspace?", ["Yes", "No", "Diff first"]]
     ])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, view, html} = live(conn, "/")
 
     assert html =~ "Open a workspace?"
-    assert has_element?(view, ~s(button[phx-click="agent_answer"]), "Yes")
-    assert has_element?(view, ~s(button[phx-click="agent_answer"]), "No")
-    assert has_element?(view, ~s(button[phx-click="agent_answer"]), "Diff first")
+    assert has_element?(view, ~s(button[phx-value-id="chat-answer:42:0"]), "Yes")
+    assert has_element?(view, ~s(button[phx-value-id="chat-answer:42:1"]), "No")
+    assert has_element?(view, ~s(button[phx-value-id="chat-answer:42:2"]), "Diff first")
     assert html =~ "type another reply below"
     # a question is not a permission: no allow/always/deny buttons. Name the
     # button, not the word — the page's own scripts contain prose too.
-    refute html =~ ~s(phx-value-cmd="agent-permission-always")
-    refute html =~ ~s(phx-value-cmd="agent-permission-allow")
+    refute html =~ ~s(phx-value-id="chat-cmd:agent-permission-always")
+    refute html =~ ~s(phx-value-id="chat-cmd:agent-permission-allow")
   end
 
   # the other branch of the one ui_cmd gate: the modeline-info segment
@@ -452,13 +432,13 @@ defmodule Compos.Ui.AgentViewTest do
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: ", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "utf8-test")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     # "site — dash\n": the em dash starts at byte 5; end offset 6 is inside it
     Buffer.set_local(buf, "agent-blocks", [[p_start, 6, "prose"]])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, _view, html} = live(conn, "/")
 
@@ -485,12 +465,12 @@ defmodule Compos.Ui.AgentViewTest do
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: ", source: :editor)
 
-    Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "table-test")
     Buffer.set_local(buf, "agent-saved-mark", mark)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     Buffer.set_local(buf, "agent-blocks", [[0, mark, "prose"]])
 
+    rich!(buf)
     Editor.set_window_buffer(buf)
     {:ok, _view, html} = live(conn, "/")
 

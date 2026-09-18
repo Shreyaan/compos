@@ -907,14 +907,14 @@ defmodule Compos.Ui.EditorLiveTest do
 
     # the real event path sets the activity word; a chunk mid-turn says so
     {:ok, _} =
-      Compos.Core.Session.eval("(agent-handle-event \"#{slug}\" '(type chunk text \"more \"))")
+      Compos.Core.Session.eval("(agent-handle-events \"#{slug}\" '((type chunk text \"more \")))")
 
     assert eventually(fn -> render(view) =~ "streaming" end)
     assert render(view) =~ "ag-activity"
 
     {:ok, _} =
       Compos.Core.Session.eval(
-        "(agent-handle-event \"#{slug}\" '(type turn-end stop-reason \"end_turn\"))"
+        "(agent-handle-events \"#{slug}\" '((type turn-end stop-reason \"end_turn\")))"
       )
 
     assert eventually(fn -> not (render(view) =~ "ag-activity") end)

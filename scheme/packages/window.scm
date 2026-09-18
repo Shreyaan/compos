@@ -2328,7 +2328,7 @@
 ;; the transcript is for reading, the prompt is where typing goes
 (define (chat-snap-to-input!)
   (let ((buf (current-buffer)))
-    (when (equal? (buffer-local buf 'render-mode) "agent")
+    (when (chat-rich-view? buf)
       (when (< (point) (chat-input-start buf))
         (end-of-buffer!)))))
 

@@ -1161,11 +1161,11 @@
 (define *chat-list-preview-generation* 0)
 
 ;; A peek owns its display state, never a chat runtime or identity.
-(define (chat-preview-project! copy source)
+(define (chat-preview-project--locals! copy source)
   (let ((mark (buffer-local source 'agent-saved-mark)))
     (if (and (buffer-exists? source) (number? mark))
         (buffer-set-locals! copy
-          (list 'render-mode "agent"
+          (list 'render-mode "blocks"
                 'agent-blocks (or (buffer-local source 'agent-blocks) '())
                 'agent-saved-mark mark
                 'agent-marker-bytes (or (buffer-local source 'agent-marker-bytes) 0)
@@ -1184,7 +1184,7 @@
                   (buffer-replace-range! copy 0 (buffer-size copy)
                     (string-join (reverse texts) ""))
                   (buffer-set-locals! copy
-                    (list 'render-mode "agent" 'agent-blocks blocks
+                    (list 'render-mode "blocks" 'agent-blocks blocks
                           'agent-saved-mark offset 'agent-marker-bytes 0)))
                 (let* ((turn (car rest)) (role (car turn)) (body (cadr turn))
                        (text (if (equal? role "user")
@@ -1196,6 +1196,11 @@
                   (loop (cdr rest) next (cons text texts)
                     (cons (append (list offset next kind)
                                   (if (equal? role "user") (list body) '())) blocks)))))))))
+
+;; the copy draws as a rich chat: its tree comes from the projected model
+(define (chat-preview-project! copy source)
+  (chat-preview-project--locals! copy source)
+  (chat-view-sync! copy))
 
 (define (chat-list--preview-request)
   (let ((entry (assoc (selected-frame) *chat-list-preview-requests*)))

@@ -396,8 +396,7 @@
 
       (else #f))))
 
-(llm-session-on-event!
-  (lambda (slug events)
+(define (agent-handle-events slug events)
     ;; batches race buffer kills — a dead thread's events just drop
     (when (buffer-exists? (agent-buf slug))
       ;; one bad event must not kill the batch behind it: a turn-end that
@@ -421,7 +420,10 @@
             (filter (lambda (e) (not (equal? (plist-get e 'type) 'permission))) events))))
       ;; fleet surfaces track every batch: the modeline says at once who
       ;; needs you, and the list settles once the burst stops
-      (agents-note-event! slug))))
+      (agents-note-event! slug)))
+
+;; one batch of a runtime's events, in order, then one view sync
+(llm-session-on-event! agent-handle-events)
 
 ;;; --- the turn-end hook --------------------------------------------------------
 ;;;

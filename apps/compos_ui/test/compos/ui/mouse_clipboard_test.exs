@@ -161,7 +161,7 @@ defmodule Compos.Ui.MouseClipboardTest do
       fresh_buffer("*chat: mc-#{System.unique_integer([:positive])}*", "transcript\n>>> you: ")
 
     marker = "\n>>> you: "
-    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "render-mode", "blocks")
     Buffer.set_local(buf, "agent-slug", "mc")
     Buffer.set_local(buf, "agent-saved-mark", 10)
     Buffer.set_local(buf, "agent-marker-bytes", byte_size(marker))

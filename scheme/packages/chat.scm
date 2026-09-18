@@ -692,10 +692,11 @@
 (define-command "chat-toggle-view" "Toggle between rich and plain chat transcript"
   (lambda ()
     (let* ((buf (current-buffer))
-           (rich? (equal? (buffer-local buf 'render-mode) "agent")))
+           (rich? (equal? (buffer-local buf 'render-mode) "blocks")))
       ;; "plain", not #f: the chosen view is identity (S11), and a cleared
       ;; local reads as "never chosen" — which the setup would re-default
-      (buffer-set-local! buf 'render-mode (if rich? "plain" "agent"))
+      (buffer-set-local! buf 'render-mode (if rich? "plain" "blocks"))
+      (chat-view-sync! buf)
       (message (if rich? "plain transcript" "rich transcript")))))
 
 ;;; (chat auto-titling died with the bare *chat* surface: a group chat is

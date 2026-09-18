@@ -14,9 +14,9 @@ const NAMED = {
 const keyOf = (ch) => NAMED[ch] || ch;
 
 const Hooks = {
-  // the transcript component's hook: stay at the bottom while
-  // the reader is there, and hand links to the server
-  AgentScroll: {
+  // a followed block list (a chat transcript): stay at the bottom
+  // while the reader is there, and hand links to the server
+  BlockFollow: {
     mounted() {
       this.stick = this.el.dataset.stick !== "false";
       this.followSeq = parseInt(this.el.dataset.followSeq || "0", 10);
@@ -26,7 +26,7 @@ const Hooks = {
         this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
         clearTimeout(this.report);
         this.report = setTimeout(() => {
-          this.pushEvent("ag_stick", { buf: this.el.dataset.buf, stick: this.stick, top: Math.round(s.scrollTop) });
+          this.pushEvent("follow_place", { buf: this.el.dataset.buf, stick: this.stick, top: Math.round(s.scrollTop) });
         }, 250);
       };
       this.el.addEventListener("scroll", this.scrollH, { passive: true });

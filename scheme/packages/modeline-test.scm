@@ -774,7 +774,8 @@
     (let ((buf "*chat:zz-modeline-switcher*"))
       (test-buffer! buf "")
       (buffer-set-local! buf 'mode-name "chat-mode")
-      (buffer-set-local! buf 'render-mode "agent")
+      (buffer-set-local! buf 'render-mode "blocks")
+      (buffer-set-local! buf 'agent-saved-mark 0)
       (check-equal! (map car (buffer-switcher-rows buf))
                     '("buffer info" "summary log"
                       "transcript: info" "transcript: log" "transcript: debug")

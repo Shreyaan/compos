@@ -91,3 +91,18 @@
     (check-equal! (chat-view-token-label 3) #f "too small to say")
     (check-equal! (chat-view-token-label 400) "~100 tok" "tokens")
     (check-equal! (chat-view-token-label 6000) "~1.5k tok" "thousands")))
+
+(deftest 'chat-view-reuses-views-after-an-excise
+  "a change deep in the model keeps the views of the unchanged blocks"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-deep*")))
+      (chat-view-sync! buf)
+      (buffer-set-local! buf 'agent-blocks
+        '((26 34 "tool" "t1" "Read: a.txt" "read" "done" 32 1400)
+          (6 20 "prose")
+          (0 6 "user" "hello")))
+      (chat-view-sync! buf)
+      (let ((rows (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+        (check-equal! (length rows) 3 "every block has a view")
+        (check-equal! (plist-get (nth 1 rows) 'range) '(6 20) "the changed block is new"))
+      (buffer-kill! buf))))

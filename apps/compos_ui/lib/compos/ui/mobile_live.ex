@@ -286,15 +286,13 @@ defmodule Compos.Ui.MobileLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  def handle_event("ag_stick", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
+  # the reader's place in a followed block list, as the editor keeps it
+  def handle_event("follow_place", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
       when is_boolean(stick) and is_integer(top) do
     if Compos.Core.Buffer.exists?(buf) do
-      Compos.Core.Buffer.set_local(buf, "agent-unstick", not stick)
-      Compos.Core.Buffer.set_local(buf, "agent-scroll-top", top)
-      anchor = if is_integer(params["anchor"]), do: params["anchor"], else: nil
+      anchor = if is_integer(params["anchor"]), do: params["anchor"], else: false
       offset = if is_integer(params["offset"]), do: params["offset"], else: 0
-      Compos.Core.Buffer.set_local(buf, "agent-scroll-anchor", anchor)
-      Compos.Core.Buffer.set_local(buf, "agent-scroll-offset", offset)
+      Compos.Core.Buffer.set_local(buf, "follow-place", [not stick, top, anchor, offset])
     end
 
     {:noreply, socket}
@@ -560,7 +558,7 @@ defmodule Compos.Ui.MobileLive do
 
       <c-group class="hh-body">
         <c-group
-          :if={@leaf && @leaf.render_mode not in ["agent", "html", "markdown", "file", "app", "terminal"]}
+          :if={@leaf && @leaf.render_mode not in ["blocks", "html", "markdown", "file", "app", "terminal"]}
           class="hh-rail"
           data-rail="1"
         >
@@ -668,6 +666,22 @@ defmodule Compos.Ui.MobileLive do
         :if={Map.get(@leaf, :ag_activity) && @leaf.ag_activity != "disconnected"}
         class="ag-wait ag-activity"
       ><c-text class="hh-blink"></c-text> <c-text class="ag-activity-text">{@leaf.ag_activity}</c-text> · C-g interrupts</c-activity>
+    </c-buffer>
+    """
+  end
+
+  # a block tree draws with the editor's own block renderer. The composer
+  # below is the handheld's input, so the tree's caret input stays empty.
+  defp content(%{leaf: %{render_mode: "blocks"}} = assigns) do
+    ~M"""
+    <c-buffer class={"hh-content hh-blocks #{hh_root_class(@leaf)}"} buffer={@leaf.buffer}>
+      <EditorLive.blk
+        :for={b <- Map.get(@leaf, :blk, [])}
+        b={b}
+        line={Map.get(@leaf, :blk_line, 0)}
+        win={@leaf.id}
+        ctx={%{live: true, buf: @leaf.buffer, follow: Map.get(@leaf, :blocks_follow)}}
+      />
     </c-buffer>
     """
   end
@@ -1143,8 +1157,17 @@ defmodule Compos.Ui.MobileLive do
 
   defp placeholder(_leaf, %{minibuffer: mb}) when is_map(mb), do: "type to narrow · RET accepts"
   defp placeholder(%{render_mode: "agent"}, _state), do: "ask, instruct, or type a chord"
+  defp placeholder(%{render_mode: "blocks", blocks_input: n}, _state) when is_integer(n),
+    do: "ask, instruct, or type a chord"
   defp placeholder(%{buffer: buf}, _state), do: "ask about #{buf} · or a chord"
   defp placeholder(_, _), do: "prose, a chord, or M-x"
+
+  defp hh_root_class(leaf) do
+    case Map.get(leaf, :blk_root) do
+      %{class: c} when is_binary(c) -> c
+      _ -> ""
+    end
+  end
 
   defp echo_error?(echo) when is_binary(echo),
     do: echo == "Quit" or String.ends_with?(echo, "is undefined") or String.starts_with?(echo, "No ")

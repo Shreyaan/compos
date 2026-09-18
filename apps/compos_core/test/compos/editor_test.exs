@@ -2476,7 +2476,7 @@ defmodule Compos.EditorTest do
     press(["RET"])
     # one chat interface: C-c c is the group companion, rich from birth
     assert Editor.current_buffer() == companion
-    assert Buffer.get_local(companion, "render-mode") == "agent"
+    assert Buffer.get_local(companion, "render-mode") == "blocks"
     assert Buffer.text(companion) =~ "companion · #{buf}"
 
     type("what is 6*7")
@@ -2616,7 +2616,7 @@ defmodule Compos.EditorTest do
     assert Buffer.get_local(companion, "mode-name") == "chat-mode"
 
     # rich surface from birth: agent renderer + help meta card + an input at the mark
-    assert Buffer.get_local(companion, "render-mode") == "agent"
+    assert Buffer.get_local(companion, "render-mode") == "blocks"
     assert Buffer.text(companion) =~ "companion · #{buf}"
     assert Buffer.get_local(companion, "agent-saved-mark") == Buffer.byte_size(companion)
 

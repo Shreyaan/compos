@@ -875,6 +875,11 @@
           (filter (lambda (m) (and (not (equal? (car m) buf)) (buffer-exists? (car m))))
                   *chat-view-memo*))))
 
+(define (chat-view--zip a b)
+  (if (or (null? a) (null? b))
+      '()
+      (cons (list (car a) (car b)) (chat-view--zip (cdr a) (cdr b)))))
+
 ;; the views of RAW, newest first. The common events push a block or change
 ;; the newest one; both reuse every older view without a walk.
 (define (chat-view--views buf raw open m)
@@ -888,7 +893,7 @@
       ((and (pair? raw) (pair? old-raw) (equal? (cdr raw) (cdr old-raw)))
        (cons (chat-view-block buf (car raw) open) (cdr old-views)))
       (else
-       (let ((pairs (map list old-raw old-views)))
+       (let ((pairs (chat-view--zip old-raw old-views)))
          (map (lambda (b)
                 (let ((hit (assoc b pairs)))
                   (if hit (cadr hit) (chat-view-block buf b open))))

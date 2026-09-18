@@ -52,7 +52,7 @@ defmodule Compos.KeyTraceTest do
       Session.eval("""
       (begin
         (switch-to-buffer! "*key-trace-chat*")
-        (buffer-set-local! "*key-trace-chat*" 'render-mode "agent")
+        (buffer-set-local! "*key-trace-chat*" 'render-mode "blocks")
         (buffer-set-local! "*key-trace-chat*" 'agent-saved-mark #{mark})
         (buffer-set-local! "*key-trace-chat*" 'agent-marker-bytes #{byte_size(marker)})
         (beginning-of-buffer!))
