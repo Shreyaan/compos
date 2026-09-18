@@ -2467,15 +2467,14 @@
 ;; The primitive changes the window and wakes the process; Scheme owns the
 ;; mode closures, so it also completes runtime restoration in this same
 ;; interpreter turn. A caller never sees the buffer between those two steps.
-;; A switch to a buffer from outside the frame's group does not take the
-;; selected window: the display chain shows the buffer as category
-;; foreign, the popup by the stock rule, and selects it there. The
-;; group's panes stay sealed, and the frame stays in its group. A switch
-;; made inside the popup replaces the popup's buffer the same way. The
-;; chain never comes back here: the popup floats the buffer before it
-;; switches, and a floating buffer is not foreign; the same-window action
-;; calls switch-to-buffer-here!; the window actions set a window's buffer
-;; by id. Emacs: switch-to-buffer-obey-display-actions.
+;; A switch to a buffer from outside the frame's group switches the group
+;; (the owner's ruling, 2026-09-19): the frame enters the buffer's home
+;; group, and the buffer opens there as a member. An ungrouped buffer
+;; takes the selected window, and the frame leaves its group by the
+;; derived rule. A list (ibuffer, ichat) may still float the row it
+;; chose; a switch never floats. The same-window action calls
+;; switch-to-buffer-here!; the window actions set a window's buffer by
+;; id. Emacs: switch-to-buffer-obey-display-actions.
 ;; A mechanism that puts a buffer in a window it chose — a layout, a
 ;; swap, a restore, a borrowed window — calls switch-to-buffer-here!.
 (define (switch-to-buffer! buf)
@@ -2485,19 +2484,18 @@
              (not (agent-edit-author? (current-edit-author))))
     (buffer-promote! buf))
   (cond ((buffer-context?) (switch-to-buffer-here! buf))
-        ;; A chat never floats. It owns exactly one group, so a switch to it
-        ;; enters that group and the chat opens as an ordinary buffer there.
-        ;; The panes stay sealed: the frame follows the chat home, the chat
-        ;; does not hang over another group's windows.
-        ((and (display-foreign? buf) (chat-buffer? buf)
-              (boundp 'switch-to-buffer-in-group!) (boundp 'group-home-of)
+        ;; a buffer of another group: the frame follows it home, and the
+        ;; buffer opens there as a member. The panes of the group it left
+        ;; stay sealed, saved as they stood.
+        ((and (display-foreign? buf)
               (let ((home (group-home-of buf)))
                 (and home (not (equal? home (frame-group))))))
          (switch-to-buffer-in-group! buf)
          buf)
+        ;; an ungrouped buffer: the pane shows it, and the frame leaves its
+        ;; group by the derived rule (docs/groups.md, The current group)
         ((display-foreign? buf)
-         (pop-to-buffer buf)
-         (message (string-append buf " is not in this group."))
+         (switch-to-buffer-here! buf)
          buf)
         ((and (not *layout-busy*) (layout-target)
               (not (popup--class? (window-buffer (active-window))))
@@ -5481,7 +5479,7 @@
 (effects! '(read))
 (public! 'current-buffer "Name of the buffer point is in")
 (effects! '(write display))
-(public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window; a buffer outside the frame's group takes another window (category foreign)")
+(public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window; a buffer of another group switches the frame to that group first; an ungrouped buffer takes the window and the frame leaves its group")
 (public! 'switch-to-buffer-here! "(switch-to-buffer-here! NAME) — show in the active window whatever the group: the mechanism a layout, a swap, or a restore uses")
 (public! 'visit "(visit PATH [GROUP]) — open a file; GROUP joins it to that context; /ssh:HOST:/PATH opens over ssh")
 (public! 'find-file-read "(find-file-read [GROUP]) — prompt for a file and join it to GROUP; no GROUP keeps it ungrouped")

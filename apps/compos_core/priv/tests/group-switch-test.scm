@@ -1288,49 +1288,6 @@
       (check-equal! (current-buffer) t--sw-second "the candidate has focus"))
     (t--sw-done!)))
 
-(deftest 'confirm-floats-a-buffer-of-another-group-and-the-frame-stays
-  "RET on a buffer outside the group shows it in the popup; the panes, the group, and every membership stay"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((ids (t--sw-three-groups!))
-           (win (active-window))
-           (shown (window-buffer win)))
-      (t--sw-open-all!)
-      (t--sw-type! t--sw-third)
-      (t--sw-key! "confirm")
-
-      (check-equal! (current-buffer) t--sw-third "the buffer is selected")
-      (check-true! (popup-open?) "in the popup")
-      (check-equal! (popup-buffer) t--sw-third "which shows it")
-      (check-equal! (window-buffer win) shown "the pane shows what it showed")
-      (check-equal! (frame-local 'current-group) (car ids) "the frame stays in its group")
-      (check-false! (buffer-in-group? t--sw-third (car ids)) "and no membership changed")
-      (popup-close!)
-      (set-frame-local! 'popup-buffer #f))
-    (t--sw-done!)))
-
-(deftest 'switching-to-an-ungrouped-buffer-floats-it-and-keeps-the-frame-group
-  "a broadened buffer switch to an ungrouped buffer shows it in the popup; the frame keeps its group"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-current")))
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second here)
-      (set-frame-local! 'current-group here)
-      (switch-to-buffer! t--sw-first)
-      (let ((win (active-window)))
-        (t--sw-open-all!)
-        (t--sw-type! t--sw-third)
-        (t--sw-key! "confirm")
-
-        (check-equal! (current-buffer) t--sw-third "the ungrouped buffer is current")
-        (check-true! (popup-open?) "in the popup")
-        (check-equal! (window-buffer win) t--sw-first "the pane shows the member it showed")
-        (check-equal! (frame-local 'current-group) here "the frame keeps its group")
-        (popup-close!)
-        (set-frame-local! 'popup-buffer #f)))
-    (t--sw-done!)))
-
 (deftest 'switching-context-restores-the-saved-layout
   "the group you go to looks the way you left it"
   (lambda ()
@@ -2004,19 +1961,35 @@
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
 
-(deftest 'a-switch-to-a-foreign-buffer-takes-a-window-and-the-frame-stays-in-its-group
-  "switch-to-buffer! on a buffer outside the group shows it in a window; the group holds"
+(deftest 'a-switch-to-a-buffer-of-another-group-enters-that-group
+  "the ruling of 2026-09-19: a foreign buffer switches the group; nothing floats"
   (lambda ()
     (t--sw-setup!)
-    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair)))
+    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
+           (away (group-record-create! "zzsw-float-away")))
+      (buffer-add-group! foreign away)
       (switch-to-buffer! foreign)
       (check-false! (popup-open?) "nothing floats")
-      (check-true! (and (window-showing foreign) #t) "a window shows it")
-      (check-equal! (current-buffer) foreign "and selected: a switch is a visit")
-      (check-equal! (frame-group) home "the frame stays in its group")
-      (t--sw-sealed-done! foreign))
+      (check-equal! (current-buffer) foreign "the buffer is selected: a switch is a visit")
+      (check-equal! (frame-group) away "the frame entered the buffer's group")
+      (check-false! (member foreign (window-tree-buffers (group-layout home)))
+                    "and the group it left keeps no foreign pane")
+      (t--sw-sealed-done! foreign)
+      (group-record-delete! away))
     (t--sw-done!)))
 
+(deftest 'a-switch-to-an-ungrouped-buffer-takes-the-window-and-leaves-the-group
+  "no group to enter: the pane shows it and the derived rule drops the group"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
+           (win (active-window)))
+      (switch-to-buffer! foreign)
+      (check-false! (popup-open?) "nothing floats")
+      (check-equal! (window-buffer win) foreign "the selected window shows it")
+      (check-false! (frame-group) "the frame is in no group")
+      (t--sw-sealed-done! foreign))
+    (t--sw-done!)))
 (deftest 'a-switch-to-a-member-takes-the-selected-window
   "the redirect is for foreign buffers only"
   (lambda ()

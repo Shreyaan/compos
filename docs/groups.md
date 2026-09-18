@@ -474,13 +474,13 @@ A tile builds its windows from one survivor, so the build hands each new pane th
 
 `switch` saves the outgoing layout as it is, every time. A layout that shows a foreign buffer is saved with it. Showing a foreign buffer in a work window takes the frame out of G (see "The current group"); that moment saves G's layout as it stands and sets `previous` to G, so a switch from a frame in no group has nothing left to save, and a switch back to G finds the arrangement the reader left.
 
-### A foreign buffer floats
+### A foreign buffer switches the group
 
-A switch to a buffer outside G does not take a pane. The buffer shows in the popup, and the frame stays in G. This covers `switch-to-buffer`, `RET` in the switcher, `find-file` on a file with a live buffer in another group, and a jump that lands in such a buffer. The popup floats over the panes, `M-<arrows>` move it, and `q` or `` C-` `` dismisses it. Dismissed, the group is as it was.
+A switch to a buffer of another group enters that group (the ruling of 2026-09-19). This covers `switch-to-buffer`, `RET` in the switcher, `find-file` on a file with a live buffer in another group, and a jump that lands in such a buffer. The frame leaves G with its layout saved as it stood, enters the buffer's home group, and the buffer opens there as a member. A switch to an ungrouped buffer takes the selected window, and the frame leaves G by the derived rule. Nothing floats on a switch.
 
-The mechanism is one display rule: a display of a buffer outside G is a display of category `foreign`, and the stock rule `((category foreign) popup)` sends it to the popup (docs/DISPLAY-BUFFER.md). A rule of your own for the category routes it elsewhere; a pane that shows it then takes the frame out of G as before.
+A list is different: a row chosen in ibuffer or ichat may still show its buffer in the popup, and dismissing the popup leaves G as it was. A display of a buffer outside G that is not a switch is a display of category `foreign` and takes the window chain (docs/DISPLAY-BUFFER.md); a pane that shows it takes the frame out of G.
 
-To keep the buffer, add it to G. `popup-bufferize` (`` C-M-` ``, or `s-RET` while the popup has the focus) adds the buffer to G first and then settles the popup into the layout, so the pane it becomes is a member's pane. `group-add` adds it and leaves the popup where it is.
+To keep a buffer in G, add it: `group-add`.
 
 A pinned frame shows a foreign buffer in the selected window: the pin keeps G through window changes, so nothing floats.
 
@@ -617,7 +617,7 @@ The frame stands in the group its windows show. The rules:
 3. When several groups are shared by every window, the frame keeps its current one if it is among them, else the most recent of them.
 4. A pinned frame keeps its pinned group through every window change.
 5. The derivation runs after every change of the frame's windows or their buffers, whoever made the change. The editor calls `window-configuration-changed!` (Emacs `window-configuration-change-hook`) from its one commit point; a command, a kill that drops a window onto its next buffer, and an agent all reach it. The window commands also run it before they return, so their modeline is right at once.
-6. A pane that shows an ungrouped buffer leaves the group; killing that buffer drops the window onto its next buffer, and the frame is back in that buffer's group with no command involved. A switch never makes such a pane: a switch to a buffer outside the group floats it in the popup (see "A foreign buffer floats"). A layout, a swap, or a restore can still put one in a pane.
+6. A pane that shows an ungrouped buffer leaves the group; killing that buffer drops the window onto its next buffer, and the frame is back in that buffer's group with no command involved. A switch to a buffer of another group enters that group first (see "A foreign buffer switches the group"); a switch to an ungrouped buffer makes such a pane. A layout, a swap, or a restore can still put one in a pane.
 
 ### Layouts
 

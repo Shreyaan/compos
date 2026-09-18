@@ -1327,6 +1327,19 @@ saves the layout") and the 2026-09-11 test ("takes a window; the group
 holds") cannot both stand. The ruling to give: which one, and then the
 losing tests are deleted, not fixed.
 
+**Ruled (2026-09-19, the owner): "foreign buffer switches the group";
+"when chosen, it can still pop up in ibuffer or ichat".** A switch to a
+buffer of another group enters that group (switch-to-buffer! follows
+the buffer home through switch-to-buffer-in-group!, as a chat already
+did); a switch to an ungrouped buffer takes the window and the frame
+leaves its group by the derived rule; a list's chosen row may still
+float. The three tests of the losing generations are deleted and two
+state the ruling (group-switch-test.scm). docs/groups.md says it. After
+the ruling: group-switch 5 red (the switcher headings and MRU work of
+the other session), layout-policy 8, detail 3, ibuffer-prompt 6, all in
+the ledger; groups, group-membership, switcher-sleep, window-config
+green or ledgered.
+
 **Winner and the layout engine (2026-09-19).** winner-undo restored the
 tree and the configuration hook tiled it back to the target: the target
 compares the visible pane count to the count it noted at the last tile,
