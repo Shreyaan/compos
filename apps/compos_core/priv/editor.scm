@@ -9130,12 +9130,18 @@
         kept)))
 
 (define (layout--fill-to buffers capacity)
-  (let loop ((rest (filter window-fill-primary? (window-fill-buffers)))
-             (result (layout--fit buffers capacity)))
-    (cond ((>= (length result) capacity) result)
-          ((null? rest) result)
-          ((member (car rest) result) (loop (cdr rest) result))
-          (else (loop (cdr rest) (append result (list (car rest))))))))
+  ;; The fill list costs a walk of every live buffer, so only pay for it when
+  ;; the fit actually came up short. The common case -- more buffers than
+  ;; panes -- now costs nothing.
+  (let ((fitted (layout--fit buffers capacity)))
+    (if (>= (length fitted) capacity)
+        fitted
+        (let loop ((rest (filter window-fill-primary? (window-fill-buffers)))
+                   (result fitted))
+          (cond ((>= (length result) capacity) result)
+                ((null? rest) result)
+                ((member (car rest) result) (loop (cdr rest) result))
+                (else (loop (cdr rest) (append result (list (car rest))))))))))
 
 (define (layout--three-columns buffers) (layout--fill-to buffers 3))
 (define (layout--two-panes buffers) (layout--fill-to buffers 2))

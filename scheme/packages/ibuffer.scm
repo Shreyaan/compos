@@ -1413,6 +1413,44 @@
               (set-frame-local! 'listing-preview-target target)
               (listing-preview-copy! owner target))))))
 
+(define (listing-peek-host source copy)
+  ;; the window a card overlays: the largest window that is neither the
+  ;; list's own nor the card itself. #f when the list is alone in the
+  ;; frame — there the popup has to split for itself.
+  (let ((rows (filter (lambda (r) (and (not (equal? (nth 0 r) source))
+                                       (not (equal? (nth 1 r) copy))))
+                      (window-rects))))
+    (and (pair? rows)
+         (nth 0 (let loop ((best (car rows)) (rest (cdr rows)))
+                  (cond ((null? rest) best)
+                        ((> (* (nth 4 (car rest)) (nth 5 (car rest)))
+                            (* (nth 4 best) (nth 5 best)))
+                         (loop (car rest) (cdr rest)))
+                        (else (loop best (cdr rest)))))))))
+
+(define (listing-peek-show! copy source)
+  ;; A card lies over a neighbour. peek-show-in-popup! splits the
+  ;; selected window to make room, which is the list's own window: with
+  ;; anything beside the list that squeezed the list to a third and left
+  ;; the card in a sliver between the two panes. The neighbour keeps its
+  ;; window; the saved tree is what popup-close! puts back.
+  (let ((host (and (not (popup-open?)) (listing-peek-host source copy))))
+    (if (not host)
+        (peek-show-in-popup! copy source)
+        (let ((rect (assoc host (window-rects)))
+              (focus (active-window)))
+          (buffer-set-local! copy 'popup-return-layout (window-tree))
+          (popup-stack-drop! copy)
+          (set-frame-local! 'popup-buffer copy)
+          (set-frame-local! 'popup-window host)
+          (popup-float! copy
+            (if (> (+ (nth 2 rect) (* 0.5 (nth 4 rect))) 0.5) 'right 'left)
+            (plist-get *display-buffer-defaults* 'size))
+          (window-show-buffer! host copy)
+          (when (window-exists? focus) (select-window! focus))
+          (window-state-changed!)
+          (popup-window)))))
+
 (define (listing-preview-copy! owner target)
   (let ((source (if (equal? (window-buffer (active-window)) owner)
                     (active-window) (window-showing owner))))
@@ -1457,7 +1495,7 @@
           (buffer-move-to-group! copy (buffer-group owner))
           (with-layout-suppressed
             (lambda () (with-display-preview
-              (lambda () (peek-show-in-popup! copy source)))))
+              (lambda () (listing-peek-show! copy source)))))
           ;; The floating helper owns its size. These two numeric properties
           ;; anchor the card to a source window and byte position in the UI.
           (buffer-set-local! copy 'window-style

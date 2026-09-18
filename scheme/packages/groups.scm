@@ -1752,7 +1752,29 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; Groups without a history entry trail in record order.
 (define (group-ids-mru)
   ;; this workspace only: the frame's own groups, and the unowned ones
-  (filter group-here? (group-ids-mru-all)))
+  ;;
+  ;; The frame tab bar calls this on every render, so it settles the frame
+  ;; once for the whole pass and reads the records in one sweep. Going
+  ;; through group-here? per id cost two linear scans of the group records
+  ;; each -- group-setting resolves the id and then looks the record up
+  ;; again -- plus a frame-list call per group, to decide which of them may
+  ;; appear in a bar of frame-tabs-limit slots.
+  (let* ((here (selected-frame))
+         (frames (frame-list))
+         (owner-of (lambda (record)
+                     (let loop ((rest (group-record-settings record)))
+                       (cond ((not (pair? rest)) #f)
+                             ((null? (cdr rest)) #f)
+                             ((equal? (car rest) 'frame) (cadr rest))
+                             (else (loop (cddr rest)))))))
+         (mine (fold (lambda (out record)
+                       (let ((owner (owner-of record)))
+                         (if (or (equal? owner here)
+                                 (not (and owner (member owner frames) #t)))
+                             (cons (group-record-id record) out)
+                             out)))
+                     '() *group-records*)))
+    (filter (lambda (id) (and (member id mine) #t)) (group-ids-mru-all))))
 
 (define (group-mru-note! value)
   (let ((id (group-resolve-id value)))
@@ -2907,20 +2929,52 @@ is forgotten and that group falls back to creation order in the switcher."
             ("K" "group-kill") ("b" "group-members")
             ("g" "groups-refresh") ("q" "quit-window"))))
 
+(define (group-members-of names id)
+  ;; Which of NAMES belong to group ID, in the order given.
+  ;;
+  ;; Membership lives on the buffer, so the only way to ask is to look at
+  ;; every buffer. That part is unavoidable; paying a call per buffer is
+  ;; not. One batched read brings back the locals that decide it, and the
+  ;; test is then membership in ID's own handful of aliases -- its id, its
+  ;; name, its origin -- rather than group-resolve-id re-scanning every
+  ;; group record for every buffer. A stale id resolves to nothing, so it
+  ;; simply fails to match. Several ids, the legacy locals, anything the
+  ;; cheap read cannot settle: those few fall through to
+  ;; group-buffer-memberships, which also migrates and prunes them.
+  (if (not id)
+      '()
+      (let* ((record (group-record-by-id id))
+             (aliases (filter (lambda (s) s)
+                              (list id
+                                    (and record (group-record-name record))
+                                    (and record (group-record-origin record)))))
+             (mine? (lambda (s) (and s (member s aliases) #t)))
+             (slow? (lambda (b) (and (member id (group-buffer-memberships b)) #t))))
+        (map car
+             (filter
+               (lambda (row)
+                 (let ((b (list-ref row 0))
+                       (mode (list-ref row 1))
+                       (gid (list-ref row 2))
+                       (gids (list-ref row 3))
+                       (legacy (or (list-ref row 4) (list-ref row 5))))
+                   (cond (legacy (slow? b))
+                         ((equal? mode "chat-mode") (mine? gid))
+                         ((not (pair? gids)) #f)   ; absent reads as #f, not ()
+                         ((null? (cdr gids)) (mine? (car gids)))
+                         (else (slow? b)))))
+               (buffer-read-many
+                 names '()
+                 '("mode-name" "group-id" "group-ids" "group" "companion-of")))))))
+
 (define (group-buffers g)
-  (let ((id (group-resolve-id g)))
-    (if id
-        (filter (lambda (b) (buffer-in-group? b id)) (buffer-list))
-        '())))
+  (group-members-of (buffer-list) (group-resolve-id g)))
 
 ;; Members in MRU order; buffers never visited this session trail.
 ;; A group is a set, so the list dedupes by name.
 (define (group-buffers-mru g)
   (let* ((id (group-resolve-id g))
-         (mru (if id
-                  (filter (lambda (b) (buffer-in-group? b id))
-                          (buffer-list-mru))
-                  '())))
+         (mru (group-members-of (buffer-list-mru) id)))
     (dedupe-names
       (append mru (remove (lambda (b) (member b mru)) (group-buffers id))))))
 

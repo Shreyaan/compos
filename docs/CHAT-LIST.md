@@ -17,52 +17,53 @@ separate `*chat-list*` buffers. A single list in a group of its own was
 tried and reverted — arriving had to cross groups, which dragged the
 frame through that group's whole layout.
 
-## Two panes, and the frame comes back
+## One window, a floating card, and the frame comes back
 
-The window form covers the frame with two panes: the list in
-`chat-list-pane-share` of it (2/3 by default) and the selected chat in
-the rest. The preview is a **real window over the real chat buffer**, not
-a card floated on the rows — you read it the way you read a chat
-anywhere, and `C-x o` into it works.
+The window form takes one window — the one you called it from — and
+previews with the same floating card `ibuffer` floats. One preview
+surface for both listings.
 
-Row movement fills that pane. A heading is not a chat and an archived row
-is a path rather than a buffer, so both leave the pane showing what it
+A two-pane form was tried and reverted. Covering the frame with a 2/3
+list and a 1/3 chat pane meant a chat from one group and a buffer from
+another stood side by side in one viewport, and a pane of the list's own
+left no neighbour for a card to lie over. It also made previewing move
+the frame: the frame derives its group from what it shows, so a pane
+holding a chat from elsewhere walked the frame group to group, and one
+list per group then answered with a different list than the one on
+screen. A card is a copy, never the chat itself in a window, so it moves
+no group and the list needs no pin.
+
+Row movement floats the card. A heading is not a chat and an archived row
+is a path rather than a buffer, so both leave the card showing what it
 last held instead of blanking it. Arriving never lands on a heading:
 grouping by group puts one first, so arrival falls through to the first
 real row, which is what gives you a preview immediately.
 
-Covering the frame is only fair if the frame comes back. The arrangement
-the list covers is recorded on arrival and restored when the list leaves
-— by `q`, and by `RET` too, so the chat you pick lands in the
-arrangement you were working in rather than in the list's two panes.
+Taking a window is only fair if the frame comes back. The arrangement the
+list found is recorded on arrival and restored when the list leaves — by
+`q`, and by `RET` too, so the chat you pick lands in the arrangement you
+were working in.
 
-The minibuffer form has no pane of its own and keeps the floating card.
-
-The list holds the frame's group still for as long as it covers the
-frame. The frame derives its current group from the buffers it shows,
-and the pane shows a chat that usually lives in some other group — so
-previewing walked the frame from group to group as the cursor moved.
-One list per group then answered with a different list buffer than the
-one on screen: the pane stopped following the cursor, and a second
-`*chat-list*` appeared. Arrival pins the group it opened in and records
-it; a frame standing in no group has none to pin, so the preview puts
-the recorded answer back by hand. Leaving hands the frame its own pin
-back and lets the group settle from the windows again, which is what
-lets `RET` enter the chat's own group.
+The minibuffer form keeps its own preview: it reads the chat into the
+window it was invoked from, the way `C-x b` does.
 
 ## Listing buffers and floating peek cards
 
 `M-x ibuffer` opens an ordinary listing buffer in the window that invoked
 it, reusing a matching one in the current group without selecting another
 window that shows it. Different groups get separate listing buffers. The
-rows identify buffers. The card described below is ibuffer's preview.
-Neither chat surface uses it: the window form previews into its pane and
-the minibuffer form previews into the window it was invoked from, both
-over the real chat buffer. `chat-list-mode` overrides the row-preview
-callback, and that override used to send the minibuffer form to the card
-— so the chat prompt read `*listing-preview:FRAME*`, an isolated text
-copy, in a popup instead of the chat. It now hands that form to
-`ibuffer-preview!`, which is the same path `C-x b` takes.
+rows identify buffers. Both window listings — ibuffer and the chat list —
+preview with the card described below. Only the minibuffer forms do not:
+they read the real buffer into the window they were invoked from, the way
+`C-x b` does.
+
+A card lies **over a neighbouring window**, and the list keeps its own
+window whole. It used to split the list's own window to make room, which
+with anything beside the list squeezed the list to a third and left the
+card in a sliver between the two panes. The tree the card covered is
+saved on the card buffer, so dismissing it puts the neighbour back
+exactly. Alone in the frame the list has no neighbour to cover, and the
+card takes a split of its own — the only way to show one at all.
 
 Row navigation shows a **Preview** card after a short pause. The card is inset
 from the window borders, raised with a soft shadow, and connected by a line

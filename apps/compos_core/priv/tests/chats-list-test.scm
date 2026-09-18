@@ -109,25 +109,24 @@
     (check-equal! (ibuffer-row-kind "*zz-chats-a*") 'chat "a chat row wears the chat kind")
     (check-contains! (buffer-text *chat-list*) "Chats" "the title")
     (check-contains! (buffer-text *chat-list*) "3 chats" "the noun is chat")
+    (check-equal! (list-key-lines *chat-list*) '() "no key bar stands over the rows")
     (chats-test-reset!)))
 
 (deftest 'the-list-arrives-in-the-invoking-group
-  "one arrival: the invoking group, two panes, the list holding the focus"
+  "one arrival: the invoking group, one window, the list holding the focus"
   (lambda ()
     (let ((groups (chats-test-open! 'group 'name)))
       ;; a frame with no group yet cannot say where the list belongs, so
       ;; stand in a real group before asking
       (switch-to-group! (car groups))
+      (delete-other-windows!)
       (run-command "chat-list")
       (set! *chat-list* (chat-list-buffer))
       (check-equal! (buffer-group *chat-list*) (frame-group)
                     "the listing belongs to the group it opened in"))
-    (check-equal! (length (window-list)) 2 "the list and the pane it previews into")
     (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
-    (let ((pane (chat-list-preview-window)))
-      (check-true! (and pane (window-exists? pane)) "the preview is a real window")
-      (check-true! (not (equal? pane (active-window)))
-                   "and it is the other one, so the list keeps the cursor"))
+    (check-equal! (buffer-local *chat-list* 'ibuffer-prompt-home-window) #f
+                  "the application form previews with a card, not into a home window")
     (chats-test-reset!)))
 
 (deftest 'arriving-is-a-request-to-look
@@ -137,8 +136,11 @@
     (let ((row (list-current *chat-list*)))
       (buffer-set-local! *chat-list* 'listing-peek-dismissed-row row)
       (run-command "chat-list")
-      (check-equal! (window-buffer (chat-list-preview-window)) row
-                    "arriving looks again at the row you left on"))
+      (check-equal! (buffer-local *chat-list* 'listing-peek-dismissed-row) #f
+                    "arriving looks again at the row you left on")
+      (listing-preview! *chat-list* row)
+      (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) row
+                    "and the card is the row you left on"))
     (chats-test-reset!)))
 
 (deftest 'the-two-surfaces-are-bound-apart
@@ -151,19 +153,33 @@
     (check-true! (ibuffer-view? *chat-prompt-buffer*) "the form's view is registered")))
 
 (deftest 'the-row-at-point-previews-its-chat
-  "the row under the cursor is the buffer in the other pane, not a card over the rows"
+  "the row under the cursor floats the same card ibuffer floats, over the window beside the list"
   (lambda ()
     (chats-test-open! 'none 'name)
-    (chat-list-preview!)
-    (let ((pane (chat-list-preview-window))
-          (row (list-current *chat-list*)))
-      (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
-      (check-equal! (window-buffer pane) row "the pane shows it")
-      (check-equal! (popup-open?) #f "and no card was floated to do it"))
+    (delete-other-windows!)
+    (test-buffer! "*zz-chats-side*" "work beside the list")
+    (let ((home (active-window)))
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer-here! "*zz-chats-side*")
+      (select-window! home)
+      (let ((side (other-window-id home))
+            (row (list-current *chat-list*)))
+        (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
+        (listing-preview! *chat-list* row)
+        (check-true! (popup-open?) "a card is floated")
+        (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) row
+                      "and it reads the row at point")
+        (check-equal! (popup-window) side
+                      "the card lies over the window beside the list, not a pane split off it")
+        (check-equal! (window-buffer home) *chat-list*
+                      "so the list keeps its own window whole")))
+    (listing-preview-dismiss! *chat-list*)
+    (buffer-kill! "*zz-chats-side*")
     (chats-test-reset!)))
 
 (deftest 'previewing-another-group-holds-the-frame-still
-  "the pane reads a chat from some other group; the frame does not follow it there"
+  "the card reads a chat from some other group; the frame does not follow it there"
   (lambda ()
     (chats-test-open! 'none 'name)
     (let ((home (frame-group))
@@ -173,24 +189,29 @@
           (list-move-in! view 1)
           (loop (+ n 1))))
       (check-equal! (list-current view) "*zz-chats-c*" "the cursor reached the other group's chat")
-      (check-equal! (window-buffer (chat-list-preview-window)) "*zz-chats-c*" "the pane shows it")
+      (listing-preview! view "*zz-chats-c*")
+      (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) "*zz-chats-c*"
+                    "the card shows it")
+      ;; a card is a copy, never the chat itself in a window of the
+      ;; frame, so the frame has nothing new to derive a group from
       (check-equal! (frame-group) home "the frame stayed in the group the list opened in")
       (check-equal! (chat-list-buffer) view "so the list is still the one on screen"))
     (chats-test-reset!)))
 
-(deftest 'the-held-group-goes-back-when-the-list-leaves
-  "the list holds the frame's group while it covers the frame, and no longer"
+(deftest 'the-list-does-not-pin-the-frames-group
+  "the list takes a window beside your work, so it has no claim on the frame's group"
   (lambda ()
     (chats-test-reset!)
     (let ((before (frame-local 'pinned-group)))
       (chats-test-open! 'none 'name)
-      (check-equal! (frame-local 'pinned-group) (frame-group) "held while the list stands")
+      (check-equal! (frame-local 'pinned-group) before
+                    "standing pins nothing: previewing is a card, and a card moves no group")
       (run-command "chat-list-quit")
-      (check-equal! (frame-local 'pinned-group) before "and the frame's own pin comes back"))
+      (check-equal! (frame-local 'pinned-group) before "and leaving changes nothing either"))
     (chats-test-reset!)))
 
 (deftest 'leaving-hands-the-frame-back
-  "the list covers the frame, so q restores the arrangement it covered"
+  "the list took a window, so q gives that window back what it held"
   (lambda ()
     (chats-test-reset!)
     (chats-test-chat! "*zz-chats-a*" #f)
@@ -198,11 +219,12 @@
     (switch-to-buffer-here! "*zz-chats-a*")
     (let ((before (length (window-list))))
       (run-command "chat-list")
-      (check-equal! (length (window-list)) 2 "the list covered it with two panes")
+      (check-equal! (window-buffer (active-window)) (chat-list-buffer)
+                    "the list stands in the window it took")
       (run-command "chat-list-quit")
       (check-equal! (length (window-list)) before "and gave the arrangement back")
       (check-equal! (window-buffer (active-window)) "*zz-chats-a*"
-                    "showing what it covered"))
+                    "showing what it displaced"))
     (chats-test-reset!)))
 
 (deftest 'the-resting-list-is-flat-and-most-recent-first

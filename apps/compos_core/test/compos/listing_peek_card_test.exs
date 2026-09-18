@@ -64,8 +64,8 @@ defmodule Compos.ListingPeekCardTest do
     end
   end
 
-  # Only ibuffer previews with a floating card. The chat list previews
-  # into a real pane it opens beside itself, so it floats nothing — see
+  # Both listings preview with the same floating card. This drives
+  # ibuffer's key handling; the chat list's card is covered by
   # the-row-at-point-previews-its-chat in chats-list-test.scm.
   for command <- ["ibuffer"] do
     @command command

@@ -2190,7 +2190,13 @@ defmodule Compos.Core.Editor do
       if Buffer.exists?(buffer), do: wp_safely(fn -> Buffer.drop_win_point(buffer, id) end)
     end)
 
-    {tree, next_win} = build_tree(spec, state.next_win)
+    # A retile rearranges panes; it does not make new ones. Minting a fresh
+    # id for every leaf told the client that every pane was new, so it re-sent
+    # each pane's whole buffer -- one arrow key in window-layout cost a patch
+    # the size of every visible buffer. Keep the ids the frame already had.
+    old_panes = leaf_ids_buffers(f.tree)
+    {tree, _minted} = build_tree(spec, state.next_win)
+    {tree, next_win} = reuse_window_ids(tree, old_panes, state.next_win)
 
     Enum.each(leaf_ids_buffers(tree), fn {_id, buffer} ->
       Compos.Core.ensure_buffer(buffer)
@@ -2992,6 +2998,50 @@ defmodule Compos.Core.Editor do
     {ta, n} = build_tree(a, n)
     {tb, n} = build_tree(b, n)
     {%{type: :split, dir: dir, ratio: ratio, children: [ta, tb]}, n}
+  end
+
+  # Lay the frame's existing window ids back over a freshly built tree, in
+  # leaf order, minting only for panes the old tree did not have. Pane
+  # identity survives a retile, so the client patches geometry instead of
+  # re-sending every buffer.
+  defp reuse_window_ids(tree, old_panes, next_win) do
+    {ids, next_win} = window_ids_for(leaf_buffers(tree), old_panes, next_win)
+    {tree, _left, _n} = relabel_leaves(tree, ids, next_win)
+    {tree, next_win}
+  end
+
+  defp leaf_buffers(tree), do: tree |> leaf_ids_buffers() |> Enum.map(&elem(&1, 1))
+
+  # A pane takes the id that already showed its buffer, so a retile moves and
+  # resizes the pane the reader is looking at rather than replacing it. Going
+  # by position alone re-sent a pane's whole buffer whenever a layout put a
+  # different buffer in that slot -- megabytes per arrow key in window-layout.
+  defp window_ids_for(buffers, old_panes, next_win) do
+    {matched, spare} =
+      Enum.map_reduce(buffers, old_panes, fn buf, avail ->
+        case Enum.find(avail, fn {_id, b} -> b == buf end) do
+          nil -> {nil, avail}
+          pair -> {elem(pair, 0), List.delete(avail, pair)}
+        end
+      end)
+
+    {ids, _spare, next_win} =
+      Enum.reduce(matched, {[], spare, next_win}, fn
+        nil, {acc, [{id, _} | rest], n} -> {[id | acc], rest, n}
+        nil, {acc, [], n} -> {[n | acc], [], n + 1}
+        id, {acc, avail, n} -> {[id | acc], avail, n}
+      end)
+
+    {Enum.reverse(ids), next_win}
+  end
+
+  defp relabel_leaves(%{type: :leaf} = leaf, [id | rest], n), do: {%{leaf | id: id}, rest, n}
+  defp relabel_leaves(%{type: :leaf} = leaf, [], n), do: {%{leaf | id: n}, [], n + 1}
+
+  defp relabel_leaves(%{type: :split, children: [a, b]} = node, ids, n) do
+    {a, ids, n} = relabel_leaves(a, ids, n)
+    {b, ids, n} = relabel_leaves(b, ids, n)
+    {%{node | children: [a, b]}, ids, n}
   end
 
   defp leaf_ids_buffers(%{type: :leaf, id: id, buffer: b}), do: [{id, b}]
