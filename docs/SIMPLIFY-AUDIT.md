@@ -1214,6 +1214,9 @@ a per-command trace, not a duplicate of the telemetry rows) and the SVG
 panels of perf.scm (perf-toggle-text already gives the plain table).
 The lane slow-job warning stays beside its telemetry row: the freeze
 triage of 2026-08 read the log, and the line is one Logger call.
+Ruled (2026-09-19): "unless there is something wrong with them they are
+all useful in their own right". M-x profile and the perf panels stay;
+step 1 closes with the dashboard removal.
 
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
