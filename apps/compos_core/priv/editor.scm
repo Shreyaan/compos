@@ -296,10 +296,6 @@
 ;; the closure behind a command, from the one table
 (define (command-function name) (command-fn name))
 
-(define (command-interactive-spec name)
-  (let ((e (catalog-entry 'command name)))
-    (and e (catalog--get e 'spec))))
-
 ;; (command-call NAME ARG ...): run the command with ARGS. A command with
 ;; no spec takes none; with none given, a spec collects them.
 (define (command-call name &rest args)
@@ -870,13 +866,6 @@
 (define (list-filter-clear! buf)
   (buffer-set-local! buf 'list-filters '())
   (list-redraw! buf))
-
-;; what you typed reads back as you typed it; a kind the mode invented
-;; says its name
-(define (list-filters-label buf)
-  (if (null? (list-filters buf))
-      ""
-      (string-append "   ·  " (list-filters-text buf))))
 
 ;;; --- `/` narrows --------------------------------------------------------------
 ;;; One filter, for every list. You press `/` and type; the list narrows
@@ -1736,15 +1725,6 @@
                                   (else i)))))
           (when target (list-goto-index! buf target)))))))
 
-;; Some lists show state that other commands change: ibuffer shows the
-;; buffers, and C-x k kills one from anywhere. Such a mode gives a
-;; 'stamp fn — a cheap value that moves when the rows move. The list
-;; compares the stamp after every command and re-renders when it
-;; differs, so a verb never acts on a row that is gone.
-(define (list-stamp! buf)
-  (let ((f (list-opt buf 'stamp)))
-    (when f (buffer-set-local! buf 'list-stamp (f buf)))))
-
 (define (list-restamp! buf)
   (let ((f (list-opt buf 'stamp)))
     (when f
@@ -1803,12 +1783,6 @@
       (list-ensure-shown! buf (+ i (window-rows)))
       (move-lines (- (window-rows) 2) next-line!)
       (list-snap-point! buf))))
-
-(define-command "list-more" "Draw the next page of this list"
-  (lambda ()
-    (if (list-more? (current-buffer))
-        (list-more! (current-buffer))
-        (message "Every row is shown"))))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -1991,12 +1965,6 @@
           (message "no filter")
           (begin (list-filter-pop! buf)
                  (list-goto-first-entry buf))))))
-
-(define-command "list-filter-clear" "Drop every filter on this list"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (list-filter-clear! buf)
-      (list-goto-first-entry buf))))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -2776,60 +2744,6 @@
   "(preview-select! WIN BEFORE AFTER WB WA NTH WN DIR) — extend the region to a rendered position"
   'interaction)
 
-;; Render-only widgets know their exact source ranges. Unlike preview-goto!,
-;; these do not need to reverse-map rendered prose into Markdown.
-(define (preview-goto-pos! win pos extend)
-  (mouse-select-window! win)
-  (when extend (unless (mark) (set-mark! (point))))
-  (unless extend (set-mark! #f))
-  (goto-char! (max 0 (min pos (buffer-size (current-buffer))))))
-(public! 'preview-goto-pos!
-  "(preview-goto-pos! WIN POS EXTEND) — move to an exact preview source position"
-  'interaction)
-
-;; A click on a link in a rendered page. The client never follows the link
-;; itself — it sends the href here, and Scheme says what the link means.
-;; A link the editor owns reads "compos:VERB/ARGUMENT": a package claims a
-;; verb with on-preview-link!, the way it claims a display rule. help.scm
-;; claims "def", which opens the source of a name. An ordinary URL opens
-;; in the reader.
-(define *preview-link-verbs* '())
-
-(define (on-preview-link! verb fn)
-  (set! *preview-link-verbs*
-    (cons (list verb fn)
-          (filter (lambda (e) (not (equal? (car e) verb))) *preview-link-verbs*))))
-
-;; "compos:def/find-file" -> ("def" "find-file"). The argument keeps its own
-;; slashes, so a qualified name survives the split.
-(define (preview--link-parts href)
-  (let* ((body (string-join (cdr (string-split href ":")) ":"))
-         (parts (string-split body "/")))
-    (list (car parts) (string-join (cdr parts) "/"))))
-
-(define (preview-follow-link! win href)
-  (mouse-select-window! win)
-  (cond
-    ((string-prefix? "compos:" href)
-     (let* ((parts (preview--link-parts href))
-            (hit (assoc (car parts) *preview-link-verbs*)))
-       (if hit
-           ((cadr hit) (cadr parts))
-           (message (string-append "No handler for " href)))))
-    ((and (or (string-prefix? "http://" href) (string-prefix? "https://" href))
-          (boundp 'browse))
-     (browse href))
-    (else (message href))))
-
-(public! 'on-preview-link!
-  "(on-preview-link! VERB FN) — claim the compos:VERB/ARG links in a rendered page; FN gets ARG"
-  'interaction)
-(public! 'preview-follow-link!
-  "(preview-follow-link! WIN HREF) — follow a link a reader clicked in a rendered page"
-  'interaction)
-(catalog-meta! 'function "on-preview-link!" 'domain 'interaction 'effects '(write))
-(catalog-meta! 'function "preview-follow-link!" 'domain 'interaction 'effects '(write))
-
 (define-command "newline" "Insert a newline at point" (interactive 'p)
   (lambda (n) (repeat-count n (lambda () (insert! "\n")))))
 (define (delete-active-region!)
@@ -2869,8 +2783,6 @@
 
 ;; the Emacs names
 (define (kill-new text) (kill-push! text))
-(define (current-kill n) (kill-nth n))
-
 (define-command "kill-line" "Kill text from point to end of line" (interactive 'p)
   (lambda (n)
     (let loop ((i 0) (acc ""))
@@ -2995,8 +2907,6 @@
 ;;; panel is a shape a prompt wears for as long as it is open.
 
 (define minibuffer-default-shape "minibuffer")
-
-(define *minibuffer-shapes* '("minibuffer" "panel" "modal"))
 
 ;;; --- the dock ------------------------------------------------------------
 ;;; A dock is a pane of the FRAME. split-root! splits the whole tree, so
@@ -3268,15 +3178,6 @@
 ;; the Emacs readers, each a completing-read of one kind
 (define (read-string prompt k &rest opts)
   (apply completing-read (append (list prompt '() k) opts)))
-
-(define (read-number prompt k &rest opts)
-  (apply completing-read
-    (append (list prompt '()
-                  (lambda (v) (let ((n (string->number v))) (k (if (number? n) n 0)))))
-            opts)))
-
-(define (read-buffer prompt k &rest opts)
-  (apply completing-read (append (list prompt (buffer-list) k 'category 'buffer) opts)))
 
 ;; the history ring: M-p walks back through what this prompt was answered
 ;; with, M-n forward, and past the newest the input comes back
@@ -3872,16 +3773,6 @@
       (filter (lambda (b)
                 (and (buffer-exists? b) (buffer-wears-mode? b modes)))
               (buffer-list))))
-
-;; Re-run mode setup wherever one of MODES is worn. Returns the number of
-;; buffers rebuilt. restore-buffer-runtime! is desktop restore's entry: it
-;; re-runs the major setup and every minor setup with the buffer current,
-;; the layout engine suppressed, and the buffer neither displayed nor
-;; selected. So the frame does not move and the point does not jump.
-(define (reload-refresh-modes! modes)
-  (let ((bs (reload--mode-buffers modes)))
-    (for-each restore-buffer-runtime! bs)
-    (length bs)))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -5297,8 +5188,6 @@
 (define (ts-mode lang)
   (lambda () (buffer-set-local! (current-buffer) 'ts-lang lang)))
 
-(define-mode "html-mode" (ts-mode "html"))
-
 (mode-doc! "html-mode"
   "HTML, parsed. You get the colours, and `C-M-f` and `C-M-b` step over whole elements. `C-c C-v` shows the rendered page, because the renderer reads the extension. `C-c C-a` runs the page as an app: its own scripts, its own storage, and the files beside it. A save reloads it, and `C-g` gives the keyboard back.")
 
@@ -5335,7 +5224,6 @@
 ;; keeps the keys, and preview.scm binds the same three.
 
 (define-mode "elixir-mode" (ts-mode "elixir"))
-(define-mode "json-mode" (ts-mode "json"))
 (define-mode "rust-mode" (ts-mode "rust"))
 
 ;; A language mode sets one buffer-local: `ts-lang`. That local starts the
@@ -5628,14 +5516,6 @@
 ;; window split/resize animations — CSS falls back to 140ms when the
 ;; chrome face doesn't say otherwise; this flips it to 0ms and back
 (define *window-animations* #t)
-
-(define-command "toggle-window-animations" "Toggle window split and resize animations"
-  (lambda ()
-    (set! *window-animations* (not *window-animations*))
-    (set-face-attribute! 'chrome 'anim (if *window-animations* "140ms" "0ms"))
-    (message (if *window-animations*
-                 "Window animations on"
-                 "Window animations off"))))
 
 (define-command "back-to-indentation" "Move point to the first non-space on this line"
   (lambda ()
@@ -5991,14 +5871,6 @@
 (define *font-lock-keywords* '())     ; ((MODE (REGEXP FACE) ...) ...)
 (define *font-lock-hooks* '())        ; ((BUF HANDLE) ...)
 
-(define (font-lock-add-keywords! mode keywords)
-  (set! *font-lock-keywords*
-    (hook--alist-put *font-lock-keywords* mode
-      (append (hook--alist-get *font-lock-keywords* mode)
-              (filter (lambda (k) (not (member k (hook--alist-get *font-lock-keywords* mode))))
-                      keywords))))
-  mode)
-
 (define (font-lock-set-keywords! mode keywords)
   (set! *font-lock-keywords* (hook--alist-put *font-lock-keywords* mode keywords))
   mode)
@@ -6178,9 +6050,6 @@
              (let ((t (buffer-local b 'last-seen)))
                (when (number? t) (buffer-seen-memo! b t))
                (and (number? t) t))))))
-
-(define (buffer-created-at b)
-  (and (buffer-known? b) (let ((t (buffer-local b 'created-at))) (and (number? t) t))))
 
 ;; The other half. A dormant buffer is absent from (buffer-list), so a
 ;; pass over the open buffers cannot reach it while it sleeps, and it
@@ -9732,12 +9601,6 @@
                         (car (if (null? (cdr ws)) (car wins) (car (cdr ws)))))
                        (else (loop (cdr ws))))))))))
 
-(define (scroll-other-window-by! delta)
-  (let ((target (scroll-other-window-target)))
-    (if target
-        (scroll-window! target delta)
-        (message "No other window"))))
-
 ;; A page belongs to the window that scrolls, never to the window the key
 ;; was pressed in: the two can differ in height and in line height.
 ;;
@@ -9757,19 +9620,6 @@
     (if target
         (scroll-window! target (* sign (window-page-rows target)))
         (message "No other window"))))
-
-;; the popup by name, for a binding of your own; nothing else scrolls
-(define-command "scroll-popup" "Scroll the popup up nearly a full screen"
-  (lambda ()
-    (if (popup-open?)
-        (scroll-window! (popup-window) (window-page-rows (popup-window)))
-        (message "No popup"))))
-
-(define-command "scroll-popup-down" "Scroll the popup down nearly a full screen"
-  (lambda ()
-    (if (popup-open?)
-        (scroll-window! (popup-window) (- (window-page-rows (popup-window))))
-        (message "No popup"))))
 
 (define-command "scroll-other-window" "Scroll the next window up nearly a full screen"
   (lambda () (scroll-other-window-page! 1)))
@@ -10503,20 +10353,6 @@
   (let ((ranges (llm-mode--response-ranges buf)))
     (when (pair? ranges) (buffer-set-local! buf 'llm-responses ranges))
     (llm-mode--paint! buf)))
-
-;; The legacy writer remains for restored transcripts without block records.
-(define (llm-mode--stream-range! buf start end replace-last)
-  (let* ((ranges (or (buffer-local buf 'llm-responses) '()))
-         (before (if (and replace-last (pair? ranges))
-                     (reverse (cdr (reverse ranges)))
-                     ranges)))
-    (buffer-set-local! buf 'llm-responses
-      (append before (list (list start end))))
-    (llm-mode--paint! buf)))
-
-(define (llm-mode--last-response-start buf)
-  (let ((range (llm-mode--last-response-range buf)))
-    (and range (car range))))
 
 (define (llm-mode--stateful? buf)
   (not (connector-can? (buffer-llm-connector buf) 'stateless)))
@@ -12852,9 +12688,6 @@
 (define (dash--seg-rule)
   (list 'tag "span" 'class "dseg-rule"))
 
-(define (dash--seg-gap)
-  (list 'tag "span" 'class "dseg-gap"))
-
 ;; The header names the major mode. The expanded modes card lists minors.
 (define (dash--mode-segs buf)
   (let* ((mode (buffer-local buf 'mode-name))
@@ -14083,7 +13916,6 @@
 (public! 'call-interactively "(call-interactively NAME) — run NAME as a key would, collecting its arguments from the spec")
 (public! 'kill-text! "(kill-text! TEXT [BEFORE?]) — TEXT onto the kill ring: appended to the newest entry after a kill command, else as a new entry")
 (public! 'kill-new "(kill-new TEXT) — a new kill-ring entry")
-(public! 'current-kill "(current-kill N) — kill-ring entry N, 0 the newest")
 (public! 'prefix-numeric-value
   "(prefix-numeric-value RAW) -> RAW as an integer; #f becomes 1")
 
@@ -14822,9 +14654,6 @@
                    "&socket=" (url-encode (compos-socket-path))
                    (if n (string-append "&line=" (number->string n)) ""))))
 
-(define (buffer-raw-link &optional buf)
-  (string-append (editor-url) "/raw/" (url-encode (or buf (current-buffer)))))
-
 (effects! '(write))
 
 (define-command "copy-buffer-link"
@@ -15036,8 +14865,6 @@
 (catalog-meta! 'function "buffer-sleep!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-last-seen "(buffer-last-seen NAME) — unix seconds when NAME was last shown in the active window, or #f; reads without waking a dormant buffer")
 (catalog-meta! 'function "buffer-last-seen" 'domain 'buffers 'effects '(read))
-(public! 'buffer-created-at "(buffer-created-at NAME) — unix seconds when NAME was made, or #f")
-(catalog-meta! 'function "buffer-created-at" 'domain 'buffers 'effects '(read))
 (public! 'buffer-note-seen! "(buffer-note-seen! NAME) — stamp NAME as seen now, at most one write a minute")
 (catalog-meta! 'function "buffer-note-seen!" 'domain 'buffers 'effects '(write))
 (effects! '(read))
@@ -15087,7 +14914,6 @@
 (effects! '(read))
 (public! 'buffer-link "(buffer-link [NAME] [LINE]) -> a URL that opens the buffer here; no NAME means this buffer at point")
 (public! 'compos-link "(compos-link [NAME] [LINE]) -> an compos:// URL for the buffer and line; no NAME means this buffer at point")
-(public! 'buffer-raw-link "(buffer-raw-link [NAME]) -> a URL that serves the buffer text as plain text")
 (effects! '(write))
 (public! 'open-buffer-link! "(open-buffer-link! NAME LINE) — show the buffer a link names; LINE may be #f")
 (catalog-meta! 'function "open-buffer-link!" 'domain 'buffers 'effects '(write display))
@@ -15296,7 +15122,6 @@
 (catalog-meta! 'function "mode-label" 'domain 'interaction 'effects '(pure))
 (catalog-meta! 'function "buffer-icon" 'domain 'interaction 'effects '(read))
 (catalog-meta! 'function "file-icon" 'domain 'interaction 'effects '(pure))
-(public! 'font-lock-add-keywords! "(font-lock-add-keywords! MODE ((REGEXP FACE) ...)) — every match wears FACE in MODE's buffers; a derived mode inherits")
 (public! 'font-lock-set-keywords! "(font-lock-set-keywords! MODE KEYWORDS) — replace MODE's keywords")
 (public! 'font-lock-keywords "(font-lock-keywords MODE) — the keywords of MODE and its parents")
 (public! 'font-lock-refontify! "(font-lock-refontify! BUF) — paint BUF's font-lock keywords now")
@@ -15321,8 +15146,6 @@
 (public! 'read-char "(read-char PROMPT K) — the next key; K gets the character, or #f on C-g")
 (public! 'completing-read "(completing-read PROMPT COLLECTION K 'predicate FN 'require-match #t 'initial TEXT 'default TEXT 'history SYM 'category SYM 'style SYM) — Emacs's completing-read, asynchronous: K gets the choice. COLLECTION is rows or a procedure of the input")
 (public! 'read-string "(read-string PROMPT K [OPTS ...]) — a line of text; K gets it")
-(public! 'read-number "(read-number PROMPT K [OPTS ...]) — a number; K gets it, 0 for not a number")
-(public! 'read-buffer "(read-buffer PROMPT K [OPTS ...]) — a buffer name; K gets it")
 (public! 'read-char-choice "(read-char-choice PROMPT CHARS K) — one key from CHARS; K gets it, or #f on C-g")
 (public! 'y-or-n-p "(y-or-n-p PROMPT K) — one key; K gets #t for y, #f for n or C-g")
 (public! 'yes-or-no-p "(yes-or-no-p PROMPT K) — the word yes or no; K gets #t or #f")
