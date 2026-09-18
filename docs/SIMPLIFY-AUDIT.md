@@ -864,6 +864,14 @@ and top-level `unless` forms that define when missing. The dead C-x b
 line in editor.scm went; switch.scm's binding was the live one. The
 C-_ and C-t overrides are deliberate per their comments (undo keeps C-/
 and C-x u), so they stand.
+Item 16 of section 3, second half, checked and left: the 37 Emacs face
+names in themes.scm are `defface!` forms that inherit a compos face, and
+the section's own comment says they exist so a package written for
+Emacs finds font-lock-keyword-face; a reference count does not decide
+an API surface. The four palettes restate the ts faces because
+load-theme writes only the faces a theme names, as the paper palette's
+comment says; a base palette with overrides changes that contract and
+waits.
 Item 16 of section 3, first half: transient.scm and chrome.scm are
 packages in scheme/packages, loaded from init.scm (transient first, a
 package defines its prefixes at load; chrome after dired, sentry and
