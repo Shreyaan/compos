@@ -5,9 +5,11 @@ window.addEventListener("phx:page-loading-stop", () => {
 });
 
 
+// the same named keys as the desktop client (app.js NAMED)
 const NAMED = {
-  Enter: "RET", Backspace: "DEL", Tab: "TAB", Escape: "ESC", " ": "SPC",
-  ArrowUp: "<up>", ArrowDown: "<down>", ArrowLeft: "<left>", ArrowRight: "<right>"
+  Enter: "RET", Backspace: "DEL", Delete: "<delete>", Tab: "TAB", Escape: "ESC", " ": "SPC",
+  ArrowUp: "<up>", ArrowDown: "<down>", ArrowLeft: "<left>", ArrowRight: "<right>",
+  Home: "<home>", End: "<end>", PageUp: "<prior>", PageDown: "<next>"
 };
 const keyOf = (ch) => NAMED[ch] || ch;
 

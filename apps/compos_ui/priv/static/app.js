@@ -1358,10 +1358,6 @@
       },
       disconnected() { this.clientErrorsConnected = false; },
       reconnected() { this.clientErrorsConnected = true; this.bootCheck(); },
-      updated() {
-        if (this.bootCheck()) return;
-        if (this.syncCursorFocus) this.syncCursorFocus();
-      },
       mounted() {
         if (this.bootCheck()) return;
         Telem.attach(this);
