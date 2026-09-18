@@ -411,6 +411,8 @@
                          (if t (symbol->string t) "?"))
                        " failed — transcript may be missing a piece"))))
         events)
+      ;; the rich view follows the batch: one tree per batch, not per event
+      (chat-view-sync! (agent-buf slug))
       ;; a document's hidden chat renders its reply into the document too:
       ;; every event but the permission, which this handler answered
       (let ((target (buffer-local (agent-buf slug) 'inline-target)))

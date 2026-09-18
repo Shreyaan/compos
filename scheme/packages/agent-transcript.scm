@@ -685,3 +685,287 @@
                 (if (equal? (string-trim draft) "")
                     texts
                     (append texts (list draft)))))))))
+
+;;; --- the rich view: the chat as a block tree ----------------------------------
+;;; A rich chat renders through the generic "blocks" mode. This section maps
+;;; the block model ('agent-blocks, the open cards, the verbosity, the queue
+;;; and the activity word) to the tree in 'render-blocks. The tree holds byte
+;;; ranges, not text: the view draws the buffer's own bytes. A memo keeps the
+;;; view of each transcript block, so a streamed event costs the views of the
+;;; blocks it changed. chat-view-sync! runs after each event batch, after
+;;; each command in a chat, and in the mode hook.
+
+(effects! '(pure))
+
+;; a rich chat: a transcript with a mark, and a view that is not plain
+(define (chat-rich-view? buf)
+  (and (number? (buffer-local buf 'agent-saved-mark))
+       (equal? (buffer-local buf 'render-mode) "blocks")))
+
+(define (chat-view--label text) (list 'tag "c-label" 'class "ag-label" 'text text))
+
+(define (chat-view--text tag class text) (list 'tag tag 'class class 'text text))
+
+;; the bytes S..E of BUF, clamped to the buffer
+(define (chat-view--slice buf s e)
+  (let* ((size (buffer-size buf))
+         (a (max 0 (min s size)))
+         (b (max a (min e size))))
+    (if (= a b) "" (with-current-buffer buf (lambda () (buffer-substring a b))))))
+
+(define (chat-view--tenths n)
+  (string-append (number->string (quotient n 10)) "." (number->string (remainder n 10))))
+
+;; "340ms", "1.4s", "2m 05s"; #f when the block has no duration
+(define (chat-view-duration-label ms)
+  (cond ((not (and (number? ms) (>= ms 0))) #f)
+        ((< ms 1000) (string-append (number->string ms) "ms"))
+        ((< ms 60000) (string-append (chat-view--tenths (quotient (+ ms 50) 100)) "s"))
+        (else (string-append (number->string (quotient ms 60000)) "m "
+                             (let ((sec (remainder (quotient ms 1000) 60)))
+                               (string-append (if (< sec 10) "0" "") (number->string sec)))
+                             "s"))))
+
+;; what a call added to the context, from its byte count; #f below 4 bytes
+(define (chat-view-token-label bytes)
+  (let ((tokens (quotient bytes 4)))
+    (cond ((< bytes 4) #f)
+          ((< tokens 1000) (string-append "~" (number->string tokens) " tok"))
+          (else (string-append "~" (chat-view--tenths (quotient (+ tokens 50) 100)) "k tok")))))
+
+(define (chat-view--user kind class text)
+  (list 'tag "c-user" 'class class
+        'attrs (list (list "author" "user") (list "kind" kind))
+        'children (list (chat-view--label "YOU")
+                        (list 'tag "c-message-body" 'class "ag-user-text" 'text text))))
+
+(define (chat-view--user-text buf b)
+  (if (and (> (length b) 3) (string? (nth 3 b)))
+      (nth 3 b)
+      (let ((t (string-trim (chat-view--slice buf (nth 0 b) (nth 1 b)))))
+        (if (string-prefix? ">>> you: " t) (substring-bytes t 9 (string-byte-length t)) t))))
+
+(define (chat-view--button class click label)
+  (list 'tag "button" 'class class 'click click 'text label))
+
+;; the tool card: a controlled disclosure. The summary names the call; the
+;; body is the call's own bytes, drawn with the tool result unwrapped.
+(define (chat-view--tool buf b open-cards)
+  (let* ((e (nth 1 b)) (id (nth 3 b)) (title (or (nth 4 b) "")) (verb (nth 5 b))
+         (status (or (nth 6 b) "")) (bs (nth 7 b))
+         (duration (chat-view-duration-label (and (> (length b) 8) (nth 8 b))))
+         (open (if (member id open-cards) #t #f))
+         (split (string-index title ": "))
+         (name (if split (substring-bytes title 0 split) title))
+         (arg (if split (substring-bytes title (+ split 2) (string-byte-length title)) ""))
+         (body (string-trim (chat-view--slice buf bs e)))
+         (tokens (chat-view-token-label (+ (string-byte-length title) (string-byte-length body))))
+         (verb-shown (and (string? verb) (not (member verb '("" "tool" "mcp" "other"))))))
+    (list 'tag "c-toolcall"
+          'attrs (list (list "call" id) (list "name" name) (list "state" status))
+          'children
+          (list
+            (list 'tag "details" 'class (string-append "ag-tool " status) 'open open
+                  'children
+                  (append
+                    (list
+                      (list 'tag "summary" 'click (string-append "chat-card:" id)
+                            'attrs (list (list "aria-label"
+                                               (string-append (if (string? verb) verb "") " " title
+                                                              ", " status ". Toggle call details")))
+                            'children
+                            (append
+                              (list (list 'tag "c-text" 'class "ag-chevron"
+                                          'attrs '(("aria-hidden" "true")) 'text "›")
+                                    (list 'tag "c-text" 'class (string-append "ag-dot " status)))
+                              (if verb-shown (list (chat-view--text "c-text" "ag-verb ag-kind" verb)) '())
+                              (list (list 'tag "c-text" 'class "ag-summary-copy"
+                                          'children
+                                          (append
+                                            (list (list 'tag "c-text" 'class "ag-title"
+                                                        'attrs (list (list "title" title))
+                                                        'children
+                                                        (append
+                                                          (list (chat-view--text "c-text" "ag-tool-name" name))
+                                                          (if (equal? arg "") '()
+                                                              (list (chat-view--text "c-arguments" "ag-arg" arg))))))
+                                            (if open '()
+                                                (list (list 'tag "c-text" 'class "ag-preview"
+                                                            'range (list bs e) 'format "mcp-result-line"))))))
+                              (if (equal? status "done") '()
+                                  (list (list 'tag "c-status" 'class (string-append "ag-tstatus " status)
+                                              'attrs (list (list "state" status)) 'text status)))
+                              (if duration (list (chat-view--text "c-text" "ag-duration" duration)) '())
+                              (if tokens (list (chat-view--text "c-text" "ag-duration ag-tokens" tokens)) '()))))
+                    (if (equal? body "") '()
+                        (list (list 'tag "c-result"
+                                    'children (list (list 'tag "pre" 'class "ag-body"
+                                                          'range (list bs e) 'format "mcp-result")))))))))))
+
+;; the view of one transcript block, or #f for a block the rich view does
+;; not draw (the waiting line: the activity row says it)
+(define (chat-view-block buf b open-cards)
+  (let ((s (nth 0 b)) (e (nth 1 b)) (kind (nth 2 b)))
+    (cond
+      ((equal? kind "user") (chat-view--user "user" "ag-user" (chat-view--user-text buf b)))
+      ((equal? kind "queued") (chat-view--user "queued" "ag-user ag-queued" (chat-view--user-text buf b)))
+      ((equal? kind "prose")
+       (list 'tag "c-agent" 'class "ag-prose"
+             'attrs '(("author" "assistant") ("kind" "prose"))
+             'range (list s e) 'format "markdown"))
+      ((equal? kind "thought")
+       (list 'tag "details" 'class "ag-thought"
+             'children (list (list 'tag "summary" 'text "thought")
+                             (list 'tag "c-group" 'class "ag-thought-text" 'range (list s e)))))
+      ((equal? kind "tool") (chat-view--tool buf b open-cards))
+      ((equal? kind "plan")
+       (list 'tag "c-plan" 'children (list (list 'tag "pre" 'class "ag-plan" 'range (list s e)))))
+      ((equal? kind "permission")
+       (list 'tag "c-permission" 'class "ag-perm" 'attrs '(("kind" "permission"))
+             'children
+             (list (chat-view--text "c-text" "ag-perm-title" (string-append "needs permission — " (nth 3 b)))
+                   (list 'tag "c-toolbar" 'class "ag-perm-actions"
+                         'children
+                         (list (chat-view--button "ag-btn allow" "chat-cmd:agent-permission-allow" "Allow")
+                               (chat-view--button "ag-btn session" "chat-cmd:agent-permission-always" "Always")
+                               (chat-view--button "ag-btn deny" "chat-cmd:agent-permission-deny" "Deny"))))))
+      ((equal? kind "question")
+       (let ((qid (nth 3 b)) (answers (or (nth 6 b) '())))
+         (list 'tag "c-question" 'class "ag-question"
+               'children
+               (list (chat-view--text "c-headline" "ag-question-title" (nth 5 b))
+                     (list 'tag "c-answers" 'class "ag-question-answers"
+                           'children
+                           (map (lambda (i)
+                                  (chat-view--button "ag-btn answer"
+                                    (string-append "chat-answer:" (value->string qid) ":" (number->string i))
+                                    (nth i answers)))
+                                (iota (length answers))))
+                     (chat-view--text "c-hint" "ag-question-hint"
+                                      "Choose an answer or type another reply below.")))))
+      ((equal? kind "status")
+       (list 'tag "c-summary" 'class "ag-status" 'attrs '(("kind" "status"))
+             'children (list (chat-view--label "SUMMARY")
+                             (list 'tag "c-group" 'class "ag-status-text" 'range (list s e)))))
+      ((equal? kind "image")
+       (let ((path (nth 3 b)))
+         (list 'tag "c-user" 'class "ag-user ag-image"
+               'attrs '(("author" "user") ("kind" "image"))
+               'children (list (chat-view--label "YOU")
+                               (list 'tag "img" 'class "ag-image-img" 'file path
+                                     'attrs (list (list "alt" (file-name-nondirectory path))
+                                                  (list "title" (file-name-nondirectory path))))))))
+      ((equal? kind "eval")
+       (list 'tag "c-eval" 'class "ag-eval" 'attrs '(("kind" "eval"))
+             'children (list (list 'tag "pre" 'class "ag-eval-text" 'range (list s e)))))
+      ((equal? kind "meta")
+       (list 'tag "c-info" 'class "ag-meta" 'attrs '(("kind" "meta")) 'range (list s e)))
+      (else #f))))
+
+;; The memo per buffer: (RAW OPEN VIEWS SIG). RAW is 'agent-blocks as last
+;; built (newest first), VIEWS their views in the same order.
+(define *chat-view-memo* '())
+
+(define (chat-view--memo buf)
+  (let ((m (assoc buf *chat-view-memo*))) (and m (cadr m))))
+
+(define (chat-view--memo-set! buf entry)
+  (set! *chat-view-memo*
+    (cons (list buf entry)
+          (filter (lambda (m) (and (not (equal? (car m) buf)) (buffer-exists? (car m))))
+                  *chat-view-memo*))))
+
+;; the views of RAW, newest first. The common events push a block or change
+;; the newest one; both reuse every older view without a walk.
+(define (chat-view--views buf raw open m)
+  (let ((old-raw (and m (nth 0 m))) (old-views (and m (nth 2 m))))
+    (cond
+      ((not (and m (equal? (nth 1 m) open)))
+       (map (lambda (b) (chat-view-block buf b open)) raw))
+      ((equal? raw old-raw) old-views)
+      ((and (pair? raw) (equal? (cdr raw) old-raw))
+       (cons (chat-view-block buf (car raw) open) old-views))
+      ((and (pair? raw) (pair? old-raw) (equal? (cdr raw) (cdr old-raw)))
+       (cons (chat-view-block buf (car raw) open) (cdr old-views)))
+      (else
+       (let ((pairs (map list old-raw old-views)))
+         (map (lambda (b)
+                (let ((hit (assoc b pairs)))
+                  (if hit (cadr hit) (chat-view-block buf b open))))
+              raw))))))
+
+(define (chat-view-tree buf children verbosity queued activity)
+  (append
+    (list (list 'tag "c-transcript" 'class (string-append "ag-scroll ag-verbosity-" verbosity)
+                'isolate #t 'follow #t 'anchor "transcript"
+                'attrs (list (list "verbosity" verbosity) (list "buffer" buf))
+                'children children))
+    (map (lambda (q)
+           (list 'tag "c-user" 'class "ag-user ag-queued ag-queued-row"
+                 'attrs '(("state" "queued"))
+                 'children (list (chat-view--label "YOU")
+                                 (list 'tag "c-group" 'class "ag-user-text" 'text q))))
+         queued)
+    (if (and (string? activity) (not (equal? activity "disconnected")))
+        (list (list 'tag "c-activity" 'class "ag-wait ag-activity"
+                    'children (list (chat-view--text "c-text" "ag-activity-text"
+                                                     (string-append "⋯ " activity)))))
+        '())
+    (list (list 'tag "c-prompt" 'class "ag-inputrow"
+                'children (list (chat-view--label "YOU")
+                                (list 'tag "c-input" 'class "ag-input" 'input #t
+                                      'hint "RET sends · C-RET interrupts"))))))
+
+(effects! '(write))
+
+;; Write BUF's block tree when its model changed. Cheap when it did not:
+;; one comparison of the model with the one the last build read.
+(define (chat-view-sync! buf)
+  (when (and (buffer-exists? buf) (chat-rich-view? buf))
+    (let* ((raw (agent-blocks buf))
+           (open (agent-open-cards buf))
+           (verbosity (or (buffer-local buf 'agent-verbosity) "info"))
+           (queued (or (buffer-local buf 'chat-queued) '()))
+           (activity (buffer-local buf 'chat-activity))
+           (sig (list raw open verbosity queued activity))
+           (m (chat-view--memo buf)))
+      (unless (and m (equal? (nth 3 m) sig)
+                   (buffer-local buf 'render-blocks))
+        (let ((views (chat-view--views buf raw open m)))
+          (chat-view--memo-set! buf (list raw open views sig))
+          (buffer-set-locals! buf
+            (list 'render-root '(tag "c-buffer" class "agent-view")
+                  'render-input "agent-saved-mark"
+                  'render-blocks (chat-view-tree buf (reverse (filter (lambda (v) v) views))
+                                                 verbosity queued activity))))))))
+
+;; the clicks the tree carries: a tool card, a permission verb, an answer
+(add-hook! (list 'block-click 'chat)
+  (lambda (buf id)
+    (cond
+      ((string-prefix? "chat-card:" id)
+       (agent-card-toggle! buf (substring-bytes id 10 (string-byte-length id)))
+       (chat-view-sync! buf)
+       #t)
+      ((string-prefix? "chat-cmd:" id)
+       (run-command (substring-bytes id 9 (string-byte-length id)))
+       (chat-view-sync! buf)
+       #t)
+      ((string-prefix? "chat-answer:" id)
+       (let* ((parts (string-split (substring-bytes id 12 (string-byte-length id)) ":"))
+              (q (let loop ((bs (agent-blocks buf)))
+                   (cond ((null? bs) #f)
+                         ((and (equal? (nth 2 (car bs)) "question")
+                               (equal? (value->string (nth 3 (car bs))) (car parts)))
+                          (car bs))
+                         (else (loop (cdr bs)))))))
+         (when q
+           (agent-answer-question! (nth 4 q) (nth 3 q)
+                                   (nth (string->number (cadr parts)) (or (nth 6 q) '()))))
+         (chat-view-sync! buf)
+         #t))
+      (else #f))))
+
+(define (chat-view--mode-hook!) (chat-view-sync! (current-buffer)))
+
+(add-hook! 'chat-mode-hook 'chat-view--mode-hook!)

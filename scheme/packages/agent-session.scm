@@ -747,7 +747,10 @@
 
 ;; the chat keeps point in its input around every command
 (define (chat-input-post-command!)
-  (chat-snap-to-input!))
+  (chat-snap-to-input!)
+  ;; a command can change the model the rich view draws (a send, a card,
+  ;; the verbosity); a key that only types leaves it as it was
+  (chat-view-sync! (current-buffer)))
 
 (add-hook! 'pre-command-hook 'chat-snap-to-input!)
 (add-hook! 'post-command-hook 'chat-input-post-command!)
