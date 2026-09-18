@@ -1201,6 +1201,12 @@ session.ex 2,228, buffer.ex 3,511, editor.ex 3,580, editor_live.ex
    under one 25 ms frame. SchemeTask stays for pure reads until the
    benchmark says it can go.
 
+Step 5 is REJECTED by ruling (2026-09-19). Asked what the world
+collapse is, the owner answered "uh uh hahaha no no non nono". The lanes
+stay: one process per lane, the escape, promote, flush, roots, heir and
+retry machinery stays, and SchemeTask stays. Do not propose one serial
+Scheme world again. Phase 3 ends with step 4.
+
 What each step must not do: move a file another session holds (groups,
 layouts, ibuffer are Phase 2), change a binding, or grow Elixir policy.
 Step 5 needs the owner's go; steps 1-4 are mechanism and can start.
