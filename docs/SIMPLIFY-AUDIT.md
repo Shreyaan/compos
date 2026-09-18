@@ -1409,6 +1409,28 @@ the other session), layout-policy 8, detail 3, ibuffer-prompt 6, all in
 the ledger; groups, group-membership, switcher-sleep, window-config
 green or ledgered.
 
+**Phase 2 gate, closed by ruling (2026-09-19).** The owner ruled: "the
+current implementation is correct. make the tests pass." The code at
+3b9a263f is the spec for the four files that held the gate. Red before,
+each file alone: group-switch 5, layout-policy 8, detail 3,
+ibuffer-prompt 6 (22). Red after: 0 in each file alone, and 0 with the
+four files in one lane. No test is deleted. Fourteen tests now state
+what the code does: ibuffer-prompt is the plain minibuffer list, and
+the table is ibuffer-prompt-pretty in a dock; a section wears its
+group's name; a sanitized restore keeps the hidden pane in the
+snapshot; a switch to a visible member selects its window; detail-keep
+keeps a name the buffer owns; a foreign display takes a pane and the
+frame leaves its group. Eight tests were red for a setup reason. The
+layout-policy fixture reused the group of the last journey, because
+group-create-and-enter! refuses a name that exists. The editor runs
+window-configuration-changed! from a detached task (editor.ex,
+config_hook), and its target reflow raced the test steps; the same file
+went red on different names from run to run. The layout journeys and
+the detail target test hold layout-target-on-change! out of the hook
+while they run. The race is real outside the tests too: a reflow can
+arrive after the command that caused it. That is a finding for Phase 2,
+not a test fix.
+
 **Item 15, ruled (2026-09-19):** "the keys i want - text-scale-decrease,
 undo on C-/, keep the C-x b. in fact you can delete the other
 implementation. this is settled. C-t is telemetry." Done: the shadowed
