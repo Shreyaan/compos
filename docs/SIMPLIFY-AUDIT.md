@@ -999,6 +999,15 @@ predicate. No copy of a server record exists to collapse. The two
 "compos" special cases are the editor bridge, whose tools are not an
 MCP server on the wire, and they stay. Nothing to do.
 
+**Ruling 2026-09-19 (the owner): llm-mode stays and is the lane.** The
+gptel model: you talk in the buffer you are in, and the reply lands
+there. A chat is a buffer in llm-mode. Item 5.1 inverts: the merge folds
+chat-mode onto llm-mode (the transcript blocks, the tools, the ACP
+backends and the permission ask become what llm-mode does in a chat
+buffer), and llm-mode handles both chats and documents. Wanted later: a
+gptel-like `C-u M-o` that directs the output (at point, to the group's
+chat, to a new buffer, over the region). Nothing in-buffer goes.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:
