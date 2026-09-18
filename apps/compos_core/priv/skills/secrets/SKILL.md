@@ -18,8 +18,6 @@ else passes through unchanged.
 
 `(setup-secret-scan)` answers `(NAME INSTALLED? READY? HINT)` for Doppler,
 1Password, GPG, the macOS Keychain, and the Linux Secret Service.
-`(setup-secrets-ready)` is the short list of providers that can actually
-answer for a key.
 
 Installed and ready are different facts, and the difference is the whole
 reason to probe. An installed Doppler that was never logged in resolves

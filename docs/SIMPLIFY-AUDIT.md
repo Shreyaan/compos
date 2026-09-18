@@ -716,6 +716,23 @@ ChromeTest "returning from a page"; LoadTest was red on calendar. Scheme:
 the keymap ladder tests, the block and theme tests, a-page-opens when feeds
 runs first, and the four apropos tests.
 
+**State on 2026-09-19, end of the autonomous run.** Every item that
+touches no file another session holds and destroys nothing a person runs
+today is done. What remains, and why it waits:
+
+- Phase 1 (one catalog, one define-mode, keyed hooks, sections out of
+  editor.scm), the window domain (section 4), the chat and llm-mode merge
+  (section 5), the six remaining defcustoms, the dired file-stat numbers,
+  the dual-spelling primitives: editor.scm, groups.scm, ibuffer.scm,
+  agent-fleet.scm and editor.ex are open in another session.
+- Profiler + M-x profile, ChatPerf + *Chat Performance*, the /dashboard
+  route, sentry.scm to ~120 lines, one PTY runner: each removes something
+  a person can run today; a yes from the owner first.
+- The whole-buffer payload the retile probe found (7.4): the window
+  renders more than its visible rows on a fresh mount; editor_live.ex is
+  under active design in the other session.
+- Phase 4, the execution model: a latency benchmark first.
+
 **Next three steps, in order.**
 
 1. `load-path`: the defvar in editor.scm, `load` searching it in Scheme over
