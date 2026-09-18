@@ -1024,6 +1024,20 @@ the in-buffer render from the record; (3) `C-u M-o` targets; (4) the
 llm-mode dispatcher, context fn and permission stub go; (5) 5.12's twin
 transcript primitives collapse onto one set.
 
+**The layout tests, bisected (2026-09-19).** The same six files at three
+commits: fc980588 (the other session's last commit, before Phase 1) 27
+red, 015d9a50 (the catalog, the mode table, the keyed hooks) 25 red,
+9b0e7411 (the tabulated-list move) 24 red. The one name red later and
+green at fc980588 is a-target-layout-does-not-give-one-mode-two-panes,
+which passes alone and flips with order. Phase 1 did not turn the layout
+tests red; they were red before it, from the listing-preview and target
+layout work in flight. The editor's layout works after a restart; the
+owner reports it slow, which is section 4a's first-class defect and is
+measured before it is named.
+
+**Wanted later (owner, 2026-09-19):** a hot refresh that unloads and
+loads all Scheme, so a registry migration does not need a restart.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:
