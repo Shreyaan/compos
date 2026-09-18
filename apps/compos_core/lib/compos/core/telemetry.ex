@@ -4,7 +4,8 @@ defmodule Compos.Core.Telemetry do
 
   Each row names its layer:
 
-    * `scheme`  - a lane job or a shared task (the Scheme scheduler)
+    * `scheme`  - a lane job, a shared task (the Scheme scheduler), or a
+                  frame GC sweep, which pauses every eval while it runs
     * `live`    - a LiveView event, the EditorLive refresh, and the render
     * `browser` - what the client measured: the round trip of one push, the
                   DOM patch, the paint (Event Timing), and long tasks
@@ -25,6 +26,7 @@ defmodule Compos.Core.Telemetry do
   @events [
     [:compos, :lane, :job],
     [:compos, :scheme, :task],
+    [:compos, :scheme, :gc],
     [:compos, :ui, :refresh],
     [:phoenix, :live_view, :handle_event, :start],
     [:phoenix, :live_view, :handle_event, :stop],
@@ -271,6 +273,19 @@ defmodule Compos.Core.Telemetry do
       owner: Integer.to_string(metadata.task),
       label: Map.get(metadata, :label, "Scheme task"),
       status: Atom.to_string(metadata.status)
+    })
+  end
+
+  # A sweep pauses every eval in every lane: its duration is a freeze.
+  defp normalize([:compos, :scheme, :gc], measurements, _metadata, time) do
+    row(%{
+      kind: "gc",
+      layer: "scheme",
+      time_ms: time,
+      duration_ms: measurements.duration,
+      owner: "gc",
+      label: "frame sweep",
+      detail: "#{measurements.frames} frames, #{measurements.live} live"
     })
   end
 

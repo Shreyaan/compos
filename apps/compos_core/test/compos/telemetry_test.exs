@@ -50,6 +50,16 @@ defmodule Compos.Core.TelemetryTest do
     assert lane.label == label
   end
 
+  test "a frame sweep is a scheme row that names the frames it kept" do
+    :telemetry.execute([:compos, :scheme, :gc], %{duration: 31, frames: 9000, live: 4000}, %{})
+
+    assert [gc] = Telemetry.events(1)
+    assert gc.kind == "gc"
+    assert gc.layer == "scheme"
+    assert gc.duration_ms == 31
+    assert gc.detail == "9000 frames, 4000 live"
+  end
+
   test "RET opens a readable detail view with the complete job and owner" do
     :telemetry.execute(
       [:compos, :lane, :job],
