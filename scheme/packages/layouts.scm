@@ -399,6 +399,13 @@
 
 (add-hook! 'window-configuration-change-hook 'autolayout--on-change!)
 
+;; a winner walk restores panes the user asked for: they become the panes
+;; autolayout keeps, not a change of panes it re-arranges
+(define (autolayout--settle!)
+  (set-frame-local! 'autolayout-panes (autolayout--panes (frame-local 'autolayout-main))))
+
+(add-hook! 'winner-restore-hook 'autolayout--settle!)
+
 ;; "62", not "62.0": the dialect has no round
 (define (autolayout--percent ratio)
   (car (string-split (number->string (* 100 ratio)) ".")))

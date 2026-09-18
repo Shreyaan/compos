@@ -39,6 +39,7 @@ list. The local table lives in Scheme, keyed by buffer name.
 | `MODE-hook` | | after `set-mode!` ran the mode's setup |
 | `frame-attach-hook` | | a client mounted a frame |
 | `window-configuration-change-hook` | | a frame's windows or their buffers changed |
+| `winner-restore-hook` | | winner-undo or winner-redo put an arrangement back; layouts.scm makes it autolayout's current panes |
 | `window-state-change-hook` | | `window-state-changed!` ran: a window command or a layout moved something; groups.scm recalculates the current group here |
 | `theme-change-hook` | | after `load-theme` |
 | `buffer-created-hook` | NAME | a new buffer has its text |

@@ -2140,9 +2140,21 @@
         (begin
           (set-frame-local! 'winner-pos idx)
           (window-tree-set! (nth idx ring))
+          (winner--settle!)
           (message (string-append "layout "
                      (number->string (+ idx 1)) "/"
                      (number->string (length ring))))))))
+
+;; The restored arrangement is the one the user asked for. The layout
+;; engine reflows when the panes change: a target compares its slot
+;; count, autolayout compares its panes. The walk tells both that the
+;; restored panes are current, so the configuration hook that follows the
+;; restore has nothing to reflow and the undo stands. layouts.scm listens
+;; on winner-restore-hook for autolayout.
+(define (winner--settle!)
+  (when (layout-target)
+    (layout-target-note-slots! (layout-target-visible-buffers)))
+  (run-hooks 'winner-restore-hook))
 
 (define (winner-previous!)
   (set! *winner-inhibit* #f)
