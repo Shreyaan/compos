@@ -79,10 +79,6 @@
                        (else (string-append "installed; run `" signin "`"))))))
        *setup-secret-backends*))
 
-(define (setup-secrets-ready)
-  "The providers that are set up and can actually answer for a key."
-  (map car (filter (lambda (row) (list-ref row 2)) (setup-secret-scan))))
-
 (define (setup-secret-backends)
   "Return secret backends as (NAME PROGRAM AVAILABLE COMMAND), without values."
   (map (lambda (entry)
@@ -190,10 +186,6 @@
                      (string-contains? (car words) "/"))
                 (car words))
                (else (loop (cdr words)))))))))
-
-(define (setup--acp-connector? name)
-  "An ACP connector is one the editor launches as a program."
-  (and (setup--cmd-program (plist-get (connector-config name) 'cmd)) #t))
 
 (define (setup-inference-scan)
   "Every declared connector with what this machine can actually run it.

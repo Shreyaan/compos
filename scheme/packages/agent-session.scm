@@ -635,26 +635,6 @@
                          "chat hidden; dismissing after the current run"
                          "chat dismissed")))))))
 
-
-
-(define-command "chat-dismiss"
-  "Hide this chat, send its input as a final instruction, and close it when answered"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (slug (agent-slug-of buf))
-           (input (string-trim (chat-input-text buf))))
-      (cond
-        ((not slug) (message "not an agent chat"))
-        ((equal? input "") (message "final instruction is empty"))
-        ((not (chat-dismiss--hide! buf))
-         (message "could not hide chat: no other buffer is available"))
-        (else
-         (chat-clear-input! buf)
-         (agent-send-msg! slug input)
-         (debounce! (string-append "chat-dismiss:" slug) 250
-           'chat-dismiss--finish! (list buf slug))
-         (message "chat hidden; running final instruction"))))))
-
 (define-command "chat-unqueue" "Remove the newest queued message and return it to the input"
   (lambda ()
     (let* ((buf (current-buffer))

@@ -278,12 +278,6 @@ nonstandard install out of the built-in connector catalog."
             (list 'mcp-servers
                   (presets-acp-servers (or (plist-get conf 'presets) '()))))))))
 
-(define (agent-config-with-primer conf)
-  (let ((primer (if (boundp (quote hello)) (hello) "")))
-    (if (equal? primer "")
-        conf
-        (agent-config-append-system conf primer))))
-
 (define (agent-system-text had text)
   (if (equal? had "") text (string-append had "\n\n" text)))
 
@@ -449,13 +443,6 @@ nonstandard install out of the built-in connector catalog."
            "Codex App Server — ChatGPT subscription")
           (else
            "ACP agent — subscription or external adapter"))))
-
-(define (agent-conf-model conf)
-  (or (plist-get conf 'model)
-      (let loop ((es (or (plist-get conf 'env) '())))
-        (cond ((null? es) #f)
-              ((equal? (car (car es)) "ANTHROPIC_MODEL") (car (cdr (car es))))
-              (else (loop (cdr es)))))))
 
 (define (agent-update-modeline! buf)
   ;; Chat buffers keep the bottom modeline free of LLM configuration.

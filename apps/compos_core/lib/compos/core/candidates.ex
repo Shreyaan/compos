@@ -60,8 +60,6 @@ defmodule Compos.Core.Candidates do
     })
   end
 
-  def put_style(list, style), do: refilter(%{list | style: style(style)})
-
   defp hint_fields(true), do: 1
   defp hint_fields(n) when is_integer(n) and n > 0, do: n
   defp hint_fields(_), do: 0

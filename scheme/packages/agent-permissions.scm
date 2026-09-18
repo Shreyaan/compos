@@ -45,12 +45,6 @@
   (let ((buf (agent-buf slug)))
     (and buf (buffer-exists? buf) (buffer-local buf 'agent-permission-profile))))
 
-(define (set-agent-permission-profile! slug profile)
-  (let ((buf (agent-buf slug)))
-    (when (and buf (buffer-exists? buf))
-      (buffer-set-local! buf 'agent-permission-profile profile)))
-  profile)
-
 (define (profile-denies? profile text)
   (and profile
        (let ((t (string-downcase text)))

@@ -762,10 +762,6 @@
           (loop (+ n 1))
           name))))
 
-(define (worktree--path-under? root path)
-  (or (equal? path root)
-      (string-prefix? (string-append root "/") path)))
-
 (define (worktree--target-file workspace source)
   (let* ((prefix (string-trim
                    (shell-command->string "git rev-parse --show-prefix"

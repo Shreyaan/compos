@@ -89,18 +89,6 @@
 
 ;;; --- the list -----------------------------------------------------------------
 
-(define (mcp-hub-line row)
-  (let ((status (cadr row)))
-    (string-append
-      (mcp-hub-glyph status) " "
-      (mcp-hub-fit (car row) 16) " "
-      (mcp-hub-fit (list-ref row 3) 5) " "
-      (mcp-hub-fit status 10) " "
-      (mcp-hub-count (caddr row))
-      (mcp-hub-count (list-ref row 4))
-      (mcp-hub-count (list-ref row 5))
-      (string-join (mcp-hub-presets (car row)) " "))))
-
 (define (mcp-hub-cells buf name)
   (let* ((row (mcp-hub-row name))
          (status (cadr row))
@@ -113,31 +101,6 @@
           (list (if (list-ref row 4) (number->string (list-ref row 4)) "—") "dim")
           (list (if (list-ref row 5) (number->string (list-ref row 5)) "—") "dim")
           (list (string-join (mcp-hub-presets name) " ") "faint"))))
-
-(define (mcp-hub-header)
-  (string-append
-    ";; mcp servers — s start · k stop · r restart · S/K/R all · "
-    "RET tools · l log · g refresh\n"
-    "  "
-    (mcp-hub-fit "NAME" 16) " " (mcp-hub-fit "TYPE" 5) " "
-    (mcp-hub-fit "STATUS" 10) " "
-    (mcp-hub-fit "TOOLS" 6) (mcp-hub-fit "RES" 6)
-    (mcp-hub-fit "PROM" 6) "PRESETS"))
-
-;; the status column carries the only colour that matters. OFF is where
-;; this row's line starts, which the list hands us — the glyph is three
-;; bytes wide, and an overlay ending mid-character renders as mojibake
-;; rather than as colour.
-(define (mcp-hub-overlays name off)
-  (let* ((row (mcp-hub-row name))
-         (g-end (+ off (string-byte-length (mcp-hub-glyph (cadr row)))))
-         (n-start (+ g-end 1))
-         (n-end (+ n-start (string-byte-length (mcp-hub-fit (car row) 16))))
-         (s-start (+ n-end 7))              ; space + type column + space
-         (s-end (+ s-start (string-byte-length (cadr row)))))
-    (list (list off g-end (mcp-hub-status-face (cadr row)))
-          (list n-start n-end "mcp-name")
-          (list s-start s-end (mcp-hub-status-face (cadr row))))))
 
 (define (mcp-hub-refresh!) (list-refresh! *mcp-hub-buffer*))
 
