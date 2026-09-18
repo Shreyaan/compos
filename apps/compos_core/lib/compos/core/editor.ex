@@ -2868,6 +2868,9 @@ defmodule Compos.Core.Editor do
       # modeline read these two; the client renders no UI for them yet.
       path: snap.path,
       read_only: snap.read_only,
+      # the editing state: the caret map is armed and the caret shows. In
+      # the movement state the client hides the caret and the window floats.
+      editing: Map.get(locals, "editing-state") == true,
       dismissible: Map.get(locals, "dismissible") == true,
       cursor_visible:
         Map.get(locals, "dismissible") != true or

@@ -644,11 +644,12 @@
 ;; the caret map keeps the window chords in the editing state, and a chat
 ;; is such a mode, so a chat says focus while you type in it. A read-only
 ;; buffer never leaves focus.
-;; A buffer's mode decides whether its window can move. An editing buffer
-;; -- one you can type into: not a view, not read-only, not a chat -- is a
-;; cua buffer and stays put, whether or not the caret map is armed yet.
-;; Every other buffer is a focus buffer and floats. A chat refuses the
-;; caret map and says focus however much you type in it.
+;; The editing state decides: while the caret map is armed the caret shows
+;; and the window sits; in the movement state (a landing, ESC, C-g) the
+;; caret is gone and the window floats. A chat refuses the caret map and
+;; says focus however much you type in it. The client draws the caret from
+;; the same state (data-editing), so the caret and the ground never
+;; disagree.
 (define (dash--state buf)
   (if (member "editing-caret-map" (buffer-minor-maps buf)) "editing" "focus"))
 

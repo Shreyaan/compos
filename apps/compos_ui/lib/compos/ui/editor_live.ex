@@ -1981,6 +1981,7 @@ defmodule Compos.Ui.EditorLive do
       data-buffer={@node.buffer}
       data-path={@path}
       data-read-only={to_string(@read_only)}
+      data-editing={to_string(Map.get(@node, :editing, false))}
       phx-hook={if @peek?, do: "PeekCard"}
       role={if @peek?, do: "note"}
       aria-label={if @peek?, do: "Preview"}

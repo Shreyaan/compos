@@ -822,6 +822,10 @@ defmodule Compos.Ui.Layouts do
              blinking and goes hollow. It does NOT go away: a reader who
              looks at the editor from a terminal must still see where point
              stands, and Emacs draws a hollow box for the same reason. */
+          /* The caret is the editing state made visible: in the movement
+             state (a landing, ESC, C-g) it is gone, and the floating
+             window says where the keys go instead. */
+          .window.active[data-editing="false"] .buf .cursor { visibility: hidden; }
           body.unfocused .window.active .cursor {
             background: transparent !important;
             color: inherit !important;

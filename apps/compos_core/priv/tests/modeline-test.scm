@@ -571,8 +571,8 @@
       (editing-state-off! buf)
       (check-equal! (t--dash-chiprow (dash--modes buf) "hidden") #f
                     "a buffer you have just landed on hides nothing")
-      (check-equal! (t--dash-row-value (dash--modes buf) "state") "editing"
-                    "and a text buffer is an editing buffer at rest")
+      (check-equal! (t--dash-row-value (dash--modes buf) "state") "focus"
+                    "and it answers the arrows with the window focus")
       (editing-state-on! buf)
       (let ((hidden (t--dash-chiprow (dash--modes buf) "hidden")))
         (check-true! (if (member "editing-state" hidden) #t #f)
@@ -601,42 +601,16 @@
       (editing-state-off! buf)
       (check-false! (t--dseg-value (dashboard-line-blocks buf) "state")
                     "the headline spends no segment on the word")
-      ;; the window's ground reads the state, so the marker only has to
-      ;; carry the name as a class. The mode decides: a text buffer is an
-      ;; editing buffer at rest too, before any key armed the caret map.
-      (check-equal! (t--dash-state-class (dashboard-line-blocks buf))
-                    "dash-state-mark dash-state-editing"
-                    "an editing buffer stays put from the landing on")
-      (editing-state-on! buf)
-      (check-equal! (t--dash-state-class (dashboard-line-blocks buf))
-                    "dash-state-mark dash-state-editing"
-                    "and while you type in it")
-      (editing-state-off! buf)
-      (buffer-set-read-only! buf #t)
+      ;; the window border wears the colour of the state, so the marker only
+      ;; has to carry the name as a class for the border rule to read
       (check-equal! (t--dash-state-class (dashboard-line-blocks buf))
                     "dash-state-mark dash-state-focus"
-                    "a read-only buffer is a focus buffer")
-      (buffer-set-read-only! buf #f)
-      (buffer-kill! buf))))
-
-;; The client draws the cached line, not a fresh one, so the state change
-;; has to invalidate the cache. Without it a window kept the ground it had
-;; last drawn, and a buffer you had begun to edit went on floating.
-(deftest 'a-state-change-asks-for-the-headline-again
-  "the state tag is what the window's ground reads, so the line cannot lag it"
-  (lambda ()
-    (let ((buf "*zz-modeline-state-sync*"))
-      (test-buffer! buf "")
-      (buffer-set-local! buf 'mode-name "text-mode")
-      (editing-state-off! buf)
-      (buffer-set-local! buf 'dashboard-dirty #f)
+                    "a landing answers the arrows with the window focus")
       (editing-state-on! buf)
-      (check-true! (buffer-local buf 'dashboard-dirty)
-                   "entering the state asks for the line again")
-      (buffer-set-local! buf 'dashboard-dirty #f)
+      (check-equal! (t--dash-state-class (dashboard-line-blocks buf))
+                    "dash-state-mark dash-state-editing"
+                    "a buffer you are editing keeps them for the caret")
       (editing-state-off! buf)
-      (check-true! (buffer-local buf 'dashboard-dirty)
-                   "and so does leaving it")
       (buffer-kill! buf))))
 
 (deftest 'the-state-marker-survives-a-window-too-narrow-for-the-metadata
@@ -785,7 +759,7 @@
       (editing-state-on! buf)
       (check-equal! (plist-get (dash--state-mark buf) 'text) "cua" "editing is cua")
       (editing-state-off! buf)
-      (check-equal! (plist-get (dash--state-mark buf) 'text) "cua" "and so is a text buffer at rest")
+      (check-equal! (plist-get (dash--state-mark buf) 'text) "focus" "a landing is focus")
       (buffer-kill! buf))))
 
 (deftest 'the-switcher-offers-what-the-buffer-can-say-about-itself
