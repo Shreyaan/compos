@@ -1243,6 +1243,15 @@ a worktree.
 Every red name in the two new runs is red in the old run or passes when
 its file runs alone (order only).
 
+**Step 4 (b) dropped by ruling (2026-09-19).** The chat's "agent" render
+mode stays beside "blocks". Asked, the owner answered "chats are working
+beautifully right now"; the fold would save about 133 lines of
+agent_transcript.ex, 20 LiveView branches, AgentScroll and 86 CSS lines,
+at a risk to the most-used surface and its input speed. The fold agent
+stopped after its design note; nothing of it landed. Phase 3 is closed:
+steps 1-4 landed (4 without b), step 5 rejected. The simplification
+refactor is complete.
+
 What each step must not do: move a file another session holds (groups,
 layouts, ibuffer are Phase 2), change a binding, or grow Elixir policy.
 Step 5 needs the owner's go; steps 1-4 are mechanism and can start.
