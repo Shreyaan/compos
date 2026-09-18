@@ -1259,6 +1259,12 @@ file run all pass alone (the full file is order-polluted at HEAD too:
 88 reds); the two which-key tests ask Scheme for their rows now.
 Landing needs a daemon restart at once: a hot reload defines the tables
 empty, and the bindings made at boot live in the old Elixir store.
+Landed as 3c3d7972 (tree repaired in 22ba6cd2); the daemon restarted
+23:17. One gap found after: the port defined `keymap--forget-buffer!`
+and did not call it, so a killed buffer kept its map and facts.
+59c7d3bd wires it into `buffer-kill!`; every minibuffer shares one
+keymap key, so a minibuffer kill keeps the shared map. The ledger gains
+list-group-and-sort-keys-run-the-declared-cycles, red before the port.
 
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
