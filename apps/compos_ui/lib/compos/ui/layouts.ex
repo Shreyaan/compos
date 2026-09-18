@@ -1256,20 +1256,21 @@ defmodule Compos.Ui.Layouts do
              lane (rank 2) goes first, then the model (rank 1). */
           .ml-facts {
             display: inline-flex; align-items: baseline; gap: var(--s8);
-            flex: 0 1 auto; min-width: 0; overflow: hidden;
+            flex: none;
           }
           .ml-fact { display: inline-flex; align-items: baseline; gap: var(--s4); white-space: nowrap; }
           .ml-fact[tone="glyph"] .ml-fact-v { font-size: 13px; }
-          @container (max-width: 700px) { .modeline .ml-fact[rank="2"] { display: none; } }
-          @container (max-width: 620px) { .modeline .ml-fact[rank="1"] { display: none; } }
-          @container (max-width: 400px) { .modeline .ml-fact { display: none; } }
-          /* the name is the last thing on the mode line to give way: the
-             position sheds its size, then its percentage, then itself,
-             before the name loses a character */
-          @container (max-width: 560px) { .modeline .ml-pos-size { display: none; } }
-          @container (max-width: 460px) { .modeline .ml-project { display: none; } }
-          @container (max-width: 460px) { .modeline .ml-pos-pct { display: none; } }
-          @container (max-width: 360px) { .modeline .ml-pos { display: none; } }
+          /* The hierarchy of the mode line, from the first to give way to the
+             last: the position's size, then its percentage, then the whole
+             position, then the context, then the lane, then the model or
+             preset. The mode stays. Nothing is clipped: what does not fit
+             is dropped whole, by rank. */
+          @container (max-width: 760px) { .modeline .ml-pos-size { display: none; } }
+          @container (max-width: 680px) { .modeline .ml-pos-pct { display: none; } }
+          @container (max-width: 600px) { .modeline .ml-pos { display: none; } }
+          @container (max-width: 520px) { .modeline .ml-project { display: none; } }
+          @container (max-width: 440px) { .modeline .ml-fact[rank="2"] { display: none; } }
+          @container (max-width: 360px) { .modeline .ml-fact[rank="1"] { display: none; } }
           /* The frame's header line. It carries the furniture: the wordmark,
              the group tabs, the frame's path, the facts, the key legend. It
              is chrome, so it is square, hairlined, mono and quiet, and it
