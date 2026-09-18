@@ -288,7 +288,7 @@
     (let ((e (models--current)))
       (when e
         (let ((name (plist-get e 'name)))
-          (yes-or-no-p (string-append "Uninstall " name " from " (models-base) "? ")
+          (yes-or-no? (string-append "Uninstall " name " from " (models-base) "? ")
             (lambda (ok)
               (when ok
                 (*models-request* "DELETE" "/api/delete"

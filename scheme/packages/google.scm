@@ -108,7 +108,7 @@
 (define-command "google-disconnect" "Revoke a Google account connection"
   (lambda () (google--account-prompt
     (lambda (id)
-      (y-or-n-p (string-append "Revoke Google access for " (google--email id) "? ")
+      (y-or-n? (string-append "Revoke Google access for " (google--email id) "? ")
         (lambda (yes)
           (when yes (google-revoke! id
             (lambda (r) (message (if (plist-get r 'ok) "Google access revoked." (plist-get r 'error))))))))))))
@@ -312,7 +312,7 @@
   (let ((account (buffer-local buf 'google-account)))
     (if (buffer-local buf 'google-file-busy) (message "A file operation is already running.")
       (when (pair? ops)
-        (y-or-n-p (string-append label " " (number->string (length ops)) " file(s) as "
+        (y-or-n? (string-append label " " (number->string (length ops)) " file(s) as "
                       (google--email account) ": " (string-join (map (lambda (op) (plist-get op 'name)) ops) ", ") "? ")
           (lambda (yes)
             (when (and yes (buffer-exists? buf) (not (buffer-local buf 'google-file-busy)))
@@ -621,7 +621,7 @@
             ((not (and request (plist-get request 'service) (plist-get request 'method) (plist-get request 'path)))
              (message "A request needs service, method, path, params, and body JSON fields."))
             (else
-              (y-or-n-p (string-append (plist-get request 'method) " " (plist-get request 'path)
+              (y-or-n? (string-append (plist-get request 'method) " " (plist-get request 'path)
                         " as " (google--email account) "? ")
                 (lambda (yes)
                   (when (and yes (not (buffer-local buf 'google-submitting)))

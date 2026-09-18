@@ -976,7 +976,7 @@
            (row (perf--row-at-point buf)))
       (if (not row)
           (message "no process on this line")
-          (y-or-n-p (string-append "Kill " (nth 2 row) " " (cadr row) "? ")
+          (y-or-n? (string-append "Kill " (nth 2 row) " " (cadr row) "? ")
             (lambda (yes?)
               (when yes?
                 (if (vm-process-kill! (cadr row))

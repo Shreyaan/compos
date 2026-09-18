@@ -1266,6 +1266,14 @@ and did not call it, so a killed buffer kept its map and facts.
 keymap key, so a minibuffer kill keeps the shared map. The ledger gains
 list-group-and-sort-keys-run-the-declared-cycles, red before the port.
 
+**The yes/no prompts, ruled (2026-09-19).** Asked whether y-or-n
+(two callbacks) merges into y-or-n-p (one continuation), the owner
+answered "we have been using ? no? i like that idiom". The 09-11
+ruling applies: Emacs names, Scheme spelling. Both readers stay; the
+`-p` names become `y-or-n?` and `yes-or-no?` (editor.scm, perf.scm,
+google.scm, models.scm, docs/COMPLETION.md). No alias stays: a hot
+reload leaves the old names bound in the live daemon until a restart.
+
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
 

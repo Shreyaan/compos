@@ -35,7 +35,7 @@ the input, `'default` answers an empty input and leads the list,
 marginalia annotator, `'style` picks the match style.
 
 `read-string`, `read-number`, `read-buffer` are completing-read of one
-kind. `y-or-n-p` takes one key, `yes-or-no-p` takes the word,
+kind. `y-or-n?` takes one key, `yes-or-no?` takes the word,
 `read-char-choice` takes one key from a list.
 
 ## History

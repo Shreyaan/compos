@@ -1061,7 +1061,7 @@
 (define-command "next-history-element" "Put the next history item in the minibuffer"
   (lambda () (minibuffer-history-step! -1)))
 
-;; y-or-n-p: a question that takes ONE key. "y" runs YES, "n" and C-g
+;; y-or-n?: a question that takes ONE key. "y" runs YES, "n" and C-g
 ;; run NO, and any other key clears the input, so the question stands
 ;; until it gets an answer. A question is not a completion prompt: it
 ;; offers no candidates, so it stays on the bottom bar and it never
@@ -1099,18 +1099,18 @@
             (list 'style "question")))))
 
 ;; the Emacs names: K gets #t or #f
-(define (y-or-n-p prompt k)
+(define (y-or-n? prompt k)
   (y-or-n prompt (lambda () (k #t)) (lambda () (k #f))))
 
 ;; a question that takes the word: "yes" or "no", RET after it
-(define (yes-or-no-p prompt k)
+(define (yes-or-no? prompt k)
   (minibuffer-read* (string-append prompt " (yes or no) ") '()
     (list (list 'confirm
             (lambda (v)
               (cond ((equal? v "yes") (k #t))
                     ((equal? v "no") (k #f))
                     (else (message "Please answer yes or no.")
-                          (yes-or-no-p prompt k)))))
+                          (yes-or-no? prompt k)))))
           (list 'cancel (lambda () (k #f)))
           (list 'style "question"))))
 
@@ -4386,7 +4386,7 @@
   (let ((full (expand-path (normalize-file-input path))))
     (if (not (or (file-exists? full) (file-directory? full)))
         (message (string-append "No such file: " (abbreviate-file-name full)))
-        (yes-or-no-p
+        (yes-or-no?
           (string-append (if permanent? "Delete permanently " "Move to trash ")
                          (abbreviate-file-name full) "?")
           (lambda (yes)
@@ -4724,7 +4724,7 @@
              (existing (buffer-known? normalized)))
         (if (file-too-big? normalized)
             ;; the reader is here, so the reader can answer
-            (y-or-n-p
+            (y-or-n?
               (string-append (cadr (path-split normalized)) " is "
                              (cadr (file-stat normalized))
                              ". Open it for this session only?")
@@ -6220,8 +6220,8 @@
 (public! 'completing-read "(completing-read PROMPT COLLECTION K 'predicate FN 'require-match #t 'initial TEXT 'default TEXT 'history SYM 'category SYM 'style SYM) — Emacs's completing-read, asynchronous: K gets the choice. COLLECTION is rows or a procedure of the input")
 (public! 'read-string "(read-string PROMPT K [OPTS ...]) — a line of text; K gets it")
 (public! 'read-char-choice "(read-char-choice PROMPT CHARS K) — one key from CHARS; K gets it, or #f on C-g")
-(public! 'y-or-n-p "(y-or-n-p PROMPT K) — one key; K gets #t for y, #f for n or C-g")
-(public! 'yes-or-no-p "(yes-or-no-p PROMPT K) — the word yes or no; K gets #t or #f")
+(public! 'y-or-n? "(y-or-n? PROMPT K) — one key; K gets #t for y, #f for n or C-g")
+(public! 'yes-or-no? "(yes-or-no? PROMPT K) — the word yes or no; K gets #t or #f")
 (public! 'minibuffer-active? "(minibuffer-active?) — #t while a prompt is up")
 (public! 'add-hook! "(add-hook! 'name-hook FN [APPEND] [LOCAL]) — put FN on the hook once; FN is a quoted function name, resolved when the hook runs, or a closure. APPEND puts it last. LOCAL puts it on the current buffer's own list, which runs first")
 (public! 'remove-hook! "(remove-hook! 'name-hook FN [LOCAL]) — take FN off the hook")
