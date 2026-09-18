@@ -356,20 +356,19 @@ defmodule Compos.Ui.Layouts do
              rule is a nearer edge). The state tag in the header line
              (dash-state-focus) is what this rule reads. */
           .window.active:has(.dash-state-focus) {
-            /* Floating is quiet: the ground lifts a step toward the select
-               ground, the hairline brightens (a nearer edge) and the seam on
-               the header line goes to the accent. No coloured frame. */
-            --surface-pane: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 30%, var(--window-bg, #fdfcf8));
+            /* The design's float, to the letter: the ground lifts to the
+               raised paper mixed with the select ground, the hairline
+               brightens toward the dim ink (a nearer edge), and the deep
+               shadow does the rest. No accent anywhere. */
+            --surface-pane: color-mix(in srgb, var(--window-bg, #fdfcf8) 55%, var(--hl-line-bg, #f5f1e6));
             --surface-chrome: var(--surface-pane);
-            --surface-sunken: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 15%, var(--window-bg, #fdfcf8));
-            --surface-select: var(--hl-line-bg, #f5f1e6);
+            --surface-sunken: color-mix(in srgb, var(--window-bg, #fdfcf8) 80%, var(--hl-line-bg, #f5f1e6));
+            --surface-select: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 70%, var(--faint-fg, #b3ac9c));
             background: var(--surface-pane);
-            border-color: color-mix(in srgb, var(--accent) 35%, var(--border-bg, #cbc4b1));
-            box-shadow: var(--chrome-shadow-deep, 0 22px 60px rgba(0, 0, 0, 0.5)),
+            border-color: color-mix(in srgb, var(--border-bg, #cbc4b1) 60%, var(--faint-fg, #b3ac9c));
+            box-shadow: 0 1px 0 var(--surface-pane) inset,
+                        var(--chrome-shadow-deep, 0 22px 60px rgba(0, 0, 0, 0.5)),
                         0 0 0 1px var(--default-bg, #e6e0d2);
-          }
-          .window.active:has(.dash-state-focus) .dash-persistent {
-            border-top: 1px solid var(--accent);
           }
           /* a sitting window: paper, a hairline, no lift */
           .window.active:has(.dash-state-editing) {
