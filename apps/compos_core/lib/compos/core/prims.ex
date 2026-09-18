@@ -5,6 +5,14 @@ defmodule Compos.Core.Prims do
   def s({:sym, str}), do: str
   def s(str) when is_binary(str), do: str
 
+  @doc "A wall-clock time of day for a log row, from a system time in milliseconds."
+  def clock(ms) do
+    ms
+    |> :calendar.system_time_to_local_time(:millisecond)
+    |> NaiveDateTime.from_erl!()
+    |> Calendar.strftime("%H:%M:%S")
+  end
+
   @doc "Raise a Scheme error the caller sees as one."
   def raise_scheme(msg), do: raise(Compos.Scheme.Eval.Error, message: msg)
 

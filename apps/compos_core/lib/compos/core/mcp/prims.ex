@@ -75,11 +75,7 @@ defmodule Compos.Core.MCP.Prims do
         fn [name] ->
           for e <- Compos.Core.MCP.log(s(name)) do
             [
-              # the reader is looking at a clock on their own wall, not UTC
-              e.at
-              |> :calendar.system_time_to_local_time(:millisecond)
-              |> NaiveDateTime.from_erl!()
-              |> Calendar.strftime("%H:%M:%S"),
+              clock(e.at),
               to_string(e.dir),
               e.text
             ]

@@ -76,10 +76,7 @@ defmodule Compos.Core.Endpoint.Prims do
         fn [name] ->
           for e <- Compos.Core.Endpoint.log(s(name)) do
             [
-              e.at
-              |> :calendar.system_time_to_local_time(:millisecond)
-              |> NaiveDateTime.from_erl!()
-              |> Calendar.strftime("%H:%M:%S"),
+              clock(e.at),
               to_string(e.dir),
               e.text
             ]

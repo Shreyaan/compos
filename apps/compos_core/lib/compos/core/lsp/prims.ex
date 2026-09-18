@@ -64,10 +64,7 @@ defmodule Compos.Core.LSP.Prims do
             {name, root} ->
               for e <- Compos.Core.LSP.log(name, root) do
                 [
-                  e.at
-                  |> :calendar.system_time_to_local_time(:millisecond)
-                  |> NaiveDateTime.from_erl!()
-                  |> Calendar.strftime("%H:%M:%S"),
+                  clock(e.at),
                   to_string(e.dir),
                   e.text
                 ]
