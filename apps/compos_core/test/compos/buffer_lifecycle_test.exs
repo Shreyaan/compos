@@ -106,7 +106,7 @@ defmodule Compos.BufferLifecycleTest do
     assert Buffer.name(ref) == nil
   end
 
-  test "waking completes mode setup internally before returning" do
+  test "a wake rebuilds the mode on the buffer's lane, whoever woke it" do
     name = unique("mode-wake")
     # zz- names a test fixture: the mode outlives this test in the same
     # interpreter, and the shipped-mode audits skip that prefix
@@ -128,22 +128,24 @@ defmodule Compos.BufferLifecycleTest do
     evict(name)
     assert eventually(fn -> not Buffer.exists?(name) end)
 
-    # A non-displaying buffer operation wakes and restores synchronously.
+    # A write wakes the buffer and queues the rebuild; the write itself
+    # returns at once, and nothing is displayed or selected.
     Buffer.set_local(name, "poke", true)
-    assert Buffer.get_local(name, "wake-count") == 2
+    assert eventually(fn -> Buffer.get_local(name, "wake-count") == 2 end)
     assert Editor.current_buffer() == "*scratch*"
 
     evict(name)
     assert eventually(fn -> not Buffer.exists?(name) end)
 
-    # An Editor-originated wake restores after the server call, also before
-    # its public API returns.
+    # An Editor-originated wake queues the rebuild from inside the handler.
     Editor.set_window_buffer(name)
-    assert Buffer.get_local(name, "wake-count") == 3
+    assert eventually(fn -> Buffer.get_local(name, "wake-count") == 3 end)
 
     Editor.set_window_buffer("*scratch*")
     evict(name)
     assert eventually(fn -> not Buffer.exists?(name) end)
+    # Scheme decides that a switch shows a whole buffer: switch-to-buffer!
+    # rebuilds inline, so the count is up before the eval returns.
     assert {:ok, _} = Session.eval(~s{(switch-to-buffer! "#{name}")})
     assert Buffer.get_local(name, "wake-count") == 4
 

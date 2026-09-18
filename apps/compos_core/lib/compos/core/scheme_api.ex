@@ -1990,45 +1990,28 @@ defmodule Compos.Core.SchemeAPI do
       end,
       {"switch-to-buffer!",
        "(switch-to-buffer! BUF) — show BUF in the active window; return BUF."} => fn [name] ->
-        if Compos.Core.Frame.buffer_context() do
-          unless Buffer.exists?(name), do: Core.create_buffer(name)
-          Compos.Core.Frame.put_buffer(name)
-        else
-          # A forgotten name gets a fresh buffer here too — C-x b creates.
-          # A dormant name goes to set_window_buffer, which wakes it.
-          unless Buffer.exists?(name) or Compos.Core.BufferStore.known?(name),
-            do: Core.create_buffer(name)
+        # A forgotten name gets a fresh buffer here too — C-x b creates. A
+        # dormant name wakes through the one door.
+        Core.ensure_buffer(name)
 
-          Editor.set_window_buffer(name)
-        end
+        if Compos.Core.Frame.buffer_context(),
+          do: Compos.Core.Frame.put_buffer(name),
+          else: Editor.set_window_buffer(name)
 
         name
       end,
-      # editor.scm wraps this raw primitive so a dormant buffer's mode setup
-      # completes in the current interpreter before switch-to-buffer! returns.
+      # editor.scm wraps this raw primitive: switch-to-buffer-here! runs
+      # restore-buffer-runtime! itself, inline, so a dormant buffer's mode
+      # setup completes in the current interpreter before the switch
+      # returns. The wake here therefore queues no rebuild of its own.
       {"window-switch-buffer!",
        "(window-switch-buffer! BUF) — raw switch that restores a dormant BUF inline; return BUF."} =>
         fn [name] ->
-          previous = Process.get(:compos_inline_runtime_restore)
-          Process.put(:compos_inline_runtime_restore, true)
+          Core.ensure_buffer(name, restore: false)
 
-          try do
-            if Compos.Core.Frame.buffer_context() do
-              unless Buffer.exists?(name), do: Core.create_buffer(name)
-              Compos.Core.Frame.put_buffer(name)
-            else
-              # A forgotten name gets a fresh buffer here too — C-x b creates.
-              # A dormant name goes to set_window_buffer, which wakes it.
-              unless Buffer.exists?(name) or Compos.Core.BufferStore.known?(name),
-                do: Core.create_buffer(name)
-
-              Editor.set_window_buffer(name)
-            end
-          after
-            if previous,
-              do: Process.put(:compos_inline_runtime_restore, previous),
-              else: Process.delete(:compos_inline_runtime_restore)
-          end
+          if Compos.Core.Frame.buffer_context(),
+            do: Compos.Core.Frame.put_buffer(name),
+            else: Editor.set_window_buffer(name)
 
           name
         end,

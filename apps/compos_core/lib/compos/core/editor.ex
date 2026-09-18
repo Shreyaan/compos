@@ -23,7 +23,7 @@ defmodule Compos.Core.Editor do
 
   use GenServer
 
-  alias Compos.Core.{Buffer, BufferStore, Candidates, Events, Frame, Session}
+  alias Compos.Core.{Buffer, Candidates, Events, Frame, Session}
 
   # Emacs window-configuration-change-hook, by its Scheme name
   @config_hook "window-configuration-changed!"
@@ -107,12 +107,8 @@ defmodule Compos.Core.Editor do
   def list_windows_all, do: GenServer.call(__MODULE__, :list_windows_all)
 
   @doc "Set any window's buffer, any frame, without selecting it."
-  def window_set_buffer(win_id, buffer) do
-    restoring = dormant?(buffer)
-    result = GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer})
-    restore_if_woken(buffer, restoring)
-    result
-  end
+  def window_set_buffer(win_id, buffer),
+    do: GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer})
 
   @doc """
   The frame's overriding map, or nil to clear it. LOCK? makes an unbound
@@ -431,12 +427,8 @@ defmodule Compos.Core.Editor do
   preview must not reorder the buffer history. WIN previews into that window
   instead (the modal switcher previews into its home window, not its own).
   """
-  def preview_buffer(buffer, fid \\ nil, win \\ nil) do
-    restoring = dormant?(buffer)
-    result = GenServer.call(__MODULE__, {:preview_buffer, buffer, fid(fid), win})
-    restore_if_woken(buffer, restoring)
-    result
-  end
+  def preview_buffer(buffer, fid \\ nil, win \\ nil),
+    do: GenServer.call(__MODULE__, {:preview_buffer, buffer, fid(fid), win})
 
   @doc "A buffer is dying: swap every window showing it (any frame) onto a live one."
   def release_buffer(buffer), do: GenServer.call(__MODULE__, {:release_buffer, buffer})
@@ -450,26 +442,11 @@ defmodule Compos.Core.Editor do
   @doc "Carry windows and MRU state across a buffer rename; Scheme carries the keymaps."
   def rename_buffer(old, new), do: GenServer.call(__MODULE__, {:rename_buffer, old, new})
 
-  def set_window_buffer(buffer, fid \\ nil) do
-    restoring = dormant?(buffer)
-    result = GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
-    restore_if_woken(buffer, restoring)
-    result
-  end
-
-  defp dormant?(buffer), do: not Buffer.exists?(buffer) and BufferStore.known?(buffer)
-
-  defp restore_if_woken(buffer, true) do
-    # Scheme completes this in its switch-to-buffer! wrapper, and says so by
-    # setting :compos_inline_runtime_restore in the calling process. Testing
-    # the Session pid instead stopped working when Scheme moved to lanes: an
-    # eval runs in a Lane worker, never in Session itself, so the guard was
-    # always true and every Scheme-driven wake restored the buffer twice.
-    if Buffer.exists?(buffer) and not Process.get(:compos_inline_runtime_restore, false),
-      do: Compos.Core.restore_runtime(buffer)
-  end
-
-  defp restore_if_woken(_buffer, false), do: :ok
+  # A dormant buffer named here wakes inside the handler, through the one
+  # door (Compos.Core.ensure_buffer), which queues its runtime rebuild on
+  # the buffer's own lane. Nothing waits for it.
+  def set_window_buffer(buffer, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
 
   @doc "Replace a frame's window tree from a {:leaf, name} | {:split, dir, a, b} spec."
   def restore_tree(spec, active_buffer, fid \\ nil),

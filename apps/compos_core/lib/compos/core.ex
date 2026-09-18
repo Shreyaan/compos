@@ -40,55 +40,69 @@ defmodule Compos.Core do
     end
   end
 
+  @doc """
+  Start a buffer named NAME. A known name comes back through `wake/2`,
+  with the options it was given; a new name starts empty, or from
+  `text:` or `path:`.
+  """
   def create_buffer(name, opts \\ []) do
-    restored = BufferStore.lookup(name)
+    case wake(name, opts) do
+      {:error, :not_found} -> start(name, opts)
+      other -> other
+    end
+  end
 
-    # A catalog row can outlive its checkpoint file. The content is gone,
-    # and a name that errors forever wedges every later create. Forget the
-    # stale row and start fresh.
-    restored =
-      if restored && not File.exists?(restored.checkpoint) do
-        Logger.warning("buffer #{name}: checkpoint file missing, starting fresh")
-        BufferStore.forget(name)
+  @doc """
+  The one door a dormant buffer comes back through.
+
+  A live buffer answers at once. A dormant buffer starts from its
+  checkpoint and its log, and one Scheme call, `restore-buffer-runtime!`,
+  is queued on the buffer's lane to rebuild what the files do not hold:
+  the mode, the keys, the overlays, the folds. The call never waits, and
+  it runs only while the buffer is still live. A caller that rebuilds the
+  runtime itself, or puts the buffer back to sleep at once, passes
+  `restore: false`. An unknown name is `{:error, :not_found}`.
+  """
+  def wake(name, opts \\ []) do
+    cond do
+      Buffer.exists?(name) ->
+        {:ok, name}
+
+      true ->
+        case dormant_checkpoint(name) do
+          nil -> {:error, :not_found}
+          path -> start(name, Keyword.put(opts, :checkpoint, path))
+        end
+    end
+  end
+
+  # The checkpoint file of a known dormant buffer. A row can outlive its
+  # file: the content is gone, and a name that errors forever wedges every
+  # later create. Forget the row and start fresh.
+  defp dormant_checkpoint(name) do
+    case BufferStore.lookup(name) do
+      %{id: id} ->
+        path = BufferStore.checkpoint_path(id)
+
+        if File.exists?(path) do
+          path
+        else
+          Logger.warning("buffer #{name}: checkpoint file missing, starting fresh")
+          BufferStore.forget(name)
+          nil
+        end
+
+      _ ->
         nil
-      else
-        restored
-      end
+    end
+  end
 
-    opts = if restored, do: Keyword.put_new(opts, :checkpoint, restored.checkpoint), else: opts
+  defp start(name, opts) do
+    {restore?, opts} = Keyword.pop(opts, :restore, true)
 
     case DynamicSupervisor.start_child(@buffer_sup, {Buffer, Keyword.put(opts, :name, name)}) do
       {:ok, _pid} ->
-        # An Editor handler cannot call Session: mode setup can install
-        # local keys by calling back into Editor. Its public caller finishes
-        # restoration after the Editor call returns. Every other wake is
-        # synchronous, so nobody observes a half-restored buffer.
-        # `Process.whereis(Session)` answered yes too early: GenServer
-        # registers the name before init/1 runs, so Session's own
-        # create_buffer("*Messages*") asked its own init to restore a
-        # runtime. The lane worker then waited on :await_boot, Session was
-        # still inside init, and every boot paid a fixed 60s timeout. Ask
-        # whether the interpreter is ready, which is what this guard means.
-        if restored && Compos.Core.Session.ready?() do
-          cond do
-            self() == Process.whereis(Compos.Core.Editor) ->
-              :ok
-
-            # Scheme evaluates in a Lane worker now, not inside Session, so
-            # asking for the Session pid here answered no forever: a wake
-            # driven by Scheme fell through to the synchronous restore and
-            # called back into the lane it was already running on. Ask the
-            # question the code means — am I inside an eval? — and let
-            # switch-to-buffer! say when it owns the restore itself.
-            Registry.keys(Compos.Core.LaneRegistry, self()) != [] ->
-              unless Process.get(:compos_inline_runtime_restore, false),
-                do: restore_runtime_later(name)
-
-            true ->
-              restore_runtime(name)
-          end
-        end
-
+        if restore? and Keyword.has_key?(opts, :checkpoint), do: restore_runtime_later(name)
         {:ok, name}
 
       {:error, {:already_started, _}} ->
@@ -99,10 +113,29 @@ defmodule Compos.Core do
     end
   end
 
-  defp restore_runtime_later(name) do
-    Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn -> restore_runtime(name) end)
+  @doc """
+  Rebuild NAME's Scheme runtime on its own lane, without waiting. The
+  frame in hand rides along, as it does for a synchronous call. The job
+  skips a buffer that went back to sleep before its turn: a rebuild
+  writes locals, and a write wakes.
+  """
+  def restore_runtime_later(name) do
+    fid = Compos.Core.Frame.current()
+
+    Compos.Core.Lane.cast(
+      Compos.Core.Lane.for_buffer(name),
+      fn _from ->
+        if Buffer.exists?(name),
+          do: Compos.Core.Session.exec_call_named("restore-buffer-runtime!", [name], fid),
+          else: {:reply, :asleep}
+      end,
+      "call restore-buffer-runtime!"
+    )
+
+    :ok
   end
 
+  @doc "Rebuild NAME's Scheme runtime on its own lane and wait for it."
   def restore_runtime(name) do
     # the buffer's own lane, with room for an agent revival: a 20s chat
     # restore on :ui froze every keystroke behind it
@@ -117,9 +150,30 @@ defmodule Compos.Core do
     :ok
   end
 
-  @doc "Ensure a live process exists for a live or dormant buffer."
-  def ensure_buffer(name) do
-    if Buffer.exists?(name), do: {:ok, name}, else: create_buffer(name)
+  @doc """
+  Wait until every queued runtime rebuild of NAMES has run. A wake queues
+  its rebuild and returns; a caller that must read the rebuilt runtime
+  (a test, the desktop restore API) waits here, on each buffer's lane.
+  """
+  def await_restores(names) do
+    Enum.each(names, fn name ->
+      Compos.Core.Lane.run(
+        Compos.Core.Lane.for_buffer(name),
+        fn _from -> {:reply, :ok} end,
+        120_000,
+        "await restore-buffer-runtime!"
+      )
+    end)
+
+    :ok
+  end
+
+  @doc """
+  A live process for NAME: a live buffer as it is, a dormant one woken
+  through `wake/2` (OPTS go to it), an unknown name created empty.
+  """
+  def ensure_buffer(name, opts \\ []) do
+    if Buffer.exists?(name), do: {:ok, name}, else: create_buffer(name, opts)
   end
 
   @doc """
@@ -214,10 +268,14 @@ defmodule Compos.Core do
         :ok
     end
 
+    # Forget before the process goes. A write can reach the name while it
+    # dies (a queued runtime rebuild, a late hook), and a write to a known
+    # dormant name wakes it: the kill would resurrect the buffer from the
+    # checkpoint it was about to bury. `discard` stops every checkpoint
+    # write first, so nothing is written after the files move.
     :ok = Buffer.discard(name)
-    result = DynamicSupervisor.terminate_child(@buffer_sup, pid)
     BufferStore.forget(name)
-    result
+    DynamicSupervisor.terminate_child(@buffer_sup, pid)
   end
 
   @doc """
@@ -300,13 +358,17 @@ defmodule Compos.Core do
         {:error, :no_buffer}
 
       true ->
-        {:ok, ^old} = ensure_buffer(old)
+        was_live = Buffer.exists?(old)
+        {:ok, ^old} = ensure_buffer(old, restore: false)
 
         case Buffer.rename(old, new, Buffer.path(old)) do
           :ok ->
             if Process.whereis(Compos.Core.Editor),
               do: Compos.Core.Editor.rename_buffer(old, new)
 
+            # a dormant buffer woke for the rename; its runtime comes back
+            # under the name it now has
+            unless was_live, do: restore_runtime_later(new)
             {:ok, new}
 
           {:error, reason} ->
@@ -326,7 +388,7 @@ defmodule Compos.Core do
          :ok <- File.rename(source, destination) do
       if BufferStore.known?(source) or Buffer.exists?(source) do
         was_live = Buffer.exists?(source)
-        {:ok, ^source} = ensure_buffer(source)
+        {:ok, ^source} = ensure_buffer(source, restore: false)
         path = Buffer.path(source)
         dired_dir = Buffer.get_local(source, "dired-dir")
         :ok = Buffer.rename(source, destination, if(path == source, do: destination, else: path))

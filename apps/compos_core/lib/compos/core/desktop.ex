@@ -35,8 +35,16 @@ defmodule Compos.Core.Desktop do
   @doc "Synchronous snapshot to disk (also used by tests)."
   def save_now, do: GenServer.call(__MODULE__, :save)
 
-  @doc "Restore from disk over the current editor state."
-  def restore_now, do: GenServer.call(__MODULE__, :restore, 30_000)
+  @doc """
+  Restore from disk over the current editor state, and wait for the
+  runtime of every shown buffer: a wake queues its rebuild on the
+  buffer's lane, and a caller of this API reads the rebuilt runtime.
+  """
+  def restore_now do
+    result = GenServer.call(__MODULE__, :restore, 30_000)
+    Compos.Core.await_restores(shown_buffers())
+    result
+  end
 
   @doc """
   The globals a desktop file holds, without touching the editor.
@@ -430,14 +438,37 @@ defmodule Compos.Core.Desktop do
 
   defp install_global(_), do: false
 
-  # A boot wakes only the buffers a window shows; the rest stay dormant and
-  # rebuild when something wakes them.
-  defp restore_window_runtime do
+  # The buffers a window shows, any frame.
+  defp shown_buffers do
     Editor.list_windows_all()
     |> Enum.map(fn {_win, name, _frame} -> name end)
     |> Enum.uniq()
-    |> Enum.each(&Compos.Core.restore_runtime/1)
   end
+
+  # Every buffer the saved trees name. A leaf is `{:leaf, name, ...}`; a
+  # split ends in its two children, whatever rides between.
+  defp tree_buffers(%{frames: frames}) when is_list(frames),
+    do: frames |> Enum.flat_map(&leaf_names(Map.get(&1, :tree))) |> Enum.uniq()
+
+  defp tree_buffers(%{tree: tree}), do: tree |> leaf_names() |> Enum.uniq()
+  defp tree_buffers(_), do: []
+
+  defp leaf_names(tuple) when is_tuple(tuple) and tuple_size(tuple) >= 2 do
+    case elem(tuple, 0) do
+      :leaf ->
+        name = elem(tuple, 1)
+        if is_binary(name), do: [name], else: []
+
+      :split when tuple_size(tuple) >= 4 ->
+        n = tuple_size(tuple)
+        leaf_names(elem(tuple, n - 2)) ++ leaf_names(elem(tuple, n - 1))
+
+      _ ->
+        []
+    end
+  end
+
+  defp leaf_names(_), do: []
 
   # A Session restart is not a boot: every buffer is already awake, and its
   # mode setup, minor modes and derived state went with the old interpreter.
@@ -504,6 +535,12 @@ defmodule Compos.Core.Desktop do
   # again. The restore stays owed until one run finishes, and do_save
   # refuses to write while it is owed, so the file keeps the real state.
   defp restore_world(desktop, state) do
+    # Every buffer a saved tree names comes back as a process first, with
+    # its literal state and no runtime: the trees need live buffers, and a
+    # mode setup reads the group records, which the globals below put
+    # back. A boot wakes only these; the rest stay dormant and rebuild
+    # when something wakes them.
+    Enum.each(tree_buffers(desktop), &Compos.Core.ensure_buffer(&1, restore: false))
     restore_frames(desktop)
 
     # Runtime setup reads persisted policy. Group modelines, for example,
@@ -516,10 +553,10 @@ defmodule Compos.Core.Desktop do
     state = %{state | scheme_stale?: not install_globals(state.globals)}
     if state.scheme_stale?, do: Process.send_after(self(), :reseed, @reseed_retry)
 
-    # Waking installs literal buffer state. Runtime-only mode machinery is
-    # rebuilt only after the Editor call has returned, avoiding a
-    # Session -> Editor deadlock during tree construction.
-    restore_window_runtime()
+    # The runtime of each shown buffer is rebuilt on that buffer's own
+    # lane. Nothing here waits for it: a boot that wakes many buffers kept
+    # the Editor busy for seconds, and this process died on the wait.
+    Enum.each(shown_buffers(), &Compos.Core.restore_runtime_later/1)
 
     # Faces are not restored. themes.scm persists the theme NAME and
     # derives the faces at boot, so a theme edit applies on restart.
