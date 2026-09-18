@@ -625,7 +625,7 @@
          (rows (list-keep buf (if extend? (nth 3 previous) source))))
     (list-filter-forget! buf)
     (set! *list-filter-history*
-      (take-n (cons (list buf filters source rows) *list-filter-history*) 32))
+      (take (cons (list buf filters source rows) *list-filter-history*) 32))
     rows))
 
 (define (list-filter-source buf)
@@ -1898,7 +1898,7 @@
                 rows)))
     (when cache?
       (set! *list-filter-row-cache*
-        (take-n
+        (take
           (cons (list buf q ctx (list-zip-prepared rows prepared))
                 (remove (lambda (entry) (equal? (car entry) buf)) *list-filter-row-cache*))
           32)))

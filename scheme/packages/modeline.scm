@@ -419,7 +419,7 @@
     (list 'tag "div" 'class "dash-chips"
           'children
           (append
-            (map dash--chip (if (> n 20) (take-n names 20) names))
+            (map dash--chip (if (> n 20) (take names 20) names))
             (if (> n 20)
                 (list (dash--chip (string-append "+" (number->string (- n 20))
                                                  " more")))
@@ -493,10 +493,7 @@
 
 (define (last-n xs n)
   (let ((k (length xs)))
-    (if (<= k n) xs (list-tail-n xs (- k n)))))
-
-(define (list-tail-n xs n)
-  (if (= n 0) xs (list-tail-n (cdr xs) (- n 1))))
+    (if (<= k n) xs (list-tail xs (- k n)))))
 
 ;; the expansion is a panel INSIDE the buffer's window, pinned above
 ;; the text — the buffer stays editable beneath it. The state is one
@@ -966,6 +963,9 @@
 (define (name--flush plain out)
   (if (equal? plain "") out (cons (list "bn-text" plain) out)))
 
+(define (name--drop-empty segs)
+  (filter (lambda (s) (not (equal? (cadr s) ""))) segs))
+
 (define (name--trim-left s)
   (let ((n (string-length s)))
     (let loop ((i 0))
@@ -978,9 +978,6 @@
     (cond ((= n 0) "")
           ((equal? (substring s (- n 1) n) " ") (loop (- n 1)))
           (else (substring s 0 n)))))
-
-(define (name--drop-empty segs)
-  (filter (lambda (s) (not (equal? (cadr s) ""))) segs))
 
 (define (name--edge segs trim)
   (if (null? segs)

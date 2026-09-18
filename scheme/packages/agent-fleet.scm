@@ -101,7 +101,7 @@
   (if (not (boundp (quote chat-log-files-newest)))
       '()
       (let ((live (chats-live-log-paths)))
-        (take-n (filter (lambda (path)
+        (take (filter (lambda (path)
                           (and (not (buffer-known? path))
                                (not (member path live))))
                         (chat-log-files-newest))
@@ -663,7 +663,7 @@
 (define (chat-list-scope)
   (let ((all (chat-list-bufs)))
     (if (equal? (chat-list-query) "")
-        (take-n all chat-list-recent-limit)
+        (take all chat-list-recent-limit)
         all)))
 (ibuffer-scope! 'chat-list (lambda () (chat-list-scope)))
 
@@ -867,7 +867,7 @@
                '(mode-name agent-slug chat-title chat-summary agent-model llm-model
                  chat-log-id chat-log-size group-id group-ids group))))
     (set! *chat-list-snapshots*
-      (take-n (cons (cons buf (map chat-list-table-row raw))
+      (take (cons (cons buf (map chat-list-table-row raw))
                     (remove (lambda (e) (equal? (car e) buf)) *chat-list-snapshots*)) 16))
     ;; the cell path asks ibuffer-row-kind per row; note it from the
     ;; mode-name this read already holds, so it never re-asks a buffer

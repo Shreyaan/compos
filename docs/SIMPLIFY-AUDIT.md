@@ -863,6 +863,23 @@ seven differ in what they take: the current buffer against a named one
 frame (window-list), the active window against one by id
 (delete-window!), the window against the frame root (split-window!),
 and minibuffer-read against its handler-alist form; they stay.
+Item 13 of section 3 (reimplemented builtins): take-n is the take
+builtin (36 sites), transient--put is plist-put, list-tail-n is
+list-tail, abbreviate-home is abbreviate-file-name; nth stays as the one
+Emacs-named line over list-ref. name--trim-left and name--trim-right
+looked unreferenced but are passed as values, so they stay. Item 15
+(keys bound from several sections): the duplicate M-< and M-> lines
+went. Five keys are bound in two files and the later file wins; these
+are policy and wait for a ruling: C-x b (switch.scm ibuffer-prompt over
+switch-to-buffer-prompt), C-_ (appearance.scm text-scale-decrease over
+undo, the Emacs binding), C-t (telemetry.scm telemetry-toggle over
+transpose-chars, the Emacs binding), C-c RET (chat-companion-ask and
+goto-address-at-point), RET (preview.scm preview-newline over
+newline-or-send). Item 5 (prompt doors), checked: read-char takes any
+key and read-char-choice a key from a set; y-or-n takes two thunks and
+y-or-n-p one continuation; yes-or-no-p takes a word. They are four
+readers, not five copies. Merging y-or-n into y-or-n-p means rewriting
+23 call sites; it waits.
 
 **Next three steps, in order.**
 

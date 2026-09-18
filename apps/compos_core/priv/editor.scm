@@ -3083,9 +3083,9 @@
          (old (mark))
          (at (or pos (point))))
     (when old
-      (buffer-set-local! buf 'mark-ring (take-n (cons old (mark-ring buf)) mark-ring-max)))
+      (buffer-set-local! buf 'mark-ring (take (cons old (mark-ring buf)) mark-ring-max)))
     (unless (and (pair? *global-mark-ring*) (equal? (car (car *global-mark-ring*)) buf))
-      (set! *global-mark-ring* (take-n (cons (list buf (or old at)) *global-mark-ring*) mark-ring-max)))
+      (set! *global-mark-ring* (take (cons (list buf (or old at)) *global-mark-ring*) mark-ring-max)))
     (set-mark! at)
     (unless nomsg (message "Mark set"))
     at))
@@ -4227,7 +4227,7 @@
           (number->string (length (group-buffers g))) " buffers"
           (let ((m (group-meta g))) (if m (string-append "  ·  " m) "")))
         "container"
-        (map buffer-short-label (take-n (group-buffers-mru g) 4))))
+        (map buffer-short-label (take (group-buffers-mru g) 4))))
 
 ;; C-RET: the picked buffer's CONTEXT comes up — its group, or its
 ;; project materialized as one. A project is also a group: the first
@@ -4352,15 +4352,10 @@
   (let ((e (assoc key *minibuffer-history*)))
     (if e (cadr e) '())))
 
-(define (take-n lst n)
-  (if (or (null? lst) (= n 0))
-      '()
-      (cons (car lst) (take-n (cdr lst) (- n 1)))))
-
 (define (history-push! key item)
   (let ((items (cons item (filter (lambda (x) (not (equal? x item)))
                                   (history-items key)))))
-    (set! *minibuffer-history* (alist-put *minibuffer-history* key (take-n items *minibuffer-history-max*)))))
+    (set! *minibuffer-history* (alist-put *minibuffer-history* key (take items *minibuffer-history-max*)))))
 
 ;; reorder candidates so remembered ones lead, in recency order
 (define (history-order key candidates)
@@ -5372,8 +5367,6 @@
 (global-set-key "C-x n w" "widen")
 
 (global-set-key "M-x" "execute-extended-command")
-(global-set-key "M-<" "beginning-of-buffer")
-(global-set-key "M->" "end-of-buffer")
 (global-set-key "M-:" "eval-expression")
 (global-set-key "C-x C-e" "eval-last-sexp")
 

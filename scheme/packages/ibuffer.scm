@@ -485,7 +485,7 @@
         ((and (ibuffer-heading? (car rows))
               (equal? (ibuffer-heading-key (car rows)) key))
          (let* ((head (car rows))
-                (updated (append (take-n head 2)
+                (updated (append (take head 2)
                                  (list (if folded? "folded" "separator"))
                                  (cdr (cdr (cdr head)))))
                 (tail (let skip ((rest (cdr rows)))
@@ -1231,7 +1231,7 @@
                (data (list mode text)))
           (ibuffer-search-forget! buf)
           (set! *ibuffer-search-cache*
-            (take-n (cons (list buf (take-n (cons (cons row data) entries) 2048))
+            (take (cons (list buf (take (cons (cons row data) entries) 2048))
                           *ibuffer-search-cache*) 16))
           data))))
 
@@ -2436,7 +2436,7 @@
                      (if (member current ids) current (if (pair? ids) (car ids) #f))
                      (or (nth 3 r) 0)))) eligible)))
     (set! *ibuffer-table-snapshots*
-      (take-n (cons (cons buf rows)
+      (take (cons (cons buf rows)
                     (remove (lambda (e) (equal? (car e) buf)) *ibuffer-table-snapshots*)) 16))))
 
 (define (ibuffer-table-data buf name)

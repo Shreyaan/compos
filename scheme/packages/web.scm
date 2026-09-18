@@ -587,7 +587,7 @@
 
 (define (web--remember-visit! url title)
   (web--history-write!
-    (take-n (cons (list url title (current-time))
+    (take (cons (list url title (current-time))
                   (filter (lambda (e) (not (equal? (car e) url)))
                           (web--history)))
             *web-visited-max*)))
@@ -1025,7 +1025,7 @@
 ;; reading it was read in
 (define (web--page-remember! buf url reading md)
   (buffer-set-local! buf 'browse-pages
-    (take-n (cons (list url reading md (current-time))
+    (take (cons (list url reading md (current-time))
                   (filter (lambda (e) (not (equal? (car e) url)))
                           (or (buffer-local buf 'browse-pages) '())))
             *web-page-cache-max*)))

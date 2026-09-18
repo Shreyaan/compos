@@ -1433,7 +1433,7 @@
           (recent (group-record-create! "zzsw-cache-recent")))
       (group-mru-note! older)
       (group-mru-note! recent)
-      (check-equal! (take-n (group-mru-ids) 2) (list recent older)
+      (check-equal! (take (group-mru-ids) 2) (list recent older)
                     "the cache holds group ids alone, newest first")
       ;; the shared ring still reads (recent older). Only the cache says
       ;; otherwise, and the cache is what the switcher must follow.

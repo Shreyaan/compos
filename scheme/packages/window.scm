@@ -590,7 +590,7 @@
     (let ((visible (layout-visible-buffers)))
       (layout-target-note-slots!
         (if (and (member name '(main-left main-top)) (pair? visible))
-            (cons (car (reverse visible)) (take-n visible (- (length visible) 1)))
+            (cons (car (reverse visible)) (take visible (- (length visible) 1)))
             visible))))
   (set-frame-local! 'layout-target-count (length (layout-visible-buffers)))
   (layout-target-modeline!)
@@ -648,7 +648,7 @@
     ;; keep window IDs while changing their order. Cached IDs must not undo it.
     ;; Main-left/top place the logical main last in physical tree order.
     (if (and (pair? visible) (member (layout-target) '(main-left main-top)))
-        (cons (car (reverse visible)) (take-n visible (- (length visible) 1)))
+        (cons (car (reverse visible)) (take visible (- (length visible) 1)))
         visible)))
 
 (define (layout-target-arrange! panes focus)
@@ -1094,7 +1094,7 @@
   (let ((e (peek-recent-entry name)))
     (when e
       (set! *peek-recent*
-        (take-n (cons e (filter (lambda (x) (not (equal? (nth 2 x) (nth 2 e))))
+        (take (cons e (filter (lambda (x) (not (equal? (nth 2 x) (nth 2 e))))
                                 *peek-recent*))
                 *peek-recent-max*)))))
 
@@ -1709,10 +1709,10 @@
 ;; Explicit fixed layouts fill with hidden work from the same context.
 ;; Keep the focused buffer when a smaller target hides surplus panes.
 (define (layout--fit buffers capacity)
-  (let* ((kept (take-n buffers capacity))
+  (let* ((kept (take buffers capacity))
          (focus (window-buffer (active-window))))
     (if (and (member focus buffers) (not (member focus kept)))
-        (append (take-n kept (- capacity 1)) (list focus))
+        (append (take kept (- capacity 1)) (list focus))
         kept)))
 
 (define (layout--fill-to buffers capacity)
@@ -1753,7 +1753,7 @@
       (switch-to-buffer-here! (car buffers))
       (let* ((count (length buffers))
              (left-count (quotient (+ count 1) 2))
-             (left (take-n buffers left-count))
+             (left (take buffers left-count))
              (right (layout--drop-n buffers left-count))
              (before (map car (window-list)))
              (left-window (active-window)))
@@ -1803,7 +1803,7 @@
 ;; the main buffer and keeps focus. This is the stable agent-facing entry point.
 (define (tile-windows! algorithm buffers)
   (let* ((known (layout--known-buffers buffers))
-         (panes (if (equal? algorithm 'two-pane) (take-n known 2) known)))
+         (panes (if (equal? algorithm 'two-pane) (take known 2) known)))
     (cond
       ((not (member algorithm *window-layout-algorithms*))
        (message "Unknown window layout") #f)
@@ -2106,7 +2106,7 @@
     (let ((ring (or (frame-local 'winner-ring) '()))
           (now (window-tree)))
       (unless (and (pair? ring) (equal? (car ring) now))
-        (set-frame-local! 'winner-ring (take-n (cons now ring) *winner-depth*)))
+        (set-frame-local! 'winner-ring (take (cons now ring) *winner-depth*)))
       (set-frame-local! 'winner-pos #f))))
 
 (define (winner--restore idx)

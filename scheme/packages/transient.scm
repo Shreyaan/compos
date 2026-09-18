@@ -13,14 +13,6 @@
 (define transient-default-level 4)
 (define transient-history-limit 20)
 
-(define (transient--put pl key value)
-  (append (list key value)
-    (let loop ((xs pl))
-      (cond ((null? xs) '())
-            ((null? (cdr xs)) '())
-            ((equal? (car xs) key) (loop (cdr (cdr xs))))
-            (else (cons (car xs) (cons (cadr xs) (loop (cdr (cdr xs))))))))))
-
 (define (transient--alist-get al key fallback)
   (let ((e (assoc key al))) (if e (cadr e) fallback)))
 
@@ -63,7 +55,7 @@
         (if (or (equal? kind 'switch) (equal? kind 'choice))
             (transient--invoke-value prefix item)
             (transient--invoke-command prefix item))))
-    (transient--put item 'wrapper name)))
+    (plist-put item 'wrapper name)))
 
 (define (transient--prefix-put prefix)
   (set! *transient-prefixes*
@@ -91,7 +83,7 @@
 (define (transient--set-value! argument value)
   (let* ((state (transient--active))
          (values (alist-put (plist-get state 'values) argument value)))
-    (transient--set-active! (transient--put state 'values values))))
+    (transient--set-active! (plist-put state 'values values))))
 
 (define (transient--raw-groups prefix state)
   (let ((groups (caddr prefix)))
@@ -358,7 +350,7 @@
              (columns (transient--columns prefix state groups))
              (target (transient--column-target
                        groups columns (or (plist-get state 'selected) 0) delta)))
-        (transient--set-active! (transient--put state 'selected target))
+        (transient--set-active! (plist-put state 'selected target))
         (transient--render!)))))
 
 (define-command "transient-column-left" "Select the same row in the column to the left"
@@ -374,7 +366,7 @@
              (items (transient--visible-items groups))
              (selected (min (or (plist-get state 'selected) 0)
                             (max 0 (- (length items) 1))))
-             (state (transient--put state 'selected selected)))
+             (state (plist-put state 'selected selected)))
         (transient--set-active! state)
         (transient-keymap-install! (transient--bindings groups))
         (transient-show!
@@ -392,7 +384,7 @@
                            'selected 0 'history-index -1 'level transient-default-level
                            'help #f))
                (groups (transient--visible-groups prefix seed))
-               (state (transient--put seed 'values
+               (state (plist-put seed 'values
                         (transient--initial-values prefix groups))))
           (transient--set-active! state)
           (transient--run-hook prefix 'on-setup state)
@@ -402,7 +394,7 @@
   (let* ((name (plist-get state 'prefix))
          (values (plist-get state 'values))
          (old (transient--alist-get *transient-history* name '()))
-         (history (take-n (cons values (remove (lambda (v) (equal? v values)) old))
+         (history (take (cons values (remove (lambda (v) (equal? v values)) old))
                           transient-history-limit)))
     (set! *transient-history* (alist-put *transient-history* name history))))
 
@@ -526,7 +518,7 @@
   (lambda ()
     (let ((state (transient--active)))
       (when state
-        (transient--set-active! (transient--put state 'help (not (plist-get state 'help))))
+        (transient--set-active! (plist-put state 'help (not (plist-get state 'help))))
         (transient--render!)))))
 
 (define (transient--move-selection delta)
@@ -537,7 +529,7 @@
                               (transient--visible-groups prefix state))) 0)))
     (when (> count 0)
       (transient--set-active!
-        (transient--put state 'selected
+        (plist-put state 'selected
           (modulo (+ (or (plist-get state 'selected) 0) delta count) count)))
       (transient--render!))))
 
@@ -566,8 +558,8 @@
         (message "No more transient history")
         (begin
           (transient--set-active!
-            (transient--put
-              (transient--put state 'history-index next)
+            (plist-put
+              (plist-put state 'history-index next)
               'values (nth next history)))
           (transient--render!)))))
 
@@ -605,7 +597,7 @@
         (set! *transient-defaults*
           (filter (lambda (e) (not (equal? (car e) name))) *transient-defaults*))
         (transient--set-active!
-          (transient--put state 'values
+          (plist-put state 'values
             (transient--initial-values prefix (transient--visible-groups prefix state))))
         (transient--render!)))))
 

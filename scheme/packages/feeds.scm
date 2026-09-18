@@ -56,7 +56,7 @@
 (define (feeds--read? url) (pair? (member url (feeds--read-urls))))
 
 (define (feeds--mark-read! url)
-  (let ((all (take-n (cons url (filter (lambda (u) (not (equal? u url)))
+  (let ((all (take (cons url (filter (lambda (u) (not (equal? u url)))
                                        (feeds--read-urls)))
                      *feeds-read-max*)))
     (set! *feeds--read* all)
@@ -177,7 +177,7 @@
   (let ((subs (feeds--subscriptions)))
     (*feeds-fetch* subs
       (lambda (items)
-        (cond ((pair? items) (k (take-n items feeds-max-items)))
+        (cond ((pair? items) (k (take items feeds-max-items)))
               ((null? subs) (k '()))
               (else (k #f)))))))
 

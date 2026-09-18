@@ -230,13 +230,13 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group--path-tail path n)
   (let* ((parts (group--path-parts path))
          (drop (max 0 (- (length parts) n))))
-    (string-join (list-tail-n parts drop) "/")))
+    (string-join (list-tail parts drop) "/")))
 
 (define (group--set-name! id name)
   (set! *group-records*
     (map (lambda (record)
            (if (equal? (group-record-id record) id)
-               (append (list (group-record-id record) name) (list-tail-n record 2))
+               (append (list (group-record-id record) name) (list-tail record 2))
                record))
          *group-records*)))
 
@@ -375,7 +375,7 @@ is forgotten and that group falls back to creation order in the switcher."
         (let* ((record (car rest))
                (slot (group-color-slot (group-record-color record) index)))
           (loop (cdr rest) (+ index 1)
-                (cons (append (take-n record 6)
+                (cons (append (take record 6)
                               (list slot
                                     (group-record-parent record)
                                     (group-record-origin record)
@@ -518,7 +518,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (persist-global! 'group-mru
   (lambda () *group-mru*)
   (lambda (saved)
-    (when (pair? saved) (set! *group-mru* (take-n saved group-mru-limit)))))
+    (when (pair? saved) (set! *group-mru* (take saved group-mru-limit)))))
 
 (persist-global! 'group-frame-contexts
   group-frame-context-state
@@ -1722,7 +1722,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (list (number->string (length members)) "dim")
           (list (group-noise g) (group-noise-face (group-noise g)))
           (list (string-append
-                  (string-join (map buffer-short-label (take-n members 3)) " · ")
+                  (string-join (map buffer-short-label (take members 3)) " · ")
                   (let ((m (group-meta g)))
                     (if m (string-append "  —  " m) "")))
                 "faint"))))
@@ -1773,7 +1773,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((id (group-resolve-id value)))
     (when id
       (set! *group-mru*
-            (take-n (cons id (remove (lambda (x) (equal? x id)) *group-mru*))
+            (take (cons id (remove (lambda (x) (equal? x id)) *group-mru*))
                     group-mru-limit))
       (desktop-dirty!)
       (mru-note-group! id))
@@ -2774,7 +2774,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-bury! tomb)
   (when tomb
     (set! *group-graveyard*
-      (take-n (cons tomb
+      (take (cons tomb
                     (remove (lambda (t) (equal? (car t) (car tomb))) *group-graveyard*))
               *group-graveyard-depth*))
     (desktop-dirty!)))

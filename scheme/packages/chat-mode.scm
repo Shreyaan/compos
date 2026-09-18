@@ -1854,7 +1854,7 @@
 (define (llm-config-remember! bundle)
   (let ((b (llm-bundle-normalize bundle)))
     (set! *llm-config-history*
-      (take-n
+      (take
         (cons b
           (remove (lambda (old)
                     (equal? (llm-bundle-setup (llm-bundle-normalize old))

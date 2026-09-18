@@ -128,7 +128,7 @@
                                     (string-prefix? (car e) name))
                                 (> (tool--edit-distance name (car e)) 2)))
                          (public-api))))
-    (take-n (append (pick 0) (pick 1) (pick 2) prefix) 3)))
+    (take (append (pick 0) (pick 1) (pick 2) prefix) 3)))
 
 ;; a suggestion shows the SIGNATURE, not just the name: the point of
 ;; "did you mean" is that the next call works, and the arguments are half
@@ -164,7 +164,7 @@
        (if (null? named)
            ""
            (string-append "\ncheck the signatures:"
-                          (tool--format-suggestions (take-n named 5))))))
+                          (tool--format-suggestions (take named 5))))))
     (else "")))
 
 (define-tool! 'eval-scheme

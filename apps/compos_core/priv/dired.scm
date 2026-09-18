@@ -425,15 +425,8 @@
     (cons ".." (dired-sorted buf (or (buffer-local buf 'dired-all) '()))))
   (list-redraw! buf))
 
-;; the title reads like a path a person says: home is "~"
-(define (abbreviate-home p)
-  (let ((home (expand-path "~")))
-    (if (string-prefix? home p)
-        (string-append "~" (substring p (string-length home) (string-length p)))
-        p)))
-
 (define (dired-title buf)
-  (string-append (abbreviate-home (or (dired-dir buf) "")) "/"))
+  (string-append (abbreviate-file-name (or (dired-dir buf) "")) "/"))
 
 ;; ".." is a way out of the directory, not a thing in it
 (define (dired-meta buf)
