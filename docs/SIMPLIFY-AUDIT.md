@@ -940,6 +940,27 @@ deciding where an inline answer goes. That is the chat merge (5.1, 5.11,
 5.12) as one project, and it is last in the Phase 2 order for that
 reason.
 
+**Phase 4, measured (2026-09-19).** The benchmark is
+apps/compos_core/test/bench/ui_latency_bench.exs. A stub agent streams
+1,500 chunks into its chat in one turn; 300 evals of `(+ 1 1)` run on
+the :ui lane during the turn, 60 more queued on the chat's own buffer
+lane, and 300 on :ui with nothing running. Three runs, microseconds:
+
+| series | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| :ui, idle | 10-11 | 22-26 | 49-119 | 256-479 |
+| :ui, under the turn | 11-12 | 25-36 | 35-88 | 53-1,393 |
+| the chat's buffer lane, under the turn | 10-13 | 38-43 | 9,243-10,282 | 979,167-986,663 |
+
+The lanes do their job: a :ui eval under a streaming turn costs what it
+costs idle. An eval queued behind the turn's render waits up to 0.99 s,
+because the 1,500 chunks apply as one job on that lane. One serial
+Scheme world would put that wait in front of a keystroke, so the
+collapse of env.ex, gc, roots, flush, the heir dance and the retry
+loops does not hold as the runtime stands. Its precondition is an
+incremental render: the transcript applies chunks in bounded slices
+that yield to the lane between them. Measure again after that.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:
