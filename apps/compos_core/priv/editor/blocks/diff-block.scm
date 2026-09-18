@@ -14,12 +14,8 @@
 ;;; block. An action (llm-rewrite, a merge, an agent) creates the block
 ;;; and owns nothing below it but its note.
 
-(define diff-block-parent-package *loading-package*)
-(define diff-block-parent-namespace *loading-namespace*)
-(define diff-block-parent-domain *catalog-domain*)
-(define diff-block-parent-effects *catalog-effects*)
-
-(package! 'diff-block 'editor)
+;; the block vocabulary is the editor's
+(namespace! 'editor)
 (domain! 'editing)
 (effects! '(write))
 
@@ -393,6 +389,5 @@
   "(diff-block-pending BUF) — the waiting diff block's record, or #f")
 
 ;; Do not leak this block's catalog context into the loader.
-(package! diff-block-parent-package diff-block-parent-namespace)
-(domain! diff-block-parent-domain)
-(effects! diff-block-parent-effects)
+(domain! 'unknown)
+(effects! '(unknown))

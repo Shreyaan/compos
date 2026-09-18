@@ -8,12 +8,8 @@
 ;;; A concrete block (diff-block.scm) owns its record, its states, its
 ;;; paint, and its verbs.
 
-(define block-parent-package *loading-package*)
-(define block-parent-namespace *loading-namespace*)
-(define block-parent-domain *catalog-domain*)
-(define block-parent-effects *catalog-effects*)
-
-(package! 'block 'editor)
+;; the block vocabulary is the editor's
+(namespace! 'editor)
 (domain! 'editing)
 (effects! '(write))
 
@@ -395,7 +391,5 @@
   (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(write)))
   '("block-create!" "block-set-state!" "block-set-metadata!"))
 
-;; Do not leak this layer's catalog context into the loader.
-(package! block-parent-package block-parent-namespace)
-(domain! block-parent-domain)
-(effects! block-parent-effects)
+(domain! 'unknown)
+(effects! '(unknown))

@@ -6,12 +6,8 @@
 ;;; verbs). This file owns only the LLM policy — the directives, the
 ;;; prompt, the reply cleaning, and the review loop C-c e opens.
 
-(define llm-rewrite-parent-package *loading-package*)
-(define llm-rewrite-parent-namespace *loading-namespace*)
-(define llm-rewrite-parent-domain *catalog-domain*)
-(define llm-rewrite-parent-effects *catalog-effects*)
-
-(package! 'llm-rewrite 'editor)
+;; the block vocabulary is the editor's
+(namespace! 'editor)
 (domain! 'llm)
 (effects! '(write external spend))
 
@@ -172,6 +168,5 @@
   'domain "llm" 'effects '("write" "external" "spend"))
 
 ;; Do not leak this action's catalog context into the loader.
-(package! llm-rewrite-parent-package llm-rewrite-parent-namespace)
-(domain! llm-rewrite-parent-domain)
-(effects! llm-rewrite-parent-effects)
+(domain! 'unknown)
+(effects! '(unknown))

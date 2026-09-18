@@ -6,12 +6,8 @@
 ;;; like every kind; this file owns the landing. It leans on block.scm
 ;;; for the fence shape and on morg-scan for where blocks stand.
 
-(define result-block-parent-package *loading-package*)
-(define result-block-parent-namespace *loading-namespace*)
-(define result-block-parent-domain *catalog-domain*)
-(define result-block-parent-effects *catalog-effects*)
-
-(package! 'result-block 'editor)
+;; the block vocabulary is the editor's
+(namespace! 'editor)
 (domain! 'writing)
 (effects! '(write))
 
@@ -59,6 +55,5 @@
   "(result-block-insert! BUF FSTART OUT [KIND]) — land OUT in the result fence below the block at FSTART, replacing the one that stands there")
 
 ;; Do not leak this block's catalog context into the loader.
-(package! result-block-parent-package result-block-parent-namespace)
-(domain! result-block-parent-domain)
-(effects! result-block-parent-effects)
+(domain! 'unknown)
+(effects! '(unknown))

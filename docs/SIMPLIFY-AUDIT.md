@@ -716,24 +716,28 @@ ChromeTest "returning from a page"; LoadTest was red on calendar. Scheme:
 the keymap ladder tests, the block and theme tests, a-page-opens when feeds
 runs first, and the four apropos tests.
 
-**State on 2026-09-19, end of the autonomous run.** Every item that
-touches no file another session holds and destroys nothing a person runs
-today is done. What remains, and why it waits:
+**State after Phase 1 (2026-09-19, second autonomous run).** editor.scm
+is 5.6k lines, from 15.3k. Thirteen sections are packages (tabulated-list,
+window, tramp, chat-mode, modeline, isearch, capf, visual-line, collect,
+comint, transient, chrome, and dired stays in priv but loads from
+init.scm). One catalog, one mode table, keyed hooks for every registry
+and seam, defvar with persist, the alist and plist builtins, sh-quote as
+a builtin, the block files without their prologue dance. Every failure
+seen on the way is in docs/KNOWN-FAILURES.md with the HEAD it was
+measured at. What remains, and why it waits:
 
-- Phase 1 (one catalog, one define-mode, keyed hooks, sections out of
-  editor.scm), the window domain (section 4), the chat and llm-mode merge
-  (section 5), the six remaining defcustoms, the dired file-stat numbers,
-  the dual-spelling primitives: editor.scm, groups.scm, ibuffer.scm,
-  agent-fleet.scm and editor.ex are open in another session.
-- ChatPerf is gone (24cdfb33). The Profiler stays: SWITCHER-PERF-HANDOFF
-  built it on 2026-09-16 for an investigation that is still open. The
-  /dashboard route stays: it is the tool of the open session-freeze triage.
-  sentry.scm to ~120 lines and one PTY runner remove something a person
-  runs today; a yes from the owner first.
-- The whole-buffer payload the retile probe found (7.4): the window
-  renders more than its visible rows on a fresh mount; editor_live.ex is
-  under active design in the other session.
-- Phase 4, the execution model: a latency benchmark first.
+- Rulings: the five keys bound in two files (C-x b, C-_, C-t, C-c RET,
+  RET); merging y-or-n into y-or-n-p (23 sites); the sentry.scm cut and
+  one PTY runner (something a person runs today).
+- Phase 2 (section 4 and 5 designs: the window domain, the chat and
+  llm-mode merge, the agent config record) touches files another session
+  holds and changes behaviour; it needs its own plan and a green baseline
+  for the layout tests, which are red at HEAD today.
+- One-shot boot migrations (llm-bundles-assign-keys at load, the chat
+  record and input migrations on restore) want one desktop migration
+  pass with a cut-off; themes.scm's face restatements and the 22
+  unreferenced face aliases want a measurement of the CSS side first.
+- Phase 3 (runtime) and Phase 4 (the execution model benchmark).
 
 **Later on 2026-09-19:** the LSP client speaks through the shared JSON-RPC
 framer (four of the five framers are one now); ChatPerf is gone;

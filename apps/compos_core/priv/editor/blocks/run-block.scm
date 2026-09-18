@@ -14,11 +14,6 @@
 ;;; not its byte offset. A tracking overlay (block.scm) follows the rope,
 ;;; and the result lands where it says.
 
-(define morg-babel-parent-package *loading-package*)
-(define morg-babel-parent-namespace *loading-namespace*)
-(define morg-babel-parent-domain *catalog-domain*)
-(define morg-babel-parent-effects *catalog-effects*)
-
 (package! 'morg-babel 'morg)
 (domain! 'writing)
 (effects! '(write execute))
@@ -416,6 +411,5 @@
   "(fence-arg-run! ARG FN) — FN (BUF BLOCK LANG BODY) runs a block whose fence carries the word ARG, ahead of the language's runner")
 
 ;; Do not leak this extension's catalog context into the next package.
-(package! morg-babel-parent-package morg-babel-parent-namespace)
-(domain! morg-babel-parent-domain)
-(effects! morg-babel-parent-effects)
+(domain! 'unknown)
+(effects! '(unknown))

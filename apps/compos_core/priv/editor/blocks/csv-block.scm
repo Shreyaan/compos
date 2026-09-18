@@ -12,7 +12,8 @@
 ;;; morg-kinds.scm paints result-csv); this file adds the one aspect they
 ;;; share, through the registry's row-spans key.
 
-(package! 'csv-block 'editor)
+;; the block vocabulary is the editor's
+(namespace! 'editor)
 (domain! 'files)
 (effects! '(pure))
 
