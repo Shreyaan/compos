@@ -247,3 +247,22 @@
         (check-equal! (permit? buf "Run command" "execute" bad) 'ask
                       "an irreversible verb asks even with a rule"))
       (buffer-kill! buf))))
+
+(deftest 'an-inline-session-answers-a-permission-through-the-one-decision
+  "M-o asks permit? under the document's stance, like a chat"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-inline-perm*" "doc\n")))
+      (buffer-set-local! buf 'chat-permission-mode 'auto)
+      (check-equal! (llm-inline-permission-verdict buf
+                      '(title "eval-scheme" kind "tool" raw "(+ 1 1)"))
+                    'allow-always "ordinary work runs unasked in auto")
+      (check-equal! (llm-inline-permission-verdict buf
+                      '(title "Bash" kind "execute" raw "{\"rawInput\":{\"command\":\"git push --force\"}}"))
+                    'ask "a deny-listed verb asks, whatever the stance")
+      (buffer-set-local! buf 'chat-permission-mode 'ask)
+      (check-equal! (llm-inline-permission-verdict buf
+                      '(title "eval-scheme" kind "tool" raw "(buffer-list)"))
+                    'ask "the ask stance asks for every tool")
+      (check-equal! (llm-inline--option '(options (("allow_once" "Yes") ("reject_once" "No"))) "reject")
+                    "reject_once" "the refusal option by prefix")
+      (buffer-kill! buf))))

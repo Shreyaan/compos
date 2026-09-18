@@ -1049,6 +1049,16 @@ buffer leaves the tree. On the way: the prompt applies a candidate to
 the visible panes without restoring first, the refresh row names the
 slowest leaf, and the slow-job log names the callback.
 
+**Ruling 2026-09-19 (the owner): unify the transport; a document's chat is
+a hidden chat you can ask to see.** Step 1 of the chat merge is in: an
+M-o session answers a permission through `permit?` under the document's
+stance, on both lanes (the direct lane's permission function and the
+ACP-lane permission event). An `ask` is a y-or-n question in the
+minibuffer, because the hidden chat has no pane for a card; a refusal is
+silent. The allow-everything stub is gone. Next: the hidden companion
+chat as the session (one per document, `*chat:<buffer>*`), then the
+in-buffer render fed from its record, then `C-u M-o` targets.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:

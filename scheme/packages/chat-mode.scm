@@ -468,7 +468,7 @@
                (llm-inline-error! id (or (plist-get event 'text) "request failed"))
                (llm-inline-finish! id))
               ((equal? type 'permission)
-               (llm-inline-allow! id event))
+               (llm-inline-permission! id event))
               ((equal? type 'question)
                (llm-inline-answer! id event))
               ((equal? type 'turn-end)
@@ -486,6 +486,37 @@
   (let ((rpc (plist-get event 'rpc-id)))
     (when rpc
       (agent-permission-respond! id rpc (llm-inline--allow-option event)))))
+
+;; the option whose name starts with PREFIX ("reject"), else the plain no
+(define (llm-inline--option event prefix)
+  (let loop ((os (or (plist-get event 'options) '())))
+    (cond ((null? os) (string-append prefix "_once"))
+          ((string-prefix? prefix (car (car os))) (car (car os)))
+          (else (loop (cdr os))))))
+
+;; One transport, one decision: an M-o session answers a permission the
+;; way a chat does, through permit? under the document's stance. The
+;; document has no pane for a card, so an ask is a y-or-n question in the
+;; minibuffer, and a refusal is silent, as the deny-list intends.
+(define (llm-inline-permission-verdict buf event)
+  (permit? buf
+           (or (plist-get event 'title) "")
+           (or (plist-get event 'kind) "")
+           (or (plist-get event 'raw) "")))
+
+(define (llm-inline-permission! id event)
+  (let* ((e (assoc id *llm-inline-sends*))
+         (buf (and e (cadr e)))
+         (rpc (plist-get event 'rpc-id))
+         (verdict (llm-inline-permission-verdict buf event)))
+    (when rpc
+      (cond ((equal? verdict 'reject)
+             (agent-permission-respond! id rpc (llm-inline--option event "reject")))
+            ((equal? verdict 'ask)
+             (y-or-n (string-append "Allow " (or (plist-get event 'title) "this") "?")
+               (lambda () (agent-permission-respond! id rpc (llm-inline--allow-option event)))
+               (lambda () (agent-permission-respond! id rpc (llm-inline--option event "reject")))))
+            (else (llm-inline-allow! id event))))))
 
 (define (llm-inline-answer! id event)
   (let ((qid (plist-get event 'id))
@@ -540,8 +571,13 @@
                 'dispatcher llm-tool-call))
         (lambda (_id events) (llm-inline-events! id events))
         (lambda (_id _role _blocks _wire) #t)
-        ;; Inline M-o historically executed its selected tools directly.
-        (lambda (_id _name _kind _raw) 'allow)))
+        ;; the direct lane asks the same decision; an ask comes back as a
+        ;; permission event and llm-inline-permission! puts the question
+        (lambda (_id name kind raw)
+          (let ((v (permit? buf name kind raw)))
+            (cond ((equal? v 'reject) 'reject)
+                  ((equal? v 'ask) 'ask)
+                  (else 'allow))))))
     (llm-session-send! id wire display)))
 
 (define (llm-mode--last-response-range buf)
