@@ -1243,14 +1243,50 @@ a worktree.
 Every red name in the two new runs is red in the old run or passes when
 its file runs alone (order only).
 
-**Step 4 (b) dropped by ruling (2026-09-19).** The chat's "agent" render
-mode stays beside "blocks". Asked, the owner answered "chats are working
-beautifully right now"; the fold would save about 133 lines of
-agent_transcript.ex, 20 LiveView branches, AgentScroll and 86 CSS lines,
-at a risk to the most-used surface and its input speed. The fold agent
-stopped after its design note; nothing of it landed. Phase 3 is closed:
-steps 1-4 landed (4 without b), step 5 rejected. The simplification
-refactor is complete.
+**Step 4 (b), done in a worktree (2026-09-19).** The owner reversed the
+drop ("chat would be a great proving ground for the elegance of our
+construction"). A chat now renders through "blocks", the one block
+renderer; the "agent" render mode is gone. Design and base numbers:
+"Step 4b, design" below.
+
+- Scheme composes the chat. `chat-view-sync!` (agent-transcript.scm)
+  maps the transcript model to `'render-blocks`: an isolated list that
+  follows its tail, the queued rows, the activity row, the prompt. The
+  views hold byte ranges, not text. A memo keeps each block's view, so a
+  pushed block builds one view. The sync runs per event batch
+  (`agent-handle-events`), after each command that is not an input edit,
+  and in the chat mode hook.
+- Generic block kinds, any mode may use them: `range` with `format`,
+  `details`/`summary`, `button`, `input` (the caret input, filled at
+  render from the local that `'render-input` names), `isolate` (the
+  `BlockList` component; each child drawn once as HTML) and `follow`
+  (the `BlockFollow` hook; the place is `'follow-place`/`'follow-seq`).
+- Deleted: `agent_leaf`, the `ag_block` clauses, `ag_input`,
+  `AgentTranscript`, `AgentScroll`, the agent content of the handheld
+  view, and three events (`agent_card`, `agent_answer`, `ag_stick`).
+  The 83 `.ag-*` rules stay: they style the classes the chat tree names.
+- The fold found a read-model defect. ETS copies a whole row to project
+  one field, so a large local slowed every read of its buffer (a read of
+  point cost 250 us with the tree in it). `BufferView` keeps a local
+  over 16 KB in its own row, and a snapshot can hand out its stand-in;
+  a list buffer gains the same speed (200 rows, C-n: 6.2 to 5.6 ms).
+
+| chat, 300 blocks, typing (render_bench, p50 us) | 7742420e | after |
+|---|---|---|
+| key, end to end, alternate runs, one session | 23,729 / 23,582 | 24,942 / 25,206 |
+| state / decorate (warm) | 55 / 0 | 43 / 1 |
+| server handle_event per key | 1,535 | 1,581 |
+| patch per key | 551 B | 703 B |
+| Scheme tree: full / one pushed block / unchanged | none | 14,834 / 4,000 / 750 |
+
+The server cost per key is the same; the patch carries the list
+component's id again (152 B), and the test client pays about 1.3 ms
+more for it. Screenshots of a chat (tool cards open and closed, a
+permission, a queued row, the activity row, the input) at 7742420e and
+after differ only in the header line. Lines: editor_live.ex 2,753 to
+2,758, agent_transcript.ex 133 to 0, block_list.ex 48, editor.ex 3,100
+to 3,091, buffer_view.ex 410 to 536, agent-transcript.scm +289.
+Landing needs a daemon restart (the BufferView row shape changes).
 
 What each step must not do: move a file another session holds (groups,
 layouts, ibuffer are Phase 2), change a binding, or grow Elixir policy.
