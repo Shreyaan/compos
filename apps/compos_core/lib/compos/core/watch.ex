@@ -39,7 +39,7 @@ defmodule Compos.Core.Watch do
   # burst broadcasts at this age even while events keep arriving.
   @max_wait_ms 1_000
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -272,8 +272,7 @@ defmodule Compos.Core.Watch do
   # `watch-path!` would deadlock it. The monitor on the Task is how the
   # root learns that the run ended.
   defp start_handler(entry, root) do
-    with tid when tid != :undefined <- :ets.whereis(@escaped),
-         [{_, handler}] <- :ets.lookup(tid, {:fs_handler}),
+    with handler when handler != nil <- Roots.get({:fs_handler}),
          {:ok, pid} <-
            Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
              Session.apply_callback(handler, [root])

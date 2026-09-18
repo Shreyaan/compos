@@ -4,7 +4,7 @@ defmodule Compos.Core.LSP.Prims do
   import Compos.Core.Prims
   alias Compos.Core.Session
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   @doc "Every primitive under its {name, doc} key."
   def entries do
@@ -55,7 +55,7 @@ defmodule Compos.Core.LSP.Prims do
       {"lsp-on-event!",
        "(lsp-on-event! HANDLER) — set the handler that gets (ID METHOD PARAMS) on server events."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:lsp_handler}, handler})
+          Roots.put({:lsp_handler}, handler)
           :void
         end,
       {"lsp-log", "(lsp-log ID) — return ((time dir text) ...) JSON-RPC frames, oldest first."} =>
@@ -174,14 +174,14 @@ defmodule Compos.Core.LSP.Prims do
   # environment is not published yet.
   defp lsp_cb(callback, _key) do
     refkey = {:lsp_call, make_ref()}
-    :ets.insert(@escaped, {refkey, callback})
+    Roots.put(refkey, callback)
 
     fn result ->
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         try do
           Session.apply_callback(callback, lsp_callback_args(result))
         after
-          :ets.delete(@escaped, refkey)
+          Roots.drop(refkey)
         end
       end)
     end

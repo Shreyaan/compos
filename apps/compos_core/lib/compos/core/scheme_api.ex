@@ -14,9 +14,7 @@ defmodule Compos.Core.SchemeAPI do
 
   @commands :compos_commands
 
-  # closures that escape into a Task must stay rooted, or the Session GC
-  # collects the frames they capture (see Session's @escaped)
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   def commands_table, do: @commands
 
@@ -2713,7 +2711,7 @@ defmodule Compos.Core.SchemeAPI do
       {"fs-on-change!",
        "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:fs_handler}, handler})
+          Roots.put({:fs_handler}, handler)
           :void
         end,
       # clicking a block in a rich view. The client holds a buffer and the
@@ -2723,7 +2721,7 @@ defmodule Compos.Core.SchemeAPI do
       {"block-on-click!",
        "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:block_click_handler}, handler})
+          Roots.put({:block_click_handler}, handler)
           :void
         end
     }
@@ -2735,8 +2733,7 @@ defmodule Compos.Core.SchemeAPI do
   Scheme's.
   """
   def block_click(buffer, id) do
-    with tid when tid != :undefined <- :ets.whereis(@escaped),
-         [{_, handler}] <- :ets.lookup(tid, {:block_click_handler}) do
+    with handler when handler != nil <- Roots.get({:block_click_handler}) do
       Compos.Core.Session.apply_callback(handler, [buffer, id])
     end
 
@@ -2804,10 +2801,10 @@ defmodule Compos.Core.SchemeAPI do
 
   # run WORK in a Task and hand its value to CALLBACK through the Session —
   # the single writer of the interpreter store. The closure stays rooted in
-  # @escaped until the callback fires, which protects it from the GC.
+  # Roots until the callback fires, which protects it from the GC.
   defp async_dispatch(callback, work) do
     key = {:async_call, make_ref()}
-    rooted? = root_closure(key, callback)
+    rooted? = Roots.put(key, callback)
 
     Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
       value = work.()
@@ -2815,24 +2812,11 @@ defmodule Compos.Core.SchemeAPI do
       try do
         Compos.Core.Session.apply_callback(callback, [value])
       after
-        if rooted?, do: :ets.delete(@escaped, key)
+        if rooted?, do: Roots.drop(key)
       end
     end)
 
     :void
-  end
-
-  # the table belongs to the Session; a primitive called without one (tests)
-  # has no GC to defend against
-  defp root_closure(key, callback) do
-    case :ets.whereis(@escaped) do
-      :undefined ->
-        false
-
-      _tid ->
-        :ets.insert(@escaped, {key, callback})
-        true
-    end
   end
 
   defp git_value({:ok, value}, shape), do: shape.(value)

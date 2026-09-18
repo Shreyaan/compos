@@ -5,7 +5,7 @@ defmodule Compos.Core.Browser.Prims do
   alias Compos.Core.{Frame}
   alias Compos.Core.Session
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   @doc "Every primitive under its {name, doc} key."
   def entries do
@@ -22,7 +22,7 @@ defmodule Compos.Core.Browser.Prims do
                                                                                              callback
                                                                                            ] ->
         key = {:browser, make_ref()}
-        :ets.insert(@escaped, {key, callback})
+        Roots.put(key, callback)
         # the frame that asked, carried across the round-trip: a command that
         # queries the browser and only then prompts must prompt in the frame
         # it came from, not in whichever was last active when the reply landed
@@ -32,7 +32,7 @@ defmodule Compos.Core.Browser.Prims do
           try do
             Session.apply_callback(callback, [browser_reply(reply)], fid)
           after
-            :ets.delete(@escaped, key)
+            Roots.drop(key)
           end
         end)
 
@@ -67,7 +67,7 @@ defmodule Compos.Core.Browser.Prims do
       {"browser-serve!",
        "(browser-serve! HANDLER) — set the handler for browser requests: (HANDLER OP ARGS)."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:browser_handler, :serve}, handler})
+          Roots.put({:browser_handler, :serve}, handler)
           Compos.Core.Browser.serve(handler)
           :void
         end,

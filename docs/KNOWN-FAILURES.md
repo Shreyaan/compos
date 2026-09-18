@@ -15,12 +15,13 @@ list to make a run green.
 
 | File | Red | Note |
 |---|---|---|
-| agent_test.exs | 36 of 52 | the `a1` slug and the fake-transport handshake; every ACP scenario after the first fails on `Agent.info("a1")` |
+| agent_test.exs | 37 of 52 (37 at e6e388af) | the `a1` slug and the fake-transport handshake; every ACP scenario after the first fails on `Agent.info("a1")` |
 | chat_reset_test.exs, switch_test.exs, preset_test.exs | 17 | the transport never opens; same root as agent_test |
 | backend_stub_test.exs | 2 | same root |
 | cache_economics_test.exs | 4 of 8 | the system prompt no longer names the other group buffers, the frozen tool list, the cancelled-turn ledger row; red at HEAD ba6d2c45 |
 | permission_test.exs | 6 of 8 | same root: the `a1` chat never gets its agent, so every lane test stops at agent-prompt!; red at HEAD e08f34d4 |
-| chat_agent_test.exs | 2 | same root |
+| chat_agent_test.exs | 3 | same root; at e6e388af the three are "a failed inline turn says why and clears its pending send", "api threads pin a per-chat model and take a switch in place", "execute* gives a spawned chat an explicit working directory" |
+| db_test.exs | 1 | "with PostgreSQL a transaction handle cannot escape its procedure": the error now says "transaction belongs to another execution lane", not "no longer active"; red at e6e388af |
 | transient_test.exs | 2 | the LLM menu no longer applies a saved combination |
 | project_search_test.exs | 4 | group membership after project-switch and dired-in-group; the ripgrep hint carries an `M-1` prefix |
 | llm_tools_test.exs | 3 | apropos output format; describe-function source; 22 tools where the test expects 10 (the tool zoo regrew, audit item 5.6) |

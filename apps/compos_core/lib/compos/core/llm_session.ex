@@ -14,7 +14,7 @@ defmodule Compos.Core.LLMSession do
 
   alias Compos.Core.Agent
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
   @callback_kinds [:context, :handler, :record, :permission]
 
   def open(id, config, callbacks \\ %{}) when is_binary(id) and is_map(config) do
@@ -57,22 +57,19 @@ defmodule Compos.Core.LLMSession do
 
   @doc false
   def callback(id, kind) when kind in @callback_kinds do
-    case :ets.lookup(@escaped, {:llm_session, id, kind}) do
-      [{_, callback}] -> callback
-      [] -> nil
-    end
+    Roots.get({:llm_session, id, kind})
   end
 
   defp put_callbacks(id, callbacks) do
     Enum.each(@callback_kinds, fn kind ->
       case Map.get(callbacks, kind) do
         nil -> :ok
-        callback -> :ets.insert(@escaped, {{:llm_session, id, kind}, callback})
+        callback -> Roots.put({:llm_session, id, kind}, callback)
       end
     end)
   end
 
   defp delete_callbacks(id) do
-    Enum.each(@callback_kinds, &:ets.delete(@escaped, {:llm_session, id, &1}))
+    Enum.each(@callback_kinds, &Roots.drop({:llm_session, id, &1}))
   end
 end

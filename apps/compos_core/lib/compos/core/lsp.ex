@@ -9,7 +9,7 @@ defmodule Compos.Core.LSP do
   string `"name@root"`, built and parsed only here.
 
   Events flow to Scheme through one rooted handler (`lsp-on-event!`,
-  stored in :compos_escaped_closures like the MCP handler): the handler
+  rooted in Compos.Core.Roots like the MCP handler): the handler
   receives (ID METHOD PARAMS). Status changes arrive on the same pipe
   as method "compos/status". Callbacks run on the connection's own
   `{:lsp, key}` lane, so a diagnostics burst never queues behind a
@@ -19,7 +19,7 @@ defmodule Compos.Core.LSP do
   alias Compos.Core.{Session, LLM}
   alias Compos.Core.LSP.Conn
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   def start(name, root, spec) when is_binary(name) and is_binary(root) do
     cond do
@@ -102,8 +102,7 @@ defmodule Compos.Core.LSP do
 
   @doc "Forward a server event to the Scheme handler, on the connection's lane."
   def dispatch_event(key, method, params) do
-    with tid when tid != :undefined <- :ets.whereis(@escaped),
-         [{_, handler}] <- :ets.lookup(tid, {:lsp_handler}) do
+    with handler when handler != nil <- Roots.get({:lsp_handler}) do
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         Session.apply_callback(
           handler,

@@ -5,7 +5,7 @@ defmodule Compos.Core.MCP.Prims do
   alias Compos.Core.Session
 
   @mcp_wait 30_000
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   @doc "Every primitive under its {name, doc} key."
   def entries do
@@ -68,7 +68,7 @@ defmodule Compos.Core.MCP.Prims do
       {"mcp-on-change!",
        "(mcp-on-change! HANDLER) — set the handler that gets (NAME STATUS) on server changes."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:mcp_handler}, handler})
+          Roots.put({:mcp_handler}, handler)
           :void
         end,
       {"mcp-log", "(mcp-log NAME) — return ((time dir text) ...) JSON-RPC frames, oldest first."} =>
@@ -121,7 +121,7 @@ defmodule Compos.Core.MCP.Prims do
 
           [server, tool, args, callback] ->
             key = {:mcp_call, make_ref()}
-            :ets.insert(@escaped, {key, callback})
+            Roots.put(key, callback)
             {server, tool, args} = {s(server), s(tool), mcp_args(args)}
 
             Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
@@ -130,7 +130,7 @@ defmodule Compos.Core.MCP.Prims do
               try do
                 Session.apply_callback(callback, mcp_callback_args(result))
               after
-                :ets.delete(@escaped, key)
+                Roots.drop(key)
               end
             end)
 

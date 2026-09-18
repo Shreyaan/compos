@@ -30,7 +30,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
 
   alias Compos.Core.{LLM, Session}
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   # --- behaviour --------------------------------------------------------------
 
@@ -346,10 +346,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   defp permission_verdict(slug, name, input) do
     fun =
       Compos.Core.LLMSession.callback(slug, :permission) ||
-        case :ets.lookup(@escaped, {:agent_permission}) do
-          [{_, callback}] -> callback
-          [] -> nil
-        end
+        Roots.get({:agent_permission})
 
     case fun do
       nil ->
@@ -440,10 +437,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   defp record(slug, role, blocks, wire) do
     fun =
       Compos.Core.LLMSession.callback(slug, :record) ||
-        case :ets.lookup(@escaped, {:agent_record}) do
-          [{_, callback}] -> callback
-          [] -> nil
-        end
+        Roots.get({:agent_record})
 
     case fun do
       nil ->

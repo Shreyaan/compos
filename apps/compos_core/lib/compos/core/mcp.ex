@@ -24,7 +24,7 @@ defmodule Compos.Core.MCP do
   alias Compos.Core.{Session}
   alias Compos.Core.MCP.Conn
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   def connect(name, spec) when is_binary(name) do
     cond do
@@ -112,8 +112,7 @@ defmodule Compos.Core.MCP do
   broken, and there is no timer in the editor to poll with.
   """
   def notify(name, status) do
-    with tid when tid != :undefined <- :ets.whereis(@escaped),
-         [{_, handler}] <- :ets.lookup(tid, {:mcp_handler}) do
+    with handler when handler != nil <- Roots.get({:mcp_handler}) do
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         Session.apply_callback(handler, [name, to_string(status)])
       end)

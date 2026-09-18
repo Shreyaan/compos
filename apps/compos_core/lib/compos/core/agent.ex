@@ -29,7 +29,7 @@ defmodule Compos.Core.Agent do
   alias Compos.Core.Agent.Backend
 
   @registry Compos.Core.AgentRegistry
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
   @chunk_batch_ms 25
   @batch_max_events 200
 
@@ -179,10 +179,7 @@ defmodule Compos.Core.Agent do
   from the chat buffer's group.
   """
   def lane(slug) do
-    case :ets.lookup(@escaped, {:agent_lane, slug}) do
-      [{_, key}] -> key
-      [] -> {:agent, slug}
-    end
+    Roots.get({:agent_lane, slug}) || {:agent, slug}
   end
 
   @impl true
@@ -201,7 +198,7 @@ defmodule Compos.Core.Agent do
 
     # the agent's Scheme (renderer, policy and record fns) runs in this
     # lane: serial with itself and its group, concurrent with the UI
-    :ets.insert(@escaped, {{:agent_lane, slug}, Compos.Core.Lane.for_buffer(buffer)})
+    Roots.put({:agent_lane, slug}, Compos.Core.Lane.for_buffer(buffer))
 
     backend = Backend.module(config)
     {:ok, handle} = backend.start(Map.put(config, "slug", slug), self())
@@ -1030,10 +1027,7 @@ defmodule Compos.Core.Agent do
     # crashed agent leaves its session record orphaned
     handler =
       Compos.Core.LLMSession.callback(state.slug, :handler) ||
-        case :ets.whereis(@escaped) != :undefined && :ets.lookup(@escaped, {:agent_handler}) do
-          [{_, callback}] -> callback
-          _ -> nil
-        end
+        Roots.get({:agent_handler})
 
     case handler do
       nil ->
@@ -1072,10 +1066,7 @@ defmodule Compos.Core.Agent do
   # a normal end and what counts as an error.
   defp notify_turn_end(slug, batch) do
     handler =
-      case :ets.whereis(@escaped) != :undefined && :ets.lookup(@escaped, {:agent_turn_end}) do
-        [{_, callback}] -> callback
-        _ -> nil
-      end
+      Roots.get({:agent_turn_end})
 
     if handler do
       for event <- batch, Backend.event_type(event) == "turn-end" do

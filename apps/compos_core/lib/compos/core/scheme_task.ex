@@ -15,7 +15,7 @@ defmodule Compos.Core.SchemeTask do
 
   @registry Compos.Core.SchemeTaskRegistry
   @supervisor Compos.Core.SchemeTaskSupervisor
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
   @retire_after 300_000
 
   defmodule Ref do
@@ -28,7 +28,7 @@ defmodule Compos.Core.SchemeTask do
     id = :erlang.unique_integer([:positive, :monotonic])
     ref = %Ref{id: id}
     root = {:scheme_task, id}
-    :ets.insert(@escaped, {root, closure})
+    Roots.put(root, closure)
 
     spec = %{
       id: {__MODULE__, id},
@@ -47,7 +47,7 @@ defmodule Compos.Core.SchemeTask do
         {:ok, ref}
 
       {:error, reason} ->
-        :ets.delete(@escaped, root)
+        Roots.drop(root)
         {:error, inspect(reason)}
     end
   end
@@ -150,7 +150,7 @@ defmodule Compos.Core.SchemeTask do
       %{task: state.ref.id, status: status, label: state.label}
     )
 
-    :ets.insert(@escaped, {state.root, result})
+    Roots.put(state.root, result)
     Process.send_after(self(), :retire, @retire_after)
     {:noreply, %{state | closure: nil, args: nil, interp: nil, result: result}}
   end
@@ -166,7 +166,7 @@ defmodule Compos.Core.SchemeTask do
 
   @impl true
   def terminate(_reason, state) do
-    :ets.delete(@escaped, state.root)
+    Roots.drop(state.root)
     :ok
   end
 

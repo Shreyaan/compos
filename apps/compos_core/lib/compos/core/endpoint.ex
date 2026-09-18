@@ -13,7 +13,7 @@ defmodule Compos.Core.Endpoint do
   whether a frame is JSON-RPC, a SQL result row, or a line of text.
 
   Unsolicited frames flow to Scheme through one rooted handler
-  (`endpoint-on-event!`, stored in :compos_escaped_closures like the MCP
+  (`endpoint-on-event!`, rooted in Compos.Core.Roots like the MCP
   and LSP handlers): the handler receives (NAME KIND TEXT), where KIND is
   "frame" for a frame nobody asked for and "status" for a lifecycle
   change. Callbacks run on the connection's own `{:endpoint, name}` lane,
@@ -23,7 +23,7 @@ defmodule Compos.Core.Endpoint do
   alias Compos.Core.Session
   alias Compos.Core.Endpoint.Conn
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   @doc "Start an endpoint. Names are [a-z0-9-]; one connection per name."
   def start(name, spec) when is_binary(name) and is_map(spec) do
@@ -95,8 +95,7 @@ defmodule Compos.Core.Endpoint do
   def dispatch_frame(name, frame), do: dispatch(name, "frame", frame)
 
   defp dispatch(name, kind, text) do
-    with tid when tid != :undefined <- :ets.whereis(@escaped),
-         [{_, handler}] <- :ets.lookup(tid, {:endpoint_handler}) do
+    with handler when handler != nil <- Roots.get({:endpoint_handler}) do
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         Session.apply_callback(handler, [name, kind, text], nil, {:endpoint, name})
       end)

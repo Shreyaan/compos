@@ -4,7 +4,7 @@ defmodule Compos.Core.DB.Prims do
   import Compos.Core.Prims
   alias Compos.Core.Session
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   @doc "Every primitive under its {name, doc} key."
   def entries do
@@ -88,13 +88,13 @@ defmodule Compos.Core.DB.Prims do
 
   defp db_cb(callback) do
     refkey = {:db_call, make_ref()}
-    :ets.insert(@escaped, {refkey, callback})
+    Roots.put(refkey, callback)
 
     fn result ->
       try do
         Session.apply_callback(callback, db_callback_args(result))
       after
-        :ets.delete(@escaped, refkey)
+        Roots.drop(refkey)
       end
     end
   end

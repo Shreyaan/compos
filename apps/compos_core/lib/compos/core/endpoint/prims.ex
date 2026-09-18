@@ -4,7 +4,7 @@ defmodule Compos.Core.Endpoint.Prims do
   import Compos.Core.Prims
   alias Compos.Core.Session
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   @doc "Every primitive under its {name, doc} key."
   def entries do
@@ -42,7 +42,7 @@ defmodule Compos.Core.Endpoint.Prims do
       {"endpoint-on-event!",
        "(endpoint-on-event! HANDLER) — set the handler that gets (NAME KIND TEXT) for unsolicited frames."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:endpoint_handler}, handler})
+          Roots.put({:endpoint_handler}, handler)
           :void
         end,
       {"endpoint-list",
@@ -122,14 +122,14 @@ defmodule Compos.Core.Endpoint.Prims do
   # conn process, so the Scheme apply always moves to a task.
   defp endpoint_cb(callback) do
     refkey = {:endpoint_call, make_ref()}
-    :ets.insert(@escaped, {refkey, callback})
+    Roots.put(refkey, callback)
 
     fn result ->
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         try do
           Session.apply_callback(callback, endpoint_callback_args(result))
         after
-          :ets.delete(@escaped, refkey)
+          Roots.drop(refkey)
         end
       end)
     end

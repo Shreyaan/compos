@@ -3,7 +3,7 @@ defmodule Compos.Core.LLMSession.Prims do
 
   import Compos.Core.Prims
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   @doc "Every primitive under its {name, doc} key."
   def entries do
@@ -99,25 +99,25 @@ defmodule Compos.Core.LLMSession.Prims do
       {"llm-session-on-event!",
        "(llm-session-on-event! HANDLER) — set the default normalized-event handler for LLM sessions."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_handler}, handler})
+          Roots.put({:agent_handler}, handler)
           :void
         end,
       {"llm-session-context-fn!",
        "(llm-session-context-fn! HANDLER) — set the default turn-context provider for LLM sessions."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_context}, handler})
+          Roots.put({:agent_context}, handler)
           :void
         end,
       {"llm-session-record-fn!",
        "(llm-session-record-fn! HANDLER) — set the default conversation-record writer for LLM sessions."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_record}, handler})
+          Roots.put({:agent_record}, handler)
           :void
         end,
       {"llm-session-permission-fn!",
        "(llm-session-permission-fn! HANDLER) — set the default tool permission policy for LLM sessions."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_permission}, handler})
+          Roots.put({:agent_permission}, handler)
           :void
         end
     }

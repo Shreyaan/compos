@@ -119,7 +119,7 @@ defmodule Compos.Core.Agent.Backend do
     end
   end
 
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   @doc """
   The context one turn runs against. Inline frontends register a callback
@@ -133,10 +133,7 @@ defmodule Compos.Core.Agent.Backend do
   def context(slug, display) do
     fun =
       Compos.Core.LLMSession.callback(slug, :context) ||
-        case :ets.lookup(@escaped, {:agent_context}) do
-          [{_, callback}] -> callback
-          [] -> nil
-        end
+        Roots.get({:agent_context})
 
     case fun do
       nil ->

@@ -13,7 +13,7 @@ defmodule Compos.Core.WebServer do
 
   @registry Compos.Core.WebServerRegistry
   @supervisor Compos.Core.WebServerSupervisor
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
   @default_max_body 1_048_576
 
   defmodule Plug do
@@ -89,8 +89,7 @@ defmodule Compos.Core.WebServer do
         pid -> DynamicSupervisor.terminate_child(@supervisor, pid)
       end
 
-    if :ets.whereis(@escaped) != :undefined,
-      do: :ets.delete(@escaped, {:web_server_handler, name})
+    Roots.drop({:web_server_handler, name})
 
     result
   end
@@ -185,7 +184,7 @@ defmodule Compos.Core.WebServer do
              startup_log: false
            ),
          {:ok, {_address, bound_port}} <- ThousandIsland.listener_info(bandit) do
-      :ets.insert(@escaped, {{:web_server_handler, name}, handler})
+      Roots.put({:web_server_handler, name}, handler)
 
       {:ok,
        %{
@@ -217,8 +216,7 @@ defmodule Compos.Core.WebServer do
 
   @impl true
   def terminate(_reason, state) do
-    if :ets.whereis(@escaped) != :undefined,
-      do: :ets.delete(@escaped, {:web_server_handler, state.name})
+    Roots.drop({:web_server_handler, state.name})
 
     :ok
   end

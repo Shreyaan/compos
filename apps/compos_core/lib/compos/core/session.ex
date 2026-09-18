@@ -30,9 +30,7 @@ defmodule Compos.Core.Session do
   @messages_table :compos_messages
   @messages_limit 2_000
 
-  # closures that escaped the store into opaque Elixir funs (Reactor handlers,
-  # LLM callbacks) — the GC can't see through funs, so they register here
-  @escaped :compos_escaped_closures
+  alias Compos.Core.Roots
 
   # how many times apply_reply_callback re-applies a closure whose frame is
   # still stale; past this the reply is dropped and reported once
@@ -549,7 +547,7 @@ defmodule Compos.Core.Session do
 
       # a deferred eval that then failed still owes the caller an answer
       {{:error, msg}, token} ->
-        :ets.delete(@escaped, {:eval_pending, token})
+        Roots.drop({:eval_pending, token})
         {:reply, {:error, msg}}
     end
   end
@@ -660,8 +658,8 @@ defmodule Compos.Core.Session do
   # hold the last 32 compound results in the escaped table (a GC root)
   # until they land somewhere rooted or age out of the ring
   defp root_result(val) when is_list(val) or is_map(val) or is_tuple(val) do
-    idx = :ets.update_counter(@escaped, :recent_idx, {2, 1, 31, 0}, {:recent_idx, -1})
-    :ets.insert(@escaped, {{:recent, idx}, val})
+    idx = :ets.update_counter(Roots.table(), :recent_idx, {2, 1, 31, 0}, {:recent_idx, -1})
+    Roots.put({:recent, idx}, val)
     :ok
   end
 
@@ -727,8 +725,8 @@ defmodule Compos.Core.Session do
 
   @impl true
   def handle_info({:scheme_debounce, key, generation}, state) do
-    case :ets.lookup(@escaped, key) do
-      [{^key, {^generation, _timer, _callback, _arg, _fid}}] ->
+    case Roots.get(key) do
+      {^generation, _timer, _callback, _arg, _fid} ->
         # Keep the generation rooted while waiting for the UI lane. A new
         # keystroke may cancel/replace it after the timer fires but before
         # the lane is free to run this callback.
@@ -765,10 +763,10 @@ defmodule Compos.Core.Session do
   end
 
   defp exec_debounce(key, generation) do
-    case :ets.lookup(@escaped, key) do
-      [{^key, {^generation, _timer, callback, arg, fid}}] ->
+    case Roots.get(key) do
+      {^generation, _timer, callback, arg, fid} ->
         # Delete only this generation; concurrent rescheduling must survive.
-        case :ets.select_delete(@escaped, [{{key, {generation, :_, :_, :_, :_}}, [], [true]}]) do
+        case :ets.select_delete(Roots.table(), [{{key, {generation, :_, :_, :_, :_}}, [], [true]}]) do
           1 -> exec_apply(callback, [arg], fid)
           0 -> {:reply, :ok}
         end
@@ -788,7 +786,7 @@ defmodule Compos.Core.Session do
 
     [
       :ets.tab2list(Compos.Core.SchemeAPI.commands_table()),
-      :ets.tab2list(@escaped),
+      Roots.all(),
       minibuffers,
       Enum.map(Compos.Core.list_buffers(), fn name ->
         if Buffer.exists?(name), do: Buffer.locals(name), else: %{}
@@ -1027,13 +1025,13 @@ defmodule Compos.Core.Session do
           # the callback vanishes into an opaque fun until the reply arrives —
           # root it for the GC, and unroot once it has fired
           key = {:llm, make_ref()}
-          :ets.insert(@escaped, {key, callback})
+          Roots.put(key, callback)
 
           Compos.Core.LLM.complete(prompt, fn text ->
             try do
               apply_reply_callback(callback, [text])
             after
-              :ets.delete(@escaped, key)
+              Roots.drop(key)
             end
           end)
 
@@ -1043,13 +1041,13 @@ defmodule Compos.Core.Session do
        "(llm-with-model PROMPT MODEL CALLBACK) — async completion on MODEL; CALLBACK gets the reply text."} =>
         fn [prompt, model, callback] ->
           key = {:llm, make_ref()}
-          :ets.insert(@escaped, {key, callback})
+          Roots.put(key, callback)
 
           Compos.Core.LLM.complete(prompt, to_string(model), fn text ->
             try do
               apply_reply_callback(callback, [text])
             after
-              :ets.delete(@escaped, key)
+              Roots.drop(key)
             end
           end)
 
@@ -1066,7 +1064,7 @@ defmodule Compos.Core.Session do
           usage_cb = List.first(rest)
           requested_model = Enum.at(rest, 1)
           key = {:llm_tools, make_ref()}
-          :ets.insert(@escaped, {key, [dispatcher, callback, usage_cb]})
+          Roots.put(key, [dispatcher, callback, usage_cb])
 
           on_usage =
             usage_cb &&
@@ -1081,7 +1079,7 @@ defmodule Compos.Core.Session do
               try do
                 apply_reply_callback(callback, [text])
               after
-                :ets.delete(@escaped, key)
+                Roots.drop(key)
               end
             end,
             on_usage: on_usage,
@@ -1391,7 +1389,7 @@ defmodule Compos.Core.Session do
       {"agent-on-event!",
        "(agent-on-event! HANDLER) — set the global agent event handler: (HANDLER SLUG EVENTS)."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_handler}, handler})
+          Roots.put({:agent_handler}, handler)
           :void
         end,
       # the turn-end fan-out: (lambda (slug stop-reason) ...). The Agent
@@ -1401,7 +1399,7 @@ defmodule Compos.Core.Session do
       {"agent-on-turn-end!",
        "(agent-on-turn-end! HANDLER) — set the turn-end handler: (HANDLER SLUG STOP-REASON), called on the :ui lane after the turn has rendered."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_turn_end}, handler})
+          Roots.put({:agent_turn_end}, handler)
           :void
         end,
       # the direct lane's context provider: (lambda (slug display-text) ...)
@@ -1410,7 +1408,7 @@ defmodule Compos.Core.Session do
       {"agent-context-fn!",
        "(agent-context-fn! HANDLER) — set the direct lane's context provider for each turn."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_context}, handler})
+          Roots.put({:agent_context}, handler)
           :void
         end,
       # the direct lane's record writer: (lambda (slug role blocks wire) ...),
@@ -1421,7 +1419,7 @@ defmodule Compos.Core.Session do
       {"agent-record-fn!",
        "(agent-record-fn! HANDLER) — set the direct lane's record writer for wire messages."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_record}, handler})
+          Roots.put({:agent_record}, handler)
           :void
         end,
       # the permission policy the DIRECT lane consults before every tool
@@ -1431,7 +1429,7 @@ defmodule Compos.Core.Session do
       {"agent-permission-fn!",
        "(agent-permission-fn! HANDLER) — set the tool policy; it returns allow, ask, or reject."} =>
         fn [handler] ->
-          :ets.insert(@escaped, {{:agent_permission}, handler})
+          Roots.put({:agent_permission}, handler)
           :void
         end,
       # arm an auto-deny deadline on the thread's pending permission
@@ -1471,7 +1469,7 @@ defmodule Compos.Core.Session do
 
             from ->
               token = make_ref()
-              :ets.insert(@escaped, {{:eval_pending, token}, from})
+              Roots.put({:eval_pending, token}, from)
               Process.put(:eval_deferred, token)
               token
           end
@@ -1479,14 +1477,14 @@ defmodule Compos.Core.Session do
       {"eval-resolve!",
        "(eval-resolve! TOKEN VALUE) — answer the deferred eval named by TOKEN with VALUE."} =>
         fn [token, value] ->
-          case :ets.lookup(@escaped, {:eval_pending, token}) do
-            [{key, from}] ->
-              :ets.delete(@escaped, key)
-              GenServer.reply(from, {:ok, Scheme.print(value)})
+          # take is one step: two resolves never both answer the caller
+          case Roots.take({:eval_pending, token}) do
+            nil ->
+              # already resolved, or the caller gave up: nobody to answer
               :void
 
-            # already resolved, or the caller gave up — nobody to answer
-            [] ->
+            from ->
+              GenServer.reply(from, {:ok, Scheme.print(value)})
               :void
           end
         end,
@@ -1722,14 +1720,14 @@ defmodule Compos.Core.Session do
 
           # the Reactor holds the callback inside an opaque fun — root it for
           # the GC for as long as the rule lives
-          :ets.insert(@escaped, {{:reactor, id}, callback})
+          Roots.put({:reactor, id}, callback)
           id
         end,
       {"remove-on-change!", "(remove-on-change! ID) — remove a change handler by its id."} => fn [
                                                                                                    id
                                                                                                  ] ->
         Compos.Core.Reactor.remove(id)
-        :ets.delete(@escaped, {:reactor, id})
+        Roots.drop({:reactor, id})
         :void
       end,
 
@@ -1847,19 +1845,16 @@ defmodule Compos.Core.Session do
           end
         end,
       # A small, general Scheme-side debounce. The callback stays rooted in
-      # @escaped until its timer fires; the generation check makes a cancelled
+      # Roots until its timer fires; the generation check makes a cancelled
       # timer harmless even if its message was already in this mailbox.
       {"debounce!",
        "(debounce! KEY MS CALLBACK ARG) — after MS idle, call CALLBACK with ARG; a newer call with KEY cancels the old one."} =>
         fn [key, ms, callback, arg] ->
           key = {:debounce, s(key)}
 
-          case :ets.lookup(@escaped, key) do
-            [{^key, {_generation, timer, _callback, _arg, _fid}}] ->
-              Process.cancel_timer(timer)
-
-            _ ->
-              :ok
+          case Roots.get(key) do
+            {_generation, timer, _callback, _arg, _fid} -> Process.cancel_timer(timer)
+            _ -> :ok
           end
 
           generation = make_ref()
@@ -1872,7 +1867,7 @@ defmodule Compos.Core.Session do
               trunc(ms)
             )
 
-          :ets.insert(@escaped, {key, {generation, timer, callback, arg, Frame.current()}})
+          Roots.put(key, {generation, timer, callback, arg, Frame.current()})
           :void
         end,
       {"debounce-cancel!",
@@ -1880,10 +1875,15 @@ defmodule Compos.Core.Session do
         fn [key] ->
           key = {:debounce, s(key)}
 
-          case :ets.lookup(@escaped, key) do
-            [{^key, {_generation, timer, _callback, _arg, _fid}}] ->
+          # delete only the generation that was read: a debounce! that
+          # lands between the read and the delete keeps its own entry
+          case Roots.get(key) do
+            {generation, timer, _callback, _arg, _fid} ->
               Process.cancel_timer(timer)
-              :ets.delete(@escaped, key)
+
+              :ets.select_delete(Roots.table(), [
+                {{key, {generation, :_, :_, :_, :_}}, [], [true]}
+              ])
 
             _ ->
               :ok
@@ -2130,7 +2130,7 @@ defmodule Compos.Core.Session do
     case SchemeTask.start(closure) do
       {:ok, task} ->
         key = {:scheme_task_callback, task.id}
-        :ets.insert(@escaped, {key, callback})
+        Roots.put(key, callback)
         fid = Frame.current()
         lane = Lane.current() || :ui
 
@@ -2146,7 +2146,7 @@ defmodule Compos.Core.Session do
                try do
                  apply_callback(callback, args, fid, lane)
                after
-                 :ets.delete(@escaped, key)
+                 Roots.drop(key)
                  SchemeTask.cancel(task)
                end
              end) do
@@ -2154,7 +2154,7 @@ defmodule Compos.Core.Session do
             task
 
           {:error, reason} ->
-            :ets.delete(@escaped, key)
+            Roots.drop(key)
             SchemeTask.cancel(task)
             raise_scheme("task-run!: #{inspect(reason)}")
         end
