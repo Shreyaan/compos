@@ -203,7 +203,7 @@
 ;; the git root above its file; the root itself feeds the context
 ;; switch (a project is also a group). A pathless buffer stays
 ;; projectless.
-(set! buffer-project-label
+(add-hook! '(buffer-project-label project)
   (lambda (b)
     (let ((p (buffer-path b)))
       (if p
@@ -211,7 +211,7 @@
             (if root (project-name root) ""))
           ""))))
 
-(set! buffer-project-root
+(add-hook! '(buffer-project-root project)
   (lambda (b)
     (let ((p (buffer-path b)))
       (or (and p (project-root-cached (parent-dir p))) ""))))
@@ -626,7 +626,7 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
           (lambda (path)
             (visit-in-group (normalize-file-input path) g)))))))
 
-(set! find-file-group-reader
+(add-hook! '(find-file-group-reader project)
   (lambda (receive)
     (group-read-or-create! "Switch file to group: "
       (lambda (group)

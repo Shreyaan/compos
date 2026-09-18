@@ -191,7 +191,7 @@
 ;; The candidate pool is the same from either side; what differs is what
 ;; standing means (from a page it is the tab you pressed the key in) and
 ;; what picking does.
-(set! switch-buffer-source
+(add-hook! '(switch-buffer-source chrome)
   (lambda (cands)
     (let* ((from-page *chrome-from-page*)
            (tabs (chrome--here-tabs *chrome-tab-cache*))

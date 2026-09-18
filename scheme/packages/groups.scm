@@ -123,17 +123,12 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((group (buffer-color-group buf)))
     (and group (group-color-face group))))
 
-(define candidate-face-for-base
-  (if (boundp 'candidate-face-for-base)
-      candidate-face-for-base
-      candidate-face-for))
-
-(set! candidate-face-for
+;; a buffer candidate wears its group's color; any other candidate, or a
+;; buffer with no group, leaves the answer to the next key
+(add-hook! '(candidate-face groups)
   (lambda (category name)
-    (if (and (equal? category 'buffer) (buffer-known? name))
-        (or (buffer-filename-face name)
-            (candidate-face-for-base category name))
-        (candidate-face-for-base category name))))
+    (and (equal? category 'buffer) (buffer-known? name)
+         (buffer-filename-face name))))
 
 (define (group-next-color)
   (+ 1 (modulo (- *group-next-id* 1) *group-colors*)))
@@ -1437,7 +1432,7 @@ is forgotten and that group falls back to creation order in the switcher."
               (frame-group-label-refresh!))
             next)))))
 
-(set! window-state-changed! group-current-recalculate!)
+(add-hook! 'window-state-change-hook 'group-current-recalculate!)
 
 ;;; --- go to a buffer where it lives ----------------------------------------------
 ;;; A list says "take me to this buffer". The buffer can belong to
@@ -3137,7 +3132,7 @@ is forgotten and that group falls back to creation order in the switcher."
                  (not (equal? (active-window) active)))
         (select-window! active)))))
 
-(set! buffer-kill-repair group-buffer-kill-repair)
+(add-hook! '(buffer-kill-repair groups) 'group-buffer-kill-repair)
 
 ;; Semantic membership lookup. This is the vocabulary a scene, a person and
 ;; an agent share: "show" resolves without knowing a buffer name or position.

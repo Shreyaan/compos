@@ -39,6 +39,7 @@ list. The local table lives in Scheme, keyed by buffer name.
 | `MODE-hook` | | after `set-mode!` ran the mode's setup |
 | `frame-attach-hook` | | a client mounted a frame |
 | `window-configuration-change-hook` | | a frame's windows or their buffers changed |
+| `window-state-change-hook` | | `window-state-changed!` ran: a window command or a layout moved something; groups.scm recalculates the current group here |
 | `theme-change-hook` | | after `load-theme` |
 | `buffer-created-hook` | NAME | a new buffer has its text |
 | `buffer-woken-hook` | NAME | a dormant buffer came back |
@@ -67,6 +68,11 @@ dispatcher runs one key or every key with the same `run-hook` call.
 | `endpoint-event` | a listener name | NAME KIND TEXT | every key (endpoint.scm) |
 | `lsp-event` | a listener name | ID METHOD PARAMS | every key (lsp.scm) |
 | `agent-turn-end` | a listener name | SLUG STOP-REASON OK? | every key, each one guarded (agent.scm) |
+| `candidate-face` | a package name | CATEGORY NAME | the first face answered, none means no face (groups.scm) |
+| `buffer-project-label`, `buffer-project-root`, `buffer-workspace-label` | a package name | BUFFER | the first label answered, none means "" (project.scm, worktrees.scm) |
+| `find-file-group-reader` | a package name | RECEIVE | the first reader runs; none means RECEIVE gets the frame's group (project.scm) |
+| `buffer-kill-repair` | a package name | NAME | the first thunk answered runs after the kill (groups.scm) |
+| `switch-buffer-source` | a package name | CANDIDATES | the first source shapes the switcher's pool (chrome.scm) |
 
 `add-paste-hook!` is not a hook on purpose: it keys a handler by mode and
 runs the first that answers.

@@ -838,6 +838,18 @@ default. Seven of the fourteen persist-global! pairs are one line now;
 the seven that normalise or rebuild on restore (llm-config-history,
 llm-bundles, group-mru, groups-v2, hidden-windows, layout-targets,
 and the composite ones) keep persist-global! as the door.
+The re-set! seams are gone (item 8, the rest): candidate-face-for,
+find-file-group-reader, buffer-project-label, buffer-workspace-label,
+buffer-project-root, buffer-kill-repair and switch-buffer-source are
+functions that ask a keyed hook and fall back to their old default, and
+window-state-changed! runs window-state-change-hook; the packages that
+used to set! them add a hook under their own key. docs/HOOKS.md lists
+them. Item 8 of section 3 (24 commands with no key and no caller):
+recounted after the moves, editor.scm has 6 commands nothing names
+(desktop-clear, buffer-rename, display-line-numbers-mode, write-rules,
+delete-file, load-file); they are M-x vocabulary with Emacs names and
+stay. Left in the item: the seven boundp guards in editor.scm, all
+call-time guards for optional packages.
 
 **Next three steps, in order.**
 

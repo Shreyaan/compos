@@ -258,7 +258,7 @@
 
 (add-hook! 'find-file-hook 'worktree--find-file-hook!)
 
-(set! buffer-workspace-label
+(add-hook! '(buffer-workspace-label worktrees)
   (lambda (b)
     (let ((id (buffer-local b 'workspace-id)))
       (if id

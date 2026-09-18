@@ -1504,9 +1504,12 @@
 ;;; annotation reads as a table. A field that wants its text on the right
 ;;; (a size) pads itself — the mechanism only makes the columns.
 
-;; Packages can attach a face to a candidate label. The candidate renderer
-;; carries the face without knowing why that name has that color.
-(define candidate-face-for (lambda (category name) #f))
+;; Packages can attach a face to a candidate label through the keyed hook
+;; (candidate-face KEY): the first answer wins, none means no face. The
+;; candidate renderer carries the face without knowing why that name has
+;; that color.
+(define (candidate-face-for category name)
+  (run-hook-with-args-until-success 'candidate-face category name))
 
 ;; the annotator of CATEGORY is the keyed hook (marginalia CATEGORY)
 (define (marginalia! category fn) (add-hook! (list 'marginalia category) fn))
@@ -2416,7 +2419,12 @@
 
 ;; Packages derive policy from the accepted window state through this seam.
 ;; Preview uses a different primitive and does not call it.
-(define window-state-changed! (lambda () #t))
+
+;; the window state changed: a package that derives state from the windows
+;; (groups.scm recalculates the current group) listens on this hook
+(define (window-state-changed!)
+  (run-hooks 'window-state-change-hook)
+  #t)
 
 ;; Emacs window-configuration-change-hook. The editor calls this once for
 ;; each change of a frame's windows or their buffers, whoever made it: a
@@ -4103,9 +4111,13 @@
 ;; Compatibility name for packages and user config.
 (define (visit-in-group path group) (visit path group))
 
-;; A package supplies the prefix reader. Its callback receives the chosen
-;; group. This keeps the prefix mechanism separate from file completion.
-(define find-file-group-reader (lambda (receive) (receive (frame-group))))
+;; A package supplies the prefix reader through the keyed hook
+;; (find-file-group-reader KEY). Its callback receives the chosen group.
+;; Without one the frame's group is the answer. This keeps the prefix
+;; mechanism separate from file completion.
+(define (find-file-group-reader receive)
+  (let ((fs (hook-functions 'find-file-group-reader)))
+    (if (pair? fs) ((car fs) receive) (receive (frame-group)))))
 
 (define (find-file-read &optional group)
   (read-file-name "Find file: "
@@ -4130,15 +4142,19 @@
 (catalog-meta! 'command "find-file" 'domain 'buffers 'effects '(write display))
 
 ;; the project a buffer belongs to, as a short name for the prompt.
-;; project.scm supplies the real answer through this seam (dup #6);
-;; without the package every buffer is projectless.
-(define buffer-project-label (lambda (b) ""))
+;; project.scm supplies the real answers through the keyed hooks
+;; (buffer-project-label KEY) and (buffer-project-root KEY); without the
+;; package every buffer is projectless. A workspace package adds one
+;; concise identity column to C-x b through (buffer-workspace-label KEY).
+(define (buffer-project-label b)
+  (or (run-hook-with-args-until-success 'buffer-project-label b) ""))
 
-;; Optional workspace packages add one concise identity column to C-x b.
-(define buffer-workspace-label (lambda (b) ""))
+(define (buffer-workspace-label b)
+  (or (run-hook-with-args-until-success 'buffer-workspace-label b) ""))
 
 ;; ...and as the ROOT, for context switching (a project is also a group)
-(define buffer-project-root (lambda (b) ""))
+(define (buffer-project-root b)
+  (or (run-hook-with-args-until-success 'buffer-project-root b) ""))
 
 ;; what a buffer name means in a prompt: its mode, its group, its
 ;; project, then the file it is visiting. The group and project columns
@@ -4182,9 +4198,11 @@
 ;; now, and therefore the one place RET must never mean. PICK sees the
 ;; choice first and returns #t when it handled it. chrome adds browser
 ;; tabs through this seam instead of redefining the command.
-(define switch-buffer-source
-  (lambda (cands)
-    (list cands (current-buffer) (lambda (picked) #f))))
+(define (switch-buffer-source cands)
+  (let ((fs (hook-functions 'switch-buffer-source)))
+    (if (pair? fs)
+        ((car fs) cands)
+        (list cands (current-buffer) (lambda (picked) #f)))))
 
 ;; RET with nothing typed takes the FIRST candidate, so the top of the
 ;; pool IS the default — the prompt must advertise exactly that.
@@ -4274,7 +4292,10 @@
 ;; before the core removes it, then repair the surviving windows afterwards.
 (define buffer-kill-raw!
   (if (boundp 'buffer-kill-raw!) buffer-kill-raw! buffer-kill!))
-(define buffer-kill-repair (lambda (name) (lambda () #f)))
+;; the repair a kill runs after the buffer is gone: the keyed hook
+;; (buffer-kill-repair KEY) answers with a thunk, none means nothing to do
+(define (buffer-kill-repair name)
+  (or (run-hook-with-args-until-success 'buffer-kill-repair name) (lambda () #f)))
 
 (define (buffer-kill! name)
   (let ((repair (buffer-kill-repair name)))
