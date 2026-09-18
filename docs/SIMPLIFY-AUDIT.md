@@ -788,6 +788,11 @@ lines. The move is a cut: no definition changed. Rule for the next
 moves: cut on a section header, check that nothing outside the block
 names a block definition at load time (a top-level call, or the value of
 a `define`), and put the new file in init.scm ahead of its first caller.
+Second move: the chat buffer, the LLM pipes, the chat locals lists, the
+.chat format, the backends and the C-c b setup (2,185 lines) are
+`scheme/packages/chat-mode.scm`, loaded third from init.scm; the block
+had inherited the terminal section's catalog scope (domain processes),
+so the file now declares domain chat. editor.scm is 10,962 lines.
 
 **Next three steps, in order.**
 

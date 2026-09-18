@@ -50,7 +50,7 @@ content+point+locals, and the mode setup fn rebuilds keys/overlays/folds from
 locals on restore. New buffer kinds must keep this true.
 
 **Rule: every chat buffer-local belongs to exactly one of the three lists**
-in `editor.scm` — `chat-identity-locals` (who the chat is: survives reset,
+in `scheme/packages/chat-mode.scm` — `chat-identity-locals` (who the chat is: survives reset,
 restart, save), `chat-conversation-locals` (what was said: survives restart
 and save, cleared by reset), `chat-runtime-locals` (mirrors a live runtime:
 always stale after a restart, meaningless after a reset — cleared by both).

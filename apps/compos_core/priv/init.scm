@@ -24,6 +24,9 @@
 ; dired is the first such package
 (load "tabulated-list.scm")
 (load "dired.scm")
+; the chat buffer and the LLM pipes: every package that opens a chat
+; reads the chat locals lists at load
+(load "chat-mode.scm")
 (load "advice.scm")
 (load "custom.scm")
 (load "tools.scm")

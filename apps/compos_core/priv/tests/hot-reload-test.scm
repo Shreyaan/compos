@@ -194,10 +194,10 @@
 ;; from the live frames and holds no variable a reload can reset.
 (define t--reload-persisted
   '(("editor.scm" "*peek-recent*")
-    ("editor.scm" "*llm-inline-next*")
-    ("editor.scm" "*llm-config-history*")
-    ("editor.scm" "*llm-bundles*")
-    ("editor.scm" "*llm-connector-models*")
+    ("chat-mode.scm" "*llm-inline-next*")
+    ("chat-mode.scm" "*llm-config-history*")
+    ("chat-mode.scm" "*llm-bundles*")
+    ("chat-mode.scm" "*llm-connector-models*")
     ("editor.scm" "*minibuffer-history*")
     ("groups.scm" "*group-records*")
     ("groups.scm" "*group-next-id*")
