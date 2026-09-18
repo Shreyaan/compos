@@ -972,6 +972,17 @@ The collapse of env.ex, gc, roots, flush, the heir dance and the retry
 loops is Phase 3 proper, and this benchmark is the gate it runs against
 before and after.
 
+**Phase 3, checked (2026-09-19):** item 16 (the per-message
+Desktop.upgrade and Buffer.upgrade) stays: Hotload swaps a module without
+code_change/3, and the upgrade is what lets a running process read its
+old state under the new module (editor.ex says the same beside its
+take-once slots). The Buffer moduledoc and two comments that still
+described a SQLite store now describe the Loro log. read_many_fallback
+is the miss path of the row cache and stays. What is left of Phase 3 is
+the four rewrites (one store, one read model, one wake path; Scheme
+keymaps; one Display row model and one LiveView; one event stream) and
+the world collapse behind the Phase 4 gate.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:

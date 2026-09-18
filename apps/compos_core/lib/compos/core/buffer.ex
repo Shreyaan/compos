@@ -30,10 +30,11 @@ defmodule Compos.Core.Buffer do
   their origins ride in the checkpoint, so attribution survives a restart;
   the edit log does not.
 
-  Provenance is default-on for every buffer. A supervised SQLite store keeps
-  immutable roots, exact edit operations, structured actors, content hashes,
-  and recording gaps. Modes can stop recording without deleting history.
-  Starting resumes the accepted head and snapshots an unrecorded interval.
+  Provenance is default-on for every buffer. The Loro log beside the text
+  is the author record: every edit lands in it with its actor, and a
+  checkpoint carries the log. Modes can stop recording without deleting
+  history. Starting resumes the accepted head and snapshots an unrecorded
+  interval.
 
   Per-window points (Emacs window-point): `win_points` holds a point/mark/goal
   per window id for every window displaying this buffer EXCEPT the one
@@ -58,9 +59,9 @@ defmodule Compos.Core.Buffer do
   @edit_log_limit 500
   @checkpoint_debounce 1_500
 
-  # Typing does not reach SQLite. Each keystroke appends one operation to a
-  # pending changeset; the checkpoint boundary above writes the batch. The cap
-  # bounds the journal when a burst outruns the timer.
+  # Typing does not write the log to disk. Each keystroke appends one
+  # operation to a pending changeset; the checkpoint boundary above writes
+  # the batch. The cap bounds the journal when a burst outruns the timer.
   @provenance_batch_limit 200
 
   defmodule Ref do
@@ -3110,9 +3111,9 @@ defmodule Compos.Core.Buffer do
       state.pending_actor.id == actor.id and state.pending_group == group
   end
 
-  # What a span's id resolves to. The revision row holds the same actor, so
-  # this is a cache that keeps `authors/1` out of SQLite, and the only copy
-  # for a buffer whose recording is off.
+  # What a span's id resolves to. The log holds the same actor, so this is a
+  # cache that keeps `authors/1` off the log, and the only copy for a buffer
+  # whose recording is off.
   defp origin(actor), do: %{actor: actor, at: now_ms()}
 
   defp now_ms, do: System.system_time(:millisecond)
