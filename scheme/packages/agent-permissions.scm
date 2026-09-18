@@ -175,8 +175,10 @@
              ((equal? agent-filesystem-tools "ask") 'ask)
              (else 'reject))))
 
-(define *permission-policy*
-  (lambda (buf title kind raw)
+;; (permit? BUF TITLE KIND RAW) -> allow-always | ask | reject: the one
+;; permission decision. Every lane asks it: the ACP request, the direct
+;; lane, the MCP proxy and an M-x command a chat runs.
+(define (permit? buf title kind raw)
     (let* ((text (string-append (or title "") " " (or kind "") " " (or raw "")))
            (profile (and buf (buffer-exists? buf)
                          (buffer-local buf 'agent-permission-profile))))
@@ -200,8 +202,10 @@
             ((equal? kind "command") 'ask)
             ((permission-effects-verdict title kind))
             ((equal? (chat-permission-mode buf) 'ask) 'ask)
-            (else 'allow-always)))))
+            (else 'allow-always))))
 
+(public! 'permit?
+  "(permit? BUF TITLE KIND RAW) -> 'allow-always, 'ask or 'reject for one tool call, command or shell line in BUF's chat")
 (public! 'chat-permission-mode-set!
   "(chat-permission-mode-set! BUF 'approve|'auto|'ask) — set a session's permission stance, and tell a live agent")
 (public! 'permission-policy-report
@@ -223,7 +227,7 @@
 (llm-session-permission-fn!
   (lambda (slug name kind raw)
     (let* ((buf (agent-buf slug))
-           (v (*permission-policy* buf name kind raw)))
+           (v (permit? buf name kind raw)))
       (cond ((equal? v 'reject) 'reject)
             ((equal? v 'ask) 'ask)
             (else 'allow)))))
@@ -241,7 +245,7 @@
 ;; every tool compos has not pre-allowed, and never asks, so an auto chat
 ;; became a chat that could not read a file. Auto must pick a mode that
 ;; PERMITS. acceptEdits comes first: it silences the edit round-trips and
-;; still routes everything else through *permission-policy*, so the deny-list
+;; still routes everything else through permit?, so the deny-list
 ;; and the profile keep working. bypassPermissions is the fallback for a
 ;; backend with no acceptEdits, and it takes compos out of the loop.
 (define *permission-auto-modes* '("acceptEdits" "bypassPermissions"))

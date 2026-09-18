@@ -18,6 +18,7 @@ list to make a run green.
 | agent_test.exs | 36 of 52 | the `a1` slug and the fake-transport handshake; every ACP scenario after the first fails on `Agent.info("a1")` |
 | chat_reset_test.exs, switch_test.exs, preset_test.exs | 17 | the transport never opens; same root as agent_test |
 | backend_stub_test.exs | 2 | same root |
+| permission_test.exs | 6 of 8 | same root: the `a1` chat never gets its agent, so every lane test stops at agent-prompt!; red at HEAD e08f34d4 |
 | chat_agent_test.exs | 2 | same root |
 | transient_test.exs | 2 | the LLM menu no longer applies a saved combination |
 | project_search_test.exs | 4 | group membership after project-switch and dired-in-group; the ripgrep hint carries an `M-1` prefix |

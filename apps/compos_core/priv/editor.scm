@@ -5248,9 +5248,7 @@
     (let ((tool-buf (and (boundp (quote *llm-tool-buffer*)) *llm-tool-buffer*)))
       (if tool-buf
           (let ((verdict
-                  (if (boundp (quote *permission-policy*))
-                      (*permission-policy* tool-buf "restart-daemon" "command" "")
-                      'ask)))
+                  (permit? tool-buf "restart-daemon" "command" "")))
             (if (member verdict '(allow allow-always))
                 (restart-daemon-now!)
                 (error "restart-daemon requires user permission")))

@@ -32,26 +32,26 @@
   (lambda ()
     (let ((buf (t--perm-buf "*zz-policy*")))
       ;; default (auto): ordinary tools run, deny-listed ones ask
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(+ 1 1)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(+ 1 1)")
                     'allow-always "the default runs an ordinary tool")
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(mail-send ...)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(mail-send ...)")
                     'ask "the default still asks for the deny-list")
 
       ;; approve: a shell command is the one thing it stops for
       (buffer-set-local! buf 'chat-permission-mode 'approve)
-      (check-equal! (*permission-policy* buf "Bash" "execute" "{}")
+      (check-equal! (permit? buf "Bash" "execute" "{}")
                     'ask "approve asks before a shell command")
 
       ;; ask mode: everything asks
       (buffer-set-local! buf 'chat-permission-mode 'ask)
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(+ 1 1)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(+ 1 1)")
                     'ask "ask asks for everything")
 
       ;; auto: same as approve at OUR chokepoints — the deny-list holds
       (buffer-set-local! buf 'chat-permission-mode 'auto)
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(+ 1 1)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(+ 1 1)")
                     'allow-always "auto runs an ordinary tool")
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(mail-send ...)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(mail-send ...)")
                     'ask "auto still asks for the deny-list")
       (buffer-kill! buf))))
 
@@ -64,21 +64,21 @@
 
       ;; read-only tools never ask, even in ask mode
       (buffer-set-local! buf 'chat-permission-mode 'ask)
-      (check-equal! (*permission-policy* buf "describe-function" "tool" "describe args")
+      (check-equal! (permit? buf "describe-function" "tool" "describe args")
                     'allow-always "a read never asks")
 
       ;; Discovery is load-bearing. Its small embedding call must not block
       ;; an agent before the agent can find the editor API.
-      (check-equal! (*permission-policy* buf "apropos" "tool" "apropos args")
+      (check-equal! (permit? buf "apropos" "tool" "apropos args")
                     'allow-always "semantic discovery never asks")
 
       ;; destroy-effect tools ask, even in approve mode
       (buffer-set-local! buf 'chat-permission-mode 'approve)
-      (check-equal! (*permission-policy* buf "zz-shred" "tool" "zz-shred args")
+      (check-equal! (permit? buf "zz-shred" "tool" "zz-shred args")
                     'ask "a destroy always asks")
 
       ;; a tool the catalog does not know falls through to the mode
-      (check-equal! (*permission-policy* buf "zz-unknown" "tool" "zz-unknown args")
+      (check-equal! (permit? buf "zz-unknown" "tool" "zz-unknown args")
                     'allow-always "an unknown tool follows the mode")
 
       (set! *llm-tools* (remove (lambda (t) (equal? (car t) 'zz-shred)) *llm-tools*))
@@ -89,14 +89,14 @@
   (lambda ()
     (let ((buf (t--perm-buf "*zz-profile*")))
       ;; no profile: the shared deny-list holds, everything else allows
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(graphql-run ...)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(graphql-run ...)")
                     'allow-always "no profile allows")
 
       ;; a profile with one extra deny pattern rejects exactly that verb
       (buffer-set-local! buf 'agent-permission-profile '(deny-patterns ("graphql")))
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(graphql-run ...)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(graphql-run ...)")
                     'reject "the profile pattern rejects")
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(+ 1 1)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(+ 1 1)")
                     'allow-always "and leaves the rest alone")
 
       ;; the pure seam permission packages call
@@ -111,9 +111,9 @@
     (let ((allowed (t--perm-buf "*zz-command-allowed*"))
           (other (t--perm-buf "*zz-command-other*")))
       (allow-command-when! "zz-reload" (lambda (buf) (equal? buf allowed)))
-      (check-equal! (*permission-policy* allowed "zz-reload" "command" "")
+      (check-equal! (permit? allowed "zz-reload" "command" "")
                     'allow-always "the granted buffer runs it")
-      (check-equal! (*permission-policy* other "zz-reload" "command" "")
+      (check-equal! (permit? other "zz-reload" "command" "")
                     'ask "every other buffer asks")
 
       (set! *command-permission-rules*
@@ -141,33 +141,33 @@
       ;; ACP labels what a call does to the workspace, whatever it is called
       (for-each
         (lambda (kind)
-          (check-equal! (*permission-policy* buf "some tool" kind "{}")
+          (check-equal! (permit? buf "some tool" kind "{}")
                         'reject (string-append "refused by kind: " kind)))
         '("edit" "delete" "move"))
 
       ;; a lane that sends no kind is caught by the tool's own name
       (for-each
         (lambda (title)
-          (check-equal! (*permission-policy* buf title "" "{}")
+          (check-equal! (permit? buf title "" "{}")
                         'reject (string-append "refused by name: " title)))
         '("Edit" "Write" "MultiEdit" "NotebookEdit"
           "apply_patch" "str_replace_editor" "fs/write_text_file"))
 
       ;; reading a file is not writing one, and compos's own tools arrive
       ;; as "other", so eval-scheme and the code editors keep working
-      (check-equal! (*permission-policy* buf "Read apps/x.scm" "read" "{}")
+      (check-equal! (permit? buf "Read apps/x.scm" "read" "{}")
                     'allow-always "reading a file is still allowed")
-      (check-equal! (*permission-policy* buf
+      (check-equal! (permit? buf
                       "compos:eval-scheme: (code-replace! ...)" "other" "{}")
                     'allow-always "the editor's own tools keep working")
 
       ;; the setting is the whole escape hatch
       (let ((was agent-filesystem-tools))
         (set! agent-filesystem-tools "ask")
-        (check-equal! (*permission-policy* buf "Write" "edit" "{}") 'ask
+        (check-equal! (permit? buf "Write" "edit" "{}") 'ask
                       "ask puts the write in front of the user")
         (set! agent-filesystem-tools "allow")
-        (check-equal! (*permission-policy* buf "Write" "edit" "{}") 'allow-always
+        (check-equal! (permit? buf "Write" "edit" "{}") 'allow-always
                       "allow hands the filesystem back")
         (set! agent-filesystem-tools was))
       (buffer-kill! buf))))
@@ -181,21 +181,21 @@
                 (string-append "(shell-command->string \"git " verb "\" d)"))))
       (for-each
         (lambda (verb)
-          (check-equal! (*permission-policy* buf "eval-scheme" "tool" (g verb))
+          (check-equal! (permit? buf "eval-scheme" "tool" (g verb))
                         'allow-always (string-append "git " verb " writes no working file")))
         '("status --porcelain" "log --oneline -5" "diff HEAD"
           "add -A" "commit -m x" "branch -a" "reset HEAD file"))
 
       (for-each
         (lambda (verb)
-          (check-equal! (*permission-policy* buf "eval-scheme" "tool" (g verb))
+          (check-equal! (permit? buf "eval-scheme" "tool" (g verb))
                         'ask (string-append "git " verb " rewrites the work tree")))
         '("checkout -- ." "restore src" "stash" "clean -fd"
           "apply patch.diff" "pull --rebase" "merge main" "rebase main"
           "revert HEAD" "reset --hard HEAD" "reset --merge"))
 
       ;; the read side of git in Scheme is untouched
-      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(git-diff d)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(git-diff d)")
                     'allow-always "the catalog's own git readers stay open")
       (buffer-kill! buf))))
 
@@ -214,36 +214,36 @@
 
       ;; approve asks before a shell command...
       (buffer-set-local! buf 'chat-permission-mode 'approve)
-      (check-equal! (*permission-policy* buf "Run command" "execute" raw) 'ask
+      (check-equal! (permit? buf "Run command" "execute" raw) 'ask
                     "the first call asks")
 
       ;; ...and the answer ends the asking for the whole family
       (permission-always-allow! buf (permission-signature "Run command" "execute" raw))
-      (check-equal! (*permission-policy* buf "Run command" "execute" raw) 'allow-always
+      (check-equal! (permit? buf "Run command" "execute" raw) 'allow-always
                     "the call that was answered runs")
-      (check-equal! (*permission-policy* buf "Run command" "execute"
+      (check-equal! (permit? buf "Run command" "execute"
                       "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"gh api repos/b\"}}")
                     'allow-always "and so does the next one in the family")
-      (check-equal! (*permission-policy* buf "Run command" "execute"
+      (check-equal! (permit? buf "Run command" "execute"
                       "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"curl example.com\"}}")
                     'ask "a verb nobody answered for still asks")
 
       ;; the rule belongs to the chat that gave it
       (let ((other (t--perm-buf "*zz-always-other*")))
         (buffer-set-local! other 'chat-permission-mode 'approve)
-        (check-equal! (*permission-policy* other "Run command" "execute" raw) 'ask
+        (check-equal! (permit? other "Run command" "execute" raw) 'ask
                       "another chat never learned it")
         (buffer-kill! other))
 
       ;; ask mode says every tool call asks, and it outranks a rule
       (buffer-set-local! buf 'chat-permission-mode 'ask)
-      (check-equal! (*permission-policy* buf "Run command" "execute" raw) 'ask
+      (check-equal! (permit? buf "Run command" "execute" raw) 'ask
                     "ask mode means ask, rule or no rule")
 
       ;; and no answer of the user's reaches past the deny-list
       (buffer-set-local! buf 'chat-permission-mode 'auto)
       (let ((bad "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"git push origin\"}}"))
         (permission-always-allow! buf (permission-signature "Run command" "execute" bad))
-        (check-equal! (*permission-policy* buf "Run command" "execute" bad) 'ask
+        (check-equal! (permit? buf "Run command" "execute" bad) 'ask
                       "an irreversible verb asks even with a rule"))
       (buffer-kill! buf))))

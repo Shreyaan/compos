@@ -234,7 +234,7 @@ defmodule Compos.PermissionTest do
       payload = ~s{(mail-send "bob@example.com" "hi")}
 
       # 1. the policy, asked directly — what both lanes consult
-      assert eval!(~s{(*permission-policy* #f "eval-scheme" "tool" #{inspect(payload)})}) == "ask"
+      assert eval!(~s{(permit? #f "eval-scheme" "tool" #{inspect(payload)})}) == "ask"
 
       # 2. the ACP lane sees the same string, because the permission event
       #    now carries the tool call's arguments and not just its title
@@ -300,7 +300,7 @@ defmodule Compos.PermissionTest do
         Session.eval("""
         (agent-permission-fn!
           (lambda (slug name kind raw)
-            (let* ((buf (agent-buf slug)) (v (*permission-policy* buf name kind raw)))
+            (let* ((buf (agent-buf slug)) (v (permit? buf name kind raw)))
               (cond ((equal? v 'reject) 'reject) ((equal? v 'ask) 'ask) (else 'allow)))))
         """)
       end)

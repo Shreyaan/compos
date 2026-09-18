@@ -307,7 +307,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
         # intended trade, and the transcript says which policy to fix.
         Logger.error("permission policy crashed: #{why}")
         ev.(type: :error, text: "the permission policy crashed — denying: #{why}")
-        {:deny, "the permission policy crashed; fix *permission-policy* and retry"}
+        {:deny, "the permission policy crashed; fix permit? and retry"}
 
       {:ask, raw} ->
         case Compos.Core.Agent.ask_permission(slug, %{title: name, kind: "tool", raw: raw}) do

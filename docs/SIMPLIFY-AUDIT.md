@@ -909,6 +909,14 @@ y-or-n-p one continuation; yes-or-no-p takes a word. They are four
 readers, not five copies. Merging y-or-n into y-or-n-p means rewriting
 23 call sites; it waits.
 
+**Phase 2, item 5.9, first cut (2026-09-19):** the one permission
+decision is a function, `(permit? BUF TITLE KIND RAW)`, and the ACP
+lane, the direct lane, the MCP proxy and the restart-daemon command call
+it by name; the variable that held a lambda and the boundp guards around
+it are gone. The nine Scheme tests that specify the policy pass. The
+rest of 5.9 (fewer inputs to the decision) drops tested behaviours
+(profiles, the effects verdict, Always rules) and is a ruling.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:

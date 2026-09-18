@@ -114,18 +114,18 @@ a hang, and the user never learns there was anything to answer."
   (lambda ()
     (let ((buf (test-buffer! "zz-llm-policy" "")))
       (chat-permission-mode-set! buf 'approve)
-      (check-equal! (*permission-policy* buf "Run tests" "execute" "mix test")
+      (check-equal! (permit? buf "Run tests" "execute" "mix test")
                     'ask "approve: the shell asks")
       (chat-permission-mode-set! buf 'ask)
-      (check-equal! (*permission-policy* buf "Run tests" "execute" "mix test")
+      (check-equal! (permit? buf "Run tests" "execute" "mix test")
                     'ask "ask: the shell asks")
       (chat-permission-mode-set! buf 'auto)
-      (check-equal! (*permission-policy* buf "Run tests" "execute" "mix test")
+      (check-equal! (permit? buf "Run tests" "execute" "mix test")
                     'allow-always "auto alone runs it unasked")
       ;; the verb is assembled at runtime so no tool-call transcript
       ;; carries it whole; the policy still sees the joined text
       (let ((risky (string-append "dep" "loy now")))
-        (check-equal! (*permission-policy* buf "Run it" "execute" risky)
+        (check-equal! (permit? buf "Run it" "execute" risky)
                       'ask "but a deny-list verb still stops even auto"))
       (buffer-kill! buf))))
 

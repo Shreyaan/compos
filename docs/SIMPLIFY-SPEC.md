@@ -331,7 +331,7 @@ permission request blocks until a human presses `C-c C-y`.
  usage events              session modes; live editor state via mcp__compos__
       │                         │
       └──────── same tool registry (define-tool! + MCP bridge) ────────┘
-             same permission policy (*permission-policy*, Scheme)
+             same permission policy (permit?, Scheme)
 ```
 
 ## Part 3: Work items
@@ -506,7 +506,7 @@ exists); `agent.ex` `pending_permission`; `Backend.ReqLLM` dispatcher
 2. One policy function, userland, override in init.scm:
 
    ```scheme
-   (set! *permission-policy*
+   (set! permit?
      (lambda (buf title kind raw)   ; -> 'allow | 'allow-always | 'ask | 'reject
        …))
    ```

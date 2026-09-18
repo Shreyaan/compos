@@ -112,7 +112,7 @@
   (lambda ()
     (let* ((buf (t--cm-on!))
            (chat (group-chat buf)))
-      (check-equal! (*permission-policy* chat "restart-daemon" "command" "")
+      (check-equal! (permit? chat "restart-daemon" "command" "")
                     'allow-always "the code chat may restart the daemon"))
     (t--cm-off!)))
 

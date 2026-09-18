@@ -21,7 +21,7 @@
 ;; EFFECTS is the tool's side-effect declaration for the permission
 ;; policy: a list with one level (pure, read, write, destroy) plus
 ;; modifiers (external, execute, spend, display). The catalog entry carries it,
-;; and *permission-policy* reads it from there.
+;; and permit? reads it from there.
 (define (define-tool! name description params handler &optional effects)
   (set! *llm-tools* (alist-put *llm-tools* name (list 'description description 'params params 'handler handler
                            'effects (or effects '(unknown)))))
@@ -1328,9 +1328,7 @@
                         (substring author 6 (string-length author)))
                    (agent-slug-of (current-buffer))))
          (verdict (cond ((mcp-proxy--granted? slug name raw) 'allow-always)
-                        ((boundp (quote *permission-policy*))
-                         (*permission-policy* #f name "tool" raw))
-                        (else 'allow))))
+                        (else (permit? #f name "tool" raw)))))
     (cond
       ((member verdict '(allow allow-always))
        (mcp-proxy--run name args-json author))
