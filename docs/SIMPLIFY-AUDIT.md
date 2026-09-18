@@ -725,9 +725,11 @@ today is done. What remains, and why it waits:
   (section 5), the six remaining defcustoms, the dired file-stat numbers,
   the dual-spelling primitives: editor.scm, groups.scm, ibuffer.scm,
   agent-fleet.scm and editor.ex are open in another session.
-- Profiler + M-x profile, ChatPerf + *Chat Performance*, the /dashboard
-  route, sentry.scm to ~120 lines, one PTY runner: each removes something
-  a person can run today; a yes from the owner first.
+- ChatPerf is gone (24cdfb33). The Profiler stays: SWITCHER-PERF-HANDOFF
+  built it on 2026-09-16 for an investigation that is still open. The
+  /dashboard route stays: it is the tool of the open session-freeze triage.
+  sentry.scm to ~120 lines and one PTY runner remove something a person
+  runs today; a yes from the owner first.
 - The whole-buffer payload the retile probe found (7.4): the window
   renders more than its visible rows on a fresh mount; editor_live.ex is
   under active design in the other session.
