@@ -2019,3 +2019,145 @@
       (if (buffer-local buf 'cache-spec)
           (cache-refresh! buf)
           (list-refresh! buf)))))
+
+;;; --- a list mode: declared once, rebuilt from its locals ------------------------
+;; a caller that refreshes right after entering the mode (ibuffer-open!)
+;; must not have list-mode-init! draw first: that draw is thrown away
+;; unread, and on a table of hundreds of rows it is not cheap to throw away
+(define *list-mode-skip-render* #f)
+
+(define (with-list-mode-skip-render thunk)
+  (let ((was *list-mode-skip-render*))
+    (set! *list-mode-skip-render* #t)
+    (let ((r (thunk)))
+      (set! *list-mode-skip-render* was)
+      r)))
+
+;; Everything a list buffer needs to BE one, applied to an explicit
+;; buffer. The mode setup calls it with (current-buffer); opening a list
+;; calls it with the buffer it just made, so neither has to select first.
+(define (list-mode-init! buf name)
+  (let ((opts (list-mode-opts name))
+        (widened #f))
+    (buffer-set-local! buf 'list-mode name)
+    (desktop-skip! buf 'list-layout-cache)
+    (buffer-set-local! buf 'list-layout-cache #f)
+    ;; whether this list is a view is the MODE's answer now (its parent is
+    ;; special-mode unless the list declared 'special #f), so nothing is
+    ;; written here. What the desktop keeps is a separate question,
+    ;; answered by desktop-skip! above.
+    ;; the stamp names the rows of one render — a restart draws new ones
+    (desktop-skip! buf 'list-stamp)
+    ;; A list opens WIDE. The typed narrowing answers a question you asked
+    ;; THIS time; a local persists, so C-x C-b days later opened on a
+    ;; three-row list narrowed by a word you no longer remember typing.
+    ;; The mode's own kinds (dired's dotfiles) are a setting, and stay.
+    ;; ...but a WAKE is not an open. Clearing the query there would leave
+    ;; the buffer holding the rows a narrowing kept with no query to
+    ;; explain them, and redrawing them from the source is the fetch a
+    ;; preview must not pay.
+    (unless *buffer-waking*
+      (set! widened (list-clear-query! buf))
+      ;; an open shows the first page; the pages you drew were for the
+      ;; question you asked last time
+      (buffer-set-local! buf 'list-page-limit #f))
+    (desktop-skip! buf 'list-shown-count)
+    ;; a list buffer's text IS its view. A buffer keeps the locals of the
+    ;; mode before it, so dired on a directory that once held a diff kept
+    ;; 'render-mode "blocks" and the window drew no rows at all.
+    (buffer-set-local! buf 'render-mode #f)
+    (buffer-set-local! buf 'render-text-root #f)
+    (buffer-set-local! buf 'render-records #f)
+    ;; the keys are the mode's map, under list-mode-map (define-list-mode!);
+    ;; a layout profile's own flags are buffer state and bind here
+    (list-install-mark-keys! buf)
+    ;; a table moves the same way in every list: the line-motion keys
+    ;; REMAP, so the arrows and C-n/C-p walk the rows and stop at the ends
+    (when (list-table? buf)
+      (local-remap*! buf "next-line" "list-next")
+      (local-remap*! buf "previous-line" "list-prev")
+      (local-remap*! buf "scroll-up-command" "list-page-down"))
+    (for-each (lambda (r) (local-remap*! buf (car r) (car (cdr r))))
+              (or (plist-get opts 'remap) '()))
+    (buffer-set-read-only! buf #t)
+    ;; A wake must not pay the source fetch: the buffer switcher previews
+    ;; dormant buffers by re-running this setup, and a list whose rows come
+    ;; from the network (sentry) froze the UI for the round trip — then
+    ;; went back to sleep. 'cached renders the rows already in the buffer
+    ;; and reaches the source only when there are none; `g` refetches.
+    ;; ...unless the clear above just widened the list. The rows in the
+    ;; buffer are the ones a narrowing kept, so drawing them back would
+    ;; open the list on a query it no longer holds: the filters read
+    ;; empty and the rows stay narrow, for good. A dired listing that
+    ;; matched one file kept showing that file every time it re-opened.
+    (unless *list-mode-skip-render*
+      (list-render! buf (if widened #t 'cached)))
+    ;; list-render! restores the selected row by key. It moves a new list to
+    ;; its first row, but it does not reset an existing list during reload.
+    ;; a list that declares an off-lane source refreshes through the
+    ;; buffer cache: the wake above drew what it had, and new rows land
+    ;; when the fetch answers. 'rows keeps serving the cached entries.
+    (let ((cf (plist-get opts 'cache-fetch)))
+      (when cf
+        (cache-declare! buf cf
+          (lambda (b rows)
+            (buffer-set-local! b 'list-entries rows)
+            (list-render! b 'cached))
+          (plist-get opts 'cache-ttl))
+        (cache-wake! buf)))))
+
+(define (define-list-mode! name opts)
+  (set! *list-modes* (alist-put *list-modes* name opts))
+  ;; the list says what it is once, here — describe-mode reads it back
+  (let ((d (plist-get opts 'doc)))
+    (when d (mode-doc! name d)))
+  ;; a real mode: a restored list buffer gets its keys and its read-only
+  ;; flag back from here, not from whatever command first opened it
+  (define-mode name (lambda () (list-mode-init! (current-buffer) name)))
+  ;; Emacs derives tabulated-list-mode from special-mode. A generated list
+  ;; is a view unless it says otherwise, and it says so once, here, as its
+  ;; parent -- not as a local on every buffer the mode makes.
+  (mode-parent! name (if (if (member 'special opts) (plist-get opts 'special) #t)
+                         "special-mode"
+                         "list-mode"))
+  ;; the list's keys: its own on its map, every list's under it
+  (keymap-parent! (mode-keymap name) "list-mode-map")
+  (mode-keys! name (or (plist-get opts 'keys) '()))
+  (list-flag-keys! (lambda (k c) (define-key (mode-keymap name) k c))
+                   (or (plist-get opts 'flags) '()))
+  (list-mode-standard-keys! name)
+  name)
+
+;; open (or re-open) a list buffer in its mode
+(define (list-mode-show! name)
+  (let ((buf (plist-get (list-mode-opts name) 'buffer)))
+    (buffer-create buf)
+    ;; an explicit open asks for current rows; a wake does not. The init
+    ;; below redraws cached entries when there are any, so fetch here in
+    ;; that case — the one place the user chose to look.
+    (let ((cached? (pair? (buffer-local buf 'list-entries))))
+      ;; enter the mode through set-mode!: it attaches the mode's keymap
+      ;; (use-local-map!) and runs the setup above. A bare mode-name
+      ;; local leaves the list's keys unreachable (S8).
+      (with-current-buffer buf (lambda () (set-mode! name)))
+      ;; current rows; the row stays where the reader left it. The point
+      ;; belongs to the reader, and the draw restores the row by its key.
+      (when cached?
+        (list-refresh! buf)))
+    ;; a listing is opened to work in: the window it takes is selected
+    (pop-to-buffer buf)
+    buf))
+
+;;; --- the public API of this file ----------------------------------------------
+;;; The catalog scope of each entry is the one it had in editor.scm.
+
+(domain! 'unknown)
+(effects! '(unknown))
+(category! 'commands)
+(public! 'define-list-mode!
+  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Read the app-creator skill before writing one: it owns what a list already does for you and what is yours to declare. Set transient to #f for persistent app buffers (default #t). KEYS. Four are TAKEN -- bound on your map after your own keys, so a mode that declares one silently does not get it: / narrows the rows (list-filter), < and > call the optional regroup and resort callbacks, SPC calls the optional mark-command or list-mark. / is the search key everywhere in this editor and it is the search key here. Another nine are INHERITED from list-mode-map and yours to shadow: f also filters, \\ pops the filter, ? describes the mode, n/p walk, m marks, u/U/* unmark and mark-all, x executes the marks, g reverts (most apps shadow g with their own refetch). Give your own verbs the letters none of these use. Responsive layouts are ordered profiles selected by min-cols, max-cols, or default, first match wins; profiles may override columns, cells, footer, and compact, and the chosen profile is cached per width in the list-layout-cache buffer local. A column width of #f takes the rest of the line, so put the widest text last and budget the fixed widths against the narrow, compact and wide turns. Rows are records, not text: keep the parsed value and let cells render it. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
+  'ui)
+(catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
+
+(domain! 'unknown)
+(effects! '(unknown))

@@ -797,6 +797,11 @@ Third move: the modeline dashboard and the buffer-name grammar (1,219
 lines) are `scheme/packages/modeline.scm`, loaded fourth; desktop-skip!
 stayed in the kernel beside its callers in the buffer cache. editor.scm
 is 9,744 lines.
+Then: the list-mode definers (define-list-mode!, list-mode-init!,
+list-mode-show!) joined tabulated-list.scm, the cost commands joined
+chat-mode.scm, and the public! and catalog-meta! lines of every moved
+definition moved into its file under the catalog scope they had; three
+global bindings that rode along came back. editor.scm is 9,482 lines.
 
 **Next three steps, in order.**
 

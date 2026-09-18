@@ -1227,3 +1227,30 @@
 
 (define (chat-buffer? b)
   (equal? (buffer-local b 'mode-name) "chat-mode"))
+
+;;; --- the public API of this file ----------------------------------------------
+;;; The catalog scope of each entry is the one it had in editor.scm.
+
+(domain! 'windows)
+(effects! '(write))
+(category! 'windows)
+(public! 'define-mode-headline!
+  "(define-mode-headline! MODE '(mode group llm wide)) — which headline segments MODE keeps in a narrow window")
+(domain! 'unknown)
+(effects! '(unknown))
+(category! 'interaction)
+(catalog-meta! 'function "define-mode-headline!" 'domain 'windows 'effects '(write))
+(public! 'buffer-modeline-name "(buffer-modeline-name BUF) — BUF's name for the modeline: project-relative, or ~ for home")
+(public! 'name-segments "(name-segments SPEC [ICONS]) — the ((CLASS TEXT) ...) spans SPEC draws: *strong* ~dim~ `mono` :icon:; ICONS is ((KEY GLYPH) ...) the caller adds")
+(public! 'name-format-expand "(name-format-expand FORMAT VALS) — fill a name format's %-directives from ((KEY VALUE) ...)")
+(public! 'name-text "(name-text SEGMENTS) — the rendered name as one plain string")
+(public! 'name-icon! "(name-icon! KEY GLYPH) — register the icon :KEY: reaches in a name")
+(public! 'buffer-name-segments "(buffer-name-segments BUF) — the spans that draw BUF's name, from the buffer-local name-format or buffer-name-format")
+(catalog-meta! 'function "name-segments" 'domain 'interaction 'effects '(pure))
+(catalog-meta! 'function "name-format-expand" 'domain 'interaction 'effects '(pure))
+(catalog-meta! 'function "name-text" 'domain 'interaction 'effects '(pure))
+(catalog-meta! 'function "name-icon!" 'domain 'interaction 'effects '(write))
+(catalog-meta! 'function "buffer-name-segments" 'domain 'interaction 'effects '(read))
+
+(domain! 'unknown)
+(effects! '(unknown))

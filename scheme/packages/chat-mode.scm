@@ -75,7 +75,6 @@
 (define (llm-mode--range-overlaps? a b)
   (and (< (car a) (cadr b)) (< (car b) (cadr a))))
 
-
 (define (llm-mode--range-overlaps-any? range ranges)
   (cond ((null? ranges) #f)
         ((llm-mode--range-overlaps? range (car ranges)) #t)
@@ -119,7 +118,6 @@
         (or (plist-get (plist-get record 'metadata) 'label) "Thinking")
         "llm-thinking-spinner"))
     (llm-mode--addressable-kind buf 'llm-thinking)))
-
 
 (define (llm-mode--paint! buf)
   (overlay-set! buf 'llm-mode-responses
@@ -400,7 +398,6 @@
             ;; the same thread through a fresh runtime with the new override.
             (llm-mode-reset-runtime! buf #t)
             (message (string-append "M-o · " model))))))))
-
 
 ;; Inline/document requests use the same session facade, connector resolution,
 ;; normalized event stream and tool loop as chat; only their presentation
@@ -819,7 +816,6 @@
   (unless (chat-buffer? buf)
     (buffer-set-local! buf 'agent-saved-mark at)))
 
-
 (define-command "llm-mode-abort" "Cancel the inline reply and restore the prompt face"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -914,7 +910,6 @@
 ;;; --- chat buffer (gptel-style) -------------------------------------------------
 ;;; *chat* is an ordinary editable buffer. Type after the "### You" marker,
 ;;; press C-c RET, and the whole buffer becomes the conversation context.
-
 
 (define (chat-prompt-marker) "\n### You\n")
 (define (chat-reply-marker) "\n### Assistant\n")
@@ -2183,8 +2178,6 @@
 ;;; tool surface, the usage ledger, and the direct lane's turn context.
 ;;; Policy about a conversation is not the editor's business.
 
-
-
 ;; a mode whose buffer went stale OFF screen registers a catch-up
 ;; here; the switcher runs it for every window it just (re)filled.
 ;; diff-mode uses it: hidden diffs skip the expensive re-render and
@@ -2193,3 +2186,103 @@
 (define (windows-shown-catchup!)
   (for-each (lambda (w) (run-hook-with-args 'buffer-shown-hook (car (cdr w))))
             (window-list)))
+
+;;; --- llm cost inspection -----------------------------------------------------
+;;; Every request is priced (models.dev catalog, cached in ~/.compos/llmdb.json,
+;;; refreshed daily) and recorded in ~/.compos/llm-usage.jsonl; each chat also
+;;; sums its own spend in the 'chat-cost buffer-local.
+
+;; What a chat cost, and — the number that decides whether it was worth it
+;; — how much of its input the provider served from cache. A conversation
+;; resends its whole history every turn. At a healthy hit rate that history
+;; bills at about a tenth of the price; at 0% it bills at full price twice
+;; over, because a cache WRITE costs more than a plain read.
+(define-command "chat-cost" "Show what this chat has cost, and its cache hit rate"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (c (buffer-local buf 'chat-cost))
+           (u (buffer-local buf 'chat-last-usage))
+           (ctx (chat-context-tokens buf))
+           (total (chat-usage-total buf))
+           (rate (chat-hit-rate total)))
+      (if (not (or c u ctx))
+          (message "No usage reported in this chat yet")
+          (message
+            (string-append
+              "This chat: " (if c (format-usd c) "unpriced")
+              ;; what it occupies right now, which is the number a reader
+              ;; asks for when a conversation feels long
+              (if ctx
+                  (string-append " · context "
+                    (number->string (plist-get ctx 'used))
+                    (let ((size (plist-get ctx 'size)))
+                      (if size (string-append " of " (number->string size)) ""))
+                    " tokens")
+                  "")
+              " · cache " (number->string (or (plist-get total 'cache-read) 0)) " read / "
+              (number->string (or (plist-get total 'cache-write) 0)) " written"
+              (if rate (string-append " · " rate " of input cached") "")
+              (if u
+                  (string-append " · last turn "
+                    (number->string (or (plist-get u 'input) 0)) "→"
+                    (number->string (or (plist-get u 'output) 0)) " tokens"
+                    (let ((tc (plist-get u 'cost)))
+                      (if tc (string-append " (" (format-usd tc) ")") "")))
+                  "")))))))
+
+(define-command "llm-costs" "Show LLM spend by day and model (the usage ledger)"
+  (lambda ()
+    (let ((rows (llm-cost-report))
+          (buf "*llm-costs*"))
+      (buffer-create buf)
+      (buffer-delete-range! buf 0 (string-byte-length (buffer-text buf)))
+      (buffer-append! buf
+        (fold (lambda (acc r)
+                (string-append acc
+                  (plist-get r 'day) "  "
+                  (format-usd (plist-get r 'cost)) "  "
+                  (number->string (plist-get r 'requests)) " reqs  "
+                  (number->string (plist-get r 'input)) "→"
+                  (number->string (plist-get r 'output)) "  "
+                  ;; the cache columns: read is what the prefix cost a tenth
+                  ;; of, written is what it cost a quarter more than usual
+                  "cache " (number->string (plist-get r 'cache-read)) "r/"
+                  (number->string (plist-get r 'cache-write)) "w  "
+                  (let ((h (plist-get r 'hit-rate)))
+                    (string-pad-right
+                      (if h (string-append (number->string h) "% cached") "") 12))
+                  "  " (plist-get r 'model) "\n"))
+              (string-append
+                "LLM spend · ledger ~/.compos/llm-usage.jsonl · per-chat: C-c $\n"
+                "hit rate is cached input over billed input: low means the "
+                "prefix is being rewritten every turn\n\n")
+              rows))
+      (switch-to-buffer! buf))))
+
+;; a new chat buffer in the current group; the old conversation stays.
+;; The frame's group wins; a buffer outside any group founds one only
+;; when the frame stands in none.
+(define-command "chat-new" "Start a new chat buffer; with a prefix, choose or create its group"
+  (interactive 'P)
+  (lambda (prefix)
+    (if prefix
+        (group-read-or-create! "New chat in group: "
+          (lambda (g) (group-chat-new! g)))
+        (let ((g (or (frame-group) (group-ensure! (current-buffer)))))
+          (if (not g)
+              (message "No group for a chat")
+              (group-chat-new! g))))))
+
+;; C-c q from anywhere: the prompt becomes a turn in this buffer's group
+;; chat (founding the group first if needed) — one chat interface, always
+(define-command "llm-ask" "Ask the LLM from anywhere via the minibuffer"
+  (lambda ()
+    (group-ask! (group-ensure! (current-buffer)))))
+
+(global-set-key "C-c c" "chat")
+(global-set-key "C-c n" "chat-new")
+(global-set-key "C-c r" "chat-send-region")
+(global-set-key "C-c q" "llm-ask")
+(global-set-key "C-c w" "chat-companion")
+
+(global-set-key "C-c RET" "chat-companion-ask")
