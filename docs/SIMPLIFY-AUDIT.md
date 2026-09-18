@@ -1143,7 +1143,8 @@ the compatibility layer the file announces, and Emacs is the reference;
 deleting them is a ruling, not a cleanup. The four full palettes restate
 the same faces because a palette is data, one colour per face per
 theme; define-theme-from already covers a derived palette (tokyo-night).
-Nothing in this item is deleted without a ruling.
+Nothing in this item is deleted without a ruling. Ruled (2026-09-19):
+keep the 22 Emacs aliases. Item 16 closes with no change.
 
 **The Phase 2 gate, measured (2026-09-19, HEAD 74ee9cb2).** The six
 layout files in one lane: 48 red. Alone: detail 3, layout-policy 9,
