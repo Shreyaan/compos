@@ -325,6 +325,13 @@ defmodule Compos.LLMToolsTest do
     end
 
     test "dispatches tool_use, feeds results back, delivers final text" do
+      # customize-save! writes the test home's custom.scm, and the next boot
+      # of any test would read it: put the default back and drop the file
+      on_exit(fn ->
+        Session.eval(~s{(customize-set! 'org-font-family "Spectral, Georgia, serif")})
+        File.rm(Path.join(Compos.Core.home(), "custom.scm"))
+      end)
+
       me = self()
 
       stub_chat(fn %{messages: messages, tools: tools, system: system} ->
