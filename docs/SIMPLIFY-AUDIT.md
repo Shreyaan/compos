@@ -1614,6 +1614,61 @@ Landing needs a daemon restart: the Endpoint's static list and the
 Hotload roots are read at start, and the root layout now links files
 that a running page does not have.
 
+**Step 4b, design (2026-09-19): the chat renders through "blocks".**
+Written before the code, in a worktree at 7742420e. The design port is
+the spec: a chat must look the same after each commit.
+
+*Scheme composes the chat.* agent-transcript.scm gains
+`chat-view-sync!`. It maps `'agent-blocks`, the open cards, the
+verbosity, the queue and the activity word to a block tree in
+`'render-blocks`. The tree has the same elements and classes that
+`AgentTranscript` draws today, so the stylesheet does not change. A
+memo keeps the view of each transcript block, so a new block costs one
+new view and not a new tree. The sync runs at the end of
+`agent-handle-event`, after every command in a chat, and in the chat
+mode hook. A chat's render mode is "blocks"; mode setup changes a
+saved "agent" to "blocks".
+
+*Four generic block kinds.* The block renderer gains what the chat
+needs, and any mode can use them:
+
+- `range (S E)` with `format`: the block draws its own buffer text
+  from S to E. "text" trims it, "markdown" draws it as prose HTML
+  (core `Markdown.Html.prose`), "mcp-result" and "mcp-result-line"
+  unwrap a tool result. The tree holds offsets, not text, so a local
+  write does not copy the transcript.
+- `details` and `summary`: a disclosure. `open` is Scheme's; a summary
+  with a click is controlled, and the browser does not toggle it.
+- `input #t`: the caret input. The view fills it at render from the
+  window's text and point, from the byte in the local that
+  `'render-input` names. A key does not run Scheme to redraw it.
+- `isolate #t`: the children draw inside the `BlockList`
+  LiveComponent. The decorate cache keeps each child's view by its
+  plist and its range bytes, so an unchanged child is the same term,
+  and a key that changes only the input diffs the list to a skip.
+  `follow #t` adds the tail-follow hook, and the reader's place is the
+  generic `'follow-place` and `'follow-seq` locals.
+
+*Deleted after the switch:* `agent_leaf` in editor.ex, the `ag_block`
+clauses, `ag_input`, `AgentTranscript`, the `AgentScroll` hook, the
+agent content of the handheld view, and the `.ag-*` rules that no
+Scheme class names. The handheld view draws a blocks window with the
+same renderer.
+
+*Measured before* (7742420e, render_bench, p50 microseconds, 60 keys):
+
+| window | state | decorate | cold | key | page |
+|---|---|---|---|---|---|
+| chat, 300 blocks, typing | 61 | 0 | 148,387 | 25,105 | 240,859 B |
+
+| lines | 7742420e |
+|---|---|
+| editor_live.ex | 2,753 |
+| agent_transcript.ex | 133 |
+| editor.ex `agent_leaf` | 45 |
+| app.js `AgentScroll` | 186 |
+| `.ag-*` rules, editor.css / mobile.css | 84 / 50 |
+
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
 
