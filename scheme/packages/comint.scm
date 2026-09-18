@@ -136,9 +136,6 @@
 ;;; is saved; tail-mode's setup restarts the tail on restore. end-of-buffer! puts
 ;;; point at the end, where process appends keep pushing it — follow for free.
 
-(define (sh-quote s)
-  (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
-
 (define (tail-command path)
   (if (remote-path? path)
       (let ((hp (remote-parse path)))

@@ -443,6 +443,9 @@ defmodule Compos.Scheme.Builtins do
       {"plist-get",
        "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST; false when KEY is absent or PLIST is not a list."} =>
         fn [pl, key] -> plist_get(pl, key) end,
+      {"sh-quote",
+       "(sh-quote STRING) — STRING as one shell word in single quotes, safe for any character."} =>
+        fn [s] when is_binary(s) -> "'" <> String.replace(s, "'", "'\\''") <> "'" end,
       {"plist-put",
        "(plist-put PLIST KEY VAL) — PLIST with KEY VAL first and any older KEY pair gone."} =>
         fn [pl, key, val] -> [key, val | plist_delete(pl, key)] end,

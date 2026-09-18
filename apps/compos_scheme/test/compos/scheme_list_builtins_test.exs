@@ -57,6 +57,12 @@ defmodule Compos.Scheme.ListBuiltinsTest do
     assert run("(alist-delete '(() (b 2)) 'b)") == [[]]
   end
 
+  test "sh-quote makes one word of any string" do
+    assert run(~S[(sh-quote "a b")]) == "'a b'"
+    assert run(~S[(sh-quote "it's")]) == ~S['it'\''s']
+    assert run(~S[(sh-quote "")]) == "''"
+  end
+
   test "plist-put replaces a pair in place of growing the plist" do
     assert run("(plist-put '(a 1 b 2) 'b 3)") == [{:sym, "b"}, 3, {:sym, "a"}, 1]
     assert run("(plist-put '() 'b 3)") == [{:sym, "b"}, 3]

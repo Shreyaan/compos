@@ -288,7 +288,7 @@
       (skills-render-into! home)
       (write-file! (string-append home "/profiles/acp/package.json")
                    dsh-profile-manifest)
-      (write-file! (string-append home "/profiles/acp/cordis.patch.yml")
+      (write-file! (string-append home "/profiles/acp/compos.patch.yml")
                    (dsh-profile-patch))
       (if (llm-key "deepseek")
           (write-file! (string-append home "/settings.yaml") (dsh-settings))
