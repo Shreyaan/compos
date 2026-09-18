@@ -137,9 +137,7 @@
 ;; MODE says what to call a detail it keeps; FN takes the buffer and answers
 ;; a name. Without a rule the buffer's own name takes a number.
 (define (detail-name! mode fn)
-  (set! *detail-names*
-        (cons (list mode fn)
-              (filter (lambda (e) (not (equal? (car e) mode))) *detail-names*)))
+  (set! *detail-names* (alist-put *detail-names* mode fn))
   mode)
 
 (define (detail--free-name name)

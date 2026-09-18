@@ -1527,11 +1527,10 @@
   (lambda () (buffer-summary-log! (current-buffer))))
 
 ;; the wide segment of the bar opens the log for the window's buffer
-(when (boundp 'on-block-click!)
-  (on-block-click! 'summary-log
-    (lambda (buf id)
-      (and (equal? id "summary-log")
-           (begin (buffer-summary-log! buf) #t)))))
+(add-hook! (list 'block-click 'summary-log)
+  (lambda (buf id)
+    (and (equal? id "summary-log")
+         (begin (buffer-summary-log! buf) #t))))
 
 (public! 'chat-summary-note-tool!
   "(chat-summary-note-tool! BUF) -- refresh the chat's running summary once the tool-call burst settles")
@@ -1606,14 +1605,13 @@
 
 ;; one listener, registered by name, so a reload replaces it instead of
 ;; stacking a second one
-(when (boundp 'on-agent-turn-end!)
-  (on-agent-turn-end! "chat-cwd"
-    (lambda (slug stop-reason ok?)
-      (let ((buf (agent-buf slug)))
-        (when (and (string? buf) (buffer-exists? buf)
-                   (buffer-local buf 'chat-cwd-pending))
-          (message (chat-cwd-note (chat-cwd-move-runtime! buf)
-                                  (or (chat-cwd-of buf) (buffer-directory buf)))))))))
+(add-hook! (list 'agent-turn-end "chat-cwd")
+  (lambda (slug stop-reason ok?)
+    (let ((buf (agent-buf slug)))
+      (when (and (string? buf) (buffer-exists? buf)
+                 (buffer-local buf 'chat-cwd-pending))
+        (message (chat-cwd-note (chat-cwd-move-runtime! buf)
+                                (or (chat-cwd-of buf) (buffer-directory buf))))))))
 
 (define-command "chat-cwd" "Set this chat's working directory, and move its agent there"
   (lambda ()

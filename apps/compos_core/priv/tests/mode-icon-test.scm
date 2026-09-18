@@ -36,8 +36,7 @@
     (check-equal! (mode-icon "zz-icon-mode") "" "the first glyph")
     (mode-icon! "zz-icon-mode" "")
     (check-equal! (mode-icon "zz-icon-mode") "" "the second replaces it")
-    (set! *mode-icons*
-      (remove (lambda (e) (equal? (car e) "zz-icon-mode")) *mode-icons*))))
+    (mode-forget! "zz-icon-mode")))
 
 (deftest 'mode-label-writes-the-icon-in-front-of-the-name
   "the label is the glyph, a space, and the name"

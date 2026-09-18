@@ -26,6 +26,7 @@ list to make a run green.
 | movie_test.exs, chosen_pane_test.exs, spotify_test.exs | 1 each | opt-in apps |
 | chrome_test.exs | 1 | "returning from a page a buffer already on screen is selected" |
 | load_test.exs | 0 | was red on calendar.scm, which init.scm never loaded; now expected |
+| desktop_restore_test.exs | 2 | "every literal mode-name write names a registered mode": ibuffer-test.scm writes `aa-other-mode` (d293b2d9) and no define-mode registers it; "LLM configuration history survives desktop restore": the history rows are plists now, the test expects bare lists |
 
 ## Scheme (priv/tests)
 
@@ -37,10 +38,16 @@ Run one file with `SCHEME_TESTS=name mix test apps/compos_core/test/compos/schem
 | fence-markers-step-back-with-other-preview-markup, a-link-keeps-its-text-and-hides-its-target, a-csv-block-draws-as-a-table | blocks |
 | the-default-face-size-is-the-setting-and-survives-a-theme, a-dark-theme-shows-the-row-under-point | themes; red since the warm-dark theme commit |
 | the-stance-is-set-in-one-place, the-modeline-names-the-tool-surface | llm-setup |
-| unstamped-bundled-declarations-do-not-multiply, a-near-miss-on-a-name-lands-anyway, kind-package-namespace-domain-and-effect-filters-compose, components-use-the-main-catalog-and-expose-a-runnable-contract | apropos and the catalog |
+| unstamped-bundled-declarations-do-not-multiply, a-near-miss-on-a-name-lands-anyway, kind-package-namespace-domain-and-effect-filters-compose, components-use-the-main-catalog-and-expose-a-runnable-contract, apropos-finds-the-endpoint-api-by-what-it-is-for, apropos-finds-the-database-api-by-what-it-is-for, searching-for-a-socket-reaches-the-client-api-not-the-listener-list | apropos and the catalog; the last three were red at HEAD b5302dd4 in a worktree run |
 | malformed-scheme-goes-nowhere, code-mode-asks-before-it-assigns-this-frame-a-worktree | code-mode |
 | the-index-gives-each-thread-two-lines, every-tag-reads-in-full-until-the-column-narrows, notmuch-quit-kills-the-mail-views-and-lands-on-work, mark-all-then-archive-marked-asks-before-it-acts | notmuch |
 | context-providers-explain-the-selection-to-chat-and-agents, subagents-table-draws-one-row-per-edge, overview-uses-only-the-current-group, tile-all-uses-only-the-current-project, telemetry-toggle-opens-the-popup-and-closes-it, telemetry-has-a-narrow-view-for-the-side-popup | one each |
+| every-mode-says-what-it-is-for | six modes call no mode-doc!: google-compose-mode, google-detail-mode, google-request-mode, irc-mode, special-mode, and the keymap-test-list-mode fixture; red at HEAD before the mode table (b5302dd4) |
+| a-pasted-images-link-is-relative-to-the-document | the test home is not a git repository; the git rev-parse error list reaches string-append |
+| the-editor-seams-are-named-hooks | buffer-created! on a name with no buffer process; red at HEAD b5302dd4 |
+| training-points-at-the-real-curriculum, training-curriculum-has-working-tour-anchors | docs/training.md left in the docs sweep (cd4575aa); the opt-in app still points at it |
+| the-chat-list-is-one-application | `list-key-lines` is unbound: the test came in fc980588 with no definition anywhere |
+| the-companion-chat-opens-into-the-documents-group, disabling-writing-mode-restores-the-previous-look | pass alone; fail after the help-page, markdown-mode or hot-reload files run first (test pollution) |
 | a-page-opens-in-the-frame-group-when-the-window-has-none-and-cycles-views | passes alone; fails when the feeds tests run first (test pollution) |
 | membership-answers-the-id, modeline-memberships-follow-the-buffer, llm-config-session-is-the-groups-most-recent-chat, a-summary-is-always-a-string, applying-a-bundle-applies-all-of-it, a-bundle-remembers-disabled-prompt-sections | pass alone; fail after other files leave a group behind (test pollution) |
 

@@ -1055,7 +1055,7 @@ is forgotten and that group falls back to creation order in the switcher."
                     (cdr layout))))
         (else (window-tree-rename layout old new))))
 
-(on-buffer-renamed!
+(add-hook! 'buffer-renamed-hook
   (lambda (old new)
     (for-each
       (lambda (record)
@@ -1204,9 +1204,7 @@ is forgotten and that group falls back to creation order in the switcher."
                                   ; a declaration outlives the record it names
 
 (define (define-scene! name spec)
-  (set! *scenes*
-    (cons (list name spec)
-          (remove (lambda (e) (equal? (car e) name)) *scenes*)))
+  (set! *scenes* (alist-put *scenes* name spec))
   name)
 
 (define (scene-spec g)
@@ -1583,7 +1581,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; INHERITED: nobody asked for it, and a board or a listing sheds it
 ;; before it covers the group's pane. A membership a package asks for is
 ;; not inherited, and every explicit path below clears the mark.
-(on-buffer-created!
+(add-hook! 'buffer-created-hook
   (lambda (buf)
     ;; A new buffer lands where the work that opened it lives: the group
     ;; of the buffer shown in the window that ran the command, and the
@@ -3349,7 +3347,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; group keeps a label for a buffer nobody can find and the chat beside it
 ;; still reads as the old work. The chat then re-derives, which renames it
 ;; too, which the layout sweep above follows in turn.
-(on-buffer-renamed!
+(add-hook! 'buffer-renamed-hook
   (lambda (old new)
     (unless (chat-buffer? new)
       (for-each
@@ -3528,7 +3526,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (chat-reply-link label reply)
   (string-append "[" label "](compos:reply/" (url-encode reply) ")"))
 
-(on-preview-link! "reply" chat-inject-reply!)
+(add-hook! (list 'preview-link "reply") chat-inject-reply!)
 
 ;; ask the group without leaving the current buffer: the minibuffer prompt
 ;; becomes a group-chat turn, point stays put, the reply lands on the right

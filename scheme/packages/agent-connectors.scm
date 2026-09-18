@@ -165,9 +165,7 @@ nonstandard install out of the built-in connector catalog."
               '() data))))
 
 (define (llm-catalog-put! provider models)
-  (set! *llm-catalog*
-    (cons (list provider models)
-          (remove (lambda (e) (equal? (car e) provider)) *llm-catalog*))))
+  (set! *llm-catalog* (alist-put *llm-catalog* provider models)))
 
 (define (llm-catalog-save!)
   (write-file! llm-catalog-file

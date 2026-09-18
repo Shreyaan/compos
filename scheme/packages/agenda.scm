@@ -575,7 +575,7 @@
 
 ;; the click registry (components.scm): a day header folds its day, an
 ;; entry row opens its file
-(on-block-click! 'agenda
+(add-hook! (list 'block-click 'agenda)
   (lambda (buf id)
     (and (buffer-local buf 'agenda-index)
          (cond ((string-prefix? "d-" id)
@@ -683,7 +683,7 @@
 
 ;; a stale agenda catches up when the switcher shows it again; the mtime
 ;; cache keeps the catch-up cheap
-(on-buffer-shown!
+(add-hook! 'buffer-shown-hook
   (lambda (b)
     (when (and (equal? b *agenda-buffer*) (buffer-local b 'agenda-index))
       (agenda--render! b))))

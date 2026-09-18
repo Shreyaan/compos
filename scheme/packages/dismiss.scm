@@ -38,9 +38,7 @@
   (and (boundp '*mb-list-buffer*) (equal? buf *mb-list-buffer*)))
 
 (define (dismiss--declared-mode? buf)
-  (let loop ((modes *dismissible-modes*))
-    (and (pair? modes)
-         (or (buffer-derived-mode? buf (car modes)) (loop (cdr modes))))))
+  (and (mode-inherited (buffer-local buf 'mode-name) 'dismissible) #t))
 
 (define (buffer-dismissible? buf)
   (and (buffer-known? buf) (buffer-read-only? buf)

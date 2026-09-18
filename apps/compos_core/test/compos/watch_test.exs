@@ -175,7 +175,7 @@ defmodule Compos.WatchTest do
     # a slow handler: one second per run, so three bursts land inside one run
     {:ok, _} =
       Session.eval("""
-      (on-fs-change!
+      (add-hook! 'fs-change-hook
         (lambda (r)
           (if (equal? r "#{ctx.real}")
               (begin
@@ -261,7 +261,7 @@ defmodule Compos.WatchTest do
 
   # --- the Scheme surface ----------------------------------------------------
 
-  test "on-fs-change! handlers run with the root", ctx do
+  test "fs-change-hook functions run with the root", ctx do
     buf = "*watch-test*"
     Compos.Core.create_buffer(buf)
 
@@ -279,7 +279,7 @@ defmodule Compos.WatchTest do
     # inert for every root but ours
     {:ok, _} =
       Session.eval("""
-      (on-fs-change!
+      (add-hook! 'fs-change-hook
         (lambda (root)
           (if (equal? root "#{ctx.real}")
               (buffer-append! "#{buf}" (string-append root "\\n")))))

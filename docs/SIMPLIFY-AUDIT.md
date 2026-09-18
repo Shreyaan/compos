@@ -745,6 +745,42 @@ bookmark commands are two-line delegations, not stubs (6.7 was wrong);
 display-memory-mode is on by default, so its boot timer is right (6.8 was
 wrong).
 
+**Phase 1, started 2026-09-19.** One catalog (b39191ca): define-command
+and public! write one table, `*command-fns*`, `*command-names*`,
+`*public-api*` and `*public-keys*` are gone, and `public-api` is a view.
+Twenty dead definitions and the shadowed preview block went (b5302dd4).
+One mode table: `*modes*` holds every fact about a mode as a plist under
+its name, `mode-put!` and `mode-get` read and write one fact,
+`mode-inherited` walks the parents, and `(define-mode NAME SETUP 'parent P
+'doc D 'icon I 'minor #t 'teardown T 'keymap K)` takes every fact in one
+form. The seven side tables (`*mode-setups*`, `*mode-parents*`,
+`*mode-docs*`, `*mode-icons*`, `*mode-link-syntaxes*`, `*mode-layouts*`,
+`*mode-headlines*`), `*dismissible-modes*` and `*minor-mode-setups*` are
+gone; the old setter names stay as one-line doors, so the 160 callers did
+not change. `plist-put` is a builtin beside `plist-get`, and the 49
+copies of the alist upsert idiom are `(alist-put TABLE KEY VALUE)`; the
+alist builtins step over an empty entry. Landmine met: a Nerd Font glyph
+is invisible in a terminal, and a rewrite typed from the screen replaced
+twelve mode icons with empty strings; the fix was a script that copied
+them back from HEAD. Read a glyph line with `unicode_escape` before you
+retype it.
+Keyed hooks: `(add-hook! '(block-click diff) FN)` holds one function per
+key and the same key replaces, so the six keyed registries
+(`*preview-link-verbs*`, `*lsp-event-handlers*`,
+`*input-intent-handlers*`, `*endpoint-event-handlers*`,
+`*block-click-handlers*`, `*agent-turn-end-handlers*`) and their on-X!
+setters are gone, the five older spellings (on-fs-change!,
+on-buffer-created!, on-buffer-woken!, on-buffer-renamed!,
+on-buffer-shown!) are gone, and the `boundp` guards in front of them went
+with them. The four one-function-per-key registries (`*marginalia*`,
+`*context-providers*`, `*target-providers*`, `*display-buffer-actions*`)
+are keyed hooks too, behind their old setter names. docs/HOOKS.md lists
+the keyed hooks. Left as they are, with the reason: `*embark-actions*`
+holds a list of actions per type, not a function; `*paste-hooks*` keeps
+registration order and replaces in place, which a keyed hook does not.
+Still to do in this item: the re-`set!` seams and the remaining boundp
+guards.
+
 **Next three steps, in order.**
 
 1. `load-path`: the defvar in editor.scm, `load` searching it in Scheme over

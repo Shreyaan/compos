@@ -159,9 +159,7 @@
 
 (define (chats-note-activity! b)
   (when (string? b)
-    (set! *chats-activity*
-      (cons (list b (current-time))
-            (filter (lambda (e) (not (equal? (car e) b))) *chats-activity*)))))
+    (set! *chats-activity* (alist-put *chats-activity* b (current-time)))))
 
 (define (chats-activity-at b)
   (let ((e (assoc b *chats-activity*)))

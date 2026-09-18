@@ -44,8 +44,8 @@
   (lambda ()
     (let ((names (command-names)) (bad '()) (entered 0))
       (for-each
-        (lambda (e)
-          (let ((mode (car e)))
+        (lambda (mode)
+          (begin
             (unless (or (member mode sweep--skip-modes) (string-prefix? "zz-" mode))
               (let ((buf (test-buffer! (string-append "zz-sweep-" mode) "line one\nline two\n")))
                 (delete-other-windows!)
@@ -56,7 +56,7 @@
                       (set! bad (append bad (sweep--check-buffer buf names))))
                     (set! bad (cons (list buf "" mode "setup raised") bad)))
                 (buffer-kill! buf)))))
-        *mode-setups*)
+        (mode-names 'major))
       (check-true! (> entered 20) "the sweep entered the modes")
       (check-equal! bad '() "every key of every mode leads to a live command"))))
 
@@ -65,8 +65,8 @@
   (lambda ()
     (let ((names (command-names)) (bad '()))
       (for-each
-        (lambda (e)
-          (let ((mode (car e)))
+        (lambda (mode)
+          (begin
             (unless (string-prefix? "zz-" mode)
               (let ((buf (test-buffer! (string-append "zz-sweep-minor-" mode) "some text\n")))
                 (delete-other-windows!)
@@ -76,7 +76,7 @@
                     (set! bad (cons (list buf "" mode "setup raised") bad)))
                 (ignore-errors (lambda () (disable-minor-mode! buf mode)))
                 (buffer-kill! buf)))))
-        *minor-mode-setups*)
+        (mode-names 'minor))
       (check-equal! bad '() "every key of every minor mode leads to a live command"))))
 
 (deftest 'every-named-keymap-binds-live-commands

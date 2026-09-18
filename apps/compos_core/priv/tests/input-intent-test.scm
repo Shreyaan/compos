@@ -48,12 +48,12 @@
   (lambda ()
     (t--intent-fresh! "abc")
     (let ((seen '()))
-      (on-input-intent! "formatBold"
+      (add-hook! (list 'input-intent "formatBold")
         (lambda (from to text) (set! seen (list from to)) #t))
       (t--intent! "formatBold" 0 3 "")
       (check-equal! seen '(0 3) "the handler saw the range")
       (check-equal! (buffer-text t--intent-buf) "abc" "the text is untouched")
-      (on-input-intent! "formatBold" (lambda (from to text) #f)))))
+      (add-hook! (list 'input-intent "formatBold") (lambda (from to text) #f)))))
 
 (deftest 'an-unknown-intent-changes-nothing
   "the default path refuses what it does not know"

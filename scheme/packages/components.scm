@@ -370,19 +370,9 @@
 ;;; name replaces the old handler, so a package reload does not stack
 ;;; duplicates.
 
-(define *block-click-handlers* '()) ; ((name fn) ...)
-
-(define (on-block-click! name fn)
-  (set! *block-click-handlers*
-    (cons (list name fn)
-          (remove (lambda (e) (equal? (car e) name)) *block-click-handlers*))))
-
 (block-on-click!
   (lambda (buf id)
-    (let loop ((hs *block-click-handlers*))
-      (cond ((null? hs) #f)
-            (((cadr (car hs)) buf id) #t)
-            (else (loop (cdr hs)))))))
+    (if (run-hook-with-args-until-success 'block-click buf id) #t #f)))
 
 (define-style! 'components "
 .c-section { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); padding: 12px 2px 6px; border-bottom: 1px solid var(--border-bg); }
@@ -420,13 +410,12 @@
 (public! 'component "(component NAME PROPS) — instantiate a registered UI component")
 (public! 'describe-component "(describe-component NAME) — show a component's props, example and owner")
 (public! 'apropos-components "(apropos-components QUERY [FILTERS...]) — the main apropos filtered to UI components")
-(public! 'on-block-click! "(on-block-click! NAME FN) — register a blocks mode's click handler; FN gets (BUF ID) and returns #t when the click was its own")
 
 (domain! 'ui)
 (effects! '(write display))
 
 ;; Semantic lists use stable row keys, never a stale DOM row number.
-(on-block-click! 'semantic-list
+(add-hook! (list 'block-click 'semantic-list)
   (lambda (buf id)
     (if (and (list-opt buf 'composml) (string-prefix? "list:" id))
         (let ((i (list-index-of buf (list-entries buf) (substring id 5 (string-length id)))))
@@ -442,4 +431,4 @@
 ;; By name, in a lambda: a hot reload of editor.scm redefines the handler,
 ;; and a registration by value would keep calling the old one.
 (when (boundp 'dashboard-block-click)
-  (on-block-click! 'dashboard (lambda (buf id) (dashboard-block-click buf id))))
+  (add-hook! (list 'block-click 'dashboard) (lambda (buf id) (dashboard-block-click buf id))))

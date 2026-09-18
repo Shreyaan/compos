@@ -685,7 +685,7 @@
       (message "No browser is connected")))
 
 ;; the page's own blocks, pressed in Scheme
-(on-block-click! 'amazon
+(add-hook! (list 'block-click 'amazon)
   (lambda (buf id)
     (let ((row (buffer-local buf 'amazon-row)))
       (and row

@@ -248,7 +248,7 @@ Two things follow from the sandbox (`allow-same-origin` only, no scripts):
   the href to Scheme. Claim a verb and the page gets buttons:
 
 ```scheme
-(on-preview-link! "cart" (lambda (arg) (amazon-cart-add! arg)))
+(add-hook! (list 'preview-link "cart") (lambda (arg) (amazon-cart-add! arg)))
 ;; then in the page: <a class='btn' href='compos:cart/B0BLVCFK8D'>Add to cart</a>
 ```
 

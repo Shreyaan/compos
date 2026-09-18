@@ -20,9 +20,7 @@
 (define *endpoint-registry* '())
 
 (define (endpoint-register! name spec)
-  (set! *endpoint-registry*
-    (cons (list name spec)
-          (remove (lambda (e) (equal? (car e) name)) *endpoint-registry*)))
+  (set! *endpoint-registry* (alist-put *endpoint-registry* name spec))
   name)
 
 (define (endpoint-spec name)
@@ -56,20 +54,14 @@
 
 ;;; --- events ------------------------------------------------------------------
 
-;; endpoint-on-event! is a single slot; this package owns it and fans out.
-;; Add a listener with (on-endpoint-event! NAME FN) — same name replaces.
-;; Without this, two packages that both watch endpoints silently clobber
-;; each other, and the second one loaded is the only one that ever runs.
-(define *endpoint-event-handlers* '())
-
-(define (on-endpoint-event! name fn)
-  (set! *endpoint-event-handlers*
-    (cons (list name fn)
-          (remove (lambda (e) (equal? (car e) name)) *endpoint-event-handlers*))))
-
+;; endpoint-on-event! is a single slot; this package owns it and fans out
+;; to the keyed hook: (add-hook! (list 'endpoint-event NAME) FN), FN gets
+;; (NAME KIND TEXT), and the same NAME replaces. Without this, two
+;; packages that both watch endpoints silently clobber each other, and
+;; the second one loaded is the only one that ever runs.
 (endpoint-on-event!
   (lambda (name kind text)
-    (for-each (lambda (e) ((cadr e) name kind text)) *endpoint-event-handlers*)))
+    (run-hook-with-args 'endpoint-event name kind text)))
 
 ;;; --- catalog -----------------------------------------------------------------
 
@@ -87,8 +79,6 @@
   "(endpoint-resolve-spec SPEC) — resolve the \"@VAR\" references in an endpoint spec before it leaves for Elixir")
 (public! 'endpoint-connected?
   "(endpoint-connected? NAME) — #t when the client connection or socket is open and ready to run a query")
-(public! 'on-endpoint-event!
-  "(on-endpoint-event! NAME FN) — add a named listener for (NAME KIND TEXT) unsolicited frames")
 
 ;; The primitives underneath. They are Elixir builtins, so the catalog
 ;; only learns them here; without these lines a package author searching

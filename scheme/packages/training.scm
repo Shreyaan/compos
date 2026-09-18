@@ -211,7 +211,7 @@
         ((equal? arg "guide") (run-command "training-guide"))
         (else (message (string-append "Unknown training link: " arg)))))
 
-(on-preview-link! "training" training--follow-link)
+(add-hook! (list 'preview-link "training") training--follow-link)
 
 (category! 'training)
 (public! 'training-document-path

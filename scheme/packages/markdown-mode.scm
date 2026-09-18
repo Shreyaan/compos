@@ -380,15 +380,11 @@
 (define (markdown--ensure-hook! buf)
   (let ((old (assoc buf *markdown-hooks*)))
     (when old (remove-on-change! (cadr old)))
-    (set! *markdown-hooks*
-      (cons (list buf
-                  (on-change! buf
+    (set! *markdown-hooks* (alist-put *markdown-hooks* buf (on-change! buf
                     (lambda (pos inserted deleted source)
                       (unless (equal? source "locals")
                         (markdown-refontify! buf)))
-                    'eager))
-            (remove (lambda (entry) (equal? (car entry) buf))
-                    *markdown-hooks*)))))
+                    'eager)))))
 
 (define (markdown--remove-hook! buf)
   (let ((old (assoc buf *markdown-hooks*)))

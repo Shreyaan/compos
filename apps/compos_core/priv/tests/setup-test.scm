@@ -70,7 +70,7 @@
   (lambda ()
     (check-true! (member "find-file-other-window" (command-names))
                  "the M-x command")
-    (check-true! (assoc "setup" *preview-link-verbs*) "the setup link handler")))
+    (check-true! (pair? (hook-functions '(preview-link "setup"))) "the setup link handler")))
 
 (deftest 'setup-documents-open-at-the-beginning
   "opening M-x must not reveal a hidden end-of-document point"

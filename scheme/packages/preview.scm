@@ -339,15 +339,9 @@
 ;; A click on a link in a rendered page. The client never follows the link
 ;; itself — it sends the href here, and Scheme says what the link means.
 ;; A link the editor owns reads "compos:VERB/ARGUMENT": a package claims a
-;; verb with on-preview-link!, the way it claims a display rule. help.scm
-;; claims "def", which opens the source of a name. An ordinary URL opens
-;; in the reader.
-(define *preview-link-verbs* '())
-
-(define (on-preview-link! verb fn)
-  (set! *preview-link-verbs*
-    (cons (list verb fn)
-          (filter (lambda (e) (not (equal? (car e) verb))) *preview-link-verbs*))))
+;; verb with (add-hook! (list 'preview-link VERB) FN), the way it claims a
+;; display rule; FN gets the argument. help.scm claims "def", which opens
+;; the source of a name. An ordinary URL opens in the reader.
 
 ;; "compos:def/find-file" -> ("def" "find-file"). The argument keeps its own
 ;; slashes, so a qualified name survives the split.
@@ -439,9 +433,9 @@
     (cond
       ((string-prefix? "compos:" href)
        (let* ((parts (preview--link-parts href))
-              (hit (assoc (car parts) *preview-link-verbs*)))
-         (if hit
-             ((cadr hit) (cadr parts))
+              (hook (list 'preview-link (car parts))))
+         (if (pair? (hook-functions hook))
+             (run-hook-with-args-until-success hook (cadr parts))
              (message (string-append "No handler for " href)))))
       ;; A rendered browse page keeps web navigation in its own tab.
       ;; Relative targets resolve against the current page, not local files.
@@ -462,16 +456,12 @@
       (else
         (preview--follow-document! source href (frame-group))))))
 
-(public! 'on-preview-link!
-  "(on-preview-link! VERB FN) — claim the compos:VERB/ARG links in a rendered page; FN gets ARG"
-  'interaction)
 (public! 'preview-follow-link!
   "(preview-follow-link! WIN HREF) — follow a link a reader clicked in a rendered page"
   'interaction)
 (public! 'link-follow-to-group
   "(link-follow-to-group WIN HREF) — choose or name a group, then follow the document link there"
   'interaction)
-(catalog-meta! 'function "on-preview-link!" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "preview-follow-link!" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "link-follow-to-group" 'domain 'interaction 'effects '(write display))
 

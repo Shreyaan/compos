@@ -367,9 +367,7 @@
 (define *fence-arg-runners* '())
 
 (define (fence-arg-run! arg fn)
-  (set! *fence-arg-runners*
-    (cons (list arg fn)
-          (remove (lambda (e) (equal? (car e) arg)) *fence-arg-runners*))))
+  (set! *fence-arg-runners* (alist-put *fence-arg-runners* arg fn)))
 
 ;; the runner of the first registered argument that INFO carries as a
 ;; word, or #f

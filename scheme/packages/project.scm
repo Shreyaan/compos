@@ -173,10 +173,7 @@
             (set! *project-default-root* #f)
             (if (equal? (car result) 'ok)
                 (begin
-                  (set! *project-defaults*
-                    (cons (list root *project-default-pending*)
-                          (remove (lambda (entry) (equal? (car entry) root))
-                                  *project-defaults*)))
+                  (set! *project-defaults* (alist-put *project-defaults* root *project-default-pending*))
                   (project-defaults-apply-project! root)
                   *project-default-pending*)
                 (begin
@@ -397,14 +394,14 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 ;; A non-file buffer inherits its creator's default-directory before this seam,
 ;; so chats, shells, and scratch buffers also run their project's config. File
 ;; buffers wait for find-file-hook above, where their mode is already installed.
-(on-buffer-created!
+(add-hook! 'buffer-created-hook
   (lambda (buf)
     (when (not (buffer-path buf))
       (project-configure-buffer! buf))))
 
 ;; Waking or restoring a buffer is another open boundary: it may have slept
 ;; while compos.scm changed, and it missed every creation and visit hook.
-(on-buffer-woken! project-configure-buffer!)
+(add-hook! 'buffer-woken-hook 'project-configure-buffer!)
 
 ;;; --- commands ----------------------------------------------------------------
 

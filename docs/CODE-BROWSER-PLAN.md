@@ -12,7 +12,7 @@ in a summary is one key away from the code it names.
 
 | codescope piece | what it is | compos today |
 |---|---|---|
-| `Target` + `Git.Watcher` | one target dir, a debounced fs event on PubSub | `project-current`, `watch-path!`, `on-fs-change!` (editor.scm:2170) |
+| `Target` + `Git.Watcher` | one target dir, a debounced fs event on PubSub | `project-current`, `watch-path!`, `fs-change-hook` (editor.scm:2170) |
 | `/diff` + explain button | live `git diff HEAD`, LLM explanation streamed into a pane | `diff-mode` cards + `define-diff-backend` + fs watch (diff-mode.scm); no explanation |
 | `/browse` file view | Monaco, fold bodies, sexp nav, scope tint | `code-browse` (code.scm), tree-sitter or indentation, tint, folds |
 | `Docs` `.codescope/*.md` | hand-editable overview, files sorted by `NN-` prefix | nothing; morg-mode is the renderer to use |
@@ -97,7 +97,7 @@ Three ways a summary refreshes:
 1. **On view.** Opening a scope buffer for a stale node queues that node.
    The buffer shows the stale summary with a `stale` badge until the new
    text lands.
-2. **On change.** `on-fs-change!` marks the changed files stale and queues
+2. **On change.** `fs-change-hook` marks the changed files stale and queues
    them if `scope-auto-refresh` is on (default on, with a per-project
    budget: `scope-refresh-budget` calls per hour, default 60). Directory
    and project summaries refresh only after their children settle, so one
@@ -325,7 +325,7 @@ the `chat` preset's model.
 ### 3.7 Elixir
 
 None expected. Every mechanism exists: `llm`, `llm-with-model`, `llm-with-tools`,
-`git-*` primitives, `shell-command->string`, `watch-path!`, `on-fs-change!`,
+`git-*` primitives, `shell-command->string`, `watch-path!`, `fs-change-hook`,
 `read-file`, `write-file!`, `list-dir`, `code-outline`, `imenu-rows`,
 `lsp-buffer-request`, the list mode, morg. The one candidate is a content
 hash primitive; `git hash-object --stdin` through the shell covers it.

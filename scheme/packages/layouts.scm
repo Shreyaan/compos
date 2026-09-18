@@ -531,9 +531,7 @@
              (kept (filter (lambda (row)
                               (not (member (car row) '(layout-target layout-slots layout-target-count))))
                             locals)))
-        (set! *frame-locals*
-          (cons (list frame (cons (list 'layout-target target) kept))
-                (filter (lambda (row) (not (equal? (car row) frame))) *frame-locals*)))))
+        (set! *frame-locals* (alist-put *frame-locals* frame (cons (list 'layout-target target) kept)))))
     (frame-list)))
 
 (persist-global! 'layout-targets layout-targets-state layout-targets-restore!)
@@ -594,7 +592,7 @@
       (set! *hidden-window-next-id* (car saved))
       (set! *hidden-windows* (cadr saved)))))
 
-(on-buffer-renamed!
+(add-hook! 'buffer-renamed-hook
   (lambda (old new)
     (set! *hidden-windows*
       (map (lambda (r)

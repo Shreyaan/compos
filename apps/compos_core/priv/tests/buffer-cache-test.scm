@@ -92,13 +92,12 @@
 
 (define *zz-cl-fetches* 0)
 
-;; define-list-mode! writes to four registries. Three are Scheme, and this
+;; define-list-mode! writes to three registries. Two are Scheme, and this
 ;; clears them. The fourth is the M-x command table, which is Elixir and
 ;; has no removal: the name stays until the next restart.
 (define (t--cache-forget-list-mode! name)
   (set! *list-modes* (remove (lambda (e) (equal? (car e) name)) *list-modes*))
-  (set! *mode-setups* (remove (lambda (e) (equal? (car e) name)) *mode-setups*))
-  (set! *mode-docs* (remove (lambda (e) (equal? (car e) name)) *mode-docs*))
+  (mode-forget! name)
   (set! *catalog* (remove (lambda (e) (equal? (plist-get e 'name) name)) *catalog*))
   name)
 

@@ -419,14 +419,6 @@
 ;;; A listener takes (SLUG STOP-REASON OK?). OK? says the turn ended
 ;;; normally; a cancel, an error and a dead backend are all not normal.
 
-(define *agent-turn-end-handlers* '())   ; ((name fn) ...), newest first
-
-(define (on-agent-turn-end! name fn)
-  (set! *agent-turn-end-handlers*
-    (cons (list name fn)
-          (remove (lambda (e) (equal? (car e) name)) *agent-turn-end-handlers*)))
-  name)
-
 (define (agent-turn-end-normal? stop-reason)
   (if (member stop-reason '("end_turn" "max_tokens" "completed" "stop")) #t #f))
 
@@ -436,20 +428,21 @@
       ;; one bad listener must not eat the ones behind it, for the same
       ;; reason one bad event must not eat its batch
       (for-each
-        (lambda (e)
-          (unless (ignore-errors (lambda () ((cadr e) slug stop-reason ok?) #t))
-            (message (string-append "turn-end listener " (car e)
+        (lambda (key)
+          (unless (ignore-errors
+                    (lambda ()
+                      (run-hook-with-args (list 'agent-turn-end key) slug stop-reason ok?)
+                      #t))
+            (message (string-append "turn-end listener "
+                                    (if (symbol? key) (symbol->string key) key)
                                     " failed on " slug))))
-        *agent-turn-end-handlers*))))
+        (hook-keys 'agent-turn-end)))))
 
 (category! 'chat)
 (domain! 'chat)
 (effects! '(write))
-(public! 'on-agent-turn-end!
-  "(on-agent-turn-end! NAME FN) — add a named listener called (FN SLUG STOP-REASON OK?) when a chat's turn ends; the same NAME replaces")
 (public! 'agent-turn-end-normal?
   "(agent-turn-end-normal? STOP-REASON) — #t when that stop reason is an ordinary end of turn, not a cancel or an error")
-(catalog-meta! 'function "on-agent-turn-end!" 'domain 'chat 'effects '(write))
 (catalog-meta! 'function "agent-turn-end-normal?" 'domain 'chat 'effects '(pure))
 
 ;; Branching questions are not permission requests. Their answer goes back

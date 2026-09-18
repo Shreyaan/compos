@@ -26,19 +26,18 @@
   "the primitive holds one slot, so this package must fan out"
   (lambda ()
     (let ((heard '()))
-      (on-endpoint-event! "t-a" (lambda (n k tx) (set! heard (cons (list "a" n k tx) heard))))
-      (on-endpoint-event! "t-b" (lambda (n k tx) (set! heard (cons (list "b" n k tx) heard))))
-      (for-each (lambda (e) ((cadr e) "conn" "frame" "hi")) *endpoint-event-handlers*)
+      (add-hook! (list 'endpoint-event "t-a") (lambda (n k tx) (set! heard (cons (list "a" n k tx) heard))))
+      (add-hook! (list 'endpoint-event "t-b") (lambda (n k tx) (set! heard (cons (list "b" n k tx) heard))))
+      (run-hook-with-args 'endpoint-event "conn" "frame" "hi")
       (check-equal! (length heard) 2 "both listeners ran"))))
 
 (deftest 'a-listener-name-replaces-its-own-earlier-listener
   "a reload must not stack a second copy of the same listener"
   (lambda ()
-    (on-endpoint-event! "t-dup" (lambda (n k tx) #f))
-    (on-endpoint-event! "t-dup" (lambda (n k tx) #f))
-    (check-equal!
-      (length (filter (lambda (e) (equal? (car e) "t-dup")) *endpoint-event-handlers*))
-      1 "one listener")))
+    (add-hook! (list 'endpoint-event "t-dup") (lambda (n k tx) #f))
+    (add-hook! (list 'endpoint-event "t-dup") (lambda (n k tx) #f))
+    (check-equal! (length (hook-functions '(endpoint-event "t-dup"))) 1 "one listener")
+    (remove-hook! '(endpoint-event "t-dup"))))
 
 ;;; --- discovery ---------------------------------------------------------------
 ;;; The mechanism is only useful if the person writing a connector can

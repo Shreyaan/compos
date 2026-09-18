@@ -393,7 +393,7 @@
 
 ;; The mode is defined above, so the adoption can run: on the buffer boot
 ;; made, and on every later creation of the name.
-(on-buffer-created! messages--adopt!)
+(add-hook! 'buffer-created-hook 'messages--adopt!)
 (when (buffer-exists? *messages-buffer*) (messages--adopt! *messages-buffer*))
 
 (effects! '(read))

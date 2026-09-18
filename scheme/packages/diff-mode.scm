@@ -1232,7 +1232,7 @@
 
 ;; the click registry (components.scm) fans the one click primitive out to
 ;; every blocks mode. The id is ours only in a diff buffer.
-(on-block-click! 'diff
+(add-hook! (list 'block-click 'diff)
   (lambda (buf id)
     (and (buffer-local buf 'diff-backend)
          (begin
@@ -1260,7 +1260,7 @@
               (message "watch on"))))))
 
 ;; a stale diff catches up the moment the switcher shows it again
-(on-buffer-shown!
+(add-hook! 'buffer-shown-hook
   (lambda (b)
     (when (and (buffer-local b 'diff-stale)
                (buffer-local b 'diff-watch))
@@ -1272,7 +1272,7 @@
 ;; the session for seconds at a time. A hidden buffer marks itself
 ;; stale; showing it again, the next fs change while visible, or `g`
 ;; catches it up.
-(on-fs-change!
+(add-hook! 'fs-change-hook
   (lambda (root)
     (for-each
       (lambda (b)

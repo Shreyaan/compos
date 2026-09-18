@@ -22,7 +22,7 @@ defmodule Compos.Core.Watch do
   handler job per root, never a queue of them.
 
   Policy lives in Scheme: `(watch-path! DIR)`, `(unwatch-path! DIR)`, and
-  `(on-fs-change! FN)` in `priv/editor.scm`.
+  `(add-hook! 'fs-change-hook FN)` in `priv/editor.scm`.
   """
 
   use GenServer

@@ -435,7 +435,7 @@ defmodule Compos.DesktopRestoreTest do
     assert written != []
 
     for mode <- written do
-      assert eval!(~s{(and (assoc "#{mode}" *mode-setups*) #t)}) == "#t",
+      assert eval!(~s{(equal? (mode-get "#{mode}" 'kind) 'major)}) == "#t",
              ~s{mode-name "#{mode}" is written but no define-mode registers it}
     end
   end

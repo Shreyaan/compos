@@ -93,10 +93,10 @@
   "assoc reads the newest either way; an auto-reloader must not stack rows"
   (lambda ()
     (t--hr-major! "zz-hr-grow" 1)
-    (let ((before (length *mode-setups*)))
+    (let ((before (length *modes*)))
       (t--hr-major! "zz-hr-grow" 2)
       (t--hr-major! "zz-hr-grow" 3)
-      (check-equal! (length *mode-setups*) before "the entry replaced in place"))))
+      (check-equal! (length *modes*) before "the entry replaced in place"))))
 
 (deftest 'buffer-wears-mode-sees-both-halves-of-a-buffers-mode
   "the major mode and every minor mode name the buffer"

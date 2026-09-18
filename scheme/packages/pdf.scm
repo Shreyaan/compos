@@ -971,7 +971,7 @@
 
 (pdf--register-auto-mode!)
 
-(on-preview-link! "pdf"
+(add-hook! (list 'preview-link "pdf")
   (lambda (verb)
     (cond ((equal? verb "first") (run-command "pdf-first-page"))
           ((equal? verb "previous") (run-command "pdf-previous-page"))

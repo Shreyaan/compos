@@ -907,7 +907,7 @@
           ((equal? verb "dismiss") (annotate--do-dismiss! src a))
           ((equal? verb "reply") (annotate--read-reply src a)))))
 
-(on-block-click! "annotate"
+(add-hook! (list 'block-click "annotate")
   (lambda (mbuf id)
     (and (string? id)
          (string-prefix? "ann:" id)

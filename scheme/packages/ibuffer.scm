@@ -118,9 +118,7 @@
 (define *ibuffer-kinds* (if (boundp '*ibuffer-kinds*) *ibuffer-kinds* '()))
 
 (define (ibuffer-kind! name plist)
-  (set! *ibuffer-kinds*
-    (cons (list name plist)
-          (filter (lambda (k) (not (equal? (car k) name))) *ibuffer-kinds*))))
+  (set! *ibuffer-kinds* (alist-put *ibuffer-kinds* name plist)))
 
 ;; a row with no buffer is a file
 (define (ibuffer-row-kind* b)
@@ -404,9 +402,7 @@
 (define *ibuffer-scopes* (if (boundp '*ibuffer-scopes*) *ibuffer-scopes* '()))
 
 (define (ibuffer-scope! name thunk)
-  (set! *ibuffer-scopes*
-    (cons (list name thunk)
-          (filter (lambda (s) (not (equal? (car s) name))) *ibuffer-scopes*))))
+  (set! *ibuffer-scopes* (alist-put *ibuffer-scopes* name thunk)))
 
 ;; #f means the ordinary complete table. A list, including an empty list,
 ;; is the exact result set that a buffer prompt handed to ibuffer. A
@@ -1217,10 +1213,8 @@
 (define *ibuffer-source-facts* '())
 
 (define (ibuffer-source-facts! buf)
-  (set! *ibuffer-source-facts*
-    (cons (list buf (length (remove ibuffer-heading?
-                                    (or (buffer-local buf 'list-source-entries) '()))))
-          (remove (lambda (e) (equal? (car e) buf)) *ibuffer-source-facts*))))
+  (set! *ibuffer-source-facts* (alist-put *ibuffer-source-facts* buf (length (remove ibuffer-heading?
+                                    (or (buffer-local buf 'list-source-entries) '()))))))
 
 (define (ibuffer-source-facts buf) (assoc buf *ibuffer-source-facts*))
 
@@ -1377,9 +1371,7 @@
 (defvar '*listing-preview-projectors* '())
 
 (define (listing-preview-projector! mode fn)
-  (set! *listing-preview-projectors*
-    (cons (list mode fn)
-          (remove (lambda (entry) (equal? (car entry) mode)) *listing-preview-projectors*))))
+  (set! *listing-preview-projectors* (alist-put *listing-preview-projectors* mode fn)))
 
 (public! 'listing-preview-projector!
   "(listing-preview-projector! MODE FN) — FN(COPY SOURCE) restores preview presentation from saved data, without waking SOURCE or fetching")

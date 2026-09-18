@@ -23,10 +23,8 @@
 ;; modifiers (external, execute, spend, display). The catalog entry carries it,
 ;; and *permission-policy* reads it from there.
 (define (define-tool! name description params handler &optional effects)
-  (set! *llm-tools*
-    (cons (list name (list 'description description 'params params 'handler handler
-                           'effects (or effects '(unknown))))
-          (remove (lambda (t) (equal? (car t) name)) *llm-tools*)))
+  (set! *llm-tools* (alist-put *llm-tools* name (list 'description description 'params params 'handler handler
+                           'effects (or effects '(unknown)))))
   (if effects
       (catalog-register! 'tool name description 'effects effects)
       (catalog-register! 'tool name description))

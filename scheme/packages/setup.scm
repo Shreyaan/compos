@@ -696,7 +696,7 @@
         ((equal? arg "code") (run-command "setup-teach-code"))
         (else (message (string-append "Unknown setup link: " arg)))))
 
-(on-preview-link! "setup" setup--follow-link)
+(add-hook! (list 'preview-link "setup") setup--follow-link)
 
 (category! 'setup)
 (public! 'setup-secret-backends

@@ -3851,7 +3851,7 @@ defmodule Compos.EditorTest do
 
     {:ok, _} =
       Compos.Core.Session.eval("""
-      (on-buffer-shown!
+      (add-hook! 'buffer-shown-hook
         (lambda (buf)
           (when (buffer-local buf 'probe-stale)
             (buffer-set-local! buf 'probe-stale #f)

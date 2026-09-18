@@ -537,8 +537,8 @@ a{color:var(--accent);text-decoration:none}
       (kill-new (plist-get row 'url))
       (message (string-append "Copied " (plist-get row 'url))))))
 
-(on-preview-link! "linkedin-open" (lambda (id) (linkedin-open-external! id)))
-(on-preview-link! "linkedin-copy" (lambda (id) (linkedin-copy-link! id)))
+(add-hook! (list 'preview-link "linkedin-open") (lambda (id) (linkedin-open-external! id)))
+(add-hook! (list 'preview-link "linkedin-copy") (lambda (id) (linkedin-copy-link! id)))
 
 (define-command "linkedin-detail" "Show the project on this row beside the listing"
   (lambda () (linkedin-show-detail! (linkedin-row-here))))
@@ -912,14 +912,13 @@ a{color:var(--accent);text-decoration:none}
 ;; <left>/<right>: the component hands back the id li--tab-entry gave it,
 ;; and that id is the tab's own name. Anything else on the listing --
 ;; a row -- is not ours, so it falls through to the list's own handler.
-(when (boundp 'on-block-click!)
-  (on-block-click! 'linkedin
-    (lambda (buf id)
-      (and (equal? buf *linkedin-buffer*)
-           (string-prefix? "linkedin-tab-" id)
-           (let ((tab (string->symbol (substring id 13 (string-length id)))))
-             (and (member tab *linkedin-tabs*)
-                  (begin (linkedin-set-tab! tab) #t)))))))
+(add-hook! (list 'block-click 'linkedin)
+  (lambda (buf id)
+    (and (equal? buf *linkedin-buffer*)
+         (string-prefix? "linkedin-tab-" id)
+         (let ((tab (string->symbol (substring id 13 (string-length id)))))
+           (and (member tab *linkedin-tabs*)
+                (begin (linkedin-set-tab! tab) #t))))))
 
 (define-command "linkedin-tab-next" "Show the next LinkedIn tab"
   (lambda () (linkedin--step-tab! 1)))

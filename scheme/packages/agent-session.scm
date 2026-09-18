@@ -608,7 +608,7 @@
         (message "chat dismissed"))
       (message "chat run ended unsuccessfully; chat remains dismissed")))
 
-(on-agent-turn-end! 'chat-dismiss
+(add-hook! (list 'agent-turn-end 'chat-dismiss)
   (lambda (slug stop-reason ok?)
     (let ((buf (agent-buf slug)))
       (when (buffer-local buf 'chat-dismiss-pending)
@@ -1078,7 +1078,7 @@
   (subagent-notify-parent! slug ok? stop-reason)
   (subagent-waiters-note! slug))
 
-(on-agent-turn-end! "subagents" subagent-turn-end!)
+(add-hook! (list 'agent-turn-end "subagents") subagent-turn-end!)
 
 (category! 'chat)
 

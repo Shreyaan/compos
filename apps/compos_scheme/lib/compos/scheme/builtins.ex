@@ -443,6 +443,9 @@ defmodule Compos.Scheme.Builtins do
       {"plist-get",
        "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST; false when KEY is absent or PLIST is not a list."} =>
         fn [pl, key] -> plist_get(pl, key) end,
+      {"plist-put",
+       "(plist-put PLIST KEY VAL) — PLIST with KEY VAL first and any older KEY pair gone."} =>
+        fn [pl, key, val] -> [key, val | plist_delete(pl, key)] end,
       # native: an interpreted walk paid one frame per element, and a read
       # into a list of 3000 lines per definition made an outline take seconds
       {"list-ref",
@@ -458,7 +461,7 @@ defmodule Compos.Scheme.Builtins do
       {"alist-put",
        "(alist-put ALIST KEY VAL) — ALIST with (KEY VAL) first and any older KEY entry gone."} =>
         fn [al, key, val] when is_list(al) ->
-          [[key, val] | Enum.reject(al, &(is_list(&1) and hd(&1) == key))]
+          [[key, val] | Enum.reject(al, &match?([^key | _], &1))]
         end,
       {"alist-get", "(alist-get ALIST KEY) — the value after KEY in ALIST, or #f."} => fn [
                                                                                             al,
@@ -467,7 +470,7 @@ defmodule Compos.Scheme.Builtins do
                                                                                           when is_list(
                                                                                                  al
                                                                                                ) ->
-        case Enum.find(al, &(is_list(&1) and hd(&1) == key)) do
+        case Enum.find(al, &match?([^key | _], &1)) do
           [_, v | _] -> v
           _ -> false
         end
@@ -476,7 +479,7 @@ defmodule Compos.Scheme.Builtins do
                                                                                         when is_list(
                                                                                                al
                                                                                              ) ->
-        Enum.reject(al, &(is_list(&1) and hd(&1) == key))
+        Enum.reject(al, &match?([^key | _], &1))
       end,
       {"list-head",
        "(list-head LST K) — return the first K elements of LST; an error past the end."} => fn [
@@ -738,6 +741,9 @@ defmodule Compos.Scheme.Builtins do
   defp plist_get([k, v | _], key) when k == key, do: v
   defp plist_get([_, _ | rest], key), do: plist_get(rest, key)
   defp plist_get(_, _key), do: false
+  defp plist_delete([k, _ | rest], key) when k == key, do: plist_delete(rest, key)
+  defp plist_delete([k, v | rest], key), do: [k, v | plist_delete(rest, key)]
+  defp plist_delete(_, _key), do: []
   defp source_callable({:interposed, original, _}), do: source_callable(original)
   defp source_callable(value), do: value
 end

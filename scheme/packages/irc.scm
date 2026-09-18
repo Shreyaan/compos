@@ -127,9 +127,7 @@
     (and e (cadr e))))
 
 (define (irc-conn-set! name conn)
-  (set! *irc-conns*
-    (cons (list name conn)
-          (remove (lambda (e) (equal? (car e) name)) *irc-conns*)))
+  (set! *irc-conns* (alist-put *irc-conns* name conn))
   conn)
 
 (define (irc-plist-put pl key value)
@@ -516,7 +514,7 @@
             ((equal? kind "status") (irc-handle-status! name text))
             (else (irc-note! (irc-buffer! name #f) (irc-chomp text)))))))
 
-(on-endpoint-event! "irc" irc-event)
+(add-hook! (list 'endpoint-event "irc") irc-event)
 
 ;;; --- redraw -----------------------------------------------------------------
 ;;; The transcript is drawn, and the frames are what the server said, so the
@@ -607,9 +605,7 @@
            (set! *irc-lists* (cons (list name '()) (remove (lambda (e) (equal? (car e) name)) *irc-lists*))))
           ((equal? c "322")
            (let ((rows (or (let ((e (assoc name *irc-lists*))) (and e (cadr e))) '())))
-             (set! *irc-lists*
-               (cons (list name (cons (list (irc-arg ps 1) (irc-arg ps 2) (irc-plain t)) rows))
-                     (remove (lambda (e) (equal? (car e) name)) *irc-lists*)))))
+             (set! *irc-lists* (alist-put *irc-lists* name (cons (list (irc-arg ps 1) (irc-arg ps 2) (irc-plain t)) rows)))))
           ((equal? c "323")
            (let ((rows (or (let ((e (assoc name *irc-lists*))) (and e (cadr e))) '())))
              (set! *irc-lists* (remove (lambda (e) (equal? (car e) name)) *irc-lists*))

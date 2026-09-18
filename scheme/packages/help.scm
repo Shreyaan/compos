@@ -428,7 +428,7 @@
 ;;; for the same word, so the key still answers over prose.
 
 ;; the help alphabet: the code alphabet plus `*`, so a point on a Scheme
-;; global like `*mode-docs*` reads the whole name and finds it
+;; global like `*modes*` reads the whole name and finds it
 (define *help-symbol-chars* (string-append *symbol-chars* "*"))
 
 (define (help--symbol-at) (symbol-at-point-in *help-symbol-chars*))
@@ -622,9 +622,9 @@
        (message (string-append name " is a primitive — " (primitive-doc name))))
       (else (message (string-append "No definition of " name))))))
 
-(on-preview-link! "def" help--goto-source)
-(on-preview-link! "cmd" (lambda (name) (help--goto-source name 'command)))
-(on-preview-link! "mode" (lambda (name) (help--goto-source name 'mode)))
+(add-hook! (list 'preview-link "def") help--goto-source)
+(add-hook! (list 'preview-link "cmd") (lambda (name) (help--goto-source name 'command)))
+(add-hook! (list 'preview-link "mode") (lambda (name) (help--goto-source name 'mode)))
 
 (define-command "help-goto-source"
   "Open the source of the name at point, in the file that defines it, or follow the link there"

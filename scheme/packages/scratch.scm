@@ -261,7 +261,7 @@
 ;; A renamed group scratch keeps its role. Move each work-buffer pointer and
 ;; return pointer so `C-c s` keeps toggling. The same applies to the way back
 ;; out of a project scratch.
-(on-buffer-renamed!
+(add-hook! 'buffer-renamed-hook
   (lambda (old new)
     (for-each
       (lambda (b)

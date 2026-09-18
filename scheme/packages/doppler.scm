@@ -461,7 +461,7 @@
         (else #f)))
 
 ;; A row click selects it. The action bar runs the same commands as the keys.
-(on-block-click! 'doppler
+(add-hook! (list 'block-click 'doppler)
   (lambda (buf id)
     (and (equal? (buffer-local buf 'mode-name) "doppler-mode")
          (cond

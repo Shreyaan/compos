@@ -20,7 +20,7 @@ defmodule Compos.LSPPrimitivesTest do
     eval!("""
     (begin
       (define *lsp-test-events* '())
-      (on-lsp-event! "test" (lambda (id method params)
+      (add-hook! (list 'lsp-event "test") (lambda (id method params)
         (set! *lsp-test-events* (cons (list id method params) *lsp-test-events*))))
       (lsp-start! "#{name}" "#{@root}"
         (list 'command "elixir" 'args (list "#{@fixture}") 'language "elixir")))

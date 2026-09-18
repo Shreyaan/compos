@@ -1053,14 +1053,10 @@
 (define (morg-ensure-hook! buf)
   (let ((old (assoc buf *morg-hooks*)))
     (when old (remove-on-change! (cadr old)))
-    (set! *morg-hooks*
-      (cons (list buf
-                  (on-change! buf
+    (set! *morg-hooks* (alist-put *morg-hooks* buf (on-change! buf
                     (lambda (pos inserted deleted source)
                       (morg-after-change buf pos inserted deleted source))
-                    'eager))
-            (remove (lambda (entry) (equal? (car entry) buf))
-                    *morg-hooks*)))))
+                    'eager)))))
 
 (mode-doc! "morg-mode"
   "Markdown with org habits. `TAB` folds a heading or code block. `C-x n n` shows one heading, and `C-x n w` widens. Narrowing gives chat an outline hint, not document text. `C-c C-c` runs a block, or fills a `:show-source PATH::NAME` block from its file. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")

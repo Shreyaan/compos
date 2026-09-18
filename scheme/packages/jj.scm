@@ -237,9 +237,7 @@
     ;; the history keeps every line the root showed, once per change
     (unless (and hit (equal? (cadr hit) line))
       (set! *jj-history* (cons (list root (current-time) line) *jj-history*)))
-    (set! *jj-lines*
-          (cons (list root line)
-                (filter (lambda (e) (not (equal? (car e) root))) *jj-lines*)))
+    (set! *jj-lines* (alist-put *jj-lines* root line))
     line))
 
 (public! 'jj-line-history

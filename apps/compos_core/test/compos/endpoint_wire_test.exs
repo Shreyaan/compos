@@ -87,7 +87,7 @@ defmodule Compos.EndpointWireTest do
         eval!("(define got '())")
 
         eval!("""
-        (on-endpoint-event! "wire-test"
+        (add-hook! (list 'endpoint-event "wire-test")
           (lambda (name kind text)
             (when (equal? kind "frame") (set! got (cons text got)))))
         """)

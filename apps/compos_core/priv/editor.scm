@@ -71,14 +71,7 @@
   (string-append k ":" (if (equal? k "component") qualified n)))
 
 (define catalog--get plist-get)
-
-(define (catalog--put pl key value)
-  (append (list key value)
-          (let loop ((xs pl))
-            (cond ((null? xs) '())
-                  ((null? (cdr xs)) '())
-                  ((equal? (car xs) key) (loop (cdr (cdr xs))))
-                  (else (cons (car xs) (cons (cadr xs) (loop (cdr (cdr xs))))))))))
+(define catalog--put plist-put)
 
 (define (catalog--string x)
   (cond ((string? x) x)
@@ -2564,9 +2557,7 @@
         (cache-wake! buf)))))
 
 (define (define-list-mode! name opts)
-  (set! *list-modes*
-    (cons (list name opts)
-          (remove (lambda (e) (equal? (car e) name)) *list-modes*)))
+  (set! *list-modes* (alist-put *list-modes* name opts))
   ;; the list says what it is once, here — describe-mode reads it back
   (let ((d (plist-get opts 'doc)))
     (when d (mode-doc! name d)))
@@ -3368,9 +3359,18 @@
 ;;; the global list. run-hooks calls with no arguments; the
 ;;; run-hook-with-args family carries arguments and stops on the first
 ;;; success or the first failure, as in Emacs.
+;;;
+;;; A KEYED hook holds one function per key: (add-hook! '(block-click
+;;; diff) FN) puts FN under the key diff, and the same key replaces, so a
+;;; package reload does not stack a second copy. (hook-functions
+;;; 'block-click) is the plain list and then every keyed function, newest
+;;; key first; (hook-functions '(block-click diff)) is that one function,
+;;; so a dispatcher runs one key or all of them with the same run-hook
+;;; call. (hook-keys 'block-click) names the keys.
 
 (define *hooks* '())                    ; ((HOOK FN ...) ...)
 (define *local-hooks* '())              ; ((BUFFER (HOOK FN ...) ...) ...)
+(define *keyed-hooks* '())              ; ((HOOK ((KEY FN) ...)) ...)
 
 (define (hook--alist-get alist key)
   (let ((e (assoc key alist))) (if e (cdr e) '())))
@@ -3407,23 +3407,40 @@
 (define (hook--remove fns fn)
   (filter (lambda (f) (not (equal? f fn))) fns))
 
+(define (hook--keyed hook) (or (alist-get *keyed-hooks* hook) '()))
+
+(define (hook--set-keyed! hook entries)
+  (set! *keyed-hooks* (alist-put *keyed-hooks* hook entries)))
+
+(define (hook-keys hook) (map car (hook--keyed hook)))
+
 (define (add-hook! hook fn &optional at-end local)
-  (if local
-      (let ((buf (current-buffer)))
-        (hook--set-local! buf hook (hook--add (hook--local buf hook) fn at-end)))
-      (hook--set-global! hook (hook--add (hook--global hook) fn at-end)))
+  (cond ((pair? hook)
+         (hook--set-keyed! (car hook) (alist-put (hook--keyed (car hook)) (cadr hook) fn)))
+        (local
+         (let ((buf (current-buffer)))
+           (hook--set-local! buf hook (hook--add (hook--local buf hook) fn at-end))))
+        (else (hook--set-global! hook (hook--add (hook--global hook) fn at-end))))
   fn)
 
-(define (remove-hook! hook fn &optional local)
-  (if local
-      (let ((buf (current-buffer)))
-        (hook--set-local! buf hook (hook--remove (hook--local buf hook) fn)))
-      (hook--set-global! hook (hook--remove (hook--global hook) fn)))
+;; a keyed hook needs no FN: the key names what goes
+(define (remove-hook! hook &optional fn local)
+  (cond ((pair? hook)
+         (hook--set-keyed! (car hook) (alist-delete (hook--keyed (car hook)) (cadr hook))))
+        (local
+         (let ((buf (current-buffer)))
+           (hook--set-local! buf hook (hook--remove (hook--local buf hook) fn))))
+        (else (hook--set-global! hook (hook--remove (hook--global hook) fn))))
   fn)
 
-;; the functions HOOK runs, in order: the current buffer's, then the global
+;; the functions HOOK runs, in order: the current buffer's, the global,
+;; then the keyed; a keyed name answers with its one function
 (define (hook-functions hook)
-  (append (hook--local (current-buffer) hook) (hook--global hook)))
+  (if (pair? hook)
+      (let ((fn (alist-get (hook--keyed (car hook)) (cadr hook))))
+        (if fn (list fn) '()))
+      (append (hook--local (current-buffer) hook) (hook--global hook)
+              (map cadr (hook--keyed hook)))))
 
 (define (run-hook-with-args hook &rest args)
   (for-each (lambda (f)
@@ -3578,9 +3595,7 @@
 ;;; refresh, they do not do the work. Watch debounces, but a slow handler
 ;;; still runs once per burst per root.
 
-;; fs-change-hook: (FN ROOT). on-fs-change! is the older spelling.
-(define (on-fs-change! fn) (add-hook! 'fs-change-hook fn))
-
+;; fs-change-hook: (FN ROOT)
 (fs-on-change!
   (lambda (root) (run-hook-with-args 'fs-change-hook root)))
 
@@ -3609,20 +3624,16 @@
 ;;; annotation reads as a table. A field that wants its text on the right
 ;;; (a size) pads itself — the mechanism only makes the columns.
 
-(define *marginalia* '())    ; ((CATEGORY FN) ...)
-
 ;; Packages can attach a face to a candidate label. The candidate renderer
 ;; carries the face without knowing why that name has that color.
 (define candidate-face-for (lambda (category name) #f))
 
-(define (marginalia! category fn)
-  (set! *marginalia*
-    (cons (list category fn)
-          (remove (lambda (e) (equal? (car e) category)) *marginalia*))))
+;; the annotator of CATEGORY is the keyed hook (marginalia CATEGORY)
+(define (marginalia! category fn) (add-hook! (list 'marginalia category) fn))
 
 (define (marginalia-for category)
-  (let ((e (assoc category *marginalia*)))
-    (and e (car (cdr e)))))
+  (let ((fs (hook-functions (list 'marginalia category))))
+    (and (pair? fs) (car fs))))
 
 ;; one candidate's fields — a single string is a list of one
 (define (marginalia-row f n)
@@ -3693,8 +3704,7 @@
 ;;; a restart.
 ;;;
 ;;; Session.reload_files/1 brackets every reload with these two fns.
-;;; reload-begin! opens a record. define-mode and register-minor-mode!
-;;; write their name into it. reload-finish! re-runs setup on every live
+;;; reload-begin! opens a record. define-mode writes its name into it. reload-finish! re-runs setup on every live
 ;;; buffer that wears one of those modes, and on nothing else — a save in
 ;;; markdown.scm must not rebuild a shell buffer.
 ;;;
@@ -3779,58 +3789,87 @@
 
 ;;; --- modes ------------------------------------------------------------------
 ;;; A major mode = mode-name buffer-local + a setup fn (local keys, vars).
-;;; The registry, auto-mode-alist, everything: userland.
+;;; One table holds every fact about every mode, major and minor:
+;;; ((NAME PLIST) ...). mode-put! writes one fact, mode-get reads the
+;;; mode's own fact, and mode-inherited reads the nearest ancestor's.
+;;; The facts: 'kind (major or minor), 'setup, 'teardown, 'keymap,
+;;; 'parent, 'doc, 'icon, 'link-syntax, 'layout, 'headline, 'dismissible.
+;;; A package may state a fact before the mode is defined; define-mode
+;;; keeps it.
 
-(define *mode-setups* '())
+(define *modes* '())
 
-;; Replace the entry by name. assoc reads the newest first either way, but
-;; a reloader that runs on every save must not grow this list without end.
+(define (mode-entry name) (or (alist-get *modes* name) '()))
+(define (mode-get name key) (and name (plist-get (mode-entry name) key)))
+
+;; the mode's own fact, or the nearest ancestor's. The walk carries what
+;; it has seen, so a parent loop ends instead of hanging the editor.
+(define (mode-inherited name key)
+  (let loop ((m name) (seen '()))
+    (cond ((or (not m) (member m seen)) #f)
+          (else (let ((v (mode-get m key)))
+                  (if v v (loop (mode-get m 'parent) (cons m seen))))))))
+
 ;; the keymap a mode owns: MODE-map. set-mode! makes it the parent of
 ;; the buffer's own map, so a binding made once on the mode's map answers
 ;; in every buffer that wears the mode, and a buffer's own binding wins.
 (define (mode-keymap name) (string-append name "-map"))
 
-(define (define-mode name setup)
-  (set! *mode-setups*
-    (cons (list name setup)
-          (remove (lambda (e) (equal? (car e) name)) *mode-setups*)))
-  (define-keymap! (mode-keymap name))
-  (reload--touch! name)
-  ;; every mode is an M-x command, like Emacs, and like Emacs the command
-  ;; puts the buffer in the mode; running it again keeps it there. The
-  ;; modeline click is the toggle (modeline-toggle-mode!).
-  (define-command name (lambda () (major-mode-set! name)))
-  (catalog-register! 'mode name "Major mode"
-    'use (string-append "(run-command \"" name "\")")))
+(define (mode-put! name key val)
+  (set! *modes* (alist-put *modes* name (plist-put (mode-entry name) key val)))
+  (cond ((equal? key 'parent)
+         ;; the child's map falls back to the parent's
+         (keymap-parent! (mode-keymap name) (mode-keymap val)))
+        ((equal? key 'doc) (mode--catalog-doc! name val)))
+  name)
 
-;; A mode can say which mode it is built from. Emacs writes that into
-;; define-derived-mode; here the parent is a fact about the name, so a test
-;; asks derived-mode? instead of comparing one string and missing every child.
-(define *mode-parents* '())
+(define (mode-forget! name)
+  (set! *modes* (alist-delete *modes* name)))
 
-;; A mode declares dismissal independently of its parent or q command.
-(defvar '*dismissible-modes* '())
+;; (define-mode NAME SETUP 'parent P 'doc D 'icon I ...): every fact in
+;; the same form. 'minor #t makes a minor mode: SETUP and 'teardown take
+;; the buffer, and 'keymap names a map that answers while the mode is on,
+;; as minor-mode-map-alist does in Emacs.
+(define (define-mode name setup &rest opts)
+  (let ((minor (plist-get opts 'minor)))
+    (mode-put! name 'kind (if minor 'minor 'major))
+    (mode-put! name 'setup setup)
+    (let loop ((o opts))
+      (when (and (pair? o) (pair? (cdr o)))
+        (unless (or (equal? (car o) 'minor) (not (cadr o)))
+          (mode-put! name (car o) (cadr o)))
+        (loop (cddr o))))
+    (cond (minor (let ((map (mode-get name 'keymap))) (when map (define-keymap! map))))
+          (else
+            (define-keymap! (mode-keymap name))
+            ;; every mode is an M-x command, like Emacs, and like Emacs the
+            ;; command puts the buffer in the mode; running it again keeps
+            ;; it there. The modeline click is the toggle.
+            (define-command name (lambda () (major-mode-set! name)))
+            (unless (mode-get name 'doc)
+              (catalog-register! 'mode name "Major mode"
+                'use (string-append "(run-command \"" name "\")")))))
+    (reload--touch! name)
+    name))
 
-(define (mode-dismissible! mode)
-  (unless (member mode *dismissible-modes*)
-    (set! *dismissible-modes* (cons mode *dismissible-modes*))))
-
-(public! 'mode-dismissible! "(mode-dismissible! MODE) — declare that MODE and its derived modes support dismissal; dismiss-mode supplies child-first q and window chrome")
-
-(define (mode-parent! name parent)
-  (set! *mode-parents*
-    (cons (list name parent)
-          (remove (lambda (e) (equal? (car e) name)) *mode-parents*)))
-  ;; the child's map falls back to the parent's
-  (keymap-parent! (mode-keymap name) (mode-keymap parent)))
+;; (register-minor-mode! NAME SETUP TEARDOWN KEYMAP): define-mode's minor form
+(define (register-minor-mode! name setup &optional teardown keymap)
+  (define-mode name setup 'minor #t 'teardown teardown 'keymap keymap))
 
 ;; (define-derived-mode NAME PARENT SETUP): NAME is PARENT with SETUP on
 ;; top. Its keymap falls back to PARENT-map, its setup runs PARENT's
 ;; setup first, and set-mode! runs PARENT-hook before NAME-hook, as
 ;; Emacs's define-derived-mode does.
 (define (define-derived-mode name parent setup)
-  (mode-parent! name parent)
-  (define-mode name (lambda () (mode-setup! parent) (setup))))
+  (define-mode name (lambda () (mode-setup! parent) (setup)) 'parent parent))
+
+(define (mode-parent! name parent) (mode-put! name 'parent parent))
+(define (mode-parent name) (mode-get name 'parent))
+
+;; A mode declares dismissal independently of its parent or q command.
+(define (mode-dismissible! mode) (mode-put! mode 'dismissible #t))
+
+(public! 'mode-dismissible! "(mode-dismissible! MODE) — declare that MODE and its derived modes support dismissal; dismiss-mode supplies child-first q and window chrome")
 
 ;; the hooks a mode runs, the root's first: fundamental has none
 (define (mode-hook-chain name)
@@ -3839,11 +3878,7 @@
         (map (lambda (n) (string->symbol (string-append n "-hook"))) acc)
         (loop (mode-parent m) (cons m acc) (cons m seen)))))
 
-(define (mode-parent name)
-  (let ((e (assoc name *mode-parents*))) (and e (cadr e))))
-
-;; #t when MODE is NAME, or descends from it. The walk carries what it has
-;; seen, so a parent loop ends instead of hanging the editor.
+;; #t when MODE is NAME, or descends from it
 (define (derived-mode? mode name)
   (let loop ((m mode) (seen '()))
     (cond ((not m) #f)
@@ -3854,20 +3889,18 @@
 (define (buffer-derived-mode? buf name)
   (derived-mode? (buffer-local buf 'mode-name) name))
 
-;; Run another mode's setup. A derived mode inherits the behavior instead
+;; Run a major mode's setup. A derived mode inherits the behavior instead
 ;; of copying it, so the two cannot drift apart.
 (define (mode-setup! name)
-  (let ((e (assoc name *mode-setups*)))
-    (when e ((cadr e)))))
+  (when (equal? (mode-get name 'kind) 'major)
+    ((mode-get name 'setup))))
 
 ;; What a mode is for, in the mode's own words. describe-mode prints it
 ;; above the key table. A mode without one still gets its keys.
-(define *mode-docs* '())
+(define (mode-doc! name doc) (mode-put! name 'doc doc))
+(define (mode-doc name) (mode-get name 'doc))
 
-(define (mode-doc! name doc)
-  (set! *mode-docs*
-    (cons (list name doc)
-          (remove (lambda (e) (equal? (car e) name)) *mode-docs*)))
+(define (mode--catalog-doc! name doc)
   (let ((e (catalog-entry 'mode name)))
     (if e
         (catalog-register! 'mode name doc
@@ -3878,10 +3911,6 @@
           'use (string-append "(run-command \"" name "\")"))
         (catalog-register! 'mode name doc))))
 
-(define (mode-doc name)
-  (let ((e (assoc name *mode-docs*)))
-    (and e (car (cdr e)))))
-
 ;;; --- mode icons ---------------------------------------------------------------
 ;;; One glyph names a mode, and every list that shows a mode shows it:
 ;;; dired, ibuffer, the buffer prompt and the file prompt. A mode declares
@@ -3890,17 +3919,13 @@
 ;;; where one says it better — λ names a Scheme file. Never an emoji, which
 ;;; draws two cells and colours a column that must stay quiet.
 
-(define *mode-icons* '())
 (define *default-mode-icon* "")
 
-(define (mode-icon! name icon)
-  (set! *mode-icons*
-    (cons (list name icon)
-          (remove (lambda (e) (equal? (car e) name)) *mode-icons*))))
+(define (mode-icon! name icon) (mode-put! name 'icon icon))
 
 (define (mode-icon name)
-  (let ((e (and name (assoc name *mode-icons*))))
-    (if e (car (cdr e)) *default-mode-icon*)))
+  (let ((i (mode-get name 'icon)))
+    (if i i *default-mode-icon*)))
 
 ;; The icon MODE registered for itself, or #f. A mode that never registered
 ;; one answers #f rather than the generic default, and a mode that registered
@@ -3908,8 +3933,8 @@
 ;; the icon INSTEAD of the name must ask this one: the default glyph says
 ;; nothing, so it can never stand in for a name.
 (define (mode-own-icon name)
-  (let ((e (and name (assoc name *mode-icons*))))
-    (and e (not (equal? (car (cdr e)) "")) (car (cdr e)))))
+  (let ((i (mode-get name 'icon)))
+    (and i (not (equal? i "")) i)))
 
 ;; the icon a buffer wears is its mode's
 (define (buffer-icon b)
@@ -3941,27 +3966,17 @@
 (mode-icon! "tail-mode" "")
 (mode-icon! "collect-mode" "")
 
-
 ;;; --- mode link syntax ---------------------------------------------------------
 ;;; How a mode writes a link to a file: Markdown writes [LABEL](PATH), Org
 ;;; writes [[file:PATH][LABEL]]. A mode declares its own syntax, and a child
 ;;; mode inherits its parent's. A mode that declares none writes the path
 ;;; alone, which is a link in every buffer (goto-address.scm).
 
-(define *mode-link-syntaxes* '())
-
-(define (mode-link-syntax! name fn)
-  (set! *mode-link-syntaxes*
-    (cons (list name fn)
-          (remove (lambda (e) (equal? (car e) name)) *mode-link-syntaxes*))))
+(define (mode-link-syntax! name fn) (mode-put! name 'link-syntax fn))
 
 ;; the syntax of MODE or of its nearest ancestor: (lambda (PATH LABEL) TEXT),
 ;; or #f when the mode writes the path alone
-(define (mode-link-syntax mode)
-  (let loop ((m mode) (seen '()))
-    (cond ((or (not m) (member m seen)) #f)
-          ((assoc m *mode-link-syntaxes*) (cadr (assoc m *mode-link-syntaxes*)))
-          (else (loop (mode-parent m) (cons m seen))))))
+(define (mode-link-syntax mode) (mode-inherited mode 'link-syntax))
 
 (define (set-mode! name)
   (let* ((buf (current-buffer))
@@ -3979,8 +3994,7 @@
     (define-keymap! (mode-keymap name))
     (use-local-map! buf (mode-keymap name))
     (buffer-set-local! buf 'mode-name name)
-    (let ((m (assoc name *mode-setups*)))
-      (if m ((cadr m))))
+    (mode-setup! name)
     (when changed (restore-minor-modes! buf))
     ;; a mode with font-lock keywords is painted from here on
     (when (pair? (font-lock-keywords name)) (font-lock-enable! buf))
@@ -4176,31 +4190,12 @@
 ;;; set-mode! re-runs major-mode setup — so setup fns must rebuild
 ;;; presentation from the locals they find, never stack hooks twice.
 
-(define *minor-mode-setups* '())   ; (name setup teardown keymap)
-
-;; KEYMAP, when given, is the name of a keymap the mode owns. While the
-;; mode is on in a buffer, that map answers ahead of the buffer's own map
-;; and the major mode's, and turning the mode off takes it away, as
-;; minor-mode-map-alist does in Emacs.
-(define (register-minor-mode! name setup &optional teardown keymap)
-  (when keymap (define-keymap! keymap))
-  (set! *minor-mode-setups*
-    (cons (list name setup teardown keymap)
-          (remove (lambda (e) (equal? (car e) name)) *minor-mode-setups*)))
-  (reload--touch! name))
-
-(define (minor-mode-keymap name)
-  (let ((m (assoc name *minor-mode-setups*)))
-    (and m (> (length m) 3) (nth 3 m))))
+(define (minor-mode-keymap name) (mode-get name 'keymap))
 
 ;; give a registered minor mode its keymap after the fact
 (define (minor-mode-keymap! name map)
   (define-keymap! map)
-  (let ((m (assoc name *minor-mode-setups*)))
-    (when m
-      (set! *minor-mode-setups*
-        (cons (list name (nth 1 m) (nth 2 m) map)
-              (remove (lambda (e) (equal? (car e) name)) *minor-mode-setups*))))))
+  (mode-put! name 'keymap map))
 
 ;; (mode-keys! MODE ((KEYS COMMAND) ...)): bind once on MODE's map, at
 ;; load; every buffer that wears the mode answers, and a buffer's own
@@ -4240,8 +4235,8 @@
     (unless (member name cur)
       (buffer-set-local! buf 'minor-modes (cons name cur))))
   (minor-mode--attach-map! buf name)
-  (let ((m (assoc name *minor-mode-setups*)))
-    (if m ((cadr m) buf)))
+  (let ((setup (mode-get name 'setup)))
+    (when setup (setup buf)))
   ;; NAME-hook runs in the buffer, as a minor mode's hook does in Emacs
   (with-current-buffer buf
     (lambda () (run-hooks (string->symbol (string-append name "-hook")))))
@@ -4253,8 +4248,8 @@
     (remove (lambda (n) (equal? n name))
             (or (buffer-local buf 'minor-modes) '())))
   (minor-mode--detach-map! buf name)
-  (let ((m (assoc name *minor-mode-setups*)))
-    (if (and m (caddr m)) ((caddr m) buf))))
+  (let ((teardown (mode-get name 'teardown)))
+    (when teardown (teardown buf))))
 
 (define (toggle-minor-mode! name)
   (let ((buf (current-buffer)))
@@ -4382,9 +4377,8 @@
   (let* ((buf (current-buffer))
          (major (or (buffer-local buf 'mode-name) "Fundamental")))
     (cond
-      ;; a minor mode toggles in place. A name that is both is a major
-      ;; mode here, because its own command would call this back forever.
-      ((and (assoc name *minor-mode-setups*) (not (assoc name *mode-setups*)))
+      ;; a minor mode toggles in place
+      ((equal? (mode-get name 'kind) 'minor)
        (if (member name (command-names))
            (run-command name)
            (toggle-minor-mode! name))
@@ -4410,16 +4404,18 @@
   (for-each
     (lambda (name)
       (minor-mode--attach-map! buf name)
-      (let ((m (assoc name *minor-mode-setups*)))
-        (if m ((cadr m) buf))))
+      (let ((setup (mode-get name 'setup)))
+        (when setup (setup buf))))
     (reverse (or (buffer-local buf 'minor-modes) '()))))
 
-;; Every mode the editor knows, major and minor, one name each, sorted.
-;; load-mode offers this list; the catalog and the help pages read the
-;; two registries directly.
-(define (mode-names)
-  (sort (dedupe-names (append (map car *mode-setups*)
-                        (map car *minor-mode-setups*)))))
+;; Every mode the editor knows, sorted: (mode-names) names them all,
+;; (mode-names 'major) or (mode-names 'minor) one kind. A name with facts
+;; but no definition yet is not a mode.
+(define (mode-names &optional kind)
+  (sort (map car (filter (lambda (e)
+                           (let ((k (plist-get (cadr e) 'kind)))
+                             (and k (or (not kind) (equal? k kind)))))
+                         *modes*))))
 
 ;; Put the current buffer in the mode NAME. This is the same toggle the
 ;; modeline click and the mode's own M-x command run, so a major mode
@@ -4720,11 +4716,7 @@
 ;;; state OTHER things key by the old name — a change hook, a pointer from
 ;;; another buffer. Each owner fixes its own, here.
 
-;; buffer-renamed-hook: (FN OLD NEW). on-buffer-renamed! is the older spelling.
-(define (on-buffer-renamed! fn)
-  (add-hook! 'buffer-renamed-hook fn)
-  #t)
-
+;; buffer-renamed-hook: (FN OLD NEW)
 ;; the rename the editor uses: mechanism, then every owner of name-keyed
 ;; state. Returns the new name, or #f when the name is taken.
 (define (rename-buffer! old new)
@@ -5063,7 +5055,7 @@
 ;;; Two callers read the name under the cursor and they disagree about the
 ;;; alphabet, on purpose. `M-.` must not read `foo/2` or `a+b` as one
 ;;; name, so it stops at the code alphabet. Help also reads Scheme globals
-;;; like `*mode-docs*`, so it adds `*`. One scanner, two alphabets.
+;;; like `*modes*`, so it adds `*`. One scanner, two alphabets.
 
 (define *symbol-chars* "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_?!-")
 
@@ -5100,16 +5092,13 @@
 ;;; description or #f. agent-send prepends the visible windows'
 ;;; contexts, so "this" in a chat means the thing selected in the other window.
 
-(define *context-providers* '())   ; ((mode-name fn) ...)
-
+;; the provider of a mode is the keyed hook (context-provider MODE)
 (define (register-context-provider! mode fn)
-  (set! *context-providers*
-    (cons (list mode fn)
-          (filter (lambda (e) (not (equal? (car e) mode))) *context-providers*))))
+  (add-hook! (list 'context-provider mode) fn))
 
 (define (buffer-context buf)
-  (let ((p (assoc (or (buffer-local buf 'mode-name) "") *context-providers*)))
-    (and p ((cadr p) buf))))
+  (run-hook-with-args-until-success
+    (list 'context-provider (or (buffer-local buf 'mode-name) "")) buf))
 
 ;; contexts of every visible buffer except EXCLUDE (the chat itself),
 ;; deduped; "" when no provider speaks up
@@ -5130,23 +5119,19 @@
 ;;; every consumer: C-. pops the action menu, and the act tool lets the
 ;;; model drive the same verbs the keyboard does.
 
-(define *target-providers* '())   ; ((mode-name fn) ...), fn: buf -> target|#f
-
+;; the provider of a mode is the keyed hook (target-provider MODE);
+;; FN: buf -> target or #f
 (define (register-target-provider! mode fn)
-  (set! *target-providers*
-    (cons (list mode fn)
-          (filter (lambda (e) (not (equal? (car e) mode))) *target-providers*))))
+  (add-hook! (list 'target-provider mode) fn))
 
 (define (target-at buf)
-  (let ((p (assoc (or (buffer-local buf 'mode-name) "") *target-providers*)))
-    (and p ((cadr p) buf))))
+  (run-hook-with-args-until-success
+    (list 'target-provider (or (buffer-local buf 'mode-name) "")) buf))
 
 (define *embark-actions* '())     ; ((type ((name fn) ...)) ...)
 
 (define (register-actions! type actions)
-  (set! *embark-actions*
-    (cons (list type actions)
-          (filter (lambda (e) (not (equal? (car e) type))) *embark-actions*))))
+  (set! *embark-actions* (alist-put *embark-actions* type actions)))
 
 (define (actions-for type)
   (let ((e (assoc type *embark-actions*)))
@@ -5275,10 +5260,7 @@
 (define *region-lifters* '())
 
 (define (register-region-lifter! mode fn)
-  (set! *region-lifters*
-    (cons (list mode fn)
-          (filter (lambda (entry) (not (equal? (car entry) mode)))
-                  *region-lifters*))))
+  (set! *region-lifters* (alist-put *region-lifters* mode fn)))
 
 (define (region-action-bounds)
   (let* ((buf (current-buffer))
@@ -5900,13 +5882,10 @@
 (define (font-lock-enable! buf)
   (let ((old (assoc buf *font-lock-hooks*)))
     (when old (remove-on-change! (cadr old)))
-    (set! *font-lock-hooks*
-      (cons (list buf
-                  (on-change! buf
+    (set! *font-lock-hooks* (alist-put *font-lock-hooks* buf (on-change! buf
                     (lambda (pos inserted deleted source)
                       (unless (equal? source "locals") (font-lock-refontify! buf)))
-                    'eager))
-            (remove (lambda (e) (equal? (car e) buf)) *font-lock-hooks*)))
+                    'eager)))
     (font-lock-refontify! buf)))
 
 (define (font-lock-disable! buf)
@@ -6004,11 +5983,7 @@
 
 ;; Every owner can apply policy to one truly new buffer. Waking a dormant
 ;; buffer does not run these hooks because that buffer already has state.
-;; buffer-created-hook: (FN NAME). on-buffer-created! is the older spelling.
-(define (on-buffer-created! fn)
-  (add-hook! 'buffer-created-hook fn)
-  #t)
-
+;; buffer-created-hook: (FN NAME)
 (define (buffer-created! name)
   (when (string? name) (buffer-set-local! name 'created-at (current-time)))
   (run-hook-with-args 'buffer-created-hook name)
@@ -6027,8 +6002,7 @@
   (let ((e (assoc b *buffer-seen-stamps*))) (and e (cadr e))))
 
 (define (buffer-seen-memo! b t)
-  (set! *buffer-seen-stamps*
-    (cons (list b t) (filter (lambda (e) (not (equal? (car e) b))) *buffer-seen-stamps*))))
+  (set! *buffer-seen-stamps* (alist-put *buffer-seen-stamps* b t)))
 
 (define (buffer-note-seen! b)
   ;; one write a minute per buffer. The hook behind this runs on every
@@ -6056,11 +6030,7 @@
 ;; missed every seam that ran meanwhile. This is where an owner catches
 ;; that buffer up. It runs on a desktop restore too, which is the same
 ;; event: state came back from a checkpoint, not from nothing.
-;; buffer-woken-hook: (FN NAME). on-buffer-woken! is the older spelling.
-(define (on-buffer-woken! fn)
-  (add-hook! 'buffer-woken-hook fn)
-  #t)
-
+;; buffer-woken-hook: (FN NAME)
 (define (buffer-woken! name)
   (run-hook-with-args 'buffer-woken-hook name)
   name)
@@ -6740,20 +6710,14 @@
           (let ((r (remote-list-dir (car hp) (cadr hp))))
             (if (and (pair? r) (symbol? (car r)))   ; (error MSG)
                 (begin
-                  (set! *remote-ls-errors*
-                    (cons (list dir (cadr r))
-                          (filter (lambda (e) (not (equal? (car e) dir)))
-                                  *remote-ls-errors*)))
+                  (set! *remote-ls-errors* (alist-put *remote-ls-errors* dir (cadr r)))
                   (message (cadr r))
                   '())
                 (begin
                   (set! *remote-ls-errors*
                     (filter (lambda (e) (not (equal? (car e) dir)))
                             *remote-ls-errors*))
-                  (set! *remote-ls-cache*
-                    (cons (list dir r)
-                          (filter (lambda (c) (not (equal? (car c) dir)))
-                                  *remote-ls-cache*)))
+                  (set! *remote-ls-cache* (alist-put *remote-ls-cache* dir r))
                   r)))))))
 
 (define (remote-ls-cached dir0)
@@ -7822,7 +7786,7 @@
 ;;;                                      pop-up-window use-some-window
 ;;;                                      same-window
 ;;;
-;;; The actions, each a function of NAME and ALIST on *display-buffer-actions*:
+;;; The actions, each a function of NAME and ALIST on the display-action hook:
 ;;;
 ;;;   reuse-window     a window that shows NAME already
 ;;;   mode-window      a work window whose buffer has NAME's major mode: a
@@ -7852,16 +7816,12 @@
 (define *display-buffer-base-action* '())
 (define *display-buffer-fallback-action*
   '(reuse-window mode-window pop-up-window use-some-window same-window))
-(define *display-buffer-actions* '())
-
-(define (define-display-action! name fn)
-  (set! *display-buffer-actions*
-    (cons (list name fn)
-          (filter (lambda (e) (not (equal? (car e) name))) *display-buffer-actions*))))
+;; an action is the keyed hook (display-action NAME)
+(define (define-display-action! name fn) (add-hook! (list 'display-action name) fn))
 
 (define (display-action-fn name)
-  (let ((e (assoc name *display-buffer-actions*)))
-    (and e (cadr e))))
+  (let ((fs (hook-functions (list 'display-action name))))
+    (and (pair? fs) (car fs))))
 
 ;; Explicit layouts remain targets as their occupied pane count changes.
 (define (layout-target) (frame-local 'layout-target))
@@ -8722,17 +8682,8 @@
 ;;; the windows in front of somebody, and the ordinary split and delete commands
 ;;; still work while the mode is on.
 
-(define *mode-layouts* '())        ; ((mode spec) ...)
-
-(define (define-mode-layout! mode spec)
-  (set! *mode-layouts*
-    (cons (list mode spec)
-          (remove (lambda (e) (equal? (car e) mode)) *mode-layouts*)))
-  mode)
-
-(define (mode-layout mode)
-  (let ((e (assoc mode *mode-layouts*)))
-    (and e (cadr e))))
+(define (define-mode-layout! mode spec) (mode-put! mode 'layout spec))
+(define (mode-layout mode) (mode-get mode 'layout))
 
 ;; the layout BUF declares. A minor mode answers before the major mode: it is
 ;; the more specific statement about the same buffer.
@@ -10065,7 +10016,7 @@
 
 ;; the change rule behind M-o's response ranges is registered under the name
 ;; the buffer had. A renamed chat needs the rule again, under the new one.
-(on-buffer-renamed!
+(add-hook! 'buffer-renamed-hook
   (lambda (old new)
     (when (assoc old *llm-mode-hooks*)
       (llm-mode--remove-hook! old)
@@ -11783,10 +11734,7 @@
 
 (define (llm-models-seen! connector entries)
   (when (and connector (pair? entries))
-    (set! *llm-connector-models*
-      (cons (list connector entries)
-            (remove (lambda (e) (equal? (car e) connector))
-                    *llm-connector-models*))))
+    (set! *llm-connector-models* (alist-put *llm-connector-models* connector entries)))
   entries)
 
 ;; Known models keep their order and their display names; a declared model
@@ -11823,10 +11771,7 @@
 
 (define (llm-modes-seen! connector entries)
   (when (and connector (pair? entries))
-    (set! *llm-connector-modes*
-      (cons (list connector entries)
-            (remove (lambda (e) (equal? (car e) connector))
-                    *llm-connector-modes*))))
+    (set! *llm-connector-modes* (alist-put *llm-connector-modes* connector entries)))
   entries)
 
 ;; the live session's own list when it has one, the connector's remembered
@@ -11981,9 +11926,7 @@
 ;; here; the switcher runs it for every window it just (re)filled.
 ;; diff-mode uses it: hidden diffs skip the expensive re-render and
 ;; catch up the moment they show.
-;; buffer-shown-hook: (FN BUFFER). on-buffer-shown! is the older spelling.
-(define (on-buffer-shown! fn) (add-hook! 'buffer-shown-hook fn))
-
+;; buffer-shown-hook: (FN BUFFER)
 (define (windows-shown-catchup!)
   (for-each (lambda (w) (run-hook-with-args 'buffer-shown-hook (car (cdr w))))
             (window-list)))
@@ -12038,7 +11981,7 @@
 ;; The ring holds layouts, and a layout names its buffers. A rename that
 ;; does not reach the ring makes winner-undo restore a window on a dead
 ;; name. Every frame keeps its own ring, so the sweep walks them all.
-(on-buffer-renamed!
+(add-hook! 'buffer-renamed-hook
   (lambda (old new)
     (set! *frame-locals*
       (map (lambda (frame-entry)
@@ -12831,16 +12774,8 @@
 ;;; starts is narrow-cols, the system's answer; a mode declares only WHICH
 ;;; of the segments survive it. The names are mode, group, llm and wide. A
 ;;; mode that declares nothing keeps every segment and lets the row clip.
-(define *mode-headlines* '())
-
-(define (define-mode-headline! mode narrow)
-  (set! *mode-headlines*
-    (cons (list mode narrow)
-          (remove (lambda (e) (equal? (car e) mode)) *mode-headlines*)))
-  mode)
-
-(define (mode-headline mode)
-  (let ((e (assoc mode *mode-headlines*))) (and e (cadr e))))
+(define (define-mode-headline! mode narrow) (mode-put! mode 'headline narrow))
+(define (mode-headline mode) (mode-get mode 'headline))
 
 ;; Chat identity is visible at every width. CSS wraps metadata beneath
 ;; the title per pane; a buffer-wide cache must not choose a pane's width.
@@ -13047,9 +12982,7 @@
 (define *name-icons* '())            ; ((KEY GLYPH) ...) what :key: reaches
 
 (define (name-icon! key glyph)
-  (set! *name-icons*
-    (cons (list key glyph)
-          (remove (lambda (e) (equal? (car e) key)) *name-icons*))))
+  (set! *name-icons* (alist-put *name-icons* key glyph)))
 
 ;; a caller's own icons come first: :mode: belongs to the buffer, not here
 (define (name--icon key icons)
@@ -13508,10 +13441,7 @@
 (define (history-push! key item)
   (let ((items (cons item (filter (lambda (x) (not (equal? x item)))
                                   (history-items key)))))
-    (set! *minibuffer-history*
-      (cons (list key (take-n items *minibuffer-history-max*))
-            (filter (lambda (e) (not (equal? (car e) key)))
-                    *minibuffer-history*)))))
+    (set! *minibuffer-history* (alist-put *minibuffer-history* key (take-n items *minibuffer-history-max*)))))
 
 ;; reorder candidates so remembered ones lead, in recency order
 (define (history-order key candidates)
@@ -14277,9 +14207,7 @@
 (define *editing-state-maps-off* '())   ; ((MODE (MAP ...)) ...)
 
 (define (editing-state-maps-off! mode names)
-  (set! *editing-state-maps-off*
-    (cons (list mode (remove (lambda (m) (equal? m "editing-state-map")) names))
-          (remove (lambda (e) (equal? (car e) mode)) *editing-state-maps-off*))))
+  (set! *editing-state-maps-off* (alist-put *editing-state-maps-off* mode (remove (lambda (m) (equal? m "editing-state-map")) names))))
 
 (define (editing--maps-for buf)
   (let ((off '()))
@@ -14484,15 +14412,8 @@
 ;;; routes it as one. A ranged intent comes here: what the range means is
 ;;; policy.
 
-(define *input-intent-handlers* '())
-
-;; (on-input-intent! TYPE FN): FN takes (from to text) and returns #t when
-;; it handled the intent. A mode registers "formatBold" here.
-(define (on-input-intent! type fn)
-  (set! *input-intent-handlers*
-    (cons (list type fn)
-          (remove (lambda (entry) (equal? (car entry) type))
-                  *input-intent-handlers*))))
+;; (add-hook! (list 'input-intent TYPE) FN): FN takes (from to text) and
+;; returns #t when it handled the intent. A mode registers "formatBold" here.
 
 (define (input-intent--replace! from to text)
   (goto-char! from)
@@ -14504,9 +14425,9 @@
   #t)
 
 (define (input-intent! type from to text)
-  (let ((handler (assoc type *input-intent-handlers*)))
+  (let ()
     (cond
-      ((and handler ((cadr handler) from to text)) #t)
+      ((run-hook-with-args-until-success (list 'input-intent type) from to text) #t)
       ((member type '("insertText" "insertReplacementText" "insertCompositionText"
                       "insertFromPaste" "insertFromDrop" "insertFromYank"
                       "insertTranspose"))
@@ -15203,7 +15124,6 @@
 (public! 'watch-path! "(watch-path! DIR ['deep]) -> the watched root; refcounted, so two watchers of one directory share one subscription. A plain watch sees the direct children of DIR; 'deep sees the whole tree, for a repository")
 (public! 'unwatch-path! "(unwatch-path! DIR ['deep]) — drop one reference, 'deep for a deep one; the subscription stops at zero")
 (public! 'watched-paths "The watched roots")
-(public! 'on-fs-change! "(on-fs-change! FN) — FN gets the root string when a watched tree changes; keep it small, it schedules a refresh")
 
 ;; folds
 ;; Tagged, because a buffer has several fold owners. Each owner replaces

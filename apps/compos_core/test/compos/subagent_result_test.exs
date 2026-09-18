@@ -6,7 +6,7 @@ defmodule Compos.SubagentResultTest do
   under test is everything that hangs off that turn end:
 
     * agent.ex dispatches it to Scheme once the turn has RENDERED, on the
-      :ui lane, and agent.scm fans it out as on-agent-turn-end!.
+      :ui lane, and agent.scm fans it out on the agent-turn-end hook.
     * a child reports STRUCTURALLY: (subagent-result SLUG) reads the child's
       own last message and costs the parent no turn at all.
     * 'notify #t is the opt-in exception, a free-text wake into the parent.
@@ -23,7 +23,7 @@ defmodule Compos.SubagentResultTest do
 
     on_exit(fn ->
       # the probe listener is keyed by name, so a no-op replaces it
-      Session.eval(~s[(on-agent-turn-end! "zz-probe" (lambda (s r ok) #f))])
+      Session.eval(~s[(add-hook! (list 'agent-turn-end "zz-probe") (lambda (s r ok) #f))])
       Enum.each(Agent.list(), &Agent.kill/1)
 
       Enum.each(Compos.Core.list_buffers(), fn name ->
@@ -54,11 +54,11 @@ defmodule Compos.SubagentResultTest do
     end
   end
 
-  test "a finished turn reaches Scheme as on-agent-turn-end!, with the slug and the stop reason" do
+  test "a finished turn reaches Scheme on the agent-turn-end hook, with the slug and the stop reason" do
     eval!("(define zz-turn-end-log '())")
 
     eval!("""
-    (on-agent-turn-end! "zz-probe"
+    (add-hook! (list 'agent-turn-end "zz-probe")
       (lambda (slug stop ok?)
         (set! zz-turn-end-log (cons (list slug stop ok?) zz-turn-end-log))))
     """)
@@ -79,7 +79,7 @@ defmodule Compos.SubagentResultTest do
     eval!("(define zz-turn-end-log '())")
 
     eval!("""
-    (on-agent-turn-end! "zz-probe"
+    (add-hook! (list 'agent-turn-end "zz-probe")
       (lambda (slug stop ok?)
         (set! zz-turn-end-log (cons (list slug stop ok?) zz-turn-end-log))))
     """)
@@ -116,7 +116,9 @@ defmodule Compos.SubagentResultTest do
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(c)) end)
     assert eval!(~s[(subagent-parent "#{c}")]) == ~s["#{p}"]
 
-    assert eval!(~s[(plist-get (subagent-result "#{c}") 'status)]) == "done"
+    # the turn-end hook runs on the :ui lane after the render; the record
+    # says done once it ran
+    assert eventually(fn -> eval!(~s[(plist-get (subagent-result "#{c}") 'status)]) == "done" end)
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'stop-reason)]) == ~s["end_turn"]
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'text)]) == ~s["the answer is 42."]
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'buffer)]) == ~s["#{chat_buf(c)}"]

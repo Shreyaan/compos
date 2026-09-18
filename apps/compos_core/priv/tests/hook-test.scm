@@ -125,3 +125,19 @@
     (buffer-created! "*hook-test-x*")
     (remove-hook! 'buffer-created-hook 'hook-test-one-arg)
     (check-true! (pair? *hook-test-log*) "buffer-created! ran the hook")))
+
+(deftest 'a-keyed-hook-holds-one-function-per-key
+  "the same key replaces; the plain name runs every key; the key alone removes"
+  (lambda ()
+    (add-hook! '(hook-test-keyed a) (lambda (x) (hook-test-log! (list 'a1 x)) #f))
+    (add-hook! '(hook-test-keyed a) (lambda (x) (hook-test-log! (list 'a2 x)) #f))
+    (add-hook! '(hook-test-keyed "b") (lambda (x) (hook-test-log! (list 'b x)) 'yes))
+    (check-equal! (length (hook-functions '(hook-test-keyed a))) 1 "one function under a")
+    (check-equal! (length (hook-functions 'hook-test-keyed)) 2 "two keys in all")
+    (hook-test-reset!)
+    (run-hook-with-args 'hook-test-keyed 'x)
+    (check-equal! (reverse *hook-test-log*) '((b x) (a2 x)) "the newest key first, the replaced function gone")
+    (check-equal! (run-hook-with-args-until-success '(hook-test-keyed "b") 'y) 'yes "one key runs alone")
+    (remove-hook! '(hook-test-keyed a))
+    (remove-hook! '(hook-test-keyed "b"))
+    (check-equal! (hook-functions 'hook-test-keyed) '() "the keys are gone")))

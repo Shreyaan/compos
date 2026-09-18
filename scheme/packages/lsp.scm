@@ -24,9 +24,7 @@
 (define (lsp--id-name id) (car (string-split id "@")))
 
 (define (lsp-register! name spec)
-  (set! *lsp-registry*
-    (cons (list name spec)
-          (remove (lambda (e) (equal? (car e) name)) *lsp-registry*)))
+  (set! *lsp-registry* (alist-put *lsp-registry* name spec))
   (for-each
     (lambda (mode)
       (unless (member mode *lsp-hooked-modes*)
@@ -143,14 +141,9 @@
       (when (buffer-exists? *lsp-diag-buffer*)
         (list-refresh! *lsp-diag-buffer*)))))
 
-;; lsp-on-event! is a single slot; this package owns it and fans out.
-;; Add a listener with (on-lsp-event! NAME FN) — same name replaces.
-(define *lsp-event-handlers* '())
-
-(define (on-lsp-event! name fn)
-  (set! *lsp-event-handlers*
-    (cons (list name fn)
-          (remove (lambda (e) (equal? (car e) name)) *lsp-event-handlers*))))
+;; lsp-on-event! is a single slot; this package owns it and fans out to
+;; the keyed hook: (add-hook! (list 'lsp-event NAME) FN), FN gets
+;; (ID METHOD PARAMS), and the same NAME replaces.
 
 (lsp-on-event!
   (lambda (id method params)
@@ -161,10 +154,7 @@
           ((equal? method "window/showMessage")
            (message (string-append "lsp: " (or (plist-get params 'message) ""))))
           (else #f))
-    (for-each (lambda (e) ((cadr e) id method params)) *lsp-event-handlers*)))
-
-(public! 'on-lsp-event!
-  "(on-lsp-event! NAME FN) — add a named listener for (ID METHOD PARAMS) server events")
+    (run-hook-with-args 'lsp-event id method params)))
 
 (define-style! 'lsp "
 .f-lsp-error{text-decoration:underline wavy var(--alert-fg,#a83a2b);text-decoration-skip-ink:none}

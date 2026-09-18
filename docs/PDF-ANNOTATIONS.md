@@ -79,7 +79,7 @@ filter. The severity supplies the colour, from the `ann-*` faces the
 annotate layer already declares.
 
 A click on the box sends `compos:pdf/note-a7`. The existing
-`on-preview-link!` handler selects that note, echoes it, and shows the
+`preview-link` hook selects that note, echoes it, and shows the
 margin card.
 
 ## Making a note

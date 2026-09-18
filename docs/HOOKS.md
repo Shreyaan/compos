@@ -48,13 +48,28 @@ list. The local table lives in Scheme, keyed by buffer name.
 | `llm-config-changed-hook` | BUF | llm-config exited and the buffer's setup changed |
 | `group-membership-hook`, `group-kill-hook` | | see docs/groups.md |
 
-`on-fs-change!`, `on-buffer-created!`, `on-buffer-woken!`,
-`on-buffer-renamed!`, `on-buffer-shown!` are the older spellings of
-`add-hook!` on those hooks.
+### Keyed hooks
 
-Two tables are not hooks on purpose. `on-input-intent!` keys a handler
-by intent type. `add-paste-hook!` keys a handler by mode and runs the
-first that answers.
+A keyed hook holds one function per key. `(add-hook! '(block-click diff)
+FN)` puts FN under the key `diff`, and the same key replaces, so a package
+reload does not stack a second copy. `(hook-functions 'block-click)` is
+the plain list and then every keyed function, newest key first;
+`(hook-functions '(block-click diff))` is that one function, so a
+dispatcher runs one key or every key with the same `run-hook` call.
+`(remove-hook! '(block-click diff))` takes the key away, and
+`(hook-keys 'block-click)` names the keys.
+
+| Keyed hook | Key | Args | Who runs it |
+|---|---|---|---|
+| `block-click` | a mode's name | BUF ID | the first key that answers #t owns the click (components.scm) |
+| `preview-link` | the verb of a `compos:VERB/ARG` link | ARG | the verb's one function (preview.scm) |
+| `input-intent` | the intent type, such as "formatBold" | FROM TO TEXT | the type's one function; #t means handled (editor.scm) |
+| `endpoint-event` | a listener name | NAME KIND TEXT | every key (endpoint.scm) |
+| `lsp-event` | a listener name | ID METHOD PARAMS | every key (lsp.scm) |
+| `agent-turn-end` | a listener name | SLUG STOP-REASON OK? | every key, each one guarded (agent.scm) |
+
+`add-paste-hook!` is not a hook on purpose: it keys a handler by mode and
+runs the first that answers.
 
 ### Dashboard presentation
 

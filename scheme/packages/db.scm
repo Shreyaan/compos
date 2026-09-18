@@ -17,9 +17,7 @@
 (define *db-registry* '())        ; ((name spec) ...)
 
 (define (db-register! name spec)
-  (set! *db-registry*
-    (cons (list name spec)
-          (remove (lambda (e) (equal? (car e) name)) *db-registry*)))
+  (set! *db-registry* (alist-put *db-registry* name spec))
   name)
 
 (define (db-spec name)

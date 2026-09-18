@@ -99,5 +99,5 @@
     ;; in the same interpreter, and the audit is about the modes we ship
     (check-equal!
       (filter (lambda (m) (and (not (mode-doc m)) (not (string-prefix? "zz-" m))))
-              (map car *mode-setups*))
+              (mode-names 'major))
       '() "every mode calls mode-doc!")))

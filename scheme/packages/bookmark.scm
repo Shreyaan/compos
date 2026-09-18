@@ -168,7 +168,7 @@
 ;; by its name alone, so a rename orphans it and the jump reports a
 ;; missing location. Move the pointer with the buffer. This never loads
 ;; the store: a rename before the first read has nothing to fix.
-(on-buffer-renamed!
+(add-hook! 'buffer-renamed-hook
   (lambda (old new)
     (when (pair? *bookmarks*)
       (let ((hits (filter (lambda (record)
@@ -223,10 +223,7 @@
   kind)
 
 (define (bookmark-register-mode-handler! mode kind)
-  (set! *bookmark-mode-handlers*
-    (cons (list mode kind)
-          (remove (lambda (entry) (equal? (car entry) mode))
-                  *bookmark-mode-handlers*)))
+  (set! *bookmark-mode-handlers* (alist-put *bookmark-mode-handlers* mode kind))
   kind)
 
 (define (bookmark--context record)

@@ -20,7 +20,7 @@
 (define (t--marg-forget! &rest categories)
   (for-each
     (lambda (c)
-      (set! *marginalia* (remove (lambda (e) (equal? (car e) c)) *marginalia*)))
+      (remove-hook! (list 'marginalia c)))
     categories))
 
 (deftest 'annotate-pairs-names-with-their-categorys-annotator

@@ -279,10 +279,7 @@
 (define (workspace--remember-finish! state)
   (let ((workspace (plist-get state 'workspace))
         (fingerprint (workspace--finish-fingerprint state)))
-    (set! *workspace-finish-seen*
-      (cons (list workspace fingerprint)
-            (remove (lambda (e) (equal? (car e) workspace))
-                    *workspace-finish-seen*)))))
+    (set! *workspace-finish-seen* (alist-put *workspace-finish-seen* workspace fingerprint))))
 
 (define (workspace--finish-seen? state)
   (let ((e (assoc (plist-get state 'workspace) *workspace-finish-seen*)))

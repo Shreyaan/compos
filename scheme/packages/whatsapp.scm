@@ -404,7 +404,7 @@
 .whatsapp-empty { margin: 4px 8px; font-family: var(--font-mono); font-size: 12px; color: var(--dim-fg); }
 ")
 
-(on-block-click! 'whatsapp
+(add-hook! (list 'block-click 'whatsapp)
   (lambda (buf id)
     (and (equal? (buffer-local buf 'mode-name) "whatsapp-chat-mode")
          (cond

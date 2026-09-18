@@ -255,13 +255,10 @@
   (let ((old (assoc buf *goto-address-hooks*)))
     ;; a rule on a buffer that is gone would never fire again
     (when old (goto-address--drop-rule! (cadr old)))
-    (set! *goto-address-hooks*
-      (cons (list buf
-                  (on-change! buf
+    (set! *goto-address-hooks* (alist-put *goto-address-hooks* buf (on-change! buf
                     (lambda (pos inserted deleted source)
                       (unless (equal? source "locals")
-                        (goto-address-repaint! buf pos inserted)))))
-            (remove (lambda (e) (equal? (car e) buf)) *goto-address-hooks*)))
+                        (goto-address-repaint! buf pos inserted))))))
     ;; the first paint reads the whole buffer once. A small buffer paints
     ;; now. A large one paints a moment later through debounce!, a timer
     ;; that lands on the UI lane after this call returns: a task here

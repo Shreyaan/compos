@@ -821,7 +821,7 @@
 (mode-doc! "perf-mode"
   "The system monitor. Schedulers, memory, port IO, render time, event latency, the process table, volumes, and messages, sampled every perf-tick-ms. Page 1 holds the vitals and the process table, page 2 the per-core, render, latency and storage detail; TAB turns the page, `1` and `2` name one, and a tab click does too. `/` filters the table, `s` cycles the sort, RET shows a process, `k` kills it after confirmation, SPC pauses.")
 
-(on-block-click! 'perf
+(add-hook! (list 'block-click 'perf)
   (lambda (buf id)
     (and (buffer-derived-mode? buf "perf-mode")
          (cond ((string-prefix? "perf:row:" id)

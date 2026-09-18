@@ -147,7 +147,7 @@ speed (faster than any human) with an 8 ms simulated round trip.
 
 ### Policy (Scheme)
 
-The primitive is one event: `(on-input-intent! (lambda (type from to text) ...))`.
+The primitive is one event; Scheme keys a handler per type with `(add-hook! (list 'input-intent TYPE) (lambda (from to text) ...))`.
 Scheme maps intents to commands: `insertText` runs the same path as
 `self-insert-command` (abbrev, electric pairs, hooks), `insertParagraph` runs
 `newline`, `deleteContentBackward` runs `delete-backward-char` and decides

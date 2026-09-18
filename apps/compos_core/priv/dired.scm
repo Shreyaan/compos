@@ -616,7 +616,7 @@
     (dired-rescan! buf)
     (list-refresh! buf)))
 
-(on-fs-change!
+(add-hook! 'fs-change-hook
   (lambda (root)
     (for-each
       (lambda (buf)
@@ -630,7 +630,7 @@
               (buffer-set-local! buf 'dired-stale #t))))
       (buffer-list))))
 
-(on-buffer-shown!
+(add-hook! 'buffer-shown-hook
   (lambda (buf)
     (when (dired-buffer? buf)
       (dired-skip-derived! buf)

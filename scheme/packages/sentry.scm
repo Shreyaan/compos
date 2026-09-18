@@ -731,7 +731,7 @@
                         (loop (cdr is) (+ done 1) (cons id ok))))))
             (cache-refresh! *sentry-buffer*)))))))
 
-(on-block-click! 'sentry
+(add-hook! (list 'block-click 'sentry)
   (lambda (buf id)
     (and (buffer-local buf 'sentry-issue-id)
          (cond

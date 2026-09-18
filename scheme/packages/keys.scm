@@ -82,9 +82,7 @@
     (when (or (equal? value #f) (equal? value ""))
       (message (string-append "llm key for " p
                               " resolved empty — check the secret provider, then M-x reload-file on ai-config.scm")))
-    (set! *llm-keys*
-      (cons (list p value)
-            (remove (lambda (e) (equal? (car e) p)) *llm-keys*)))
+    (set! *llm-keys* (alist-put *llm-keys* p value))
     value))
 
 ;; A provider id -> the resolved key VALUE, or #f when unregistered. Elixir
@@ -104,9 +102,7 @@
 
 (define (register-llm-base-url! provider value)
   (let ((p (if (symbol? provider) (symbol->string provider) provider)))
-    (set! *llm-base-urls*
-      (cons (list p value)
-            (remove (lambda (e) (equal? (car e) p)) *llm-base-urls*)))
+    (set! *llm-base-urls* (alist-put *llm-base-urls* p value))
     value))
 
 (define (llm-base-url provider)

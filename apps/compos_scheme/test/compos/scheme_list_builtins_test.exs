@@ -51,6 +51,19 @@ defmodule Compos.Scheme.ListBuiltinsTest do
     assert run("(plist-get (plist-get '(a 1) 'z) 'b)") == false
   end
 
+  test "alist-put replaces an entry and steps over an empty one" do
+    assert run("(alist-put '((a 1) () (b 2)) 'b 3)") == [[{:sym, "b"}, 3], [{:sym, "a"}, 1], []]
+    assert run("(alist-get '(() (b 2)) 'b)") == 2
+    assert run("(alist-delete '(() (b 2)) 'b)") == [[]]
+  end
+
+  test "plist-put replaces a pair in place of growing the plist" do
+    assert run("(plist-put '(a 1 b 2) 'b 3)") == [{:sym, "b"}, 3, {:sym, "a"}, 1]
+    assert run("(plist-put '() 'b 3)") == [{:sym, "b"}, 3]
+    assert run("(plist-put #f 'b 3)") == [{:sym, "b"}, 3]
+    assert run("(plist-get (plist-put '(a 1 b 2) 'b 3) 'b)") == 3
+  end
+
   test "a predicate error reaches the caller as a Scheme error" do
     assert {:error, msg} = Scheme.eval_string(Scheme.new(), "(filter (lambda (x) (car x)) '(1))")
     assert msg =~ "car"

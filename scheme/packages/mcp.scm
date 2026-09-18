@@ -31,9 +31,7 @@
 (define *mcp-registry* '())
 
 (define (mcp-register! name spec)
-  (set! *mcp-registry*
-    (cons (list name spec)
-          (remove (lambda (e) (equal? (car e) name)) *mcp-registry*)))
+  (set! *mcp-registry* (alist-put *mcp-registry* name spec))
   name)
 
 (define (mcp-connected? name)
@@ -77,9 +75,7 @@
 (define *chat-presets* '())
 
 (define (define-preset! name description servers)
-  (set! *chat-presets*
-    (cons (list name (list 'description description 'servers servers))
-          (remove (lambda (e) (equal? (car e) name)) *chat-presets*)))
+  (set! *chat-presets* (alist-put *chat-presets* name (list 'description description 'servers servers)))
   name)
 
 (define (preset-servers name)
