@@ -91,17 +91,7 @@
 ;; command table is Elixir and has none, so that name stays until the next
 ;; restart.
 (define (test-forget-catalog! kind name)
-  (let ((e (catalog-entry (string->symbol kind) name)))
-    (when e
-      (set! *catalog-keys*
-        (remove (lambda (k)
-                  (equal? k (catalog--key kind name (plist-get e 'qualified-name))))
-                *catalog-keys*))
-      (set! *catalog*
-        (remove (lambda (x) (and (equal? (plist-get x 'kind) kind)
-                                 (equal? (plist-get x 'name) name)))
-                *catalog*))))
-  name)
+  (catalog-forget! (string->symbol kind) name))
 
 (define (test-fail! text)
   (set! *test-failures* (append *test-failures* (list text))))

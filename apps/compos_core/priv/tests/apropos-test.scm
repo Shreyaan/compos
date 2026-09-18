@@ -21,8 +21,6 @@
 (effects! '(write))
 
 (define (t--ap-forget-public! name)
-  (set! *public-api* (remove (lambda (e) (equal? (car e) name)) *public-api*))
-  (set! *public-keys* (remove (lambda (k) (equal? k name)) *public-keys*))
   (test-forget-catalog! "function" name))
 
 ;;; --- the catalog --------------------------------------------------------------

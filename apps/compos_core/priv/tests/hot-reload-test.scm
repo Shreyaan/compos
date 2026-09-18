@@ -199,10 +199,10 @@
     ("editor.scm" "*llm-bundles*")
     ("editor.scm" "*llm-connector-models*")
     ("editor.scm" "*minibuffer-history*")
-    ("packages/groups.scm" "*group-records*")
-    ("packages/groups.scm" "*group-next-id*")
-    ("packages/groups.scm" "*group-graveyard*")
-    ("packages/register.scm" "*registers*")))
+    ("groups.scm" "*group-records*")
+    ("groups.scm" "*group-next-id*")
+    ("groups.scm" "*group-graveyard*")
+    ("register.scm" "*registers*")))
 
 (deftest 'every-persisted-global-uses-defvar
   "no persisted variable is initialized with define, which a reload resets"
@@ -211,7 +211,7 @@
       (lambda (entry)
         (let* ((file (car entry))
                (var (cadr entry))
-               (src (read-file (string-append (compos-priv-dir) "/" file))))
+               (src (read-file (locate-library file))))
           (check-equal! (string? src) #t (string-append "read " file))
           (check-equal! (string-contains? src (string-append "(defvar '" var " ")) #t
             (string-append var " uses defvar"))

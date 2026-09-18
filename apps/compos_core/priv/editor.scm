@@ -135,10 +135,31 @@
           (begin
             (set! *catalog* (cons entry *catalog*))
             (set! *catalog-keys* (cons key *catalog-keys*)))))
-    (catalog--touch!)
-    (when (boundp (quote apropos-catalog-changed!))
-      (apropos-catalog-changed! entry))
-    entry))
+    (catalog--changed! entry)))
+
+;; every write ends here: the generation moves and apropos hears about it
+(define (catalog--changed! entry)
+  (catalog--touch!)
+  (when (boundp (quote apropos-catalog-changed!))
+    (apropos-catalog-changed! entry))
+  entry)
+
+;; drop one entry, and its key; a name the catalog does not hold costs nothing
+(define (catalog-forget! kind name)
+  (let ((e (catalog-entry kind name)))
+    (when e
+      (let ((k (catalog--string kind)))
+        (set! *catalog-keys*
+          (remove (lambda (x) (equal? x (catalog--key k (catalog--get e 'name)
+                                                        (catalog--get e 'qualified-name))))
+                  *catalog-keys*))
+        (set! *catalog*
+          (remove (lambda (x) (and (equal? (catalog--get x 'kind) k)
+                                   (equal? (catalog--get x 'qualified-name)
+                                           (catalog--get e 'qualified-name))))
+                  *catalog*))
+        (catalog--changed! #f)))
+    (and e #t)))
 
 (define (catalog) (reverse *catalog*))
 
@@ -190,10 +211,7 @@
                                  (equal? (catalog--get e 'qualified-name)
                                          (catalog--get old 'qualified-name))))
                           *catalog*)))
-          (catalog--touch!)
-          (when (boundp (quote apropos-catalog-changed!))
-            (apropos-catalog-changed! updated))
-          updated))))
+          (catalog--changed! updated)))))
 
 ;; Commands are an Elixir registry underneath, but this wrapper gives every
 ;; declaration the same package/domain/effect metadata as Scheme APIs.
@@ -213,7 +231,6 @@
 
 (define (interactive-spec? x) (and (pair? x) (equal? (car x) 'interactive)))
 
-(define *command-fns* '())              ; ((name spec fn) ...)
 
 (define (interactive--arg code k)
   (cond ((equal? code 'p) (k (prefix-numeric-value (current-prefix-arg))))
@@ -249,67 +266,52 @@
 (define (call-interactively--spec spec fn)
   (interactive--collect (cdr spec) '() fn))
 
-;; One name per live command, for the registration fast path: a fresh
-;; definition asks the `member` builtin and conses; only a redefinition
-;; pays the walk that drops the old entry.
-(define *command-names* '())
-
 ;; (define-command NAME [DOC] [SPEC] FN)
+;;
+;; A command lives in two places and no more: the Elixir command table,
+;; which run-command and the keys reach, and the catalog, which carries
+;; its doc and its spec. The closure in the table takes the arguments
+;; command-call passes; with none it collects them from the spec.
 (define (define-command name &rest args)
   (let* ((doc (if (and (pair? args) (string? (car args))) (car args) ""))
          (rest (if (and (pair? args) (string? (car args))) (cdr args) args))
          (spec (and (pair? rest) (interactive-spec? (car rest)) (car rest)))
          (fn (if spec (cadr rest) (car rest)))
-         (thunk (if spec (lambda () (call-interactively--spec spec fn)) fn)))
-    (set! *command-fns*
-      (if (member name *command-names*)
-          (cons (list name spec fn)
-                (remove (lambda (e) (equal? (car e) name)) *command-fns*))
-          (begin
-            (set! *command-names* (cons name *command-names*))
-            (cons (list name spec fn) *command-fns*))))
+         ;; run-command calls with no arguments: a spec collects them. A
+         ;; command-call passes 'direct first: the function runs as given.
+         (thunk (lambda (&rest args)
+                  (cond ((and (pair? args) (equal? (car args) 'direct))
+                         (if spec (apply fn (cdr args)) (fn)))
+                        ((null? args) (if spec (call-interactively--spec spec fn) (fn)))
+                        (spec (apply fn args))
+                        (else (fn))))))
     (if (> (string-length doc) 0)
         (define-command--raw name doc thunk)
         (define-command--raw name thunk))
     (catalog-register! 'command name doc
-      'use (string-append "(run-command \"" name "\")"))
+      'use (string-append "(run-command \"" name "\")")
+      'spec (or spec #f))
     name))
 
-;; the function behind a command, and its spec
-(define (command-function name)
-  (let ((e (assoc name *command-fns*))) (and e (nth 2 e))))
+;; the closure behind a command, from the one table
+(define (command-function name) (command-fn name))
 
 (define (command-interactive-spec name)
-  (let ((e (assoc name *command-fns*))) (and e (nth 1 e))))
+  (let ((e (catalog-entry 'command name)))
+    (and e (catalog--get e 'spec))))
 
-;; (command-call NAME ARG ...): run the command's function with ARGS. A
-;; command with no spec takes none.
+;; (command-call NAME ARG ...): run the command with ARGS. A command with
+;; no spec takes none; with none given, a spec collects them.
 (define (command-call name &rest args)
   (let ((fn (command-function name)))
-    (cond ((not fn) (run-command name))
-          ((command-interactive-spec name) (apply fn args))
-          (else (fn)))))
+    (if fn (apply fn (cons 'direct args)) (run-command name))))
 
 ;; Emacs call-interactively: run NAME as a key would
 (define (call-interactively name) (run-command name))
 
 (define (undefine-command name)
   (undefine-command--raw name)
-  (when (member name *command-names*)
-    (set! *command-names* (remove (lambda (n) (equal? n name)) *command-names*))
-    (set! *command-fns* (remove (lambda (e) (equal? (car e) name)) *command-fns*)))
-  ;; a name the catalog does not hold needs no walk over it
-  (let ((key (catalog--key "command" name name)))
-    (when (member key *catalog-keys*)
-      (set! *catalog-keys* (remove (lambda (k) (equal? k key)) *catalog-keys*))
-      (set! *catalog*
-        (remove (lambda (entry)
-                  (and (equal? (catalog--get entry 'kind) "command")
-                       (equal? (catalog--get entry 'name) name)))
-                *catalog*))
-      (catalog--touch!)
-      (when (boundp (quote apropos-catalog-changed!))
-        (apropos-catalog-changed! #f))))
+  (catalog-forget! 'command name)
   name)
 
 ;;; --- public API registry -----------------------------------------------------
@@ -318,9 +320,6 @@
 ;;; convention. The LLM's apropos searches this registry by default, so
 ;;; the model discovers a documented API instead of hundreds of internals.
 ;;; Declare yours next to its definition: (public! 'my-fn "what it does").
-
-(define *public-api* '())
-(define *public-keys* '())   ; the fast path, as for *catalog-keys*
 
 ;;; Every entry is (NAME DOC SIG CATEGORY).
 ;;;
@@ -363,29 +362,31 @@
           ((string-prefix? "-- " s) (string-trim (substring-bytes s 3 (string-byte-length s))))
           (else s))))
 
+;; A public function is a catalog entry of kind function, nothing more:
+;; the doc, the signature split out of it, and the category it was
+;; declared under. public-api and public-entry read the catalog back in
+;; the shape their callers know: (NAME DOC SIG CATEGORY).
 (define (public! name doc &optional category)
   (let* ((n (symbol->string name))
          (parts (public--split doc))
          (sig (or (car parts) (string-append "(" n ")")))
-         (text (car (cdr parts))))
-    (set! *public-api*
-      (if (member n *public-keys*)
-          (cons (list n text sig (or category *public-category*))
-                (remove (lambda (e) (equal? (car e) n)) *public-api*))
-          (begin
-            (set! *public-keys* (cons n *public-keys*))
-            (cons (list n text sig (or category *public-category*))
-                  *public-api*))))
+         (text (car (cdr parts)))
+         (cat (or category *public-category*)))
     (catalog-register! 'function n text
-      'domain (or category *public-category*) 'signature sig 'use sig)))
+      'domain cat 'category cat 'signature sig 'use sig)))
 
-(define (public-api) (reverse *public-api*))
+(define (public--tuple e)
+  (list (catalog--get e 'name) (catalog--get e 'doc)
+        (catalog--get e 'signature)
+        (or (catalog--get e 'category) (string->symbol (catalog--get e 'domain)))))
+
+(define (public-api)
+  (map public--tuple
+       (filter (lambda (e) (equal? (catalog--get e 'kind) "function")) (catalog))))
 
 (define (public-entry name)
-  (let loop ((es *public-api*))
-    (cond ((null? es) #f)
-          ((equal? (car (car es)) name) (car es))
-          (else (loop (cdr es))))))
+  (let ((e (catalog-entry 'function name)))
+    (and e (public--tuple e))))
 
 (define (public-categories)
   (let loop ((es (public-api)) (acc '()))
