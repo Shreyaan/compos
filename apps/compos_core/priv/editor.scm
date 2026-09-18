@@ -2259,11 +2259,14 @@
         (set! *buffer-key-facts*
           (alist-put (alist-delete *buffer-key-facts* old) new f))))))
 
-;; a killed buffer leaves no map and no facts behind
+;; a killed buffer leaves no map and no facts behind; every minibuffer
+;; shares one key, so a minibuffer kill keeps that map
 (define (keymap--forget-buffer! buf)
-  (keymap--changed!)
-  (set! *keymaps* (alist-delete *keymaps* (keymap--key buf)))
-  (set! *buffer-key-facts* (alist-delete *buffer-key-facts* (keymap--key buf))))
+  (let ((k (keymap--key buf)))
+    (unless (equal? k keymap--minibuf)
+      (keymap--changed!)
+      (set! *keymaps* (alist-delete *keymaps* k))
+      (set! *buffer-key-facts* (alist-delete *buffer-key-facts* k)))))
 
 ;;; --- modes ------------------------------------------------------------------
 ;;; A major mode = mode-name buffer-local + a setup fn (local keys, vars).
@@ -4895,6 +4898,7 @@
 (define (buffer-kill! name)
   (let ((repair (buffer-kill-repair name)))
     (buffer-kill-raw! name)
+    (keymap--forget-buffer! name)
     (when repair (repair))))
 
 (define (kill-buffer-confirm! target done)

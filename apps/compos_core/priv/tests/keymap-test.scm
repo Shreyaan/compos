@@ -217,6 +217,22 @@
                     "unbinding takes the answer with it")
       (buffer-kill! buf))))
 
+(deftest 'a-killed-buffer-leaves-no-map-and-a-minibuffer-kill-keeps-the-shared-one
+  "buffer-kill! forgets the buffer's map and facts; the minibuffer key is shared"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-keymap-forget" "text")))
+      (local-set-key* buf "<f9> d" "keymap-test-dummy-two")
+      (check-true! (keymap--entry buf) "the buffer has its own map")
+      (buffer-kill! buf)
+      (check-equal! (keymap--entry buf) #f "the kill takes the map")
+      (check-equal! (alist-get *buffer-key-facts* (keymap--key buf)) #f
+                    "and the facts"))
+    (let ((before (keymap--entry keymap--minibuf))
+          (mb (test-buffer! " *minibuf-zz-keymap*" "")))
+      (buffer-kill! mb)
+      (check-equal! (keymap--entry keymap--minibuf) before
+                    "a minibuffer kill keeps the shared map"))))
+
 ;;; --- keymaps are named, with parents ------------------------------------------
 ;;; A mode's map answers for every buffer that wears the mode. A minor
 ;;; mode's map answers ahead of the buffer's own. All on dummy keys.
