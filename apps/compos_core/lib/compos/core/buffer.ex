@@ -64,6 +64,32 @@ defmodule Compos.Core.Buffer do
   # the batch. The cap bounds the journal when a burst outruns the timer.
   @provenance_batch_limit 200
 
+  defmodule Unrestorable do
+    @moduledoc """
+    A dormant buffer whose checkpoint holds no text and whose log cannot
+    answer for it. The buffer does not start, and nothing is written: the
+    log may be only unreadable for now, and an empty buffer would write an
+    empty checkpoint and an empty history over it.
+    """
+    defexception [:name, :reason]
+
+    @impl true
+    def message(%{name: name, reason: reason}),
+      do: "buffer #{name} cannot restore its text: #{Compos.Core.Buffer.describe_unrestorable(reason)}"
+  end
+
+  @doc "One line that names what went wrong with a log and where it is."
+  def describe_unrestorable({:no_log, path}), do: "the log #{path} does not exist"
+  def describe_unrestorable({:no_frames, path}), do: "the log #{path} holds no whole frame"
+
+  def describe_unrestorable({:unreadable_log, path, posix}),
+    do: "the log #{path} cannot be read (#{inspect(posix)})"
+
+  def describe_unrestorable({:corrupt_log, path, why}),
+    do: "the log #{path} is corrupt (#{inspect(why)})"
+
+  def describe_unrestorable(other), do: inspect(other)
+
   defmodule Ref do
     @moduledoc "Immutable buffer identity. Names are mutable lookup aliases."
     @enforce_keys [:id]
@@ -153,7 +179,7 @@ defmodule Compos.Core.Buffer do
   def via(%Ref{} = ref) do
     if not exists?(ref) do
       case name(ref) do
-        name when is_binary(name) -> Compos.Core.wake(name)
+        name when is_binary(name) -> woken!(name)
         nil -> :ok
       end
     end
@@ -162,8 +188,17 @@ defmodule Compos.Core.Buffer do
   end
 
   def via(name) do
-    if not exists?(name), do: Compos.Core.wake(name)
+    if not exists?(name), do: woken!(name)
     registry_name(name)
+  end
+
+  # A write to a dormant buffer that cannot restore raises the reason, with
+  # the buffer and the log named, instead of a :noproc from the call.
+  defp woken!(name) do
+    case Compos.Core.wake(name) do
+      {:error, {:unrestorable, ^name, reason}} -> raise Unrestorable, name: name, reason: reason
+      _ -> :ok
+    end
   end
 
   # The registry drops a dead process on its own monitor, a moment after the
@@ -808,18 +843,17 @@ defmodule Compos.Core.Buffer do
     end
   end
 
+  # A checkpoint without text reads its log. A log that cannot answer is an
+  # error that names the buffer and the log, never an empty text: an empty
+  # answer reads exactly like an empty buffer.
   defp checkpoint_text(%{text: text}) when is_binary(text), do: text
 
-  defp checkpoint_text(%{id: id}) do
-    case BufferHistoryStore.load(id) do
-      nil -> ""
-      weave -> with text when is_binary(text) <- History.text(weave), do: text, else: (_ -> "")
+  defp checkpoint_text(%{id: id, name: name}) do
+    case BufferHistoryStore.load_text(id, 0) do
+      {:ok, _weave, text} -> text
+      {:error, reason} -> raise Unrestorable, name: name, reason: reason
     end
-  rescue
-    _ -> ""
   end
-
-  defp checkpoint_text(_checkpoint), do: ""
 
   # The whole checkpoint of a dormant buffer: the file. Only the text and
   # a local too big to index are worth it; every fact is in the row.
@@ -844,9 +878,22 @@ defmodule Compos.Core.Buffer do
     name = Keyword.fetch!(opts, :name)
     checkpoint = read_checkpoint(Keyword.get(opts, :checkpoint))
 
+    case checkpoint && restored_text(checkpoint) do
+      {:error, reason} ->
+        # Nothing was written and nothing was published: the dormant row
+        # and both files stay as they are, for a later wake to try again.
+        Logger.error(Exception.message(%Unrestorable{name: name, reason: reason}))
+        {:stop, {:unrestorable, name, reason}}
+
+      restored ->
+        start(name, opts, checkpoint, restored)
+    end
+  end
+
+  defp start(name, opts, checkpoint, restored) do
     state =
       if checkpoint do
-        restored_state(checkpoint)
+        restored_state(checkpoint, restored)
       else
         path = Keyword.get(opts, :path)
 
@@ -2538,10 +2585,9 @@ defmodule Compos.Core.Buffer do
     _ -> nil
   end
 
-  defp restored_state(cp) do
+  defp restored_state(cp, {:ok, {text, weave}}) do
     version = cp[:buffer_version] || 0
     saved_version = if cp[:modified], do: max(version - 1, 0), else: version
-    {text, weave} = restored_text(cp)
     size = Kernel.byte_size(text)
 
     %__MODULE__{
@@ -2567,30 +2613,16 @@ defmodule Compos.Core.Buffer do
 
   # Where the text is: in the checkpoint when it carries one, else in the
   # log, which then becomes the document as well. A checkpoint without
-  # text and without a log has lost its text; that is said loudly, and the
-  # buffer comes back empty rather than not at all.
-  defp restored_text(%{text: text}) when is_binary(text), do: {text, nil}
+  # text whose log is missing, unreadable or corrupt is an error: the
+  # buffer does not start, rather than start empty and write that empty
+  # text over a log that may only be unreadable for now.
+  defp restored_text(%{text: text}) when is_binary(text), do: {:ok, {text, nil}}
 
-  defp restored_text(%{id: id, name: name}) do
-    case BufferHistoryStore.load(id, History.replica_peer()) do
-      nil ->
-        Logger.error("buffer #{name}: no text in the checkpoint and no log #{id}; restored empty")
-        {"", nil}
-
-      weave ->
-        case History.text(weave) do
-          text when is_binary(text) ->
-            {text, weave}
-
-          other ->
-            Logger.error("buffer #{name}: the log #{id} has no readable text: #{inspect(other)}")
-            {"", nil}
-        end
+  defp restored_text(%{id: id}) do
+    case BufferHistoryStore.load_text(id, History.replica_peer()) do
+      {:ok, weave, text} -> {:ok, {text, weave}}
+      {:error, reason} -> {:error, reason}
     end
-  rescue
-    e ->
-      Logger.error("buffer #{name}: could not read the log #{id}: #{inspect(e)}")
-      {"", nil}
   end
 
   # A checkpoint written before the fold existed restores no spans, and a
@@ -3292,7 +3324,8 @@ defmodule Compos.Core.Buffer do
     # then sit there: no further event would arrive to correct it. The
     # callback wrapper publishes again on the way out, which is one more
     # small write and the reason a caller still reads its own last write.
-    BufferView.put(view(state))
+    # A killed buffer writes no row (see `publish/2`).
+    unless state.discard, do: BufferView.put(view(state))
 
     change = %{
       version: state.version,

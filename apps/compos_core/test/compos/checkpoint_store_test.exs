@@ -127,4 +127,96 @@ defmodule Compos.CheckpointStoreTest do
     Compos.Core.kill_buffer(agreed)
     Compos.Core.kill_buffer(stale)
   end
+
+  describe "a checkpoint with no text and a log that cannot answer" do
+    # a recording buffer asleep with a v2 checkpoint; answers the name, the id
+    # and the two paths
+    defp asleep_without_text(label) do
+      name = unique(label)
+      {:ok, ^name} = Compos.Core.create_buffer(name)
+      Buffer.append(name, "only the log holds this", source: :user)
+      id = Buffer.id(name)
+      evict(name)
+      assert eventually(fn -> match?({:ok, %{live: false}}, Compos.Core.BufferView.fetch(name)) end)
+      refute Map.has_key?(checkpoint(id), :text)
+      on_exit(fn -> Compos.Core.kill_buffer(name) end)
+      {name, id, BufferStore.checkpoint_path(id), BufferHistoryStore.path(id)}
+    end
+
+    defp files(paths), do: Enum.map(paths, &File.read/1)
+
+    defp refuses_to_start(name, id, cp_path, log_path) do
+      before = files([cp_path, log_path])
+      row = Compos.Core.BufferView.fetch(name)
+
+      assert {:error, {:unrestorable, ^name, reason}} = Compos.Core.wake(name)
+      assert Buffer.describe_unrestorable(reason) =~ log_path
+      assert {:error, {:unrestorable, ^name, _}} = Compos.Core.ensure_buffer(name)
+      assert {:error, {:unrestorable, ^name, _}} = Compos.Core.create_buffer(name)
+
+      # no process, no fresh empty buffer under the name
+      refute Buffer.exists?(name)
+      assert Registry.lookup(Compos.Core.BufferRegistry, name) == []
+      assert Registry.lookup(Compos.Core.BufferRegistry, {:id, id}) == []
+
+      # a write and a dormant text read answer the error, naming the log
+      err = assert_raise Buffer.Unrestorable, fn -> Buffer.text(name) end
+      assert Exception.message(err) =~ name and Exception.message(err) =~ log_path
+      assert_raise Buffer.Unrestorable, fn -> Buffer.append(name, "x", source: :user) end
+      refute Buffer.exists?(name)
+
+      # the editor keeps its window, and Scheme gets an error, not a buffer
+      assert {:error, {:unrestorable, ^name, _}} = Compos.Core.Editor.set_window_buffer(name)
+      refute Compos.Core.Editor.current_buffer() == name
+      assert {:error, msg} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{name}")})
+      assert msg =~ log_path
+      refute Buffer.exists?(name)
+
+      # the row and both files are exactly as they were
+      assert Compos.Core.BufferView.fetch(name) == row
+      assert files([cp_path, log_path]) == before
+    end
+
+    test "a deleted log: the wake errors and nothing is written" do
+      {name, id, cp_path, log_path} = asleep_without_text("no-log")
+      File.rm!(log_path)
+      refuses_to_start(name, id, cp_path, log_path)
+      refute File.exists?(log_path)
+    end
+
+    test "a corrupt log: the wake errors and nothing is written" do
+      {name, id, cp_path, log_path} = asleep_without_text("bad-log")
+      garbage = :crypto.strong_rand_bytes(64)
+      File.write!(log_path, <<byte_size(garbage)::size(32), garbage::binary>>)
+      refuses_to_start(name, id, cp_path, log_path)
+    end
+
+    test "a log with no whole frame: the wake errors" do
+      {name, id, cp_path, log_path} = asleep_without_text("torn-log")
+      File.write!(log_path, <<0, 0, 16, 0, 1, 2, 3>>)
+      refuses_to_start(name, id, cp_path, log_path)
+    end
+
+    test "the log comes back, and so does the buffer" do
+      {name, _id, _cp, log_path} = asleep_without_text("log-back")
+      saved = File.read!(log_path)
+      File.rm!(log_path)
+      assert {:error, _} = Compos.Core.wake(name)
+      File.write!(log_path, saved)
+      assert {:ok, ^name} = Compos.Core.wake(name, restore: false)
+      assert Buffer.text(name) == "only the log holds this"
+    end
+  end
+
+  test "a compaction replaces the log by a rename, never in place" do
+    id = "compact-atomic-#{System.unique_integer([:positive])}"
+    on_exit(fn -> BufferHistoryStore.forget(id) end)
+    BufferHistoryStore.append(id, "first")
+    {:ok, %{inode: before}} = File.stat(BufferHistoryStore.path(id))
+    assert BufferHistoryStore.compact(id, "snapshot") > 0
+    {:ok, %{inode: after_}} = File.stat(BufferHistoryStore.path(id))
+    assert before != after_
+    assert BufferHistoryStore.read(id) == ["snapshot"]
+    assert Path.wildcard(BufferHistoryStore.path(id) <> ".tmp-*") == []
+  end
 end

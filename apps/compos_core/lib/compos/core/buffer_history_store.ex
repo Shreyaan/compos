@@ -65,6 +65,43 @@ defmodule Compos.Core.BufferHistoryStore do
     end
   end
 
+  @doc """
+  The log of ID as the text of a buffer: `{:ok, document}`, or
+  `{:error, reason}` when the log cannot answer for the text. A missing
+  file, a file with no whole frame, and a frame the document refuses are
+  each an error, never an empty document: a buffer whose checkpoint holds
+  no text has nothing else to come back from. A torn tail after whole
+  frames is not an error; the frames before it are the history.
+  """
+  def load_text(id, peer) do
+    path = path(id)
+
+    with {:read, {:ok, bin}} <- {:read, File.read(path)},
+         {:frames, [_ | _] = blobs} <- {:frames, frames(bin, [])},
+         weave = Compos.Core.BufferHistory.new(peer),
+         {:import, :ok} <- {:import, import_all(weave, blobs)},
+         {:text, text} when is_binary(text) <- {:text, Compos.Core.BufferHistory.text(weave)} do
+      {:ok, weave, text}
+    else
+      {:read, {:error, :enoent}} -> {:error, {:no_log, path}}
+      {:read, {:error, posix}} -> {:error, {:unreadable_log, path, posix}}
+      {:frames, []} -> {:error, {:no_frames, path}}
+      {:import, why} -> {:error, {:corrupt_log, path, why}}
+      {:text, why} -> {:error, {:corrupt_log, path, why}}
+    end
+  rescue
+    e -> {:error, {:corrupt_log, path(id), Exception.message(e)}}
+  end
+
+  defp import_all(weave, blobs) do
+    Enum.reduce_while(blobs, :ok, fn blob, :ok ->
+      case Compos.Core.BufferHistory.import(weave, blob) do
+        {:error, why} -> {:halt, why}
+        _ -> {:cont, :ok}
+      end
+    end)
+  end
+
   @doc "Append one blob. Returns the bytes written, or 0 on failure."
   def append(id, blob) when is_binary(blob) do
     if blob == "" do
@@ -83,13 +120,31 @@ defmodule Compos.Core.BufferHistoryStore do
   Replace the log with one snapshot. The history is unchanged: a Loro snapshot
   carries it. This only stops the file from growing without bound.
   """
+  #
+  # The new log goes to a temporary file and takes the log's name by a
+  # rename, so a crash or a full disk leaves the old log whole: a write in
+  # place truncates the file first.
   def compact(id, snapshot) when is_binary(snapshot) do
     frame = <<byte_size(snapshot)::size(@frame_bits), snapshot::binary>>
+    tmp = path(id) <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
 
-    case write(id, frame, []) do
-      :ok -> byte_size(frame)
-      _ -> 0
+    with :ok <- write_file(tmp, frame),
+         :ok <- File.rename(tmp, path(id)) do
+      byte_size(frame)
+    else
+      _ ->
+        File.rm(tmp)
+        0
     end
+  end
+
+  defp write_file(file, bytes) do
+    File.mkdir_p!(dir())
+    File.write(file, bytes, [:binary])
+  rescue
+    e ->
+      Logger.error("could not write #{file}: #{inspect(e)}")
+      :error
   end
 
   def forget(id), do: File.rm(path(id))

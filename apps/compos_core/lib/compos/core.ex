@@ -371,20 +371,16 @@ defmodule Compos.Core do
 
       true ->
         was_live = Buffer.exists?(old)
-        {:ok, ^old} = ensure_buffer(old, restore: false)
 
-        case Buffer.rename(old, new, Buffer.path(old)) do
-          :ok ->
-            if Process.whereis(Compos.Core.Editor),
-              do: Compos.Core.Editor.rename_buffer(old, new)
+        with {:ok, ^old} <- ensure_buffer(old, restore: false),
+             :ok <- Buffer.rename(old, new, Buffer.path(old)) do
+          if Process.whereis(Compos.Core.Editor),
+            do: Compos.Core.Editor.rename_buffer(old, new)
 
-            # a dormant buffer woke for the rename; its runtime comes back
-            # under the name it now has
-            unless was_live, do: restore_runtime_later(new)
-            {:ok, new}
-
-          {:error, reason} ->
-            {:error, reason}
+          # a dormant buffer woke for the rename; its runtime comes back
+          # under the name it now has
+          unless was_live, do: restore_runtime_later(new)
+          {:ok, new}
         end
     end
   end
@@ -394,13 +390,17 @@ defmodule Compos.Core do
     source = Path.expand(source)
     destination = Path.expand(destination)
 
+    known? = BufferStore.known?(source) or Buffer.exists?(source)
+    was_live = Buffer.exists?(source)
+
+    # the buffer wakes before the file moves: a buffer that cannot start
+    # stops the rename, and the file stays where its buffer says it is
     with false <- source == destination,
          false <- File.exists?(destination),
+         {:ok, _} <- if(known?, do: ensure_buffer(source, restore: false), else: {:ok, nil}),
          :ok <- File.mkdir_p(Path.dirname(destination)),
          :ok <- File.rename(source, destination) do
-      if BufferStore.known?(source) or Buffer.exists?(source) do
-        was_live = Buffer.exists?(source)
-        {:ok, ^source} = ensure_buffer(source, restore: false)
+      if known? do
         path = Buffer.path(source)
         dired_dir = Buffer.get_local(source, "dired-dir")
         :ok = Buffer.rename(source, destination, if(path == source, do: destination, else: path))
@@ -417,8 +417,19 @@ defmodule Compos.Core do
 
       {:ok, destination}
     else
-      true -> {:error, :already_exists}
-      {:error, reason} -> {:error, reason}
+      true ->
+        {:error, :already_exists}
+
+      {:error, reason} ->
+        # a buffer woken only for this rename goes back to sleep
+        if known? and not was_live do
+          case live_pid(source) do
+            [{pid, _}] -> DynamicSupervisor.terminate_child(@buffer_sup, pid)
+            [] -> :ok
+          end
+        end
+
+        {:error, reason}
     end
   end
 end

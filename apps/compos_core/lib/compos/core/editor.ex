@@ -747,12 +747,16 @@ defmodule Compos.Core.Editor do
   end
 
   def handle_call({:window_set_buffer, win_id, buffer}, _from, state) do
-    case find_window_frame(state, win_id) do
-      nil ->
+    case {find_window_frame(state, win_id), Compos.Core.ensure_buffer(buffer)} do
+      {nil, _} ->
         {:reply, {:error, :no_window}, state}
 
-      f ->
-        Compos.Core.ensure_buffer(buffer)
+      # a buffer that cannot start stays out of the window, and the
+      # window keeps what it showed
+      {_f, {:error, reason}} ->
+        {:reply, {:error, reason}, state}
+
+      {f, _started} ->
         Buffer.touch(buffer)
         leaf = find_leaf(f.tree, win_id)
         tree = replace_leaf(f.tree, win_id, visit_buffer(leaf, buffer))
@@ -1888,13 +1892,18 @@ defmodule Compos.Core.Editor do
   end
 
   def handle_call({:set_window_buffer, buffer, fid}, _from, state) do
-    Compos.Core.ensure_buffer(buffer)
-    Buffer.touch(buffer)
-    f = frame(state, fid)
-    leaf = find_leaf(f.tree, f.active)
-    tree = replace_leaf(f.tree, f.active, visit_buffer(leaf, buffer))
-    mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
-    changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
+    case Compos.Core.ensure_buffer(buffer) do
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+
+      _started ->
+        Buffer.touch(buffer)
+        f = frame(state, fid)
+        leaf = find_leaf(f.tree, f.active)
+        tree = replace_leaf(f.tree, f.active, visit_buffer(leaf, buffer))
+        mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
+        changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
+    end
   end
 
   def handle_call({:preview_buffer, buffer, fid, win}, _from, state) do
@@ -1904,12 +1913,14 @@ defmodule Compos.Core.Editor do
       f = (win && find_window_frame(state, win)) || frame(state, fid)
       target = win || f.active
 
-      case find_leaf(f.tree, target) do
-        nil ->
+      case {find_leaf(f.tree, target), Compos.Core.ensure_buffer(buffer)} do
+        {nil, _} ->
           {:reply, {:error, :no_window}, state}
 
-        leaf ->
-          Compos.Core.ensure_buffer(buffer)
+        {_leaf, {:error, reason}} ->
+          {:reply, {:error, reason}, state}
+
+        {leaf, _started} ->
           Buffer.touch(buffer)
           origin = Map.get(leaf, :preview_origin, leaf.buffer)
 
@@ -1945,10 +1956,19 @@ defmodule Compos.Core.Editor do
     {tree, _minted} = build_tree(spec, state.next_win)
     {tree, next_win} = reuse_window_ids(tree, old_panes, state.next_win)
 
-    Enum.each(leaf_ids_buffers(tree), fn {_id, buffer} ->
-      Compos.Core.ensure_buffer(buffer)
-      Buffer.touch(buffer)
-    end)
+    # A buffer that cannot start leaves its pane to *scratch*: a window
+    # must show a live buffer, and the dormant one keeps its files.
+    tree =
+      Enum.reduce(leaf_ids_buffers(tree), tree, fn {id, buffer}, tree ->
+        case Compos.Core.ensure_buffer(buffer) do
+          {:error, _reason} ->
+            replace_leaf(tree, id, %{find_leaf(tree, id) | buffer: live_scratch()})
+
+          _started ->
+            Buffer.touch(buffer)
+            tree
+        end
+      end)
 
     # No saved point is laid down. A layout arranges windows; it does not
     # move point (S9). The old windows' points went above, so each window

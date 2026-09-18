@@ -38,6 +38,13 @@ defmodule Compos.Core.SchemeAPI do
     |> Compos.Core.SchemeRawNames.add()
   end
 
+  # A buffer that cannot start is a Scheme error that names it, never a
+  # fresh empty buffer under its name.
+  defp started!({:error, {:unrestorable, name, reason}}),
+    do: raise(Buffer.Unrestorable, name: name, reason: reason)
+
+  defp started!(_), do: :ok
+
   # one whole-buffer rewrite: five packages wrote create, unlock, clear,
   # append, relock around every render
   defp set_text(name, text) do
@@ -1992,7 +1999,7 @@ defmodule Compos.Core.SchemeAPI do
        "(switch-to-buffer! BUF) — show BUF in the active window; return BUF."} => fn [name] ->
         # A forgotten name gets a fresh buffer here too — C-x b creates. A
         # dormant name wakes through the one door.
-        Core.ensure_buffer(name)
+        started!(Core.ensure_buffer(name))
 
         if Compos.Core.Frame.buffer_context(),
           do: Compos.Core.Frame.put_buffer(name),
@@ -2007,7 +2014,7 @@ defmodule Compos.Core.SchemeAPI do
       {"window-switch-buffer!",
        "(window-switch-buffer! BUF) — raw switch that restores a dormant BUF inline; return BUF."} =>
         fn [name] ->
-          Core.ensure_buffer(name, restore: false)
+          started!(Core.ensure_buffer(name, restore: false))
 
           if Compos.Core.Frame.buffer_context(),
             do: Compos.Core.Frame.put_buffer(name),
