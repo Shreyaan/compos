@@ -1459,6 +1459,86 @@ the restart keep their text in the checkpoint. Six version 2 buffers,
 35 bytes to 1.6 MB, read back through the live daemon at their backup
 size. The graveyard (buffers/dead/, 2138 files) is not migrated.
 
+**Step 4, design (2026-09-19): one Display row model and one
+LiveView.** Item 14 of Phase 3, items 3, 4, 5 and 10 of section 7.
+Written before the code, in a worktree at 243fc29b. The design port is
+the spec: every window must look the same after each sub-item. The five
+sub-items land in the order of least risk, one commit each.
+
+*(a) Markdown.Html owns the document.* Today editor_live.ex holds the
+page around a Markdown body (`markdown_page`, the palette, the fonts),
+the tree-sitter caller (`preview_doc_ts`, the line marks, the overlay
+source) and the whole Earmark pipeline (`preview_doc`, the caret
+heuristics, the fence labels, the LLM response tags, the embeds): about
+1,000 lines. `Compos.Core.Markdown.Html` gains `document/3`: the page,
+drawn by the tree-sitter renderer when the grammar is there. Earmark
+stays, as the renderer of a home with no Markdown grammar, and moves
+into core with the page. It cannot go: the grammar is not compiled in
+(`native/compos_ts` has elixir, json, rust, html and diff), a fresh home
+has none, and the chat prose and every preview then draw through
+Earmark. A screenshot of such a home at 243fc29b shows the tables and
+the emphasis that a plain fallback would lose. The LiveView keeps the
+iframe and the cache key; the transcript's `prose_html` calls core.
+
+*(b) The "agent" render mode folds into "blocks".* Scheme composes the
+transcript as a block tree; editor.ex loses `agent_leaf`, editor_live.ex
+the `ag_block` clauses and `ag_input`, and `AgentTranscript` becomes the
+isolation component of any block list. What it needs that the block
+renderer lacks: a raw HTML block (the prose), a disclosure block (the
+tool card), a caret block (the input), and the reference-equal block
+list the chat-input-perf fix depends on. The Scheme half is in
+chat-mode.scm and agent-fleet.scm, which another session edits now.
+
+*(c) Scheme composes the mode line and the header blocks.* The window
+mode line becomes a block list that modeline.scm builds with the
+dashboard line (`modeline-blocks`), and the view fills Emacs's
+`%`-constructs in it (`%l`, `%c`, `%p`, `%I`) at render, so a caret
+motion costs no Scheme. The echo area's key hints and the other chords
+written in editor_live.ex (`@header_keys`, the workspace bar, the "more"
+tab, the transient default legend) come from Scheme variables that the
+frame carries. editor.ex keeps the walk and loses `modeline_group`,
+whose value no client reads.
+
+*(d) One Display row model in core.* `viewport_lines`, `build_static`,
+`display_spans` and `render_pass` move from the LiveView to a core
+`Display` module that answers rows per window, memoized by buffer
+version, for the LiveView, the handheld client and /raw. The
+whole-buffer `build_static` goes: a window builds the rows it ships.
+
+*(e) Static app.js and editor.css.* layouts.ex holds 2,926 lines of
+script and 1,647 of stylesheet in the root layout. They move byte for
+byte to `apps/compos_ui/priv/static/app.js` and `editor.css`, served by
+the existing `Plug.Static` with the boot id in the query. Hotload
+watches that directory and bumps the boot id on a save, as a swap of
+the layout module does today.
+
+What stays: the Window and AgentTranscript components (the
+zero-work-on-clean-tree and chat-input-perf rulings), the per-window
+decorate cache, the iframe preview, the handheld LiveView (a second
+LiveView is item 2 of section 7 and a Phase 2 layout question).
+
+*Measured before* (243fc29b, `apps/compos_ui/test/bench/render_bench.exs`,
+p50 microseconds, 60 keys; state = `Editor.render_state`, decorate = the
+warm view pass, cold = the view pass with an empty cache, key = one key
+through the LiveView end to end in the test client):
+
+| window | state | decorate | cold | key | page |
+|---|---|---|---|---|---|
+| file, 3k lines, C-f / C-b | 47 | 8 | 512 | 10,604 | 142,817 B |
+| file, 3k lines, typing | 82 | 9 | 532 | 11,713 | 142,826 B |
+| chat, 300 blocks, typing | 87 | 0 | 138,776 | 26,193 | 240,859 B |
+| blocks, 200 rows, C-n / C-p | 71 | 34 | 236 | 6,280 | 104,830 B |
+| markdown page, 400 lines, C-f | 15 | 26 | 72,127 | 4,830 | 181,371 B |
+
+| lines | 243fc29b |
+|---|---|
+| editor_live.ex | 4,335 |
+| agent_transcript.ex | 133 |
+| editor.ex render walk + modeline_group/pin + agent_leaf | 212 + 51 + 45 |
+| layouts.ex (script / stylesheet in it) | 4,873 (2,926 / 1,647) |
+| .ag-* and .agent-view CSS rules (layouts.ex / mobile_layouts.ex) | 85 / 51 |
+| Markdown: markdown.ex, markdown/html.ex, the Earmark path in editor_live.ex, oembed.ex | 181, 822, ~570, 188 |
+
 **Phase 2, the three designs its condition 3 asks for (2026-09-19,
 proposed; each is one page and waits for the owner's agreement).**
 
