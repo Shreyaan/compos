@@ -152,7 +152,8 @@ defmodule Compos.Core.Lane do
   one, else the buffer itself.
   """
   def for_buffer(name) do
-    case Buffer.exists?(name) && Map.get(Buffer.locals(name), "group") do
+    # one local, not the whole map: a large local copies with the map
+    case Buffer.exists?(name) && Buffer.get_local(name, "group") do
       g when is_binary(g) -> {:group, g}
       _ -> {:buffer, name}
     end

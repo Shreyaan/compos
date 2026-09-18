@@ -1055,7 +1055,7 @@ defmodule Compos.Core.Editor do
   # the render modes the client draws in an iframe
   defp preview?(buffer) do
     try do
-      Buffer.locals(buffer)["render-mode"] in ["html", "markdown", "app", "file"]
+      Buffer.get_local(buffer, "render-mode") in ["html", "markdown", "app", "file"]
     catch
       :exit, _ -> false
     end
@@ -2741,7 +2741,9 @@ defmodule Compos.Core.Editor do
   # every client. Now only a buffer with no row costs a call, and a dormant
   # one still draws empty rather than waking.
   defp safe_snapshot(buffer, win_id) do
-    case Compos.Core.BufferView.snapshot(buffer, win_id) do
+    # a block tree stays in the read model: the leaf carries its stand-in,
+    # and the view copies the tree only when the stand-in changes
+    case Compos.Core.BufferView.snapshot(buffer, win_id, ["render-blocks"]) do
       nil ->
         if Buffer.exists?(buffer),
           do: Buffer.render_snapshot(buffer, win_id),
@@ -2795,9 +2797,9 @@ defmodule Compos.Core.Editor do
     # window: a filter key in another pane must not rescan this buffer.
     {geometry, leaf} =
       cond do
-        # the rich transcript renders blocks, not lines — fold geometry
-        # is the plain view's cost, not this one's (S16)
-        Map.get(locals, "render-mode") == "agent" ->
+        # a block tree renders blocks, not lines — fold geometry is the
+        # line view's cost, not this one's (S16)
+        Map.get(locals, "render-mode") in ["agent", "blocks"] ->
           {{snap.total_lines, snap.cursor_line, MapSet.new(), nil},
            Map.delete(leaf, :fold_geometry)}
 
@@ -3073,7 +3075,7 @@ defmodule Compos.Core.Editor do
   defp render_mode(%{"render-mode" => "blocks"} = locals) do
     case Map.get(locals, "render-blocks") do
       [_ | _] -> "blocks"
-      _ -> nil
+      other -> if Compos.Core.BufferView.big_ref?(other), do: "blocks", else: nil
     end
   end
 

@@ -7,8 +7,8 @@ defmodule Compos.Ui.BlockList do
   place makes one key in a sibling walk every child. As a component with
   unchanged assigns, the diff ships a skip placeholder, and the client
   never enters this subtree. The decorate cache keeps each unchanged
-  child as the same term, so a changed list costs only its changed
-  children.
+  child as the same term, with its HTML drawn once, so a changed list
+  costs only its changed children.
 
   `follow` is the reader's place when the list follows its tail: the
   BlockFollow hook keeps the tail in view until the reader scrolls up,
@@ -38,7 +38,7 @@ defmodule Compos.Ui.BlockList do
       data-scroll-offset={@follow && @follow.offset}
       data-follow-seq={@follow && @follow.seq}
       {@b.attrs}
-    ><Compos.Ui.EditorLive.blk :for={c <- @children} b={c} line={-1} win={@win} /></.dynamic_tag>
+    ><%= for c <- @children do %>{Phoenix.HTML.raw(c.frozen)}<% end %></.dynamic_tag>
     </c-list>
     """
   end

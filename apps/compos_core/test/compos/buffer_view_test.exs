@@ -338,4 +338,38 @@ defmodule Compos.BufferViewTest do
       assert Buffer.get_local(name, "mode-name") == nil
     end
   end
+
+  # A large local lives in its own row. The buffer's row holds a stand-in,
+  # so a read of point or of a small local copies neither the large value
+  # nor the row it used to swell; every reader still sees the value.
+  test "a large local lives in its own row and every reader still sees it", %{name: name} do
+    big = for i <- 1..2000, do: ["block", i, String.duplicate("x", 20)]
+    Buffer.set_local(name, "big-tree", big)
+    Buffer.set_local(name, "small", 7)
+
+    [{^name, row}] = :ets.lookup(BufferView.table(), name)
+    assert BufferView.big_ref?(row.locals["big-tree"])
+    assert row.locals["small"] == 7
+    assert :erlang.external_size(row) < 16_384
+
+    assert Buffer.get_local(name, "big-tree") == big
+    assert Buffer.get_local(name, "small") == 7
+    assert Buffer.locals(name)["big-tree"] == big
+    assert Buffer.text(name) == "hello\nworld\n"
+    assert BufferView.snapshot(name).locals["big-tree"] == big
+
+    # a lazy snapshot keeps the stand-in, and equal stand-ins name one value
+    lazy = BufferView.snapshot(name, nil, ["big-tree"]).locals["big-tree"]
+    assert BufferView.big_ref?(lazy)
+    assert BufferView.big_value(lazy) == big
+    Buffer.set_local(name, "small", 8)
+    assert BufferView.snapshot(name, nil, ["big-tree"]).locals["big-tree"] == lazy
+
+    # a new value gets a new stand-in; a small value leaves no row behind
+    Buffer.set_local(name, "big-tree", big ++ [["one", "more"]])
+    refute BufferView.snapshot(name, nil, ["big-tree"]).locals["big-tree"] == lazy
+    Buffer.set_local(name, "big-tree", 1)
+    assert Buffer.get_local(name, "big-tree") == 1
+    assert :ets.lookup(BufferView.table(), {:big_local, name, "big-tree"}) == []
+  end
 end

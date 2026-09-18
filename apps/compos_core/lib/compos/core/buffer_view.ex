@@ -30,6 +30,13 @@ defmodule Compos.Core.BufferView do
   serial path. The writer publishes `bin` as well whenever it already holds
   the flattened text, and `text/1` takes it when it is there.
 
+  A large local (a block tree, a row cache) lives in a row of its own,
+  `{{:big_local, name, key}, value}`, and the buffer's row holds a small
+  stand-in for it. ETS copies a whole object to project one field out of
+  it, so a large value in the row made every read of the buffer copy that
+  value: a chat's block tree made each read of point cost 250 us. The
+  writer inserts a large local again only when the value is a new term.
+
   A name with no row is not an error: it is a name nobody knows, or a live
   buffer in the moment after this process restarted. The reader falls back
   to the buffer process for the second case.
@@ -41,6 +48,10 @@ defmodule Compos.Core.BufferView do
   alias Compos.Core.{BufferStore, Rope}
 
   @table :compos_buffer_view
+
+  # a local larger than this many bytes, serialized, gets a row of its own
+  @big_bytes 16_384
+  @big :"$compos_big_local"
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -62,6 +73,8 @@ defmodule Compos.Core.BufferView do
     end
 
     :ets.delete(@table, name)
+    :ets.match_delete(@table, {{:big_local, name, :_}, :_})
+    Process.delete({__MODULE__, :big, name})
     :ok
   rescue
     # the table is gone (see `lookup/1`) — there is no row to drop
@@ -70,6 +83,7 @@ defmodule Compos.Core.BufferView do
 
   @doc "Publish VIEW under its own name, and under its id for `Ref` readers."
   def put(%{name: name, id: id} = view) do
+    view = split_big(view)
     :ets.insert(@table, [{name, view}, {{:id, id}, name}])
     :ok
   rescue
@@ -103,7 +117,7 @@ defmodule Compos.Core.BufferView do
 
   def fetch(name) when is_binary(name) do
     case lookup(name) do
-      [{^name, view}] -> {:ok, view}
+      [{^name, view}] -> {:ok, resolve_view(view)}
       [] -> :error
     end
   end
@@ -146,7 +160,10 @@ defmodule Compos.Core.BufferView do
         Enum.map(keys, &value.({:map_get, :locals, :"$1"}, &1))
 
     case :ets.select(@table, [{{name, :"$1"}, [], [values]}]) do
-      [values] when is_list(values) -> {:ok, values}
+      [values] when is_list(values) ->
+        {facts, locals} = Enum.split(values, length(fields))
+        {:ok, facts ++ Enum.map(locals, &resolve(name, &1))}
+
       _ -> :error
     end
   rescue
@@ -184,6 +201,7 @@ defmodule Compos.Core.BufferView do
     spec = [{{name, :"$1"}, [{:is_map_key, key, :"$1"}], [{:map_get, key, :"$1"}]}]
 
     case :ets.select(@table, spec) do
+      [value] when key == :locals -> {:ok, resolve_locals(name, value)}
       [value] -> {:ok, value}
       [] -> :error
     end
@@ -223,7 +241,7 @@ defmodule Compos.Core.BufferView do
 
     case :ets.select(@table, spec) do
       [value] ->
-        {:ok, value}
+        {:ok, resolve(name, value)}
 
       [] ->
         case field(name, :local_keys) do
@@ -266,10 +284,15 @@ defmodule Compos.Core.BufferView do
   point, and it is clamped on read because undo swaps a whole rope under
   stored positions.
   """
-  def snapshot(name, win_id \\ nil) do
-    case fetch(name) do
-      {:ok, view} -> if live?(view), do: snapshot_of(view, win_id), else: nil
-      :error -> nil
+  def snapshot(name, win_id \\ nil, lazy \\ []) do
+    case lookup(name) do
+      [{^name, view}] ->
+        if live?(view),
+          do: snapshot_of(%{view | locals: resolve_locals(name, Map.get(view, :locals, %{}), lazy)}, win_id),
+          else: nil
+
+      [] ->
+        nil
     end
   end
 
@@ -308,6 +331,103 @@ defmodule Compos.Core.BufferView do
   end
 
   defp clamp(pos, size), do: pos |> max(0) |> min(size)
+
+  @doc """
+  The text of NAME's live row without its locals, or `:error`. Only the
+  rope and the flat copy leave the table.
+  """
+  def text_of(name) when is_binary(name) do
+    spec = [{{name, :"$1"}, [{:is_map_key, :rope, :"$1"}],
+             [[{:map_get, :rope, :"$1"},
+               {:andalso, {:is_map_key, :bin, :"$1"}, {:map_get, :bin, :"$1"}}]]}]
+
+    case :ets.select(@table, spec) do
+      [[_rope, bin]] when is_binary(bin) -> {:ok, bin}
+      [[rope, _]] -> {:ok, Rope.to_binary(rope)}
+      [] -> :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  def text_of(_), do: :error
+
+  # Move each large local to its own row. The writer remembers what it
+  # decided for each value it published, so a value that is the same term
+  # as last time costs one identity compare: no size walk, no new row.
+  defp split_big(%{name: name, locals: locals} = view) when is_map(locals) do
+    last = Process.get({__MODULE__, :big, name}, %{})
+
+    {small, seen} =
+      Enum.reduce(locals, {%{}, %{}}, fn {k, v}, {small, seen} ->
+        decision =
+          case Map.get(last, k) do
+            {old, decided} when old === v ->
+              decided
+
+            _ ->
+              if :erlang.external_size(v) > @big_bytes do
+                :ets.insert(@table, {{:big_local, name, k}, v})
+                {@big, name, k, :erlang.unique_integer([:monotonic])}
+              else
+                :small
+              end
+          end
+
+        shown = if decision == :small, do: v, else: decision
+        {Map.put(small, k, shown), Map.put(seen, k, {v, decision})}
+      end)
+
+    for {k, {_, ref}} <- last, ref != :small, not match?({_, ^ref}, Map.get(seen, k)),
+        do: if(not big_seen?(seen, k), do: :ets.delete(@table, {:big_local, name, k}))
+
+    Process.put({__MODULE__, :big, name}, seen)
+    %{view | locals: small}
+  end
+
+  defp big_seen?(seen, k) do
+    case Map.get(seen, k) do
+      {_, :small} -> false
+      {_, _ref} -> true
+      nil -> false
+    end
+  end
+
+  defp split_big(view), do: view
+
+  defp resolve(_name, {@big, _, _, _} = ref), do: big_value(ref)
+  defp resolve(_name, value), do: value
+
+  @doc """
+  The value behind a large local's stand-in, which a snapshot hands out
+  for a key the caller asked to keep lazy. The stand-in names a generation,
+  so two equal stand-ins name the same value: a renderer can key a cache
+  on it and copy the value only when the generation moves.
+  """
+  def big_value({@big, name, key, _gen}) do
+    case :ets.lookup(@table, {:big_local, name, key}) do
+      [{_, value}] -> value
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  def big_value(value), do: value
+
+  @doc "Whether VALUE is a large local's stand-in."
+  def big_ref?({@big, _, _, _}), do: true
+  def big_ref?(_), do: false
+
+  defp resolve_locals(name, locals, lazy \\ []) when is_map(locals),
+    do: Map.new(locals, fn {k, v} -> {k, if(k in lazy, do: v, else: resolve(name, v))} end)
+
+  defp resolve_locals(_name, locals, _lazy), do: locals
+
+  defp resolve_view(%{name: name, locals: locals} = view) when is_map(locals),
+    do: %{view | locals: resolve_locals(name, locals)}
+
+  defp resolve_view(view), do: view
 
   # --- server ----------------------------------------------------------------
 
@@ -397,9 +517,13 @@ defmodule Compos.Core.BufferView do
             forget(name)
 
           true ->
-            case BufferStore.row_of_view(view) do
-              nil -> forget(name)
-              row -> put(row)
+            case BufferStore.row_of_view(resolve_view(view)) do
+              nil ->
+                forget(name)
+
+              row ->
+                :ets.match_delete(@table, {{:big_local, name, :_}, :_})
+                put(row)
             end
         end
 

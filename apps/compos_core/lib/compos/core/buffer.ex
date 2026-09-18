@@ -239,6 +239,13 @@ defmodule Compos.Core.Buffer do
   end
 
   def text(name) do
+    case BufferView.text_of(name) do
+      {:ok, text} -> text
+      :error -> text_of_row(name)
+    end
+  end
+
+  defp text_of_row(name) do
     case BufferView.fetch(name) do
       {:ok, view} -> if BufferView.live?(view), do: BufferView.text(view), else: dormant_text(view)
       :error -> live_call(name, :text, "")
