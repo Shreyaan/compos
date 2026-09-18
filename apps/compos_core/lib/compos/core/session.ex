@@ -185,8 +185,18 @@ defmodule Compos.Core.Session do
   @doc "Apply a Scheme closure (e.g. a minibuffer confirm callback)."
   def apply_callback(closure, args, fid \\ nil, lane \\ nil) do
     fid = fid(fid)
-    Lane.run(lane || :ui, fn _from -> exec_apply(closure, args, fid) end, 30_000, "apply")
+    Lane.run(lane || :ui, fn _from -> exec_apply(closure, args, fid) end, 30_000, apply_label(closure))
   end
+
+  # the slow-job log names the callback by the head of its body, so a slow
+  # "apply" says which hook ran, not only that one did
+  defp apply_label({:closure, _params, body, _env}) do
+    "apply " <> (body |> Compos.Scheme.Printer.print() |> String.slice(0, 80))
+  rescue
+    _ -> "apply"
+  end
+
+  defp apply_label(_), do: "apply"
 
   @doc """
   Apply a closure that has been waiting on a reply from outside the editor.
