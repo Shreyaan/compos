@@ -917,6 +917,18 @@ it are gone. The nine Scheme tests that specify the policy pass. The
 rest of 5.9 (fewer inputs to the decision) drops tested behaviours
 (profiles, the effects verdict, Always rules) and is a ruling.
 
+**Phase 2, item 5.10, measured (2026-09-19):** the config record does
+not exist six times. The bundle in chat-mode.scm (connector, model,
+effort, presets, permission, agent-mode, prompt-disabled, setup) is the
+record, with 30 accessors and a normaliser for older desktops; the
+connector "record" is six read accessors over the connector table; the
+MCP server list is one plist; setup.scm asks one predicate; the
+workspace defaults are four lines that read a bundle. What the item
+really names is mcp-hub.scm, a 382-line list view with 13 commands over
+the MCP servers, and llm-config.scm's 951 lines of pickers over the
+bundle. Both are surfaces a person uses; folding them into one picker
+is a design and a ruling, not a cut.
+
 **Phase 2 entry conditions (2026-09-19).** Phase 2 rewrites behaviour in
 groups.scm, layouts.scm, ibuffer.scm, editor.ex and the chat lane. It
 starts when all four hold, and not before:
