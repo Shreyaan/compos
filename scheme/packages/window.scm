@@ -1407,18 +1407,6 @@
           (peek-keep! b)
           (message "not a peek")))))
 
-(define-command "peek-recent" "Peek a buffer you looked at and let go"
-  (lambda ()
-    (if (null? *peek-recent*)
-        (message "nothing recent")
-        (minibuffer-read* "Recent: "
-          (map (lambda (e) (list (nth 2 e) (car e))) *peek-recent*)
-          (list (list 'match-hint 1)
-                (list 'confirm
-                      (lambda (key)
-                        (let ((e (peek-recent-find key)))
-                          (when e (peek-revive! e))))))))))
-
 (public! 'window-fill-buffers
   "(window-fill-buffers) — the buffers a window in this frame may be filled with, most recent first: the frame's context, never the raw MRU ring")
 (public! 'window-fill-blank
