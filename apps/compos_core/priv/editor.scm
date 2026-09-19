@@ -1936,6 +1936,10 @@
 ;; a resolved sequence is kept per buffer, overriding map and keymap
 ;; generation: the second press of a key is one table hit
 (define (keymap--lookup-here seq)
+  ;; a buffer whose mode setup never ran in this daemon run has none of
+  ;; its keys: run the restore first, so the lookup reads its maps
+  (let ((owed (car (key-context))))
+    (when (runtime-owed? owed) (restore-buffer-runtime! owed)))
   (let* ((ctx (key-context))
          (buf (car ctx))
          (memo-key (list (keymap--key buf) (cadr ctx) seq *keymap-generation*))
@@ -2458,10 +2462,35 @@
 ;; or #f when the mode writes the path alone
 (define (mode-link-syntax mode) (mode-inherited mode 'link-syntax))
 
+;; The buffers whose mode setup ran in this daemon run. A buffer that
+;; comes back from a checkpoint carries its mode-name but none of the
+;; keys, overlays or folds its setup builds; restore-buffer-runtime! does
+;; that work. A boot queues it without waiting, and a queued job that
+;; fails is lost, so a key looked up in a buffer this set does not name
+;; runs the restore first (keymap--lookup-here). The set lives in memory
+;; only: a restart starts it empty.
+(define *runtime-restored* '())
+
+(define (runtime--mark! buf)
+  (unless (member buf *runtime-restored*)
+    (set! *runtime-restored* (cons buf *runtime-restored*))))
+
+(define (runtime-owed? buf)
+  (and (string? buf)
+       (buffer-local buf 'mode-name)
+       (not (member buf *runtime-restored*))))
+
+(add-hook! 'buffer-renamed-hook
+  (lambda (old new)
+    (when (member old *runtime-restored*)
+      (set! *runtime-restored*
+        (cons new (filter (lambda (b) (not (equal? b old))) *runtime-restored*))))))
+
 (define (set-mode! name)
   (let* ((buf (current-buffer))
          (old (buffer-local buf 'mode-name))
          (changed (and old (not (equal? old name)))))
+    (runtime--mark! buf)
     (when changed (run-hooks 'change-major-mode-hook))
     ;; a change of major mode starts the buffer's own map afresh, as
     ;; use-local-map does in Emacs. The mode's setup puts its keys back,
@@ -2933,6 +2962,7 @@
 ;; runtime machinery those locals describe. Re-run both setup layers with a
 ;; logical current buffer: restoration must not display or select BUF.
 (define (restore-buffer-runtime! buf)
+  (runtime--mark! buf)
   (with-layout-suppressed
     (lambda ()
       (with-current-buffer buf

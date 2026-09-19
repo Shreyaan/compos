@@ -125,9 +125,21 @@ defmodule Compos.Core do
     Compos.Core.Lane.cast(
       Compos.Core.Lane.for_buffer(name),
       fn _from ->
-        if Buffer.exists?(name),
-          do: Compos.Core.Session.exec_call_named("restore-buffer-runtime!", [name], fid),
-          else: {:reply, :asleep}
+        if Buffer.exists?(name) do
+          # a cast drops its reply: a failed restore must still say why,
+          # or the buffer stays live with no keys and nothing names it
+          case Compos.Core.Session.exec_call_named("restore-buffer-runtime!", [name], fid) do
+            {:reply, {:error, msg}} = reply ->
+              require Logger
+              Logger.warning("buffer #{name}: the runtime restore failed: #{msg}")
+              reply
+
+            reply ->
+              reply
+          end
+        else
+          {:reply, :asleep}
+        end
       end,
       "call restore-buffer-runtime!"
     )
