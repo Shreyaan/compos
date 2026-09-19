@@ -71,42 +71,12 @@
 (define (morg-kind e) (caddr e))
 (define (morg-info e) (car (cdr (cdr (cdr e)))))
 
-;; classify every line, by the walk with the fence state carried through,
-;; so a `# comment` inside a code block never reads as a heading. This is
-;; the answer where the reader has no markdown grammar; morg-scan itself
-;; asks tree-sitter first.
-(define (morg-scan--walk buf)
-  (let loop ((ls (morg-lines buf)) (in #f) (acc '()))
-    (if (null? ls)
-        (reverse acc)
-        (let* ((e (car ls)) (start (car e)) (line (cadr e)))
-          (cond
-            ((and in (morg-fence-close? line))
-             (loop (cdr ls) #f (cons (list start line 'close #f) acc)))
-            (in
-             (loop (cdr ls) in (cons (list start line 'code in) acc)))
-            ((morg-fence-info line)
-             (let ((lang (morg-fence-info line)))
-               (loop (cdr ls) lang (cons (list start line 'open lang) acc))))
-            ((morg-directive-info line)
-             (loop (cdr ls) #f
-                   (cons (list start line 'directive
-                               (morg-directive-info line)) acc)))
-            ((re-match "^#{1,6}[ \t]" line)
-             (let ((m (re-groups "^(#+)" line 0)))
-               (loop (cdr ls) #f
-                     (cons (list start line 'heading
-                                 (- (cadr (cadr m)) (car (cadr m))))
-                           acc))))
-            (else
-             (loop (cdr ls) #f (cons (list start line 'text #f) acc))))))))
-
 ;; The scan, from the grammar. Tree-sitter parses the document — it
 ;; already knows a # inside a fence is not a heading — and every line is
 ;; classified from its tree: the blocks from block--ts-list, the headings
-;; from their markers. The entries are the same shape the walk answers,
-;; so every consumer reads either. Directives are our own syntax, which
-;; markdown reads as a paragraph, so their line regex stays.
+;; from their markers. The Markdown grammars are built into the NIF, so
+;; this is the only scan. Directives are our own syntax, which markdown
+;; reads as a paragraph, so their line regex stays.
 (define morg--heading-query
   "(atx_h1_marker) @1 (atx_h2_marker) @2 (atx_h3_marker) @3 (atx_h4_marker) @4 (atx_h5_marker) @5 (atx_h6_marker) @6")
 
@@ -167,10 +137,7 @@
        (list start line 'directive (morg-directive-info line)))
       (else (list start line 'text #f)))))
 
-(define (morg-scan buf)
-  (if (member "markdown" (ts-langs))
-      (morg-scan--ts buf)
-      (morg-scan--walk buf)))
+(define (morg-scan buf) (morg-scan--ts buf))
 
 ;; the scan entry whose line contains byte pos
 (define (morg-entry-at scan pos)

@@ -924,10 +924,9 @@ defmodule Compos.Ui.EditorLive do
   defp csv_preview_file_key(_buffer, _text, rm) when rm != "markdown", do: nil
 
   defp csv_preview_file_key(buffer, text, "markdown") do
-    Regex.scan(~r/^[ \t]*```[ \t]*csv[^\r\n]*:tangle[ \t]+([^ \t\r\n]+)/im, text,
-      capture: :all_but_first
-    )
-    |> Enum.map(fn [target] ->
+    text
+    |> csv_tangle_targets()
+    |> Enum.map(fn target ->
       path = csv_preview_path(buffer, target)
 
       case File.stat(path) do
@@ -935,6 +934,26 @@ defmodule Compos.Ui.EditorLive do
         _ -> {path, nil}
       end
     end)
+  end
+
+  # The :tangle target of every csv fence. The Markdown grammar finds the
+  # fences, so a fence line quoted inside another block is not one. The key
+  # runs on every draw, so a text with no "csv" in it is not parsed.
+  defp csv_tangle_targets(text) do
+    if :binary.match(text, "csv") == :nomatch do
+      []
+    else
+      "markdown"
+      |> Compos.Core.TS.ts_query_nif(text, "(info_string) @info")
+      |> Enum.map(fn {_, s, e} -> binary_part(text, s, e - s) end)
+      |> Enum.filter(&(&1 |> String.split() |> List.first() |> to_string() |> String.downcase() == "csv"))
+      |> Enum.flat_map(fn info ->
+        case Regex.run(~r/:tangle[ \t]+(\S+)/, info) do
+          [_, target] -> [target]
+          _ -> []
+        end
+      end)
+    end
   end
 
   defp safe_int(v) when is_integer(v), do: v
@@ -2550,13 +2569,14 @@ defmodule Compos.Ui.EditorLive do
   # Preview folds keep source byte offsets stable. Hidden lines become spaces.
   # A closing fence stays present so the Markdown tree remains valid.
   defp preview_fold_source("markdown", text, point, mark, hidden) do
+    fences = if MapSet.size(hidden) == 0, do: MapSet.new(), else: fence_lines(text)
+
     folded =
       text
       |> String.split("\n", trim: false)
       |> Enum.with_index()
       |> Enum.map_join("\n", fn {line, index} ->
-        if MapSet.member?(hidden, index) and
-             not Regex.match?(~r/^\s*(?:```|~~~)/, line) do
+        if MapSet.member?(hidden, index) and not MapSet.member?(fences, index) do
           String.duplicate(" ", byte_size(line))
         else
           line
@@ -2573,6 +2593,14 @@ defmodule Compos.Ui.EditorLive do
 
   defp preview_fold_source(_mode, text, point, mark, _hidden),
     do: {text, point, mark}
+
+  # the line index of every fence delimiter the Markdown grammar finds
+  defp fence_lines(text) do
+    for {_, s, _} <-
+          Compos.Core.TS.ts_query_nif("markdown", text, "(fenced_code_block_delimiter) @d"),
+        into: MapSet.new(),
+        do: Compos.Core.Text.line_index(text, s)
+  end
 
   defp preview_fold_point(text, point, hidden) do
     line = Compos.Core.Text.line_index(text, point)
