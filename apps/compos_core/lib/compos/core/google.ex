@@ -7,6 +7,7 @@ defmodule Compos.Core.Google do
   """
   use GenServer
   alias Compos.Core.Google.Store
+  alias Compos.Core.WebServer
 
   @authorize "https://accounts.google.com/o/oauth2/v2/auth"
   @token "https://oauth2.googleapis.com/token"
@@ -122,17 +123,11 @@ defmodule Compos.Core.Google do
     with {:ok, %{"installed" => %{"client_id" => client_id} = client}} <- read_client(path),
          true <- is_binary(client_id) and is_list(scopes) and Enum.all?(scopes, &is_binary/1) do
       stop_listener(state.listener)
+      # each flow names its own shared web server for the loopback redirect
+      listener = "google-oauth-#{System.unique_integer([:positive])}"
 
-      case Bandit.start_link(
-             plug: __MODULE__.Callback,
-             ip: {127, 0, 0, 1},
-             port: 0,
-             startup_log: false,
-             http_options: [log_protocol_errors: false]
-           ) do
-        {:ok, listener} ->
-          Process.unlink(listener)
-          {:ok, {_, port}} = ThousandIsland.listener_info(listener)
+      case WebServer.start(listener, %{"host" => "127.0.0.1"}, &callback_page/1) do
+        {:ok, %{port: port}} ->
           nonce = random()
           verifier = random()
           redirect = "http://127.0.0.1:#{port}/oauth2/callback"
@@ -216,9 +211,9 @@ defmodule Compos.Core.Google do
   def handle_info({:expire, nonce}, %{flow: %{nonce: nonce}} = state),
     do: {:noreply, finish(state, "expired")}
 
-  def handle_info({:stop_listener, pid}, state) do
-    stop_listener(pid)
-    {:noreply, if(state.listener == pid, do: %{state | listener: nil}, else: state)}
+  def handle_info({:stop_listener, name}, state) do
+    stop_listener(name)
+    {:noreply, if(state.listener == name, do: %{state | listener: nil}, else: state)}
   end
 
   def handle_info(_, state), do: {:noreply, state}
@@ -232,13 +227,27 @@ defmodule Compos.Core.Google do
     %{state | flow: nil, status: %{"state" => status}}
   end
 
-  defp stop_listener(pid) when is_pid(pid) do
-    if Process.alive?(pid), do: Supervisor.stop(pid, :normal)
-  catch
-    :exit, _ -> :ok
-  end
-
+  defp stop_listener(name) when is_binary(name), do: WebServer.stop(name)
   defp stop_listener(_), do: :ok
+
+  @doc false
+  # the web server handler for the loopback redirect
+  def callback_page(request) do
+    req = request |> Enum.chunk_every(2) |> Map.new(fn [{:sym, k}, v] -> {k, v} end)
+
+    {status, body} =
+      if req["method"] == "GET" and req["path"] == "/oauth2/callback",
+        do: callback(URI.decode_query(req["query"])),
+        else: {404, "Not found"}
+
+    headers = [
+      ["cache-control", "no-store"],
+      ["referrer-policy", "no-referrer"],
+      ["content-type", "text/plain; charset=utf-8"]
+    ]
+
+    [{:sym, "status"}, status, {:sym, "headers"}, headers, {:sym, "body"}, body]
+  end
 
   defp read_client(client) when is_map(client), do: {:ok, client}
 
@@ -379,25 +388,5 @@ defmodule Compos.Core.Google do
     end
   rescue
     _ -> {:error, :transport}
-  end
-
-  defmodule Callback do
-    @moduledoc false
-    @behaviour Plug
-    import Plug.Conn
-    def init(opts), do: opts
-
-    def call(%{method: "GET", request_path: "/oauth2/callback"} = conn, _) do
-      conn = fetch_query_params(conn)
-      {status, body} = Compos.Core.Google.callback(conn.query_params)
-
-      conn
-      |> put_resp_header("cache-control", "no-store")
-      |> put_resp_header("referrer-policy", "no-referrer")
-      |> put_resp_content_type("text/plain")
-      |> send_resp(status, body)
-    end
-
-    def call(conn, _), do: send_resp(conn, 404, "Not found")
   end
 end

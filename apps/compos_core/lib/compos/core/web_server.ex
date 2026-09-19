@@ -2,9 +2,10 @@ defmodule Compos.Core.WebServer do
   @moduledoc """
   Programmable HTTP servers owned by Scheme callers.
 
-  Each named server has its own Bandit listener and Scheme handler. Bandit
+  Each named server has its own Bandit listener and one handler. Bandit
   owns sockets, HTTP parsing, and response writes. The handler decides all
-  routing and response policy from request data.
+  routing and response policy from request data. A handler is a Scheme
+  procedure, or an Elixir fun for a core module (the Google OAuth redirect).
   """
 
   use GenServer, restart: :temporary
@@ -157,7 +158,7 @@ defmodule Compos.Core.WebServer do
   def dispatch(name, request) do
     with pid when is_pid(pid) <- whereis(name),
          %{handler: handler, lane: lane} <- GenServer.call(pid, :handler),
-         {:ok, value} <- Session.call_fn(handler, [request], nil, lane, "web server #{name}"),
+         {:ok, value} <- call_handler(handler, request, lane, name),
          {:ok, response} <- response(value) do
       {:ok, response}
     else
@@ -169,6 +170,14 @@ defmodule Compos.Core.WebServer do
   catch
     :exit, reason -> {:error, "web server handler failed: #{inspect(reason)}"}
   end
+
+  # an Elixir fun is a handler that a core module owns, such as the
+  # Google OAuth redirect; every other handler is a Scheme procedure
+  defp call_handler(fun, request, _lane, _name) when is_function(fun, 1),
+    do: {:ok, fun.(request)}
+
+  defp call_handler(handler, request, lane, name),
+    do: Session.call_fn(handler, [request], nil, lane, "web server #{name}")
 
   @impl true
   def init({name, spec, handler, lane}) do
