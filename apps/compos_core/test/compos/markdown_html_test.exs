@@ -236,6 +236,28 @@ defmodule Compos.MarkdownHtmlTest do
     assert bare(html) =~ "(define answer 42)"
   end
 
+  test "a fence in a built-in language draws its code in the ts faces" do
+    text = "```elixir\ndef f, do: :ok\n```\n"
+    html = render!(text, [{14, @pt}])
+
+    assert html =~ ~s(<span class="f-ts-keyword"><span class="s" data-s="10">def</span></span>)
+    assert bare(html) =~ "def f, do: :ok"
+    # the caret stands between the space and the name, at byte 14
+    assert html =~ ~s(<span class="s" data-s="13"> </span>#{@pt}<span class="f-ts-function">)
+    assert html =~ ~s(<pre data-src="0-29">)
+  end
+
+  test "chat prose highlights a fence the same way" do
+    html = Html.prose("see\n\n```json\n{\"a\": 1}\n```\n")
+    assert html =~ ~s(<span class="f-ts-number"><span class="s" data-s="19">1</span></span>)
+  end
+
+  test "a fence in an unknown language stays plain" do
+    html = render!("```zzz\ndef f\n```\n")
+    refute html =~ "f-ts-"
+    assert html =~ ~s(<span class="s" data-s="7">def f</span>)
+  end
+
   test "a list item keeps its own line and breaks nowhere" do
     html = render!("- first\n- second\n")
 

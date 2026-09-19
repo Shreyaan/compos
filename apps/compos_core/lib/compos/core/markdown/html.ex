@@ -412,7 +412,7 @@ defmodule Compos.Core.Markdown.Html do
           # <pre> draws a newline as a line already. A break added inside one
           # would draw the same newline twice and open the block by a line for
           # every line it holds.
-          marks = scheme_result_marks(node, text, lang, marks)
+          marks = code_marks(node, text, lang, marks)
           {inner, marks} = without_breaks(fn -> children(node, text, marks) end)
           class = if lang == "", do: "", else: ~s( class="#{attr(lang)}")
 
@@ -625,29 +625,40 @@ defmodule Compos.Core.Markdown.Html do
     {[open, picture, gap, caption_open, words, caption_close, tail, close], marks}
   end
 
-  defp scheme_result_marks(node, text, "result-scheme", marks) do
-    case Enum.find(node.children, &(&1.kind == :code_text)) do
-      nil ->
-        marks
+  # A fence whose language has a grammar draws its code in the theme's
+  # f-ts-* faces. The spans go in as marks, so the caret, the line anchors
+  # and the byte offsets of the source stay exact. A result block reads as
+  # the language that made it. An unknown language stays plain.
+  defp code_marks(node, text, lang, marks) do
+    with lang when is_binary(lang) <- highlight_lang(lang),
+         %{} = child <- Enum.find(node.children, &(&1.kind == :code_text)) do
+      body = binary_part(text, child.start, child.stop - child.start)
 
-      child ->
-        body = binary_part(text, child.start, child.stop - child.start)
-
-        syntax =
-          "scheme"
-          |> TS.ts_highlight(body)
-          |> Enum.flat_map(fn {start, stop, scope} ->
-            class = "f-ts-" <> attr(scope)
-            [{child.start + start, ~s(<span class="#{class}">)}, {child.start + stop, "</span>"}]
-          end)
-
-        Enum.sort_by(marks ++ syntax, fn {at, html} ->
-          {at, if(String.starts_with?(html, "</"), do: 0, else: 1)}
+      # the grammar can name one node twice; the later name wins, as it
+      # does in the editor
+      syntax =
+        lang
+        |> TS.ts_highlight(body)
+        |> Enum.reverse()
+        |> Enum.uniq_by(fn {start, stop, _} -> {start, stop} end)
+        |> Enum.sort_by(fn {start, stop, _} -> {start, -stop} end)
+        |> Enum.flat_map(fn {start, stop, scope} ->
+          class = "f-ts-" <> attr(scope)
+          [{child.start + start, ~s(<span class="#{class}">)}, {child.start + stop, "</span>"}]
         end)
+
+      Enum.sort_by(marks ++ syntax, fn {at, html} ->
+        {at, if(String.starts_with?(html, "</"), do: 0, else: 1)}
+      end)
+    else
+      _ -> marks
     end
   end
 
-  defp scheme_result_marks(_node, _text, _lang, marks), do: marks
+  defp highlight_lang(lang) do
+    lang = lang |> String.downcase() |> String.replace_prefix("result-", "")
+    if lang != "" and lang in TS.ts_langs(), do: lang
+  end
 
   defp folded_code?(node, text) do
     hidden = Process.get(:compos_md_hidden_lines, MapSet.new())
