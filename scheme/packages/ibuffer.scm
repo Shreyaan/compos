@@ -2259,6 +2259,9 @@
             ("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
             ("RET" "ibuffer-visit")
             ("C-c v" "ibuffer-toggle-preview")
+            ;; the owner's ruling (2026-09-19): p turns the row preview off
+            ;; and on; C-p and <up> still move to the row above
+            ("p" "ibuffer-toggle-preview")
             ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
             ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")
             ("TAB" "ibuffer-toggle-filter-group")

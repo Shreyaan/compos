@@ -1096,12 +1096,14 @@
       ;; flag-then-run, which is a table's idea and not an application's
       'markable? (lambda (buf e) #f)
       'flags '()
-      ;; n and p move, so the answer keys are y and d, and k stops a
+      ;; n moves and p turns the row preview off and on (the owner's
+      ;; ruling, 2026-09-19), so the answer keys are y and d, and k stops a
       ;; runtime without touching the transcript the way the table's k
       ;; would kill the buffer outright
       'keys '(("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
               ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
               ("f" "chat-list-filter") ("RET" "chat-list-visit")
+              ("p" "ibuffer-toggle-preview")
               ("q" "chat-list-quit")
               ("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
               ("a" "chats-archive") ("r" "chats-retitle")
