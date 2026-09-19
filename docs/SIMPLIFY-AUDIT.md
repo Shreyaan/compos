@@ -1872,6 +1872,66 @@ seconds is a first-class defect).
    the one window-state change path (Emacs winner-mode).
 3. Hidden windows go.
 
+**Phase 2, landed in a worktree (2026-09-19).** Steps (a) to (e) of
+the window design are six commits on daef54c5. Each step ran window-config,
+peek, peek-md, detail, display-buffer, ibuffer, ibuffer-prompt,
+group-switch, layout-policy, layouts, winner, popup-move, overview,
+window-history, switcher-sleep and chats-list, and the Elixir listing_*,
+dismiss, window_heal, desktop_restore, frames and editor tests. Every red
+is red at daef54c5 too, or is a timing leak between lanes (below).
+
+| Step | Commit | Source lines (+/-, net) |
+|---|---|---|
+| (a) `restore` and `owner` on the leaf | 36a7aae2 | +262 -118, +144 |
+| (b) `preview-show` / `preview-end` | cee3b6a1 | +210 -223, -13 |
+| (c) the frame return stack | b35f5d39 | +95 -132, -37 |
+| (d) winner from one path | ae982cab | +61 -60, +1 |
+| (e) hidden windows go, one layout write | f07b54db | +33 -177, -144 |
+| A9 cleanup | 80d00662 | -7 |
+
+Net: -56 source lines (Scheme -218, Elixir +162), not the ~870 the design
+expected. The Elixir leaf API (restore, owner, the preview record) is
+new code. What the steps did not shrink: the listing card's copy
+machinery (ibuffer.scm), the group switcher's prompt body, the popup's
+own stack of buffers, and peek-recent. Those are the next cuts.
+
+Window rearrange time, p50 over 30 runs in the test VM
+(apps/compos_core/test/bench/window_rearrange_bench.exs), daef54c5 then
+HEAD: group switch 5.5 / 5.8 ms, peek show and dismiss 40.2 / 39.3 ms
+(the file visit is the cost), listing preview 6.5 / 6.4 ms, layout
+choice 10.7 / 12.8 ms (the choice is now a kept frame look: one stack
+entry pushed and dropped), winner undo 1.4 / 1.6 ms. No step made a
+rearrangement cost more than milliseconds.
+
+What changed for the user:
+- A visit clears a display's quit record, as in Emacs. quit-window
+  after a switch in that window walks the window's history.
+- A popup close does not put back the point the return window had at
+  open; the window keeps the buffer's own point.
+- The switcher, the ibuffer and chat-list tables, the overview and the
+  movie give the frame back through one stack; a pop also restores the
+  layout target.
+- Winner records the arrangement a key command changed, once, from the
+  pre- and post-command steps. An eval or an agent that changes the
+  windows between commands is where the next command starts, not an
+  entry. The configuration hook runs in another Scheme lane, so winner
+  writes nothing from it.
+- A group's saved layout is written only when the frame leaves the
+  group. The switcher no longer snapshots on open, and a foreign display
+  no longer checkpoints.
+- mode-consolidate drops the other buffers from the destination's
+  history; nothing hides them in an invisible window.
+
+Found on the way: the configuration hook runs in another lane and reads
+frame locals that the test lane has not flushed, so winner-test,
+layout-policy-test and the group-switch look tests are timing-dependent
+at daef54c5 as well. group-switch's buffer-prompt test fails at
+daef54c5 too once editor_test has left buffers in the test home.
+
+Landing needs a daemon restart: the window-tree leaf tuple grew from 7
+to 9 fields, and a hot swap of editor.ex would meet trees the old code
+built. Desktop files keep the 7-tuple and read unchanged.
+
 *5.1 M-o.* Decided and shipped as the chat merge above: llm-mode stays
 the lane, a hidden chat per document, `C-u M-o` picks the target.
 
