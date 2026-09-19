@@ -4289,16 +4289,20 @@
     (message (string-append (number->string (length *write-rules*))
                             " write rules; see *messages*"))))
 
+;; The end of every save path: the buffer matches the file, the hooks
+;; run, and the echo area names the file.
+(define (save-done! path)
+  (buffer-mark-saved! (current-buffer))
+  (run-hooks 'after-save-hook)
+  (message (string-append "Wrote " path)))
+
 ;; remote buffers save over ssh, never through the local filesystem
 (define (save-remote-buffer! bpath)
   (let ((hp (remote-parse bpath)))
     (let ((r (remote-write (car hp) (cadr hp) (buffer-text (current-buffer)))))
       (if (pair? r)   ; (error MSG)
           (message (string-append "Write failed: " (cadr r)))
-          (begin
-            (buffer-mark-saved! (current-buffer))
-            (run-hooks 'after-save-hook)
-            (message (string-append "Wrote " bpath)))))))
+          (save-done! bpath)))))
 
 (define-command "save-buffer" "Save the current buffer to its file"
   (lambda ()
@@ -4312,17 +4316,13 @@
                   (chat-file-text (current-buffer)))
              (write-file! bpath (chat-file-text (current-buffer))
                           (current-buffer))
-             (buffer-mark-saved! (current-buffer))
-             (run-hooks 'after-save-hook)
-             (message (string-append "Wrote " bpath)))
+             (save-done! bpath))
             (else (save-local-buffer!))))))
 
 (define (save-local-buffer!)
     (let ((path (buffer-save!)))
       (cond
-        (path
-         (run-hooks 'after-save-hook)
-         (message (string-append "Wrote " path)))
+        (path (save-done! path))
         ;; the name is a file on disk, and this buffer never read it: the
         ;; text here is not that file plus edits, so writing it there is
         ;; a clobber. write-file is the gesture that writes over a file
@@ -4340,8 +4340,7 @@
          (let ((p (buffer-save! (current-buffer))))
            (unless (buffer-local (current-buffer) 'mode-name)
              (auto-mode p))
-           (run-hooks 'after-save-hook)
-           (message (string-append "Wrote " p))))
+           (save-done! p)))
         ;; no file name at all: C-x C-s falls through to write-file
         (else (run-command "write-file")))))
 
@@ -4378,8 +4377,7 @@
           ;; the buffer already carries this name: adopt, do not re-visit
           (begin
             (buffer-save! p)
-            (run-hooks 'after-save-hook)
-            (message (string-append "Wrote " p)))
+            (save-done! p))
           (let ((g (buffer-group old))
                 (record (buffer-local old 'chat-wire-turns))
                 (chat? (buffer-local old 'agent-slug)))
@@ -4394,8 +4392,7 @@
               (buffer-set-local! (current-buffer) 'chat-directory
                                  (path-directory p)))
             (buffer-kill! old)
-            (run-hooks 'after-save-hook)
-            (message (string-append "Wrote " p)))))
+            (save-done! p))))
 
 ;; A pathless buffer still has a useful name and mode. Use both when C-x C-w
 ;; asks for a destination. Outer stars are editor notation, not filename
