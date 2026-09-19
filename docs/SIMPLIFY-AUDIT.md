@@ -1916,9 +1916,14 @@ What changed for the user:
   windows between commands is where the next command starts, not an
   entry. The configuration hook runs in another Scheme lane, so winner
   writes nothing from it.
-- A group's saved layout is written only when the frame leaves the
-  group. The switcher no longer snapshots on open, and a foreign display
-  no longer checkpoints.
+- A group's saved layout is written on each completed window change
+  (owner's ruling, 2026-09-19: "group layouts should be saved on each
+  change"), by group-layout-record! from winner's pre- and post-command
+  steps. A change that enters another group is an arrival and writes
+  nothing, so a restore is never recorded as a change. A leave flushes
+  the change the same command made, and the adoption of a screen by a
+  move (no window changes) writes once. The switcher no longer
+  snapshots on open, and a foreign display no longer checkpoints.
 - mode-consolidate drops the other buffers from the destination's
   history; nothing hides them in an invisible window.
 
@@ -1927,6 +1932,14 @@ frame locals that the test lane has not flushed, so winner-test,
 layout-policy-test and the group-switch look tests are timing-dependent
 at daef54c5 as well. group-switch's buffer-prompt test fails at
 daef54c5 too once editor_test has left buffers in the test home.
+
+Found on the way, and fixed (b5271dc7): a Session restart after a crash
+failed with "init.scm failed to load: unbound variable: capf-auto-watch!".
+agent-session.scm (under agent.scm) runs the chat mode hook on the chats
+already open, and the hook calls capf-auto-watch!, which completion.scm
+defined later in init.scm. A cold boot has no chat open at that point;
+a restart does. init.scm now loads completion.scm before the apps. The
+failure is present at 71f02c62 and aff8bcc8.
 
 Landing needs a daemon restart: the window-tree leaf tuple grew from 7
 to 9 fields, and a hot swap of editor.ex would meet trees the old code
