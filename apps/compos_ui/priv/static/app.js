@@ -1249,8 +1249,14 @@
         const gap = 28;
         const width = Math.max(180, Math.min(o.width - gap, area.width - gap * 2));
         const height = Math.max(100, area.height - gap * 2);
+        // The card sits at the edge of the list's own window, on the side
+        // with more room, not at the far edge of the screen: with several
+        // windows the far edge is windows away from the row it previews.
+        // One window spans the area, so the clamp puts the card where it
+        // always was.
         const right = o.left + o.width / 2 < area.left + area.width / 2;
-        const left = right ? area.right - width - gap : area.left + gap;
+        const beside = right ? o.right + gap / 2 : o.left - width - gap / 2;
+        const left = Math.max(area.left + gap, Math.min(area.right - width - gap, beside));
         const sy = Math.max(o.top + 12, Math.min(o.bottom - 12, r.top + r.height / 2));
         const top = Math.max(area.top + gap, Math.min(area.bottom - height - gap, sy - height * .32));
         // Compos zooms its editor root independently of the viewport.
