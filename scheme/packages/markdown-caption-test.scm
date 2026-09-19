@@ -19,11 +19,11 @@
 (deftest 'a-line-of-emphasis-under-a-picture-is-its-caption
   "the stars step back, the words wear md-caption, and the row is a caption row"
   (lambda ()
-    (t--cap-fresh! "![alt](a.png)\n*Ok, now what? *\n")
+    (t--cap-fresh! "![alt](a.png)\n*Ok, now what?*\n")
     (check-true! (t--cap-has? '(14 15 "md-marker")) "the opening star steps back")
-    (check-true! (t--cap-has? '(15 29 "md-caption")) "the words are the caption, space and all")
-    (check-true! (t--cap-has? '(29 30 "md-marker")) "the closing star steps back")
-    (check-true! (t--cap-has? '(14 30 "row-caption")) "the row is a caption row")
+    (check-true! (t--cap-has? '(15 28 "md-caption")) "the words are the caption")
+    (check-true! (t--cap-has? '(28 29 "md-marker")) "the closing star steps back")
+    (check-true! (t--cap-has? '(14 29 "row-caption")) "the row is a caption row")
     (check-true! (t--cap-has? '(0 13 "row-picture")) "the picture's row is a picture row")
     (check-true! (t--cap-has? '(7 12 "img-embed")) "and still draws the picture")
     (t--cap-done!)))
@@ -35,6 +35,14 @@
     (check-true! (t--cap-has? '(6 7 "md-marker")) "the opening star steps back")
     (check-true! (t--cap-has? '(7 20 "morg-italic")) "the words are italic")
     (check-true! (not (t--cap-has? '(6 21 "row-caption"))) "no picture, no caption")
+    (t--cap-done!)))
+
+(deftest 'a-star-after-a-space-closes-no-caption
+  "the grammar reads *x * as text, as the page does: no caption row"
+  (lambda ()
+    (t--cap-fresh! "![alt](a.png)\n*Ok, now what? *\n")
+    (check-false! (t--cap-has? '(14 30 "row-caption")) "no caption row")
+    (check-true! (t--cap-has? '(0 13 "row-picture")) "the picture is still a picture")
     (t--cap-done!)))
 
 (deftest 'a-bold-pair-is-not-two-emphases

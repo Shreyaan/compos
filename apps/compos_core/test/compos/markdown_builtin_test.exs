@@ -21,5 +21,20 @@ defmodule Compos.MarkdownBuiltinTest do
     assert :emphasis in kinds
   end
 
+  test "one query reads many ranges, in the text's own offsets" do
+    text = "a *b*\n\n`c` d\n"
+    caps = TS.ts_query_ranges("markdown-inline", text, [{0, 5}, {7, 12}], "(emphasis) @e (code_span) @c")
+    assert caps == [{"e", 2, 5}, {"c", 7, 10}]
+  end
+
+  test "several queries share one parse" do
+    text = "# T\n\n- x\n"
+    assert [heads, items] =
+             TS.ts_queries("markdown", text, ["(atx_h1_marker) @h", "(list_marker_minus) @m"])
+
+    assert heads == [{"h", 0, 1}]
+    assert items == [{"m", 5, 7}]
+  end
+
   defp flatten(nodes), do: Enum.flat_map(nodes, fn n -> [n | flatten(n.children)] end)
 end

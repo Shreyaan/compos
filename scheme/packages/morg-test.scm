@@ -1183,3 +1183,42 @@
       (check-contains! (buffer-text t--morg-buf) "```result\nthe answer\n```"
                        "and the answer replaces the status")
       (t--morg-done!))))
+
+;;; --- inline markup from the grammar -----------------------------------------
+
+(deftest 'the-source-view-paints-inline-markup-from-the-grammar
+  "code, bold, both emphases and a link keep their markers inside one face"
+  (lambda ()
+    (t--morg! "`x` **b** *i* _u_ [t](http://a.b)\n" 0)
+    (let ((ovs (buffer-overlays t--morg-buf)))
+      (check-true! (member '(0 3 "morg-code") ovs) "the code span")
+      (check-true! (member '(4 9 "morg-bold") ovs) "the strong run")
+      (check-true! (member '(10 13 "morg-italic") ovs) "star emphasis")
+      (check-true! (member '(14 17 "morg-italic") ovs) "underscore emphasis")
+      (check-true! (member '(18 33 "link") ovs) "the link"))
+    (t--morg-done!)))
+
+(deftest 'markup-inside-a-code-span-is-code
+  "the grammar reads `*a*` as code: no emphasis inside"
+  (lambda ()
+    (t--morg! "`*a*` and 2 * 3 * 4\n" 0)
+    (check-true! (member '(0 5 "morg-code") (buffer-overlays t--morg-buf)) "the code span")
+    (check-false! (member "morg-italic" (t--morg-faces)) "no emphasis")
+    (t--morg-done!)))
+
+(deftest 'a-checkbox-line-keeps-its-state-faces-alone
+  "inline markup paints nothing over an item's state"
+  (lambda ()
+    (t--morg! "- [ ] fix **now**\n**b**\n" 0)
+    (check-false! (member '(11 17 "morg-bold") (buffer-overlays t--morg-buf))
+                  "the item's bold is not painted")
+    (check-true! (member '(18 23 "morg-bold") (buffer-overlays t--morg-buf))
+                 "the next line's bold is")
+    (t--morg-done!)))
+
+(deftest 'morg-markup-reads-both-grammars
+  "block markers and inline nodes, in document bytes, sorted by start"
+  (lambda ()
+    (check-equal! (morg-markup "- a `b`\n> c\n")
+                  '(("bullet" 0 2) ("code" 4 7) ("quote" 8 10))
+                  "one bullet, one code span, one quote marker")))

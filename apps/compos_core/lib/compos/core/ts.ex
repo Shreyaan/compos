@@ -25,6 +25,42 @@ defmodule Compos.Core.TS do
   @doc "Arbitrary query: [{capture, start, stop}]."
   def ts_query_nif(_lang, _text, _query), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc """
+  Several queries over one parse of TEXT: one [{capture, start, stop}]
+  list per query.
+  """
+  def ts_queries(lang, text, queries) do
+    ts_queries_nif(lang, text, queries)
+  rescue
+    # the old library before a restart: one parse per query
+    ErlangError -> Enum.map(queries, &ts_query_nif(lang, text, &1))
+  end
+
+  @doc false
+  def ts_queries_nif(_lang, _text, _queries), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  One query over many ranges of TEXT: [{capture, start, stop}] in TEXT's
+  offsets. Each range parses as a document of its own, and the query
+  compiles once. Markdown reads its inline ranges this way.
+  """
+  def ts_query_ranges(lang, text, ranges, query) do
+    ts_query_ranges_nif(lang, text, ranges, query)
+  rescue
+    # a daemon that swapped this module in before its restart still runs
+    # the old library: ask the old NIF once per range
+    ErlangError ->
+      Enum.flat_map(ranges, fn {start, stop} ->
+        lang
+        |> ts_query_nif(binary_part(text, start, stop - start), query)
+        |> Enum.map(fn {cap, s, e} -> {cap, s + start, e + start} end)
+      end)
+  end
+
+  @doc false
+  def ts_query_ranges_nif(_lang, _text, _ranges, _query),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   def ts_langs, do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "dlopen a grammar library and register it: \"ok\" | \"error: ...\"."

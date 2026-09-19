@@ -1789,12 +1789,43 @@ defmodule Compos.Core.SchemeAPI do
       # Detached text has no buffer parser state. Search commands use this
       # mechanism for a file or an explicit language without changing a
       # buffer's mode or its incremental parser.
+      # A list of queries shares one parse, and the answer is one capture
+      # list per query.
       {"ts-query-string",
-       "(ts-query-string LANG TEXT QUERY) — run a tree-sitter query on detached text; return (CAPTURE START END) byte ranges."} =>
+       "(ts-query-string LANG TEXT QUERY) — run a tree-sitter query on detached text; return (CAPTURE START END) byte ranges. With a list of queries, parse once and return one list per query."} =>
         fn [lang, text, query] ->
-          if is_binary(lang) and is_binary(text) and is_binary(query) do
+          cond do
+            not (is_binary(lang) and is_binary(text)) ->
+              []
+
+            is_binary(query) ->
+              lang
+              |> Compos.Core.TS.ts_query_nif(text, query)
+              |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
+
+            is_list(query) and Enum.all?(query, &is_binary/1) ->
+              lang
+              |> Compos.Core.TS.ts_queries(text, query)
+              |> Enum.map(fn caps -> Enum.map(caps, fn {cap, s, e} -> [cap, s, e] end) end)
+
+            true ->
+              []
+          end
+        end,
+      # Markdown reads its inline ranges this way: the block grammar names
+      # them, and one call runs the inline grammar over each of them.
+      {"ts-query-ranges",
+       "(ts-query-ranges LANG TEXT RANGES QUERY) — parse each (START END) range of TEXT as LANG, run QUERY on it; return (CAPTURE START END) byte ranges in TEXT."} =>
+        fn [lang, text, ranges, query] ->
+          if is_binary(lang) and is_binary(text) and is_binary(query) and is_list(ranges) do
+            size = byte_size(text)
+
+            ranges =
+              for [s, e] <- ranges, is_integer(s), is_integer(e), 0 <= s, s < e, e <= size,
+                  do: {s, e}
+
             lang
-            |> Compos.Core.TS.ts_query_nif(text, query)
+            |> Compos.Core.TS.ts_query_ranges(text, ranges, query)
             |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
           else
             []

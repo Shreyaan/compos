@@ -125,12 +125,44 @@ defmodule Compos.Core.Markdown do
   # working link, the single-line one at the foot.
   @block_structure [:continuation]
 
+  # One call reads every inline range: the inline grammar's query compiles
+  # once, not once per paragraph.
   defp expand_inlines(nodes, text, true) do
+    ranges = nodes |> unread_ranges() |> Enum.reverse()
+
+    by_range =
+      "markdown-inline"
+      |> TS.ts_query_ranges(text, ranges, @inline_query)
+      |> group_by_range(ranges, %{})
+
+    fill_inlines(nodes, by_range)
+  end
+
+  defp unread_ranges(nodes, acc \\ []) do
+    Enum.reduce(nodes, acc, fn node, acc ->
+      if node.kind in @inline_holders and inline_unread?(node.children),
+        do: [{node.start, node.stop} | acc],
+        else: unread_ranges(node.children, acc)
+    end)
+  end
+
+  # The captures come back in the order of the ranges, and each lies
+  # inside its own range.
+  defp group_by_range([], _ranges, acc), do: acc
+  defp group_by_range(_caps, [], acc), do: acc
+
+  defp group_by_range([{_, from, to} = cap | rest] = caps, [{start, stop} | more] = ranges, acc) do
+    if from >= start and to <= stop,
+      do: group_by_range(rest, ranges, Map.update(acc, {start, stop}, [cap], &[cap | &1])),
+      else: group_by_range(caps, more, acc)
+  end
+
+  defp fill_inlines(nodes, by_range) do
     Enum.map(nodes, fn node ->
       if node.kind in @inline_holders and inline_unread?(node.children) do
-        %{node | children: inline_children(node, text)}
+        %{node | children: inline_children(node, Map.get(by_range, {node.start, node.stop}, []))}
       else
-        %{node | children: expand_inlines(node.children, text, true)}
+        %{node | children: fill_inlines(node.children, by_range)}
       end
     end)
   end
@@ -141,16 +173,10 @@ defmodule Compos.Core.Markdown do
   # The continuation keeps its place among the inline nodes. Its bytes are
   # markup the renderer drops, and where emphasis spans the line break the
   # ranges nest it inside that emphasis, which is where it belongs.
-  defp inline_children(node, text) do
+  defp inline_children(node, captures) do
     (Enum.map(node.children, &{Atom.to_string(&1.kind), &1.start, &1.stop}) ++
-       inline_captures(text, node.start, node.stop))
+       Enum.reverse(captures))
     |> nest()
-  end
-
-  defp inline_captures(text, start, stop) do
-    "markdown-inline"
-    |> TS.ts_query_nif(binary_part(text, start, stop - start), @inline_query)
-    |> Enum.map(fn {kind, from, to} -> {kind, from + start, to + start} end)
   end
 
   @doc false

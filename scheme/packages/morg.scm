@@ -110,38 +110,62 @@
 (define morg--heading-query
   "(atx_h1_marker) @1 (atx_h2_marker) @2 (atx_h3_marker) @3 (atx_h4_marker) @4 (atx_h5_marker) @5 (atx_h6_marker) @6")
 
-(define (morg-scan--ts buf)
-  (let* ((text (buffer-text buf))
-         (blocks (block--ts-list text))
-         (heads (map (lambda (h) (list (cadr h) (string->number (car h))))
-                     (ts-query-string "markdown" text morg--heading-query))))
-    (let loop ((ls (morg-lines buf)) (bs blocks) (acc '()))
-      (if (null? ls)
-          (reverse acc)
-          (let* ((e (car ls)) (start (car e)) (line (cadr e))
-                 (bs (let drop ((bs bs))
-                       (if (and (pair? bs) (< (nth 1 (car bs)) start))
-                           (drop (cdr bs))
-                           bs)))
-                 (b (and (pair? bs)
-                         (<= (nth 0 (car bs)) start)
-                         (<= start (nth 1 (car bs)))
-                         (car bs)))
-                 (head (assoc start heads))
-                 (entry
-                   (cond
-                     ((and b (= start (nth 0 b)))
-                      (list start line 'open (block-lang b)))
-                     ((and b (morg-fence-close? line)
-                           (let ((le (+ start (string-byte-length line))))
-                             (and (<= start (nth 1 b)) (<= (nth 1 b) le))))
-                      (list start line 'close #f))
-                     (b (list start line 'code (block-lang b)))
-                     (head (list start line 'heading (cadr head)))
-                     ((morg-directive-info line)
-                      (list start line 'directive (morg-directive-info line)))
-                     (else (list start line 'text #f)))))
-            (loop (cdr ls) bs (cons entry acc)))))))
+;; heading captures -> ((START LEVEL) ...). A recursion, not map over a
+;; lambda: a lambda handed to a primitive publishes the frames it closes
+;; over, and this frame holds the document.
+(define (morg--heads hits acc)
+  (if (null? hits)
+      (reverse acc)
+      (morg--heads (cdr hits)
+                   (cons (list (car (cdr (car hits))) (string->number (car (car hits)))) acc))))
+
+;; HITS, when given, are the captures of block--query and of the heading
+;; query, from a parse the caller shares.
+;; No frame here binds the document text: a long string in a live frame
+;; makes every later step of the scan slower.
+(define (morg-scan--ts buf &optional hits)
+  (morg--scan-hits buf (or hits (ts-query-string "markdown" (buffer-text buf)
+                                                  (list block--query morg--heading-query)))))
+
+(define (morg--scan-hits buf hits)
+  (morg--scan-lines (morg-lines buf)
+                    (block--ts-list (buffer-text buf) (car hits))
+                    (morg--heads (cadr hits) '())
+                    '()))
+
+;; The scan runs on every edit, over every line. Each step is a top-level
+;; procedure with few bindings: a variable lookup walks every frame
+;; between it and the global one.
+(define (morg--scan-lines ls bs heads acc)
+  (if (null? ls)
+      (reverse acc)
+      (morg--scan-step ls (morg--drop-blocks bs (car (car ls))) heads acc)))
+
+(define (morg--scan-step ls bs heads acc)
+  (morg--scan-lines (cdr ls) bs heads
+                    (cons (morg--scan-entry (car (car ls)) (car (cdr (car ls))) bs heads)
+                          acc)))
+
+;; the blocks that do not end before START
+(define (morg--drop-blocks bs start)
+  (if (and (pair? bs) (< (car (cdr (car bs))) start))
+      (morg--drop-blocks (cdr bs) start)
+      bs))
+
+(define (morg--scan-entry start line bs heads)
+  (let ((b (and (pair? bs) (<= (car (car bs)) start) (car bs)))
+        (head (assoc start heads)))
+    (cond
+      ((and b (= start (car b)))
+       (list start line 'open (block-lang b)))
+      ((and b (morg-fence-close? line)
+            (<= (car (cdr b)) (+ start (string-byte-length line))))
+       (list start line 'close #f))
+      (b (list start line 'code (block-lang b)))
+      (head (list start line 'heading (car (cdr head))))
+      ((morg-directive-info line)
+       (list start line 'directive (morg-directive-info line)))
+      (else (list start line 'text #f)))))
 
 (define (morg-scan buf)
   (if (member "markdown" (ts-langs))
@@ -710,29 +734,159 @@
 ;; The fence-kind registry (morg-kinds.scm) owns the mapping.
 (define (morg-ts-lang lang) (fence-kind-ts-lang lang))
 
+;;; --- markup, from the grammar ----------------------------------------------
+;;; The block grammar names the list, quote and rule markers, and the ranges
+;;; of inline text. The inline grammar reads every inline range in one call.
+;;; The answer is one list of (KIND START END) in document bytes, sorted by
+;;; START. Both painters read it, so no painter matches markup by regex.
+;;;
+;;; The painters run on every edit of a long document, so the hot loops
+;;; below call car and cdr, which are primitives, and few procedures.
+
+;; A continuation is the indent a block carries onto its next line; it is
+;; a quote marker when it holds a >.
+(define morg--block-markup-query
+  "(list_marker_minus) @bullet (list_marker_star) @bullet (list_marker_plus) @bullet (list_marker_dot) @ordered (list_marker_parenthesis) @ordered (block_quote_marker) @quote ((block_continuation) @quote (#match? @quote \">\")) (thematic_break) @rule (setext_h2_underline) @rule (inline) @inline (pipe_table_cell) @inline")
+
+(define morg--inline-markup-query
+  "(code_span) @code (strong_emphasis) @strong (emphasis) @emphasis (inline_link) @link (link_text) @link-text (link_destination) @link-destination (image) @image")
+
+;; two capture lists, each sorted by START, as one sorted list
+(define (morg--merge-captures a b acc)
+  (cond ((null? a) (append (reverse acc) b))
+        ((null? b) (append (reverse acc) a))
+        ((<= (car (cdr (car a))) (car (cdr (car b))))
+         (morg--merge-captures (cdr a) b (cons (car a) acc)))
+        (else (morg--merge-captures a (cdr b) (cons (car b) acc)))))
+
+(define (morg--inline-capture? c) (equal? (car c) "inline"))
+
+(define (morg-markup text &optional blocks)
+  (let* ((blocks (or blocks (ts-query-string "markdown" text morg--block-markup-query)))
+         (ranges (map cdr (filter morg--inline-capture? blocks)))
+         (inlines (ts-query-ranges "markdown-inline" text ranges
+                                   morg--inline-markup-query)))
+    (morg--merge-captures (remove morg--inline-capture? blocks) inlines '())))
+
+;; -> (SCAN MARKUP) for BUF, from one parse of its text
+(define (morg-scan-markup buf)
+  (morg--scan-markup-hits buf
+    (ts-query-string "markdown" (buffer-text buf)
+      (list block--query morg--heading-query morg--block-markup-query))))
+
+(define (morg--scan-markup-hits buf hits)
+  (list (morg--scan-hits buf hits)
+        (morg-markup (buffer-text buf) (car (cdr (cdr hits))))))
+
+;; -> (LINE-CAPTURES . REST): the captures that start at or before byte END
+(define (morg--take-line caps end acc)
+  (if (and (pair? caps) (<= (car (cdr (car caps))) end))
+      (morg--take-line (cdr caps) end (cons (car caps) acc))
+      (cons (reverse acc) caps)))
+
+;; the first capture of KIND in CAPS that lies inside START..END, or #f
+(define (morg-markup-find caps kind start end)
+  (cond ((null? caps) #f)
+        ((and (equal? (car (car caps)) kind)
+              (>= (car (cdr (car caps))) start)
+              (<= (car (cdr (cdr (car caps)))) end))
+         (car caps))
+        (else (morg-markup-find (cdr caps) kind start end))))
+
+;; Run FN over every scan entry with the captures that start on its line.
+;; FN is (FN ENTRY LINE-CAPS PREV-ENTRY PREV-CAPS FENCE-ARGS) -> spans. The
+;; fence args reach a body line from its open fence. The spans come back in
+;; one list, in scan order.
+(define (morg-markup-spans scan caps fn)
+  (morg--markup-walk scan caps fn #f '() #f '()))
+
+;; The walk runs on every edit, over every line. Each step is a top-level
+;; procedure with one frame: a variable lookup walks every frame between
+;; it and the global one.
+(define (morg--markup-walk es caps fn prev prev-caps args acc)
+  (if (null? es)
+      (apply append (reverse acc))
+      (morg--markup-line es (car es) caps fn prev prev-caps
+                         (morg--fence-args-at (car es) args) acc)))
+
+(define (morg--markup-line es e caps fn prev prev-caps args acc)
+  (let ((split (morg--take-line caps (+ (car e) (string-byte-length (car (cdr e)))) '())))
+    (morg--markup-walk (cdr es) (cdr split) fn e (car split) args
+                       (cons (fn e (car split) prev prev-caps
+                                 (and (equal? (car (cdr (cdr e))) 'code) args))
+                             acc))))
+
+;; the fence arguments a line carries on: its own on an open fence, the
+;; open fence's ARGS on a body line, else #f
+(define (morg--fence-args-at e args)
+  (let ((k (car (cdr (cdr e)))))
+    (cond ((equal? k 'code) args)
+          ((equal? k 'open) (morg-fence-args (car (cdr e))))
+          (else #f))))
+
+;; the byte where a heading's words start: after the LEVEL marks the
+;; grammar counted, and the blanks after them
+(define (morg-heading-text-start line level)
+  (morg--skip-blanks line level (string-byte-length line)))
+
+(define (morg--skip-blanks line i len)
+  (if (and (< i len) (member (substring-bytes line i (+ i 1)) '(" " "\t")))
+      (morg--skip-blanks line (+ i 1) len)
+      i))
+
+;; The source view's inline faces: the construct and its markers wear one
+;; face, so every marker stays visible. A capture that starts inside a
+;; SKIP range, (START END) sorted, keeps no face.
+(define morg--source-faces
+  '(("code" "morg-code") ("strong" "morg-bold") ("emphasis" "morg-italic")
+    ("link" "link")))
+
+(define (morg--source-markup caps skip acc)
+  (cond ((null? caps) (reverse acc))
+        ((and (pair? skip) (> (car (cdr (car caps))) (car (cdr (car skip)))))
+         (morg--source-markup caps (cdr skip) acc))
+        ((and (pair? skip) (>= (car (cdr (car caps))) (car (car skip))))
+         (morg--source-markup (cdr caps) skip acc))
+        (else
+         (let ((f (assoc (car (car caps)) morg--source-faces)))
+           (morg--source-markup (cdr caps) skip
+             (if f
+                 (cons (list (car (cdr (car caps))) (car (cdr (cdr (car caps)))) (car (cdr f))) acc)
+                 acc))))))
+
+;; a heading's TODO or DONE keyword at TEXT-START: (KEYWORD START END), or #f
+(define (morg-heading-keyword line text-start)
+  (let ((len (string-byte-length line)))
+    (cond ((< (- len text-start) 4) #f)
+          ((not (member (substring-bytes line text-start (+ text-start 4)) '("TODO" "DONE"))) #f)
+          ((or (= (+ text-start 4) len)
+               (member (substring-bytes line (+ text-start 4) (+ text-start 5)) '(" " "\t")))
+           (list (substring-bytes line text-start (+ text-start 4))
+                 text-start (+ text-start 4)))
+          (else #f))))
+
 ;; spans for one scan entry; block BODIES are highlighted per block in
-;; morg-refontify!, because a multi-line construct needs the whole body.
+;; morg-refontify!, because a multi-line construct needs the whole body,
+;; and the inline markup comes from the grammar in one pass
+;; (morg--source-markup). BOX is the line's checkbox, or #f.
 ;; This is the plain source view: every marker stays visible. preview-mode
 ;; draws the page in place, and its painter replaces this when it is on.
-(define (morg-line-spans e &optional fence-args buf)
-  (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
-         (len (string-byte-length line))
-         (abs (lambda (r) (list (+ start (car r)) (+ start (cadr r))))))
+(define (morg-line-spans e fence-args box)
+  (let* ((start (car e)) (line (car (cdr e))) (k (car (cdr (cdr e))))
+         (len (string-byte-length line)))
     (cond
       ((= len 0) '())
       ((equal? k 'heading)
        (let* ((face (string-append "org-level-"
                       (number->string (+ 1 (modulo (- (morg-info e) 1) 4)))))
-              (g (re-groups "^#{1,6}[ \t]+(TODO|DONE)[ \t]" line 0)))
-         (if (not g)
+              (kw (morg-heading-keyword line (morg-heading-text-start line (morg-info e)))))
+         (if (not kw)
              (list (list start (+ start len) face))
-             (let* ((r (nth 1 g))
-                    (ks (+ start (car r)))
-                    (ke (+ start (cadr r)))
-                    (todo (substring-bytes line (car r) (cadr r))))
+             (let ((ks (+ start (nth 1 kw)))
+                   (ke (+ start (nth 2 kw))))
                (append
                  (if (> ks start) (list (list start ks face)) '())
-                 (list (list ks ke (if (equal? todo "TODO")
+                 (list (list ks ke (if (equal? (car kw) "TODO")
                                        "org-todo" "org-done")))
                  (if (< ke (+ start len))
                      (list (list ke (+ start len) face))
@@ -750,11 +904,10 @@
          (if f (list (list start (+ start len) f)) '())))
       ;; a checkbox line: the marker takes its state's face and the text
       ;; after it takes the state's text face. Like a heading's keyword,
-      ;; these spans REPLACE rather than stack, so the prose markers are
-      ;; not painted over the item's own state.
-      ((and (equal? k 'text) (morg-checkbox-at line))
-       (let* ((box (morg-checkbox-at line))
-              (open (car box))
+      ;; these spans REPLACE rather than stack: morg-refontify! paints no
+      ;; inline markup over the item's own state.
+      (box
+       (let* ((open (car box))
               (close (caddr box))
               (text-start (nth 3 box))
               (faces (morg-checkbox-faces (cadr box))))
@@ -764,39 +917,36 @@
            (if (and (cadr faces) (< text-start len))
                (list (list (+ start text-start) (+ start len) (cadr faces)))
                '()))))
-      (else
-       (append
-         (map (lambda (r) (append (abs r) '("morg-code")))
-              (re-find* "`[^`\n]+`" line))
-         (map (lambda (r) (append (abs r) '("morg-bold")))
-              (re-find* "\\*\\*[^*\n]+\\*\\*" line))
-         (map (lambda (r) (append (abs r) '("morg-italic")))
-              (re-find* "\\b_[^_\n]+_\\b" line))
-         (map (lambda (r) (append (abs r) '("link")))
-              (re-find* "\\[[^\\]\n]+\\]\\([^)\n]+\\)" line)))))))
+      (else '()))))
 
 (define (morg-refontify! buf)
   ;; preview-mode's painter (drawn in place) has its own hook when it is on
   (when (and (buffer-exists? buf)
              (not (equal? (buffer-local buf 'markdown-paint) #t)))
-    (let* ((scan (morg-scan buf))
-           (text (buffer-text buf))
+    (let* ((both (morg-scan-markup buf))
+           (scan (car both))
            ;; each body line sees its open fence's arguments, so a kind
            ;; can paint by them (a live diff's one-sided views stay prose)
-           (line-spans
-             (car (fold (lambda (acc e)
-                          (let* ((k (morg-kind e))
-                                 (args (cond ((equal? k 'open)
-                                              (morg-fence-args (cadr e)))
-                                             ((equal? k 'code) (cadr acc))
-                                             (else #f))))
-                            (list (append (car acc)
-                                          (morg-line-spans
-                                            e (and (equal? k 'code) args) buf))
-                                  args)))
-                        (list '() #f) scan)))
-           (block-spans (fence-kind-body-spans text (morg-blocks scan buf))))
-      (overlay-set! buf 'morg (append line-spans block-spans)))))
+           (r (morg--source-walk scan #f '() '()))
+           (markup (morg--source-markup (cadr both) (cadr r) '()))
+           (block-spans (fence-kind-body-spans (buffer-text buf) (morg-blocks scan buf))))
+      (overlay-set! buf 'morg (append (car r) markup block-spans)))))
+
+;; -> (SPANS CHECKBOX-LINES): the line spans of the scan ES, and the
+;; (START END) of every checkbox line, where no inline markup paints
+(define (morg--source-walk es args boxes acc)
+  (if (null? es)
+      (list (apply append (reverse acc)) (reverse boxes))
+      (morg--source-line es (car es) (morg--fence-args-at (car es) args) boxes acc)))
+
+(define (morg--source-line es e args boxes acc)
+  (let ((box (and (equal? (car (cdr (cdr e))) 'text) (morg-checkbox-at (car (cdr e))))))
+    (morg--source-walk
+      (cdr es) args
+      (if box
+          (cons (list (car e) (+ (car e) (string-byte-length (car (cdr e))))) boxes)
+          boxes)
+      (cons (morg-line-spans e (and (equal? (car (cdr (cdr e))) 'code) args) box) acc))))
 
 ;;; --- change hook -------------------------------------------------------------
 

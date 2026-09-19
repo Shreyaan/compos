@@ -202,3 +202,47 @@
     (check-true! (t--md-has? '(26 39 "md-fence")) "and the result names itself")
     (t--md-done!)))
 
+
+;;; --- markers and inline markup from the grammar ------------------------------
+
+(deftest 'list-and-quote-markers-come-from-the-grammar
+  "a bullet steps back, a number stays, and each quoted line is a quote row"
+  (lambda ()
+    (t--md-fresh! "- one\n1. two\n> three\n> four\n")
+    (check-true! (t--md-has? '(0 2 "md-marker")) "the bullet steps back")
+    (check-true! (t--md-has? '(0 5 "row-li")) "the bullet row")
+    (check-true! (t--md-has? '(6 12 "row-oli")) "the numbered row")
+    (check-true! (t--md-has? '(13 15 "md-marker")) "the quote marker")
+    (check-true! (t--md-has? '(13 20 "row-quote")) "the quote row")
+    (check-true! (t--md-has? '(21 23 "md-marker")) "the continued quote marker")
+    (check-true! (t--md-has? '(21 27 "row-quote")) "the continued quote row")
+    (t--md-done!)))
+
+(deftest 'a-dash-line-in-a-fence-is-code-and-not-a-bullet
+  "the grammar knows the fence: no list row inside it"
+  (lambda ()
+    (t--md-fresh! "```\n- x\n```\n")
+    (check-false! (t--md-has? '(4 7 "row-li")) "no bullet row")
+    (check-true! (t--md-has? '(4 7 "row-code")) "a code row")
+    (t--md-done!)))
+
+(deftest 'inline-code-and-emphasis-step-their-markers-back
+  "a code span and both emphases paint the words and hide the delimiters"
+  (lambda ()
+    (t--md-fresh! "`x` *i* _u_ ``a`b``\n")
+    (check-true! (t--md-has? '(0 1 "md-marker")) "the opening tick")
+    (check-true! (t--md-has? '(1 2 "morg-code")) "the code")
+    (check-true! (t--md-has? '(5 6 "morg-italic")) "star emphasis")
+    (check-true! (t--md-has? '(9 10 "morg-italic")) "underscore emphasis")
+    (check-true! (t--md-has? '(12 14 "md-marker")) "a double tick opens")
+    (check-true! (t--md-has? '(14 17 "morg-code")) "and holds a tick")
+    (t--md-done!)))
+
+(deftest 'a-heading-keyword-keeps-its-face-in-the-preview
+  "# TODO x: the marker steps back, TODO wears org-todo, the rest the level"
+  (lambda ()
+    (t--md-fresh! "# TODO fix it\n")
+    (check-true! (t--md-has? '(0 2 "md-marker")) "the marker")
+    (check-true! (t--md-has? '(2 6 "org-todo")) "the keyword")
+    (check-true! (t--md-has? '(6 13 "md-h1")) "the words")
+    (t--md-done!)))

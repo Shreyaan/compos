@@ -284,8 +284,10 @@
 (define block--query
   "(fenced_code_block (info_string)? @info (code_fence_content)? @body) @block")
 
-(define (block--ts-list text)
-  (let loop ((hits (ts-query-string "markdown" text block--query))
+;; HITS are block--query's captures when the caller has them from a
+;; parse it shares
+(define (block--ts-list text &optional hits)
+  (let loop ((hits (or hits (ts-query-string "markdown" text block--query)))
              (cur #f) (acc '()))
     (if (null? hits)
         (reverse (if cur (cons cur acc) acc))

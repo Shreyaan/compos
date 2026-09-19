@@ -354,14 +354,42 @@ fn ts_nav(lang_name: String, text: String, pos: usize, op: String) -> Option<usi
 /// Run an arbitrary query: [{capture_name, start, end}].
 #[rustler::nif(schedule = "DirtyCpu")]
 fn ts_query_nif(lang_name: String, text: String, query_src: String) -> Vec<(String, usize, usize)> {
-    let mut out = Vec::new();
     let Some(lang) = language(&lang_name) else {
-        return out;
+        return Vec::new();
     };
     let Some(tree) = parse(lang.clone(), &text) else {
-        return out;
+        return Vec::new();
     };
-    let Ok(query) = Query::new(&lang, &query_src) else {
+    run_query(&lang, &tree, &text, &query_src)
+}
+
+/// Several queries over one parse: one capture list per query.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_queries_nif(
+    lang_name: String,
+    text: String,
+    queries: Vec<String>,
+) -> Vec<Vec<(String, usize, usize)>> {
+    let Some(lang) = language(&lang_name) else {
+        return queries.iter().map(|_| Vec::new()).collect();
+    };
+    let Some(tree) = parse(lang.clone(), &text) else {
+        return queries.iter().map(|_| Vec::new()).collect();
+    };
+    queries
+        .iter()
+        .map(|q| run_query(&lang, &tree, &text, q))
+        .collect()
+}
+
+fn run_query(
+    lang: &Language,
+    tree: &tree_sitter::Tree,
+    text: &str,
+    query_src: &str,
+) -> Vec<(String, usize, usize)> {
+    let mut out = Vec::new();
+    let Ok(query) = Query::new(lang, query_src) else {
         return out;
     };
     let names = query.capture_names();
@@ -374,6 +402,52 @@ fn ts_query_nif(lang_name: String, text: String, query_src: String) -> Vec<(Stri
             cap.node.start_byte(),
             cap.node.end_byte(),
         ));
+    }
+    out
+}
+
+/// Run one query over many ranges of TEXT: each range parses as a
+/// document of its own, and the captures come back in TEXT's offsets.
+/// Markdown needs this: the block grammar hands out the inline ranges, and
+/// the inline grammar reads each one. The query compiles once.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_query_ranges_nif(
+    lang_name: String,
+    text: String,
+    ranges: Vec<(usize, usize)>,
+    query_src: String,
+) -> Vec<(String, usize, usize)> {
+    let mut out = Vec::new();
+    let Some(lang) = language(&lang_name) else {
+        return out;
+    };
+    let Ok(query) = Query::new(&lang, &query_src) else {
+        return out;
+    };
+    let mut parser = Parser::new();
+    if parser.set_language(&lang).is_err() {
+        return out;
+    }
+    let names = query.capture_names();
+    let bytes = text.as_bytes();
+    let mut cursor = QueryCursor::new();
+    for (start, stop) in ranges {
+        if start >= stop || stop > bytes.len() {
+            continue;
+        }
+        let part = &bytes[start..stop];
+        let Some(tree) = parser.parse(part, None) else {
+            continue;
+        };
+        let mut captures = cursor.captures(&query, tree.root_node(), part);
+        while let Some((m, ix)) = captures.next() {
+            let cap = m.captures[*ix];
+            out.push((
+                names[cap.index as usize].to_string(),
+                cap.node.start_byte() + start,
+                cap.node.end_byte() + start,
+            ));
+        }
     }
     out
 }

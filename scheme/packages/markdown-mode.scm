@@ -26,27 +26,10 @@
 ;; a picture's caption: the line of emphasis under the picture
 (defface! 'md-caption 'fg "#8a857a" 'style "italic")
 
+;; A span at byte offsets S..E of LINE, which starts at byte START.
 (define (md--span start s e face)
   (list (+ start s) (+ start e) face))
 
-;; A construct OPEN bytes long at its head and CLOSE bytes at its tail:
-;; the markers step back, FACE covers what is between them.
-(define (md--wrapped start line pattern open close face)
-  (apply append
-    (map (lambda (r)
-           (let ((s (car r)) (e (cadr r)))
-             (list (md--span start s (+ s open) "md-marker")
-                   (md--span start (+ s open) (- e close) face)
-                   (md--span start (- e close) e "md-marker"))))
-         (re-find* pattern line))))
-
-(define md--link-pattern "\\[([^\\]\n]+)\\]\\(([^)\n]+)\\)")
-(define md--image-pattern "!\\[([^\\]\n]*)\\]\\(([^)\n]+)\\)")
-;; *text*: one star each side, and not the star of a **bold** pair
-(define md--emphasis-pattern "(?<!\\*)\\*(?!\\*)[^*\n]+(?<!\\*)\\*(?!\\*)")
-;; a line that is one picture, and a line that is one run of emphasis
-(define md--image-line-pattern "^!\\[[^\\]\n]*\\]\\([^)\n]+\\)[ \t]*$")
-(define md--caption-line-pattern "^\\*([^*\n]+)\\*[ \t]*$")
 ;; the share sheet appends ?s=20 and friends; a query or fragment after
 ;; the status id still names the same post
 (define md--x-pattern
@@ -56,106 +39,134 @@
 (define md--embed-pattern
   (string-append "^#\\+embed:[ \\t]+(" md--youtube-url-pattern ")[ \\t]*$"))
 
+;;; The markup comes from the grammar (morg-markup): each line receives the
+;;; captures that start on it, in document bytes. A construct OPEN bytes
+;;; long at its head and CLOSE bytes at its tail steps its markers back,
+;;; and FACE covers what is between them.
+(define (md--wrapped s e open close face)
+  (if (> (- e s) (+ open close))
+      (list (list s (+ s open) "md-marker")
+            (list (+ s open) (- e close) face)
+            (list (- e close) e "md-marker"))
+      '()))
+
+;; the number of backticks at byte I of LINE: a code span's delimiter
+(define (md--ticks line i n)
+  (if (and (< (+ i n) (string-byte-length line))
+           (equal? (substring-bytes line (+ i n) (+ i n 1)) "`"))
+      (md--ticks line i (+ n 1))
+      n))
+
+;; true when LINE holds only white space from byte I to its end
+(define (md--blank-from? line i)
+  (equal? (string-trim (substring-bytes line i (string-byte-length line))) ""))
+
 ;; [text](url): the text is the link; the brackets and the target step
-;; back. An image's link is not a link.
-;; The drawn text carries its own target, so a reader can click it. A span
-;; has one channel, its class, so the URL travels percent-encoded and the
-;; client decodes it. A target in angle brackets is a target with a space.
+;; back. The drawn text carries its own target, so a reader can click it.
+;; A span has one channel, its class, so the URL travels percent-encoded
+;; and the client decodes it. A target in angle brackets is a target with
+;; a space.
 (define (md--link-class url)
   (let ((u (if (and (string-prefix? "<" url) (string-suffix? ">" url))
                (substring url 1 (- (string-length url) 1))
                url)))
     (string-append "link link-to:" (url-encode u))))
 
-(define (md--links start line)
-  (apply append
-    (map (lambda (r)
-           (let* ((s (car r)) (e (cadr r))
-                  (image? (and (> s 0) (equal? (substring-bytes line (- s 1) s) "!")))
-                  (g (re-groups md--link-pattern line s))
-                  (text (and g (nth 1 g)))
-                  (url (and g (nth 2 g))))
-             (if (or image? (not text) (not url))
-                 '()
-                 (list (md--span start s (car text) "md-marker")
-                       (md--span start (car text) (cadr text)
-                                 (md--link-class
-                                   (substring-bytes line (car url) (cadr url))))
-                       (md--span start (cadr text) e "md-marker")))))
-         (re-find* md--link-pattern line))))
+(define (md--link start line caps s e)
+  (let* ((text (morg-markup-find caps "link-text" s e))
+         (url (and text (morg-markup-find caps "link-destination" (caddr text) e))))
+    (if (not url)
+        '()
+        (list (list s (cadr text) "md-marker")
+              (list (cadr text) (caddr text)
+                    (md--link-class
+                      (substring-bytes line (- (cadr url) start) (- (caddr url) start))))
+              (list (caddr text) e "md-marker")))))
 
 ;; ![alt](url): the URL draws as the picture; everything else steps back
-(define (md--images start line)
+(define (md--image caps s e)
+  (let ((url (morg-markup-find caps "link-destination" s e)))
+    (if (not url)
+        '()
+        (list (list s (cadr url) "md-marker")
+              (list (cadr url) (caddr url) "img-embed")
+              (list (caddr url) e "md-marker")))))
+
+(define (md--inline-spans start line caps)
   (apply append
-    (map (lambda (r)
-           (let* ((s (car r)) (e (cadr r))
-                  (g (re-groups md--image-pattern line s))
-                  (url (and g (nth 2 g))))
-             (if (not url)
-                 '()
-                 (list (md--span start s (car url) "md-marker")
-                       (md--span start (car url) (cadr url) "img-embed")
-                       (md--span start (cadr url) e "md-marker")))))
-         (re-find* md--image-pattern line))))
+    (map (lambda (c)
+           (let ((kind (car c)) (s (cadr c)) (e (caddr c)))
+             (cond
+               ((equal? kind "code")
+                (let ((n (md--ticks line (- s start) 0)))
+                  (md--wrapped s e n n "morg-code")))
+               ((equal? kind "strong") (md--wrapped s e 2 2 "morg-bold"))
+               ((equal? kind "emphasis") (md--wrapped s e 1 1 "morg-italic"))
+               ((equal? kind "link") (md--link start line caps s e))
+               ((equal? kind "image") (md--image caps s e))
+               (else '()))))
+         caps)))
 
 ;; a heading: the marker steps back, the text wears the level's face, and
 ;; a TODO keyword keeps its own face
 (define (md--heading start line e len)
   (let* ((face (string-append "md-h"
                  (number->string (+ 1 (modulo (- (morg-info e) 1) 4)))))
-         (m (re-groups "^(#{1,6}[ \t]+)" line 0))
-         (text-start (if m (cadr (nth 1 m)) 0))
-         (marker (if m (list (md--span start 0 text-start "md-marker")) '()))
-         (g (re-groups "^#{1,6}[ \t]+(TODO|DONE)[ \t]" line 0)))
+         (text-start (morg-heading-text-start line (morg-info e)))
+         (marker (if (> text-start 0) (list (md--span start 0 text-start "md-marker")) '()))
+         (kw (morg-heading-keyword line text-start)))
     (append
       marker
-      (if (not g)
-          (list (md--span start text-start len face))
-          (let* ((r (nth 1 g))
-                 (ks (car r))
-                 (ke (cadr r))
-                 (todo (substring-bytes line ks ke)))
-            (append
-              (if (> ks text-start) (list (md--span start text-start ks face)) '())
-              (list (md--span start ks ke (if (equal? todo "TODO") "org-todo" "org-done")))
-              (if (< ke len) (list (md--span start ke len face)) '())))))))
+      (cond
+        ((>= text-start len) '())
+        ((not kw) (list (md--span start text-start len face)))
+        (else
+         (let ((ks (nth 1 kw)) (ke (nth 2 kw)))
+           (append
+             (list (md--span start ks ke (if (equal? (car kw) "TODO") "org-todo" "org-done")))
+             (if (< ke len) (list (md--span start ke len face)) '()))))))))
+
+;; the marker that opens a line: a bullet, a number, or a quote's >
+(define (md--line-marker caps)
+  (cond ((null? caps) #f)
+        ((member (car (car caps)) '("bullet" "ordered" "quote")) (car caps))
+        (else (md--line-marker (cdr caps)))))
 
 ;; a bullet or a quote marker steps back and the row takes the shape; an
 ;; ordered item keeps its number, which is content
-(define (md--block-marker start line)
-  (let ((bullet (re-groups "^([ \t]*[-*+][ \t]+)" line 0))
-        (ordered (re-groups "^([ \t]*[0-9]+[.)][ \t]+)" line 0))
-        (quote (re-groups "^(>[ \t]?)" line 0)))
+(define (md--block-marker start line len caps)
+  (let ((m (md--line-marker caps))
+        (le (+ start len)))
     (cond
-      (bullet
-       (let ((m (nth 1 bullet)))
-         (list (md--span start (car m) (cadr m) "md-marker")
-               (list start (+ start (string-byte-length line)) "row-li"))))
-      (ordered
-       (list (list start (+ start (string-byte-length line)) "row-oli")))
-      (quote
-       (let ((m (nth 1 quote)))
-         (list (md--span start (car m) (cadr m) "md-marker")
-               (list start (+ start (string-byte-length line)) "row-quote"))))
-      (else '()))))
+      ((not m) '())
+      ((equal? (car m) "bullet")
+       (list (list (cadr m) (caddr m) "md-marker") (list start le "row-li")))
+      ((equal? (car m) "ordered") (list (list start le "row-oli")))
+      (else
+       (list (list (cadr m) (min (caddr m) le) "md-marker") (list start le "row-quote"))))))
+
+;; the capture of KIND that starts LINE and leaves only white space after
+;; it: a line that is one picture, or one run of emphasis
+(define (md--whole-line caps kind line start)
+  (let ((c (morg-markup-find caps kind start (+ start (string-byte-length line)))))
+    (and c (= (cadr c) start) (md--blank-from? line (- (caddr c) start)) c)))
 
 ;; Markdown has no caption syntax of its own. The shape most renderers
 ;; agree on, and the one the page draws as a figure (docs/MARKDOWN.md):
 ;; a picture on a line of its own, and under it a line that is only
 ;; emphasis. The stars step back, the words wear md-caption, and the row
 ;; wears row-caption: the page centres it under the picture.
-(define (md--caption? line prev)
+(define (md--caption? line start caps prev prev-caps)
   (and prev
-       (not (null? (re-find* md--image-line-pattern prev)))
-       (not (null? (re-find* md--caption-line-pattern line)))))
+       (md--whole-line prev-caps "image" (cadr prev) (car prev))
+       (let ((c (md--whole-line caps "emphasis" line start)))
+         (and c (equal? (substring-bytes line 0 1) "*") c))))
 
-(define (md--caption start line len)
-  (let* ((g (re-groups md--caption-line-pattern line 0))
-         (words (nth 1 g)))
-    (list (md--span start 0 (car words) "md-marker")
-          (md--span start (car words) (cadr words) "md-caption")
-          (md--span start (cadr words) len "md-marker")
-          (list start (+ start len) "row-caption"))))
+(define (md--caption start len c)
+  (list (list start (+ (cadr c) 1) "md-marker")
+        (list (+ (cadr c) 1) (- (caddr c) 1) "md-caption")
+        (list (- (caddr c) 1) (+ start len) "md-marker")
+        (list start (+ start len) "row-caption")))
 
 ;;; --- tables ------------------------------------------------------------
 ;;; A table is a head row, a rule row of dashes under it, and the body rows
@@ -276,17 +287,21 @@
 
 ;; the spans for one scan entry; block BODIES are highlighted per block in
 ;; markdown-refontify!, because a multi-line construct needs the whole body.
-;; PREV is the text of the line above, or #f on the first line.
-(define (markdown--line-spans e &optional prev fence-args)
-  (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
-         (len (string-byte-length line))
-         (embed (re-groups md--embed-pattern line 0)))
+;; CAPS are the grammar's captures on the line. PREV is the entry above
+;; and PREV-CAPS its captures, or #f and () on the first line.
+(define (markdown--line-spans e caps prev prev-caps fence-args)
+  ;; one frame: this runs on every line of every edit
+  (let ((start (car e)) (line (car (cdr e))) (k (car (cdr (cdr e))))
+        (len (string-byte-length (car (cdr e))))
+        (embed (re-groups md--embed-pattern (car (cdr e)) 0)))
     (cond
       ((= len 0) '())
-      ((and (equal? k 'text) (md--caption? line prev)) (md--caption start line len))
+      ((and (pair? caps) (pair? prev-caps) (equal? k 'text)
+            (md--caption? line start caps prev prev-caps))
+       (md--caption start len (md--caption? line start caps prev prev-caps)))
       ;; a line that is one picture: the row centres it, as the page does
-      ((not (null? (re-find* md--image-line-pattern line)))
-       (cons (list start (+ start len) "row-picture") (md--images start line)))
+      ((and (pair? caps) (md--whole-line caps "image" line start))
+       (cons (list start (+ start len) "row-picture") (md--inline-spans start line caps)))
       ((equal? k 'heading) (md--heading start line e len))
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment
@@ -313,13 +328,13 @@
       ;; (FN START LINE LEN HEAD?), HEAD? on the first row after the fence
       ((and (equal? k 'code) (fence-kind-get (morg-info e) 'row-spans #f))
        ((fence-kind-get (morg-info e) 'row-spans #f)
-        start line len (and prev (string-prefix? "```" (string-trim prev)) #t)))
+        start line len (and prev (string-prefix? "```" (string-trim (cadr prev))) #t)))
       ((equal? k 'code)
        (cons (list start (+ start len) "row-code")
              (let ((f (fence-kind-line-face (morg-info e) line fence-args)))
                (if f (list (list start (+ start len) f)) '()))))
       ;; a rule: the dashes step back, the row draws the line
-      ((not (null? (re-find* "^(---+|\\*\\*\\*+|___+)[ \t]*$" line)))
+      ((and (pair? caps) (equal? (car (car caps)) "rule") (= (car (cdr (car caps))) start))
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-hr")))
       ;; re-find* answers '() for no match, and '() is true: ask null?
       ((not (null? (re-find* md--x-pattern line)))
@@ -334,40 +349,22 @@
                (list (md--span start (cadr url) len "md-marker")) '()))))
       ((re-match (string-append "^" md--youtube-url-pattern "$") line)
        (list (list start (+ start len) "youtube-embed")))
+      ((null? caps) '())
       (else
        (append
-         (md--block-marker start line)
-         (md--wrapped start line "`[^`\n]+`" 1 1 "morg-code")
-         (md--wrapped start line "\\*\\*[^*\n]+\\*\\*" 2 2 "morg-bold")
-         (md--wrapped start line "\\b_[^_\n]+_\\b" 1 1 "morg-italic")
-         (md--wrapped start line md--emphasis-pattern 1 1 "morg-italic")
-         (md--images start line)
-         (md--links start line))))))
+         (md--block-marker start line len caps)
+         (md--inline-spans start line caps))))))
 
 (define (markdown-refontify! buf)
   (when (buffer-exists? buf)
-    (let* ((scan (morg-scan buf))
-           (text (buffer-text buf))
-           ;; each line sees the line above it: a caption is known by the
-           ;; picture over it
-           ;; each line sees the line above it and the open fence's args,
-           ;; so a caption knows its picture and a body line its block
-           (line-spans
-             (car (fold (lambda (acc e)
-                          (let* ((k (morg-kind e))
-                                 (args (cond ((equal? k 'open)
-                                              (morg-fence-args (cadr e)))
-                                             ((equal? k 'code) (caddr acc))
-                                             (else #f))))
-                            (list (append (car acc)
-                                          (markdown--line-spans
-                                            e (cadr acc)
-                                            (and (equal? k 'code) args)))
-                                  (cadr e)
-                                  args)))
-                        (list '() #f #f) scan)))
+    (let* ((both (morg-scan-markup buf))
+           (scan (car both))
+           ;; each line sees its captures, the entry above it with that
+           ;; entry's captures, and the open fence's args: a caption knows
+           ;; its picture, and a body line its block
+           (line-spans (morg-markup-spans scan (cadr both) markdown--line-spans))
            (table-spans (markdown--table-spans scan))
-           (block-spans (fence-kind-body-spans text (morg-blocks scan buf))))
+           (block-spans (fence-kind-body-spans (buffer-text buf) (morg-blocks scan buf))))
       (overlay-set! buf 'markdown
         (append line-spans table-spans block-spans)))))
 
