@@ -953,10 +953,13 @@
     (buffer-set-local! buf 'peek-own-read-only #f)))
 
 (mode-doc! "peek-mode"
-  "A look at a buffer without keeping it: read-only, in another window. q dismisses it; M-RET on the row opens it as your own.")
+  "Deprecated and no longer turned on. A preview now shows an ordinary
+buffer in an ordinary window: focusable, editable, and yours. The window
+keeps the buffer you were in and your point.")
 
 (define (peek-buffer? name)
-  (and (string? name) (buffer-exists? name) (minor-mode-on? name "peek-mode")))
+  (and (string? name) (buffer-exists? name)
+       (buffer-local name 'preview-opened) #t))
 
 (define (peek-buffers) (filter peek-buffer? (buffer-list)))
 
@@ -1010,8 +1013,11 @@
 
 ;; let NAME go: remember it, kill it. A buffer with a live process is
 ;; never a peek, so nothing here stops one.
+;; A buffer the preview opened goes when it leaves the slot. A buffer with
+;; unsaved changes never goes: the reader entered it and worked in it, so it
+;; stopped being a preview the moment they typed.
 (define (peek-drop! name)
-  (when (peek-buffer? name)
+  (when (and (peek-buffer? name) (not (buffer-modified? name)))
     (peek-remember! name)
     (buffer-kill! name)))
 
@@ -1043,9 +1049,10 @@
     win))
 
 ;; a window the focus commands may land on: not a peek's
-(define (window-focusable? w)
-  (let ((b (window-buffer w)))
-    (not (and b (peek-buffer? b)))))
+;; Peeks are deprecated, so no window refuses the focus. A preview shows
+;; an ordinary buffer in an ordinary window, and Cmd-arrow lands in it
+;; like any other.
+(define (window-focusable? w) (and w #t))
 
 ;; the peek verb. OPEN makes or finds the buffer and returns its name.
 ;; KNOWN is the name it will have, so "did the peek make it" is answered
@@ -1063,7 +1070,12 @@
     (when (and (string? buf) (not (equal? buf here)))
       (unless (equal? (window-buffer me) here)
         (window-preview-buffer! here me))
-      (unless existed? (enable-minor-mode! buf "peek-mode"))
+      ;; Peeks are deprecated. A preview opens an ordinary buffer in an
+      ;; ordinary window: focusable, editable, and yours. All that is kept
+      ;; is the bookkeeping — a buffer the preview itself opened is the
+      ;; preview's to dispose of when it leaves the slot, so a walk down a
+      ;; listing does not leave a buffer per row behind.
+      (unless existed? (buffer-set-local! buf 'preview-opened #t))
       (peek-show! buf))
     buf))
 (domain! 'files)
@@ -1105,23 +1117,24 @@
                             ", too big to look at. RET opens it."))
     #f))
 
-;; a file, peeked: the one opener every listing of files shares
+;; a file, previewed: the one opener every listing of files shares
 (define (peek-file! path)
   (if (peek-too-big? path)
       (peek-say-too-big! path)
       (peek! path (lambda () (visit-quietly path)))))
 
-;; RET twice: the first press peeks KNOWN, the second keeps it and goes
-;; there. Returns 'peek or 'keep.
+;; Peeks are deprecated, so there is no keep step and no second gesture.
+;; This is the C-x 4 door: an ask to open something shows it in the other
+;; window and it is yours from that moment — never a buffer some later
+;; preview may dispose of. The window you are in keeps its buffer and its
+;; point. peek! is the other door, for a listing that shows a row as the
+;; highlight moves; only that one leaves the buffer disposable.
 (define (peek-or-keep! known open)
-  (if (and (string? known) (peek-buffer? known) (window-showing known))
-      (begin
-        (peek-keep! known)
-        (select-window! (window-showing known))
-        'keep)
-      (begin (peek! known open) 'peek)))
+  (let ((buf (peek! known open)))
+    (when (string? buf) (buffer-set-local! buf 'preview-opened #f))
+    'shown))
 
-;; RET on a row: peek KNOWN, or open it when it is the peek on screen
+;; RET on a row: preview KNOWN, or open it when it is the one on screen
 (define (peek-or-open! known open)
   (if (and (string? known) (peek-buffer? known) (window-showing known))
       (peek-open! known open)
@@ -1192,7 +1205,7 @@
 
 (define (peek-keep! name)
   (when (peek-buffer? name)
-    (disable-minor-mode! name "peek-mode")
+    (buffer-set-local! name 'preview-opened #f)
     ;; a kept buffer keeps its window: the look is over
     (when (equal? (peek-shown) name) (preview-end #t))
     (peek-forget-recent! (or (buffer-path name)
