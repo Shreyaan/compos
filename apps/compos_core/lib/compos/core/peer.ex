@@ -13,7 +13,7 @@ defmodule Compos.Core.Peer do
 
   require Logger
 
-  alias Compos.Core.Remote
+  alias Compos.Core.{JsonRpc, Remote}
 
   @connect_timeout 5_000
   @call_timeout 30_000
@@ -26,9 +26,9 @@ defmodule Compos.Core.Peer do
   replicas go away, and the ones still here keep working.
   """
   def eval(peer, code) when is_binary(code) do
-    request = %{jsonrpc: "2.0", id: 1, method: "eval", params: %{code: code}}
+    request = JsonRpc.request(1, "eval", %{code: code})
 
-    with {:ok, line} <- send_line(peer, Jason.encode!(request) <> "\n"),
+    with {:ok, line} <- send_line(peer, IO.iodata_to_binary(JsonRpc.encode(request))),
          {:ok, %{"result" => result}} <- decode(line) do
       {:ok, result}
     else
@@ -44,7 +44,10 @@ defmodule Compos.Core.Peer do
   end
 
   defp send_local(path, line) do
-    case :gen_tcp.connect({:local, path}, 0, [:binary, active: false, packet: :line],
+    case :gen_tcp.connect(
+           {:local, path},
+           0,
+           [:binary, active: false, packet: :line],
            @connect_timeout
          ) do
       {:ok, sock} ->

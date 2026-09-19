@@ -34,7 +34,7 @@ defmodule Compos.Core.MCP.Conn do
   use GenServer, restart: :temporary
   require Logger
 
-  alias Compos.Core.{MCP, Session}
+  alias Compos.Core.{JsonRpc, MCP, Session}
 
   @protocol "2025-06-18"
   @call_timeout 120_000
@@ -176,8 +176,8 @@ defmodule Compos.Core.MCP.Conn do
 
   @impl true
   def handle_info({port, {:data, chunk}}, %{transport: {:stdio, port}} = state) do
-    {lines, buf} = Compos.Core.JsonRpc.split_lines(state.buf <> chunk)
-    state = Enum.reduce(lines, %{state | buf: buf}, &handle_line/2)
+    {frames, buf} = JsonRpc.decode_lines(state.buf <> chunk)
+    state = Enum.reduce(frames, %{state | buf: buf}, &handle_message/2)
     {:noreply, state}
   end
 
@@ -258,13 +258,6 @@ defmodule Compos.Core.MCP.Conn do
     }
   end
 
-  defp handle_line(line, state) do
-    case Jason.decode(line) do
-      {:ok, msg} -> handle_message(msg, state)
-      _ -> state
-    end
-  end
-
   # every frame is logged before it is acted on, so the hub's log reads as
   # the conversation actually happened
   defp handle_message(msg, state), do: dispatch(msg, log(state, :in, msg))
@@ -320,7 +313,7 @@ defmodule Compos.Core.MCP.Conn do
 
   # server-initiated: answer pings, ignore the rest (logging/progress)
   defp dispatch(%{"method" => "ping", "id" => id}, state),
-    do: send_msg(state, %{jsonrpc: "2.0", id: id, result: %{}})
+    do: send_msg(state, JsonRpc.response(id, %{}))
 
   defp dispatch(_msg, state), do: state
 
@@ -352,25 +345,24 @@ defmodule Compos.Core.MCP.Conn do
 
   defp send_req(state, method, params, tag) do
     id = state.next_id
-    msg = %{jsonrpc: "2.0", id: id, method: method, params: params}
 
     %{state | next_id: id + 1, pending: Map.put(state.pending, id, tag)}
-    |> send_msg(msg)
+    |> send_msg(JsonRpc.request(id, method, params))
   end
 
   defp send_notification(state, method, params),
-    do: send_msg(state, %{jsonrpc: "2.0", method: method, params: params})
+    do: send_msg(state, JsonRpc.notification(method, params))
 
   defp send_msg(state, msg), do: state |> log(:out, msg) |> transmit(msg)
 
   defp transmit(%{transport: {:stdio, port}} = state, msg) do
-    Port.command(port, Jason.encode!(msg) <> "\n")
+    Port.command(port, JsonRpc.encode(msg))
     state
   end
 
   defp transmit(%{transport: {:http, url, headers, session_id}} = state, msg) do
     me = self()
-    id = msg[:id]
+    id = msg["id"]
 
     headers =
       if session_id, do: [{"mcp-session-id", session_id} | headers], else: headers

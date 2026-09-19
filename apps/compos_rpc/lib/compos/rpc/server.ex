@@ -23,7 +23,7 @@ defmodule Compos.Rpc.Server do
 
   require Logger
 
-  alias Compos.Core.Session
+  alias Compos.Core.{JsonRpc, Session}
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -69,7 +69,7 @@ defmodule Compos.Rpc.Server do
   defp serve(sock) do
     case :gen_tcp.recv(sock, 0) do
       {:ok, line} ->
-        :gen_tcp.send(sock, [handle_line(line), "\n"])
+        :gen_tcp.send(sock, handle_line(line))
         serve(sock)
 
       {:error, _} ->
@@ -80,8 +80,8 @@ defmodule Compos.Rpc.Server do
   @doc false
   def handle_line(line) do
     case Jason.decode(line) do
-      {:ok, req} -> req |> handle_request() |> Jason.encode!()
-      {:error, _} -> Jason.encode!(error_resp(nil, -32700, "parse error"))
+      {:ok, req} -> req |> handle_request() |> JsonRpc.encode()
+      {:error, _} -> JsonRpc.encode(JsonRpc.error(nil, -32700, "parse error"))
     end
   end
 
@@ -92,14 +92,14 @@ defmodule Compos.Rpc.Server do
   defp handle_request(%{"method" => "eval", "params" => %{"code" => code}} = req) do
     case Session.eval(code, nil, 600_000, {:rpc, self()}) do
       {:ok, printed} ->
-        %{jsonrpc: "2.0", id: req["id"], result: printed}
+        JsonRpc.response(req["id"], printed)
 
       {:error, msg} ->
         # the same did-you-mean the eval-scheme tool gets. A raw socket
         # client used to receive "unbound variable: buffer-insert" and
         # nothing else, while the tool path handed back the nearest real
         # names with their signatures.
-        error_resp(req["id"], -32000, suggest(msg))
+        JsonRpc.error(req["id"], -32000, suggest(msg))
     end
   end
 
@@ -110,10 +110,10 @@ defmodule Compos.Rpc.Server do
   defp handle_request(%{"method" => "initialize"} = req) do
     case Session.eval("(hello)") do
       {:ok, printed} ->
-        %{jsonrpc: "2.0", id: req["id"], result: %{primer: unquote_printed(printed)}}
+        JsonRpc.response(req["id"], %{primer: unquote_printed(printed)})
 
       {:error, msg} ->
-        error_resp(req["id"], -32000, msg)
+        JsonRpc.error(req["id"], -32000, msg)
     end
   end
 
@@ -121,14 +121,10 @@ defmodule Compos.Rpc.Server do
        when is_list(paths) do
     case Session.reload_files(paths) do
       {:ok, %{files: count, forms: forms}} ->
-        %{
-          jsonrpc: "2.0",
-          id: req["id"],
-          result: %{"reloaded" => count, "forms" => forms}
-        }
+        JsonRpc.response(req["id"], %{"reloaded" => count, "forms" => forms})
 
       {:error, msg} ->
-        error_resp(req["id"], -32000, msg)
+        JsonRpc.error(req["id"], -32000, msg)
     end
   end
 
@@ -140,15 +136,15 @@ defmodule Compos.Rpc.Server do
           System.stop(0)
         end)
 
-        %{jsonrpc: "2.0", id: req["id"], result: "stopping"}
+        JsonRpc.response(req["id"], "stopping")
 
       :error ->
-        error_resp(req["id"], -32000, "desktop save failed; refusing to stop")
+        JsonRpc.error(req["id"], -32000, "desktop save failed; refusing to stop")
     end
   end
 
   defp handle_request(%{"method" => "ping"} = req),
-    do: %{jsonrpc: "2.0", id: req["id"], result: "pong"}
+    do: JsonRpc.response(req["id"], "pong")
 
   # `ask` is intentionally not an eval. The connection task can wait for the
   # user while the Scheme Session remains free to process keys and redraws.
@@ -166,15 +162,12 @@ defmodule Compos.Rpc.Server do
       end
 
     case Compos.Core.Agent.ask_user(slug, question, answers) do
-      {:ok, answer} -> %{jsonrpc: "2.0", id: req["id"], result: answer}
-      {:error, reason} -> error_resp(req["id"], -32000, "ask failed: #{inspect(reason)}")
+      {:ok, answer} -> JsonRpc.response(req["id"], answer)
+      {:error, reason} -> JsonRpc.error(req["id"], -32000, "ask failed: #{inspect(reason)}")
     end
   end
 
-  defp handle_request(req), do: error_resp(req["id"], -32601, "method not found")
-
-  defp error_resp(id, code, message),
-    do: %{jsonrpc: "2.0", id: id, error: %{code: code, message: message}}
+  defp handle_request(req), do: JsonRpc.error(req["id"], -32601, "method not found")
 
   # eval returns a PRINTED value, so a string comes back quoted
   defp unquote_printed(<<?", _::binary>> = printed) do

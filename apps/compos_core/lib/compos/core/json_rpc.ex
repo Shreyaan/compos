@@ -1,8 +1,9 @@
 defmodule Compos.Core.JsonRpc do
   @moduledoc """
-  Line-framed JSON-RPC over a byte stream, the way ACP, the Codex app
-  server and an MCP server over stdio speak it. This module holds the
-  framing and the envelopes. Each speaker keeps its own vocabulary and
+  JSON-RPC over a byte stream: lines for ACP, the Codex app server, an
+  MCP server over stdio, the compos socket and a peer daemon, and
+  Content-Length frames for LSP. This module holds the framing and the
+  envelopes. Each speaker keeps its own vocabulary and
   the ids it has in flight.
   """
 
