@@ -2166,9 +2166,9 @@
   (lambda () (run-command "llm-configure")))
 
 ;;; --- rich chat transcript (the agent thread design) ---------------------------
-;;; A companion chat maintains the exact locals the native agent renderer
-;;; reads — render-mode "agent", 'agent-blocks byte ranges, 'agent-saved-mark
-;;; — so it inherits the serif prose, user cards, and tool cards wholesale.
+;;; A companion chat maintains the locals the chat view reads (render-mode
+;;; "blocks", 'agent-blocks byte ranges, 'agent-saved-mark), so
+;;; chat-view-sync! draws its prose, user cards and tool cards as any chat.
 ;;; No runtime behind it: the mark lives in 'agent-saved-mark, the
 ;;; conversation in 'chat-wire-turns.
 ;;; Buffer layout: [help][transcript … mark][input].
