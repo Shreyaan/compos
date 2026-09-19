@@ -996,6 +996,59 @@ defmodule Compos.AgentTest do
     refute_receive {:frame, %{"method" => "session/prompt"}}, 100
   end
 
+  test "a turn whose end already arrived refuses a steer" do
+    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => iid,
+      "result" => %{
+        "protocolVersion" => 1,
+        "_meta" => %{"steering" => %{"supported" => true}}
+      }
+    })
+
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-e"}})
+
+    slug = "a1"
+    buf = "*chat:a1*"
+    assert eventually(fn -> Agent.info(slug).steering end)
+    focus(buf)
+
+    type("start")
+    press(["RET"])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
+
+    type("first")
+    press(["RET"])
+    press(["RET"])
+    assert_receive {:frame, %{"method" => "_session/steering", "id" => _steer_id}}, 1_000
+
+    # the backend never answers the steering rpc, so the turn's end parks
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => prompt_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert eventually(fn -> Agent.info(slug).ending end)
+    assert Agent.info(slug).steers == 1
+
+    # a second message must not steer into a turn the backend has finished:
+    # an accepted steer would show it as sent and nothing would answer it
+    type("second")
+    press(["RET"])
+    assert eventually(fn -> Agent.info(slug).queued >= 2 end)
+    assert Agent.steer_next(slug) == {:error, :turn_ending}
+
+    # the settle timeout puts the unresolved steer back, the turn closes,
+    # and the queued messages run as their own turns
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 4_000
+  end
+
   test "Claude ACP completion waits for out-of-order steering fallbacks and preserves FIFO" do
     {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
     assert_receive {:transport_open, agent}, 1_000
@@ -2047,6 +2100,48 @@ defmodule Compos.AgentTest do
 
     assert Buffer.get_local(buf, "agent-open-cards") == []
     refute Buffer.text(buf) =~ "⋯ thinking"
+  end
+
+  test "a cancel the adapter never answers still ends the turn" do
+    {_, _, agent} = boot("")
+    # boot/1 still spells the slug the old way; ask the runtime for it
+    [slug] = Agent.list()
+    buf = Agent.info(slug).buffer
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+    assert eventually(fn -> Buffer.get_local(buf, "chat-turn-active") == true end)
+
+    # session/cancel is a notification. A wedged adapter can take it and
+    # never resolve the prompt, and this side must not wait for it: a turn
+    # that stays :running forever says "streaming" at a model that stopped.
+    :ok = Agent.cancel(slug)
+    assert_receive {:frame, %{"method" => "session/cancel"}}, 1_000
+
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+    assert eventually(fn -> Buffer.get_local(buf, "chat-turn-active") == false end)
+
+    # the adapter answers at last. That reply belongs to a turn this side
+    # already ended, so it is swallowed once and ends nothing.
+    inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "cancelled"}})
+
+    # a chunk behind it: seeing this text proves the agent already handled
+    # the stale reply, so the next prompt cannot race it
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "agent_message_chunk",
+      "content" => %{"type" => "text", "text" => "late reply"}
+    })
+
+    assert eventually(fn -> Buffer.text(buf) =~ "late reply" end)
+
+    # the next turn runs, and the swallowed reply did not close it
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "again")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid2}}, 1_000
+    assert eventually(fn -> Buffer.get_local(buf, "chat-turn-active") == true end)
+    assert match?(%{status: :running}, Agent.info(slug))
+
+    inject(agent, %{"jsonrpc" => "2.0", "id" => pid2, "result" => %{"stopReason" => "end_turn"}})
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
   end
 
   test "*agents* fleet: sorted by attention, y answers the current line's thread" do

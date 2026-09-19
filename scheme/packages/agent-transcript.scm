@@ -923,6 +923,30 @@
 
 (effects! '(write))
 
+;; The activity label is the last event's word. agent-status is what is true
+;; NOW. A label standing over an idle runtime is a turn-end that never
+;; arrived, and the row must not go on advertising work nobody is doing. So
+;; the row reads both, and the runtime wins: no lost event can leave the
+;; chat saying "streaming" at a model that stopped.
+;; Only a runtime that is working, or about to, may caption itself. Naming
+;; those three is safer than excluding idle: a DEAD runtime is not working
+;; either, and excluding one status let "streaming" stand over a backend that
+;; had exited. #f is a chat whose runtime has not started yet -- it owns its
+;; label, because nothing else knows about it.
+(define *chat-activity-statuses* '(running needs_attention starting))
+
+;; the decision alone: one label, one status, no buffer and no runtime
+(define (chat-activity-shown label status)
+  (and (string? label)
+       (or (not status) (member status *chat-activity-statuses*))
+       label))
+
+(define (chat-activity-live buf)
+  (chat-activity-shown
+    (buffer-local buf 'chat-activity)
+    (let ((slug (buffer-local buf 'agent-slug)))
+      (and (string? slug) (agent-status slug)))))
+
 ;; Write BUF's block tree when its model changed. Cheap when it did not:
 ;; one comparison of the model with the one the last build read.
 (define (chat-view-sync! buf)
@@ -931,7 +955,7 @@
            (open (agent-open-cards buf))
            (verbosity (or (buffer-local buf 'agent-verbosity) "info"))
            (queued (or (buffer-local buf 'chat-queued) '()))
-           (activity (buffer-local buf 'chat-activity))
+           (activity (chat-activity-live buf))
            (sig (list raw open verbosity queued activity))
            (m (chat-view--memo buf)))
       (unless (and m (equal? (nth 3 m) sig)

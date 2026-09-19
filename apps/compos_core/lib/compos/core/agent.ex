@@ -230,6 +230,9 @@ defmodule Compos.Core.Agent do
        steering_fallbacks: [],
        pending_turn_end: nil,
        steering_settle_timer: nil,
+       # how many terminal backend events belong to turns this side has
+       # already ended (see the cancel above): each one is swallowed once
+       stale_turn_ends: 0,
        next_steer_id: 1,
        steering: steering,
        pending_permission: nil,
@@ -286,6 +289,15 @@ defmodule Compos.Core.Agent do
   end
 
   def handle_call(:take_steering, _from, state), do: {:reply, [], state}
+
+  # A turn whose end already arrived takes no steer. The backend is finished
+  # with it, so an accepted steer lands a user message in a closed turn: the
+  # transcript shows it as sent and nothing ever answers it. The message
+  # stays in the queue, and finish_turn's pop_prompt_queue sends it as its
+  # own turn.
+  def handle_call(:steer_next, _from, %{pending_turn_end: event} = state)
+      when not is_nil(event),
+      do: {:reply, {:error, :turn_ending}, state}
 
   def handle_call(:steer_next, _from, state) do
     case {state.status, state.steering, state.prompt_queue} do
@@ -368,8 +380,19 @@ defmodule Compos.Core.Agent do
           |> set_status(:idle)
 
         state.status in [:running, :needs_attention] ->
+          # Tell the backend, then end the turn HERE. A cancel that only
+          # asks is a cancel a wedged adapter can ignore -- ACP's
+          # session/cancel is a notification with no reply, so a turn whose
+          # prompt reply never comes would stay :running for good and the
+          # chat would say "streaming" at a model that stopped, with every
+          # later message queued behind it. The user said stop: the turn is
+          # over on this side now, whatever the wire does later.
           state.backend.cancel(state.handle)
-          state
+
+          finish_turn(
+            %{state | stale_turn_ends: state.stale_turn_ends + 1},
+            Backend.plist(type: :"turn-end", "stop-reason": "cancelled")
+          )
 
         true ->
           state
@@ -516,6 +539,11 @@ defmodule Compos.Core.Agent do
          length(state.prompt_queue) + length(state.steering_queue) +
            map_size(state.pending_steers) + length(state.steering_fallbacks),
        steering: state.steering != :none,
+       # the turn the backend already ended, still held open behind an
+       # unresolved steer. Every stall in this area lived in this field and
+       # nothing reported it.
+       ending: not is_nil(state.pending_turn_end),
+       steers: length(state.pending_steer_order),
        permission:
          case state.pending_permission do
            %{rpc_id: id, title: title, options: opts} ->
@@ -741,6 +769,13 @@ defmodule Compos.Core.Agent do
   # goes idle while the chat keeps its active flag and waiting presentation.
   defp apply_backend_event(state, event) do
     case Backend.event_type(event) do
+      # the terminal event of a turn this side already ended -- a backend
+      # that answered our cancel after we stopped waiting for it. Ending
+      # again would run every turn-end listener twice, and could close a
+      # turn that is not the one it belongs to.
+      t when t in ["turn-end", "turn-failed"] and state.stale_turn_ends > 0 ->
+        %{state | stale_turn_ends: state.stale_turn_ends - 1}
+
       "steering-ready" ->
         %{state | steering: :push}
 
@@ -941,6 +976,9 @@ defmodule Compos.Core.Agent do
       # event carries the DISPLAY text: what the user typed, not the seed
       # context wrapped around it on the wire.
       |> enqueue(Backend.plist(type: :"user-msg", text: display || text))
+      # a backend that never answered the last cancel never will: drop the
+      # debt here, or the swallow would eat THIS turn's end instead
+      |> Map.put(:stale_turn_ends, 0)
       |> Map.put(:status, :running)
       |> emit_status(:running)
 

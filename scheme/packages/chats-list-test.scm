@@ -99,6 +99,24 @@
     (check-equal! (chats-age-label (chats-activity-at "*zz-chats-stamped*")) "now" "just stamped")
     (check-equal! (chats-age-label (chats-activity-at "*zz-chats-never*")) "" "never stamped")))
 
+(deftest 'the-state-change-draws-the-list
+  "the row's state is read at draw time, so a change has to draw it once"
+  (lambda ()
+    ;; the first sight of a slug is a change: nothing drew it before
+    (set! *agents-state-last* '())
+    (check-true! (agents-state-moved? "zz-no-such-agent")
+                 "an unseen chat has moved")
+    (check-false! (agents-state-moved? "zz-no-such-agent")
+                  "the same state again is not a change")
+    (check-equal! (alist-get *agents-state-last* "zz-no-such-agent") 'dead
+                  "the state it settled on is kept")
+    ;; a state the list has not drawn yet moves again
+    (set! *agents-state-last*
+          (alist-put *agents-state-last* "zz-no-such-agent" 'running))
+    (check-true! (agents-state-moved? "zz-no-such-agent")
+                 "streaming to stopped is a change")
+    (set! *agents-state-last* '())))
+
 (deftest 'the-chat-list-is-one-application
   "*chat-list* wears the chat list mode built from the ibuffer template, over the chat scope"
   (lambda ()

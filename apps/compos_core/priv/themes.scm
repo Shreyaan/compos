@@ -1127,6 +1127,16 @@
 (defface! 'agent-tool 'inherit 'accent)
 (defface! 'agent-permission 'inherit 'warn)
 
+;; The transcript's three grounds. The stylesheet reads them by variable,
+;; and no theme named them, so every theme wore the light-theme literals
+;; in editor.css: a blue wash on the card you typed in, and two washes of
+;; black on a dark pane. Each one is now a step from the pane the theme
+;; itself supplies, so a dark theme gets a dark step. A theme that wants
+;; to say something else names the face.
+(defface! 'agent-you 'bg "color-mix(in srgb, var(--accent-fg) 12%, var(--window-bg))")
+(defface! 'agent-code 'bg "color-mix(in srgb, var(--default-bg) 62%, var(--window-bg))")
+(defface! 'agent-card 'border "var(--border-soft-bg)")
+
 ;; the prompt previews: the theme under the highlight goes on screen as
 ;; you move, a rest at a time; RET keeps it and writes it, C-g puts the
 ;; theme you had back

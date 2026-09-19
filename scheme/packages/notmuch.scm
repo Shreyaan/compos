@@ -1323,6 +1323,24 @@ when a message has no text/plain part." 'group 'notmuch)
     "reply-due" "The most recent message in this thread, by its Date header, comes from somebody other than this reader, and it waits on an answer from them: a question, a request, a reminder, or a decision that is theirs to make. Is that true of this thread? It is not true when this reader sent the most recent message, when the matter is already settled, and when the mail is a bulk mailing, a notification, a receipt, or comes from an address that takes no reply.")
   "Yes/no tags notmuch-autotag asks about one at a time, as tag then question.")
 
+;; How the mail reached the reader, asked apart from what it is about. The two
+;; axes are independent: one bank sends this reader a card alert made for them
+;; alone and a rate circular sent to every customer, and both are "banking".
+;; The tells live in the headers, which is why autotag sends those too.
+(defcustom 'notmuch-autotag-kinds
+  '("transactional" "This message was made for this reader alone and would not exist without them: something they did, bought, owe, hold, or booked set it off. Their own address stands in To, the text names their account, card, order, booking, ticket, or case, and nobody else got this same message. A card or account alert, an order or payment confirmation, a password reset, a bill for this account, a delivery notice, and a reply in a conversation are all transactional."
+    "broadcast" "This message went out unchanged to many readers at once. The headers say so before the words do: a List-Id, a List-Unsubscribe, a List-Post, a Precedence of bulk or list, an Auto-Submitted, a campaign or feedback id, a From nobody answers, or a To that is a list address, undisclosed-recipients, or not this reader at all. A newsletter, a promotion, an announcement, a product update, a policy notice, and a circular a bank sends all its customers are all broadcast, however warmly they greet the reader by name.")
+  "The one-of delivery kinds notmuch-autotag picks between, as tag then criterion.")
+
+(define nm--autotag-kind-instructions
+  (string-append
+    "Decide how this thread reached the reader. The raw headers stand above "
+    "the body: who the envelope names, and which list, bulk, or campaign "
+    "headers are present, settle this, not the tone of the writing and not "
+    "the subject of it. A greeting by name proves nothing, because a bulk "
+    "mailing fills the name in. Pick none when the headers and the body do "
+    "not settle it."))
+
 (defcustom 'notmuch-autotag-threshold 0.75
   "How sure JEV must be before notmuch-autotag applies a yes/no tag.")
 
@@ -1336,13 +1354,17 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--autotag-flag-tags)
   (nm--autotag-pair-tags notmuch-autotag-flags))
 
+(define (nm--autotag-kind-tags)
+  (nm--autotag-pair-tags notmuch-autotag-kinds))
+
 
 (define (nm--autotag-vocabulary)
-  ;; A flag tag is never a subject option: it has its own yes/no question, and
-  ;; offering it twice would make the one subject pick fight with the flag.
-  (let ((flags (nm--autotag-flag-tags)))
+  ;; Neither a flag tag nor a kind tag is ever a subject option: each has its
+  ;; own question, and offering one twice would make the subject pick fight
+  ;; with the answer that already covers it.
+  (let ((own (append (nm--autotag-flag-tags) (nm--autotag-kind-tags))))
     (filter (lambda (t) (and (not (member t notmuch-autotag-exclude))
-                             (not (member t flags))))
+                             (not (member t own))))
             (nm--all-tags))))
 
 (define (nm--thread-tags id)
@@ -1360,9 +1382,10 @@ when a message has no text/plain part." 'group 'notmuch)
 (define nm--autotag-instructions
   (string-append
     "Pick the one tag that says what this email thread is about. "
-    "Read the sender before the wording: who sent it decides more than how it "
-    "reads, so decide what kind of organisation sent this before you weigh a "
-    "single word in it. A tag fits only when it is true of the whole thread, "
+    "The raw headers stand above the body. Read the sender before the "
+    "wording: who sent it decides more than how it reads, so decide what "
+    "kind of organisation sent this before you weigh a single word in it. "
+    "A tag fits only when it is true of the whole thread, "
     "not of one sentence in it. Pick none when no tag on the list tells the "
     "truth."))
 (define (nm--autotag-hint tag)
@@ -1415,13 +1438,32 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--autotag-flag-key i)
   (string->symbol (string-append "f" (number->string i))))
 
+(define (nm--autotag-kind-option i)
+  (string->symbol (string-append "k" (number->string i))))
+
+(define (nm--autotag-kind-criteria)
+  (let loop ((xs notmuch-autotag-kinds) (i 0) (out '()))
+    (if (or (null? xs) (null? (cdr xs)))
+        (append out (list 'none "Neither kind is true of this thread."))
+        (loop (cdr (cdr xs)) (+ i 1)
+              (append out (list (nm--autotag-kind-option i)
+                                (string-append (car xs) " - " (car (cdr xs)))))))))
+
+(define (nm--autotag-kind-of chosen)
+  (let loop ((xs (nm--autotag-kind-tags)) (i 0))
+    (cond ((null? xs) #f)
+          ((equal? chosen (symbol->string (nm--autotag-kind-option i))) (car xs))
+          (else (loop (cdr xs) (+ i 1))))))
+
 (define (nm--autotag-questions vocab)
-  ;; One choice for the subject, then one yes/no per flag. The keys are t0, f0,
-  ;; ... for the same reason throughout: a tag is free text and an option key
-  ;; has to survive as a symbol.
+  ;; One choice for the subject, one for how it was delivered, then one yes/no
+  ;; per flag. The keys are t0, k0, f0, ... for the same reason throughout: a
+  ;; tag is free text and an option key has to survive as a symbol.
   (let loop ((xs notmuch-autotag-flags) (i 0)
              (out (list 'tag (jev-choice nm--autotag-instructions
-                                         (nm--autotag-criteria vocab)))))
+                                         (nm--autotag-criteria vocab))
+                        'kind (jev-choice nm--autotag-kind-instructions
+                                          (nm--autotag-kind-criteria)))))
     (if (or (null? xs) (null? (cdr xs)))
         out
         (loop (cdr (cdr xs)) (+ i 1)
@@ -1467,17 +1509,74 @@ when a message has no text/plain part." 'group 'notmuch)
                  " -- thread:" id)))
     ops))
 
+;; notmuch's json carries only From/To/Cc/Subject/Date, and the delivery axis
+;; lives in the headers it leaves out. These are the ones that say who a
+;; message was written for. They go raw and undecoded, folded lines kept.
+(define notmuch-autotag-headers
+  '("from" "sender" "to" "cc" "reply-to" "return-path" "delivered-to"
+    "envelope-to" "subject" "date" "list-id" "list-unsubscribe" "list-post"
+    "precedence" "auto-submitted" "x-mailer" "x-campaign-id" "feedback-id"))
+
+;; How many of a thread's messages send their headers. The first few settle
+;; the kind; a long thread would spend the whole budget on repeats.
+(define notmuch-autotag-header-messages 3)
+
+(define nm--autotag-my-addresses #f)
+
+(define (nm--autotag-addresses)
+  ;; One notmuch config read per session: the reader's own addresses, so the
+  ;; model can see whether the envelope names them or somebody else.
+  (unless nm--autotag-my-addresses
+    (set! nm--autotag-my-addresses
+          (filter (lambda (s) (not (equal? s "")))
+                  (map string-trim
+                       (append (string-split (nm--run "config get user.primary_email") "\n")
+                               (string-split (nm--run "config get user.other_email") "\n"))))))
+  nm--autotag-my-addresses)
+
+(define (nm--autotag-header-text msg-id)
+  (let ((prog (string-append
+                "/^$/{exit} /^[ \\t]/{if(p)print;next} "
+                "{p=(tolower($0) ~ /^(" (string-join notmuch-autotag-headers "|")
+                "):/); if(p)print}")))
+    (string-trim
+      (nm--run (string-append
+                 "show --format=raw -- " (sh-quote (string-append "id:" msg-id))
+                 " | awk " (sh-quote prog))))))
+
+(define (nm--autotag-header-block id)
+  (let* ((all (nm--show-msgs id))
+         (msgs (if (> (length all) notmuch-autotag-header-messages)
+                   (list-head all notmuch-autotag-header-messages)
+                   all)))
+    (string-append
+      "This reader's own addresses: "
+      (string-join (nm--autotag-addresses) ", ") "\n\n"
+      "Raw headers, as delivered:\n"
+      (string-join (map (lambda (m) (nm--autotag-header-text (plist-get m 'id))) msgs)
+                   "\n\n"))))
+
+(define (nm--autotag-input id)
+  ;; Headers first and whole: the body is cut at the limit, the evidence for
+  ;; who this was written for never is.
+  (string-append (nm--autotag-header-block id)
+                 "\n\nThread:\n"
+                 (nm--trunc (mail-read-thread id) notmuch-autotag-limit)))
+
 (define (nm--autotag-one! id vocab k)
   ;; K gets the signed ops this thread actually took, so the caller reports a
   ;; real change and never a blind \"done\".
-  (jev-ask (nm--trunc (mail-read-thread id) notmuch-autotag-limit)
+  (jev-ask (nm--autotag-input id)
            (nm--autotag-questions vocab)
     (lambda (reply)
       (if (not reply)
           (k '())
           (let* ((chosen (jev-answer-choice reply 'tag))
                  (tag (and chosen (nm--autotag-tag-of vocab chosen)))
+                 (picked (jev-answer-choice reply 'kind))
+                 (kind (and picked (nm--autotag-kind-of picked)))
                  (want (append (if tag (list tag) '())
+                               (if kind (list kind) '())
                                (nm--autotag-flags-said-yes reply))))
             (k (nm--autotag-apply! id want)))))))
 

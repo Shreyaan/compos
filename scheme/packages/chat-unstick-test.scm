@@ -46,6 +46,18 @@
                     "no live runtime means not stale — recovery re-attaches instead")
       (buffer-kill! buf))))
 
+(deftest 'the-sweep-drops-a-turn-no-runtime-is-running
+  "no runtime, no turn: a restored chat never waits on a process that is gone"
+  (lambda ()
+    (let ((buf (t--us-chat! #t)))
+      (check-false! (chat-live-runtime? buf) "nothing is running this turn")
+      (chat-sweep-runtime-locals! buf)
+      (check-false! (buffer-local buf 'chat-turn-active)
+                    "the turn flag is down: no status event can ever arrive")
+      (check-false! (buffer-local buf 'chat-activity)
+                    "and the activity row goes with it")
+      (buffer-kill! buf))))
+
 (deftest 'chat-unstick-clears-a-hung-turn
   "the command is the manual door for the same repair"
   (lambda ()

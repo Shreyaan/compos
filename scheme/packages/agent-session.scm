@@ -364,7 +364,12 @@
                          ;; A blank RET commits the oldest queued message as
                          ;; steering. Non-empty RET only adds to the queue.
                          (let ((info (agent-info slug)))
+                           ;; 'ending says the backend already finished this
+                           ;; turn and only an unresolved steer holds it open.
+                           ;; A steer into it is never answered, so the
+                           ;; message waits and runs as its own turn.
                            (if (and (plist-get info 'steering)
+                                    (not (plist-get info 'ending))
                                     (> (plist-get info 'queued) 0)
                                     (member (plist-get info 'status)
                                             (list 'running 'needs_attention)))
@@ -381,17 +386,20 @@
                            (let ((result (agent-send-msg! slug input)))
                              (if (equal? result 'queued)
                                  ;; mid-turn: the message moves up into the
-                                 ;; transcript at once, muted, and the input clears
-                                 ;; for the next one. Blank RET can explicitly steer
-                                 ;; the oldest row; otherwise it runs after this turn.
+                                 ;; transcript at once, muted, and the input
+                                 ;; clears for the next one. ONE RET is the
+                                 ;; whole send. The turn ends, finish_turn
+                                 ;; pops the queue, and the message runs in
+                                 ;; order. Nothing asks for a second key: a
+                                 ;; message you must send twice reads as a
+                                 ;; message that did not go. Blank RET still
+                                 ;; steers the oldest row into the turn that
+                                 ;; is running, for when waiting is wrong.
                                  (begin
                                    (agent-echo-queued! slug input)
                                    (chat-clear-input! buf)
                                    (end-of-buffer!)
-                                   (message
-                                     (if (plist-get (agent-info slug) 'steering)
-                                         "queued — press RET again to steer"
-                                         "queued — runs when this turn ends")))
+                                   (message "queued — runs when this turn ends"))
                                  (begin
                                    (chat-clear-input! buf)
                                    (end-of-buffer!)

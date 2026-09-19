@@ -29,7 +29,7 @@
 ;; A group chat wears chat-mode only after it is created, so its name has to
 ;; answer for it: the config has to reach the buffer before that.
 (define (group-config-chat? buf)
-  (or (chat-buffer? buf) (string-prefix? "*chat" buf)))
+  (or (chat-buffer? buf) (string-prefix? "*chat:" buf)))
 
 ;; the group whose config this buffer has already run, or #f. It is one of
 ;; chat-identity-locals, so a chat still knows after a restart.

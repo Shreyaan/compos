@@ -3684,6 +3684,18 @@
               (goto-char! (line-start-position n))
               (message "Not a number")))))))
 
+(define (buffer-goto-line! buf line)
+  "Move BUF's point to the start of LINE without selecting or displaying BUF."
+  (let ((n (if (number? line) line (string->number line))))
+    (if (and (buffer-known? buf) (number? n) (>= n 1))
+        (with-current-buffer buf
+          (lambda () (goto-char! (line-start-position n))))
+        #f)))
+
+(public! 'buffer-goto-line!
+  "(buffer-goto-line! BUF LINE) — move a named buffer's point to LINE without changing focus or windows")
+(catalog-meta! 'function "buffer-goto-line!" 'domain 'editing 'effects '(write))
+
 ;;; imenu lives in packages/code.scm now, on the outline contract: the
 ;;; index is (code-outline BUF), so it needs no per-language query table.
 
@@ -5181,10 +5193,14 @@
 (domain! 'unknown)
 (effects! '(unknown))
 
+;; One form, run and forgotten, is still a form you ran: M-p in this prompt
+;; walks it back. The ring is 'scheme-eval, which the *scheme* buffer walks
+;; too (repl.scm), so the two surfaces have one past between them.
 (define-command "eval-expression" "Evaluate a Scheme expression from the minibuffer"
   (lambda ()
-    (minibuffer-read "Eval: " '()
-      (lambda (src) (message (value->string (eval-string src)))))))
+    (completing-read "Eval: " '()
+      (lambda (src) (message (value->string (eval-string src))))
+      'history 'scheme-eval)))
 
 ;;; --- live eval: the editor is its own REPL -----------------------------------
 
@@ -5395,16 +5411,23 @@
 (domain! 'unknown)
 (effects! '(unknown))
 
-(define-command "keyboard-quit" "Quit the current operation; close the active popup or the dashboard, or clear the mark"
+(define-command "keyboard-quit" "Quit the current operation: cancel the prompt, close the active popup or the dashboard, or clear the mark"
   (lambda ()
     (editing-quit!)
     (set-mark! #f)
-    (if (and (popup-open?) (equal? (active-window) (popup-window)))
-        (popup-close!)
-        ;; C-g closes the dashboard panel too, so the key that opened it
-        ;; is not the only key that puts it away
-        (begin (dashboard-panel-close! (current-buffer))
-               (message "Quit")))))
+    (cond
+      ;; A prompt IS the current operation, and a modal prompt is the
+      ;; whole screen. Escape runs this command, so a reader who answers
+      ;; a dialog with the key every dialog answers to had the prompt
+      ;; stay put: only C-g reached minibuffer-cancel. Quit the prompt
+      ;; first, and both keys say the same thing.
+      ((minibuffer-active?) (minibuffer-cancel!))
+      ((and (popup-open?) (equal? (active-window) (popup-window)))
+       (popup-close!))
+      ;; C-g closes the dashboard panel too, so the key that opened it
+      ;; is not the only key that puts it away
+      (else (dashboard-panel-close! (current-buffer))
+            (message "Quit")))))
 (catalog-meta! 'command "keyboard-quit" 'domain 'interaction 'effects '(write))
 
 ;;; --- the movement state and the editing state ------------------------------

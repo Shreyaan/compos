@@ -7,13 +7,21 @@
   /* Each stack is the fallback of a face variable, so the
      'mono, 'sans and 'serif faces choose the font from Scheme
      (appearance.scm: mono-font-family and friends). A face that
-     names no family leaves the stack below. */
-  --font-mono: var(--mono-family,
-               'IBM Plex Mono', 'Symbols Nerd Font Mono',
-               'JetBrainsMonoNL Nerd Font Mono', 'JetBrainsMono Nerd Font Mono',
-               'Hack Nerd Font Mono', ui-monospace, Menlo, monospace);
-  --font-sans: var(--sans-family, 'IBM Plex Sans', system-ui, sans-serif);
-  --font-serif: var(--serif-family, Spectral, Georgia, serif);
+     names no family leaves the stack below.
+
+     The symbol fonts ride at the END of every stack, after the
+     face variable, because a face that DOES name a family replaces
+     everything the variable stood for. The paperized theme names a
+     typewriter mono, and the typewriter has no private-use area:
+     every mode icon in the application became a hollow box. A font
+     the theme picks now chooses the letters only. */
+  --font-icons: 'Symbols Nerd Font Mono', 'JetBrainsMonoNL Nerd Font Mono',
+                'JetBrainsMono Nerd Font Mono', 'Hack Nerd Font Mono';
+  --font-mono: var(--mono-family, 'IBM Plex Mono'), var(--font-icons),
+               ui-monospace, Menlo, monospace;
+  --font-sans: var(--sans-family, 'IBM Plex Sans'), var(--font-icons),
+               system-ui, sans-serif;
+  --font-serif: var(--serif-family, Spectral), var(--font-icons), Georgia, serif;
 
   /* --- the design's token layer --------------------------------
      The Modern Emacs design names two layers: a base palette and
@@ -316,13 +324,20 @@ body {
    rule is a nearer edge). The state tag in the header line
    (dash-state-focus) is what this rule reads. */
 .window.active:has(.dash-state-focus) {
-  /* The design's float, to the letter: the ground lifts to the
-     raised paper mixed with the select ground, the hairline
-     brightens toward the dim ink (a nearer edge), and the deep
-     shadow does the rest. No accent anywhere. */
-  --surface-pane: color-mix(in srgb, var(--window-bg, #fdfcf8) 55%, var(--hl-line-bg, #f5f1e6));
+  /* The design's float: the ground lifts one step off the raised
+     paper, the hairline brightens toward the dim ink (a nearer
+     edge), and the deep shadow does the rest. No accent anywhere.
+
+     The step is a TWELFTH of the row-under-point colour, not half
+     of it. `hl-line` is a band that has to stand off the window by
+     a wide margin (theme-test asks for it), so on a dark theme
+     half of it put the pane four steps above its own paper: the
+     chat you were reading was the brightest thing on the screen.
+     A sunken well reads the other way, so it steps toward the
+     frame canvas, which is under the paper in every theme. */
+  --surface-pane: color-mix(in srgb, var(--window-bg, #fdfcf8) 88%, var(--hl-line-bg, #f5f1e6));
   --surface-chrome: var(--surface-pane);
-  --surface-sunken: color-mix(in srgb, var(--window-bg, #fdfcf8) 80%, var(--hl-line-bg, #f5f1e6));
+  --surface-sunken: color-mix(in srgb, var(--window-bg, #fdfcf8) 82%, var(--default-bg, #e6e0d2));
   --surface-select: color-mix(in srgb, var(--hl-line-bg, #f5f1e6) 70%, var(--faint-fg, #b3ac9c));
   background: var(--surface-pane);
   border-color: color-mix(in srgb, var(--border-bg, #cbc4b1) 60%, var(--faint-fg, #b3ac9c));
@@ -1469,44 +1484,72 @@ c-action-key {
   /* rows keep their natural height — no stretching to fill */
   align-content: start;
 }
-/* the name is the point: give it the room, ellipsize later. The
-   palette reads at the transient's size: names 20px, hints 17px,
-   one head row with the prompt's name and its key legend. */
-.mb-panel.palette { width: min(1480px, 100%); height: 74dvh; }
+/* the name is the point: give it the room, ellipsize later. One
+   scale for the whole panel, four steps, and every rule below
+   picks a step instead of a number. The two lists hold CONTENT —
+   a group's name on the left, a buffer's name in the rail — so
+   both read at --mb-fs-row. Counts, modes and key legends are
+   what the content is ABOUT, so they sit a clear step below at
+   --mb-fs-meta rather than a hair under the names, which is what
+   made the metadata read louder than the buffers it described.
+
+   The steps are em, not px, so the panel reads at the editor's own
+   text size and follows ui-scale instead of fighting it: fixed px
+   here meant a switcher 1.4x louder than the buffer it covers. No
+   stepped element nests inside another, so nothing compounds.
+   The frame carries zoom (--ui-zoom), and viewport units do not,
+   so the box divides by it to hold the same share of the screen at
+   every scale — at ui-scale 1 the old 74dvh filled 89% of it. */
+.mb-panel.palette {
+  width: min(calc(1320px / var(--ui-zoom, 1)), calc(88vw / var(--ui-zoom, 1)));
+  height: calc(62dvh / var(--ui-zoom, 1));
+  --mb-fs-title: 1.25em;
+  --mb-fs-row: 1em;
+  --mb-fs-meta: 0.85em;
+  --mb-fs-micro: 0.75em;
+}
 .mb-panel.palette .mb-cand {
-  font-size: 20px; padding: 7px 24px; min-height: 42px; column-gap: 22px;
+  font-size: var(--mb-fs-row); padding: 5px 18px; min-height: 30px; column-gap: 18px;
   border-left-width: 3px;
 }
 .mb-panel.palette .mb-label { max-width: 80ch; }
-.mb-panel.palette .mb-hint { font-size: 17px; }
-.mb-panel.palette .mb-sep { padding: 14px 24px 6px; }
-.mb-panel.palette .mb-sep-label { font-size: 13px; }
-.mb-panel.palette .mb-input-row { padding: 12px 24px 13px; font-size: 20px; }
-.mb-panel.palette .mb-count { font-size: 15px; }
+.mb-panel.palette .mb-hint { font-size: var(--mb-fs-meta); }
+.mb-panel.palette .mb-sep { padding: 10px 18px 4px; }
+.mb-panel.palette .mb-sep-label { font-size: var(--mb-fs-micro); }
+.mb-panel.palette .mb-input-row { padding: 8px 18px 9px; font-size: var(--mb-fs-row); }
+.mb-panel.palette .mb-count { font-size: var(--mb-fs-meta); }
 .mb-head {
   order: -2; flex: 0 0 auto;
   display: flex; align-items: baseline; gap: 18px;
-  padding: 18px 28px 14px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
+  padding: 10px 20px 9px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
   font-family: var(--font-mono);
 }
-.mb-head-title { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+/* the head repeats the input row's prompt verbatim, so it is a
+   label for the box, not a second title competing with the name of
+   whatever is selected. It takes the same section-label vocabulary
+   the separators and the rail heading use. */
+.mb-head-title {
+  font-size: var(--mb-fs-micro); font-weight: 600;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--dim-fg, #8a857a);
+}
 .mb-head-spacer { flex: 1; }
 .mb-head-legend {
   display: inline-flex; flex-wrap: wrap; gap: 6px 22px;
-  color: var(--dim-fg, #8a857a); font-size: 15px;
+  color: var(--dim-fg, #8a857a); font-size: var(--mb-fs-meta, 14px);
 }
 .mb-panel.palette .mb-preview {
-  flex: 0 0 30%; padding: 22px 28px 26px; gap: 4px; font-size: 18px;
+  flex: 0 0 30%; padding: 14px 20px 16px; gap: 2px; font-size: var(--mb-fs-row);
 }
 .mb-panel.palette .mb-preview-title {
-  font-size: 22px; font-weight: 700; letter-spacing: 0; text-transform: none;
-  color: var(--default-fg, #1b1a17); margin-bottom: 14px; padding-bottom: 12px;
+  font-size: var(--mb-fs-title); font-weight: 700; letter-spacing: 0; text-transform: none;
+  color: var(--default-fg, #1b1a17); margin-bottom: 10px; padding-bottom: 8px;
   border-bottom: 1px solid var(--border-bg, #e2dbc9);
 }
-.mb-panel.palette .mb-preview-fact { min-height: 40px; align-items: center; gap: 16px; }
+.mb-panel.palette .mb-preview-fact { min-height: 26px; align-items: center; gap: 14px; }
 .mb-panel.palette .mb-preview-k { flex: 0 0 11ch; }
 .mb-panel.palette .mb-preview-note {
-  padding: 16px 18px; border-radius: 0; font-size: 17px; line-height: 1.45;
+  padding: 10px 12px; border-radius: 0; font-size: var(--mb-fs-meta); line-height: 1.45;
   border: 1px solid var(--border-bg, #e2dbc9); background: var(--window-bg, #fdfcf8);
   color: var(--default-fg, #1b1a17);
 }
@@ -1518,30 +1561,31 @@ c-action-key {
 .mb-panel.palette.transient-panel {
   position: fixed; left: 50%; top: 9dvh;
   transform: translateX(-50%);
-  height: auto; max-height: 78dvh;
-  width: min(1480px, 96vw);
+  height: auto;
+  max-height: calc(78dvh / var(--ui-zoom, 1));
+  width: min(calc(1480px / var(--ui-zoom, 1)), calc(96vw / var(--ui-zoom, 1)));
   font-family: var(--font-mono);
 }
 .transient-head {
-  display: flex; align-items: baseline; gap: 18px;
-  padding: 20px 28px 16px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 10px 18px 8px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
 }
 .transient-title {
-  font-size: 28px; font-weight: 700; letter-spacing: -0.01em;
+  font-size: 1.25em; font-weight: 700; letter-spacing: -0.01em;
   color: var(--default-fg, #1b1a17);
 }
-.transient-subtitle { font-size: 18px; color: var(--dim-fg, #8a857a); }
+.transient-subtitle { font-size: 0.85em; color: var(--dim-fg, #8a857a); }
 .transient-head-spacer { flex: 1; }
-.transient-chips { display: inline-flex; gap: 8px; align-items: center; }
+.transient-chips { display: inline-flex; gap: 6px; align-items: center; }
 .transient-chip {
-  padding: 4px 14px; border-radius: 0; font-size: 16px;
+  padding: 2px 10px; border-radius: 0; font-size: 0.75em;
   border: 1px solid var(--border-bg, #e2dbc9); color: var(--dim-fg, #8a857a);
 }
 .transient-chip.active {
   background: var(--accent-fg, #26356b); border-color: var(--accent-fg, #26356b);
   color: var(--window-bg, #fdfcf8); font-weight: 600;
 }
-.transient-context { font-size: 16px; color: var(--dim-fg, #8a857a); }
+.transient-context { font-size: 0.85em; color: var(--dim-fg, #8a857a); }
 .transient-body { display: flex; min-height: 0; flex: 1; }
 /* The menu decides its columns (the 'columns option): the frame
    draws each as a stack of groups, and left/right move between
@@ -1550,31 +1594,35 @@ c-action-key {
    hook keeps the selected row in view. */
 .transient-groups {
   flex: 1; min-width: 0; min-height: 0;
-  display: flex; align-items: flex-start; gap: 40px;
-  padding: 22px 28px 26px; overflow: auto;
+  display: flex; align-items: flex-start; gap: 28px;
+  padding: 14px 18px 18px; overflow: auto;
 }
+/* A column is as wide as its own rows and no wider: a fixed width put
+   the second column past the right edge of the body and left a band of
+   empty paper between the two. It may shrink when the rows are long,
+   and a description wraps rather than pushing the column out. */
 .transient-column {
-  flex: 0 0 auto; width: 460px; max-width: 100%;
-  display: flex; flex-direction: column; gap: 26px;
+  flex: 0 1 auto; min-width: 0; max-width: 36em;
+  display: flex; flex-direction: column; gap: 18px;
 }
 .transient-group { flex: 0 0 auto; min-height: max-content; }
 .transient-group-title {
-  margin-bottom: 10px; font-size: 13px; letter-spacing: .14em;
+  margin-bottom: 6px; font-size: 0.7em; letter-spacing: .14em;
   text-transform: uppercase; color: var(--dim-fg, #8a857a);
 }
 .transient-item {
-  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
-  gap: 16px; align-items: center; min-height: 46px; padding: 5px 12px 5px 8px;
-  border-radius: 0; border-left: 3px solid transparent; font-size: 21px;
+  display: grid; grid-template-columns: 2.8em minmax(0, 1fr) auto;
+  gap: 12px; align-items: center; min-height: 2.4em; padding: 3px 10px 3px 6px;
+  border-radius: 0; border-left: 3px solid transparent; font-size: 1em;
 }
 .transient-item.selected {
   background: var(--select-bg, #e7e9f1); border-left-color: var(--accent-fg, #26356b);
 }
 .transient-key {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 36px; border-radius: 0;
+  width: 2.4em; height: 2em; border-radius: 0;
   background: var(--default-bg, #f4f0e6);
-  font-size: 19px; font-weight: var(--fw-semi);
+  font-size: 0.9em; font-weight: var(--fw-semi);
 }
 .transient-item.selected .transient-key {
   background: var(--accent-fg, #26356b); color: var(--window-bg, #fdfcf8);
@@ -1588,42 +1636,55 @@ c-action-key {
   font-weight: 600; color: var(--default-fg, #1b1a17);
 }
 .transient-item.selected .transient-description { color: var(--accent-fg, #26356b); }
+/* Two marks, two meanings. .selected is the cursor: it moves with every
+   key and paints the whole row. .active is the row the session is
+   actually on: it stays where it is when the cursor leaves, and says so
+   with a green edge and a green value. On the row that is both, the
+   cursor keeps its paper and the active edge stays green. */
+.transient-item.active {
+  border-left-color: var(--ok-fg, #2e6b45);
+  background: color-mix(in srgb, var(--ok-fg, #2e6b45) 10%, transparent);
+}
+.transient-item.active .transient-value {
+  color: var(--ok-fg, #2e6b45); font-weight: 600;
+}
+.transient-item.selected.active { background: var(--select-bg, #e7e9f1); }
 .transient-value {
-  color: var(--dim-fg, #8a857a); white-space: nowrap; font-size: 18px;
+  color: var(--dim-fg, #8a857a); white-space: nowrap; font-size: 0.9em;
   max-width: 22ch; overflow: hidden; text-overflow: ellipsis;
 }
 .transient-rail {
   flex: 0 0 34%; min-width: 0; overflow: auto;
   border-left: 1px solid var(--border-bg, #e2dbc9);
   background: var(--default-bg, #f4f0e6);
-  padding: 22px 28px 26px; display: flex; flex-direction: column; gap: 4px;
+  padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 2px;
 }
 .transient-rail-title {
-  font-size: 22px; font-weight: 700; margin-bottom: 14px; padding-bottom: 12px;
+  font-size: 1.1em; font-weight: 700; margin-bottom: 8px; padding-bottom: 8px;
   border-bottom: 1px solid var(--border-bg, #e2dbc9);
 }
 .transient-rail-title::before {
-  content: "resolves to"; display: block; font-size: 13px; font-weight: 400;
+  content: "resolves to"; display: block; font-size: 0.7em; font-weight: 400;
   letter-spacing: .14em; text-transform: uppercase; color: var(--dim-fg, #8a857a);
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .transient-rail-row {
-  display: grid; grid-template-columns: 15ch minmax(0, 1fr); gap: 16px;
-  font-size: 18px; min-height: 40px; align-items: center;
+  display: grid; grid-template-columns: 12ch minmax(0, 1fr); gap: 12px;
+  font-size: 0.9em; min-height: 1.8em; align-items: center;
 }
 .transient-rail-k { color: var(--dim-fg, #8a857a); }
 .transient-rail-v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transient-rail-row.drift .transient-rail-v { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
 .transient-rail-row.dim .transient-rail-v { color: var(--dim-fg, #8a857a); }
 .transient-rail-note {
-  margin-top: auto; padding: 16px 18px; border-radius: 0; font-size: 17px;
+  margin-top: auto; padding: 10px 12px; border-radius: 0; font-size: 0.85em;
   border: 1px solid var(--border-bg, #e2dbc9); background: var(--window-bg, #fdfcf8);
   color: var(--default-fg, #1b1a17); white-space: pre-line;
 }
 .transient-help {
-  display: flex; flex-wrap: wrap; gap: 8px 26px;
-  padding: 14px 28px 16px; border-top: 1px solid var(--border-bg, #e2dbc9);
-  color: var(--dim-fg, #8a857a); font-size: 16px;
+  display: flex; flex-wrap: wrap; gap: 6px 18px;
+  padding: 8px 18px 10px; border-top: 1px solid var(--border-bg, #e2dbc9);
+  color: var(--dim-fg, #8a857a); font-size: 0.85em;
 }
 .transient-legend-key { margin-right: var(--s3); }
 /* the palette body: candidates left, the facts panel right */
@@ -1674,13 +1735,25 @@ c-action-key {
   border-left: 2px solid transparent;
   font-size: 11px; line-height: 1.35;
 }
-/* the palette reads at a distance, so the rail's rows do too:
-   smaller than a group card, larger than the facts they replace */
+/* a rail row is a buffer NAME: the same rank as a group name in
+   the list beside it, and read at the same size. It was a step
+   below the counts in that list, which put the metadata above
+   the content it counted. The mode and directory beside the name
+   are metadata and take the metadata step. */
 .mb-panel.palette .mb-rail-row {
-  padding: 4px 16px 4px 28px; min-height: 28px;
-  border-left-width: 3px; font-size: 15px;
+  padding: 3px 14px 3px 20px; min-height: 24px;
+  border-left-width: 3px; font-size: var(--mb-fs-row);
 }
-.mb-panel.palette .mb-rail-hint { font-size: 13px; }
+.mb-panel.palette .mb-rail-hint { font-size: var(--mb-fs-meta); }
+/* the rail's heading names a column, not the panel — the panel's
+   own title is the head row. So it takes the section-label
+   vocabulary the candidate list already uses for its separators
+   instead of a second 22px title inside the same box. */
+.mb-panel.palette .mb-preview.mb-rail .mb-preview-title {
+  font-size: var(--mb-fs-micro); font-weight: 600;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--dim-fg, #8a857a);
+}
 .mb-rail-name {
   flex: 1; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

@@ -221,6 +221,25 @@
           ((equal? hit 'prefix) (list "prefix"))
           (else (list "none")))))
 
+;;; A row can say it holds the setting in force — the bundle the session
+;;; is on, the mode it is in. That is not the cursor: the cursor moves
+;;; with the keys and this stays put, so the frame reads them as two
+;;; marks and colours them apart. A row carries 'active as a flag, or
+;;; 'active-fn to answer it per scope the way 'value-fn does.
+(define (transient--item-active? item state)
+  (let ((fn (plist-get item 'active-fn)))
+    (if fn
+        (and (fn (plist-get state 'scope)) #t)
+        (and (plist-get item 'active) #t))))
+
+;;; a row's display flags as one class list: what invoking it does to
+;;; the menu, then active when it is the one in force
+(define (transient--item-flags item state)
+  (let ((behavior (value->string (or (plist-get item 'transient) 'exit))))
+    (if (transient--item-active? item state)
+        (string-append behavior " active")
+        behavior)))
+
 (define (transient--menu-groups groups state)
   (let ((selected (or (plist-get state 'selected) 0))
         (index 0)
@@ -240,7 +259,7 @@
                           (plist-get item 'description))
                       (transient--item-value item)
                       (plist-get item 'kind)
-                      (or (plist-get item 'transient) 'exit)
+                      (transient--item-flags item state)
                       selected?)))
             (cdr group))))
       groups)))
@@ -379,6 +398,17 @@
                 (cons (list "columns" (transient--columns prefix state groups))
                       (transient--menu-meta prefix state items))))))))
 
+;;; the row a menu opens on: the one holding the setting in force, else
+;;; the first. Opening on the live choice means the menu answers "what
+;;; am I on?" before a key is pressed.
+(define (transient--initial-selection prefix state)
+  (let loop ((items (transient--visible-items
+                      (transient--visible-groups prefix state)))
+             (i 0))
+    (cond ((null? items) 0)
+          ((transient--item-active? (car items) state) i)
+          (else (loop (cdr items) (+ i 1))))))
+
 (define (transient-setup name &optional scope)
   (let ((prefix (transient-prefix name)))
     (if (not prefix)
@@ -393,6 +423,12 @@
                         (transient--initial-values prefix groups))))
           (transient--set-active! state)
           (transient--run-hook prefix 'on-setup state)
+          ;; the setup hook decides what is in force, so the opening row
+          ;; is read after it, not from the seed
+          (let ((settled (transient--active)))
+            (transient--set-active!
+              (plist-put settled 'selected
+                (transient--initial-selection prefix settled))))
           (transient--render!)))))
 
 (define (transient--remember! state)

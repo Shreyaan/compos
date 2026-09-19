@@ -1342,13 +1342,26 @@
 
 (define *chat-file-header* "#+chat:")
 
+;; connector, model and effort are strings everywhere else that touches
+;; them: the bundle vocabulary compares them with equal?, the modeline
+;; appends them, and the llm-configure transient prints them. A header
+;; that spells one as a bare symbol — an old file, a hand edit — puts a
+;; symbol in the buffer-local, and the writer below then spells it bare
+;; again, so the two keep each other alive until something tries to
+;; print it. Coerce on the way out and on the way in. presets and
+;; permission-mode stay symbols, which is what they are.
+(define (chat-header-string v)
+  (if (symbol? v) (symbol->string v) v))
+
+(define *chat-header-strings* '(connector model effort title summary directory))
+
 (define (chat-header-line buf)
   (string-append *chat-file-header* " (connector "
-    (value->string (or (buffer-local buf 'agent-connector) "api"))
+    (value->string (chat-header-string (or (buffer-local buf 'agent-connector) "api")))
     (let ((m (buffer-local buf 'agent-model)))
-      (if m (string-append " model " (value->string m)) ""))
+      (if m (string-append " model " (value->string (chat-header-string m))) ""))
     (let ((effort (buffer-local buf 'agent-effort)))
-      (if effort (string-append " effort " (value->string effort)) ""))
+      (if effort (string-append " effort " (value->string (chat-header-string effort))) ""))
     (let ((ps (buffer-local buf 'chat-presets)))
       (if (pair? ps) (string-append " presets " (value->string ps)) ""))
     (let ((d (buffer-local buf 'chat-directory)))
@@ -1446,7 +1459,11 @@
       (for-each
         (lambda (pair)
           (let ((v (plist-get header (car pair))))
-            (when v (buffer-set-local! buf (cadr pair) v))))
+            (when v
+              (buffer-set-local! buf (cadr pair)
+                (if (member (car pair) *chat-header-strings*)
+                    (chat-header-string v)
+                    v)))))
         '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)
           (title chat-title) (summary chat-summary)
@@ -1616,7 +1633,14 @@
 
 (define (chat-sweep-runtime-locals! buf)
   (unless (chat-live-runtime? buf)
-    (chat-clear-locals! buf chat-runtime-locals)))
+    (chat-clear-locals! buf chat-runtime-locals)
+    ;; chat-turn-active is a CONVERSATION local, so it outlives a restart --
+    ;; and the process that was running the turn does not. No status event
+    ;; can ever arrive for a runtime that is gone, so this is the one place
+    ;; the news can reach the view: no runtime, no turn. Without it a
+    ;; restored chat waits on a turn nobody is running, and every RET queues
+    ;; behind it.
+    (buffer-set-local! buf 'chat-turn-active #f)))
 
 ;; wipe the conversation, keep the identity: group, backend, model,
 ;; presets and permission mode survive; every chat comes back as the one

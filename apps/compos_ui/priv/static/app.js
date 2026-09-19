@@ -1246,19 +1246,34 @@
           row?.classList.add("peek-source-row");
         }
         const r = row ? row.getBoundingClientRect() : o;
-        const gap = 28;
-        const width = Math.max(180, Math.min(o.width - gap, area.width - gap * 2));
-        const height = Math.max(100, area.height - gap * 2);
-        // The card sits at the edge of the list's own window, on the side
-        // with more room, not at the far edge of the screen: with several
-        // windows the far edge is windows away from the row it previews.
-        // One window spans the area, so the clamp puts the card where it
-        // always was.
-        const right = o.left + o.width / 2 < area.left + area.width / 2;
-        const beside = right ? o.right + gap / 2 : o.left - width - gap / 2;
-        const left = Math.max(area.left + gap, Math.min(area.right - width - gap, beside));
+        const pad = 10;
+        // The card lands on the pane NEXT to the list, not at a frame edge:
+        // pinning it to the edge threw it clear across a wide frame. Take
+        // the neighbour away from the list, and if the list is alone in the
+        // frame, lay the card over the list's own right half.
+        const neighbours = Array.from((owner.closest(".windows") || document.body)
+            .querySelectorAll(".window"))
+          .filter(w => w !== owner && w !== this.el && !w.classList.contains("listing-peek"))
+          .map(w => w.getBoundingClientRect())
+          .filter(b => b.width > 80 && b.height > 60
+                    && b.top < o.bottom - 8 && b.bottom > o.top + 8);
+        const after = neighbours.filter(b => b.left >= o.right - 8)
+          .sort((a, b) => a.left - b.left)[0];
+        const before = neighbours.filter(b => b.right <= o.left + 8)
+          .sort((a, b) => b.right - a.right)[0];
+        const outward = o.left + o.width / 2 < area.left + area.width / 2;
+        const host = (outward ? (after || before) : (before || after));
+        const box = host
+          ? {left: host.left + pad, top: host.top + pad,
+             width: host.width - pad * 2, height: host.height - pad * 2}
+          : {left: o.left + o.width / 2, top: o.top + pad,
+             width: o.width / 2 - pad, height: o.height - pad * 2};
+        const width = Math.max(180, Math.min(box.width, area.width - pad * 2));
+        const height = Math.max(100, Math.min(box.height, area.height - pad * 2));
+        const left = Math.max(area.left + pad, Math.min(area.right - width - pad, box.left));
+        const top = Math.max(area.top + pad, Math.min(area.bottom - height - pad, box.top));
+        const right = left + width / 2 > o.left + o.width / 2;
         const sy = Math.max(o.top + 12, Math.min(o.bottom - 12, r.top + r.height / 2));
-        const top = Math.max(area.top + gap, Math.min(area.bottom - height - gap, sy - height * .32));
         // Compos zooms its editor root independently of the viewport.
         // DOM rectangles and the connector use viewport pixels; fixed
         // descendants still inherit CSS zoom, so convert the card back.

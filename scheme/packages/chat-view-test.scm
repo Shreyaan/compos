@@ -81,6 +81,41 @@
       (check-equal! (buffer-local buf 'render-blocks) #f "no tree")
       (buffer-kill! buf))))
 
+(deftest 'chat-view-activity-follows-the-runtime
+  "the activity row is a view of the runtime, not a record of the last event"
+  (lambda ()
+    ;; the decision, with no buffer and no runtime in it
+    (check-equal! (chat-activity-shown "streaming" 'running) "streaming"
+                  "a running turn says what it is doing")
+    (check-equal! (chat-activity-shown "needs permission" 'needs_attention)
+                  "needs permission" "waiting on the reader still shows")
+    (check-equal! (chat-activity-shown "starting agent…" #f) "starting agent…"
+                  "a chat with no runtime yet keeps its label")
+    (check-false! (chat-activity-shown "streaming" 'idle)
+                  "an idle runtime outranks the label: the turn-end was lost")
+    (check-false! (chat-activity-shown "streaming" 'dead)
+                  "a backend that exited is not working either")
+    (check-false! (chat-activity-shown "streaming" 'api)
+                  "a chat with no runtime is not working")
+    (check-false! (chat-activity-shown #f 'running) "no label, no row")
+    ;; the same three statuses decide it in the event handler, so the two
+    ;; cannot drift apart
+    (check-equal! *agent-working-statuses* '(running needs_attention starting)
+                  "the working statuses are the ones the row captions")
+    ;; and the tree carries the decision
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-activity*")))
+      (buffer-set-local! buf 'chat-activity "streaming")
+      (chat-view-sync! buf)
+      (check-true! (re-match? "ag-activity"
+                              (value->string (buffer-local buf 'render-blocks)))
+                   "the row is in the tree while the work runs")
+      (buffer-set-local! buf 'chat-activity #f)
+      (chat-view-sync! buf)
+      (check-false! (re-match? "ag-activity"
+                               (value->string (buffer-local buf 'render-blocks)))
+                    "the turn ends and the row leaves the tree")
+      (buffer-kill! buf))))
+
 (deftest 'chat-view-labels
   "the card's duration and token labels"
   (lambda ()

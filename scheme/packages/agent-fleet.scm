@@ -301,10 +301,31 @@
     (list-refresh! (chat-list-buffer))
     (chat-list-preview!)))
 
-;; the fleet's surfaces after an event batch: the modeline answers, and
-;; it answers alone -- the chat list is never drawn behind its reader.
+;; A list that never draws LIES. The state column reads agent-status at draw
+;; time, so a chat that finished keeps the word "streaming" until somebody
+;; presses g. Two things make drawing it safe here. The draw happens on the
+;; state CHANGE, twice a turn instead of many times a second. And it is a
+;; REDRAW, not a refresh: the rows stay as they were fetched, so nothing
+;; re-sorts and no cursor moves. Only the words a column reads from live
+;; state change.
+(define *agents-state-last* '())
+
+(define (agents-state-moved? slug)
+  (let ((now (agent-status slug))
+        (was (alist-get *agents-state-last* slug)))
+    (and (not (equal? now was))
+         (begin (set! *agents-state-last* (alist-put *agents-state-last* slug now))
+                #t))))
+
+(define (agents-restate!)
+  (when (buffer-known? (chat-list-buffer))
+    (list-redraw! (chat-list-buffer))))
+
+;; the fleet's surfaces after an event batch: the modeline answers every
+;; batch, and the list answers the state changes inside it.
 (define (agents-note-event! &optional slug)
   (when slug (chats-note-activity! (agent-buf slug)))
+  (when (and slug (agents-state-moved? slug)) (agents-restate!))
   (agents-modeline-refresh!))
 
 (define (agents-current-buf)
@@ -1162,9 +1183,13 @@
     ;; as the windows change, and a list left ownerless is a list no
     ;; group ever reuses. It belongs to the group you opened it in
     (group-current-recalculate!)
-    (let ((group (frame-group)))
-      (when (and group (not (equal? (buffer-group buf) group)))
-        (buffer-move-to-group! buf group)))
+    ;; one list serves every group, so the row it was left on is a row in
+    ;; the group it was left in. Coming in from elsewhere is a first
+    ;; arrival in this group: say so, and the opener starts at the top
+    (let* ((group (frame-group))
+           (fresh (and group (not (equal? (buffer-group buf) group)))))
+      (buffer-set-local! buf 'chat-list-fresh-group fresh)
+      (when fresh (buffer-move-to-group! buf group)))
     buf))
 
 (defcustom 'chat-list-preview-delay-ms 150
@@ -1214,9 +1239,29 @@
                                   (if (equal? role "user") (list body) '())) blocks)))))))))
 
 ;; the copy draws as a rich chat: its tree comes from the projected model
+(define (chat-preview-live-tree? copy source)
+  ;; A live chat keeps its own view tree current: chat-view-sync! runs on every
+  ;; event batch, shown or not. listing-preview-copy! has already carried that
+  ;; tree into the copy, so there is nothing left to build.
+  (and (buffer-exists? source)
+       (number? (buffer-local source 'agent-saved-mark))
+       (equal? (buffer-local copy 'render-mode) "blocks")
+       (pair? (buffer-local copy 'render-blocks))))
+
 (define (chat-preview-project! copy source)
-  (chat-preview-project--locals! copy source)
-  (chat-view-sync! copy))
+  ;; Rebuilding the transcript view inside the copy cost the whole chat on
+  ;; every row move, which is what made previews crawl. Take the tree the
+  ;; source already carried across, and project only a chat that has none:
+  ;; a saved chat file, or one that has never rendered.
+  (if (chat-preview-live-tree? copy source)
+      (buffer-set-locals! copy
+        (list 'render-input "agent-saved-mark"
+              'agent-saved-mark (buffer-local source 'agent-saved-mark)
+              'agent-marker-bytes (or (buffer-local source 'agent-marker-bytes) 0)
+              'agent-verbosity (or (buffer-local source 'agent-verbosity) "info")))
+      (begin
+        (chat-preview-project--locals! copy source)
+        (chat-view-sync! copy))))
 
 (define (chat-list--preview-request)
   (let ((entry (assoc (selected-frame) *chat-list-preview-requests*)))
@@ -1402,11 +1447,15 @@
     ;; highlight and the verbs read it as every chat under it
     (buffer-set-local! (chat-list-buffer) 'ibuffer-heading-rows #t)
     (ibuffer-refresh! (chat-list-buffer))
-    ;; the list keeps the row it was left on, but a heading is not a
-    ;; chat: arriving on one leaves the pane with nothing to show, and
-    ;; grouping by group puts a heading first. Fall through to a real row
+    ;; the list keeps the row it was left on, but only where that row is
+    ;; still yours to keep: one list serves every group, and the first
+    ;; time it comes to this group it is standing on somebody else's
+    ;; row. A heading is not a chat either — arriving on one leaves the
+    ;; pane with nothing to show, and grouping by group puts a heading
+    ;; first. Either way, fall through to the top of the list
     (let ((row (list-current (chat-list-buffer))))
-      (unless (and (string? row) (not (ibuffer-heading? row)))
+      (when (or (buffer-local (chat-list-buffer) 'chat-list-fresh-group)
+                (not (and (string? row) (not (ibuffer-heading? row)))))
         (ibuffer-goto-first-row! (chat-list-buffer))))
     ;; arriving is an explicit request to look. A card dismissed with q
     ;; shuts the preview for that row until the selection changes, and

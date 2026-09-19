@@ -163,3 +163,13 @@
         (check-equal! (buffer-local buf 'capf-auto-watch) id "re-entry kept the same rule"))
       (remove-on-change! (buffer-local buf 'capf-auto-watch))
       (buffer-kill! buf))))
+
+(deftest 'keyboard-quit-cancels-the-prompt
+  "the command that quits the current operation quits a prompt too"
+  (lambda ()
+    (cr-test-reset!)
+    (completing-read "Pick: " '("alpha" "beta") cr-test-k)
+    (check-true! (minibuffer-active?) "the prompt is up")
+    (run-command "keyboard-quit")
+    (check-false! (minibuffer-active?) "keyboard-quit put the prompt away")
+    (check-false! *cr-test-got* "and it answered nothing")))

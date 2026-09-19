@@ -581,6 +581,23 @@
 (define (llm-config--history-key index)
   (if (= index 10) "0" (number->string index)))
 
+;;; Which row wears the active mark. Two marks share the menu: the
+;;; cursor, which the keys move, and this one, which says what the
+;;; session is on. A parked choice outranks the live setup, because
+;;; that is what the menu will apply when it closes.
+(define (llm-config--bundle-chosen? buf b)
+  (if (llm-config--pending-bundle)
+      (equal? (llm-config--pending-bundle) b)
+      (llm-config--bundle-active? buf b)))
+
+;;; A recent setup only carries the mark when no saved bundle already
+;;; does: a setup that is a named bundle is shown as that bundle.
+(define (llm-config--history-chosen? buf choice)
+  (if (llm-config--pending-bundle)
+      (equal? (llm-config--pending-bundle) choice)
+      (and (not (llm-config--matching-bundle buf))
+           (llm-config--bundle-active-against? (llm-config--current buf) choice))))
+
 (define (llm-config--history-items buf)
   (let loop ((choices *llm-config-history*) (index 1) (items '()))
     (if (null? choices)
@@ -595,7 +612,9 @@
                 'transient 'stay 'bundle choice
                 'value-fn (lambda (_scope)
                             (if (equal? (llm-config--pending-bundle) choice)
-                                "selected" "")))
+                                "selected" ""))
+                'active-fn (lambda (scope)
+                             (llm-config--history-chosen? scope choice)))
               items))))))
 
 (define (llm-config--bundle-items buf)
@@ -611,7 +630,9 @@
                     (lambda () (llm-config--choose-bundle! buf b))
                     'transient 'stay 'bundle b
                     'value-fn (lambda (scope)
-                                (llm-config--bundle-value scope b)))
+                                (llm-config--bundle-value scope b))
+                    'active-fn (lambda (scope)
+                                 (llm-config--bundle-chosen? scope b)))
                   items)
                 items))))))
 

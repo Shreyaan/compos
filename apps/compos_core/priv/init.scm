@@ -109,6 +109,9 @@
 (load "messages.scm")
 (load "provenance.scm")
 (load "scheme-ide.scm")
+;; the REPL is scheme-mode's other buffer: it derives its mode from scheme-mode
+;; and binds C-c C-z and C-c C-e in it
+(load "repl.scm")
 (load "peek.scm")
 (load "scratch.scm")
 (load "sentry.scm")

@@ -12,6 +12,11 @@
 ;; a turn-end after none of them is a silent turn
 (define *agent-output-kinds* '(chunk thought tool-call tool-update plan question error))
 
+;; The statuses that mean a turn is in flight or about to be. Every other
+;; status -- idle, api, dead -- says the chat is doing nothing, and the view
+;; takes down the turn's chrome when the runtime reports one.
+(define *agent-working-statuses* '(running needs_attention starting))
+
 ;; A tool event arrives in pieces, and no two backends send the same
 ;; pieces. The direct lane names the tool and its arguments on the call
 ;; and hands back the body on completion. ACP calls first with an empty
@@ -388,7 +393,16 @@
        (let ((start (agent-render! slug "\n[agent exited]\n" "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "meta" '())))
 
+      ;; The runtime says what it is NOW, and the view believes it. This is
+      ;; the only place that needs to: set_status emits on every change, so a
+      ;; status that is not work ends the turn's chrome here even when the
+      ;; turn-end event itself never arrives. Nothing polls and nothing
+      ;; reconciles on a timer -- the runtime announces, the view listens.
       ((equal? type 'status)
+       (unless (member (plist-get e 'status) *agent-working-statuses*)
+         (chat-activity! buf #f)
+         (buffer-set-local! buf 'chat-turn-active #f)
+         (agent-clear-waiting! buf))
        ;; answered/cancelled attention requests leave the rich view
        (unless (equal? (plist-get e 'status) 'needs_attention)
          (agent-block-drop-kind! buf "permission")

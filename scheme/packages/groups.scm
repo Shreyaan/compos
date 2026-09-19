@@ -2265,7 +2265,12 @@ is forgotten and that group falls back to creation order in the switcher."
         (minibuffer-cancel!)
         (group-switch-run-new-action! action)))))
 
-(define-key "group-switch-modal-map" "C-n" "group-switch-new")
+;; C-n belongs to the list: every prompt in the editor moves the
+;; selection with it, and the modal's own legend says so. Taking it
+;; for a verb made the one key the reader already knows do the one
+;; thing they did not ask for. New goes on the C-c prefix, where the
+;; prompt's other verbs live.
+(define-key "group-switch-modal-map" "C-c C-n" "group-switch-new")
 
 (define-command "group-switch" "Switch to a group and restore its layout"
   (lambda ()
@@ -2353,7 +2358,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (set! *group-switch-rows* (cdr prompt-rows))
           (set! *group-switch-restore* restore!)
           (begin
-              (minibuffer-read-preview "Switch group (C-n new): " candidates
+              (minibuffer-read-preview "Switch group (C-c C-n new): " candidates
                 peek!
                 (lambda (name)
                   (let ((id (group-switch-id name)))
@@ -2679,6 +2684,111 @@ is forgotten and that group falls back to creation order in the switcher."
 (define *group-killed* #f)
 
 (defgroup 'groups "Work contexts: groups of buffers and their layouts.")
+
+(defcustom 'magic-grouping #f
+  "When enabled, let JEV place chats and other buffers after a summary lands."
+  'group 'groups 'type 'boolean)
+
+;; JEV's first grouping decision is made from the first running summary.
+;; The hook is deliberately installed here, after the group primitives exist.
+(define (jev-buffer-group &optional buf summary k)
+  "Return JEV's suggested existing group for BUF, or #f. With K, answer asynchronously."
+  (let* ((target (or buf (current-buffer)))
+         (text (or summary
+                   (buffer-local target 'chat-summary)
+                   (buffer-local target 'chat-title)
+                   ""))
+         (ids (group-ids))
+         (options (append
+                    (apply append
+                      (map (lambda (id)
+                             (list (group-name id)
+                                   (or (group-meta id)
+                                       (string-append "Existing group " (group-name id)))))
+                           ids))
+                    (list "none" "No existing group matches this summary.")))
+         (state (string-append
+                  "Chat summary:\n" text
+                  "\n\nExisting groups and their descriptions:\n"
+                  (if (null? ids) "(none)"
+                      (string-join
+                        (map (lambda (id)
+                               (string-append "- " (group-name id)
+                                              ": " (or (group-meta id) "(no description)")))
+                             ids)
+                        "\n"))))
+         (question (list 'group
+                         (jev-choice
+                           "Which existing group best matches this chat summary? Choose none unless the match is clear."
+                           options))))
+    (if (or (not (string? text)) (equal? (string-trim text) "") (null? ids)
+            (not (and (boundp 'jev-systemone) (boundp 'jev-answer-choice))))
+        (if k (k #f) #f)
+        (if k
+            (jev-ask state question
+              (lambda (reply) (k (and reply (jev-answer-choice reply 'group)))))
+            (let ((reply (jev-systemone state question)))
+              (and reply (jev-answer-choice reply 'group)))))))
+
+(public! 'jev-buffer-group
+  "(jev-buffer-group BUF SUMMARY K) — ask JEV which existing group matches SUMMARY; K gets its name or #f")
+(catalog-meta! 'function "jev-buffer-group" 'domain 'jev 'effects '(read external execute spend))
+
+(define (buffer-magic-group! buf destination)
+  (let ((id (and destination (group-resolve-id destination))))
+    (and id
+         (begin
+           (buffer-move-to-group! buf id)
+           (message (string-append "JEV moved " buf " to " (group-name id)))
+           id))))
+
+(public! 'buffer-magic-group!
+  "(buffer-magic-group! BUF GROUP) — move BUF's membership to GROUP without changing the visible frame")
+(catalog-meta! 'function "buffer-magic-group!" 'domain 'buffers 'effects '(write))
+
+(define-command "buffer-magic-group" "Classify the current buffer with JEV and move it when a group matches"
+  (lambda () (buffer-magic-group-current! (current-buffer))))
+
+;; With no explicit arguments, classify the current buffer from its summary.
+(define (buffer-magic-group-current! &optional buf)
+  (let ((target (or buf (current-buffer))))
+    (let ((summary (or (buffer-local target 'chat-summary)
+                       (buffer-local target 'chat-title))))
+      (if (and (string? summary) (not (equal? (string-trim summary) "")))
+          (jev-buffer-group target summary
+            (lambda (choice)
+              (if (and choice (not (equal? choice "none")))
+                  (buffer-magic-group! target choice)
+                  (message "JEV left the current buffer in place"))))
+          (message "The current buffer has no summary yet")))))
+
+(public! 'buffer-magic-group-current!
+  "(buffer-magic-group-current! [BUF]) — classify BUF, defaulting to the current buffer")
+
+(catalog-meta! 'command "buffer-magic-group" 'domain 'buffers 'effects '(write))
+
+(define (group-magic-first-summary! buf kind summary)
+  (when (and magic-grouping
+             (equal? kind 'summary)
+             (buffer-known? buf)
+             (not (buffer-local buf 'magic-grouping-done))
+             (not (buffer-local buf 'magic-grouping-pending)))
+    (buffer-set-local! buf 'magic-grouping-pending #t)
+    (message (string-append "JEV is checking the first summary for " buf "…"))
+    (jev-buffer-group buf summary
+      (lambda (choice)
+        (buffer-set-local! buf 'magic-grouping-pending #f)
+        (buffer-set-local! buf 'magic-grouping-done #t)
+        (cond ((or (not choice) (equal? choice "none"))
+               (message (string-append "JEV left " buf " in its current group")))
+              ((equal? choice (group-name (buffer-group buf)))
+               (message (string-append "JEV confirmed " buf " in " choice)))
+              ((buffer-magic-group! buf choice) #t)
+              (else (message (string-append "JEV chose unknown group " choice))))))))
+
+(add-hook! 'chat-summary-hook 'group-magic-first-summary!)
+
+
 
 (defcustom 'group-after-kill "follow"
   "After you kill the group you stand in: \"follow\" enters the group of the buffer the window fell to, with that group's layout; \"stay\" shows the buffer and no group."

@@ -1327,7 +1327,7 @@ defmodule Compos.Core.Session do
       end,
       # -> (slug "a1" buffer "*agent: a1*" status idle queued 0 permission #f)
       {"agent-info",
-       "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, permission, question; or #f."} =>
+       "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, ending, steers, permission, question; or #f. ending is #t while a finished turn waits on an unresolved steer."} =>
         fn [slug] ->
           case Compos.Core.Agent.info(s(slug)) do
             {:error, _} ->
@@ -1377,6 +1377,10 @@ defmodule Compos.Core.Session do
                 info.queued,
                 {:sym, "steering"},
                 info.steering,
+                {:sym, "ending"},
+                info.ending,
+                {:sym, "steers"},
+                info.steers,
                 {:sym, "permission"},
                 perm,
                 {:sym, "question"},

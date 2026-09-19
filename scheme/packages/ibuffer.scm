@@ -1507,10 +1507,16 @@
                (string? target) (buffer-known? target))
       (unless (equal? target (buffer-local owner 'listing-peek-dismissed-row))
         (buffer-set-local! owner 'listing-peek-dismissed-row #f)
-        (debounce! key 180 (lambda (ignored)
-          (when (and (= ticket (or (frame-local 'listing-peek-ticket) 0))
-                     (buffer-known? owner) (equal? (list-current owner) target))
-            (listing-preview! owner target))) #f)))))
+        ;; The wait is for the first card of a list: opening one splits a
+        ;; window and lays the frame out, and that should not happen while
+        ;; the user is still travelling. Once the card is up for this same
+        ;; list, the next row only swaps its contents, so it follows the
+        ;; point almost at once instead of lagging a fifth of a second.
+        (let ((delay (if (equal? (listing-preview-owner) owner) 40 180)))
+          (debounce! key delay (lambda (ignored)
+            (when (and (= ticket (or (frame-local 'listing-peek-ticket) 0))
+                       (buffer-known? owner) (equal? (list-current owner) target))
+              (listing-preview! owner target))) #f))))))
 
 (define-command "ibuffer-toggle-preview" "Toggle automatic previews in this listing"
   (lambda ()
