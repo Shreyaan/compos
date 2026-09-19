@@ -633,26 +633,50 @@ defmodule Compos.Core.Markdown.Html do
     with lang when is_binary(lang) <- highlight_lang(lang),
          %{} = child <- Enum.find(node.children, &(&1.kind == :code_text)) do
       body = binary_part(text, child.start, child.stop - child.start)
-
-      # the grammar can name one node twice; the later name wins, as it
-      # does in the editor
-      syntax =
-        lang
-        |> TS.ts_highlight(body)
-        |> Enum.reverse()
-        |> Enum.uniq_by(fn {start, stop, _} -> {start, stop} end)
-        |> Enum.sort_by(fn {start, stop, _} -> {start, -stop} end)
-        |> Enum.flat_map(fn {start, stop, scope} ->
-          class = "f-ts-" <> attr(scope)
-          [{child.start + start, ~s(<span class="#{class}">)}, {child.start + stop, "</span>"}]
-        end)
-
-      Enum.sort_by(marks ++ syntax, fn {at, html} ->
-        {at, if(String.starts_with?(html, "</"), do: 0, else: 1)}
-      end)
+      sort_marks(marks ++ syntax_marks(lang, body, child.start))
     else
       _ -> marks
     end
+  end
+
+  # {offset, html} marks that open and close one f-ts-* span per capture of
+  # TEXT, shifted by BASE. The grammar can name one node twice; the later
+  # name wins, as it does in the editor.
+  defp syntax_marks(lang, text, base) do
+    lang
+    |> TS.ts_highlight(text)
+    |> Enum.reverse()
+    |> Enum.uniq_by(fn {start, stop, _} -> {start, stop} end)
+    |> Enum.sort_by(fn {start, stop, _} -> {start, -stop} end)
+    |> Enum.flat_map(fn {start, stop, scope} ->
+      class = "f-ts-" <> attr(scope)
+      [{base + start, ~s(<span class="#{class}">)}, {base + stop, "</span>"}]
+    end)
+  end
+
+  # a close before an open at the same byte, so spans nest
+  defp sort_marks(marks) do
+    Enum.sort_by(marks, fn {at, html} ->
+      {at, if(String.starts_with?(html, "</"), do: 0, else: 1)}
+    end)
+  end
+
+  @doc """
+  TEXT as escaped HTML, with the f-ts-* spans of LANG's grammar. A
+  language with no grammar gives the escaped text alone.
+  """
+  def highlight(lang, text) do
+    {html, at} =
+      lang
+      |> syntax_marks(text, 0)
+      |> sort_marks()
+      |> Enum.reduce({[], 0}, fn {pos, mark}, {acc, at} ->
+        {[mark, html_escape(binary_part(text, at, pos - at)) | acc], pos}
+      end)
+
+    [html_escape(binary_part(text, at, byte_size(text) - at)) | html]
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
   end
 
   defp highlight_lang(lang) do

@@ -252,6 +252,14 @@ defmodule Compos.MarkdownHtmlTest do
     assert html =~ ~s(<span class="f-ts-number"><span class="s" data-s="19">1</span></span>)
   end
 
+  test "highlight draws text in a grammar's faces, escaped" do
+    assert Html.highlight("json", ~s({"a": [1, "<b>"]})) ==
+             ~s({<span class="f-ts-string">"a"</span>: [<span class="f-ts-number">1</span>, ) <>
+               ~s(<span class="f-ts-string">"&lt;b&gt;"</span>]})
+
+    assert Html.highlight("zzz", "a < b") == "a &lt; b"
+  end
+
   test "a fence in an unknown language stays plain" do
     html = render!("```zzz\ndef f\n```\n")
     refute html =~ "f-ts-"

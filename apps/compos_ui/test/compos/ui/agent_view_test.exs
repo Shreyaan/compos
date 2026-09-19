@@ -318,7 +318,8 @@ defmodule Compos.Ui.AgentViewTest do
     assert html =~ "M-x probe"
   end
 
-  test "agent tool cards pretty-print JSON without changing transcript bytes", %{conn: conn} do
+  test "agent tool cards pretty-print and highlight JSON without changing transcript bytes",
+       %{conn: conn} do
     buf = "*agent: json-view-test*"
     {:ok, _} = Compos.Core.create_buffer(buf)
 
@@ -341,8 +342,15 @@ defmodule Compos.Ui.AgentViewTest do
     Editor.set_window_buffer(buf)
     {:ok, _view, html} = live(conn, "/")
 
-    assert html =~ "\n  &quot;"
-    refute html =~ ~s({&quot;count&quot;:2)
+    [_, body] = String.split(html, ~s(class="ag-body"), parts: 2)
+    [body | _] = String.split(body, "</pre>", parts: 2)
+    # the json grammar colours the body, and the text under the spans is
+    # the pretty JSON
+    assert body =~ ~s(<span class="f-ts-number">2</span>)
+    assert body =~ ~s(<span class="f-ts-string">&quot;count&quot;</span>)
+    bare = String.replace(body, ~r{</?span[^>]*>}, "")
+    assert bare =~ ~s(\n  &quot;count&quot;: 2,)
+    refute bare =~ ~s({&quot;count&quot;:2)
     assert Buffer.text(buf) =~ raw
   end
 

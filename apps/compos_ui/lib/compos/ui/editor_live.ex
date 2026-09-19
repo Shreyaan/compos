@@ -1987,6 +1987,21 @@ defmodule Compos.Ui.EditorLive do
     end
   end
 
+  # A tool body whose last part is a JSON object or array: {HEAD, JSON}.
+  # The JSON draws in the json grammar's faces.
+  defp json_tail(body) do
+    parts = String.split(body, "\n\n")
+    json = List.last(parts) || ""
+
+    case Jason.decode(json) do
+      {:ok, value} when is_map(value) or is_list(value) ->
+        {binary_part(body, 0, byte_size(body) - byte_size(json)), json}
+
+      _ ->
+        nil
+    end
+  end
+
   defp pretty_json(text) do
     case Jason.decode(String.trim(text)) do
       {:ok, value} -> Jason.encode!(value, pretty: true)
@@ -2453,7 +2468,17 @@ defmodule Compos.Ui.EditorLive do
   # whole or as its first line.
   defp range_content(t, "markdown"), do: {:html, t |> prose_html() |> wrap_tables()}
   defp range_content(t, "raw"), do: {:text, t}
-  defp range_content(t, "mcp-result"), do: {:text, t |> String.trim_trailing() |> tool_display_body()}
+  defp range_content(t, "mcp-result") do
+    body = t |> String.trim_trailing() |> tool_display_body()
+
+    case json_tail(body) do
+      nil -> {:text, body}
+      {head, json} ->
+        {:html,
+         Compos.Core.Markdown.Html.html_escape(head) <>
+           Compos.Core.Markdown.Html.highlight("json", json)}
+    end
+  end
 
   defp range_content(t, "mcp-result-line"),
     do: {:text, t |> String.trim_trailing() |> tool_display_body() |> tool_preview()}
