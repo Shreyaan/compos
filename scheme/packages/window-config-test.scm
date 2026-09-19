@@ -177,3 +177,31 @@
         (check-equal! (length (window-list)) 1 "and the window the peek made goes")
         (check-equal! (active-window) me "the reader stays")))
     (t--wr-done!)))
+
+;;; the frame return stack
+
+(deftest 'a-pop-puts-back-the-tree-target-and-focus
+  "arrangement-pop! restores what arrangement-push! saw; drop keeps the screen; a pop ends later entries"
+  (lambda ()
+    (t--wr-setup!)
+    (layout-target-set! #f)
+    (set-frame-local! 'winner-ring '())
+    (let* ((me (active-window))
+           (token (arrangement-push! 'zz-test)))
+      (split-window! 'h 0.5)
+      (switch-to-buffer-here! "zz-wr-b")
+      (layout-target-set! 'columns)
+      (let ((later (arrangement-push! 'zz-later)))
+        (check-true! (arrangement-pop! token) "the pop answers #t")
+        (check-equal! (map cadr (window-list)) '("zz-wr-a") "the tree comes back")
+        (check-equal! (window-buffer (active-window)) "zz-wr-a" "and the focus")
+        (check-false! (layout-target) "and the layout target")
+        (check-false! (arrangement-for 'zz-later) "a pop ends the entries pushed after it")
+        (check-false! (arrangement-pop! later) "so they restore nothing"))
+      (let ((token (arrangement-push! 'zz-test)))
+        (split-window! 'h 0.5)
+        (check-true! (arrangement-drop! token) "a drop answers #t")
+        (check-equal! (length (window-list)) 2 "and keeps what is on screen")
+        (check-false! (arrangement-for 'zz-test) "the entry is gone")))
+    (layout-target-set! #f)
+    (t--wr-done!)))

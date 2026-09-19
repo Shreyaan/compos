@@ -178,13 +178,11 @@
 
 (define-command "movie-quit" "Stop the movie and restore the frame"
   (lambda ()
-    (let ((movie (movie-current-buffer))
-          (layout (frame-local 'movie-return-layout)))
+    (let ((movie (movie-current-buffer)))
       (when movie (movie-pause! movie))
       (when (popup-open?) (popup-close!))
       (set-frame-local! 'movie-buffer #f)
-      (set-frame-local! 'movie-return-layout #f)
-      (when layout (window-tree-set! layout))
+      (arrangement-pop! (arrangement-for 'movie))
       (when (and movie (buffer-known? movie)) (buffer-kill! movie))
       (when (buffer-known? *movie-stream-buffer*)
         (buffer-kill! *movie-stream-buffer*)))))
@@ -239,7 +237,7 @@
           (message "This buffer has no Provenance states")
           (let ((movie (string-append "*movie: " source "*"))
                 (source-mode (buffer-local source 'mode-name)))
-            (set-frame-local! 'movie-return-layout (window-tree))
+            (arrangement-push! 'movie)
             (buffer-create movie)
             (buffer-provenance-stop! movie "mode:movie" "derived playback" "mode")
             (buffer-set-locals! movie

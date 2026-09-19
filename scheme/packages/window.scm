@@ -193,70 +193,21 @@
        (window-exists? (popup-window))
        (not (null? (cdr (window-list))))))
 
-;; Where the popup came from. A popup is a visit, not a move. Closing it
-;; restores work windows changed by a preview. The return record is
-;; (WINDOW BUFFER POINT). The work record is ((WINDOW BUFFER) ...).
-;;
-;; Read the buffer from the window, never from (current-buffer): a popup
-;; can open from inside a prompt, and (current-buffer) answers with the
-;; minibuffer while one is open.
-;;
-;; The record lives in memory and dies with the daemon. A popup restored
-;; from the desktop has nothing to go back to, so its close only closes.
+;; Where the popup came from. An entered popup is a visit, not a move: its
+;; entry on the frame return stack (reason popup) holds the arrangement,
+;; the group and the focus from before it opened. The entry lives in
+;; memory and dies with the daemon: a popup restored from the desktop has
+;; nothing to go back to, so its close only closes.
 (define (popup-remember!)
-  (let ((w (active-window)))
-    (unless (popup-open?)
-      (set-frame-local! 'popup-work (window-list))
-      (set-frame-local! 'popup-layout (window-tree)))
-    ;; a popup that shows the next popup does not move you: the window
-    ;; you came from is still the one the first popup remembered
-    (when (not (equal? w (popup-window)))
-      (set-frame-local! 'popup-return
-        (list w (window-buffer w) (buffer-point (window-buffer w)))))))
+  (unless (or (popup-open?) (arrangement-for 'popup))
+    (arrangement-push! 'popup)))
 
-(define (popup-saved-layout)
-  (or (frame-local 'popup-layout)
-      (let ((buf (popup-buffer)))
-        (and buf (buffer-local buf 'popup-return-layout)))))
-
-(define (popup-forget!)
-  (let ((buf (popup-buffer)))
-    (when (and buf (buffer-known? buf))
-      (buffer-set-local! buf 'popup-return-layout #f)))
-  (set-frame-local! 'popup-return #f)
-  (set-frame-local! 'popup-work #f)
-  (set-frame-local! 'popup-layout #f))
-
-;; Restore only live buffers into surviving work windows. This preserves window
-;; ids and ratios. It also does not recreate a buffer that ibuffer killed.
-(define (popup-work-restore!)
-  (for-each
-    (lambda (row)
-      (let ((w (car row)) (buf (cadr row)))
-        (when (and (window-exists? w) (buffer-exists? buf)
-                   (not (equal? (window-buffer w) buf)))
-          (select-window! w)
-          (switch-to-buffer-here! buf))))
-    (or (frame-local 'popup-work) '())))
+(define (popup-forget!) (arrangement-drop! (arrangement-for 'popup)))
 
 (define (popup-layout-live? layout)
   (and layout
        (null? (filter (lambda (buf) (not (buffer-exists? buf)))
                       (window-tree-buffers layout)))))
-
-;; Go back. The window can be gone (you split or closed it from inside
-;; the popup) and the buffer can be dead (ibuffer killed it) — each step
-;; asks before it acts, and a step that cannot run leaves the rest alone.
-(define (popup-return!)
-  (let ((r (frame-local 'popup-return)))
-    (popup-forget!)
-    (when (and r (window-exists? (car r)))
-      (select-window! (car r))
-      (let ((buf (cadr r)))
-        (when (and buf (buffer-exists? buf))
-          (when (not (equal? (window-buffer (car r)) buf))
-            (switch-to-buffer-here! buf))
-          (goto-char! (caddr r)))))))
 
 ;; Closing the popup is three things, every time and in this order: the
 ;; buffer stops floating, the window goes, and you come back. You come
@@ -286,27 +237,23 @@
          (mine? (equal? (active-window) w))
          (buf (and w (window-buffer w)))
          (focus (active-window))
-         (work (frame-local 'popup-work))
-         (layout (popup-saved-layout)))
+         (token (arrangement-for 'popup))
+         (entry (and token (assoc token (arrangements)))))
     ;; the buffer stops floating the moment it stops being the popup, or
     ;; it would float again in an ordinary window
     (when buf (popup-float! buf #f))
     (set-frame-local! 'popup-window #f)
-    (cond
-      ((pair? work)
-       (when w (delete-window-id! w))
-       (popup-work-restore!)
-       (if mine?
-           (popup-return!)
-           (begin
-             (when (window-exists? focus) (select-window! focus))
-             (popup-forget!))))
-      ((popup-layout-live? layout)
-       (popup-forget!)
-       (window-tree-set! layout))
-      (else
-       (when w (delete-window-id! w))
-       (if mine? (popup-return!) (popup-forget!))))))
+    ;; the arrangement from before comes back, unless a buffer it names
+    ;; died meanwhile (ibuffer killed it): then only the popup goes
+    (if (and entry (popup-layout-live? (nth 2 entry)))
+        (arrangement-pop! token)
+        (begin
+          (popup-forget!)
+          (when w (delete-window-id! w))
+          (when (and mine? entry (window-exists? (nth 5 entry)))
+            (select-window! (nth 5 entry)))))
+    ;; you come back only if you were IN the popup
+    (unless (or mine? (not (window-exists? focus))) (select-window! focus))))
 
 ;; A popup FLOATS, and only visibly: it stays an ordinary window in the
 ;; tree, so every window command still reaches it. The class takes its
@@ -431,16 +378,13 @@
 (define (popup-show-on name side size)
     ;; before the focus moves: this is the place you come back to
     (popup-remember!)
-    (let ((old (popup-buffer))
-          (layout (popup-saved-layout)))
+    (let ((old (popup-buffer)))
       (when (and old (not (equal? old name)) (buffer-known? old))
-        (buffer-set-local! old 'popup-return-layout #f)
         ;; the buffer this one covers waits underneath
         (when (and (popup-open?) (not *popup-dismissing*))
           (popup-stack-push! old)))
       (popup-stack-drop! name)
-      (set-frame-local! 'popup-buffer name)
-      (when layout (buffer-set-local! name 'popup-return-layout layout)))
+      (set-frame-local! 'popup-buffer name))
     (popup-float! name side size)
     (if (popup-open?)
         (let ((was (window-buffer (popup-window))))
@@ -524,6 +468,59 @@
         (popup-default-side))
     (display-param name 'size)))
 
+;;; --- the frame return stack ----------------------------------------------------
+;;; An arrangement that a mode or a prompt puts over the frame and takes
+;;; away again is one entry: (TOKEN REASON TREE GROUP TARGET FOCUS).
+;;; arrangement-push! answers the token. arrangement-pop! puts back the
+;;; tree, the group, the layout target and the focus; arrangement-drop!
+;;; keeps what is on screen. Either one also ends the entries pushed after
+;;; it. A pop is not a window command, so winner does not record it.
+
+(define (arrangements) (or (frame-local 'arrangements) '()))
+
+(define (arrangement-push! reason)
+  (let ((token (+ 1 (or (frame-local 'arrangement-last) 0))))
+    (set-frame-local! 'arrangement-last token)
+    (set-frame-local! 'arrangements
+      (cons (list token reason (window-tree) (frame-group) (layout-target) (active-window))
+            (arrangements)))
+    token))
+
+;; the token of the newest entry pushed for REASON, or #f
+(define (arrangement-for reason)
+  (let ((hits (filter (lambda (e) (equal? (cadr e) reason)) (arrangements))))
+    (and (pair? hits) (car (car hits)))))
+
+(define (arrangement--take! token)
+  (let loop ((s (arrangements)))
+    (cond ((null? s) #f)
+          ((equal? (car (car s)) token)
+           (set-frame-local! 'arrangements (cdr s))
+           (car s))
+          (else (loop (cdr s))))))
+
+(define (arrangement-drop! token) (and token (arrangement--take! token) #t))
+
+;; LOOK? draws the tree as a look (window-tree-preview!): the MRU stays
+(define (arrangement-pop! token &optional look?)
+  (let ((e (and token (arrangement--take! token)))
+        (winner *winner-inhibit*))
+    (when e
+      (set! *winner-inhibit* #t)
+      (with-layout-suppressed
+        (lambda ()
+          (if look? (window-tree-preview! (nth 2 e)) (window-tree-set! (nth 2 e)))))
+      (when (and (window-exists? (nth 5 e)) (not (equal? (active-window) (nth 5 e))))
+        (select-window! (nth 5 e)))
+      (unless (equal? (layout-target) (nth 4 e)) (layout-target-set! (nth 4 e)))
+      ;; a frame derives its group from what it shows: standing where you
+      ;; stood is part of giving the frame back
+      (unless (equal? (frame-group) (nth 3 e))
+        (set-frame-local! 'current-group (nth 3 e))
+        (frame-group-label-refresh!))
+      (set! *winner-inhibit* winner))
+    (and e #t)))
+
 ;;; --- the preview verb ----------------------------------------------------------
 ;;; A look shows a buffer for a while without keeping it. It never bumps
 ;;; the MRU, never moves focus, and never enters winner's ring. A frame
@@ -532,7 +529,7 @@
 ;;;   other  a window FROM owns: the one it owns already, else a display
 ;;;   float  the popup card, the one floating overlay
 ;;;   frame  the whole frame: BUF is a procedure that draws the look, and
-;;;          TREE is the arrangement it covers
+;;;          TREE is the return-stack token of the arrangement it covers
 ;;; DATA is the caller's own note. (preview-end KEEP) ends the look: KEEP
 ;;; #t keeps what is shown (RET twice keeps), #f puts back what was there.
 
@@ -556,7 +553,7 @@
     ;; one look per frame: a look from elsewhere ends the last one first
     (when (and slot (not same?)) (preview-end #f))
     (set! *winner-inhibit* #t)
-    (let* ((tree (if same? (nth 5 slot) (and (equal? where 'frame) (window-tree))))
+    (let* ((tree (if same? (nth 5 slot) (and (equal? where 'frame) (arrangement-push! 'preview))))
            (shown
              (cond
                ((equal? where 'here) (window-preview-buffer! buf from) from)
@@ -592,7 +589,8 @@
     (when slot
       (let ((buf (nth 0 slot)) (where (nth 1 slot)) (w (nth 3 slot)))
         (cond
-          ((equal? where 'frame) (unless keep (window-tree-preview! (nth 5 slot))))
+          ((equal? where 'frame)
+           (if keep (arrangement-drop! (nth 5 slot)) (arrangement-pop! (nth 5 slot) #t)))
           ((equal? where 'float)
            (unless (or keep (not (popup-open?)) (not (equal? (popup-buffer) buf)))
              (with-layout-suppressed (lambda () (popup-dismiss!)))))

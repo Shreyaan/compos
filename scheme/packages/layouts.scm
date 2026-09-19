@@ -105,24 +105,14 @@
 ;;; buffer was replaced, a layout was applied — abandons its record
 ;;; instead of restoring a tree of windows that no longer exist.
 
-(define (transient-frame--records) (or (frame-local 'transient-frames) '()))
-
-(define (transient-frame--set! records) (set-frame-local! 'transient-frames records))
-
-(define (transient-frame-standing? name)
-  (and (assoc name (transient-frame--records)) #t))
+;; A record is an entry on the frame return stack, pushed for NAME.
+(define (transient-frame-standing? name) (and (arrangement-for name) #t))
 
 (define (transient-frame-enter! name)
-  (if (transient-frame-standing? name)
-      #f
-      (begin
-        (transient-frame--set!
-          (cons (list name (window-tree) (frame-group)) (transient-frame--records)))
-        #t)))
+  (and (not (transient-frame-standing? name)) (arrangement-push! name) #t))
 
 (define (transient-frame-abandon! name)
-  (transient-frame--set!
-    (filter (lambda (r) (not (equal? (car r) name))) (transient-frame--records)))
+  (arrangement-drop! (arrangement-for name))
   #f)
 
 ;; the mode is standing only while the buffer it took the frame for is on
@@ -134,20 +124,7 @@
     (transient-frame-abandon! name))
   (transient-frame-enter! name))
 
-(define (transient-frame-exit! name)
-  (let ((record (assoc name (transient-frame--records))))
-    (if (not record)
-        #f
-        (let ((tree (nth 1 record)) (group (nth 2 record)))
-          (transient-frame-abandon! name)
-          (with-layout-suppressed (lambda () (window-tree-set! tree)))
-          ;; the windows walked while the mode stood, and a frame derives
-          ;; its group from what it shows: standing where you stood is
-          ;; part of giving the frame back
-          (unless (equal? (frame-group) group)
-            (set-frame-local! 'current-group group)
-            (frame-group-label-refresh!))
-          #t))))
+(define (transient-frame-exit! name) (arrangement-pop! (arrangement-for name)))
 
 (public! 'transient-frame-enter!
   "(transient-frame-enter! NAME) — record the frame's arrangement so NAME can give it back; #f when NAME already stands")
@@ -219,15 +196,13 @@
 (define (overview-enter!)
   (if (overview-active?)
       (begin (overview--hint!) #f)
-      (let ((buffers (overview-buffers))
-            (base (window-tree))
-            (group (frame-group)))
+      (let* ((buffers (overview-buffers))
+             (token (and (pair? buffers) (arrangement-push! 'overview))))
         (cond
           ((null? buffers)
            (message "Tile all is available only in a group or project") #f)
-          ((not (tile-windows! 'grid buffers)) #f)
+          ((not (tile-windows! 'grid buffers)) (arrangement-drop! token) #f)
           (else
-            (set-frame-local! 'overview-return (list base group))
             (set-frame-local! 'overview-marked '())
             (set-frame-local! 'overview-active #t)
             (transient-keymap-install! (overview--bindings))
@@ -246,16 +221,9 @@
 ;; standing where you stood is part of the restore. Returns the saved
 ;; group, the parent of a pop-out.
 (define (overview--restore!)
-  (let ((return (frame-local 'overview-return)))
-    (set-frame-local! 'overview-return #f)
-    (if (not (pair? return))
-        #f
-        (let ((group (car (cdr return))))
-          (window-tree-set! (car return))
-          (unless (equal? (frame-group) group)
-            (set-frame-local! 'current-group group)
-            (frame-group-label-refresh!))
-          group))))
+  (let* ((token (arrangement-for 'overview))
+         (entry (and token (assoc token (arrangements)))))
+    (and (arrangement-pop! token) (nth 3 entry))))
 
 (define (overview-quit!)
   (when (overview-active?)

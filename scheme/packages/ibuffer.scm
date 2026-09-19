@@ -1417,7 +1417,6 @@
   ;;
   ;; Re-showing is already right here: with a popup open, popup-show-quietly
   ;; fills the popup's window rather than splitting again.
-  (buffer-set-local! copy 'popup-return-layout #f)
   (preview-show copy 'float source))
 
 (define (listing-preview-copy! owner target)
