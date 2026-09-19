@@ -216,14 +216,19 @@
   "The connector names this machine can run now."
   (map car (filter (lambda (row) (car (cdr (cdr row)))) (setup-inference-scan))))
 
+;; A setup document opens at its beginning. The point at the end would
+;; hide the start of the document from the reader.
+(define (setup--document-set! buf text)
+  (buffer-set-text! buf text #f)
+  (buffer-goto! buf 0))
+
 ;; A bot document never takes the user's selected window. Silent mode does
 ;; not create or display the document, so it cannot alter the window tree.
 (define (bot-show-document-other-window! buf title markdown silent?)
   (if silent?
       (message (string-append "Setup: " title))
       (begin
-        (buffer-set-text! buf markdown #f)
-        (buffer-goto! buf 0)
+        (setup--document-set! buf markdown)
         (buffer-set-local! buf 'help-title title)
         (with-current-buffer buf (lambda () (set-mode! "help-mode")))
         (display-buffer-other-window! buf))))

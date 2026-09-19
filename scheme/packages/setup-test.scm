@@ -75,7 +75,7 @@
 (deftest 'setup-documents-open-at-the-beginning
   "opening M-x must not reveal a hidden end-of-document point"
   (lambda ()
-    (setup--replace-buffer! *setup-buffer* "# First\n\nLast\n")
+    (setup--document-set! *setup-buffer* "# First\n\nLast\n")
     (check-equal! (buffer-point *setup-buffer*) 0 "the document point")))
 
 (deftest 'welcome-marker-makes-first-frame-policy-idempotent

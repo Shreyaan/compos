@@ -5,7 +5,7 @@ defmodule Compos.TrainingSchemeTest do
 
   alias Compos.Core.Session
 
-  @file_ Path.join([:code.priv_dir(:compos_core), "tests", "training-test.scm"])
+  @file_ Path.expand("../../../../scheme/packages/training-test.scm", __DIR__)
   @lane {:scheme_suite, __MODULE__}
 
   defp eval!(code) do
