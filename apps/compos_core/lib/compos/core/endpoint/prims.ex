@@ -38,49 +38,6 @@ defmodule Compos.Core.Endpoint.Prims do
 
           [name, text, until, timeout, callback] ->
             endpoint_ask(name, text, until, timeout, callback)
-        end,
-      {"endpoint-on-event!",
-       "(endpoint-on-event! HANDLER) — set the handler that gets (NAME KIND TEXT) for unsolicited frames."} =>
-        fn [handler] ->
-          Roots.put({:endpoint_handler}, handler)
-          :void
-        end,
-      {"endpoint-list",
-       "(endpoint-list) — return (name status transport framing queued) per connection."} =>
-        fn [] ->
-          for c <- Compos.Core.Endpoint.connections(),
-              do: [c.name, to_string(c.status), to_string(c.transport), c.framing, c.queued]
-        end,
-      {"endpoint-detail",
-       "(endpoint-detail NAME) — return a status plist, or #f when never started."} => fn [name] ->
-        case Compos.Core.Endpoint.detail(s(name)) do
-          nil ->
-            false
-
-          d ->
-            [
-              {:sym, "status"},
-              to_string(d.status),
-              {:sym, "reason"},
-              Map.get(d, :reason, ""),
-              {:sym, "transport"},
-              to_string(d.transport),
-              {:sym, "framing"},
-              Map.get(d, :framing, ""),
-              {:sym, "queued"},
-              Map.get(d, :queued, 0)
-            ]
-        end
-      end,
-      {"endpoint-log", "(endpoint-log NAME) — return ((time dir text) ...) frames, oldest first."} =>
-        fn [name] ->
-          for e <- Compos.Core.Endpoint.log(s(name)) do
-            [
-              clock(e.at),
-              to_string(e.dir),
-              e.text
-            ]
-          end
         end
     }
   end

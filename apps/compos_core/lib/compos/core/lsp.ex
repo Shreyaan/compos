@@ -8,7 +8,7 @@ defmodule Compos.Core.LSP do
   server per project root. Scheme addresses a connection by the id
   string `"name@root"`, built and parsed only here.
 
-  Events flow to Scheme through one rooted handler (`lsp-on-event!`,
+  Events flow to Scheme through one rooted handler (`on-event!` with kind lsp,
   rooted in Compos.Core.Roots like the MCP handler): the handler
   receives (ID METHOD PARAMS). Status changes arrive on the same pipe
   as method "compos/status". Callbacks run on the connection's own
@@ -102,7 +102,7 @@ defmodule Compos.Core.LSP do
 
   @doc "Forward a server event to the Scheme handler, on the connection's lane."
   def dispatch_event(key, method, params) do
-    with handler when handler != nil <- Roots.get({:lsp_handler}) do
+    with handler when handler != nil <- Roots.get({:on_event, "lsp"}) do
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         Session.apply_callback(
           handler,

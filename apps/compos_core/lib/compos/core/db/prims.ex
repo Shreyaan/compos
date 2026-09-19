@@ -27,9 +27,6 @@ defmodule Compos.Core.DB.Prims do
       {"db-connected?", "(db-connected? NAME) — #t when NAME is open."} => fn [name] ->
         Compos.Core.DB.whereis(s(name)) != nil
       end,
-      {"db-list", "(db-list) — return (name adapter database) per connection."} => fn [] ->
-        for c <- Compos.Core.DB.connections(), do: [c.name, c.adapter, c.database]
-      end,
       {"db-adapters", "(db-adapters) — the database adapters this build can open."} => fn [] ->
         String.split(Compos.Core.DB.known_adapters(), ", ")
       end,

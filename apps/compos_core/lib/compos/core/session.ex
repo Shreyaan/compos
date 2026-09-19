@@ -62,6 +62,7 @@ defmodule Compos.Core.Session do
     Compos.Core.DB.Prims,
     Compos.Core.Endpoint.Prims,
     Compos.Core.WebServer.Prims,
+    Compos.Core.Conn.Prims,
     Compos.Core.LLMSession.Prims
   ]
   @pt_stamp {__MODULE__, :primitive_stamp}
@@ -2077,6 +2078,7 @@ defmodule Compos.Core.Session do
     |> Map.merge(Compos.Core.DB.Prims.entries())
     |> Map.merge(Compos.Core.Endpoint.Prims.entries())
     |> Map.merge(Compos.Core.WebServer.Prims.entries())
+    |> Map.merge(Compos.Core.Conn.Prims.entries())
     |> Map.merge(Compos.Core.LLMSession.Prims.entries())
     |> Compos.Core.SchemeRawNames.add()
   end

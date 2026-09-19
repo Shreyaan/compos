@@ -49,6 +49,8 @@
         (when e (lsp-start! name root (cadr e)))))
     id))
 
+(define (lsp-connections) (conn-rows 'lsp '(id status name root)))
+
 (define (lsp--connection? id) (assoc id (lsp-connections)))
 
 ;;; --- attach ------------------------------------------------------------------
@@ -141,11 +143,11 @@
       (when (buffer-exists? *lsp-diag-buffer*)
         (list-refresh! *lsp-diag-buffer*)))))
 
-;; lsp-on-event! is a single slot; this package owns it and fans out to
+;; the lsp event handler is a single slot; this package owns it and fans out to
 ;; the keyed hook: (add-hook! (list 'lsp-event NAME) FN), FN gets
 ;; (ID METHOD PARAMS), and the same NAME replaces.
 
-(lsp-on-event!
+(on-event! 'lsp
   (lambda (id method params)
     (cond ((equal? method "textDocument/publishDiagnostics")
            (lsp--diagnostics! id params))
@@ -593,3 +595,6 @@
   "(lsp-register! NAME SPEC) — register a language server; SPEC has 'command 'args 'env 'language 'modes 'settings")
 (public! 'lsp-ensure!
   "(lsp-ensure! NAME ROOT) — start the registered server for ROOT once; return the connection id")
+(public! 'lsp-connections
+  "(lsp-connections) — return (id status name root) per language-server connection")
+(catalog-meta! 'function "lsp-connections" 'effects '(read))

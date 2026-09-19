@@ -28,7 +28,7 @@
     (and e (cadr e))))
 
 (define (endpoint-connected? name)
-  (let ((d (endpoint-detail name)))
+  (let ((d (conn-detail 'endpoint name)))
     (and d (equal? (plist-get d 'status) "ready"))))
 
 ;; Start a registered endpoint once. A live connection is reused, which
@@ -54,12 +54,12 @@
 
 ;;; --- events ------------------------------------------------------------------
 
-;; endpoint-on-event! is a single slot; this package owns it and fans out
+;; the endpoint event handler is a single slot; this package owns it and fans out
 ;; to the keyed hook: (add-hook! (list 'endpoint-event NAME) FN), FN gets
 ;; (NAME KIND TEXT), and the same NAME replaces. Without this, two
 ;; packages that both watch endpoints silently clobber each other, and
 ;; the second one loaded is the only one that ever runs.
-(endpoint-on-event!
+(on-event! 'endpoint
   (lambda (name kind text)
     (run-hook-with-args 'endpoint-event name kind text)))
 
@@ -91,19 +91,13 @@
   "(endpoint-ask NAME TEXT UNTIL [TIMEOUT] CB) — send a query and collect the result frames up to the sentinel UNTIL; CB gets (OK FRAMES)")
 (public! 'endpoint-send!
   "(endpoint-send! NAME TEXT) — write one frame to the connection and do not wait")
-(public! 'endpoint-list
-  "(endpoint-list) — every client connection this editor opened, as (name status transport framing queued)")
-(public! 'endpoint-detail
-  "(endpoint-detail NAME) — a status plist for one connection, or #f when it never started")
-(public! 'endpoint-log
-  "(endpoint-log NAME) — the frames both ways as ((time dir text) ...), oldest first; read this when a connection will not start")
 
 (effects! '(read external))
 (defrecipe! "open a client connection to a database, a repl, or a tcp socket"
   "(endpoint-register! {{name}} '(command {{command}} framing \"line\"))"
   (list (list 'name "Connection name: ") (list 'command "Program to run: ")))
 (defrecipe! "see the open connections"
-  "(endpoint-list)" '())
+  "(conn-list 'endpoint)" '())
 (defrecipe! "see why a connection will not start"
-  "(endpoint-log {{name}})"
+  "(conn-log 'endpoint {{name}})"
   (list (list 'name "Connection name: ")))

@@ -2777,7 +2777,7 @@ defmodule Compos.Core.SchemeAPI do
   # --- the file watcher (Compos.Core.Watch) -----------------------------------
   # The event is content-free: it names the root and nothing else, so the
   # handler re-queries. `fs-on-change!` holds ONE handler, like
-  # `mcp-on-change!`; editor.scm keeps the subscriber list, because a list of
+  # `on-event!`; editor.scm keeps the subscriber list, because a list of
   # subscribers is policy.
   defp watch_primitives do
     %{
@@ -2808,7 +2808,7 @@ defmodule Compos.Core.SchemeAPI do
         end,
       # clicking a block in a rich view. The client holds a buffer and the
       # block's own id string, not a command, so it needs a closure to hand
-      # them to — the same one-handler shape as mcp-on-change! and
+      # them to — the same one-handler shape as on-event! and
       # fs-on-change!. What an id means is the mode's business.
       {"block-on-click!",
        "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked."} =>

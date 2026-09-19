@@ -1605,6 +1605,30 @@
                                   (list name hint))
                               out)))))))))
 
+;;; --- connections --------------------------------------------------------------
+;;; conn-list, conn-detail and conn-log answer for every connection kind
+;;; (mcp, lsp, endpoint, web-server, db) with plists. The package of a kind
+;;; picks the fields that its rows show.
+
+(domain! 'system)
+(effects! '(read))
+
+(define (conn-rows kind fields)
+  (map (lambda (c) (map (lambda (f) (plist-get c f)) fields))
+       (conn-list kind)))
+
+(public! 'conn-list
+  "(conn-list KIND) — one plist per connection of KIND: 'mcp, 'lsp, 'endpoint, 'web-server or 'db")
+(public! 'conn-detail
+  "(conn-detail KIND NAME) — the status plist of one connection, or #f when it never started")
+(public! 'conn-log
+  "(conn-log KIND NAME) — the frames both ways as ((time dir text) ...), oldest first; read this when a connection will not start")
+(public! 'conn-rows
+  "(conn-rows KIND FIELDS) — return one list of the FIELDS values per connection of KIND")
+(public! 'on-event!
+  "(on-event! KIND HANDLER) — set the ONE handler for events of KIND; the package of KIND owns the slot")
+(catalog-meta! 'function "on-event!" 'effects '(write))
+
 ;;; --- hot reload -------------------------------------------------------------
 ;;; A save reloads that file's changed top-level forms into this session.
 ;;; A new definition alone does not reach a buffer that is already open:

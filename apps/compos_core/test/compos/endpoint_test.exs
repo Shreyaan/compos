@@ -138,7 +138,7 @@ defmodule Compos.EndpointTest do
       eval!("(define seen '())")
 
       eval!("""
-      (endpoint-on-event!
+      (on-event! (quote endpoint)
         (lambda (name kind text) (set! seen (cons (list name kind text) seen))))
       """)
 
@@ -153,15 +153,15 @@ defmodule Compos.EndpointTest do
       start_fake("t-info")
       ask!("t-info", "echo x", ~s|"END"|, "r")
 
-      assert eval!(~s|(endpoint-detail "t-info")|) =~ ~s|status "ready"|
-      assert eval!(~s|(endpoint-detail "t-info")|) =~ ~s|transport "exec"|
-      assert eval!(~s|(endpoint-detail "t-info")|) =~ ~s|framing "line"|
+      assert eval!(~s|(conn-detail (quote endpoint) "t-info")|) =~ ~s|status "ready"|
+      assert eval!(~s|(conn-detail (quote endpoint) "t-info")|) =~ ~s|transport "exec"|
+      assert eval!(~s|(conn-detail (quote endpoint) "t-info")|) =~ ~s|framing "line"|
 
-      list = eval!("(endpoint-list)")
+      list = eval!("(conn-list (quote endpoint))")
       assert list =~ "t-info"
 
       # the log holds both directions of the exchange that just happened
-      log = eval!(~s|(endpoint-log "t-info")|)
+      log = eval!(~s|(conn-log (quote endpoint) "t-info")|)
       assert log =~ "echo x"
       assert log =~ "out"
       assert log =~ "in"
@@ -171,7 +171,7 @@ defmodule Compos.EndpointTest do
   describe "diagnostics" do
     test "the log names the command that ran, so a wrong binary is visible" do
       start_fake("t-cmd")
-      assert eval!(~s|(endpoint-log "t-cmd")|) =~ "fake_endpoint.exs"
+      assert eval!(~s|(conn-log (quote endpoint) "t-cmd")|) =~ "fake_endpoint.exs"
     end
 
     test "stderr merges onto the frame stream when the spec asks for it" do
@@ -185,7 +185,7 @@ defmodule Compos.EndpointTest do
 
       wait_until(fn -> Endpoint.whereis("t-err") != nil end)
       on_exit(fn -> Endpoint.stop("t-err") end)
-      wait_until(fn -> eval!(~s|(endpoint-log "t-err")|) =~ "oops" end)
+      wait_until(fn -> eval!(~s|(conn-log (quote endpoint) "t-err")|) =~ "oops" end)
     end
 
     test "without the merge, stderr stays off the frame stream" do
@@ -211,7 +211,9 @@ defmodule Compos.EndpointTest do
 
   describe "tcp transport" do
     test "an endpoint connects to a listener and exchanges frames" do
-      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, packet: :raw])
+      {:ok, listener} =
+        :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, packet: :raw])
+
       {:ok, port_no} = :inet.port(listener)
 
       # a one-shot echo server: read a line, answer it, then the sentinel
@@ -227,7 +229,7 @@ defmodule Compos.EndpointTest do
       on_exit(fn -> Endpoint.stop("t-tcp") end)
 
       assert ask!("t-tcp", "hello", ~s|"END"|, "r") == ~s|(#t ("got:hello"))|
-      assert eval!(~s|(endpoint-detail "t-tcp")|) =~ ~s|transport "tcp"|
+      assert eval!(~s|(conn-detail (quote endpoint) "t-tcp")|) =~ ~s|transport "tcp"|
     end
   end
 

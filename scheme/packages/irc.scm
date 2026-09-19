@@ -545,7 +545,7 @@
             (else (list (irc-route m) (irc-message m)))))))
 
 (define (irc-redraw! name)
-  (let ((frames (endpoint-log (or (irc-conn-get name 'endpoint) (irc-endpoint name)))))
+  (let ((frames (conn-log 'endpoint (or (irc-conn-get name 'endpoint) (irc-endpoint name)))))
     (for-each (lambda (b)
                 (irc-reset! b)
                 (irc-display b (irc-banner (let ((t (irc-buf-target b)))

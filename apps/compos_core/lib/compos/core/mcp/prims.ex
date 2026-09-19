@@ -24,63 +24,6 @@ defmodule Compos.Core.MCP.Prims do
         Compos.Core.MCP.disconnect(s(name))
         :void
       end,
-      {"mcp-connections",
-       "(mcp-connections) — return (name status tools type resources prompts) per connection."} =>
-        fn [] ->
-          for c <- Compos.Core.MCP.connections() do
-            [c.name, to_string(c.status), c.tools, to_string(c.type), c.resources, c.prompts]
-          end
-        end,
-      # what the hub's detail view reads: false for a server never started
-      {"mcp-server-detail",
-       "(mcp-server-detail NAME) — return a status plist, or #f when never started."} => fn [name] ->
-        case Compos.Core.MCP.detail(s(name)) do
-          nil ->
-            false
-
-          d ->
-            [
-              {:sym, "status"},
-              to_string(d.status),
-              {:sym, "type"},
-              to_string(d.type),
-              {:sym, "server-name"},
-              d.server_info["name"] || "",
-              {:sym, "server-version"},
-              d.server_info["version"] || "",
-              {:sym, "reason"},
-              d.reason,
-              {:sym, "tools"},
-              d.tools,
-              {:sym, "resources"},
-              for(
-                r <- d.resources,
-                do: [r["name"] || "", r["uri"] || "", r["description"] || ""]
-              ),
-              {:sym, "prompts"},
-              for(p <- d.prompts, do: [p["name"] || "", p["description"] || ""])
-            ]
-        end
-      end,
-      # (mcp-on-change! (lambda (name status) ...)) — the hub redraws itself
-      # when a server becomes ready, dies, or fails. Rooted like the agent
-      # event handler.
-      {"mcp-on-change!",
-       "(mcp-on-change! HANDLER) — set the handler that gets (NAME STATUS) on server changes."} =>
-        fn [handler] ->
-          Roots.put({:mcp_handler}, handler)
-          :void
-        end,
-      {"mcp-log", "(mcp-log NAME) — return ((time dir text) ...) JSON-RPC frames, oldest first."} =>
-        fn [name] ->
-          for e <- Compos.Core.MCP.log(s(name)) do
-            [
-              clock(e.at),
-              to_string(e.dir),
-              e.text
-            ]
-          end
-        end,
       {"mcp-tool-specs", "(mcp-tool-specs NAMES) — return the tool specs of the named servers."} =>
         fn [names] ->
           Compos.Core.MCP.tool_specs(Enum.map(names, &s/1))

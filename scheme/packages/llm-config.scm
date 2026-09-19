@@ -92,7 +92,7 @@
 (define (llm-config--server-tools server)
   (if (equal? server 'compos)
       (if (boundp (quote llm-tool-specs)) (length (llm-tool-specs)) 0)
-      (let ((d (mcp-server-detail (symbol->string server))))
+      (let ((d (conn-detail 'mcp (symbol->string server))))
         (and (pair? d)
              (equal? (plist-get d 'status) "ready")
              (length (or (plist-get d 'tools) '()))))))
@@ -429,7 +429,7 @@
       ((and (equal? server "compos") (boundp (quote llm-tool-specs)))
        (map car (llm-tool-specs)))
       (else
-        (let ((d (mcp-server-detail server)))
+        (let ((d (conn-detail 'mcp server)))
           (map (lambda (t) (if (pair? t) (car t) t))
                (or (plist-get d 'tools) '())))))))
 

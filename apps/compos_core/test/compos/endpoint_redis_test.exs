@@ -24,13 +24,27 @@ defmodule Compos.EndpointRedisTest do
 
     if exe && cli do
       {_, 0} =
-        System.cmd(exe, [
-          "--port", "#{@port}", "--save", "", "--appendonly", "no",
-          "--daemonize", "yes", "--bind", "127.0.0.1"
-        ], stderr_to_stdout: true)
+        System.cmd(
+          exe,
+          [
+            "--port",
+            "#{@port}",
+            "--save",
+            "",
+            "--appendonly",
+            "no",
+            "--daemonize",
+            "yes",
+            "--bind",
+            "127.0.0.1"
+          ], stderr_to_stdout: true)
 
       Process.sleep(500)
-      on_exit(fn -> System.cmd(cli, ["-p", "#{@port}", "shutdown", "nosave"], stderr_to_stdout: true) end)
+
+      on_exit(fn ->
+        System.cmd(cli, ["-p", "#{@port}", "shutdown", "nosave"], stderr_to_stdout: true)
+      end)
+
       {:ok, redis: true}
     else
       :ok
@@ -66,7 +80,10 @@ defmodule Compos.EndpointRedisTest do
 
       eval!(~s|(redis "redis-test" "SET greeting hello" (lambda (ok v) (set! r1 (list ok v))))|)
       eval!(~s|(redis "redis-test" "GET greeting" (lambda (ok v) (set! r2 (list ok v))))|)
-      eval!(~s|(redis "redis-test" "INCR counter\\r\\nINCR counter" (lambda (ok v) (set! r3 (list ok v))))|)
+
+      eval!(
+        ~s|(redis "redis-test" "INCR counter\\r\\nINCR counter" (lambda (ok v) (set! r3 (list ok v))))|
+      )
 
       wait_until(fn -> eval!("r3") != "pending" end)
 
@@ -76,8 +93,8 @@ defmodule Compos.EndpointRedisTest do
       assert eval!("r3") == ~s|(#t (":1" ":2"))|
 
       # one connection served all three: that is the point of an endpoint
-      assert eval!(~s|(endpoint-detail "redis-test")|) =~ ~s|status "ready"|
-      assert eval!(~s|(endpoint-detail "redis-test")|) =~ ~s|transport "tcp"|
+      assert eval!(~s|(conn-detail (quote endpoint) "redis-test")|) =~ ~s|status "ready"|
+      assert eval!(~s|(conn-detail (quote endpoint) "redis-test")|) =~ ~s|transport "tcp"|
     end
   end
 

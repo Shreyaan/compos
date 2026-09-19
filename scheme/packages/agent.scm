@@ -441,7 +441,7 @@
 
 ;;; --- the turn-end hook --------------------------------------------------------
 ;;;
-;;; agent-on-turn-end! is a single slot, the way lsp-on-event! is: this
+;;; agent-on-turn-end! is a single slot, the way the lsp event handler is: this
 ;;; package owns it and fans out to named listeners. The Agent dispatches it
 ;;; once per completed turn, after the batch carrying that turn-end has
 ;;; rendered, on the :ui lane. A listener therefore reads a FINISHED

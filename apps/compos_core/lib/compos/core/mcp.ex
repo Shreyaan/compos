@@ -108,11 +108,11 @@ defmodule Compos.Core.MCP do
 
   @doc """
   Tell Scheme a server changed state, if anything registered interest
-  (`mcp-on-change!`). A hub whose rows sit on "connecting" forever reads as
+  (`on-event!` with kind mcp). A hub whose rows sit on "connecting" forever reads as
   broken, and there is no timer in the editor to poll with.
   """
   def notify(name, status) do
-    with handler when handler != nil <- Roots.get({:mcp_handler}) do
+    with handler when handler != nil <- Roots.get({:on_event, "mcp"}) do
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         Session.apply_callback(handler, [name, to_string(status)])
       end)

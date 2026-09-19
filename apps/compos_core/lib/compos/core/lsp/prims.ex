@@ -28,52 +28,6 @@ defmodule Compos.Core.LSP.Prims do
 
         :void
       end,
-      {"lsp-connections", "(lsp-connections) — return (id status name root) per connection."} =>
-        fn [] ->
-          for c <- Compos.Core.LSP.connections(), do: [c.id, to_string(c.status), c.name, c.root]
-        end,
-      {"lsp-server-detail",
-       "(lsp-server-detail ID) — return a status plist, or #f when never started."} => fn [id] ->
-        with {name, root} <- Compos.Core.LSP.parse_id(s(id)),
-             d when d != nil <- Compos.Core.LSP.detail(name, root) do
-          [
-            {:sym, "status"},
-            to_string(d.status),
-            {:sym, "reason"},
-            Map.get(d, :reason, ""),
-            {:sym, "encoding"},
-            to_string(Map.get(d, :encoding, "")),
-            {:sym, "server-name"},
-            Map.get(d, :server_info, %{})["name"] || "",
-            {:sym, "docs"},
-            Map.get(d, :docs, [])
-          ]
-        else
-          _ -> false
-        end
-      end,
-      {"lsp-on-event!",
-       "(lsp-on-event! HANDLER) — set the handler that gets (ID METHOD PARAMS) on server events."} =>
-        fn [handler] ->
-          Roots.put({:lsp_handler}, handler)
-          :void
-        end,
-      {"lsp-log", "(lsp-log ID) — return ((time dir text) ...) JSON-RPC frames, oldest first."} =>
-        fn [id] ->
-          case Compos.Core.LSP.parse_id(s(id)) do
-            {name, root} ->
-              for e <- Compos.Core.LSP.log(name, root) do
-                [
-                  clock(e.at),
-                  to_string(e.dir),
-                  e.text
-                ]
-              end
-
-            _ ->
-              []
-          end
-        end,
       {"lsp-open!", "(lsp-open! ID BUF) — open BUF on the server and keep it in sync."} => fn [
                                                                                                 id,
                                                                                                 buf

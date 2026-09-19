@@ -115,7 +115,7 @@ defmodule Compos.MCPHubTest do
       press("s")
       wait_until(fn -> MCP.connected?("zzhub") end)
 
-      # no g pressed: mcp-on-change! redraws when the handshake lands
+      # no g pressed: the mcp event handler redraws when the handshake lands
       wait_until(fn -> eval!(~s{(buffer-text "*mcp-hub*")}) =~ "ready" end)
       assert eval!(~s{(buffer-text "*mcp-hub*")}) =~ "stdio"
     end

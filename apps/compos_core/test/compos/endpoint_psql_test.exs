@@ -78,7 +78,7 @@ defmodule Compos.EndpointPsqlTest do
       assert eval!("r3") == "(#t (\"id|name\" \"1|a\" \"2|b\"))"
 
       # the session stayed up across all three: no reconnect tax
-      assert eval!(~s|(endpoint-detail "pg-test")|) =~ ~s|status "ready"|
+      assert eval!(~s|(conn-detail (quote endpoint) "pg-test")|) =~ ~s|status "ready"|
     end
   end
 
@@ -119,7 +119,7 @@ defmodule Compos.EndpointPsqlTest do
 
       wait_until(fn -> eval!("after") != "pending" end)
       assert eval!("after") =~ "7"
-      assert eval!(~s|(endpoint-detail "pg-err")|) =~ ~s|status "ready"|
+      assert eval!(~s|(conn-detail (quote endpoint) "pg-err")|) =~ ~s|status "ready"|
     end
   end
 end

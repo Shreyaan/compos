@@ -20,21 +20,6 @@ defmodule Compos.Core.WebServer.Prims do
         Compos.Core.WebServer.stop(s(name))
         :void
       end,
-      {"web-server-list",
-       "(web-server-list) — return (name host port url max-body) for every programmable HTTP server."} =>
-        fn [] ->
-          for server <- Compos.Core.WebServer.servers() do
-            [server.name, server.host, server.port, server.url, server.max_body]
-          end
-        end,
-      {"web-server-detail",
-       "(web-server-detail NAME) — return the server detail plist, or #f when the server is not running."} =>
-        fn [name] ->
-          case Compos.Core.WebServer.detail(s(name)) do
-            nil -> false
-            detail -> web_server_detail(detail)
-          end
-        end,
       # MCP-shaped JSON for a list of registry tool specs — the proxy's
       # tools/list payload (input_schema key renamed to MCP's camelCase)
       {"tool-specs-json",

@@ -12,7 +12,7 @@
 ;;;   g / q         refresh · bury
 ;;;
 ;;; The rows redraw themselves: a connection announces ready/stopped/error
-;;; through mcp-on-change!, because a row that sits on "connecting" forever
+;;; through on-event!, because a row that sits on "connecting" forever
 ;;; reads as a broken feature, and the editor has no timer to poll with.
 
 (define *mcp-hub-buffer* "*mcp-hub*")
@@ -36,6 +36,9 @@
 (define (mcp-hub-spec name)
   (let ((e (assoc (string->symbol name) *mcp-registry*)))
     (if e (cadr e) '())))
+
+(define (mcp-connections)
+  (conn-rows 'mcp '(name status tools type resources prompts)))
 
 (define (mcp-hub-live name)
   (let loop ((cs (mcp-connections)))
@@ -62,7 +65,7 @@
     (if live
         (list name (cadr live) (caddr live) (list-ref live 3)
               (list-ref live 4) (list-ref live 5))
-        (let ((last (mcp-server-detail name)))
+        (let ((last (conn-detail 'mcp name)))
           (list name
                 (if last (plist-get last 'status) "stopped")
                 #f
@@ -105,7 +108,7 @@
 (define (mcp-hub-refresh!) (list-refresh! *mcp-hub-buffer*))
 
 ;; a connection changing state redraws the list, if anyone is looking
-(mcp-on-change! (lambda (name status) (mcp-hub-refresh!)))
+(on-event! 'mcp (lambda (name status) (mcp-hub-refresh!)))
 
 (define (mcp-hub-current) (list-current *mcp-hub-buffer*))
 
@@ -195,7 +198,7 @@
   (string-append "*mcp: " name "*"))
 
 (define (mcp-hub-render-detail! buf name)
-  (let ((d (mcp-server-detail name)))
+  (let ((d (conn-detail 'mcp name)))
     (if (not d)
         ;; restored from a previous session, or never run: the old text is a
         ;; frozen screenshot of a server that isn't there — say so instead
@@ -210,12 +213,13 @@
           (buffer-set-read-only! buf #t))
         (let* ((title (string-append name " — " (plist-get d 'type) ", "
                                      (plist-get d 'status) "\n"))
-               (ident (let ((sn (plist-get d 'server-name)))
-                        (if (equal? sn "")
-                            ""
-                            (string-append sn " " (plist-get d 'server-version) "\n"))))
-              (why (let ((r (plist-get d 'reason)))
-                     (if (equal? r "") "" (string-append r "\n")))))
+               (info (plist-get d 'server-info))
+               (sn (plist-get info 'name))
+               (ident (if sn
+                          (string-append sn " " (or (plist-get info 'version) "") "\n")
+                          ""))
+               (why (let ((r (plist-get d 'reason)))
+                      (if (and r (not (equal? r ""))) (string-append r "\n") ""))))
           (buffer-create buf)
           (buffer-set-read-only! buf #f)
           (buffer-delete-range! buf 0 (buffer-size buf))
@@ -225,11 +229,13 @@
                         '()))
                  (ovs (mcp-hub-section buf "Resources" (plist-get d 'resources)
                         (lambda (r)
-                          (list (string-append (car r) " (" (cadr r) ")")
-                                (caddr r)))
+                          (list (string-append (or (plist-get r 'name) "")
+                                               " (" (or (plist-get r 'uri) "") ")")
+                                (or (plist-get r 'description) "")))
                         ovs))
                  (ovs (mcp-hub-section buf "Prompts" (plist-get d 'prompts)
-                        (lambda (p) (list (car p) (cadr p)))
+                        (lambda (p) (list (or (plist-get p 'name) "")
+                                          (or (plist-get p 'description) "")))
                         ovs)))
             (overlay-set! buf 'mcp-detail
               (cons (list 0 (string-byte-length name) "mcp-heading") ovs)))
@@ -256,7 +262,7 @@
   "What one MCP server serves: its tools, its resources and its prompts. `g` re-reads them from the server, and `l` shows the wire log.")
 
 (define (mcp-hub-show-detail name)
-  (if (not (mcp-server-detail name))
+  (if (not (conn-detail 'mcp name))
       (message (string-append name " has never been started — s starts it"))
       (let ((buf (mcp-hub-detail-buffer name)))
         (buffer-create buf)
@@ -284,7 +290,7 @@
 ;; own stderr (~/.compos/daemon.log), and merging them into this stream
 ;; risks interleaving a half-written line into a JSON frame.
 (define (mcp-hub-render-log! buf name)
-  (let ((entries (mcp-log name)))
+  (let ((entries (conn-log 'mcp name)))
     (buffer-set-read-only! buf #f)
     (buffer-delete-range! buf 0 (buffer-size buf))
     (buffer-append! buf
@@ -378,5 +384,4 @@
 
 (category! 'mcp)
 (public! 'mcp-hub-refresh! "(mcp-hub-refresh!) — redraw *mcp-hub* if it exists")
-(public! 'mcp-server-detail "(mcp-server-detail NAME) — plist: status, type, tools, resources, prompts")
-(public! 'mcp-log "(mcp-log NAME) — ((time dir text) ...) JSON-RPC frames, oldest first")
+(public! 'mcp-connections "(mcp-connections) — (name status tools type resources prompts) per live MCP connection")

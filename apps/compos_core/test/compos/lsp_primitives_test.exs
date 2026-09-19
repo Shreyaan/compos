@@ -1,7 +1,7 @@
 defmodule Compos.LSPPrimitivesTest do
   @moduledoc """
   The Scheme surface of the LSP client: lsp-start!, lsp-open!, the
-  lsp-on-event! pipe, and lsp-buffer-request — against the fake server.
+  on-event! pipe, and lsp-buffer-request — against the fake server.
   """
 
   use Compos.Case
@@ -102,16 +102,19 @@ defmodule Compos.LSPPrimitivesTest do
     assert eval!("*lsp-test-hover*") == ~S{(#t "hover:hola")}
   end
 
-  test "lsp-connections and lsp-server-detail answer from Scheme" do
+  test "lsp-connections and conn-detail answer from Scheme" do
     id = start!("prim-d")
 
     assert eval!("(lsp-connections)") =~ ~s{("#{id}" "ready" "prim-d" "/tmp")}
-    assert eval!(~s{(plist-get (lsp-server-detail "#{id}") 'server-name)}) == ~S{"fake-lsp"}
-    assert eval!(~s{(lsp-server-detail "nope@/tmp")}) == "#f"
+
+    assert eval!(~s{(plist-get (plist-get (conn-detail 'lsp "#{id}") 'server-info) 'name)}) ==
+             ~S{"fake-lsp"}
+
+    assert eval!(~s{(conn-detail 'lsp "nope@/tmp")}) == "#f"
   end
 
-  test "lsp-log answers for a live connection" do
+  test "conn-log answers for a live connection" do
     id = start!("prim-e")
-    assert eval!(~s{(length (lsp-log "#{id}"))}) =~ ~r/\d+/
+    assert eval!(~s{(length (conn-log 'lsp "#{id}"))}) =~ ~r/\d+/
   end
 end

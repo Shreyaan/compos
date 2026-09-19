@@ -16,7 +16,7 @@ defmodule Compos.Core.Roots do
 
   Two kinds of entry:
 
-    * a slot: a single handler under a fixed key such as `{:lsp_handler}`,
+    * a slot: a single handler under a fixed key such as `{:on_event, "lsp"}`,
       set by a Scheme primitive and read on every event;
     * a hold: a callback under a fresh key such as `{:llm, ref}`, put
       before the value escapes and dropped once the callback fired.

@@ -400,14 +400,13 @@
 ;; A preset whose server is not ready serves no tools yet. Name those
 ;; servers: "0 tools" with a preset set is otherwise unexplainable.
 (define (dash--pending-servers chat)
-  (if (not (and (boundp (quote chat-active-servers))
-                (boundp (quote mcp-server-detail))))
+  (if (not (boundp (quote chat-active-servers)))
       '()
       (let ((remote (filter (lambda (s) (not (equal? s 'compos)))
                             (chat-active-servers chat))))
         (map (lambda (s) (value->string s))
              (filter (lambda (s)
-                       (let ((d (mcp-server-detail (value->string s))))
+                       (let ((d (conn-detail 'mcp (value->string s))))
                          (not (and (pair? d)
                                    (equal? (plist-get d 'status) "ready")))))
                      remote)))))

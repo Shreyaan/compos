@@ -148,7 +148,6 @@
   "(db-query NAME-OR-TRANSACTION SQL [PARAMS] [CB]) — return RESULT on the calling lane; with CB, answer asynchronously with (OK RESULT)")
 (public! 'db-with-transaction
   "(db-with-transaction NAME PROC) — call PROC with a scoped transaction handle; commit and return its value, or roll back on error")
-(public! 'db-list "(db-list) — every open database as (name adapter database)")
 (public! 'db-adapters "(db-adapters) — the database adapters this build can open")
 
 (effects! '(read external))
@@ -159,4 +158,4 @@
   "(db-register! {{name}} (list 'adapter \"postgres\" 'database {{database}}))"
   (list (list 'name "Connection name: ") (list 'database "Database: ")))
 (defrecipe! "see the open databases"
-  "(db-list)" '())
+  "(conn-list 'db)" '())

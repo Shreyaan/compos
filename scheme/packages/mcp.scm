@@ -379,7 +379,7 @@
       (begin
         (mcp-ensure! name)
         (mcp-await-ready (symbol->string name))
-        (let ((d (mcp-server-detail (symbol->string name))))
+        (let ((d (conn-detail 'mcp (symbol->string name))))
           (if d (plist-get d 'tools) '())))))
 
 ;; ...and the arguments one tool takes, as its JSON schema. Without this a
@@ -429,7 +429,7 @@
   (let ((server (symbol->string name)))
     (mcp-ensure! name)
     (mcp-await-ready server *mcp-find-wait*)
-    (let ((d (mcp-server-detail server)))
+    (let ((d (conn-detail 'mcp server)))
       (if (not d)
           '()
           (filter (lambda (row) (mcp-find-hit? row words))
@@ -485,7 +485,6 @@
 (public! 'chat-preset-candidates "(chat-preset-candidates BUF) — every preset as (NAME \"●|○ DESC\")")
 (public! 'chat-preset-toggle! "(chat-preset-toggle! BUF 'name) — turn one preset on or off for a session")
 (public! 'chat-presets-set! "(chat-presets-set! BUF '(name ...)) — set a session's whole tool surface at once; #t when it changed")
-(public! 'mcp-connections "(mcp-connections) — (name status tool-count) per live MCP connection")
 (public! 'mcp-call! "(mcp-call! 'name TOOL ARGS [CB]) — call one tool; ARGS is JSON text or a plist")
 (public! 'mcp-tools "(mcp-tools 'name) — (TOOL DESCRIPTION) per tool an MCP server serves")
 (public! 'mcp-find "(mcp-find \"words|words\" ['name]) — search MCP tools; gives (SERVER TOOL DESC)")
