@@ -785,9 +785,12 @@
         (group-layout-set! home older (layout-target))
         (let ((before (window-tree))
               (panes (length (window-list))))
+          (winner--pre-command!)
           (run-command "group-move")
           (t--sw-type! "zzsw-layout-home")
           (t--sw-key! "confirm")
+          ;; the move completes: the change is recorded
+          (winner--post-command!)
 
           (check-true! (buffer-in-group? t--sw-third home)
                        "the moved buffer joins the group")
@@ -801,8 +804,6 @@
                            (string-append buf " left the screen")))
             (list t--sw-first t--sw-second t--sw-third))
           (check-equal! (frame-group) home "the frame stands in the group")
-          ;; the group writes its layout when the frame leaves it
-          (group-frame-leave! home)
           (check-equal! (window-tree-buffers (group-layout home)) (window-tree-buffers before)
                         "and the group remembers the arrangement it adopted"))))
     (t--sw-done!)))
@@ -1870,7 +1871,10 @@
         ;; a switch would float it in the popup (the tests below); a pane
         ;; that shows it is the case here, and only a window action shows
         ;; a foreign buffer in a pane
+        ;; one command: the change is recorded as it completes
+        (winner--pre-command!)
         (t--sw-show-here! foreign)
+        (winner--post-command!)
         (check-false! (frame-group) "the foreign pane takes the frame out of the group")
         (let ((tree (window-tree)))
           (check-equal! (group-layout home) tree "the layout was saved as it stood, foreign pane included")
@@ -2039,4 +2043,33 @@
       (switch-to-group! id)
       (check-equal! (group-frame-owner id) (selected-frame) "entering it adopts it")
       (check-true! (member id (group-ids-mru)) "and this frame lists it now"))
+    (t--sw-done!)))
+
+(deftest 'every-completed-window-change-saves-the-groups-layout
+  "the owner's ruling: a group's layout is saved on each change; an arrival records nothing"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((home (group-record-create! "zzsw-each-home"))
+          (away (group-record-create! "zzsw-each-away")))
+      (buffer-add-group! t--sw-first home)
+      (buffer-add-group! t--sw-second home)
+      (buffer-add-group! t--sw-third away)
+      (switch-to-group! home)
+      (delete-other-windows!)
+      (t--sw-show-here! t--sw-first)
+      (winner--settle-screen!)
+      (winner--pre-command!)
+      (split-window! 'h 0.5)
+      (other-window!)
+      (t--sw-show-here! t--sw-second)
+      (winner--post-command!)
+      (check-equal! (window-tree-buffers (group-layout home)) (list t--sw-first t--sw-second)
+                    "the split is saved when the command completes")
+      (let ((away-layout (group-layout away)))
+        (winner--pre-command!)
+        (switch-to-group! away)
+        (winner--post-command!)
+        (check-equal! (group-layout away) away-layout "the arrival writes nothing")
+        (check-equal! (window-tree-buffers (group-layout home)) (list t--sw-first t--sw-second)
+                      "and the group left keeps its last change")))
     (t--sw-done!)))

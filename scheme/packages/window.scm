@@ -2138,20 +2138,29 @@
 ;;; and undo cannot pollute its own history. The record is written only
 ;;; in the command's own lane: the configuration hook runs in another.
 
+;;; The same two steps are the one recording point for every completed
+;;; window change: window-change-recorded-hook runs with the group the
+;;; frame stood in when the change began (groups.scm saves its layout).
+
 (define *winner-depth* 12)
 
 ;; the screen now is not a change the user made: winner takes it as settled
 (define (winner--settle-screen!)
-  (set-frame-local! 'winner-last (list (window-list) (window-tree))))
+  (set-frame-local! 'winner-last
+    (list (window-list) (window-tree) (frame-local 'current-group))))
 
+;; a change between commands is recorded for the group, not for winner
 (define (winner--pre-command!)
   (let ((last (frame-local 'winner-last)))
-    (unless (and last (equal? (car last) (window-list))) (winner--settle-screen!))))
+    (unless (and last (equal? (car last) (window-list)))
+      (when last (run-hook-with-args 'window-change-recorded-hook (caddr last)))
+      (winner--settle-screen!))))
 
 (define (winner--post-command!)
   (let ((last (frame-local 'winner-last)))
     (unless (or (not last) (equal? (car last) (window-list)))
       (winner-push! (cadr last))
+      (run-hook-with-args 'window-change-recorded-hook (caddr last))
       (winner--settle-screen!))))
 
 (add-hook! 'pre-command-hook 'winner--pre-command!)

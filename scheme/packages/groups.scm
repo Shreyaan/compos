@@ -1591,14 +1591,28 @@ is forgotten and that group falls back to creation order in the switcher."
                              (group-visible-membership-rows))))
                (and common (member id common)))))))
 
-;; The one place a group's saved layout is written: the frame leaves FROM.
-;; The arrangement is saved when it is FROM's own (the frame stands in
-;; FROM, a member is still on screen, and no window covers it), and FROM
-;; becomes the frame's previous group.
+;; The one place a group's saved layout is written: every completed window
+;; change (the owner's ruling, 2026-09-19: "group layouts should be saved on
+;; each change"), from winner's recording point. FROM is the group the frame
+;; stood in when the change began. A change that stays in FROM, or leaves
+;; it for no group (a foreign pane), saves FROM's arrangement as it stands
+;; when a member is still on screen and no window covers it. A change that
+;; entered another group is an arrival: it restored a layout and records
+;; nothing.
+(define (group-layout-record! from)
+  (let ((now (frame-group)))
+    (when (and from (group-resolve-id from)
+               (or (not now) (and (equal? now from) (group-visible-homogeneous? from)))
+               (group-uncovered? from)
+               (pair? (filter (lambda (row) (buffer-in-group? (cadr row) from)) (window-list))))
+      (group-layout-save! from))))
+
+(add-hook! 'window-change-recorded-hook 'group-layout-record!)
+
+;; the frame leaves FROM: a change the current command made in FROM before
+;; it left is recorded now, and FROM becomes the previous group
 (define (group-frame-leave! from)
-  (when (and (group-visible-homogeneous? from) (group-uncovered? from)
-             (pair? (filter (lambda (row) (buffer-in-group? (cadr row) from)) (window-list))))
-    (group-layout-save! from))
+  (group-layout-record! from)
   (set-frame-local! 'previous-group from))
 
 ;; a group is UNCOVERED when no window is holding another buffer's place
@@ -3874,6 +3888,9 @@ is forgotten and that group falls back to creation order in the switcher."
   (set-frame-local! 'current-group id)
   (when (group-pinned) (set-frame-local! 'pinned-group id))
   (frame-group-label-refresh!)
+  ;; no window changes, so the change path records nothing: the screen
+  ;; becomes the group's arrangement here
+  (group-layout-save! id)
   (group-mru-note! id)
   (windows-shown-catchup!))
 
