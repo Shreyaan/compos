@@ -1327,8 +1327,6 @@ is forgotten and that group falls back to creation order in the switcher."
         (begin
           ;; a group no live frame owns joins the workspace that enters it
           (group-adopt-here! id)
-          (winner-save!)
-          (set! *winner-inhibit* #t)
           (set! *group-current-inhibit* #t)
           (let ((from (frame-group)))
             (when (and from (not (equal? from id)))
@@ -1357,7 +1355,6 @@ is forgotten and that group falls back to creation order in the switcher."
                   (group-default-layout! id)
                   (group-layout-save! id))))
           (set! *group-current-inhibit* #f)
-          (set! *winner-inhibit* #f)
           (group-current-recalculate!)
           (group-mru-note! id)
           (windows-shown-catchup!)
@@ -2192,9 +2189,7 @@ is forgotten and that group falls back to creation order in the switcher."
              (names (if saved (window-tree-buffers saved) members))
              (asleep (filter (lambda (b) (and (buffer-known? b) (not (buffer-exists? b))))
                              names))
-             (winner *winner-inhibit*)
              (standing *group-current-inhibit*))
-        (set! *winner-inhibit* #t)
         (set! *group-current-inhibit* #t)
         ;; and it stays set until the frame is yours again: the look outlives
         ;; the draw, and so must the silence around it
@@ -2211,7 +2206,6 @@ is forgotten and that group falls back to creation order in the switcher."
                    (group-restore-sanitize! g))
             (group-preview-default! members))
         (set! *group-current-inhibit* standing)
-        (set! *winner-inhibit* winner)
         (set! *group-preview-last* (list g (map cadr (window-list))))
         (let loop ((rest asleep) (woken '()))
           (cond ((null? rest) woken)

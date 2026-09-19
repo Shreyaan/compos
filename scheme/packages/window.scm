@@ -503,10 +503,8 @@
 
 ;; LOOK? draws the tree as a look (window-tree-preview!): the MRU stays
 (define (arrangement-pop! token &optional look?)
-  (let ((e (and token (arrangement--take! token)))
-        (winner *winner-inhibit*))
+  (let ((e (and token (arrangement--take! token))))
     (when e
-      (set! *winner-inhibit* #t)
       (with-layout-suppressed
         (lambda ()
           (if look? (window-tree-preview! (nth 2 e)) (window-tree-set! (nth 2 e)))))
@@ -518,7 +516,7 @@
       (unless (equal? (frame-group) (nth 3 e))
         (set-frame-local! 'current-group (nth 3 e))
         (frame-group-label-refresh!))
-      (set! *winner-inhibit* winner))
+      (winner--settle-screen!))
     (and e #t)))
 
 ;;; --- the preview verb ----------------------------------------------------------
@@ -549,10 +547,9 @@
          (from (or win me))
          (slot (preview-slot))
          (same? (and slot (equal? (nth 1 slot) where) (equal? (nth 2 slot) from)))
-         (winner *winner-inhibit*))
+         (borrowed #f))
     ;; one look per frame: a look from elsewhere ends the last one first
     (when (and slot (not same?)) (preview-end #f))
-    (set! *winner-inhibit* #t)
     (let* ((tree (if same? (nth 5 slot) (and (equal? where 'frame) (arrangement-push! 'preview))))
            (shown
              (cond
@@ -560,6 +557,7 @@
                ((equal? where 'other)
                 (let* ((own (preview--owned-window from))
                        (rec (and own (window-restore own)))
+                       (there (window-showing-other buf from))
                        (w (or own (with-display-preview
                                     (lambda ()
                                       (display-buffer buf '(category preview inhibit-same-window #t)))))))
@@ -567,30 +565,38 @@
                   (when own
                     (window-preview-buffer! buf own)
                     (when rec (set-window-restore! own rec)))
-                  (when (and w (not (equal? w from))) (set-window-owner! w from))
+                  ;; a window that showed BUF already is not the look's
+                  (if (and w (not own) (equal? w there))
+                      (set! borrowed #t)
+                      (when w (set-window-owner! w from)))
                   w))
                ((equal? where 'float)
                 (let ((old (and (popup-open?) (popup-buffer))))
                   (popup-show-quietly buf (or (and old (popup-side-of old)) (peek-side-away-from from))
                                       (plist-get *display-buffer-defaults* 'size))))
                (else (buf) (active-window)))))
-      (set! *winner-inhibit* winner)
       ;; a frame look draws the focus with the frame
       (unless (or (equal? where 'frame) (not (window-exists? me)) (equal? (active-window) me))
         (select-window! me))
-      (set-frame-local! 'preview (list buf where from shown data tree))
+      (set-frame-local! 'preview (list buf where from (and (not borrowed) shown) data tree))
+      (winner--settle-screen!)
       shown)))
 
 ;; end the look; KEEP #t keeps what it shows. Answers the slot it ended.
 (define (preview-end keep)
-  (let ((slot (preview-slot)) (winner *winner-inhibit*))
+  (let ((slot (preview-slot)))
     (set-frame-local! 'preview #f)
-    (set! *winner-inhibit* #t)
     (when slot
       (let ((buf (nth 0 slot)) (where (nth 1 slot)) (w (nth 3 slot)))
         (cond
           ((equal? where 'frame)
-           (if keep (arrangement-drop! (nth 5 slot)) (arrangement-pop! (nth 5 slot) #t)))
+           (if keep
+               ;; a kept frame look is the user's change: winner records
+               ;; the arrangement the look covered
+               (let ((e (assoc (nth 5 slot) (arrangements))))
+                 (when e (winner-push! (nth 2 e)))
+                 (arrangement-drop! (nth 5 slot)))
+               (arrangement-pop! (nth 5 slot) #t)))
           ((equal? where 'float)
            (unless (or keep (not (popup-open?)) (not (equal? (popup-buffer) buf)))
              (with-layout-suppressed (lambda () (popup-dismiss!)))))
@@ -599,7 +605,7 @@
            (if keep (window-set-buffer! w buf) (window-preview-end! w)))
           (keep (set-window-owner! w #f) (set-window-restore! w #f))
           (else (set-window-owner! w #f) (window-quit-restore! w)))))
-    (set! *winner-inhibit* winner)
+    (winner--settle-screen!)
     slot))
 
 ;; Nothing floats any more. The old popup door is kept so an older
@@ -1601,10 +1607,6 @@
 ;; for another layout in the middle of this one.
 (define *layout-busy* #f)
 
-;; Winner records one entry for a complete layout change. The wrapped split
-;; functions consult this flag, including during mode layouts and tiling.
-(define *winner-inhibit* #f)
-
 ;; Run THUNK with the engine standing down. Desktop restore uses this: it
 ;; rebuilds the exact windows it saved, and a mode setup that runs inside it
 ;; must not arrange the frame a second way.
@@ -1640,8 +1642,6 @@
         ;; mode setup asks the engine for a layout of its own. One
         ;; arrangement at a time, materialising included.
         (set! *layout-busy* #t)
-        (winner-save!)
-        (set! *winner-inhibit* #t)
         (let ((panes (layout--panes anchor spec))
               (histories (layout--capture-histories)))
           (when (pair? panes)
@@ -1650,7 +1650,6 @@
             (layout--restore-histories! histories)
             (let ((w (window-showing anchor)))
               (when w (select-window! w))))
-          (set! *winner-inhibit* #f)
           (set! *layout-busy* #f)
           panes))))
 
@@ -1842,8 +1841,6 @@
       (else
         (when (popup-open?) (popup-close!))
         (set! *layout-busy* #t)
-        (winner-save!)
-        (set! *winner-inhibit* #t)
         (set! *layout-histories* (layout--capture-histories))
         (delete-other-windows!)
         (cond
@@ -1871,7 +1868,6 @@
         (set! *layout-histories* '())
         (let ((home (window-showing (car panes))))
           (when home (select-window! home)))
-        (set! *winner-inhibit* #f)
         (set! *layout-busy* #f)
         (layout-target-note-slots! panes)
         panes))))
@@ -1945,12 +1941,10 @@
   ;; it. Restoring first and applying again was the two-step flash.
   (debounce-cancel! "window-layout-preview")
   (cond ((equal? name "free")
-         (preview-end #t)
-         (window-tree-set! saved)
+         (preview-end #f)
          (layout-target-set! #f)
          (message "Layout free: a display may split a window again"))
         (else
-          (winner-push! saved)
           (if (let ((ok (window-layout-preview-without-history! name requested)))
                 (preview-end #t)
                 ok)
@@ -2141,23 +2135,37 @@
 (effects! '(write execute))
 
 ;;; --- winner: layout undo ------------------------------------------------------
-;;; Every arrangement about to be destroyed goes onto a per-frame ring;
-;;; C-c <left> walks back through them, C-c <right> walks forward. The
-;;; wrapped window mutators and the group switch push; the walk itself
-;;; does not, so undo cannot pollute its own history.
+;;; Winner records itself (Emacs winner-mode): a command that changed the
+;;; frame's windows puts the arrangement it started from on a per-frame
+;;; ring, once. C-c <left> walks back through the ring, C-c <right> walks
+;;; forward. A change between commands (a reflow, an agent's display) is
+;;; where the next command starts, not a command. A look, the pop of a
+;;; stack entry and a winner walk settle the screen, so they push nothing
+;;; and undo cannot pollute its own history. The record is written only
+;;; in the command's own lane: the configuration hook runs in another.
 
 (define *winner-depth* 12)
 
-;; a compound operation (a group switch builds its layout in steps)
-;; saves ONCE and inhibits the wrapped mutators' pushes underneath
+;; the screen now is not a change the user made: winner takes it as settled
+(define (winner--settle-screen!)
+  (set-frame-local! 'winner-last (list (window-list) (window-tree))))
 
-(define (winner-save!)
-  (unless *winner-inhibit*
-    (winner-push! (window-tree))))
+(define (winner--pre-command!)
+  (let ((last (frame-local 'winner-last)))
+    (unless (and last (equal? (car last) (window-list))) (winner--settle-screen!))))
 
-;; TREE goes onto the ring as the arrangement about to be destroyed. The
-;; layout prompt pushes the arrangement it started from, so its previews
-;; never enter the ring and one undo returns to before the prompt.
+(define (winner--post-command!)
+  (let ((last (frame-local 'winner-last)))
+    (unless (or (not last) (equal? (car last) (window-list)))
+      (winner-push! (cadr last))
+      (winner--settle-screen!))))
+
+(add-hook! 'pre-command-hook 'winner--pre-command!)
+(add-hook! 'post-command-hook 'winner--post-command!)
+
+(define (winner-save!) (winner-push! (window-tree)))
+
+;; TREE goes onto the ring as the arrangement a command destroyed
 (define (winner-push! tree)
   (let ((ring (or (frame-local 'winner-ring) '())))
     (unless (and (pair? ring) (equal? (car ring) tree))
@@ -2170,7 +2178,11 @@
         (message (if (< idx 0) "at the latest layout" "no earlier layout"))
         (begin
           (set-frame-local! 'winner-pos idx)
+          ;; the configuration hook runs in another lane and may run before
+          ;; the settle: it must already count the panes the walk restores
+          (set-frame-local! 'layout-target-count (length (window-tree-buffers (nth idx ring))))
           (window-tree-set! (nth idx ring))
+          (winner--settle-screen!)
           (winner--settle!)
           (message (string-append "layout "
                      (number->string (+ idx 1)) "/"
@@ -2188,7 +2200,6 @@
   (run-hooks 'winner-restore-hook))
 
 (define (winner-previous!)
-  (set! *winner-inhibit* #f)
   (let ((pos (frame-local 'winner-pos)))
     (if pos
         (winner--restore (+ pos 1))
@@ -2213,12 +2224,13 @@
       (map (lambda (frame-entry)
              (list (car frame-entry)
                    (map (lambda (item)
-                          (if (equal? (car item) 'winner-ring)
-                              (list 'winner-ring
-                                    (map (lambda (tree)
-                                           (window-tree-rename tree old new))
-                                         (car (cdr item))))
-                              item))
+                          (cond ((equal? (car item) 'winner-ring)
+                                 (list 'winner-ring
+                                       (map (lambda (tree)
+                                              (window-tree-rename tree old new))
+                                            (car (cdr item)))))
+                                ((equal? (car item) 'winner-last) (list 'winner-last #f))
+                                (else item)))
                         (car (cdr frame-entry)))))
            *frame-locals*))))
 
@@ -2250,12 +2262,10 @@
   (window-state-changed!))
 
 (define (delete-other-windows!)
-  (winner-save!)
   (builtin-delete-other-windows!)
   (window-state-changed!))
 
 (define (split-window! dir &optional ratio)
-  (winner-save!)
   (let ((result (if ratio
                     (builtin-split-window! dir ratio)
                     (builtin-split-window! dir))))
@@ -2263,7 +2273,6 @@
     result))
 
 (define (delete-window!)
-  (winner-save!)
   (let ((result (builtin-delete-window!)))
     (window-state-changed!)
     result))
@@ -2327,12 +2336,11 @@
 (define-command "split-window-right" "Split the window in two, side by side"
   (lambda () (split-window-with-other-buffer! 'h)))
 ;; `C-x 0` in the popup closes the popup: same window, same close, so the
-;; same return. Winner still records the arrangement — popup-close! calls
-;; delete-window-id!, which winner does not save, so save it here.
+;; same return.
 (define-command "delete-window" "Delete the selected window"
   (lambda ()
     (if (and (popup-open?) (equal? (active-window) (popup-window)))
-        (begin (winner-save!) (popup-close!))
+        (popup-close!)
         (if (not (delete-window!)) (message "Attempt to delete sole window")))))
 ;; `C-x 1` from anywhere makes one window, and the popup is not one of
 ;; them: it stops being a popup rather than leaving a return nobody can use
@@ -2545,10 +2553,9 @@
                        (not (window-rects-merge? mine n)))
                    (loop (cdr l) #t))
                   (else
-                    ;; winner records what a delete leaves behind, and an
-                    ;; eat is a delete: C-c <left> brings the pane back
-                    (winner-save!)
+                    ;; an eat is a delete: C-c <left> brings the pane back
                     (window-eat-id! me (car n))
+                    (window-state-changed!)
                     (message (string-append "Ate " (cadr n))))))))))
 
 (define-command "window-eat" "Eat the neighboring pane and take its space"

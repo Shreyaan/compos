@@ -3541,7 +3541,10 @@ defmodule Compos.EditorTest do
              (buffer-set-local! "#{m}" 'group "wggrp-#{n}")
              (delete-other-windows!)
              (switch-to-buffer! "#{home}")
-             (switch-to-group! "wggrp-#{n}"))
+             ;; the switch as the key loop runs a command
+             (pre-command!)
+             (switch-to-group! "wggrp-#{n}")
+             (post-command!))
       """)
 
     assert Editor.current_buffer() == m
