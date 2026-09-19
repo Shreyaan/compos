@@ -2144,6 +2144,40 @@ it is red on the fake transport today.
 serial Scheme world. If it holds, collapse env.ex, gc, roots, flush, the
 heir dance and the retry loops.
 
+**Duplicate cuts (2026-09-19, worktree on 121de726).** Five items, one
+commit each. Net lines are source files only, tests excluded.
+
+| Item | Commit | Net |
+|---|---|---|
+| 1. conn-list, conn-detail, conn-log, on-event! replace 15 prims (7.11) | 4dd0801e | -43 |
+| 2. MCP stdio, the socket server and the peer use Compos.Core.JsonRpc | 71e98166 | -11 |
+| 3. The Google OAuth redirect lands on a WebServer server (7.7) | 19cff474 | -2 |
+| 4. save-done!: one epilogue for six save paths (3.9) | 00565244 | -3 |
+| 5. The peek-recent command goes | 9afebe07 | -12 |
+
+Net: -71 source lines. Item 1 keeps mcp-connections and lsp-connections
+as Scheme functions over conn-rows, because five packages read their row
+shape. fs-on-change! and block-on-click! stay single-slot prims; they
+are not connections. Item 3 keeps a Google handler in Elixir: a Scheme
+handler would move the authorization code into Scheme.
+
+Not done, with the reason:
+- The listing card's copy machinery (ibuffer.scm). preview-show already
+  shows the card. The copy is the isolation: the card reads a dormant
+  buffer from its checkpoint without waking it, and a chat card is a
+  projection, not the chat's text. docs/CHAT-LIST.md and the ibuffer
+  comments state that a row preview never visits its source buffer. To
+  show the source buffer itself changes that contract. RULING NEEDED.
+- The popup's own stack of buffers (window.scm). The frame return stack
+  holds whole arrangements for a popup that was entered. It does not
+  hold the buffer under a popup. docs/POPUPS.md rule 4 and
+  popup-move-test state that a dismiss shows the buffer underneath. The
+  popup window's history is no substitute: a split copies the history of
+  the host window, and a quiet show writes none. RULING NEEDED.
+- The *peek-recent* store stays. The switcher reads it for its recent
+  section. Only the unused command went.
+- The two PTY runners: not approved.
+
 ## 11. Rules so it does not grow back
 
 - A seam in core is one custom that holds a function. The provider lives in
