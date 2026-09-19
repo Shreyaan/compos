@@ -2213,6 +2213,9 @@ defmodule Compos.Core.SchemeAPI do
           Editor.set_style(plain(name), css)
           :void
         end,
+      {"style-css",
+       "(style-css NAME) — the stylesheet NAME wears now, or \"\" when nothing registered one."} =>
+        fn [name] -> Editor.style_css(plain(name)) end,
       # The languages whose blocks offer the run key in the rendered page.
       # The fence-kind registry pushes the list on every registration, so
       # the page never mirrors the registry by hand.

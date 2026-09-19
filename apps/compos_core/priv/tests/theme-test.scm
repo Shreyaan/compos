@@ -77,7 +77,8 @@
                 (check-false! (equal? fg "#26356b")
                               (string-append theme " does not wear paper's navy on " (symbol->string face))))))
           '(org-level-1 org-level-2 org-level-3 org-level-4)))
-      '("paper" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"))
+      '("paper" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
+        "zenburn" "ascii" "crt" "paperized"))
     (theme-test-restore!)))
 
 (deftest 'a-theme-preview-shows-faces-and-writes-nothing
@@ -156,5 +157,38 @@
                        (string-append theme ": a selection is not the row under point"))
           (check-true! (> (theme-test-distance sel reg) 20)
                        (string-append theme ": a search match is not a selection"))))
-      '("paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"))
+      '("paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
+        "zenburn" "ascii" "crt"))
+    (theme-test-restore!)))
+
+;; a theme may carry a stylesheet as well as a palette. It goes on under
+;; one name, so the theme you leave takes its CSS with it.
+(define-theme "tt-theme-skinned" (list (list 'tt-face 'fg "#333333")))
+(define-theme-skin! "tt-theme-skinned" ".tt-probe{color:red}")
+
+(deftest 'a-theme-skin-goes-on-with-the-theme-and-off-with-it
+  "the skinned theme installs its CSS; the next theme replaces it with nothing"
+  (lambda ()
+    (theme-apply! "tt-theme-skinned")
+    (check-contains! (style-css 'theme-skin) ".tt-probe" "the skin is on the page")
+    (theme-apply! "tt-theme-a")
+    (check-equal! (style-css 'theme-skin) "" "a theme with no skin wears no skin")
+    (theme-test-restore!)))
+
+(deftest 'the-crazy-themes-carry-their-own-fonts
+  "ascii and crt set one font for the whole application; paperized sets a typewriter"
+  (lambda ()
+    (load-theme "ascii")
+    (check-contains! (theme-test-face-attr 'mono 'family) "Menlo" "ascii names the mono stack")
+    (check-equal! (theme-test-face-attr 'sans 'inherit) "mono" "and sans is the same font")
+    (check-contains! (style-css 'theme-skin) "dashed" "ascii types its rules")
+    (load-theme "crt")
+    (check-contains! (style-css 'theme-skin) "repeating-linear-gradient" "crt ships its scan lines")
+    (load-theme "paperized")
+    (check-contains! (theme-test-face-attr 'mono 'family) "Courier Prime" "paperized types")
+    (check-contains! (style-css 'theme-skin) "feTurbulence" "paperized ships its fibre")
+    (check-false! (theme-dark?) "paperized is a light theme")
+    (load-theme "zenburn")
+    (check-equal! (style-css 'theme-skin) "" "zenburn is palette only")
+    (check-true! (theme-dark?) "zenburn is a dark theme")
     (theme-test-restore!)))

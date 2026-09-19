@@ -11,8 +11,15 @@
 
 (define *themes* '())
 
+;; A reload re-runs every define-theme in this file. Consing each time
+;; listed "ascii" five times in the theme prompt, so a name already in the
+;; registry is replaced where it stands and the order never moves.
 (define (define-theme name faces)
-  (set! *themes* (cons (list name faces) *themes*)))
+  (set! *themes*
+        (if (assoc name *themes*)
+            (map (lambda (t) (if (equal? (car t) name) (list name faces) t))
+                 *themes*)
+            (cons (list name faces) *themes*))))
 
 ;; a theme built on another (dup #33): BASE's faces, with OVERRIDES
 ;; replacing every face they name. The base must be defined first.
@@ -22,6 +29,23 @@
          (kept (filter (lambda (f) (not (member (car f) named)))
                        (if b (car (cdr b)) '()))))
     (define-theme name (append overrides kept))))
+
+;;; --- a theme's own stylesheet ------------------------------------------
+;;; Faces carry colour. A skin carries everything a colour cannot say: a
+;;; paper grain, an inverted status line, a phosphor glow. The theme owns
+;;; it, so `define-style!` writes it under ONE name and a theme without a
+;;; skin writes the empty string. The page then holds exactly one skin.
+
+(define *theme-skins* '())              ; ((NAME CSS) ...)
+
+(define (define-theme-skin! name css)
+  (set! *theme-skins*
+        (cons (list name css)
+              (filter (lambda (s) (not (equal? (car s) name))) *theme-skins*))))
+
+;; the CSS NAME wears, or "" for a theme with no skin
+(define (theme-skin name)
+  (let ((s (assoc name *theme-skins*))) (if s (cadr s) "")))
 
 (define (theme-names) (map car *themes*))
 
@@ -144,6 +168,9 @@
                (map (lambda (d) (cons 'set d)) *face-defaults*)
                (map (lambda (spec) (cons 'set spec)) (cadr t))))
            (set! *current-theme* name)
+           ;; the skin goes on after the faces, always under one name, so
+           ;; the theme you leave takes its stylesheet with it
+           (define-style! 'theme-skin (theme-skin name))
            (run-hooks 'theme-change-hook)
            #t))))
 
@@ -508,6 +535,510 @@
           'border "1px solid #101014"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
+;;; --- zenburn: the low-contrast classic --------------------------------------
+;;; Jani Nurminen's palette, as Emacs has worn it since 2003. A grey-green
+;;; ground, a bone foreground, and colours that are all one step muted, so
+;;; nothing on the screen is brighter than anything else by much.
+
+(define-theme "zenburn"
+  (list
+    (list 'ts-keyword 'fg "#f0dfaf" 'weight "600")
+    (list 'ts-function 'fg "#efef8f")
+    (list 'ts-string 'fg "#cc9393")
+    (list 'ts-comment 'fg "#7f9f7f" 'style "italic")
+    (list 'ts-number 'fg "#8cd0d3")
+    (list 'ts-constant 'fg "#dca3a3")
+    (list 'ts-type 'fg "#dfdfbf")
+    (list 'ts-module 'fg "#dfdfbf")
+    (list 'ts-operator 'fg "#f0dfaf")
+    (list 'ts-punctuation 'fg "#9fafaf")
+    (list 'ts-tag 'fg "#e89393")
+    (list 'ts-attribute 'fg "#dfaf8f")
+    (list 'ts-variable 'fg "#dcdccc")
+    (list 'ts-property 'fg "#dfaf8f")
+    (list 'ts-escape 'fg "#dca3a3")
+    (list 'default 'bg "#2b2b2b" 'fg "#dcdccc")
+    (list 'window 'bg "#3f3f3f")
+    (list 'paper 'bg "#383838")
+    (list 'window-inactive 'bg "#363636")
+    (list 'body 'fg "#c8c8b8")
+    (list 'border-soft 'bg "#4f4f4f")
+    (list 'border 'bg "#5f5f5f")
+    (list 'modeline 'bg "#2b2b2b" 'fg "#8fb28f")
+    (list 'modeline-active 'bg "#4a4a4a" 'fg "#dcdccc")
+    (list 'cursor 'bg "#ffffef")
+    (list 'region 'bg "#4f6384")
+    (list 'select 'bg "#6e6e5a")
+    (list 'hl-line 'bg "#5b5b5b")
+    (list 'linenum 'fg "#6f6f6f")
+    (list 'accent 'fg "#94bff3")
+    (list 'link 'fg "#94bff3" 'decoration "underline")
+    (list 'llm-response 'fg "#94bff3" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
+    (list 'diff-block 'fg "#dfaf8f" 'style "italic")
+    (list 'diff-block-source 'fg "#7f9f7f" 'style "italic")
+    (list 'dim 'fg "#9fafaf")
+    (list 'faint 'fg "#7f8f8f")
+    (list 'warn 'fg "#dfaf8f")
+    (list 'ok 'fg "#7f9f7f")
+    (list 'alert 'fg "#e37170")
+    (list 'org-level-1 'fg "#dfaf8f" 'weight "700")
+    (list 'org-level-2 'fg "#f0dfaf" 'weight "600")
+    (list 'org-level-3 'fg "#8fb28f" 'weight "600")
+    (list 'org-level-4 'fg "#94bff3" 'weight "600")
+    (list 'group-color-1 'fg "#dca3a3")
+    (list 'group-color-2 'fg "#94bff3")
+    (list 'group-color-3 'fg "#7f9f7f")
+    (list 'group-color-4 'fg "#dc8cc3")
+    (list 'group-color-5 'fg "#f0dfaf")
+    (list 'group-color-6 'fg "#8cd0d3")
+    (list 'org-todo 'fg "#e37170" 'weight "700")
+    (list 'org-done 'fg "#7f9f7f" 'decoration "line-through")
+    (list 'org-priority 'fg "#dfaf8f" 'weight "600")
+    (list 'org-date 'fg "#94bff3" 'style "italic")
+    (list 'org-tag 'fg "#9fafaf")
+    (list 'org-checkbox 'fg "#8fb28f" 'weight "600")
+    (list 'org-cookie 'fg "#f0dfaf")
+    (list 'org-meta 'fg "#7f9f7f")
+    (list 'fold-marker 'fg "#dfaf8f")
+    (list 'nm-date 'fg "#9fafaf")
+    (list 'nm-author 'fg "#94bff3")
+    (list 'nm-tags 'fg "#7f9f7f")
+    (list 'nm-subject 'fg "#dcdccc")
+    (list 'nm-marked 'fg "#e37170")
+    (list 'nm-hdr 'fg "#f0dfaf")
+    (list 'nm-sep 'fg "#6f6f6f")
+    (list 'diff-file 'fg "#f0dfaf" 'weight "600")
+    (list 'diff-hunk 'fg "#8cd0d3")
+    (list 'diff-add 'fg "#9fc59f" 'bg "rgba(127, 159, 127, 0.18)")
+    (list 'diff-del 'fg "#e0a3a3" 'bg "rgba(227, 113, 112, 0.16)")
+    (list 'diff-add-word 'bg "rgba(127, 159, 127, 0.38)")
+    (list 'diff-del-word 'bg "rgba(227, 113, 112, 0.34)")
+    (list 'code-scope 'bg "rgba(148, 191, 243, 0.08)")
+    (list 'chrome 'gap "5px" 'radius "0"
+          'border "1px solid #5f5f5f"
+          'shadow "0 2px 14px rgba(0, 0, 0, 0.35)"
+          'shadow-deep "0 16px 40px rgba(0, 0, 0, 0.5)")))
+
+;;; --- ascii: everything is typed ---------------------------------------------
+;;; No colour and no paint. The screen has one font and a scale of greys,
+;;; and every line on it is a character: a dash for a rule, a dot for a
+;;; soft one, a + where two rules cross. A keyword is not blue, it is
+;;; bold. A comment is not green, it leans. This is what the editor looks
+;;; like when the only thing it can draw is text.
+
+(define-theme "ascii"
+  (list
+    ;; the only scale there is: weight and slant carry what colour would
+    (list 'ts-keyword 'fg "#ffffff" 'weight "700")
+    (list 'ts-function 'fg "#e4e4e4" 'weight "500")
+    (list 'ts-string 'fg "#a8a8a8")
+    (list 'ts-comment 'fg "#6c6c6c" 'style "italic")
+    (list 'ts-number 'fg "#e4e4e4")
+    (list 'ts-constant 'fg "#e4e4e4")
+    (list 'ts-type 'fg "#e4e4e4" 'weight "500")
+    (list 'ts-module 'fg "#e4e4e4" 'weight "500")
+    (list 'ts-operator 'fg "#8a8a8a")
+    (list 'ts-punctuation 'fg "#6c6c6c")
+    (list 'ts-tag 'fg "#ffffff" 'weight "700")
+    (list 'ts-attribute 'fg "#a8a8a8")
+    (list 'ts-variable 'fg "#c6c6c6")
+    (list 'ts-property 'fg "#a8a8a8")
+    (list 'ts-escape 'fg "#ffffff")
+    (list 'default 'bg "#101010" 'fg "#c6c6c6")
+    (list 'window 'bg "#101010")
+    (list 'paper 'bg "#101010")
+    (list 'window-inactive 'bg "#0b0b0b")
+    (list 'body 'fg "#ababab")
+    (list 'border-soft 'bg "#4a4a4a")
+    (list 'border 'bg "#767676")
+    (list 'modeline 'bg "#101010" 'fg "#8a8a8a")
+    (list 'modeline-active 'bg "#101010" 'fg "#ffffff")
+    (list 'cursor 'bg "#ffffff")
+    (list 'region 'bg "#666666")
+    (list 'select 'bg "#4a4a4a")
+    (list 'hl-line 'bg "#333333")
+    (list 'linenum 'fg "#4a4a4a")
+    (list 'accent 'fg "#ffffff")
+    (list 'link 'fg "#ffffff" 'decoration "underline")
+    (list 'llm-response 'fg "#e4e4e4" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
+    (list 'diff-block 'fg "#a8a8a8" 'style "italic")
+    (list 'diff-block-source 'fg "#6c6c6c" 'style "italic")
+    (list 'dim 'fg "#8a8a8a")
+    (list 'faint 'fg "#5a5a5a")
+    ;; three words a list must say, and one grey scale to say them in
+    (list 'warn 'fg "#e4e4e4" 'weight "600")
+    (list 'ok 'fg "#a8a8a8")
+    (list 'alert 'fg "#ffffff" 'weight "700")
+    (list 'org-level-1 'fg "#ffffff" 'weight "700")
+    (list 'org-level-2 'fg "#e4e4e4" 'weight "700")
+    (list 'org-level-3 'fg "#c6c6c6" 'weight "600")
+    (list 'org-level-4 'fg "#a8a8a8" 'weight "600")
+    ;; six groups, six steps of grey
+    (list 'group-color-1 'fg "#ffffff")
+    (list 'group-color-2 'fg "#d4d4d4")
+    (list 'group-color-3 'fg "#ababab")
+    (list 'group-color-4 'fg "#8a8a8a")
+    (list 'group-color-5 'fg "#6c6c6c")
+    (list 'group-color-6 'fg "#545454")
+    (list 'org-todo 'fg "#ffffff" 'weight "700")
+    (list 'org-done 'fg "#6c6c6c" 'decoration "line-through")
+    (list 'org-priority 'fg "#ffffff" 'weight "700")
+    (list 'org-date 'fg "#a8a8a8")
+    (list 'org-tag 'fg "#6c6c6c")
+    (list 'org-checkbox 'fg "#ffffff" 'weight "700")
+    (list 'org-cookie 'fg "#a8a8a8")
+    (list 'org-meta 'fg "#6c6c6c")
+    (list 'fold-marker 'fg "#8a8a8a")
+    (list 'nm-date 'fg "#6c6c6c")
+    (list 'nm-author 'fg "#e4e4e4")
+    (list 'nm-tags 'fg "#8a8a8a")
+    (list 'nm-subject 'fg "#c6c6c6")
+    (list 'nm-marked 'fg "#ffffff" 'weight "700")
+    (list 'nm-hdr 'fg "#ffffff" 'weight "600")
+    (list 'nm-sep 'fg "#4a4a4a")
+    ;; a diff says add and remove with the sign and the ground, not a hue
+    (list 'diff-file 'fg "#ffffff" 'weight "700")
+    (list 'diff-hunk 'fg "#a8a8a8")
+    (list 'diff-add 'fg "#ffffff" 'bg "rgba(255, 255, 255, 0.11)")
+    (list 'diff-del 'fg "#8a8a8a" 'bg "rgba(255, 255, 255, 0.04)")
+    (list 'diff-add-word 'bg "rgba(255, 255, 255, 0.26)")
+    (list 'diff-del-word 'bg "rgba(255, 255, 255, 0.12)")
+    (list 'code-scope 'bg "rgba(255, 255, 255, 0.05)")
+    ;; one font for the whole application, because a teletype has one
+    (list 'mono 'family "Menlo, 'DejaVu Sans Mono', 'Liberation Mono', 'Courier New', monospace")
+    (list 'sans 'inherit 'mono)
+    (list 'serif 'inherit 'mono)
+    ;; a gap, because an ASCII screen draws each box and the boxes do not
+    ;; share a rule
+    (list 'chrome 'gap "7px" 'radius "0"
+          'border "1px dashed #767676"
+          'shadow "none"
+          'shadow-deep "none")))
+
+;; the + where two typed rules cross, as one small drawing, placed at the
+;; four corners of every box
+(define ascii-plus
+  "url(\"data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%279%27%20height=%279%27%3E%3Cpath%20d=%27M0%204.5H9M4.5%200V9%27%20stroke=%27%23767676%27%20stroke-width=%271%27/%3E%3C/svg%3E\")")
+
+(define-theme-skin! "ascii" (string-append "
+/* Nothing is painted. A box is four dashed rules with a + at each corner,
+   the way a person draws one with the keys they have. */
+.window, .window.active, .window.inactive,
+.window.active:has(.dash-state-focus),
+.window.active:has(.dash-state-editing) { box-shadow: none; }
+.window { border: 1px dashed var(--border-soft-bg); }
+.window.active { border-color: var(--border-bg); }
+.window::before {
+  content: ''; position: absolute; inset: 0; z-index: 7;
+  pointer-events: none;
+  background-image: " ascii-plus ", " ascii-plus ", " ascii-plus ", " ascii-plus ";
+  background-repeat: no-repeat;
+  background-position: left top, right top, left bottom, right bottom;
+}
+/* a mode line is a dashed rule with words under it */
+.modeline, .window.active .modeline {
+  background: transparent;
+  border-top: 1px dashed var(--border-soft-bg);
+}
+/* a heading is typed, so it is upper case and ruled underneath */
+.buffer-header {
+  background: transparent;
+  border-bottom: 1px dashed var(--border-bg);
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+/* the soft rules inside a pane are dotted, never faint grey bands */
+.buffer-footer, .dash-live, .dash-top, .echo-bar, .echo-area {
+  background: transparent;
+  border-color: var(--border-soft-bg);
+  border-style: dotted;
+}
+/* a tab is a word between brackets, not a chip */
+.ml-tab-on { text-decoration: underline; }
+"))
+
+;;; --- crt: the green phosphor tube -------------------------------------------
+;;; One font. One ground. Sixteen colours, and it spends six of them. A
+;;; mode line is an inverted strip, the glass blooms around every lit
+;;; pixel, and the scan lines never stop. Nothing lifts, nothing rounds,
+;;; nothing eases.
+
+(define-theme "crt"
+  (list
+    ;; the ANSI eight, bright half, on black
+    (list 'ts-keyword 'fg "#ffffff" 'weight "700")
+    (list 'ts-function 'fg "#5fffff")
+    (list 'ts-string 'fg "#ffff5f")
+    (list 'ts-comment 'fg "#00a52b" 'style "italic")
+    (list 'ts-number 'fg "#ff5fff")
+    (list 'ts-constant 'fg "#ff5fff")
+    (list 'ts-type 'fg "#5fffff")
+    (list 'ts-module 'fg "#5fffff")
+    (list 'ts-operator 'fg "#33ff33")
+    (list 'ts-punctuation 'fg "#00c231")
+    (list 'ts-tag 'fg "#ffffff")
+    (list 'ts-attribute 'fg "#ffff5f")
+    (list 'ts-variable 'fg "#33ff33")
+    (list 'ts-property 'fg "#33ff33")
+    (list 'ts-escape 'fg "#ff5fff")
+    ;; every ground is the same ground: a terminal has one
+    (list 'default 'bg "#000000" 'fg "#33ff33")
+    (list 'window 'bg "#000000")
+    (list 'paper 'bg "#000000")
+    (list 'window-inactive 'bg "#000000")
+    (list 'body 'fg "#2be02b")
+    (list 'border-soft 'bg "#0d4f18")
+    (list 'border 'bg "#00a52b")
+    (list 'modeline 'bg "#00a52b" 'fg "#000000")
+    (list 'modeline-active 'bg "#33ff33" 'fg "#000000")
+    (list 'cursor 'bg "#33ff33")
+    (list 'region 'bg "#0f7a26")
+    (list 'select 'bg "#10561b")
+    (list 'hl-line 'bg "#0a3d12")
+    (list 'linenum 'fg "#0d6b21")
+    (list 'accent 'fg "#5fffff")
+    (list 'link 'fg "#5fffff" 'decoration "underline")
+    (list 'llm-response 'fg "#5fffff")
+    (list 'llm-prompt 'inherit 'llm-response)
+    (list 'diff-block 'fg "#ffff5f")
+    (list 'diff-block-source 'fg "#00a52b")
+    (list 'dim 'fg "#00a52b")
+    (list 'faint 'fg "#0d6b21")
+    (list 'warn 'fg "#ffff5f")
+    (list 'ok 'fg "#33ff33")
+    (list 'alert 'fg "#ff5f5f")
+    (list 'org-level-1 'fg "#ffffff" 'weight "700")
+    (list 'org-level-2 'fg "#5fffff" 'weight "700")
+    (list 'org-level-3 'fg "#ffff5f" 'weight "700")
+    (list 'org-level-4 'fg "#ff5fff" 'weight "700")
+    (list 'group-color-1 'fg "#ff5f5f")
+    (list 'group-color-2 'fg "#5fffff")
+    (list 'group-color-3 'fg "#33ff33")
+    (list 'group-color-4 'fg "#ff5fff")
+    (list 'group-color-5 'fg "#ffff5f")
+    (list 'group-color-6 'fg "#ffffff")
+    (list 'org-todo 'fg "#ff5f5f" 'weight "700")
+    (list 'org-done 'fg "#00a52b" 'decoration "line-through")
+    (list 'org-priority 'fg "#ffff5f" 'weight "700")
+    (list 'org-date 'fg "#5fffff")
+    (list 'org-tag 'fg "#00a52b")
+    (list 'org-checkbox 'fg "#ffff5f" 'weight "700")
+    (list 'org-cookie 'fg "#ffff5f")
+    (list 'org-meta 'fg "#00a52b")
+    (list 'fold-marker 'fg "#ffff5f")
+    (list 'nm-date 'fg "#00a52b")
+    (list 'nm-author 'fg "#5fffff")
+    (list 'nm-tags 'fg "#ffff5f")
+    (list 'nm-subject 'fg "#33ff33")
+    (list 'nm-marked 'fg "#ff5f5f")
+    (list 'nm-hdr 'fg "#ffffff")
+    (list 'nm-sep 'fg "#00a52b")
+    (list 'diff-file 'fg "#ffffff" 'weight "700")
+    (list 'diff-hunk 'fg "#5fffff")
+    (list 'diff-add 'fg "#33ff33" 'bg "rgba(51, 255, 51, 0.12)")
+    (list 'diff-del 'fg "#ff5f5f" 'bg "rgba(255, 95, 95, 0.12)")
+    (list 'diff-add-word 'bg "rgba(51, 255, 51, 0.30)")
+    (list 'diff-del-word 'bg "rgba(255, 95, 95, 0.28)")
+    (list 'code-scope 'bg "rgba(51, 255, 51, 0.07)")
+    ;; one font for the whole application, because a terminal has one
+    (list 'mono 'family "Menlo, 'DejaVu Sans Mono', 'Liberation Mono', 'Courier New', monospace")
+    (list 'sans 'inherit 'mono)
+    (list 'serif 'inherit 'mono)
+    (list 'chrome 'gap "0" 'radius "0"
+          'border "1px solid #00a52b"
+          'shadow "none"
+          'shadow-deep "none")))
+
+(define-theme-skin! "crt" "
+/* No pane lifts: a terminal has no depth. Every box is rules. */
+.window, .window.active, .window.inactive,
+.window.active:has(.dash-state-focus),
+.window.active:has(.dash-state-editing) { box-shadow: none; }
+.window { border: 1px solid var(--border-soft-bg); }
+.window.active { border-color: var(--border-bg); }
+/* the status line curses draws: the ink and the ground change places */
+.modeline, .window.active .modeline, .buffer-header {
+  background: var(--modeline-bg);
+  color: var(--modeline-fg);
+  border-top: 0; border-bottom: 0;
+  letter-spacing: 0;
+}
+.window.active .modeline, .window.active .buffer-header {
+  background: var(--modeline-active-bg);
+  color: var(--modeline-active-fg);
+}
+.modeline .ml-icon, .modeline .ml-group-item, .modeline .ml-state-modified,
+.modeline .ml-segment, .modeline .ml-strong, .modeline .ml-extra .ml-segment {
+  color: inherit;
+}
+.modeline .ml-dot { background: var(--modeline-fg); }
+.window.active .modeline .ml-dot { background: var(--modeline-active-fg); }
+/* phosphor: the glass blooms a little around every lit pixel */
+.buf, .ag-prose, .echo { text-shadow: 0 0 6px color-mix(in srgb, var(--default-fg) 42%, transparent); }
+/* the scan lines, over everything, catching nothing */
+.windows::after {
+  content: ''; position: absolute; inset: 0; z-index: 45;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom,
+    rgba(0, 0, 0, 0.26) 0 1px, rgba(0, 0, 0, 0) 1px 3px);
+}
+")
+
+;;; --- paperized: the sheet, the grain, and the ink ---------------------------
+;;; The desk is woven, the pane is a sheet laid on it, and the sheet has a
+;;; grain that catches the light at the corners. The hand writes in three
+;;; inks: black for the text, blue for what it points at, red for what it
+;;; marks. A selection is a highlighter stroke. The margin numbers are
+;;; pencil, so they lean.
+
+(define-theme "paperized"
+  (list
+    (list 'ts-keyword 'fg "#2b3a67" 'weight "600")
+    (list 'ts-function 'fg "#1f1a14")
+    (list 'ts-string 'fg "#3b6b46")
+    (list 'ts-comment 'fg "#9a8f77" 'style "italic")
+    (list 'ts-number 'fg "#8a5a1f")
+    (list 'ts-constant 'fg "#8a5a1f")
+    (list 'ts-type 'fg "#6b3d5b")
+    (list 'ts-module 'fg "#6b3d5b")
+    (list 'ts-operator 'fg "#6b6151")
+    (list 'ts-punctuation 'fg "#8f8470")
+    (list 'ts-tag 'fg "#2b3a67")
+    (list 'ts-attribute 'fg "#8a5a1f")
+    (list 'ts-variable 'fg "#3a332b")
+    (list 'ts-property 'fg "#6b6151")
+    (list 'ts-escape 'fg "#a5342a")
+    ;; the desk, the sheet, and the sheet laid over it
+    (list 'default 'bg "#d9d0b8" 'fg "#241f1a")
+    (list 'window 'bg "#fbf7ec")
+    (list 'paper 'bg "#f3ecda")
+    (list 'window-inactive 'bg "#efe7d2")
+    (list 'body 'fg "#40382f")
+    (list 'border-soft 'bg "#e3dac2")
+    (list 'border 'bg "#c7bb9e")
+    (list 'modeline 'bg "#f3ecda" 'fg "#6b6151")
+    (list 'modeline-active 'bg "#f8f2e2" 'fg "#241f1a")
+    (list 'cursor 'bg "#a5342a")
+    ;; the highlighter: one pass of the pen, and the ink still reads
+    (list 'region 'bg "#f6e08a")
+    (list 'select 'bg "#f8e9ae")
+    (list 'hl-line 'bg "#f6efdc")
+    (list 'linenum 'fg "#b6a988")
+    (list 'accent 'fg "#2b3a67")
+    (list 'link 'fg "#2b3a67" 'decoration "underline")
+    (list 'llm-response 'fg "#2b3a67" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
+    (list 'diff-block 'fg "#8a5a1f" 'style "italic")
+    (list 'diff-block-source 'fg "#9a8f77" 'style "italic")
+    (list 'dim 'fg "#9a8f77")
+    (list 'faint 'fg "#b6a988")
+    (list 'warn 'fg "#8a5a1f")
+    (list 'ok 'fg "#3b6b46")
+    (list 'alert 'fg "#a5342a")
+    (list 'org-level-1 'fg "#241f1a" 'weight "700")
+    (list 'org-level-2 'fg "#2b3a67" 'weight "600")
+    (list 'org-level-3 'fg "#3b6b46" 'weight "600")
+    (list 'org-level-4 'fg "#6b3d5b" 'weight "600")
+    (list 'group-color-1 'fg "#a5342a")
+    (list 'group-color-2 'fg "#2b3a67")
+    (list 'group-color-3 'fg "#3b6b46")
+    (list 'group-color-4 'fg "#6b3d5b")
+    (list 'group-color-5 'fg "#8a5a1f")
+    (list 'group-color-6 'fg "#1f5f5c")
+    (list 'org-todo 'fg "#a5342a" 'weight "700")
+    (list 'org-done 'fg "#3b6b46" 'decoration "line-through")
+    (list 'org-priority 'fg "#a5342a" 'weight "600")
+    (list 'org-date 'fg "#2b3a67" 'style "italic")
+    (list 'org-tag 'fg "#9a8f77" 'style "italic")
+    (list 'org-checkbox 'fg "#2b3a67" 'weight "600")
+    (list 'org-cookie 'fg "#8a5a1f")
+    (list 'org-meta 'fg "#9a8f77" 'style "italic")
+    (list 'fold-marker 'fg "#9a8f77")
+    (list 'nm-date 'fg "#6b6151")
+    (list 'nm-author 'fg "#2b3a67" 'style "italic")
+    (list 'nm-tags 'fg "#8a5a1f")
+    (list 'nm-subject 'fg "#241f1a")
+    (list 'nm-marked 'fg "#a5342a")
+    (list 'nm-hdr 'fg "#2b3a67")
+    (list 'nm-sep 'fg "#c7bb9e")
+    (list 'diff-file 'fg "#2b3a67" 'weight "600")
+    (list 'diff-hunk 'fg "#8a5a1f")
+    (list 'diff-add 'fg "#28522f" 'bg "rgba(59, 107, 70, 0.14)")
+    (list 'diff-del 'fg "#7d2418" 'bg "rgba(165, 52, 42, 0.12)")
+    (list 'diff-add-word 'bg "rgba(59, 107, 70, 0.30)")
+    (list 'diff-del-word 'bg "rgba(165, 52, 42, 0.26)")
+    (list 'code-scope 'bg "rgba(43, 58, 103, 0.06)")
+    ;; the typewriter wrote the text; the press set everything else
+    (list 'mono 'family "'Courier Prime', 'American Typewriter', 'Courier New', 'IBM Plex Mono', monospace")
+    (list 'serif 'family "'Iowan Old Style', 'Palatino Linotype', Palatino, Spectral, Georgia, serif")
+    (list 'sans 'inherit 'serif)
+    (list 'chrome 'gap "9px" 'radius "0"
+          'border "1px solid #c7bb9e"
+          'shadow "0 1px 2px rgba(74, 58, 36, 0.14), 0 9px 22px rgba(74, 58, 36, 0.16)"
+          'shadow-deep "0 2px 4px rgba(74, 58, 36, 0.16), 0 22px 48px rgba(74, 58, 36, 0.22)")))
+
+;; the fibre: grey fractal noise, tiled, multiplied into the sheet. One
+;; data URI, so the texture costs no file and no request.
+(define paper-noise
+  "url(\"data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%27200%27%20height=%27200%27%3E%3Cfilter%20id=%27p%27%3E%3CfeTurbulence%20type=%27fractalNoise%27%20baseFrequency=%270.8%27%20numOctaves=%274%27%20stitchTiles=%27stitch%27/%3E%3CfeColorMatrix%20type=%27saturate%27%20values=%270%27/%3E%3C/filter%3E%3Crect%20width=%27200%27%20height=%27200%27%20filter=%27url(%23p)%27%20opacity=%270.38%27/%3E%3C/svg%3E\")")
+
+(define-theme-skin! "paperized"
+  (string-append "
+/* the desk: the same pulp, pressed harder */
+.windows {
+  background-image: " paper-noise ";
+  background-size: 200px 200px;
+  background-blend-mode: multiply;
+}
+/* The sheet. Paper is fibre and mottle: noise at the scale of a
+   character, and the places where the pulp settled thick or thin. No
+   rules, no hatching. A sheet has no lines on it until someone draws one.
+
+   The grain is a layer of its own, not the pane background-image. Four
+   rules in the stylesheet set the `background` SHORTHAND on a window, one
+   per state, and a shorthand resets background-image to none: the pane in
+   front of you kept coming back flat. A pseudo-element under the text
+   cannot be reset by any of them. */
+.window::after {
+  content: \"\"; position: absolute; inset: 0; z-index: 0;
+  pointer-events: none; mix-blend-mode: multiply;
+  background-image:
+    " paper-noise ",
+    radial-gradient(ellipse at 84% 88%, rgba(150, 122, 78, 0.16) 0%, rgba(150, 122, 78, 0) 58%),
+    radial-gradient(ellipse at 12% 18%, rgba(160, 134, 88, 0.12) 0%, rgba(160, 134, 88, 0) 50%),
+    radial-gradient(ellipse at 52% 46%, rgba(150, 122, 78, 0.07) 0%, rgba(150, 122, 78, 0) 62%);
+  background-size: 200px 200px, auto, auto, auto;
+}
+/* the text, the bars and the rows ride above the grain */
+.window > * { position: relative; z-index: 1; }
+/* the minibuffer and the echo area are cut from the same sheet */
+.echo-bar, .echo-area, .mb-panel, .buffer-footer {
+  background-image: " paper-noise ";
+  background-size: 200px 200px;
+  background-blend-mode: multiply;
+}
+/* a sheet has a lit top edge and a shadow under it, always */
+.window.active {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), var(--chrome-shadow);
+}
+.window.inactive { box-shadow: 0 1px 2px rgba(74, 58, 36, 0.10); }
+/* the chrome is written on the sheet, not printed on a band */
+.modeline, .window.active .modeline {
+  background: transparent;
+  border-top: 1px solid var(--border-soft-bg);
+}
+.buffer-header {
+  background: transparent;
+  border-bottom: 1px solid var(--border-bg);
+  font-family: var(--font-serif);
+  font-weight: 600; font-style: italic; letter-spacing: 0.01em;
+  font-size: 12.5px; text-transform: none;
+}
+/* pencil in the margin leans; ink on the page does not */
+.linenum { font-style: italic; }
+.buf { text-rendering: optimizeLegibility; }
+"))
 ;;; --- the faces a package can count on -------------------------------------
 ;;; The theme owns the colours. These defaults own the shape of the syntax
 ;;; faces and give the Emacs names a home, so a package written for Emacs
@@ -632,6 +1163,8 @@
 (public! 'defface! "(defface! FACE ATTR VALUE ...) — a package's default face, attribute by attribute; an attribute the theme names wins. 'inherit names a face or a list of faces; 'priority orders overlapping overlays")
 (public! 'face-clear! "(face-clear! FACE) — forget every attribute of FACE")
 (public! 'theme-faces "(theme-faces NAME) -> the theme's face specs")
+(public! 'define-theme-skin! "(define-theme-skin! NAME CSS) — the stylesheet NAME wears beside its faces; a theme load installs exactly one")
+(public! 'theme-skin "(theme-skin NAME) -> the CSS NAME wears, or \"\" for a theme with no skin")
 (public! 'theme-dark? "(theme-dark?) -> #t when the current theme has a dark default background")
 (public! 'face-color "(face-color FACE ATTR) -> the value FACE wears now, theme first and the package default after; #f when neither names ATTR")
 (public! '*themes* "The theme registry: ((name . spec) ...)")

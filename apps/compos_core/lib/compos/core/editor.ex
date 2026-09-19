@@ -390,6 +390,8 @@ defmodule Compos.Core.Editor do
   # styles: name -> a stylesheet the mode wrote; the page renders them all.
   # Faces carry colors; styles carry structure (grids, cards, spacing).
   def set_style(name, css), do: GenServer.call(__MODULE__, {:set_style, name, css})
+  # the stylesheet NAME wears now, or "" for a name nothing registered
+  def style_css(name), do: GenServer.call(__MODULE__, {:style_css, name})
 
   # windows
   def split(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
@@ -1711,6 +1713,9 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:set_style, name, css}, _from, state),
     do: changed(:ok, %{state | styles: Map.put(state.styles, name, css)})
+
+  def handle_call({:style_css, name}, _from, state),
+    do: {:reply, Map.get(state.styles, name, ""), state}
 
   def handle_call(:kill_top, _from, state),
     do: {:reply, List.first(state.kill_ring, ""), state}
