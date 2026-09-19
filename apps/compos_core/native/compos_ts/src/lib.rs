@@ -24,6 +24,8 @@ fn language(name: &str) -> Option<Language> {
         "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
         "html" => Some(tree_sitter_html::LANGUAGE.into()),
         "diff" => Some(tree_sitter_diff::LANGUAGE.into()),
+        "markdown" => Some(tree_sitter_md::LANGUAGE.into()),
+        "markdown-inline" => Some(tree_sitter_md::INLINE_LANGUAGE.into()),
         _ => dynamic().lock().unwrap().get(name).map(|(l, _)| l.clone()),
     }
 }
@@ -35,6 +37,8 @@ fn highlights_query(name: &str) -> Option<String> {
         "rust" => Some(tree_sitter_rust::HIGHLIGHTS_QUERY.to_string()),
         "html" => Some(tree_sitter_html::HIGHLIGHTS_QUERY.to_string()),
         "diff" => Some(tree_sitter_diff::HIGHLIGHTS_QUERY.to_string()),
+        "markdown" => Some(tree_sitter_md::HIGHLIGHT_QUERY_BLOCK.to_string()),
+        "markdown-inline" => Some(tree_sitter_md::HIGHLIGHT_QUERY_INLINE.to_string()),
         _ => dynamic().lock().unwrap().get(name).map(|(_, q)| q.clone()),
     }
 }
@@ -377,7 +381,8 @@ fn ts_query_nif(lang_name: String, text: String, query_src: String) -> Vec<(Stri
 #[rustler::nif]
 fn ts_langs() -> Vec<String> {
     let mut langs: Vec<String> =
-        vec!["elixir".into(), "json".into(), "rust".into(), "html".into()];
+        vec!["elixir".into(), "json".into(), "rust".into(), "html".into(),
+             "markdown".into(), "markdown-inline".into()];
     langs.extend(dynamic().lock().unwrap().keys().cloned());
     langs.sort();
     langs
