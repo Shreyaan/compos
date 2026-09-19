@@ -50,6 +50,16 @@ defmodule Compos.Scheme.GCTest do
     assert {:ok, 3, _} = Scheme.eval_string(swept, "(keep)")
   end
 
+  test "a root that holds an improper list does not stop the sweep" do
+    interp = Scheme.new()
+    {:ok, closure, interp} = Scheme.eval_string(interp, "(let ((x 7)) (lambda () x))")
+    base = Scheme.frame_count(interp)
+    # iodata and other host terms can end in a non-list tail
+    kept = Scheme.gc(interp, [["a", "b" | "c"], {:held, [closure | :tail]}])
+    assert Scheme.frame_count(kept) == base
+    assert {:ok, 7, _} = Scheme.call(kept, closure, [])
+  end
+
   test "roots keep otherwise-unreachable closures alive" do
     interp = Scheme.new()
     {:ok, closure, interp} = Scheme.eval_string(interp, "(let ((x 42)) (lambda () x))")
