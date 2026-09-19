@@ -1537,6 +1537,14 @@ defmodule Compos.Ui.EditorLive do
     """
   end
 
+  # A card takes an id of its own. The popup is split first and shows the
+  # list's buffer for one render, then the card's copy: under one id the
+  # client patched the phx-hook onto that element, and LiveView mounts a
+  # hook only when its element is inserted, so the card never placed
+  # itself and stayed hidden. A new id makes the client insert the card.
+  def window_dom_id(id, true), do: "peek-#{id}"
+  def window_dom_id(id, _), do: "win-#{id}"
+
   @doc """
   One window: its header, dashboard, body, and modeline.
 
@@ -1562,7 +1570,7 @@ defmodule Compos.Ui.EditorLive do
 
     ~M"""
     <c-window
-      id={"win-#{@node.id}"}
+      id={window_dom_id(@node.id, @peek?)}
       class={"window #{if Map.get(@node, :highlighted, false), do: "preview-highlight"} #{if @active?, do: "active", else: "inactive"} #{if @dismissible?, do: "dismissible"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       style={window_style(@node)}
       active={to_string(@active?)}
