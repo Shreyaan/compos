@@ -386,7 +386,9 @@ defmodule Compos.MarkdownHtmlTest do
   test "a picture with an emphasised line under it is a figure with a caption" do
     html = render!("![alt](a.png)\n*A caption*\n")
 
-    assert bare(html) =~ ~r{<figure data-src="0-26"><img [^>]*src="a.png"[^>]*>\s*<figcaption data-src="14-25">A caption</figcaption>\s*</figure>}
+    assert bare(html) =~
+             ~r{<figure data-src="0-26"><img [^>]*src="a.png"[^>]*>\s*<figcaption data-src="14-25">A caption</figcaption>\s*</figure>}
+
     refute html =~ "<em"
     refute html =~ "<p "
     refute html =~ "<br>", "the line between the picture and its caption is not a break"
@@ -430,5 +432,88 @@ defmodule Compos.MarkdownHtmlTest do
     faces = %{"window" => %{"bg" => "#101010"}}
     assert Html.html_document("<p>x</p>", faces, true) == "<p>x</p>"
     assert Html.html_document("<p>x</p>", faces, false) =~ "background:#101010 !important"
+  end
+
+  # --- answers, pasted URLs and CSV results ----------------------------------
+
+  defp page(text, point, opts \\ []), do: Html.document(text, point, nil, %{}, opts)
+
+  test "an llm-mode answer draws as its own block, and its metadata does not draw" do
+    text = "Prompt\n\nAn **answer** here.\n\nMore answer.\n"
+    start = byte_size("Prompt\n\n")
+    finish = byte_size(text) - 1
+    html = page(text, 0, overlays: [{start, finish, "llm-response"}])
+
+    assert html =~
+             ~s(<blockquote class="llm-response" data-start="#{start}" data-end="#{finish}")
+
+    assert bare(html) =~ ~r{<strong[^>]*>answer</strong>}
+    refute html =~ "#{start}:#{finish}"
+    refute html =~ ~r/[\x{E002}\x{E003}\x{E004}]/u
+    # the blank line inside the answer stays inside it
+    [_, inside] = String.split(html, ~s(class="llm-response"))
+    [inside | _] = String.split(inside, "</blockquote>")
+    assert inside =~ "More answer."
+  end
+
+  test "an llm-mode answer keeps the buffer's byte offsets" do
+    text = "Prompt\n\nAn answer.\n"
+    start = byte_size("Prompt\n\n")
+    at = start + 3
+    html = page(text, at, overlays: [{start, byte_size(text) - 1, "llm-response"}])
+
+    # the caret sits between the bytes it names, and the line anchor names
+    # the answer's own first byte
+    assert bare(html) =~ "An a"
+    assert html =~ ~s(<span class="ln" data-p="#{start}"></span>)
+    assert html =~ ~r{An </span><span class="pt"></span><span class="s" data-s="#{at}">answer}
+  end
+
+  test "a bare image URL alone in a paragraph draws as the picture" do
+    html = page("https://pics.example/cat.jpeg?w=800\n", 0)
+    assert html =~ ~s(<img src="https://pics.example/cat.jpeg?w=800")
+
+    hooked = page("https://pics.example/cat.png\n", 0, image_src: &("/via/" <> &1))
+    assert hooked =~ ~s(<img src="/via/https://pics.example/cat.png")
+  end
+
+  test "a written link and a non-image URL stay links" do
+    refute page("[cat](https://pics.example/cat.png)\n", 0) =~ "<img"
+
+    html = page("see https://example.com/page, then stop\n", 0)
+    refute html =~ "<img"
+    assert html =~ ~s(<a href="https://example.com/page" data-src="4-28">)
+  end
+
+  test "an X post URL alone in a paragraph draws through the card hook" do
+    url = "https://x.com/someone/status/123?s=20"
+    card = fn ^url -> {:ok, "<p>the card</p>"} end
+
+    assert page(url <> "\n", 0, tweet_card: card) =~
+             ~r{<div class="tweet"[^>]*><p>the card</p></div>}
+
+    assert page(url <> "\n", 0, tweet_card: fn _ -> :pending end) =~ "tweet-pending"
+
+    failed = page(url <> "\n", 0, tweet_card: fn _ -> :error end)
+    refute failed =~ ~s(class="tweet)
+    assert failed =~ ~s(<a href="#{url}")
+  end
+
+  test "a CSV result fence previews five rows with a header" do
+    rows = Enum.map_join(1..7, "\n", &"row#{&1},#{&1}")
+    html = page("```result-csv\nname,value\n#{rows}\n```\n", 0)
+
+    assert html =~ ~s(<table class="csv-preview")
+    assert bare(html) =~ ~r{<th[^>]*>name</th>}
+    assert html =~ "row4"
+    refute html =~ "row5"
+  end
+
+  test "a CSV fence without a tangle target stays code, and Morg arguments stay out" do
+    html = page("```csv :results silent\nname,value\n```\n", 0)
+
+    assert html =~ ~s(<code class="csv">)
+    refute html =~ "csv-preview"
+    refute bare(html) =~ ":results silent\n"
   end
 end

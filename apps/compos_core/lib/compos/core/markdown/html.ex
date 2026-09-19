@@ -16,9 +16,13 @@ defmodule Compos.Core.Markdown.Html do
 
   alias Compos.Core.{Markdown, TS}
   alias Compos.Scheme.Text
-  alias Compos.Core.Markdown.Classic
 
   @csv_preview_lines 5
+
+  # llm-mode answer overlays ride the parse as private-use sentinels
+  @llm_start "\uE002"
+  @llm_end "\uE003"
+  @llm_meta_end "\uE004"
 
   # Source that is markup: consumed, never drawn. This is the grammar's own
   # vocabulary written down - the bytes it says are a marker - not a rule
@@ -65,6 +69,7 @@ defmodule Compos.Core.Markdown.Html do
     # nothing.
     Process.put(:compos_md_image_src, opts[:image_src])
     Process.put(:compos_md_url_embed, opts[:url_embed])
+    Process.put(:compos_md_tweet_card, opts[:tweet_card])
     Process.put(:compos_md_csv_source, opts[:csv_source])
     Process.put(:compos_md_hidden_lines, opts[:hidden_lines] || MapSet.new())
     # A transcript wants CommonMark reflow: a newline inside a paragraph
@@ -76,7 +81,7 @@ defmodule Compos.Core.Markdown.Html do
     Process.put(:compos_md_chrome, opts[:chrome] != false)
 
     marks = Enum.sort_by(marks, &elem(&1, 0))
-    {iodata, marks} = nodes(tree, text, 0, marks)
+    {iodata, marks} = tree |> autolinks(text) |> nodes(text, 0, marks)
 
     # The blank lines after the last block are lines too, and RET at the end
     # of a document makes one of them. Without this the caret landed after
@@ -97,7 +102,7 @@ defmodule Compos.Core.Markdown.Html do
   #
   # A mark in that gap still draws: point can stand on a blank line, and it
   # has to show.
-  @containers ~w(root list item quote table table_head table_row code)a
+  @containers ~w(root answer list item quote table table_head table_row code)a
 
   defp nodes(nodes, text, from, marks, parent \\ :root) do
     content? = parent not in @containers
@@ -113,7 +118,9 @@ defmodule Compos.Core.Markdown.Html do
             # that separates two table rows, or two list items, separates
             # them - it is not a line the author left empty. Drawn as one,
             # a twenty row table opened a screenful of nothing above itself.
-            parent == :root -> blank_lines(text, at, node.start, marks)
+            # An llm-mode answer is a document inside the document, and its
+            # blank lines are the answer's own.
+            parent in [:root, :answer] -> blank_lines(text, at, node.start, marks)
             true -> gap_marks(at, node.start, marks)
           end
 
@@ -244,6 +251,43 @@ defmodule Compos.Core.Markdown.Html do
 
     {inner, marks} = children(node, text, marks)
     {[~s(<li data-src="#{node.start}-#{node.stop}">), inner, "</li>"], marks}
+  end
+
+  # A rule's dashes are markup: the rule draws as the line, and a caret on
+  # it still shows.
+  defp node(%{kind: :rule} = node, _text, marks),
+    do:
+      {[~s(<hr data-src="#{node.start}-#{node.stop}">), marks_only(node, marks)],
+       drop_marks(node, marks)}
+
+  # A Setext heading holds its text as a paragraph. The text is the
+  # heading's own, so it draws bare, as an ATX heading's does.
+  defp node(%{kind: :heading, children: kids} = node, text, marks) when kids != [] do
+    kids = Enum.map(kids, &if(&1.kind == :paragraph, do: %{&1 | kind: :bare}, else: &1))
+    generic_node(%{node | children: kids}, text, marks)
+  end
+
+  # An llm-mode answer: the quote the overlay wrote into the parse. It says
+  # which bytes of the buffer are the answer, and draws them as a block.
+  defp node(%{kind: :quote, llm: {start, finish}} = node, text, marks) do
+    {inner, marks} = children(%{node | kind: :answer}, text, marks)
+
+    {[
+       ~s(<blockquote class="llm-response" data-start="#{start}" data-end="#{finish}" ),
+       ~s(data-src="#{node.start}-#{node.stop}">),
+       inner,
+       "</blockquote>"
+     ], marks}
+  end
+
+  # A URL in running text is a link to itself, as it is on every page that
+  # reads GitHub Markdown.
+  defp node(%{kind: :bare_url} = node, text, marks) do
+    url = binary_part(text, node.start, node.stop - node.start)
+    {inner, marks} = children(node, text, marks)
+
+    {[~s(<a href="), attr(url), ~s(" data-src="#{node.start}-#{node.stop}">), inner, "</a>"],
+     marks}
   end
 
   defp bare(children, target),
@@ -399,12 +443,147 @@ defmodule Compos.Core.Markdown.Html do
         {here, marks} = Enum.split_while(marks, fn {off, _} -> off < node.stop end)
         {[embedded, Enum.map(here, &elem(&1, 1))], marks}
 
+      url = lone_url(node, text) ->
+        url_paragraph(node, url, text, marks)
+
       figure = figure_parts(node, text) ->
         figure(node, figure, text, marks)
 
       true ->
         generic_node(node, text, marks)
     end
+  end
+
+  # A paragraph that is one URL and nothing else: the author pasted it to
+  # show the thing it names. A picture draws as the picture and an X post as
+  # its card. Any other URL is a link.
+  defp lone_url(
+         %{children: [%{kind: :inline, children: [%{kind: :bare_url} = link]} = inline]},
+         text
+       ) do
+    url = binary_part(text, link.start, link.stop - link.start)
+    whole = String.trim(binary_part(text, inline.start, inline.stop - inline.start))
+    if whole == url and (image_url?(url) or tweet_url?(url)), do: {url, link}
+  end
+
+  defp lone_url(_node, _text), do: nil
+
+  defp url_paragraph(node, {url, link}, text, marks) do
+    if image_url?(url) do
+      {open, close} = box("p", node)
+
+      {[
+         open,
+         ~s(<img src="),
+         attr(image_src(url)),
+         ~s(" alt="" data-src="#{link.start}-#{link.stop}" data-s="#{link.start}">),
+         marks_only(node, marks),
+         close
+       ], drop_marks(node, marks)}
+    else
+      tweet_paragraph(node, url, text, marks)
+    end
+  end
+
+  # The card is the caller's: only the client can fetch it. Until it lands
+  # the page says so, and a post that cannot be fetched stays a link.
+  defp tweet_paragraph(node, url, text, marks) do
+    card = Process.get(:compos_md_tweet_card) || fn _ -> :error end
+    src = ~s(data-src="#{node.start}-#{node.stop}")
+
+    body =
+      case card.(url) do
+        # verbatim: the card builder escapes the author's text, and the
+        # preview frame runs no scripts
+        {:ok, html} ->
+          [~s(<div class="tweet" #{src}>), html, "</div>"]
+
+        :pending ->
+          [
+            ~s(<div class="tweet tweet-pending" #{src}>Loading the post: <a href="),
+            attr(url),
+            ~s(">),
+            escape(url),
+            "</a></div>"
+          ]
+
+        _ ->
+          nil
+      end
+
+    if body,
+      do: {[body, marks_only(node, marks)], drop_marks(node, marks)},
+      else: generic_node(node, text, marks)
+  end
+
+  @image_exts ~w(.png .jpg .jpeg .gif .webp .svg .avif .bmp)
+  # the share sheet appends ?s=20 and friends; a query or fragment after
+  # the status id still names the same post
+  @tweet_re ~r{\Ahttps?://(?:mobile\.)?(?:twitter|x)\.com/[^/]+/status(?:es)?/\d+(?:[?#]\S*)?\z}
+
+  defp image_url?(url) do
+    case URI.parse(url) do
+      %URI{scheme: s, path: p} when s in ["http", "https"] and is_binary(p) ->
+        (p |> Path.extname() |> String.downcase()) in @image_exts
+
+      _ ->
+        false
+    end
+  end
+
+  defp tweet_url?(url), do: Regex.match?(@tweet_re, url)
+
+  # A bare URL is a node the inline grammar does not make, so the walk adds
+  # it: a `bare_url` over the bytes of each URL that stands in the text
+  # between the grammar's own nodes. A link, an image or a code span is
+  # text of another kind, and nothing inside one is read.
+  @url_holders ~w(inline cell emphasis strong strike)a
+  @url_opaque ~w(link image code_span autolink code)a
+
+  defp autolinks(nodes, text), do: Enum.map(nodes, &autolink(&1, text))
+
+  defp autolink(%{kind: kind} = node, _text) when kind in @url_opaque, do: node
+
+  defp autolink(%{kind: kind} = node, text) when kind in @url_holders do
+    kids = autolinks(node.children, text)
+
+    urls =
+      [node.start | Enum.flat_map(kids, &[&1.start, &1.stop])]
+      |> Enum.concat([node.stop])
+      |> Enum.chunk_every(2)
+      |> Enum.flat_map(fn [from, to] -> urls_in(text, from, to) end)
+
+    %{node | children: Enum.sort_by(kids ++ urls, & &1.start)}
+  end
+
+  defp autolink(node, text), do: %{node | children: autolinks(node.children, text)}
+
+  defp urls_in(text, from, to) when to > from do
+    case :binary.match(text, "http", scope: {from, to - from}) do
+      :nomatch ->
+        []
+
+      _ ->
+        ~r{https?://[^\s<>]+}
+        |> Regex.scan(binary_part(text, from, to - from), return: :index)
+        |> Enum.map(fn [{at, len}] ->
+          url = url_end(binary_part(text, from + at, len))
+          %{kind: :bare_url, start: from + at, stop: from + at + byte_size(url), children: []}
+        end)
+    end
+  end
+
+  defp urls_in(_text, _from, _to), do: []
+
+  # Punctuation that closes the sentence is not part of the URL. A closing
+  # parenthesis is part of it only when the URL opened one.
+  defp url_end(url) do
+    url = String.replace(url, ~r/[.,;:!?'"*_~]+\z/, "")
+    opens = length(:binary.matches(url, "("))
+
+    if String.ends_with?(url, ")") and length(:binary.matches(url, ")")) > opens,
+      do: url |> String.slice(0..-2//1) |> url_end(),
+      else: url
   end
 
   # An image on a line of its own, and under it a line that is only
@@ -751,7 +930,6 @@ defmodule Compos.Core.Markdown.Html do
   defp tag(%{kind: :emphasis} = node, _), do: box("em", node)
   defp tag(%{kind: :strike} = node, _), do: box("del", node)
   defp tag(%{kind: :code_span} = node, _), do: box("code", node)
-  defp tag(%{kind: :rule, start: s, stop: e}, _), do: {~s(<hr data-src="#{s}-#{e}">), ""}
   defp tag(%{kind: :list} = node, _), do: box(list_tag(node), node)
   defp tag(_node, _text), do: nil
 
@@ -828,11 +1006,11 @@ defmodule Compos.Core.Markdown.Html do
   The whole preview page for the Markdown TEXT, with the caret at POINT
   and the mark at MARK. This module owns it: the LiveView only frames it.
 
-  OPTS: `tree` (a parse of TEXT with the overlays applied, which the
-  caller caches against the buffer version), `overlays`, `faces`, and the
+  OPTS: `tree` (the answer of `parse/2` for TEXT and the overlays, which
+  the caller caches against the buffer version), `overlays`, and the
   hooks `image_src`, `url_embed`, `csv_source`, `local_url`, `tweet_card`,
-  `base_dir`, `whitespace`, `hidden_lines`. With no tree and no grammar,
-  `Compos.Core.Markdown.Classic` draws the page through Earmark.
+  `base_dir`, `whitespace`, `hidden_lines`. The Markdown grammars are
+  built into the NIF; a parse that still fails draws the escaped source.
   """
   def document(text, point, mark, faces, opts \\ []) do
     overlays = opts[:overlays] || []
@@ -840,7 +1018,7 @@ defmodule Compos.Core.Markdown.Html do
     tree =
       case opts[:tree] do
         nil ->
-          case Markdown.parse(overlay_source(text, overlays)) do
+          case parse(text, overlays) do
             {:ok, tree} -> tree
             {:error, _} -> nil
           end
@@ -851,17 +1029,20 @@ defmodule Compos.Core.Markdown.Html do
 
     if tree do
       {:ok, html} =
-        preview_doc_ts(tree, text, point, mark, faces, overlays,
+        preview_doc_ts(tree, text, point, mark, faces,
           whitespace: opts[:whitespace] == true,
           hidden_lines: opts[:hidden_lines] || MapSet.new(),
-          image_src: opts[:image_src] || (&Classic.local_image_src(&1, opts)),
-          url_embed: opts[:url_embed] || (&Classic.youtube_embed_html/1),
+          image_src: opts[:image_src] || (&local_image_src(&1, opts)),
+          url_embed: opts[:url_embed] || (&youtube_embed_html/1),
+          tweet_card: opts[:tweet_card],
           csv_source: opts[:csv_source]
         )
 
       html
     else
-      Classic.preview_doc("markdown", text, point, mark, faces, false, overlays, opts)
+      # the Markdown grammars are built into the NIF, so a parse fails only
+      # on input the grammar rejects: draw the source, escaped
+      page(~s(<pre class="preview-raw">) <> html_escape(text) <> "</pre>", faces)
     end
   end
 
@@ -875,13 +1056,10 @@ defmodule Compos.Core.Markdown.Html do
         html
 
       {:error, _} ->
-        case Earmark.as_html(md, compact_output: false) do
-          {:ok, html, _} -> html
-          {:error, html, _} -> html
-        end
+        "<pre>" <> html_escape(md) <> "</pre>"
     end
   rescue
-    _ -> "<pre>" <> Classic.html_escape(md) <> "</pre>"
+    _ -> "<pre>" <> html_escape(md) <> "</pre>"
   end
 
   @doc """
@@ -889,10 +1067,9 @@ defmodule Compos.Core.Markdown.Html do
 
   Every node knows the source it came from, so the caret is cut in at its
   byte rather than placed by a rule about the construct it landed in.
-  Answers `{:error, :no_grammar}` when the Markdown grammar is missing, and
-  the caller falls back rather than drawing nothing.
+  TREE is the answer of `parse/2`.
   """
-  def preview_doc_ts(tree, text, point, mark, faces, overlays, opts \\ []) do
+  def preview_doc_ts(tree, text, point, mark, faces, opts \\ []) do
     size = byte_size(text)
     p = point |> max(0) |> min(size)
     m = if is_integer(mark), do: mark |> max(0) |> min(size), else: nil
@@ -902,13 +1079,7 @@ defmodule Compos.Core.Markdown.Html do
         [{p, ~s(<span class="pt"></span>)}] ++
         if(m, do: [{m, ~s(<span class="mk"></span>)}], else: [])
 
-    body =
-      render_tree(
-        tree,
-        overlay_source(text, overlays),
-        marks,
-        opts
-      )
+    body = render_tree(tree, text, marks, opts)
 
     {:ok, page(body, faces)}
   end
@@ -919,17 +1090,88 @@ defmodule Compos.Core.Markdown.Html do
     |> Enum.map(fn at -> {at, ~s(<span class="ln" data-p="#{at}"></span>)} end)
   end
 
-  # An overlay only ever adds markup, which draws no character, so the marks
-  # keep the source's own offsets and need no correction.
-  @doc "TEXT with the LLM response overlays written in as quote markers; parse this."
-  def overlay_source(text, overlays) do
-    text
-    |> Classic.overlay_positions(overlays)
-    |> Enum.sort_by(fn {at, _} -> -at end)
-    |> Enum.reduce(text, fn {at, insert}, acc ->
-      at = acc |> Text.floor_utf8(at) |> max(0) |> min(byte_size(acc))
-      binary_part(acc, 0, at) <> insert <> binary_part(acc, at, byte_size(acc) - at)
+  @doc """
+  Parse TEXT with its llm-mode OVERLAYS. Every node in the answer speaks
+  TEXT's own byte offsets.
+
+  An answer is parsed as a quote, so the grammar still reads the headings,
+  lists and emphasis inside it. The quote markers and the sentinels are
+  written into a copy of TEXT for the parse, and the walk then maps every
+  node back: a node the insertion made draws nothing, and the quote that
+  carries the start sentinel records the answer's range as `llm`.
+  """
+  def parse(text, overlays \\ []) do
+    inserts =
+      text
+      |> overlay_positions(overlays)
+      |> Enum.map(fn {at, s} -> {Text.floor_utf8(text, at), s} end)
+      |> Enum.sort_by(&elem(&1, 0))
+
+    if inserts == [] do
+      Markdown.parse(text)
+    else
+      source = inserts |> Enum.reverse() |> Enum.reduce(text, &insert_at/2)
+
+      with {:ok, tree} <- Markdown.parse(source) do
+        {spans, _} =
+          Enum.map_reduce(inserts, 0, fn {at, s}, shift ->
+            {{at + shift, at + shift + byte_size(s), at}, shift + byte_size(s)}
+          end)
+
+        {:ok, unshift(tree, source, spans)}
+      end
+    end
+  end
+
+  defp insert_at({at, s}, acc),
+    do: binary_part(acc, 0, at) <> s <> binary_part(acc, at, byte_size(acc) - at)
+
+  defp unshift(nodes, source, spans) do
+    Enum.flat_map(nodes, fn node ->
+      start = to_text(node.start, spans)
+      stop = to_text(node.stop, spans)
+
+      if start == stop and node.kind in @silent do
+        []
+      else
+        mapped = %{
+          node
+          | start: start,
+            stop: stop,
+            children: unshift(node.children, source, spans)
+        }
+
+        case node.kind == :quote and answer_range(source, node.start) do
+          {from, to} -> [Map.put(mapped, :llm, {from, to})]
+          _ -> [mapped]
+        end
+      end
     end)
+  end
+
+  # An offset in the parsed copy, as an offset in the buffer text. An
+  # offset inside an insertion is the byte the insertion stands before.
+  defp to_text(at, spans) do
+    Enum.reduce_while(spans, at, fn {from, to, orig}, _ ->
+      cond do
+        at < from -> {:halt, at - (from - orig)}
+        at < to -> {:halt, orig}
+        true -> {:cont, at - (to - orig)}
+      end
+    end)
+  end
+
+  # The quote the overlay wrote opens with the start sentinel and the
+  # answer's range: "> " START ":" FINISH META_END.
+  defp answer_range(source, at) do
+    head = binary_part(source, at, min(64, byte_size(source) - at))
+
+    case Regex.run(~r/\A> #{@llm_start}(\d+):(\d+)#{@llm_meta_end}/u, head,
+           capture: :all_but_first
+         ) do
+      [from, to] -> {String.to_integer(from), String.to_integer(to)}
+      _ -> nil
+    end
   end
 
   # A font face belongs to one document. The preview runs in its own
@@ -943,8 +1185,8 @@ defmodule Compos.Core.Markdown.Html do
 
   @doc """
   The page around a rendered BODY: the reader's typography and palette,
-  from FACES. Both renderers draw into it, so the only difference between
-  them is the body itself.
+  from FACES. The page carries no logic of the renderer; the body is all
+  of the renderer's work.
   """
   def page(body, faces) do
     %{bg: bg, fg: fg, accent: accent, link: link, dim: dim, border: border, inset: inset} =
@@ -1135,4 +1377,125 @@ defmodule Compos.Core.Markdown.Html do
     }
   end
 
+  # --- overlays, local images, and embeds -------------------------------------
+  # Preview formatting belongs to llm-mode, not to the Markdown document.
+  # An llm-mode answer is written into the source as a quote, so the parser
+  # still reads headings, lists and emphasis inside it. The private
+  # sentinels tell it apart from a quote the author typed.
+  def overlay_positions(text, overlays) do
+    Enum.flat_map(overlays || [], fn
+      {start, finish, face}
+      when is_integer(start) and is_integer(finish) and face in ["llm-response", :llm_response] ->
+        start = start |> max(0) |> min(byte_size(text))
+        finish = finish |> max(start) |> min(byte_size(text))
+
+        continuation_prefixes =
+          text
+          |> binary_part(start, finish - start)
+          |> :binary.matches("\n")
+          |> Enum.map(fn {offset, _length} -> start + offset + 1 end)
+          # a newline that ends the answer ends the quote: the line after
+          # it is the author's again
+          |> Enum.filter(&(&1 < finish))
+          |> Enum.map(&{&1, "> "})
+
+        metadata = "#{start}:#{finish}"
+
+        [
+          {start, "> " <> @llm_start <> metadata <> @llm_meta_end},
+          {finish, @llm_end} | continuation_prefixes
+        ]
+
+      _ ->
+        []
+    end)
+  end
+
+  # A document's picture is a file path: absolute, or relative to the document
+  # itself. A relative link is the one that survives another checkout, so the
+  # preview resolves it against the document's directory. A URL is left alone.
+  def local_image_src(src, ctx) do
+    dir = ctx[:base_dir]
+    local_url = ctx[:local_url] || (&Function.identity/1)
+
+    path =
+      if String.starts_with?(src, "<") and String.ends_with?(src, ">") do
+        binary_part(src, 1, byte_size(src) - 2)
+      else
+        src
+      end
+
+    cond do
+      Path.type(path) == :absolute -> local_url.(path)
+      not is_nil(URI.parse(path).scheme) -> src
+      is_binary(dir) -> local_url.(Path.expand(path, dir))
+      true -> src
+    end
+  end
+
+  defp embed_directive_url(text) do
+    case Regex.run(~r/\A#\+embed:[ \t]+(\S+)[ \t]*\z/i, text, capture: :all_but_first) do
+      [url] -> url
+      _ -> nil
+    end
+  end
+
+  @doc false
+  def youtube_id(url) do
+    uri = URI.parse(url)
+    host = uri.host && String.downcase(uri.host)
+    path = String.split(uri.path || "", "/", trim: true)
+
+    id =
+      cond do
+        host in ["youtu.be", "www.youtu.be"] ->
+          List.first(path)
+
+        host in ["youtube.com", "www.youtube.com", "m.youtube.com"] and path == ["watch"] ->
+          youtube_query_id(uri.query)
+
+        host in ["youtube.com", "www.youtube.com", "m.youtube.com"] and
+            List.first(path) in ["shorts", "live", "embed"] ->
+          Enum.at(path, 1)
+
+        true ->
+          nil
+      end
+
+    if is_binary(id) and Regex.match?(~r/\A[A-Za-z0-9_-]{11}\z/, id), do: id
+  end
+
+  defp youtube_query_id(nil), do: nil
+
+  defp youtube_query_id(query) do
+    URI.decode_query(query)["v"]
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc "A YouTube URL, or an `#+embed:` line naming one, drawn as a card; nil otherwise."
+  def youtube_embed_html(source) do
+    url = embed_directive_url(source) || String.trim(source)
+
+    case url && youtube_id(url) do
+      nil ->
+        nil
+
+      id ->
+        safe_url = url |> html_escape() |> String.replace("\"", "&quot;")
+
+        ~s(<a class="youtube-card" href="#{safe_url}" target="_blank" rel="noopener noreferrer" aria-label="Watch this video on YouTube"><img src="#{youtube_thumbnail(id)}" alt="YouTube video thumbnail"><span class="youtube-play" aria-hidden="true">▶</span></a>)
+    end
+  end
+
+  @doc false
+  def youtube_thumbnail(id), do: "https://i.ytimg.com/vi/#{id}/hqdefault.jpg"
+
+  @doc false
+  def html_escape(text) do
+    text
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+  end
 end
