@@ -540,7 +540,8 @@ defmodule Compos.Core.Desktop do
     # mode setup reads the group records, which the globals below put
     # back. A boot wakes only these; the rest stay dormant and rebuild
     # when something wakes them.
-    Enum.each(tree_buffers(desktop), &Compos.Core.ensure_buffer(&1, restore: false))
+    woken = tree_buffers(desktop)
+    Enum.each(woken, &Compos.Core.ensure_buffer(&1, restore: false))
     restore_frames(desktop)
 
     # Runtime setup reads persisted policy. Group modelines, for example,
@@ -553,10 +554,14 @@ defmodule Compos.Core.Desktop do
     state = %{state | scheme_stale?: not install_globals(state.globals)}
     if state.scheme_stale?, do: Process.send_after(self(), :reseed, @reseed_retry)
 
-    # The runtime of each shown buffer is rebuilt on that buffer's own
-    # lane. Nothing here waits for it: a boot that wakes many buffers kept
-    # the Editor busy for seconds, and this process died on the wait.
-    Enum.each(shown_buffers(), &Compos.Core.restore_runtime_later/1)
+    # The runtime of each buffer this boot woke is rebuilt on that buffer's
+    # own lane: the shown ones and every one a saved tree named. A frame
+    # rebuild can drop a leaf (a sealed group, a layout reflow), and a
+    # buffer woken without its runtime stays live with no mode and no keys:
+    # a chat whose RET fell through to the global map. Nothing here waits:
+    # a boot that wakes many buffers kept the Editor busy for seconds, and
+    # this process died on the wait.
+    Enum.each(Enum.uniq(shown_buffers() ++ woken), &Compos.Core.restore_runtime_later/1)
 
     # Faces are not restored. themes.scm persists the theme NAME and
     # derives the faces at boot, so a theme edit applies on restart.
