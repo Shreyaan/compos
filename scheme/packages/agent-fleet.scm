@@ -355,18 +355,14 @@
                (string-append verb " " (car bs))
                (string-append verb " " (number->string (length bs)) " chats"))))
 
-(define-command "chats-retitle" "Give the chat at point a title"
+(define-command "chat-retitle-at-point" "Title the chat at point again; a blank title asks the model"
   (lambda ()
     (let ((b (ibuffer-current (chat-list-buffer))))
       (if (not (and (string? b) (buffer-known? b)))
           (message "no chat here")
-          (minibuffer-read
-            (string-append "Title for " b ": ")
-            '()
-            (lambda (name)
-              (unless (equal? name "")
-                (chat-title b name)
-                (agents-relist!))))))))
+          (chat-retitle! b agents-relist!)))))
+
+(catalog-meta! 'command "chat-retitle-at-point" 'domain 'chat 'effects '(write external spend))
 
 (define (agents-live-slug buf)
   (let ((slug (or (buffer-local buf 'agent-slug) (chat-ensure-runtime! buf))))
@@ -1127,7 +1123,7 @@
               ("p" "ibuffer-toggle-preview")
               ("q" "chat-list-quit")
               ("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
-              ("a" "chats-archive") ("r" "chats-retitle")
+              ("a" "chats-archive") ("r" "chat-retitle-at-point")
               ("k" "chats-kill-runtime") ("g" "agents-refresh")
               ("t" "chat-list-toggle-groups")
               ("+" "agent-open")))))

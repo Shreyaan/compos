@@ -175,3 +175,30 @@
       ;; killing the buffer does not take the hook with it
       (disable-minor-mode! "*zz-named-hooked*" "llm-mode")
       (t--rn-kill! "*zz-named-hooked*"))))
+
+;;; --- chat-retitle: a typed title, or a blank one for the model ----------------
+
+(deftest 'a-typed-retitle-names-the-chat-and-a-blank-one-asks-the-model
+  "chat-retitle! takes the typed title; a blank answer takes the model path"
+  (lambda ()
+    (let ((buf "*zz-retitle*") (named "*zz-retitle-named*")
+          (asked #f) (after 0)
+          (saved chat-title-first-prompt!) (saved-turn chat-summary-turn!))
+      (t--rn-kill! buf named)
+      (buffer-create buf)
+      (set! chat-title-first-prompt! (lambda (b &optional force?) (set! asked b) #t))
+      (set! chat-summary-turn! (lambda (b) #t))
+      (chat-retitle! buf (lambda () (set! after (+ after 1))))
+      (minibuffer-input! "   ")
+      (run-command "minibuffer-confirm-input")
+      (check-equal! asked buf "a blank answer asks the model")
+      (check-true! (buffer-known? buf) "and the name stays until the model answers")
+      (chat-retitle! buf (lambda () (set! after (+ after 1))))
+      (minibuffer-input! named)
+      (run-command "minibuffer-confirm-input")
+      (check-true! (buffer-known? named) "a typed answer is the new name")
+      (check-equal! (buffer-local named 'chat-title) named "and it is the chat's title")
+      (check-equal! after 2 "the caller hears each answer")
+      (set! chat-title-first-prompt! saved)
+      (set! chat-summary-turn! saved-turn)
+      (t--rn-kill! buf named))))

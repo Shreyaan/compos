@@ -1576,14 +1576,17 @@
   (debounce! (string-append "chat-summary:" buf) *chat-summary-debounce-ms*
              chat-summary-refresh! buf))
 
-;; One command for both facts a chat learns about itself: it names the
-;; chat again, and lands a fresh running summary. Every other path titles
+;; Title a chat again. The reader types the title, or leaves the answer
+;; blank to ask the model. The model path names the chat from its first
+;; prompt again and lands a fresh running summary. Every other path titles
 ;; a chat once; this is the one that overrules a title already there.
-(define-command "chat-retitle" "Name this chat again and refresh its summary"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
-          (message "not a chat buffer")
+;; AFTER runs when the answer is in.
+(define (chat-retitle! buf &optional after)
+  (minibuffer-read
+    (string-append "Title for " buf " (blank asks the model): ")
+    '()
+    (lambda (name)
+      (if (equal? (string-trim name) "")
           (begin
             (message "chat-retitle: asking the model")
             ;; the same two moments, both forced: the name comes from the
@@ -1591,7 +1594,16 @@
             ;; when the card writer is away does the hosted model answer.
             (or (and (chat-title-first-prompt! buf #t)
                      (chat-summary-turn! buf))
-                (chat-summary-refresh! buf #t)))))))
+                (chat-summary-refresh! buf #t)))
+          (chat-title buf name))
+      (when after (after)))))
+
+(define-command "chat-retitle" "Title this chat again; a blank title asks the model"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+          (message "not a chat buffer")
+          (chat-retitle! buf)))))
 
 (domain! 'chat)
 (effects! '(write external execute))
