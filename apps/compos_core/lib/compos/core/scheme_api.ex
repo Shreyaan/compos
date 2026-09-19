@@ -1092,7 +1092,7 @@ defmodule Compos.Core.SchemeAPI do
       {"start-process!",
        "(start-process! BUF CMD) — start a shell process attached to BUF; return #t on success."} =>
         fn [buffer, cmd] ->
-          case Compos.Core.Proc.start(buffer, cmd) do
+          case Compos.Core.Terminal.start(buffer, cmd, raw: false) do
             {:ok, _} -> true
             {:error, {:already_started, _}} -> true
             _ -> false
@@ -1110,20 +1110,15 @@ defmodule Compos.Core.SchemeAPI do
       {"process-send!",
        "(process-send! BUF TEXT) — send TEXT to the buffer's process; return #t on success."} =>
         fn [buffer, text] ->
-          result =
-            if Compos.Core.Terminal.running?(buffer),
-              do: Compos.Core.Terminal.send_text(buffer, text),
-              else: Compos.Core.Proc.send_text(buffer, text)
-
-          result == :ok
+          Compos.Core.Terminal.send_text(buffer, text) == :ok
         end,
       {"process-running?", "(process-running? BUF) — return #t if the buffer's process runs."} =>
         fn [buffer] ->
-          Compos.Core.Terminal.running?(buffer) or Compos.Core.Proc.running?(buffer)
+          Compos.Core.Terminal.running?(buffer)
         end,
       {"process-mark",
        "(process-mark BUF) — return the byte position just after the last process output."} =>
-        fn [buffer] -> Compos.Core.Proc.mark(buffer) end,
+        fn [buffer] -> Compos.Core.Terminal.mark(buffer) end,
       {"buffer-substring",
        "(buffer-substring START END) — return the current buffer's text between byte START and END."} =>
         fn [s, e] ->
@@ -1131,26 +1126,17 @@ defmodule Compos.Core.SchemeAPI do
           binary_part(text, s, min(e, Kernel.byte_size(text)) - s)
         end,
       {"process-kill!", "(process-kill! BUF) — kill the buffer's process."} => fn [buffer] ->
-        if Compos.Core.Terminal.running?(buffer),
-          do: Compos.Core.Terminal.kill(buffer),
-          else: Compos.Core.Proc.kill(buffer)
-
+        Compos.Core.Terminal.kill(buffer)
         :void
       end,
       {"process-list",
        "(process-list) — return ((BUF CMD) ...) for every running process buffer."} => fn [] ->
-        for {name, cmd} <- Enum.sort(Compos.Core.Proc.list() ++ Compos.Core.Terminal.list()),
-            do: [name, cmd]
+        for {name, cmd} <- Compos.Core.Terminal.list(), do: [name, cmd]
       end,
       {"process-restart!",
        "(process-restart! BUF) — kill the buffer's process and run its command again; return #t on success."} =>
         fn [buffer] ->
-          result =
-            if Compos.Core.Terminal.running?(buffer),
-              do: Compos.Core.Terminal.restart(buffer),
-              else: Compos.Core.Proc.restart(buffer)
-
-          case result do
+          case Compos.Core.Terminal.restart(buffer) do
             {:ok, _} -> true
             _ -> false
           end

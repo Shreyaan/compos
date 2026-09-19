@@ -1391,15 +1391,15 @@ defmodule Compos.EditorTest do
     Editor.set_window_buffer(buf)
 
     # wait for process to be up, then type a line and hit RET (comint send)
-    assert Compos.Core.Proc.running?(buf)
+    assert Compos.Core.Terminal.running?(buf)
     type("hello-comint")
     press(["RET"])
 
     # cat echoes it back (plus the pty echo) — poll until it lands
     assert eventually(fn -> Buffer.text(buf) =~ "hello-comint" end)
 
-    Compos.Core.Proc.kill(buf)
-    assert eventually(fn -> not Compos.Core.Proc.running?(buf) end)
+    Compos.Core.Terminal.kill(buf)
+    assert eventually(fn -> not Compos.Core.Terminal.running?(buf) end)
   end
 
   defp eventually(fun, tries \\ 40) do

@@ -338,7 +338,7 @@ defmodule Compos.Core do
 
     cond do
       displayed?(name) -> :displayed
-      Compos.Core.Proc.running?(name) -> :busy
+      Compos.Core.Terminal.running?(name) -> :busy
       is_binary(agent) and Compos.Core.Agent.running?(agent) -> :busy
       locals["buffer-pinned"] not in [nil, false] -> :pinned
       true -> nil

@@ -107,4 +107,31 @@ defmodule Compos.TerminalTest do
     assert {:ok, history} = Terminal.subscribe(name)
     assert byte_size(history) <= 512 * 1024
   end
+
+  test "a comint process runs dumb, strips escapes, moves its mark, and restarts as comint" do
+    name = "*terminal-comint-#{System.unique_integer([:positive])}*"
+
+    {:ok, _} =
+      Terminal.start(name, "printf 'TERM=%s \\033[31mred\\033[0m\\n' \"$TERM\"; cat", raw: false)
+
+    on_exit(fn ->
+      if Terminal.running?(name), do: Terminal.kill(name)
+      Compos.Core.kill_buffer(name)
+    end)
+
+    wait_until(fn -> Buffer.text(name) =~ "red" end)
+    assert Buffer.text(name) =~ "TERM=dumb red"
+    refute Buffer.text(name) =~ "\e["
+    assert Terminal.mark(name) == Buffer.byte_size(name)
+
+    assert :ok = Terminal.send_text(name, "typed\n")
+    wait_until(fn -> Buffer.text(name) =~ "typed" end)
+    # pty echo is off: cat answers once and the pty does not repeat the line
+    Process.sleep(100)
+    assert length(String.split(Buffer.text(name), "typed")) == 2
+
+    assert {:ok, _} = Terminal.restart(name)
+    wait_until(fn -> length(String.split(Buffer.text(name), "TERM=dumb")) == 3 end)
+    assert Terminal.mark(name) == Buffer.byte_size(name)
+  end
 end

@@ -1,19 +1,19 @@
 defmodule Compos.SocketsTest do
   @moduledoc """
   The sockets buffer (packages/sockets.scm) and the mechanism under it:
-  Proc enumeration and restart, the listener inventory, and the list buffer
+  Buffer process enumeration and restart, the listener inventory, and the list buffer
   driven the way a person drives it — through KeyDispatch.
   """
 
   use Compos.Case
 
-  alias Compos.Core.{Daemon, Editor, Proc}
+  alias Compos.Core.{Daemon, Editor, Terminal}
 
   defp start_proc!(name, cmd) do
-    {:ok, pid} = Proc.start(name, cmd)
+    {:ok, pid} = Terminal.start(name, cmd, raw: false)
 
     on_exit(fn ->
-      Proc.kill(name)
+      Terminal.kill(name)
       Compos.Core.kill_buffer(name)
     end)
 
@@ -23,20 +23,20 @@ defmodule Compos.SocketsTest do
   describe "the proc mechanism" do
     test "list names every running process buffer with its command" do
       start_proc!("*sock-proc-a*", "cat")
-      assert {"*sock-proc-a*", "cat"} in Proc.list()
+      assert {"*sock-proc-a*", "cat"} in Terminal.list()
     end
 
     test "restart runs the same command under a new process" do
       pid = start_proc!("*sock-proc-b*", "cat")
 
-      assert {:ok, new_pid} = Proc.restart("*sock-proc-b*")
+      assert {:ok, new_pid} = Terminal.restart("*sock-proc-b*")
       assert new_pid != pid
-      assert Proc.running?("*sock-proc-b*")
-      assert {"*sock-proc-b*", "cat"} in Proc.list()
+      assert Terminal.running?("*sock-proc-b*")
+      assert {"*sock-proc-b*", "cat"} in Terminal.list()
     end
 
     test "restart of an unknown buffer says so" do
-      assert {:error, :no_process} = Proc.restart("*sock-proc-none*")
+      assert {:error, :no_terminal} = Terminal.restart("*sock-proc-none*")
     end
   end
 
@@ -115,7 +115,7 @@ defmodule Compos.SocketsTest do
       goto_row("proc:*sock-shell-k*")
 
       press("k")
-      wait_until(fn -> not Proc.running?("*sock-shell-k*") end)
+      wait_until(fn -> not Terminal.running?("*sock-shell-k*") end)
       refute eval!(~s{(buffer-text "*sockets*")}) =~ "*sock-shell-k*"
     end
 
@@ -125,9 +125,9 @@ defmodule Compos.SocketsTest do
       goto_row("proc:*sock-shell-r*")
 
       press("r")
-      wait_until(fn -> Proc.running?("*sock-shell-r*") end)
-      assert {"*sock-shell-r*", "cat"} in Proc.list()
-      [{new_pid, _}] = Registry.lookup(Compos.Core.ProcRegistry, "*sock-shell-r*")
+      wait_until(fn -> Terminal.running?("*sock-shell-r*") end)
+      assert {"*sock-shell-r*", "cat"} in Terminal.list()
+      [{new_pid, _}] = Registry.lookup(Compos.Core.TerminalRegistry, "*sock-shell-r*")
       assert new_pid != pid
     end
   end

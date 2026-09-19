@@ -1,11 +1,19 @@
 defmodule Compos.Core.Terminal do
   @moduledoc """
-  A raw PTY for full-screen programs and high-volume app servers.
+  The one PTY runner. Every buffer process runs under `/usr/bin/script`.
 
-  Raw output goes directly to subscribed terminal clients. A cleaned,
-  bounded transcript enters the normal editor buffer four times per second.
-  This keeps the terminal readable through editor APIs without putting its
-  render traffic through the editor document view.
+  A raw terminal (`raw: true`, the default) serves full-screen programs
+  and high-volume app servers. Raw output goes directly to subscribed
+  terminal clients. A cleaned, bounded transcript enters the editor
+  buffer four times per second.
+
+  A comint process (`raw: false`) is a line-oriented process, as in Emacs
+  comint. It runs with TERM=dumb and pty echo off. Each output chunk
+  enters the buffer at once without escape sequences, and the process
+  mark moves to the end of that output.
+
+  Both kinds accept input, resize, restart, and kill through the same
+  functions. Scheme decides which kind a buffer gets.
   """
 
   use GenServer, restart: :temporary
@@ -20,30 +28,38 @@ defmodule Compos.Core.Terminal do
   @transcript_limit 512 * 1024
   @tty_prefix "COMPOS_TTY="
 
-  def start(buffer, command) do
+  @doc "Start COMMAND in a PTY attached to BUFFER. `raw: false` makes a comint process."
+  def start(buffer, command, opts \\ []) do
     DynamicSupervisor.start_child(
       Compos.Core.TerminalSupervisor,
-      {__MODULE__, buffer: buffer, command: command}
+      {__MODULE__, buffer: buffer, command: command, raw: Keyword.get(opts, :raw, true)}
     )
   end
 
   def start_link(opts) do
     buffer = Keyword.fetch!(opts, :buffer)
     command = Keyword.fetch!(opts, :command)
+    raw = Keyword.get(opts, :raw, true)
 
-    GenServer.start_link(__MODULE__, opts, name: {:via, Registry, {@registry, buffer, command}})
+    # the command and the kind ride as the registry value: a restart needs
+    # them, and the GenServer state is not reachable once the process is gone
+    GenServer.start_link(__MODULE__, opts,
+      name: {:via, Registry, {@registry, buffer, {command, raw}}}
+    )
   end
 
   def running?(buffer), do: Registry.lookup(@registry, buffer) != []
 
+  @doc "Every running buffer process as {buffer, command}, sorted by buffer."
   def list do
-    Registry.select(@registry, [{{:"$1", :_, :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    Registry.select(@registry, [{{:"$1", :_, {:"$2", :_}}, [], [{{:"$1", :"$2"}}]}])
     |> Enum.sort()
   end
 
+  @doc "Kill the buffer's process and run the same command again."
   def restart(buffer) do
     case Registry.lookup(@registry, buffer) do
-      [{pid, command}] ->
+      [{pid, {command, raw}}] ->
         ref = Process.monitor(pid)
         GenServer.stop(pid, :normal)
 
@@ -53,8 +69,10 @@ defmodule Compos.Core.Terminal do
           5_000 -> :ok
         end
 
+        # the registry drops the name a moment after the process dies;
+        # starting into a still-registered name returns already_started
         await_unregistered(buffer, 100)
-        start(buffer, command)
+        start(buffer, command, raw: raw)
 
       [] ->
         {:error, :no_terminal}
@@ -69,6 +87,14 @@ defmodule Compos.Core.Terminal do
 
   def subscribe(buffer, subscriber \\ self()),
     do: call(buffer, {:subscribe, subscriber})
+
+  @doc "Byte position just after the last process output. User input starts here."
+  def mark(buffer) do
+    case call(buffer, :mark) do
+      {:error, :no_terminal} -> 0
+      mark -> mark
+    end
+  end
 
   def kill(buffer) do
     case Registry.lookup(@registry, buffer) do
@@ -97,15 +123,18 @@ defmodule Compos.Core.Terminal do
 
   @impl true
   def init(opts) do
+    # trap exits so terminate/2 runs and can kill the OS process; a closed
+    # port only closes stdin, which `script` and its child ignore
     Process.flag(:trap_exit, true)
     buffer = Keyword.fetch!(opts, :buffer)
     command = Keyword.fetch!(opts, :command)
+    raw = Keyword.get(opts, :raw, true)
     Compos.Core.create_buffer(buffer)
-    sanitize_existing_transcript(buffer)
+    if raw, do: sanitize_existing_transcript(buffer)
 
     wrapper =
       "tty_path=$(tty); printf '#{@tty_prefix}%s\\n' \"$tty_path\"; " <>
-        "stty rows 24 cols 80; " <> command
+        "stty rows 24 cols 80; " <> echo_setting(raw) <> command
 
     port =
       Port.open({:spawn_executable, "/usr/bin/script"}, [
@@ -113,18 +142,14 @@ defmodule Compos.Core.Terminal do
         :exit_status,
         :stderr_to_stdout,
         args: ["-q", "/dev/null", "/bin/sh", "-c", wrapper],
-        env: [
-          {~c"TERM", ~c"xterm-256color"},
-          {~c"COLORTERM", ~c"truecolor"},
-          {~c"NO_COLOR", false},
-          {~c"CLICOLOR", ~c"1"},
-          {~c"PROMPT_EOL_MARK", ~c""}
-        ]
+        env: pty_env(raw)
       ])
 
     {:ok,
      %{
        buffer: buffer,
+       raw: raw,
+       mark: 0,
        port: port,
        tty: :pending,
        handshake: "",
@@ -149,6 +174,8 @@ defmodule Compos.Core.Terminal do
     {:reply, resize_tty(state.tty, cols, rows), state}
   end
 
+  def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
+
   def handle_call({:subscribe, subscriber}, _from, state) do
     state = monitor_subscriber(state, subscriber)
     history = state.history |> :queue.to_list() |> IO.iodata_to_binary()
@@ -160,12 +187,17 @@ defmodule Compos.Core.Terminal do
     {data, state} = consume_tty_handshake(data, state)
 
     state =
-      if data == "" do
-        state
-      else
-        state
-        |> Map.update!(:raw_pending, &[data | &1])
-        |> schedule_raw_flush()
+      cond do
+        data == "" ->
+          state
+
+        state.raw ->
+          state
+          |> Map.update!(:raw_pending, &[data | &1])
+          |> schedule_raw_flush()
+
+        true ->
+          append(state, strip_ansi(data))
       end
 
     {:noreply, state}
@@ -197,8 +229,7 @@ defmodule Compos.Core.Terminal do
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    state = flush_terminal(state)
-    Buffer.append(state.buffer, "\n[process exited: #{status}]\n", source: :process)
+    state = state |> flush_terminal() |> append("\n[process exited: #{status}]\n")
 
     Enum.each(Map.keys(state.subscribers), fn subscriber ->
       send(subscriber, {:terminal_exit, state.buffer, status})
@@ -292,9 +323,46 @@ defmodule Compos.Core.Terminal do
   defp flush_transcript(%{transcript_pending: ""} = state), do: state
 
   defp flush_transcript(state) do
-    Buffer.append(state.buffer, state.transcript_pending, source: :process)
+    state = append(state, state.transcript_pending)
     trim_transcript(state.buffer)
-    %{state | transcript_pending: ""}
+    %{state | transcript_pending: "", mark: Buffer.byte_size(state.buffer)}
+  end
+
+  defp append(state, ""), do: state
+
+  defp append(state, text) do
+    Buffer.append(state.buffer, text, source: :process)
+    %{state | mark: Buffer.byte_size(state.buffer)}
+  end
+
+  # -echo: a comint buffer keeps the typed input; the pty must not echo it
+  # back, or comint shows it twice
+  defp echo_setting(true), do: ""
+  defp echo_setting(false), do: "stty -echo 2>/dev/null; "
+
+  defp pty_env(true) do
+    [
+      {~c"TERM", ~c"xterm-256color"},
+      {~c"COLORTERM", ~c"truecolor"},
+      {~c"NO_COLOR", false},
+      {~c"CLICOLOR", ~c"1"},
+      {~c"PROMPT_EOL_MARK", ~c""}
+    ]
+  end
+
+  defp pty_env(false),
+    do: [{~c"TERM", ~c"dumb"}, {~c"PS1", ~c"$ "}, {~c"PROMPT_EOL_MARK", ~c""}]
+
+  # CSI/OSC sequences and stray carriage returns from a comint pty.
+  # " +\r" is the partial-line padding (zsh PROMPT_SP): drop the padding
+  # with the CR, not only the CR, or prompts show mid-window.
+  defp strip_ansi(data) do
+    data
+    |> String.replace(~r/\e\[[0-9;?]*[a-zA-Z]/, "")
+    |> String.replace(~r/\e\][^\a]*(\a|\e\\)/, "")
+    |> String.replace(~r/ +\r(\n?)/, "\\1")
+    |> String.replace("\r\n", "\n")
+    |> String.replace("\r", "")
   end
 
   defp trim_transcript(buffer) do

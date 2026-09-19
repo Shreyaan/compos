@@ -40,7 +40,6 @@ defmodule Compos.Core.Application do
     children = [
       {Registry, keys: :unique, name: Compos.Core.BufferRegistry},
       {Registry, keys: :duplicate, name: Compos.Core.EventRegistry},
-      {Registry, keys: :unique, name: Compos.Core.ProcRegistry},
       {Registry, keys: :unique, name: Compos.Core.TerminalRegistry},
       {Registry, keys: :unique, name: Compos.Core.AgentRegistry},
       {Registry, keys: :unique, name: Compos.Core.MCPRegistry},
@@ -50,7 +49,6 @@ defmodule Compos.Core.Application do
       {Registry, keys: :unique, name: Compos.Core.WebServerRegistry},
       {Registry, keys: :unique, name: Compos.Core.SchemeTaskRegistry},
       {DynamicSupervisor, name: Compos.Core.BufferSupervisor, strategy: :one_for_one},
-      {DynamicSupervisor, name: Compos.Core.ProcSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Compos.Core.TerminalSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Compos.Core.AgentSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Compos.Core.MCPSupervisor, strategy: :one_for_one},

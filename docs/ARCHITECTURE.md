@@ -165,7 +165,7 @@ would duplicate both. Revisit only if we want multi-node agent scheduling.
 
 **Driving external agent CLIs (pi, codex, claude):** two mechanisms, both mostly
 built:
-1. **PTY/comint** (`Compos.Core.Proc`) — already works for any CLI; output
+1. **PTY/comint** (`Compos.Core.Terminal` with `raw: false`) — already works for any CLI; output
    streams into a buffer the reactor can watch. Good for chat-shaped tools.
 2. **ACP/JSON-RPC over a port** — structured: the editor mediates file reads,
    permission prompts become minibuffer gates, progress becomes buffer updates.

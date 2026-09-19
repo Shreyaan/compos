@@ -7,7 +7,7 @@ defmodule Compos.RemoteTest do
 
   use ExUnit.Case
 
-  alias Compos.Core.{Buffer, Editor, Proc, Session}
+  alias Compos.Core.{Buffer, Editor, Session, Terminal}
 
   setup_all do
     dir = Path.join(System.tmp_dir!(), "compos-remote-#{System.unique_integer([:positive])}")
@@ -224,7 +224,7 @@ defmodule Compos.RemoteTest do
     {:ok, _} = Session.eval(~s{(tail-open "#{file}")})
 
     assert Buffer.exists?(buf)
-    assert Proc.running?(buf)
+    assert Terminal.running?(buf)
     assert Buffer.read_only?(buf)
     assert Buffer.get_local(buf, "mode-name") == "tail-mode"
     assert wait_until(fn -> Buffer.text(buf) =~ "one" end)
@@ -237,7 +237,7 @@ defmodule Compos.RemoteTest do
 
     # C-x k semantics: killing the buffer kills the tail process
     {:ok, _} = Session.eval(~s{(begin (process-kill! "#{buf}") (buffer-kill! "#{buf}"))})
-    refute Proc.running?(buf)
+    refute Terminal.running?(buf)
   end
 
   test "tail-open follows a remote file through ssh", %{dir: dir} do
@@ -248,7 +248,7 @@ defmodule Compos.RemoteTest do
 
     {:ok, _} = Session.eval(~s{(tail-open "#{rp}")})
 
-    assert Proc.running?(buf)
+    assert Terminal.running?(buf)
     assert wait_until(fn -> Buffer.text(buf) =~ "alpha" end)
 
     File.write!(file, "beta\n", [:append])
