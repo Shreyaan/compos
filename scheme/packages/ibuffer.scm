@@ -300,34 +300,33 @@
 
 (define *ibuffer-md-marks* '("`" "**" "_" "["))
 
-(define *ibuffer-md-wrapped*
-  '(("`[^`\n]+`" 1 1 "morg-code")
-    ("\\*\\*[^*\n]+\\*\\*" 2 2 "morg-bold")
-    ("\\b_[^_\n]+_\\b" 1 1 "morg-italic")))
+(define ibuffer-md--query
+  "(code_span) @code (strong_emphasis) @strong (emphasis) @emphasis (inline_link (link_text) @link-text) @link")
 
-(define md--title-link-pattern "\\[([^]\n]+)\\]\\(([^)\n]+)\\)")
+;; the inline grammar's constructs in SRC:
+;; (KIND START END) -> (START END TEXT FACE), or #f for one the row keeps
+(define (ibuffer-md--hit src caps c)
+  (let ((kind (car c)) (s (cadr c)) (e (caddr c)))
+    (cond
+      ((equal? kind "code")
+       ;; the delimiter is as many backticks as the span opens with
+       (let ((n (cadr (car (re-find* "^`+" (substring-bytes src s e))))))
+         (and (> (- e s) (* 2 n))
+              (list s e (substring-bytes src (+ s n) (- e n)) "morg-code"))))
+      ((equal? kind "strong")
+       (list s e (substring-bytes src (+ s 2) (- e 2)) "morg-bold"))
+      ;; only _x_: *x* is a buffer's name
+      ((and (equal? kind "emphasis") (equal? (substring-bytes src s (+ s 1)) "_"))
+       (list s e (substring-bytes src (+ s 1) (- e 1)) "morg-italic"))
+      ((equal? kind "link")
+       (let ((t (assoc "link-text" (filter (lambda (x) (and (>= (cadr x) s) (<= (caddr x) e))) caps))))
+         (and t (list s e (substring-bytes src (cadr t) (caddr t)) "link"))))
+      (else #f))))
 
 ;; (START END TEXT FACE) for every inline construct in SRC
 (define (ibuffer-md--hits src)
-  (append
-    (apply append
-      (map (lambda (rule)
-             (let ((open (nth 1 rule)) (close (nth 2 rule)) (face (nth 3 rule)))
-               (map (lambda (r)
-                      (let ((s (car r)) (e (cadr r)))
-                        (list s e (substring-bytes src (+ s open) (- e close)) face)))
-                    (re-find* (car rule) src))))
-           *ibuffer-md-wrapped*))
-    (let loop ((at 0) (out '()))
-      (let ((m (re-groups md--title-link-pattern src at)))
-        (if (not m)
-            (reverse out)
-            (let ((whole (nth 0 m)) (text (nth 1 m)))
-              (loop (cadr whole)
-                    (cons (list (car whole) (cadr whole)
-                                (substring-bytes src (car text) (cadr text))
-                                "link")
-                          out))))))))
+  (let ((caps (ts-query-string "markdown-inline" src ibuffer-md--query)))
+    (filter (lambda (h) h) (map (lambda (c) (ibuffer-md--hit src caps c)) caps))))
 
 ;; the text with the markers gone, and (START LEN FACE) over that text
 (define (ibuffer-md-plain src)

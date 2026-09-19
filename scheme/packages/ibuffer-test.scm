@@ -187,6 +187,16 @@
     (check-true! (ibuffer-md-row? "*zz-ib-a*") "a row with no file is read as prose")
     (ibuffer-test-reset!)))
 
+(deftest 'ibuffer-a-name-is-read-by-the-inline-grammar
+  "a double-tick code span keeps its ticks inside; a star after a space closes nothing"
+  (lambda ()
+    (check-equal! (ibuffer-md-plain "fix ``a `b` c`` now")
+                  '("fix a `b` c now" ((4 7 "morg-code")))
+                  "the span's own delimiter length")
+    (check-equal! (ibuffer-md-plain "**not bold ** here")
+                  '("**not bold ** here" ())
+                  "no strong run where the grammar reads none")))
+
 (deftest 'ibuffer-headings-and-marks-wear-bands
   "a heading wears its register, a marked row wears a band across the row"
   (lambda ()
