@@ -54,6 +54,10 @@
 (load "detail.scm")
 (load "preview.scm")
 (load "file-view.scm")
+; completion-at-point: agent-session.scm (under agent.scm) runs the chat
+; mode hook on the chats already open, and that hook watches for
+; completion. A cold boot has no chat open then; a Session restart does.
+(load "completion.scm")
 
 (load "agenda.scm")
 (load "agent.scm")
@@ -64,7 +68,6 @@
 (load "register.scm")
 (load "chat.scm")
 (load "code.scm")
-(load "completion.scm")
 (load "daemons.scm")
 (load "db.scm")
 (load "diff-mode.scm")
