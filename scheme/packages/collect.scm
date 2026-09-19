@@ -220,12 +220,12 @@
 ;; DELTA in lines, positive forward. A preview window has no lines, so
 ;; scroll-window! turns the count into pixels for it — the caller says
 ;; "a screen" and every kind of window understands.
-;; the window the other-window scroll moves: the popup when it shows
-;; and is not where you are (a peek, the messages, the telemetry: the
-;; look beside your work), else the next window
+;; the window the other-window scroll moves: the float when it shows
+;; and is not where you are (the card beside your work), else the next
+;; window
 (define (scroll-other-window-target)
   (let ((me (active-window)))
-    (or (and (popup-open?) (not (equal? (popup-window) me)) (popup-window))
+    (or (and (float-open?) (not (equal? (float-window) me)) (float-window))
         (let ((wins (window-list)))
           (and (pair? (cdr wins))
                (let loop ((ws wins))

@@ -164,7 +164,7 @@
                 (let* ((win (car row)) (rec (window-restore win))
                        (past (window-eligible-history win)))
                   (cond
-                    ((and (popup-open?) (equal? win (popup-window))) (popup-dismiss!))
+                    ((equal? win (float-window)) (float-close!))
                     ((and rec (equal? (car rec) 'window) (> (length (window-list)) 1))
                      (delete-window-id! win))
                     ((pair? past)

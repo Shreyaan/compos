@@ -19,8 +19,8 @@ defmodule Compos.ListPromptFollowTest do
       (switch-to-buffer! "*zz-lpf-1*"))})
 
     eval!(~s{(run-command "ibuffer-prompt")})
-    assert eval!("(popup-open?)") == "#t"
-    win = eval!("(popup-window)") |> String.to_integer()
+    assert eval!("(float-open?)") == "#t"
+    win = eval!("(float-window)") |> String.to_integer()
 
     # the client's own follow scroll reports back: the window is pinned
     Editor.set_client_top(win, 300)

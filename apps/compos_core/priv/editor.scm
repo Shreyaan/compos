@@ -764,9 +764,8 @@
 ;;;               and the work underneath is hidden while you look.
 ;;;   modal       the centred palette.
 ;;;
-;;; A panel is not a popup window. The popup (display-buffer's 'popup
-;;; action, C-\) is a side window a buffer is sent to and lives in; a
-;;; panel is a shape a prompt wears for as long as it is open.
+;;; The panel and the modal are the float (window.scm): a shape a prompt
+;;; wears for as long as it is open.
 
 (define minibuffer-default-shape "minibuffer")
 
@@ -782,7 +781,7 @@
 (define (window-docked buf)
   (and (buffer-known? buf) (buffer-local buf 'window-dock)))
 
-;; A dock is not a work window. Every rule that keeps the popup out of
+;; A dock is not a work window. Every rule that keeps the float out of
 ;; the layout keeps a dock out too: the tiler must not count it, fill it,
 ;; or renumber it away, and a display must never land in it.
 (define (window-dock? win buf) (and buf (equal? (window-docked buf) win)))
@@ -809,8 +808,7 @@
   (buffer-set-local! buf 'window-shape shape)
   (if (equal? shape "minibuffer")
       (begin
-        (when (and (popup-open?) (equal? (window-buffer (popup-window)) buf))
-          (popup-dismiss!))
+        (when (equal? (float-buffer) buf) (float-close!))
         (window-float-class! buf #f)
         (unless (window-docked buf)
           (window-dock! buf (display-param buf 'size))))
@@ -844,13 +842,13 @@
 (define (minibuffer-list-shape)
   (and *mb-list-buffer*
        (buffer-known? *mb-list-buffer*)
-       (let ((side (popup-side-of *mb-list-buffer*)))
+       (let ((side (float-side-of *mb-list-buffer*)))
          (cond ((equal? side 'center) "modal")
                (side "panel")
                (else "minibuffer")))))
 
 (define-command "minibuffer-cycle-shape"
-  "Show this prompt as the bottom bar, the popup, or the modal"
+  "Show this prompt as the bottom bar, the panel, or the modal"
   (lambda ()
     (if (not (minibuffer-active?))
         (message "No prompt")
@@ -2998,9 +2996,7 @@
               (run-hook-with-args 'buffer-restore-hook buf)
               (let ((mode (buffer-local buf 'mode-name)))
                 (when mode (set-mode! mode)))
-              (restore-minor-modes! buf)
-              ;; a restored popup floats still, so its move keys come back
-              (when (popup--class? buf) (popup-keys! buf #t))))))))
+              (restore-minor-modes! buf)))))))
   ;; The modeline is derived state. Rebuild it here so a restored desktop
   ;; shows its top line and its short name before the first command runs.
   (when (boundp (quote dashboard--sync!))
@@ -3124,10 +3120,10 @@
          (switch-to-buffer-here! buf)
          buf)
         ((and (not *layout-busy*) (layout-target)
-              (not (popup--class? (window-buffer (active-window))))
+              (not (float--class? (window-buffer (active-window))))
               (window-display! (lambda () (layout-target-open! buf #t #f)))) buf)
         ((and (not *layout-busy*) (not (layout-target))
-              (not (popup--class? (window-buffer (active-window))))
+              (not (float--class? (window-buffer (active-window))))
               (let ((win (or (window-showing buf)
                              (window-showing-mode (buffer-local buf 'mode-name)))))
                 (and win
@@ -3144,14 +3140,14 @@
 
 ;; the switch itself: the selected window shows BUF, whatever its group
 (define (switch-to-buffer-here! buf)
-  (let ((restoring (not (buffer-exists? buf))))
+  (let ((restoring (not (buffer-exists? buf)))
+        (float (float-window)))
     (window-switch-buffer! buf)
     (when restoring (restore-buffer-runtime! buf))
-    ;; a buffer floats only in the popup window: shown anywhere else it
-    ;; is an ordinary buffer again, whatever class it carried
-    (when (and (popup--class? buf)
-               (not (equal? (active-window) (frame-local 'popup-window))))
-      (popup-float! buf #f))
+    ;; a buffer floats only in the float: shown anywhere else it is an
+    ;; ordinary buffer again, whatever class it carried
+    (when (and (float--class? buf) (not (equal? (active-window) float)))
+      (window-float-class! buf #f))
     (window-state-changed!)
     buf))
 
@@ -3315,7 +3311,7 @@
     ("C-r" "isearch-repeat-backward")
     ;; the prompt continues as a buffer — see minibuffer-collect
     ("C-c C-o" "minibuffer-collect")
-    ;; the same prompt as the bar, popup, or modal while it is up
+    ;; the same prompt as the bar, panel, or modal while it is up
     ("C-c C-t" "minibuffer-cycle-shape")
     ("DEL" "minibuffer-delete-backward")))
 
@@ -4753,7 +4749,7 @@
 ;; The same open, without a window: the buffer is made, joins the
 ;; group, and takes its mode with the buffer current but not shown. A
 ;; peek opens this way, so the selected window never shows the file on
-;; its way to the popup (find-file-noselect).
+;; its way to the look (find-file-noselect).
 (define (visit-quietly path0 &optional group)
   (let* ((path (normalize-file-input path0))
          (existing (buffer-known? path)))
@@ -5432,7 +5428,7 @@
 (domain! 'unknown)
 (effects! '(unknown))
 
-(define-command "keyboard-quit" "Quit the current operation: cancel the prompt, close the active popup or the dashboard, or clear the mark"
+(define-command "keyboard-quit" "Quit the current operation: cancel the prompt, close the dashboard, or clear the mark"
   (lambda ()
     (editing-quit!)
     (set-mark! #f)
@@ -5443,8 +5439,6 @@
       ;; stay put: only C-g reached minibuffer-cancel. Quit the prompt
       ;; first, and both keys say the same thing.
       ((minibuffer-active?) (minibuffer-cancel!))
-      ((and (popup-open?) (equal? (active-window) (popup-window)))
-       (popup-close!))
       ;; C-g closes the dashboard panel too, so the key that opened it
       ;; is not the only key that puts it away
       (else (dashboard-panel-close! (current-buffer))
@@ -6030,11 +6024,6 @@
 (global-set-key "C-c C-v" "preview-mode")
 (global-set-key "C-c C-a" "app-preview")
 (global-set-key "C-c C-r" "app-reload")
-;; the backtick family reads as one hand: C-` walks this pane's own kind of
-;; buffer (groups.scm), M-` shows and hides the popup, C-M-` turns the popup
-;; into a real window.
-(global-set-key "M-`" "popup-toggle")
-(global-set-key "C-M-`" "popup-bufferize")
 (global-set-key "C-M-v" "scroll-other-window")
 ;; the other window, without leaving this one — the reference page beside
 ;; the work is the case this exists for. org-mode keeps M-<up>/M-<down>
@@ -6097,7 +6086,6 @@
     ("<right>" "window-layout-main-left")
     ("<up>" "window-layout-main-bottom")
     ("<down>" "window-layout-main-top")))
-(global-set-key "C-c p" "popup-buffer")
 ;; Cmd-arrows move the focus; Cmd-Shift-arrows swap the two panes
 (global-set-key "S-<left>" "previous-buffer")
 (global-set-key "S-<right>" "next-buffer")
@@ -6231,7 +6219,7 @@
   '("select-window!" "split-window!" "delete-window-id!"
     "delete-other-windows!" "other-window!" "display-buffer" "pop-to-buffer"
     "define-display-action!" "split-window-sensibly" "window-quit-restore!"
-    "display-buffer-popup!" "display-buffer-other-window!" "apply-layout!"
+    "display-buffer-other-window!" "apply-layout!"
     "tile-windows!" "tile-visible-windows!" "window-eat!"))
 (effects! '(write))
 (effects! '(read))

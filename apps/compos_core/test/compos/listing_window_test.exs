@@ -50,13 +50,13 @@ defmodule Compos.ListingWindowTest do
           """
           (define *lw-view* (current-buffer))
           (listing-preview! *lw-view* "*zz-lw-left*")
-          (define *lw-copy* (popup-buffer))
+          (define *lw-copy* (float-buffer))
           (local-set-key "<f10>" "#{@quit}")
           """,
           frame
         )
 
-        assert eval!("(popup-open?)", frame) == "#t"
+        assert eval!("(float-open?)", frame) == "#t"
         assert eval!("(window-point (window-showing \"*zz-lw-left*\"))", frame) == "3"
         assert eval!("(equal? (active-window) *lw-window*)", frame) == "#t"
         if @card_press do
@@ -170,11 +170,11 @@ defmodule Compos.ListingWindowTest do
       # than walked to: what is under test is where the preview lands
       eval!("(listing-preview! (mb-list-target) \"*zz-lw-chat-home*\")", frame)
 
-      assert eval!("(popup-open?)", frame) == "#t"
+      assert eval!("(float-open?)", frame) == "#t"
       assert eval!("(equal? (listing-preview-owner) (mb-list-target))", frame) == "#t"
 
       assert eval!(
-               "(equal? (buffer-local (popup-buffer) 'listing-preview-source) \"*zz-lw-chat-home*\")",
+               "(equal? (buffer-local (float-buffer) 'listing-preview-source) \"*zz-lw-chat-home*\")",
                frame
              ) == "#t"
 
@@ -183,7 +183,7 @@ defmodule Compos.ListingWindowTest do
       assert eval!("(window-buffer *lw-chat-window*)", frame) == "\"*zz-lw-chat-home*\""
 
       KeyDispatch.handle_key(frame, "C-g")
-      assert eval!("(popup-open?)", frame) == "#f"
+      assert eval!("(float-open?)", frame) == "#f"
       assert eval!("(window-buffer *lw-chat-window*)", frame) == "\"*zz-lw-chat-home*\""
     after
       eval!(
@@ -237,7 +237,7 @@ defmodule Compos.ListingWindowTest do
       assert eval!("(window-buffer *lw-prompt-window*)", frame) == "\"*zz-lw-prompt-source*\""
       assert eval!("(window-point *lw-prompt-window*)", frame) == "3"
       assert eval!("(equal? (window-prev-buffers *lw-prompt-window*) *lw-prompt-history*)", frame) == "#t"
-      assert eval!("(popup-open?)", frame) == "#f"
+      assert eval!("(float-open?)", frame) == "#f"
     after
       eval!(
         """

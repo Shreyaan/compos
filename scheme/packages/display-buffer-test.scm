@@ -29,7 +29,7 @@
     (set! split-width-threshold (cadr thresholds))
     (set! *display-buffer-base-action* '())
     (layout-target-set! #f)
-    (when (popup-open?) (popup-close!))
+    (when (float-open?) (float-close!))
     (set-frame-local! 'pinned-group #f)
     (set-frame-local! 'current-group #f)
     (switch-to-buffer-here! "*scratch*")
@@ -263,17 +263,18 @@
             (check-equal! (window-buffer me) "*scratch*" "this one still shows scratch")
             (check-equal! (active-window) me "and is still selected")))))))
 
-(deftest 'an-old-popup-rule-takes-an-ordinary-window
-  "nothing floats: a rule written for the popup goes through the window chain"
+(deftest 'a-rule-can-match-by-a-procedure
+  "a rule's pattern can be a procedure of the name and the alist"
   (lambda ()
     (t--db-with t--db-wide
       (lambda ()
-        (buffer-create "*zz-db-side*")
-        (add-display-rule! "*zz-db-side*" 'popup)
-        (let ((win (display-buffer "*zz-db-side*")))
-          (check-false! (popup-open?) "no popup opened")
-          (check-equal! (window-buffer win) "*zz-db-side*"
-                        "an ordinary window shows it"))))))
+        (buffer-create "*zz-db-proc*")
+        (buffer-create "*zz-db-other*")
+        (add-display-rule! (lambda (name alist) (equal? name "*zz-db-proc*")) 'same-window)
+        (let ((me (active-window)))
+          (check-equal! (display-buffer "*zz-db-proc*") me "the procedure matched: this window")
+          (check-false! (equal? (display-buffer "*zz-db-other*") me)
+                        "another name takes the chain"))))))
 
 (deftest 'a-peek-follows-the-preview-rule
   "a peek goes through the window chain"
@@ -284,7 +285,7 @@
               (b (t--db-file "b.txt" "beta\n"))
               (me (active-window)))
           (peek-file! a)
-          (check-false! (popup-open?) "stock: no popup")
+          (check-false! (float-open?) "stock: no popup")
           (check-equal! (length (window-list)) 2 "a window beside")
           (check-equal! (active-window) me "point stays")
           (check-true! (peek-buffer? a) "it is a peek")

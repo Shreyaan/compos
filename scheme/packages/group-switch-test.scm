@@ -21,8 +21,7 @@
 
 (define (t--sw-setup!)
   (when (minibuffer-state) (minibuffer-cancel!))
-  (when (popup-open?) (popup-close!))
-  (set-frame-local! 'popup-window #f)
+  (when (float-open?) (float-close!))
   (for-each
     (lambda (b)
       (test-buffer! b "")
@@ -1916,8 +1915,7 @@
       (list home foreign))))
 
 (define (t--sw-sealed-done! foreign)
-  (when (popup-open?) (popup-close!))
-  (set-frame-local! 'popup-buffer #f)
+  (when (float-open?) (float-close!))
   (when (buffer-known? foreign) (buffer-kill! foreign)))
 
 (deftest 'a-foreign-buffer-is-a-display-of-category-foreign
@@ -1940,7 +1938,7 @@
            (away (group-record-create! "zzsw-float-away")))
       (buffer-add-group! foreign away)
       (switch-to-buffer! foreign)
-      (check-false! (popup-open?) "nothing floats")
+      (check-false! (float-open?) "nothing floats")
       (check-equal! (current-buffer) foreign "the buffer is selected: a switch is a visit")
       (check-equal! (frame-group) away "the frame entered the buffer's group")
       (check-false! (member foreign (window-tree-buffers (group-layout home)))
@@ -1956,7 +1954,7 @@
     (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
            (win (active-window)))
       (switch-to-buffer! foreign)
-      (check-false! (popup-open?) "nothing floats")
+      (check-false! (float-open?) "nothing floats")
       (check-equal! (window-buffer win) foreign "the selected window shows it")
       (check-false! (frame-group) "the frame is in no group")
       (t--sw-sealed-done! foreign))
@@ -1968,7 +1966,7 @@
     (let* ((pair (t--sw-sealed-frame!)) (foreign (cadr pair))
            (win (active-window)))
       (switch-to-buffer! t--sw-first)
-      (check-false! (popup-open?) "no popup")
+      (check-false! (float-open?) "no popup")
       (check-equal! (current-buffer) t--sw-first "the member is current")
       (check-equal! (active-window) (window-showing t--sw-first) "in the window that already showed it")
       (check-equal! (window-buffer win) t--sw-second "the window we left keeps its buffer")
@@ -1983,7 +1981,7 @@
            (win (active-window)))
       (set-frame-local! 'pinned-group home)
       (switch-to-buffer! foreign)
-      (check-false! (popup-open?) "no popup")
+      (check-false! (float-open?) "no popup")
       (check-equal! (window-buffer win) foreign "the pane shows the foreign buffer")
       (check-equal! (frame-group) home "and the pin holds the group")
       (set-frame-local! 'pinned-group #f)

@@ -17,7 +17,7 @@
     (set! split-width-threshold 1)
     (set! *display-buffer-base-action* '())
     (layout-target-set! #f)
-    (when (popup-open?) (popup-close!))
+    (when (float-open?) (float-close!))
     (set-frame-local! 'pinned-group #f)
     (set-frame-local! 'current-group #f)
     (set! *detail-windows* '())

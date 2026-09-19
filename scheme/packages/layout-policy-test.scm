@@ -23,7 +23,7 @@
   ;; refuses a name that exists, and a member the last journey left in
   ;; the group would fill a pane of this one
   (when (minibuffer-state) (minibuffer-cancel!))
-  (when (popup-open?) (popup-close!))
+  (when (float-open?) (float-close!))
   (delete-other-windows!)
   (switch-to-buffer-here! "*scratch*")
   (set-frame-local! 'current-group #f)
@@ -326,7 +326,7 @@
       (buffer-remove-group! "zz-lp-foreign" group)
       (let ((win (display-buffer "zz-lp-foreign")))
         (lp-snapshot! 'foreign-shown)
-        (check-false! (popup-open?) "nothing floats")
+        (check-false! (float-open?) "nothing floats")
         (check-equal! (current-buffer) "zz-lp-a" "a display takes no focus")
         (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-foreign")
                       "the other pane shows it")

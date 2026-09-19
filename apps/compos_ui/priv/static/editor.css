@@ -206,9 +206,9 @@ body {
 /* window chrome is themable: a 'chrome face maps to these vars
    (gap, radius, border, shadow, anim) — zero values reproduce the
    flat flush look */
-/* position: relative so a floating popup measures itself
+/* position: relative so a float (window.scm) measures itself
    against the whole frame. Against its own split instead, a
-   popup opened from a window in the middle of the layout would
+   float opened from a window in the middle of the layout would
    float in the middle of the layout — the frame edge is the
    only anchor that puts it in the same place every time. */
 .windows {
@@ -226,9 +226,10 @@ body {
   transition: flex-grow var(--chrome-anim, 0ms) ease-out;
 }
 .split-child > * { flex: 1; min-width: 0; min-height: 0; }
-/* A popup stays in the window tree, so editor commands can reach it.
-   Its split leaves the visual flow. The sibling then fills that split.
-   The popup measures itself against .windows, which is the frame. */
+/* A float (the card, a shaped prompt) stays in the window tree, so
+   editor commands can reach it. Its split leaves the visual flow. The
+   sibling then fills that split. The float measures itself against
+   .windows, which is the frame. The class keeps the name popup-SIDE. */
 .split-child:has(> .window.popup) {
   flex: 0 0 0 !important; overflow: visible; transition: none;
 }

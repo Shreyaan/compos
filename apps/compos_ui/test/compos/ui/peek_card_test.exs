@@ -24,7 +24,7 @@ defmodule Compos.Ui.PeekCardTest do
       (local-set-key "q" "listing-peek-dismiss")
       (listing-preview! "*zz-visible-owner*" "*zz-visible-target*")
       """, frame)
-      assert {:ok, "#f"} = Session.eval("(popup-open?)", frame)
+      assert {:ok, "#f"} = Session.eval("(float-open?)", frame)
       state = Editor.render_state(frame)
       {tree, _} = Compos.Ui.EditorLive.decorate_tree(state.tree, %{}, %{}, state.active)
       target = Enum.find(leaves(tree), &(&1.buffer == "*zz-visible-target*"))
@@ -37,9 +37,9 @@ defmodule Compos.Ui.PeekCardTest do
 
       assert {:ok, _} = Session.eval(~S{(listing-preview! "*zz-visible-owner*" "*zz-hidden-target*")}, frame)
       refute Enum.find(leaves(Editor.render_state(frame).tree), &(&1.id == target.id)).highlighted
-      assert {:ok, "#t"} = Session.eval("(popup-open?)", frame)
+      assert {:ok, "#t"} = Session.eval("(float-open?)", frame)
       assert {:ok, _} = Session.eval(~S{(listing-preview! "*zz-visible-owner*" "*zz-visible-target*")}, frame)
-      assert {:ok, "#f"} = Session.eval("(popup-open?)", frame)
+      assert {:ok, "#f"} = Session.eval("(float-open?)", frame)
       Compos.Core.KeyDispatch.handle_key(frame, "q")
       refute Enum.find(leaves(Editor.render_state(frame).tree), &(&1.id == target.id)).highlighted
       assert {:ok, "#t"} = Session.eval(~S{(buffer-exists? "*zz-visible-target*")}, frame)

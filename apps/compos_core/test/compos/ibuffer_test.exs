@@ -203,10 +203,10 @@ defmodule Compos.IbufferTest do
     eval!(~s{(ibuffer-open-buffers! (list "*zz-collected-one*"))})
     assert Editor.current_buffer() == "*ibuffer*"
     # The work window holds the listing; the popup holds a separate copy.
-    assert eval!("(popup-open?)") == "#f"
+    assert eval!("(float-open?)") == "#f"
     refute tree.() == before
     assert eval!("(listing-preview-owner)") == "#f"
-    refute eval!("(popup-buffer)") == ~s{"*zz-collected-one*"}
+    refute eval!("(float-buffer)") == ~s{"*zz-collected-one*"}
 
     press("q")
 

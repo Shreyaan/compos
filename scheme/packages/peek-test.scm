@@ -42,7 +42,7 @@
           (check-equal! (current-buffer) "*scratch*" "the reader stays put")
           (check-equal! (active-window) me "in the same window")
           (check-true! (peek-buffer? a) "the file is a peek")
-          (check-false! (popup-open?) "no popup opened")
+          (check-false! (float-open?) "no popup opened")
           (check-true! (and (window-showing a) #t) "a window shows the file")
           (check-false! (equal? (window-showing a) me) "and it is not the reader's window")
           (check-true! (buffer-read-only? a) "read-only")
@@ -158,7 +158,7 @@
           (check-equal! (current-buffer) a "and the reader is in it")
           (check-false! (equal? (active-window) me) "in another window: never on top of the listing")
           (check-equal! (window-buffer me) "*scratch*" "the listing's window keeps the listing")
-          (check-false! (popup-open?) "and no popup was ever opened")
+          (check-false! (float-open?) "and no popup was ever opened")
           (check-false! (buffer-read-only? a) "writable")
           (check-false! (string-contains? (buffer-modeline-name a) "peek")
                         "the modeline is plain again")
@@ -166,7 +166,7 @@
           (let ((b (t--peek-file "b.txt" "beta\n")))
             (peek-file! b)
             (check-true! (and (window-showing b) #t) "the new peek shows in a window")
-            (check-false! (popup-open?) "still no popup")
+            (check-false! (float-open?) "still no popup")
             (check-equal! (current-buffer) a "and the opened buffer stays where it is")))))))
 
 (deftest 'a-peek-is-read-only-and-keep-makes-it-writable
@@ -276,7 +276,7 @@
               (run-command "dired-visit")
               (check-equal! (current-buffer) a "the second RET opened it")
               (check-false! (peek-buffer? a) "and it is no peek")
-              (check-false! (popup-open?) "the popup gave it up")
+              (check-false! (float-open?) "the popup gave it up")
               (check-equal! (window-buffer me) d "beside dired, not on top of it"))
             (buffer-kill! d)))))))
 
@@ -360,8 +360,8 @@
             (check-false! (peek-buffer? b) "as your own")
             (buffer-kill! d)))))))
 
-(deftest 'the-other-window-scroll-reads-the-popup-first
-  "M-<down> from the listing scrolls the popup (a peek, the messages), not the next split"
+(deftest 'the-other-window-scroll-reads-the-float-first
+  "M-<down> from the listing scrolls the float (the card), not the next split"
   (lambda ()
     (t--peek-with
       (lambda ()
@@ -372,16 +372,16 @@
           (peek-file! a)
           (check-equal! (scroll-other-window-target) (window-showing a)
                         "the peek's window is the target")
-          (popup-close!)
+          (peek-dismiss!)
           (check-false! (equal? (scroll-other-window-target) me)
-                        "with no popup, the next window is")
-          (buffer-create "*zz-plain-popup*")
-          (popup-show "*zz-plain-popup*")
+                        "with no float, the next window is")
+          (buffer-create "*zz-plain-float*")
+          (float-show! "*zz-plain-float*" 'right 0.3)
           (select-window! me)
-          (check-equal! (scroll-other-window-target) (popup-window)
-                        "any popup beside your work is the target")
-          (popup-close!)
-          (buffer-kill! "*zz-plain-popup*"))))))
+          (check-equal! (scroll-other-window-target) (float-window)
+                        "a float beside your work is the target")
+          (float-close!)
+          (buffer-kill! "*zz-plain-float*"))))))
 
 (deftest 'a-rested-look-fires-only-where-it-was-scheduled
   "the reader moved on: the look does nothing"
@@ -418,8 +418,8 @@
           (check-false! (equal? (active-window) me) "with a real window it moves")
           (check-true! (window-focusable? (active-window)) "to the real window, not the peek"))))))
 
-(deftest 'replaced-peeks-leave-nothing-on-the-popup-stack
-  "a look is killed when replaced, and the stack keeps live buffers only"
+(deftest 'replaced-peeks-leave-one-live-peek
+  "a look is killed when replaced"
   (lambda ()
     (t--peek-with
       (lambda ()
@@ -427,7 +427,6 @@
               (b (t--peek-file "b.txt" "beta\n"))
               (c (t--peek-file "c.txt" "gamma\n")))
           (peek-file! a) (peek-file! b) (peek-file! c)
-          (check-equal! (popup-stack) '() "no peek waits on the stack")
           (check-equal! (length (peek-buffers)) 1 "one peek lives")
           (check-false! (buffer-known? a) "the first is gone")
           (check-false! (buffer-known? b) "and the second"))))))

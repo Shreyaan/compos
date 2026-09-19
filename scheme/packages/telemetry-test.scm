@@ -143,16 +143,16 @@
         (run-command "telemetry-slow")
         (check-equal! (list-filters *telemetry-buffer*) '() "s again widens")))))
 
-(deftest 'telemetry-toggle-opens-the-popup-and-closes-it
-  "one command shows the list as a bottom popup and takes it away again"
+(deftest 'telemetry-toggle-opens-the-list-and-closes-it
+  "one command shows the list in a window and takes it away again"
   (lambda ()
-    (when (telemetry-popup-open?) (popup-close!))
+    (switch-to-buffer! "*scratch*")
+    (run-command "delete-other-windows")
     (run-command "telemetry-toggle")
-    (check-true! (telemetry-popup-open?) "the popup shows the telemetry list")
-    (check-true! (string-prefix? "popup" (or (buffer-local *telemetry-buffer* 'window-class) ""))
-                 "the list is a popup window")
+    (check-true! (telemetry-shown?) "a window shows the telemetry list")
     (run-command "telemetry-toggle")
-    (check-true! (not (telemetry-popup-open?)) "the same command closes it")))
+    (check-false! (telemetry-shown?) "the same command takes it away")
+    (check-equal! (window-buffer (active-window)) "*scratch*" "the work comes back")))
 
 (deftest 'telemetry-follows-the-work-the-user-causes
   "a traced row or a Scheme job is a cause; the list's own refresh is not"
@@ -177,7 +177,6 @@
 (deftest 'telemetry-list-redraws-on-its-own-while-it-shows
   "a Scheme task after the list opens reaches the rows without a refresh key"
   (lambda ()
-    (when (telemetry-popup-open?) (popup-close!))
     (run-command "telemetry")
     (let ((before (length (list-entries *telemetry-buffer*))))
       (let ((task (task-spawn (lambda () 7))))
@@ -186,7 +185,8 @@
       (check-true!
         (wait-until (lambda () (> (length (list-entries *telemetry-buffer*)) before)) 3000 50)
         "the list grew on its own"))
-    (popup-close!)))
+    (let ((w (window-showing *telemetry-buffer*)))
+      (when w (window-quit-restore! w)))))
 
 (deftest 'telemetry-hides-the-editors-own-refresh-and-render-rows
   "an untraced live refresh or render is noise; a shows it"
@@ -197,7 +197,7 @@
     (check-true! (not (telemetry--noise? (list 'layer "live" 'label "event sel"))) "an event")
     (check-true! (not (telemetry--noise? (list 'layer "scheme" 'label "refresh"))) "another layer")))
 
-(deftest 'telemetry-has-a-narrow-view-for-the-side-popup
+(deftest 'telemetry-has-a-narrow-view-for-a-side-window
   "under the width the narrow profile shows five columns; the wide one shows eight"
   (lambda ()
     (let ((layouts (plist-get (list-mode-opts "telemetry-mode") 'layouts))
@@ -208,5 +208,4 @@
       (check-equal! (length (telemetry--narrow-columns "*unused*")) 5 "five columns")
       (check-equal! (length (telemetry--narrow-cells "*unused*" row)) 5 "five cells")
       (check-equal! (nth 2 (telemetry--narrow-cells "*unused*" row)) "key a" "the job is the third")
-      (check-equal! (length (telemetry--wide-columns "*unused*")) 8 "eight columns")
-      (check-equal! (display-rule-param *telemetry-buffer* 'side) 'right "the popup is on the side"))))
+      (check-equal! (length (telemetry--wide-columns "*unused*")) 8 "eight columns"))))

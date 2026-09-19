@@ -1,28 +1,25 @@
-;;; window.scm --- windows: display-buffer, popups, peek, layouts, special-mode, tiling.
+;;; window.scm --- windows: display-buffer, the float, peek, layouts, special-mode, tiling.
 ;;;
 ;;; Emacs's window.el, in one file: the display-buffer chain and its actions,
-;;; the popup and the look, peek, the mode layouts, special-mode and
+;;; the float and the look, peek, the mode layouts, special-mode and
 ;;; quit-window, winner, and the tiling commands. init.scm loads it second,
 ;;; before dired: a list mode derives from special-mode at load.
 
 (domain! 'files)
 (effects! '(read))
 
-;;; --- display-buffer & popups (popper) ----------------------------------------
+;;; --- display-buffer ------------------------------------------------------------
 ;;; *display-buffer-alist* says WHERE a buffer goes. It is Emacs' alist of
 ;;; the same name, in the shape this editor needs: a list of
 ;;;
 ;;;   (PATTERN ACTION PARAMS)
 ;;;
 ;;; read in order, first match wins. PATTERN is a substring of the buffer
-;;; name, or (category KIND) for a kind of display the caller names
+;;; name, (category KIND) for a kind of display the caller names
 ;;; ((category preview) is a peek; (category foreign) is a buffer from
-;;; outside the frame's group). ACTION is one action name or a list
-;;; of them, tried in order; the display-buffer section below lists them.
-;;; The two this editor started with:
-;;;
-;;;   'same    show it in the selected window (same-window)
-;;;   'popup   a side window: one per frame, reused, and it floats
+;;; outside the frame's group), or a procedure of NAME and ALIST. ACTION
+;;; is one action name or a list of them, tried in order; the
+;;; display-buffer section below lists them.
 ;;;
 ;;; A buffer with no rule takes *display-buffer-base-action* and then
 ;;; *display-buffer-fallback-action*: reuse a window that shows it, split
@@ -30,14 +27,11 @@
 ;;; PARAMS is a plist, and every key has a default, so a rule says only
 ;;; what it wants to change:
 ;;;
-;;;   'side   'right | 'left | 'top | 'bottom | 'center
-;;;           default right, or bottom on compact frames
-;;;           'center floats a fixed modal in the middle of the frame
+;;;   'side   'right | 'left | 'top | 'bottom | 'center, for a float
 ;;;   'size   the share of the frame it takes     default one third
 ;;;
-;;; A popup floats over the frame — see popup-float! for what that means
-;;; and what it deliberately does not change. `C-\`` toggles it and
-;;; `C-M-\`` settles it into the layout, on the side it already floats on.
+;;; A popup (popper.scm) is an ordinary buffer in an ordinary window: a
+;;; rule with a procedure PATTERN sends it to the bottom of the frame.
 
 (define *window-third* (/ 1 3))
 
@@ -50,13 +44,9 @@
 
 (define *display-buffer-defaults* (list 'side 'right 'size *window-third*))
 
-;; Packages can make the default responsive without changing explicit display
-;; rules. layouts.scm chooses bottom on compact frames and right otherwise.
-(define popup-default-side (lambda () 'right))
-
 (define *display-buffer-alist*
-  ;; nothing floats. No stock rule names the popup, so a listing, the
-  ;; messages, a shell take the window chain like any other buffer
+  ;; no stock rule names a place, so a listing, the messages, a shell
+  ;; take the window chain like any other buffer
   (list
         ;; a detail a list opens from one of its rows takes another
         ;; window and KEEPS it (packages/detail.scm): reuse a window
@@ -73,7 +63,7 @@
 ;; A buffer from outside the frame's group. groups.scm answers; with no
 ;; groups, no buffer is foreign. A display of a foreign buffer that names
 ;; no category of its own is a display of category foreign, and the
-;; stock rule sends it to the popup. A rule of your own for
+;; stock rule sends it to another window. A rule of your own for
 ;; (category foreign) routes it elsewhere; a pane that shows it then
 ;; takes the frame out of the group.
 (define display-foreign? (lambda (name) #f))
@@ -90,10 +80,13 @@
     (cons (list pattern action (if params params '()))
           *display-buffer-alist*)))
 
-;; a rule matches a name by substring, or a category the caller passed in
-;; ALIST as 'category; a rule written (category . KIND) reads the same
+;; a rule matches a name by substring, a category the caller passed in
+;; ALIST as 'category, or a procedure of NAME and ALIST that answers true
+;; (Emacs display-buffer-alist). A rule written (category . KIND) reads
+;; the same.
 (define (display-rule-match? condition name alist)
   (cond ((string? condition) (string-contains? name condition))
+        ((procedure? condition) (and (condition name alist) #t))
         ((and (pair? condition) (equal? (car condition) 'category))
          (let ((kind (cdr condition)))
            (equal? (if (pair? kind) (car kind) kind)
@@ -126,7 +119,7 @@
       (plist-get *display-buffer-defaults* key)))
 
 ;; frame-local policy state: values keyed by the selected frame — each
-;; browser gets its own popup, its own ibuffer home window. Pruned when a
+;; browser gets its own look, its own ibuffer home window. Pruned when a
 ;; frame is deleted.
 (define *frame-locals* '())   ; ((frame ((key val) ...)) ...)
 
@@ -153,136 +146,40 @@
     (set! *frame-locals*
       (filter (lambda (e) (member (car e) live)) *frame-locals*))))
 
-;; The window that floats. The frame local lives in memory and dies with
-;; the daemon, but the floating class is a buffer-local and comes back
-;; with the desktop — so a restored popup is still a popup, and `C-\`` and
-;; `C-M-\`` still reach it. Read the class when the local has nothing
-;; live to say.
-;; the class carries the side too — "popup popup-right" — so read it as
-;; the prefix it is. Read for equality, this never matched, the frame
-;; local was the only answer, and a restored popup split the frame a
-;; second time every time you opened it.
-(define (popup--class? buf)
-  (let ((c (buffer-local buf 'window-class)))
-    (and c (string-prefix? "popup" c))))
+;;; --- the float -------------------------------------------------------------------
+;;; A window floats while its buffer wears the float class. Two surfaces
+;;; float: the card of a row preview (preview-show ... 'float) and the
+;;; table of a prompt in the panel or the modal shape. The window stays
+;;; in the tree, so every window command reaches it. The class takes its
+;;; split out of the flow, and the window it covers keeps the frame. A
+;;; frame shows at most one float. The class string is the stylesheet's
+;;; ("popup popup-SIDE"); it is not a popup in the popper sense.
 
-(define (popup--by-class)
+(define (float--class? buf)
+  (let ((c (and (string? buf) (buffer-local buf 'window-class))))
+    (and c (string-prefix? "popup" c) #t)))
+
+;; the window that floats in this frame, or #f
+(define (float-window)
   (let loop ((ws (window-list)))
     (cond ((null? ws) #f)
-          ((popup--class? (cadr (car ws))) (car (car ws)))
+          ((float--class? (cadr (car ws))) (car (car ws)))
           (else (loop (cdr ws))))))
 
-(define (popup-window)
-  (let ((w (frame-local 'popup-window)))
-    (if (and w (window-exists? w) (popup--class? (window-buffer w)))
-        w
-        (popup--by-class))))
-
-(define (popup-buffer)
-  (or (frame-local 'popup-buffer)
-      (let ((w (popup--by-class)))
-        (and w (cadr (assoc w (window-list)))))))
+(define (float-buffer)
+  (let ((w (float-window))) (and w (window-buffer w))))
 
 (define (window-exists? id)
   (assoc id (window-list)))
 
-;; a leftover popup that became the sole window (C-x 1 from inside it)
-;; is not a popup anymore — treat it as closed so display-buffer splits
-(define (popup-open?)
-  (and (popup-window)
-       (window-exists? (popup-window))
-       (not (null? (cdr (window-list))))))
+;; a float that became the sole window (C-x 1 from inside it) is not a
+;; float any more
+(define (float-open?)
+  (and (float-window) (pair? (cdr (window-list))) #t))
 
-;; Where the popup came from. An entered popup is a visit, not a move: its
-;; entry on the frame return stack (reason popup) holds the arrangement,
-;; the group and the focus from before it opened. The entry lives in
-;; memory and dies with the daemon: a popup restored from the desktop has
-;; nothing to go back to, so its close only closes.
-(define (popup-remember!)
-  (unless (or (popup-open?) (arrangement-for 'popup))
-    (arrangement-push! 'popup)))
-
-(define (popup-forget!) (arrangement-drop! (arrangement-for 'popup)))
-
-(define (popup-layout-live? layout)
-  (and layout
-       (null? (filter (lambda (buf) (not (buffer-exists? buf)))
-                      (window-tree-buffers layout)))))
-
-;; Closing the popup is three things, every time and in this order: the
-;; buffer stops floating, the window goes, and you come back. You come
-;; back only if you were IN the popup — `C-\`` from another window
-;; dismisses it and leaves your focus alone.
-;; The window is read ONCE. popup-window can answer from the class, and
-;; the first step clears the class — read again after it, the answer is
-;; #f and the window never goes.
-;; Dismiss the popup's buffer: the one under it comes back, or the popup
-;; closes when nothing waits. `q` in a listing and the toggles use this;
-;; the popup toggle closes the whole popup.
-(define (popup-dismiss!)
-  (let loop ((stack (popup-stack)))
-    (cond ((null? stack)
-           (set-frame-local! 'popup-stack '())
-           (popup-close!))
-          ((buffer-known? (car stack))
-           (set-frame-local! 'popup-stack (cdr stack))
-           (set! *popup-dismissing* #t)
-           (popup-show (car stack))
-           (set! *popup-dismissing* #f))
-          (else (loop (cdr stack))))))
-
-(define (popup-close!)
-  (set-frame-local! 'popup-stack '())
-  (let* ((w (popup-window))
-         (mine? (equal? (active-window) w))
-         (buf (and w (window-buffer w)))
-         (focus (active-window))
-         (token (arrangement-for 'popup))
-         (entry (and token (assoc token (arrangements)))))
-    ;; the buffer stops floating the moment it stops being the popup, or
-    ;; it would float again in an ordinary window
-    (when buf (popup-float! buf #f))
-    (set-frame-local! 'popup-window #f)
-    ;; the arrangement from before comes back, unless a buffer it names
-    ;; died meanwhile (ibuffer killed it): then only the popup goes
-    (if (and entry (popup-layout-live? (nth 2 entry)))
-        (arrangement-pop! token)
-        (begin
-          (popup-forget!)
-          (when w (delete-window-id! w))
-          (when (and mine? entry (window-exists? (nth 5 entry)))
-            (select-window! (nth 5 entry)))))
-    ;; you come back only if you were IN the popup
-    (unless (or mine? (not (window-exists? focus))) (select-window! focus))))
-
-;; A popup FLOATS, and only visibly: it stays an ordinary window in the
-;; tree, so every window command still reaches it. The class takes its
-;; split out of the flow, so the window it covers keeps the whole frame
-;; underneath. SIDE is the edge it floats against, or #f to stop
-;; floating — `C-M-\`` passes #f and the popup becomes an ordinary split,
-;; which is popper's toggle-type under popper's key.
-;; In the popup, M-<left>, M-<right>, M-<up>, and M-<down> move it to
-;; that edge. The keys are the popup's, not the buffer's: they go in
-;; when the buffer floats and out when it stops, and the mode setup then
-;; gives the buffer its own keys back.
-(define *popup-keys*
-  '(("M-<left>" "popup-move-left") ("M-<right>" "popup-move-right")
-    ("M-<up>" "popup-move-up") ("M-<down>" "popup-move-down")
-    ;; Cmd-RET keeps what floats: the popup becomes an ordinary window.
-    ("s-RET" "popup-bufferize")))
-
-(register-minor-mode! "popup-mode" (lambda (buf) #t) (lambda (buf) #t))
-(minor-mode-keys! "popup-mode" *popup-keys*)
-
-(define (popup-keys! name floating?)
-  (if floating?
-      (enable-minor-mode! name "popup-mode")
-      (disable-minor-mode! name "popup-mode"))
-  (buffer-set-local! name 'popup-keys (and floating? #t)))
-
-;; A buffer can ask for more window classes than the popup gives it. The
-;; extra words come after the side, so popup-side-of still reads the side.
-(define (popup--extra-classes name)
+;; A buffer can ask for more window classes than the float gives it. The
+;; extra words come after the side, so float-side-of still reads the side.
+(define (float--extra-classes name)
   (let ((extra (buffer-local name 'window-classes)))
     (if (and (string? extra) (not (equal? extra "")))
         (string-append " " extra)
@@ -291,114 +188,65 @@
 ;; A window floats because of its class, and for no other reason: the
 ;; pane is in the tree either way. So a change of shape is a change of
 ;; two locals. It runs no mode setup, which is what lets a prompt change
-;; shape with its table still standing, filter and row intact.
+;; shape with its table still standing, filter and row intact. SIDE #f
+;; stops the float.
 (define (window-float-class! name side &optional size)
   (buffer-set-locals! name
     (list 'window-class
             (and side (string-append "popup popup-" (symbol->string side)
-                                     (popup--extra-classes name)))
+                                     (float--extra-classes name)))
           ;; the share is a number, and CSS cannot read a Scheme list —
           ;; hand it over as a custom property the stylesheet already reads
           'window-style
             (and side size
                  (string-append "--popup-size:" (number->string (* 100 size)) "%")))))
 
-(define (popup-float! name side &optional size)
-  (let ((had-keys (buffer-local name 'popup-keys)))
-    (window-float-class! name side size)
-    (cond (side (popup-keys! name #t))
-          (had-keys
-           (popup-keys! name #f)
-           ;; the buffer's own M-arrows come back with its mode. Not for a
-           ;; peek: it is read-only, it dies when replaced, and a mode
-           ;; setup is the one thing here that could move anything.
-           (when (and (buffer-exists? name)
-                      (not (peek-buffer? name)))
-             (restore-buffer-runtime! name))))))
-
-(define (popup-move! side)
-  (let ((buf (current-buffer)))
-    (if (not (and (popup-open?) (equal? (active-window) (popup-window))))
-        (message "Not in the popup")
-        (begin
-          ;; the side a buffer was moved to is the side it opens on next
-          (buffer-set-local! buf 'popup-side side)
-          (popup-float! buf side (display-param buf 'size))
-          (message (string-append "Popup on the " (symbol->string side)))))))
-
-(define-command "popup-move-left" "Float the popup against the left edge"
-  (lambda () (popup-move! 'left)))
-(define-command "popup-move-right" "Float the popup against the right edge"
-  (lambda () (popup-move! 'right)))
-(define-command "popup-move-up" "Float the popup against the top edge"
-  (lambda () (popup-move! 'top)))
-(define-command "popup-move-down" "Float the popup against the bottom edge"
-  (lambda () (popup-move! 'bottom)))
-
-;; The popup FLOATS: its class says which edge, and its place in the
-;; tree does not show. So the new window is always SECOND, whatever the
-;; side, and the window it covers keeps its id and its place. A swap
-;; into first place for the left and the top moved the covered window
-;; to the other side of its half and carried the ids with the buffers.
-;; popup-bufferize swaps when the popup becomes a real window.
-(define (popup--split-for side size)
-  (split-window! (if (or (equal? side 'top) (equal? side 'bottom)) 'v 'h)
-                 (- 1 size))
-  (other-window!))
-
 ;; the side a floating buffer wears, from its class, or #f. The class can
 ;; carry more words after the side, so the side is the first word.
-(define (popup-side-of buf)
+(define (float-side-of buf)
   (let ((c (and buf (buffer-local buf 'window-class))))
     (and c (string-prefix? "popup popup-" c)
          (let* ((rest (substring c (string-length "popup popup-") (string-length c)))
                 (space (string-index rest " ")))
            (string->symbol (if space (substring rest 0 space) rest))))))
 
-;; The popup shows one buffer at a time. A buffer shown over another
-;; keeps it underneath (popper's stack): dismiss the top one and the one
-;; under it comes back; close the popup and the stack empties.
-(define *popup-dismissing* #f)
-
-(define (popup-stack) (or (frame-local 'popup-stack) '()))
-
-;; a peek is a look: replaced, it is killed, so it never waits on the
-;; stack. Dead names are pruned as the stack is written, so it holds
-;; live buffers only and cannot grow past them.
-(define (popup-stack-push! name)
-  (unless (peek-buffer? name)
-    (set-frame-local! 'popup-stack
-      (cons name (filter (lambda (b) (and (not (equal? b name)) (buffer-known? b)))
-                         (popup-stack))))))
-
-(define (popup-stack-drop! name)
-  (set-frame-local! 'popup-stack
-    (remove (lambda (b) (equal? b name)) (popup-stack))))
-
-(define (popup-show-on name side size)
-    ;; before the focus moves: this is the place you come back to
-    (popup-remember!)
-    (let ((old (popup-buffer)))
-      (when (and old (not (equal? old name)) (buffer-known? old))
-        ;; the buffer this one covers waits underneath
-        (when (and (popup-open?) (not *popup-dismissing*))
-          (popup-stack-push! old)))
-      (popup-stack-drop! name)
-      (set-frame-local! 'popup-buffer name))
-    (popup-float! name side size)
-    (if (popup-open?)
-        (let ((was (window-buffer (popup-window))))
-          (select-window! (popup-window))
-          (switch-to-buffer! name)
-          ;; the buffer this one replaces stops floating: the class is a
-          ;; buffer-local, and a buffer that kept it floated in every
-          ;; window it was shown in after
-          (when (and was (not (equal? was name)) (buffer-exists? was))
-            (popup-float! was #f)))
+;; Show NAME as the float and answer its window. An open float takes
+;; NAME in place; else the selected window splits, and the new window,
+;; second in the tree, floats against SIDE. SELECT? selects the float;
+;; otherwise the selection stays where it was. A display that is a look
+;; (with-display-preview) covers the float's buffer, and the end of the
+;; look puts it back. Any other display replaces it, and the replaced
+;; buffer stops floating.
+(define (float-show! name side size &optional select?)
+  (let ((me (active-window))
+        (w (float-window)))
+    (window-float-class! name side size)
+    (if w
+        (let ((was (window-buffer w)))
+          (window-show-buffer! w name)
+          (when (and was (not (equal? was name)) (not *display-preview*)
+                     (buffer-exists? was))
+            (window-float-class! was #f)))
         (begin
-          (popup--split-for side size)
-          (set-frame-local! 'popup-window (active-window))
-          (switch-to-buffer! name))))
+          (split-window! (if (member side '(top bottom)) 'v 'h) (- 1 size))
+          (other-window!)
+          (set! w (active-window))
+          (window-show-buffer! w name)
+          ;; the split made this window: the end of a look deletes it
+          (set-window-restore! w '(window #f #f))))
+    (select-window! (if (or select? (not (window-exists? me))) w me))
+    (window-state-changed!)
+    w))
+
+;; The float goes: its buffer stops floating and its window is deleted.
+;; The last window of a frame is never deleted.
+(define (float-close!)
+  (let ((w (float-window)))
+    (when w
+      (let ((buf (window-buffer w)))
+        (when buf (window-float-class! buf #f))
+        (when (pair? (cdr (window-list))) (delete-window-id! w))))))
+
 (domain! 'files)
 (effects! '(read))
 
@@ -427,46 +275,6 @@
     (let ((r (thunk)))
       (set! *display-preview* was)
       r)))
-
-;; where the popup floats: the rule's side, else the side the buffer was
-;; last moved to, else the default, which is the right edge
-;; Show NAME in the popup without moving the selection: a preview takes
-;; no focus. The popup window's buffer is set in place; a new popup is
-;; split, filled, and the selection goes back where it was, in one
-;; step. A quiet popup records no return place, no work windows, and no
-;; layout: nothing is restored when it closes, because nothing moved.
-;; The restores are for a popup you entered, and they carried every
-;; window's point back to the moment the popup opened.
-(define (popup-show-quietly name side size)
-  (let ((me (active-window)))
-    (let ((old (popup-buffer)))
-      (when (and old (not (equal? old name)) (buffer-known? old))
-        (when (and (popup-open?) (not *popup-dismissing*))
-          (popup-stack-push! old)))
-      (popup-stack-drop! name)
-      (set-frame-local! 'popup-buffer name))
-    (popup-float! name side size)
-    (if (popup-open?)
-        (let* ((w (popup-window))
-               (was (window-buffer w)))
-          (window-show-buffer! w name)
-          (when (and was (not (equal? was name)) (buffer-exists? was))
-            (popup-float! was #f)))
-        (begin
-          (popup--split-for side size)
-          (let ((w (active-window)))
-            (set-frame-local! 'popup-window w)
-            (window-show-buffer! w name)
-            (select-window! me))))
-    (window-state-changed!)
-    (popup-window)))
-
-(define (popup-show name)
-  (popup-show-on name
-    (or (display-rule-param name 'side)
-        (buffer-local name 'popup-side)
-        (popup-default-side))
-    (display-param name 'size)))
 
 ;;; --- the frame return stack ----------------------------------------------------
 ;;; An arrangement that a mode or a prompt puts over the frame and takes
@@ -525,7 +333,7 @@
 ;;; holds one look: (BUF WHERE FROM SHOWN DATA TREE). WHERE says where:
 ;;;   here   the window FROM itself; its leaf records what the look covers
 ;;;   other  a window FROM owns: the one it owns already, else a display
-;;;   float  the popup card, the one floating overlay
+;;;   float  the card, the one float (see the float section)
 ;;;   frame  the whole frame: BUF is a procedure that draws the look, and
 ;;;          TREE is the return-stack token of the arrangement it covers
 ;;; DATA is the caller's own note. (preview-end KEEP) ends the look: KEEP
@@ -571,12 +379,12 @@
                       (when w (set-window-owner! w from)))
                   w))
                ;; the side away from the source decides, every time: reusing
-               ;; the open popup's side left the card at the far edge of a
+               ;; the open float's side left the card at the far edge of a
                ;; wide frame. The card is placed by the PeekCard hook; the
                ;; side only names the tree slot the float hangs from.
                ((equal? where 'float)
-                (popup-show-quietly buf (peek-side-away-from from)
-                                    (plist-get *display-buffer-defaults* 'size)))
+                (float-show! buf (peek-side-away-from from)
+                             (plist-get *display-buffer-defaults* 'size)))
                (else (buf) (active-window)))))
       ;; a frame look draws the focus with the frame
       (unless (or (equal? where 'frame) (not (window-exists? me)) (equal? (active-window) me))
@@ -600,9 +408,12 @@
                  (when e (winner-push! (nth 2 e)))
                  (arrangement-drop! (nth 5 slot)))
                (arrangement-pop! (nth 5 slot) #t)))
+          ;; the card goes, or gives back the float it covered
           ((equal? where 'float)
-           (unless (or keep (not (popup-open?)) (not (equal? (popup-buffer) buf)))
-             (with-layout-suppressed (lambda () (popup-dismiss!)))))
+           (let ((fw (float-window)))
+             (unless (or keep (not fw) (not (equal? (window-buffer fw) buf)))
+               (with-layout-suppressed
+                 (lambda () (or (window-preview-end! fw) (float-close!)))))))
           ((not (and w (window-exists? w) (equal? (window-buffer w) buf))) #f)
           ((equal? where 'here)
            (if keep (window-set-buffer! w buf) (window-preview-end! w)))
@@ -611,11 +422,6 @@
     (winner--settle-screen!)
     slot))
 
-;; Nothing floats any more. The old popup door is kept so an older
-;; caller still works, and it shows the buffer in an ordinary window.
-;; SIDE and SIZE say nothing.
-(define (display-buffer-popup! name &optional side size)
-  (display-buffer name))
 (domain! 'files)
 (effects! '(read))
 
@@ -639,9 +445,9 @@
 ;;;                    in the chat pane
 ;;;   pop-up-window    split the largest work window when it is big
 ;;;                    enough (split-window-sensibly), else the selected one
-;;;   use-some-window  another work window; the popup and a peek are not one
+;;;   use-some-window  another work window; the float and a peek are not one
 ;;;   same-window      the selected window (also 'same)
-;;;   popup            the side window (popup-show)
+;;;   shaped           the dock or the float, by the buffer's window-shape
 ;;;
 ;;; ALIST is a plist the caller passes. 'category names the kind of display,
 ;;; and a rule (category KIND) matches it. 'inhibit-same-window #t keeps
@@ -724,9 +530,14 @@
                     (filter (lambda (row) (not (equal? (car row) (car (car matches))))) rows)
                     (cons (car matches) out)))))))
 
+;; A buffer that makes its window a work window. popper.scm answers #f
+;; for a popup: a popup window is ordinary, but the layout does not tile
+;; it and a display of another buffer does not take it.
+(define window-work-buffer? (lambda (buf) #t))
+
 (define (layout-visible-window? row)
-  (and (not (equal? (car row) (popup-window)))
-       (not (popup--class? (cadr row)))
+  (and (not (float--class? (cadr row)))
+       (window-work-buffer? (cadr row))
        (not (window-dock? (car row) (cadr row)))))
 
 (define (layout-target-visible-buffers)
@@ -818,7 +629,7 @@
 (define (layout-target-on-change!)
   (layout-target-modeline!)
   (when (and (layout-target) (not *layout-busy*)
-             (not (minibuffer-state)) (not (popup-open?)))
+             (not (minibuffer-state)) (not (float-open?)))
     (let ((panes (layout-target-visible-buffers))
           (focus (window-buffer (active-window))))
       (when (and (pair? panes)
@@ -892,10 +703,11 @@
 
 ;;; geometry, from the selected window's measure and the fractional rects
 
-;; the work windows: not the popup, not a peek
+;; the work windows: not the float, not a dock, not a peek
 (define (display--work-windows)
-  (let ((popup (and (popup-open?) (popup-window))))
-    (filter (lambda (w) (and (not (equal? w popup))
+  (let ((float (float-window)))
+    (filter (lambda (w) (and (not (equal? w float))
+                             (window-work-buffer? (window-buffer w))
                              (not (window-dock? w (window-buffer w)))
                              (not (peek-buffer? (window-buffer w)))))
             (map car (window-list)))))
@@ -959,29 +771,27 @@
 
 ;; show NAME in window WIN, selecting nothing. A buffer the user can see
 ;; is a buffer the user can switch to; a floating buffer shown anywhere
-;; but the popup stops floating.
+;; but the float stops floating.
 (define (display-buffer-in-window! win name)
   (when (and (not *display-preview*) (boundp 'buffer-promote!)) (buffer-promote! name))
-  (window-show-buffer! win name)
-  (when (and (popup--class? name) (not (equal? win (frame-local 'popup-window))))
-    (popup-float! name #f))
+  (let ((float (float-window)))
+    (window-show-buffer! win name)
+    (when (and (float--class? name) (not (equal? win float)))
+      (window-float-class! name #f)))
   (window-state-changed!)
   win)
 
-;; the popup action is kept for a rule written before popups went away,
-;; and it takes the ordinary window chain
-(define-display-action! 'popup
-  (lambda (name alist)
-    (display-buffer-run-actions name alist *display-buffer-fallback-action*)))
-
 ;; Where a shaped surface goes: the dock when it is a minibuffer, the
-;; popup window when it is a panel or a modal. A buffer says which with
-;; its own 'window-shape, so the rule needs no argument.
+;; float when it is a panel or a modal. A buffer says which with its own
+;; 'window-shape, so the rule needs no argument. The float takes the
+;; focus: the table is where the reader works.
 (define-display-action! 'shaped
   (lambda (name alist)
     (let ((shape (or (buffer-local name 'window-shape) minibuffer-default-shape))
           (docked (window-docked name)))
-      (cond ((not (equal? shape "minibuffer")) (popup-show name))
+      (cond ((not (equal? shape "minibuffer"))
+             (float-show! name (or (float-side-of name) (display-param name 'side))
+                          (display-param name 'size) #t))
             ((and docked (window-exists? docked)) (select-window! docked) docked)
             (else (window-dock! name (display-param name 'size)))))))
 
@@ -1070,13 +880,17 @@
              (win (and fn (fn name alist))))
         (or win (display-buffer-run-actions name alist (cdr actions))))))
 
+;; the actions that place a buffer themselves: the layout target does not
+;; take their displays. A package adds its own (popper.scm).
+(define *display-buffer-outside-layout* '(shaped same same-window))
+
 (define (display-buffer name &optional alist)
   (let ((a (or alist '())))
     (let ((actions (display-buffer-actions-for name a)))
       (window-display!
         (lambda ()
           (or (and (layout-target) (not *layout-busy*) (pair? actions)
-                   (not (member (car actions) '(popup same same-window)))
+                   (not (member (car actions) *display-buffer-outside-layout*))
                    (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
               (display-buffer-run-actions name a actions)))))))
 
@@ -1108,7 +922,7 @@
 ;;;   ONE peek at a time. The next peek replaces the last one. A buffer
 ;;;     that a peek MADE is killed when it is replaced. A buffer that
 ;;;     existed before the peek is only shown, never killed.
-;;;   THE PEEK WINDOW is another window, never the popup. A look goes
+;;;   THE PEEK WINDOW is another window, never the float. A look goes
 ;;;     beside the listing: the peek takes a window that is not the
 ;;;     reader's, and the next peek takes that same window again. The
 ;;;     buffer it replaced comes back when the peek goes.
@@ -1212,10 +1026,9 @@
                   (peek-drop! b)))
               (peek-buffers))))
 
-;; the side away from the window the peek was asked from. The stock
-;; rule sends no peek to the popup any more, so this answers only a
-;; rule of your own that does. A window on the right half of the frame
-;; gets the popup on the left; any other, the right.
+;; the side away from the window a look was asked from: the side the
+;; card floats against. A window on the right half of the frame gets
+;; the card on the left; any other, the right.
 (define (peek-side-away-from win)
   (let ((r (assoc win (window-rects))))
     (if (and r (> (+ (nth 2 r) (* 0.5 (nth 4 r))) 0.5)) 'left 'right)))
@@ -1238,7 +1051,7 @@
 ;; KNOWN is the name it will have, so "did the peek make it" is answered
 ;; before OPEN runs: a buffer that was known stays a real buffer. OPEN
 ;; may move the selected window (visit does); the window is put back.
-;; A quiet popup is transparent to the point: nothing in this path
+;; A look is transparent to the point: nothing in this path
 ;; selects a window. OPEN opens the buffer, best without a window
 ;; (visit-quietly); an opener that showed it in the selected window has
 ;; the listing put back there, in place, with no selection change.
@@ -1331,21 +1144,21 @@
     (when b (preview-end #f))
     (for-each (lambda (p)
                 (unless (equal? p b)
-                  (if (and (popup-open?) (equal? (popup-buffer) p))
-                      (popup-dismiss!)
+                  (if (equal? (float-buffer) p)
+                      (float-close!)
                       (let ((w (window-showing p)))
                         (when w (window-quit-restore! w)))))
                 (when (peek-buffer? p) (peek-drop! p)))
               shown)
     (pair? shown)))
 
-;; any work window that is not ME: the popup is not one
+;; any work window that is not ME: the float is not one
 (define (other-work-window-id me)
-  (let ((popup (and (popup-open?) (popup-window))))
+  (let ((float (float-window)))
     (let loop ((ws (window-list)))
       (cond ((null? ws) #f)
             ((and (not (equal? (car (car ws)) me))
-                  (not (equal? (car (car ws)) popup)))
+                  (not (equal? (car (car ws)) float)))
              (car (car ws)))
             (else (loop (cdr ws)))))))
 
@@ -1360,15 +1173,14 @@
           (else (split-window! 'h 0.5) (other-window!) (switch-to-buffer-here! name)))
     (active-window)))
 
-;; open KNOWN as a buffer of your own, beside the listing: the popup
+;; open KNOWN as a buffer of your own, beside the listing: the float
 ;; gives it up, the mark goes, and the other work window shows it. Not a
 ;; peek yet, it opens the same way.
 (define (peek-open! known open)
   (let ((me (active-window)))
     (when (and (string? known) (peek-buffer? known))
       (peek-keep! known)
-      (when (and (popup-open?) (equal? (popup-buffer) known))
-        (popup-dismiss!))
+      (when (equal? (float-buffer) known) (float-close!))
       (when (window-exists? me) (select-window! me)))
     (let ((buf (if (and (string? known) (buffer-known? known)) known (open))))
       (when (string? buf)
@@ -1414,7 +1226,7 @@
 (public! 'buffer-special?
   "(buffer-special? NAME) — a view of something else (a listing, a diff, a mail thread), not a place you work: Emacs special-mode")
 (public! 'fill-candidate?
-  "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, special, context-only, popup or peek")
+  "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, special, context-only, floating or peek")
 (public! 'peek!
   "(peek! KNOWN OPEN) — show the buffer OPEN returns beside the selected window as a peek; KNOWN is its name, so a buffer that already existed is only shown and never killed; the next peek replaces it")
 (public! 'peek-or-keep!
@@ -1424,7 +1236,7 @@
 (public! 'peek-dismiss!
   "(peek-dismiss!) — dismiss every peek on screen; #t when there was one")
 (public! 'peek-open!
-  "(peek-open! KNOWN OPEN) — open KNOWN as your own in the selected window: a peek is kept and the popup gives it up; not a peek yet, OPEN runs")
+  "(peek-open! KNOWN OPEN) — open KNOWN as your own in the selected window: a peek is kept and the float gives it up; not a peek yet, OPEN runs")
 (public! 'peek-file!
   "(peek-file! PATH) — peek the file at PATH")
 (public! 'peek-keep!
@@ -1655,8 +1467,8 @@
 ;;; empties, the buffer q falls to. A layout that read the ring pulled
 ;;; buffers in from other groups.
 
-;; a buffer a window may be filled with: known, not hidden, not floating
-;; as the popup, not a peek (a look, not a place)
+;; a buffer a window may be filled with: known, not hidden, not floating,
+;; not a peek (a look, not a place)
 (domain! 'files)
 (effects! '(read))
 
@@ -1687,14 +1499,14 @@
        (or (derived-mode? (buffer-local b 'mode-name) "special-mode")
            (and (buffer-local b 'special) #t))))
 
-;; a buffer a window may be filled with: known, not hidden, not floating
-;; as the popup, not a peek (a look, not a place)
+;; a buffer a window may be filled with: known, not hidden, not floating,
+;; not a peek (a look, not a place)
 (define (fill-candidate? b)
   (and (string? b) (buffer-known? b)
        (not (string-prefix? " " b))
        (not (buffer-local b 'context-only))
        (not (buffer-special? b))
-       (not (popup--class? b))
+       (not (float--class? b))
        (not (peek-buffer? b))))
 
 (define window-fill-source (lambda () (buffer-list-mru)))
@@ -1824,7 +1636,7 @@
       ((null? panes) (message "No live buffers to arrange") #f)
       (*layout-busy* panes)
       (else
-        (when (popup-open?) (popup-close!))
+        (float-close!)
         (set! *layout-busy* #t)
         (set! *layout-histories* (layout--capture-histories))
         (delete-other-windows!)
@@ -2019,43 +1831,6 @@
                  (apply-layout! (current-buffer) spec))
           (message "This buffer's modes declare no layout")))))
 
-(define-command "popup-toggle" "Toggle the floating popup window"
-  (lambda ()
-    (if (popup-open?)
-        (popup-close!)
-        (if (popup-buffer)
-            (popup-show (popup-buffer))
-            (message "No popup buffer yet")))))
-
-(define-command "popup-buffer" "Show any buffer in another window"
-  (lambda ()
-    (minibuffer-read "Show buffer: " (buffer-candidates)
-      (lambda (name) (display-buffer name)))))
-(catalog-meta! 'command "popup-buffer" 'domain 'windows 'effects '(write display))
-
-;; popper-toggle-type: the popup you want to keep stops floating and
-;; becomes an ordinary window, in the place it already occupies.
-(define-command "popup-bufferize"
-  "Turn the floating popup into an ordinary window"
-  (lambda ()
-    (if (not (popup-open?))
-        (message "No popup window")
-        (let* ((buf (current-buffer))
-               (side (popup-side-of buf)))
-          ;; the buffer is about to take a pane. groups.scm adds a foreign
-          ;; buffer to the frame's group here, before any window change
-          ;; derives the group again from the panes
-          (run-hooks 'popup-bufferize-hook)
-          (popup-float! buf #f)
-          ;; a window on the left or the top takes that place in the tree
-          ;; now: floating, it sat second and the class placed it
-          (cond ((equal? side 'left) (window-swap! 'left))
-                ((equal? side 'top) (window-swap! 'up)))
-          (set-frame-local! 'popup-window #f)
-          ;; it is a window now, not a visit — there is nothing to go back from
-          (popup-forget!)
-          (message (string-append buf " is an ordinary window now"))))))
-
 (define (window-unwind-or-close! win)
   (let* ((cur (window-buffer win))
          (history (window-eligible-history win))
@@ -2073,17 +1848,15 @@
 
 ;; Quit consumes this window's own stack. An exhausted window closes before
 ;; the buffer dies, so kill repair cannot refill it from group recency.
-(define-command "quit-window" "Close the popup, or kill this buffer and go back"
+(define-command "quit-window" "Kill this buffer and go back"
   (lambda ()
     (cond
       ;; a peek goes with its window: the look is over, and the layout
-      ;; is what it was. In the popup the popup is dismissed; in a split
-      ;; the split closes; alone, the window falls to the next buffer.
+      ;; is what it was. In a split the split closes; alone, the window
+      ;; falls to the next buffer.
       ((peek-buffer? (current-buffer))
         (let ((cur (current-buffer)))
-          (cond ((and (popup-open?) (equal? (active-window) (popup-window)))
-                 (popup-dismiss!))
-                ((window-quit-restore! (active-window)) #t)
+          (cond ((window-quit-restore! (active-window)) #t)
                 ((other-window-id (active-window))
                  (delete-window!))
                 (else
@@ -2096,8 +1869,6 @@
       ;; from any other buffer, a peek on screen goes first: q in the
       ;; listing that peeked takes the look, then the listing
       ((peek-dismiss!) #t)
-      ((and (popup-open?) (equal? (active-window) (popup-window)))
-        (popup-dismiss!))
       (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and
@@ -2243,7 +2014,7 @@
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("winner-previous" "winner-next" "winner-undo" "winner-redo"))
 
-;; the window mutators the keyboard reaches (C-x 1/2/3/0, popups) push
+;; the window mutators the keyboard reaches (C-x 1/2/3/0) push
 ;; the arrangement they are about to destroy
 (define (window-tree-set! tree)
   (builtin-window-tree-set! tree)
@@ -2329,23 +2100,16 @@
   (lambda () (split-window-with-other-buffer! 'v)))
 (define-command "split-window-right" "Split the window in two, side by side"
   (lambda () (split-window-with-other-buffer! 'h)))
-;; `C-x 0` in the popup closes the popup: same window, same close, so the
-;; same return.
 (define-command "delete-window" "Delete the selected window"
   (lambda ()
-    (if (and (popup-open?) (equal? (active-window) (popup-window)))
-        (popup-close!)
-        (if (not (delete-window!)) (message "Attempt to delete sole window")))))
-;; `C-x 1` from anywhere makes one window, and the popup is not one of
-;; them: it stops being a popup rather than leaving a return nobody can use
+    (if (not (delete-window!)) (message "Attempt to delete sole window"))))
+;; `C-x 1` from anywhere makes one window. A float is not one of them:
+;; its buffer stops floating rather than float in the one window left.
 (define-command "delete-other-windows" "Make the selected window the only one"
   (lambda ()
-    (when (popup-open?)
-      (let ((buf (window-buffer (popup-window))))
-        (when buf (popup-float! buf #f)))
-      (set-frame-local! 'popup-window #f)
-      (popup-forget!))
-    (delete-other-windows!)))
+    (let ((buf (float-buffer)))
+      (delete-other-windows!)
+      (when buf (window-float-class! buf #f)))))
 
 ;; frames: one per attached browser. Deleting the selected frame while its
 ;; browser is still connected resets it to a fresh single window (the client
@@ -2453,7 +2217,7 @@
          (eligible (filter (lambda (b)
                             (and (not (equal? b buf))
                                  (buffer-known? b) (not (buffer-context-only? b))
-                                 (not (popup--class? b)) (not (peek-buffer? b))
+                                 (not (float--class? b)) (not (peek-buffer? b))
                                  (window-fill-member? b))) past)))
     (cond ((not neighbor) (message "No neighboring pane"))
           ((or (not (window-focusable? (car neighbor)))
@@ -2642,8 +2406,6 @@
   "(split-window-sensibly WIN) — split WIN below when it is tall enough, beside when wide enough; the new window or #f")
 (public! 'window-quit-restore!
   "(window-quit-restore! WIN) — undo what a display did to WIN: delete the window it made, or put back the buffer it replaced")
-(public! 'display-buffer-popup!
-  "(display-buffer-popup! NAME [SIDE SIZE]) — kept for an older caller: shows NAME in an ordinary window, because nothing floats. SIDE and SIZE say nothing")
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window: the display chain with the selected window kept out of it")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
 (public! 'tile-windows!
@@ -2654,7 +2416,7 @@
   "(window-eat! [DIR]) — the neighboring pane goes away and this window takes its rectangle; DIR is left, right, up or down")
 (effects! '(write))
 (public! 'add-display-rule!
-  "(add-display-rule! PATTERN ACTION [PARAMS]) — set display policy without showing a buffer. PATTERN is a name substring or (category KIND); ACTION is one action name or a list: pop-up-window, reuse-window, use-some-window, same-window")
+  "(add-display-rule! PATTERN ACTION [PARAMS]) — set display policy without showing a buffer. PATTERN is a name substring, (category KIND), or a procedure of NAME and ALIST; ACTION is one action name or a list: pop-up-window, reuse-window, use-some-window, same-window")
 (public! 'define-mode-layout!
   "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — set a mode layout without applying it")
 (effects! '(read))

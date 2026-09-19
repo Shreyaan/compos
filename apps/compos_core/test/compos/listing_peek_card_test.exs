@@ -19,7 +19,7 @@ defmodule Compos.ListingPeekCardTest do
       (buffer-sleep! "*zz-saved-preview-target*")
       (listing-preview! "*zz-saved-preview-owner*" "*zz-saved-preview-target*")
       """, frame)
-      assert eval!(~S{(buffer-text (popup-buffer))}, frame) == ~s("Saved generated detail")
+      assert eval!(~S{(buffer-text (float-buffer))}, frame) == ~s("Saved generated detail")
       assert eval!(~S{(buffer-exists? "*zz-saved-preview-target*")}, frame) == "#f"
     after
       eval!(~S{(listing-preview-dismiss! "*zz-saved-preview-owner*")
@@ -45,15 +45,15 @@ defmodule Compos.ListingPeekCardTest do
       (buffer-set-local! *heading-owner* 'list-source-entries *heading-rows*)
       (list-redraw! *heading-owner*)
       (listing-preview! *heading-owner* "*zz-heading-first*")
-      (define *heading-copy* (popup-buffer))
+      (define *heading-copy* (float-buffer))
       (list-goto-index! *heading-owner* 0)
       """, frame)
       KeyDispatch.handle_key(frame, "<up>")
-      assert eval!("(equal? (popup-buffer) *heading-copy*)", frame) == "#t"
+      assert eval!("(equal? (float-buffer) *heading-copy*)", frame) == "#t"
       assert eval!("(buffer-local *heading-copy* 'listing-preview-source)", frame) == ~s("*zz-heading-first*")
       KeyDispatch.handle_key(frame, "<down>")
       Process.sleep(250)
-      assert eval!("(buffer-local (popup-buffer) 'listing-preview-source)", frame) == ~s("*zz-heading-next*")
+      assert eval!("(buffer-local (float-buffer) 'listing-preview-source)", frame) == ~s("*zz-heading-next*")
     after
       eval!(~S"""
       (listing-preview-dismiss! *heading-owner*)
@@ -88,39 +88,38 @@ defmodule Compos.ListingPeekCardTest do
         (list-set-query! *card-owner* "zz-card-target" #t)
         (ibuffer-goto-first-row! *card-owner*)
         (listing-preview! *card-owner* "*zz-card-target*")
-        (define *card-copy* (popup-buffer))
+        (define *card-copy* (float-buffer))
         """, frame)
         assert eval!("(equal? (active-window) *card-home*)", frame) == "#t"
         assert eval!("(buffer-read-only? *card-copy*)", frame) == "#t"
-        assert eval!("(window-focusable? (popup-window))", frame) == "#f"
+        assert eval!("(window-focusable? (float-window))", frame) == "#f"
         assert eval!("(buffer-local *card-copy* 'window-class)", frame) =~ "listing-peek"
         assert eval!("(buffer-local *card-copy* 'window-style)", frame) =~ "--peek-source-window:"
         assert eval!("(buffer-local *card-copy* 'mode-name)", frame) == "\"chat-mode\""
         assert eval!("(buffer-local \"*zz-card-target*\" 'window-class)", frame) == "#f"
-        assert eval!("(buffer-local *card-copy* 'popup-keys)", frame) == "#f"
         KeyDispatch.handle_key(frame, "q")
         assert eval!("(equal? (current-buffer) *card-owner*)", frame) == "#t"
         assert eval!("(buffer-known? *card-copy*)", frame) == "#f"
         eval!("(listing-preview-schedule! *card-owner* \"*zz-card-target*\")", frame)
         Process.sleep(250)
-        assert eval!("(popup-open?)", frame) == "#f"
+        assert eval!("(float-open?)", frame) == "#f"
         if @command == "ibuffer" do
           # Even up at the first row is an explicit request to look again.
           KeyDispatch.handle_key(frame, "<up>")
           Process.sleep(250)
-          assert eval!("(popup-open?)", frame) == "#t"
+          assert eval!("(float-open?)", frame) == "#t"
           # C-c v turns previews off and on. p walks rows, as p does in
           # every list -- binding the toggle there switched previews off
           # for anyone who pressed p to go up a line.
           KeyDispatch.handle_key(frame, "C-c")
           KeyDispatch.handle_key(frame, "v")
-          assert eval!("(popup-open?)", frame) == "#f"
+          assert eval!("(float-open?)", frame) == "#f"
           KeyDispatch.handle_key(frame, "<up>")
           Process.sleep(250)
-          assert eval!("(popup-open?)", frame) == "#f"
+          assert eval!("(float-open?)", frame) == "#f"
           KeyDispatch.handle_key(frame, "C-c")
           KeyDispatch.handle_key(frame, "v")
-          assert eval!("(popup-open?)", frame) == "#t"
+          assert eval!("(float-open?)", frame) == "#t"
           KeyDispatch.handle_key(frame, "q")
         end
         KeyDispatch.handle_key(frame, "q")

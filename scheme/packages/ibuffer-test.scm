@@ -498,7 +498,7 @@
         (check-false! (equal? w me) "in another window, never the table's")
         (check-equal! (active-window) me "the selection stayed on the table")
         (check-equal! (window-buffer me) "*ibuffer*" "and the table kept its window")
-        (check-false! (popup-open?) "no popup was opened")))
+        (check-false! (float-open?) "no popup was opened")))
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-window-form-previews-reuse-one-window

@@ -209,7 +209,7 @@
   "Walk the details opened from this list, the other way"
   (lambda () (detail-cycle! -1)))
 
-;; the key is the detail's own, so it shadows the global popup toggle only
+;; the key is the detail's own, so it shadows the global binding only
 ;; while you stand in a detail, the way chat-mode shadows it in a chat
 (register-minor-mode! "detail-mode" (lambda (buf) #t) (lambda (buf) #t))
 (minor-mode-keys! "detail-mode"

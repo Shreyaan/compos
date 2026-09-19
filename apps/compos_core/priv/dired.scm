@@ -480,8 +480,8 @@
 
 ;; ".." is entry zero, so RET on it works through the same list-current
 ;; path as every real row; marks skip it
-;; The popup opens on RET. While a peek shows, the highlight drives it:
-;; rest on a file and the popup shows that file instead, so RET on it
+;; The peek opens on RET. While a peek shows, the highlight drives it:
+;; rest on a file and the peek shows that file instead, so RET on it
 ;; opens. Held down, the arrows move faster than a file opens, so the
 ;; look waits for the highlight to rest. With no peek showing, moving
 ;; the highlight shows nothing.
@@ -519,7 +519,7 @@
            "One directory as a table: name, size, modified, perms and what "
            "git says. Select files with `SPC` (or `m`) and the whole listing with `*`; "
            "`x` trashes what you marked, and `d` flags a file for the same "
-           "`x`. `D` flags permanent deletion. `RET` on a file peeks it in the popup, "
+           "`x`. `D` flags permanent deletion. `RET` on a file peeks it in the other window, "
            "read-only; `RET` again or `M-RET` opens it here as your own; `q` dismisses "
            "the peek, and with none showing leaves dired. "
            "`RET` on a directory opens it here. `^` goes up. `/` narrows as you type — it matches the "
@@ -774,7 +774,7 @@
   (lambda () (list-move! -1)))
 
 ;; A directory opens in place: a listing is yours. A file is a PEEK: RET
-;; shows it in the popup, read-only, and M-RET opens it as your own,
+;; shows it in the other window, read-only, and M-RET opens it as your own,
 ;; here. A file that already had a buffer is only shown.
 (define (dired-visit-with-group group)
   (let ((p (dired-path-at-point))
@@ -788,7 +788,7 @@
                p))
         (message "No file on this line"))))
 
-(define-command "dired-visit" "Peek the file on this line in the popup; RET again opens it here. A directory opens here"
+(define-command "dired-visit" "Peek the file on this line in the other window; RET again opens it here. A directory opens here"
   (lambda ()
     ;; The Dired buffer's group is more specific than a frame or project
     ;; fallback. An explicit visit also replaces inherited placement.

@@ -157,7 +157,7 @@
       (check-equal! (buffer-local *chat-list* 'listing-peek-dismissed-row) #f
                     "arriving looks again at the row you left on")
       (listing-preview! *chat-list* row)
-      (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) row
+      (check-equal! (buffer-local (float-buffer) 'listing-preview-source) row
                     "and the card is the row you left on"))
     (chats-test-reset!)))
 
@@ -187,15 +187,15 @@
             (row (list-current *chat-list*)))
         (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
         (listing-preview! *chat-list* row)
-        (check-true! (popup-open?) "a card is floated")
-        (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) row
+        (check-true! (float-open?) "a card is floated")
+        (check-equal! (buffer-local (float-buffer) 'listing-preview-source) row
                       "and it reads the row at point")
-        (check-true! (not (member (popup-window) (list home side)))
+        (check-true! (not (member (float-window) (list home side)))
                      "the card is its own window, neither the list's nor the neighbour's")
         (check-equal! (window-buffer side) "*zz-chats-side*"
                       "the window beside the list keeps what it was showing")
         (listing-preview-dismiss! *chat-list*)
-        (check-equal! (popup-open?) #f "dismissing takes the card down")
+        (check-equal! (float-open?) #f "dismissing takes the card down")
         (check-equal! (window-buffer side) "*zz-chats-side*"
                       "and gives the neighbour back untouched")))
     (buffer-kill! "*zz-chats-side*")
@@ -213,7 +213,7 @@
           (loop (+ n 1))))
       (check-equal! (list-current view) "*zz-chats-c*" "the cursor reached the other group's chat")
       (listing-preview! view "*zz-chats-c*")
-      (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) "*zz-chats-c*"
+      (check-equal! (buffer-local (float-buffer) 'listing-preview-source) "*zz-chats-c*"
                     "the card shows it")
       ;; a card is a copy, never the chat itself in a window of the
       ;; frame, so the frame has nothing new to derive a group from
@@ -263,12 +263,12 @@
     (run-command "chat-list")
     (let ((view (chat-list-buffer)))
       (listing-preview! view "*zz-chats-b*")
-      (let ((windows (length (window-list))) (host (popup-window)))
-        (check-true! (popup-open?) "the first row lays a card over the neighbour")
+      (let ((windows (length (window-list))) (host (float-window)))
+        (check-true! (float-open?) "the first row lays a card over the neighbour")
         (listing-preview! view "*zz-chats-c*")
         (check-equal! (length (window-list)) windows
                       "the second row adds no window")
-        (check-equal! (popup-window) host "and the card stands where it stood")))
+        (check-equal! (float-window) host "and the card stands where it stood")))
     (run-command "chat-list-quit")
     (chats-test-reset!)))
 
@@ -284,9 +284,9 @@
     (let ((before (length (window-list))))
       (run-command "chat-list")
       (listing-preview! (chat-list-buffer) "*zz-chats-b*")
-      (check-true! (popup-open?) "the row floats a card over the neighbour")
+      (check-true! (float-open?) "the row floats a card over the neighbour")
       (run-command "chat-list-quit")
-      (check-false! (popup-open?) "one q takes the card")
+      (check-false! (float-open?) "one q takes the card")
       (check-false! (window-showing (chat-list-buffer)) "and the list with it")
       (check-equal! (length (window-list)) before "the arrangement comes back whole"))
     (chats-test-reset!)))
@@ -488,8 +488,8 @@
       (let ((row (list-current view)))
         (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
         (listing-preview! view row)
-        (check-equal! (popup-open?) #t "the row floats a card")
-        (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) row
+        (check-equal! (float-open?) #t "the row floats a card")
+        (check-equal! (buffer-local (float-buffer) 'listing-preview-source) row
                       "the card holds the row's chat")
         (check-equal! (window-buffer home) was
                       "the pane it was invoked from is untouched")))

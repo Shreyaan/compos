@@ -152,7 +152,7 @@
       (telemetry--queue row)
       (list (telemetry--trace row) "dim"))))
 
-;; Two views. A side popup is narrow: it shows the time, the layer, the
+;; Two views. A side window is narrow: it shows the time, the layer, the
 ;; job, the bar, and the number. The owner, the wait, and the trace stay
 ;; in the wide view and in RET's details; t still narrows to the trace.
 (define telemetry-narrow-cols 100)
@@ -428,21 +428,22 @@
 (define-command "telemetry" "Show the duration of every layer's work: scheme, live, browser"
   (lambda () (list-mode-show! "telemetry-mode")))
 
-;;; --- the popup ---------------------------------------------------------------
-;;; The list is a side popup, always: the default side reads an estimate
-;;; of the frame's width, and a stale window measurement put the list on
-;;; the bottom edge. One chord opens it with current rows and closes it
-;;; again.
+;;; --- the toggle ---------------------------------------------------------------
+;;; One chord opens the list with current rows and closes it again. The
+;;; list takes the display chain like any listing, and the close undoes
+;;; that display: the window it made goes, or the buffer it covered
+;;; comes back.
 
+(define (telemetry-shown?)
+  (and (window-showing *telemetry-buffer*) #t))
 
-(define (telemetry-popup-open?)
-  (and (popup-open?) (equal? (popup-buffer) *telemetry-buffer*)))
-
-(define-command "telemetry-toggle" "Show the telemetry popup, or dismiss it"
+(define-command "telemetry-toggle" "Show the telemetry list, or take it away"
   (lambda ()
-    (if (telemetry-popup-open?)
-        (popup-dismiss!)
-        (list-mode-show! "telemetry-mode"))))
+    (let ((w (window-showing *telemetry-buffer*)))
+      (cond ((not w) (list-mode-show! "telemetry-mode"))
+            ((window-quit-restore! w) #t)
+            ((pair? (cdr (window-list))) (delete-window-id! w))
+            (else (message "The telemetry list is the last window"))))))
 
 (catalog-meta! 'command "telemetry-toggle" 'domain 'diagnostics 'effects '(read display))
 
@@ -454,8 +455,8 @@
   "(telemetry-refresh!) — refresh the telemetry buffer when it exists")
 (public! 'telemetry-arrived!
   "(telemetry-arrived!) — the collector's notice: redraw the shown list for work the user caused")
-(public! 'telemetry-popup-open?
-  "(telemetry-popup-open?) — #t while the telemetry popup shows")
+(public! 'telemetry-shown?
+  "(telemetry-shown?) — #t while a window shows the telemetry list")
 
 ;;; --- one keystroke, phase by phase --------------------------------------------
 ;;; The dispatch mechanism records a row per phase: the key, the resolved

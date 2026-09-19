@@ -1368,14 +1368,14 @@ is forgotten and that group falls back to creation order in the switcher."
         ((group-work-buffer? buf) (buffer-group-ids buf))
         (else #f)))
 
-;; A popup is a visit, not a place: a listing or the messages floating
+;; A float is a visit, not a place: a card or a prompt's table floating
 ;; over the group's panes says nothing about the group the frame is in.
 (define (group-visible-membership-rows)
-  (let ((popup (popup-window)))
+  (let ((float (float-window)))
     (filter (lambda (ids) ids)
             (map (lambda (window)
-                   (if (or (equal? (car window) popup)
-                           (popup--class? (car (cdr window))))
+                   (if (or (equal? (car window) float)
+                           (float--class? (car (cdr window))))
                        #f
                        (group-context-memberships (car (cdr window)))))
                  (window-list)))))
@@ -1481,15 +1481,10 @@ is forgotten and that group falls back to creation order in the switcher."
           (switch-to-buffer! b)))
     id))
 
-;;; --- a sealed group and the popup -----------------------------------------------
-;;; A buffer from outside the group never takes a pane by a switch. The
-;;; display chain shows it as category foreign, the popup by the stock
-;;; rule (docs/DISPLAY-BUFFER.md), and the frame stays in its group: a
-;;; popup says nothing about the group (docs/POPUPS.md, rule 6). Dismiss
-;;; the popup and the group is as it was. popup-bufferize keeps the
-;;; buffer: it joins the group first, so the pane it becomes is a
-;;; member's pane. A pinned frame keeps the old way and shows a foreign
-;;; buffer in the selected window.
+;;; --- a sealed group ---------------------------------------------------------------
+;;; A display of a buffer from outside the group is a display of category
+;;; foreign (docs/DISPLAY-BUFFER.md). A pinned frame keeps the old way and
+;;; shows a foreign buffer in the selected window.
 
 ;; BUF would take the frame out of its group if a pane showed it
 (define (group-foreign-buffer? buf)
@@ -1497,21 +1492,12 @@ is forgotten and that group falls back to creation order in the switcher."
     (and id
          (not (group-pinned))
          (not *group-current-inhibit*)
-         (not (popup--class? buf))
+         (not (float--class? buf))
          (let ((ids (group-context-memberships buf)))
            (and ids (not (member id ids)) #t)))))
 
 ;; through the name, so a reload of the predicate reaches the seam
 (set! display-foreign? (lambda (name) (group-foreign-buffer? name)))
-
-(define (group-keep-popup-buffer!)
-  (let ((buf (current-buffer))
-        (id (frame-group)))
-    (when (and id (group-work-buffer? buf) (not (buffer-in-group? buf id)))
-      (buffer-add-group! buf id)
-      (message (string-append buf " joins " (group-name id))))))
-
-(add-hook! 'popup-bufferize-hook 'group-keep-popup-buffer!)
 
 (define-command "group-pin"
   "Toggle a frame pin that keeps the current group through window changes"
@@ -2576,7 +2562,7 @@ is forgotten and that group falls back to creation order in the switcher."
                          "This window cycles its preferred mode"))))))))
 
 ;; one key, one meaning in every pane: C-` walks the buffers this pane
-;; cycles, chat or not. The popup toggle keeps the family and sits on M-`.
+;; cycles, chat or not.
 (global-set-key "C-`" "group-next-buffer")
 
 ;; a verb here acts on every marked group, or on the row at point when
@@ -3966,19 +3952,19 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; it, and at least one joining buffer is on screen. The move is then a
 ;; membership change alone: the group adopts the windows as they stand,
 ;; and the arrangement the user made stays. A pane that carries no
-;; context -- a popup, a special buffer, a buffer no group holds -- says
+;; context -- a float, a special buffer, a buffer no group holds -- says
 ;; nothing, so it does not stop the adoption. A pane of another group
 ;; does: that screen belongs to a different context, and the move leaves
 ;; it for the destination.
 (define (group-move-screen-is-destination? id eligible)
-  (let ((popup (popup-window)))
+  (let ((float (float-window)))
     (let loop ((rows (window-list)) (moving #f))
       (if (null? rows)
           moving
           (let* ((row (car rows))
                  (win (car row))
                  (buf (cadr row)))
-            (cond ((or (equal? win popup) (popup--class? buf))
+            (cond ((or (equal? win float) (float--class? buf))
                    (loop (cdr rows) moving))
                   ((member buf eligible) (loop (cdr rows) #t))
                   ((buffer-in-group? buf id) (loop (cdr rows) moving))

@@ -78,7 +78,7 @@
           (group (group-record-create! "zz-sealed-group")))
       (for-each (lambda (buf) (buffer-add-group! buf group)) (list a b c))
       ;; the foreign buffer is the most recent one: the old pool led with it
-      (when (popup-open?) (popup-close!))
+      (when (float-open?) (float-close!))
       (delete-other-windows!)
       (switch-to-buffer-here! foreign)
       (switch-to-buffer-here! a)

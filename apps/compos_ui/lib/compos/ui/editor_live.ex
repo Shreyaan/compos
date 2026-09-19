@@ -1373,8 +1373,8 @@ defmodule Compos.Ui.EditorLive do
   # daemon and a freshly recompiled UI compatible during development.
   # The three shapes are minibuffer, panel and modal. "popup" is the name
   # panel used to wear; it is still accepted here so an older daemon and a
-  # freshly recompiled UI agree during development. A popup WINDOW is a
-  # different thing (display-buffer's popup action) and shares no name.
+  # freshly recompiled UI agree during development. A popup buffer
+  # (popper.scm) is an ordinary window and shares no name with it.
   defp mb_geom(%{geometry: geometry}) when geometry in ["minibuffer", "panel", "modal"],
     do: geometry
 

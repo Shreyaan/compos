@@ -722,7 +722,7 @@ defmodule Compos.Ui.EditorLiveTest do
       (begin
         (tile-windows! 'columns (list "#{base}" "#{other}"))
         (select-window! (window-showing "#{base}"))
-        (popup-show-on "#{popup}" 'right (/ 1 3)))
+        (float-show! "#{popup}" 'right (/ 1 3) #t))
       """)
 
     assert {:ok, "#f"} =

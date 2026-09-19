@@ -20,16 +20,16 @@ defmodule Compos.ListingPeekKillTest do
       (list-set-query! *pk-list* "zz-peek-kill-target" #t)
       (ibuffer-goto-first-row! *pk-list*)
       (listing-preview! *pk-list* "*zz-peek-kill-target*")
-      (define *pk-copy* (popup-buffer))
+      (define *pk-copy* (float-buffer))
       """, frame)
       KeyDispatch.handle_key(frame, "k")
       assert eval!("(buffer-known? \"*zz-peek-kill-target*\")", frame) == "#f"
       assert eval!("(member \"*zz-peek-kill-target*\" (list-entries *pk-list*))", frame) == "#f"
       assert eval!("(equal? (current-buffer) *pk-list*)", frame) == "#t"
       assert eval!("(buffer-known? *pk-copy*)", frame) == "#f"
-      for _ <- 1..100, eval!("(popup-open?)", frame) == "#f", do: Process.sleep(10)
+      for _ <- 1..100, eval!("(float-open?)", frame) == "#f", do: Process.sleep(10)
       assert eval!("(list-current *pk-list*)", frame) == "\"*zz-peek-kill-target-next*\""
-      assert eval!("(buffer-local (popup-buffer) 'listing-preview-source)", frame) ==
+      assert eval!("(buffer-local (float-buffer) 'listing-preview-source)", frame) ==
                "\"*zz-peek-kill-target-next*\""
     after
       eval!("""

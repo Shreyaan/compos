@@ -1126,7 +1126,7 @@ defmodule Compos.Core.Editor do
   # shows another buffer, as kill-buffer does in Emacs. Each window that
   # showed the victim falls back to its own history first, then to the
   # most recent buffer no window shows, then to any live buffer. Only a
-  # popup that showed the victim closes: nobody split for a popup, and
+  # float that showed the victim closes: nobody split for a float, and
   # one with nothing to show is not a window. Scheme policy refines the
   # choice after the kill (buffer-kill-repair): a group window fills
   # from its group.
@@ -1141,7 +1141,7 @@ defmodule Compos.Core.Editor do
           b != buffer and Buffer.exists?(b)
         end) || live_scratch()
 
-    popup? = popup_buffer?(buffer)
+    float? = float_buffer?(buffer)
 
     frames =
       Map.new(state.frames, fn {id, f} ->
@@ -1152,7 +1152,7 @@ defmodule Compos.Core.Editor do
           victim_ids == [] ->
             {id, f}
 
-          popup? and others != [] ->
+          float? and others != [] ->
             Enum.each(victim_ids, fn win ->
               wp_safely(fn -> Buffer.drop_win_point(buffer, win) end)
             end)
@@ -2619,8 +2619,9 @@ defmodule Compos.Core.Editor do
   end
 
   # returns the tree with the leaf removed, or nil if the tree IS that leaf
-  # a buffer floating as the popup wears the class Scheme gave it
-  defp popup_buffer?(b) when is_binary(b) do
+  # a floating buffer (a card, a shaped prompt) wears the class Scheme
+  # gave it; the class string keeps the stylesheet's name, popup-SIDE
+  defp float_buffer?(b) when is_binary(b) do
     case Buffer.get_local(b, "window-class") do
       class when is_binary(class) -> String.starts_with?(class, "popup")
       _ -> false
@@ -2629,7 +2630,7 @@ defmodule Compos.Core.Editor do
     :exit, _ -> false
   end
 
-  defp popup_buffer?(_), do: false
+  defp float_buffer?(_), do: false
 
   defp remove_leaf(%{type: :leaf, id: id}, id), do: nil
   defp remove_leaf(%{type: :leaf} = leaf, _id), do: leaf
@@ -3093,7 +3094,7 @@ defmodule Compos.Core.Editor do
       # extra CSS class on the window div (writing-mode centering etc.)
       highlighted: id in (Map.get(locals, "window-highlight-ids") || []),
       window_class: Map.get(locals, "window-class") || nil,
-      # inline style on the window itself. A popup hands its share of the
+      # inline style on the window itself. A float hands its share of the
       # frame over this way: the stylesheet cannot read a number out of a
       # display rule, but it can read a custom property.
       window_style: Map.get(locals, "window-style") || nil

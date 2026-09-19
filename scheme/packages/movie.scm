@@ -62,7 +62,7 @@
     (and movie (buffer-known? movie) movie)))
 
 (define (movie-stream-open?)
-  (and (popup-open?) (equal? (popup-buffer) *movie-stream-buffer*)))
+  (and (window-showing *movie-stream-buffer*) #t))
 
 (define (movie-select-stream-row! index)
   (when (buffer-known? *movie-stream-buffer*)
@@ -180,7 +180,6 @@
   (lambda ()
     (let ((movie (movie-current-buffer)))
       (when movie (movie-pause! movie))
-      (when (popup-open?) (popup-close!))
       (set-frame-local! 'movie-buffer #f)
       (arrangement-pop! (arrangement-for 'movie))
       (when (and movie (buffer-known? movie)) (buffer-kill! movie))

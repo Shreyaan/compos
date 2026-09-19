@@ -19,7 +19,7 @@
 ;;; A VIEW is one table buffer with its own scope: *ibuffer* lists every
 ;;; workspace buffer, *chats* lists the chats. The window form is an
 ;;; ordinary buffer in an ordinary window; the minibuffer form (below)
-;;; is a popup under the work. A view's mode takes the
+;;; is a dock under the work. A view's mode takes the
 ;;; template's options and overrides the few that differ (ibuffer-mode-opts).
 ;;;
 ;;; A ROW KIND says what a row shows: a buffer, a chat, a file no buffer
@@ -1409,14 +1409,14 @@
 (define (listing-peek-show! copy source)
   ;; The card floats. A floating window's split takes no room -- its
   ;; sibling fills the space and the card is drawn over the frame -- so
-  ;; the popup splits the list's own window for itself and nothing else
+  ;; the float splits the list's own window for itself and nothing else
   ;; on screen is touched. It was laid over a neighbouring window for a
   ;; while instead, on the strength of window-rects showing the list
   ;; squeezed into a third; those are tree numbers, not what is drawn,
   ;; and the price was a card that took another buffer's window away.
   ;;
-  ;; Re-showing is already right here: with a popup open, popup-show-quietly
-  ;; fills the popup's window rather than splitting again.
+  ;; Re-showing is already right here: with a float open, float-show!
+  ;; fills the float's window rather than splitting again.
   (preview-show copy 'float source))
 
 (define (listing-preview-copy! owner target)
@@ -1470,7 +1470,7 @@
             (string-append (or (buffer-local copy 'window-style) "") ";--peek-source-window:"
               (number->string source) ";--peek-source-point:"
               (number->string (window-point source))))
-          (popup-keys! copy #f)))
+          ))
         (when (window-exists? focus) (select-window! focus))
         copy))))
 
@@ -1573,7 +1573,7 @@
 (public! 'ibuffer-group-view! "(ibuffer-group-view! MODE BASE) — reuse a listing buffer owned by this group, or create one")
 (public! 'listing-preview-schedule! "(listing-preview-schedule! OWNER TARGET) — debounce a read-only card tied to the selected source row")
 (public! 'listing-preview! "(listing-preview! OWNER TARGET) — show an inert floating card anchored to OWNER; focus stays in the list")
-(public! 'listing-preview-dismiss! "(listing-preview-dismiss! OWNER) — dismiss only OWNER's current popup preview")
+(public! 'listing-preview-dismiss! "(listing-preview-dismiss! OWNER) — dismiss only OWNER's current card preview")
 (public! 'listing-visit! "(listing-visit! VIEW TARGET) — leave VIEW and visit TARGET in its owning group")
 (public! 'listing-quit! "(listing-quit! BUFFER) — return through the invoking window's history and retain the listing")
 
@@ -1699,19 +1699,15 @@
   '(("C-n/C-p" "move") ("M-n/M-p" "section") ("TAB" "fold")
     ("M-g" "regroup") ("RET" "visit") ("C-g" "close")))
 
-;; C-g ends the prompt, so the table it stood in front of goes with it.
-;; Ask the popup to take it first, then check: popup-close! clears the
-;; popup class before it disposes the window, and its work and layout
-;; restores can put the table straight back on screen. A table left
-;; standing is no longer a popup to anything, so nothing else would ever
-;; close it. The close reads the result rather than trusting the attempt.
+;; C-g ends the prompt, so the table it stood in front of goes with it:
+;; the dock goes, the float goes, and a window that still shows the
+;; table gives back what it covered.
 (define (ibuffer-prompt-close! view &optional keep)
   (listing-preview-dismiss! view)
   ;; a dock is a pane of the frame: deleting it gives its rows back to
   ;; the windows it took them from, and the tree is as it was
   (window-undock! view)
-  (when (and (popup-open?) (equal? (window-buffer (popup-window)) view))
-    (popup-dismiss!))
+  (when (equal? (float-buffer) view) (float-close!))
   (let ((w (window-showing view)))
     (when w (window-quit-restore! w)))
   (when (buffer-known? view) (buffer-kill! view))
@@ -1787,7 +1783,7 @@
 
 ;; open VIEW on SCOPE in MODE as a popup, then its prompt line. The
 ;; classes and the line numbers go on before the display rule floats the
-;; buffer: popup-float! reads them when it writes the window class.
+;; buffer: window-float-class! reads them when it writes the class.
 (define (ibuffer-prompt! scope view mode label pick &optional shape options)
   (let ((home (active-window)))
     (buffer-create view)

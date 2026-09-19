@@ -27,7 +27,7 @@
 (load "migrations.scm")
 (load "transient.scm")
 (load "tabulated-list.scm")
-; windows: display-buffer, popups, peek, layouts, special-mode, tiling;
+; windows: display-buffer, the float, peek, layouts, special-mode, tiling;
 ; a list mode derives from special-mode at load, so this precedes dired
 (load "window.scm")
 (load "tramp.scm")

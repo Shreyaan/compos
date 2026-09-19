@@ -455,12 +455,6 @@
   '("autolayout" "autolayout-main-left" "autolayout-main-right"
     "autolayout-set-main-width" "autolayout-toggle-stack" "autolayout-mode"))
 
-;; The popup's default side is the right edge, on every frame: a compact
-;; frame once got the bottom edge, and the estimate of the frame's width
-;; read narrow after a stale window measurement, so the popup wandered.
-;; A rule names a side, and M-<arrows> in the popup move it.
-(set! popup-default-side (lambda () 'right))
-
 (catalog-meta! 'command "window-layout-adaptive"
   'domain 'windows 'effects '(write display))
 (for-each

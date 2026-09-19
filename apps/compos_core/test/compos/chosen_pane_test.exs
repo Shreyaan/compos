@@ -33,7 +33,7 @@ defmodule Compos.ChosenPaneTest do
           KeyDispatch.handle_key(frame, "RET")
         end
         assert eval!("(current-buffer)", frame) == "\"*zz-chosen-detail*\""
-        assert eval!("(popup-open?)", frame) == "#f"
+        assert eval!("(float-open?)", frame) == "#f"
         assert eval!("(equal? (active-window) *chosen-detail*)", frame) == "#t"
         if @action in ["RET", "C-x b"] do
           assert eval!("(equal? (car (car (window-list))) *chosen-detail*)", frame) == "#t"

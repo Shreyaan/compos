@@ -20,8 +20,8 @@ defmodule Compos.ListingRowCardTest do
 
       eval!(
         """
-        (let ((row (list-current *zz-card-owner*)) (b (popup-buffer)))
-          (and (popup-open?) (string? b) (string-prefix? " *listing-preview" b)
+        (let ((row (list-current *zz-card-owner*)) (b (float-buffer)))
+          (and (float-open?) (string? b) (string-prefix? " *listing-preview" b)
                (buffer-known? b) (string? row)
                (equal? (buffer-local b 'listing-preview-source) row)))
         """,

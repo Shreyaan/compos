@@ -143,7 +143,7 @@ defmodule Compos.HelpTest do
     assert line =~ "define-command \\\"find-file\\\""
 
     # the popup closed: the page must not cover the code it sent you to
-    assert eval!(~s{(popup-open?)}) == "#f"
+    assert eval!(~s{(float-open?)}) == "#f"
   end
 
   test "M-. in a help page opens the source of the name at point" do
