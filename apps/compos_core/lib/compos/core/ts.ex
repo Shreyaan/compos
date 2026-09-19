@@ -53,7 +53,10 @@ defmodule Compos.Core.TS do
 
   defp line_runs(spans, at, stop) do
     inside =
-      for {s, e, scope} <- spans, s < stop, e > at, do: {max(s, at) - at, min(e, stop) - at, scope}
+      for {s, e, scope} <- spans,
+          s < stop,
+          e > at,
+          do: {max(s, at) - at, min(e, stop) - at, scope}
 
     cuts =
       inside

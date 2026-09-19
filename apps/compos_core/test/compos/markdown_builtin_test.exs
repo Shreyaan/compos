@@ -23,12 +23,21 @@ defmodule Compos.MarkdownBuiltinTest do
 
   test "one query reads many ranges, in the text's own offsets" do
     text = "a *b*\n\n`c` d\n"
-    caps = TS.ts_query_ranges("markdown-inline", text, [{0, 5}, {7, 12}], "(emphasis) @e (code_span) @c")
+
+    caps =
+      TS.ts_query_ranges(
+        "markdown-inline",
+        text,
+        [{0, 5}, {7, 12}],
+        "(emphasis) @e (code_span) @c"
+      )
+
     assert caps == [{"e", 2, 5}, {"c", 7, 10}]
   end
 
   test "several queries share one parse" do
     text = "# T\n\n- x\n"
+
     assert [heads, items] =
              TS.ts_queries("markdown", text, ["(atx_h1_marker) @h", "(list_marker_minus) @m"])
 

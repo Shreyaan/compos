@@ -1415,7 +1415,9 @@ defmodule Compos.Core.Markdown.Html do
     |> Enum.flat_map(fn {key, prop} ->
       case attrs[key] do
         v when is_binary(v) and v != "" ->
-          if String.contains?(v, "var(") or String.contains?(v, ";"), do: [], else: ["#{prop}:#{v}"]
+          if String.contains?(v, "var(") or String.contains?(v, ";"),
+            do: [],
+            else: ["#{prop}:#{v}"]
 
         _ ->
           []

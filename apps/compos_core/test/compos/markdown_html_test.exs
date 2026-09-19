@@ -248,7 +248,11 @@ defmodule Compos.MarkdownHtmlTest do
   end
 
   test "the preview page carries the ts face colours into its frame" do
-    faces = %{"ts-keyword" => %{"fg" => "#123456", "weight" => "700"}, "ts-type" => %{"fg" => "var(--x)"}}
+    faces = %{
+      "ts-keyword" => %{"fg" => "#123456", "weight" => "700"},
+      "ts-type" => %{"fg" => "var(--x)"}
+    }
+
     page = Html.document("```elixir\ndef f, do: 1\n```\n", 0, nil, faces)
     assert page =~ ".f-ts-keyword{color:#123456;font-weight:700}"
     refute page =~ ".f-ts-type{"

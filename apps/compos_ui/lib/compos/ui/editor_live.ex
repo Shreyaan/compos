@@ -946,7 +946,9 @@ defmodule Compos.Ui.EditorLive do
       "markdown"
       |> Compos.Core.TS.ts_query_nif(text, "(info_string) @info")
       |> Enum.map(fn {_, s, e} -> binary_part(text, s, e - s) end)
-      |> Enum.filter(&(&1 |> String.split() |> List.first() |> to_string() |> String.downcase() == "csv"))
+      |> Enum.filter(
+        &(&1 |> String.split() |> List.first() |> to_string() |> String.downcase() == "csv")
+      )
       |> Enum.flat_map(fn info ->
         case Regex.run(~r/:tangle[ \t]+(\S+)/, info) do
           [_, target] -> [target]
@@ -2487,11 +2489,14 @@ defmodule Compos.Ui.EditorLive do
   # whole or as its first line.
   defp range_content(t, "markdown"), do: {:html, t |> prose_html() |> wrap_tables()}
   defp range_content(t, "raw"), do: {:text, t}
+
   defp range_content(t, "mcp-result") do
     body = t |> String.trim_trailing() |> tool_display_body()
 
     case json_tail(body) do
-      nil -> {:text, body}
+      nil ->
+        {:text, body}
+
       {head, json} ->
         {:html,
          Compos.Core.Markdown.Html.html_escape(head) <>

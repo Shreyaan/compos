@@ -1821,7 +1821,12 @@ defmodule Compos.Core.SchemeAPI do
             size = byte_size(text)
 
             ranges =
-              for [s, e] <- ranges, is_integer(s), is_integer(e), 0 <= s, s < e, e <= size,
+              for [s, e] <- ranges,
+                  is_integer(s),
+                  is_integer(e),
+                  0 <= s,
+                  s < e,
+                  e <= size,
                   do: {s, e}
 
             lang
