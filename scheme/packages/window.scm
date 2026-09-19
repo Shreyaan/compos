@@ -570,10 +570,13 @@
                       (set! borrowed #t)
                       (when w (set-window-owner! w from)))
                   w))
+               ;; the side away from the source decides, every time: reusing
+               ;; the open popup's side left the card at the far edge of a
+               ;; wide frame. The card is placed by the PeekCard hook; the
+               ;; side only names the tree slot the float hangs from.
                ((equal? where 'float)
-                (let ((old (and (popup-open?) (popup-buffer))))
-                  (popup-show-quietly buf (or (and old (popup-side-of old)) (peek-side-away-from from))
-                                      (plist-get *display-buffer-defaults* 'size))))
+                (popup-show-quietly buf (peek-side-away-from from)
+                                    (plist-get *display-buffer-defaults* 'size)))
                (else (buf) (active-window)))))
       ;; a frame look draws the focus with the frame
       (unless (or (equal? where 'frame) (not (window-exists? me)) (equal? (active-window) me))
