@@ -33,7 +33,7 @@ are marked (CQ #n).
 | JSON-RPC framers | 5 | 1 | |
 | Markdown renderers | 3 | 1 | |
 | Model catalogs | 3 | 1 | |
-| PTY runners | 2 | 1 | |
+| PTY runners | 1 | 1 | done (b96c18fd) |
 | Observability surfaces | 6 | 2 | one event stream, one sample |
 
 Roughly 210k lines including tests becomes roughly 105k.
@@ -2176,7 +2176,20 @@ Not done, with the reason:
   the host window, and a quiet show writes none. RULING NEEDED.
 - The *peek-recent* store stays. The switcher reads it for its recent
   section. Only the unused command went.
-- The two PTY runners: not approved.
+- The two PTY runners: not approved. The owner approved the merge
+  later the same day; the record follows.
+
+**One PTY runner (2026-09-19, b96c18fd, worktree on d657abbb).** Item
+16 is done. Compos.Core.Terminal is the one runner; proc.ex is gone.
+`raw: true` (the default) is the terminal: raw stream to subscribers,
+raw history, bounded transcript. `raw: false` is comint: TERM=dumb,
+pty echo off, escape strip, one append per output chunk. Both kinds
+share spawn, resize, send, mark, kill, restart, and the exit line. The
+registry value holds the command and the kind, so a restart keeps the
+kind. The Scheme primitives keep their names; no Scheme caller changed.
+ProcRegistry and ProcSupervisor leave application.ex, so a live daemon
+keeps two idle children until its next restart. A raw terminal now
+counts as busy for buffer sleep. Net: -117 non-test lines.
 
 ## 11. Rules so it does not grow back
 
