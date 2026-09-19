@@ -32,11 +32,11 @@ The layout does not tile a popup window. `window-work-buffer?` answers false for
 
 | Command | Key | What it does |
 |---|---|---|
-| `popper-toggle` | `` C-` `` | Closes the popup on screen. With no popup on screen, it shows the latest popup again. |
+| `popper-toggle` | none (M-x) | Closes the popup on screen. With no popup on screen, it shows the latest popup again. |
 | `popper-cycle` | `` M-` `` | Shows another popup in the popup window. It shows the popup used least recently, so each press reaches a different popup. With no popup on screen, it shows the latest popup. |
 | `popper-toggle-type` | `` C-M-` `` | Makes the current popup an ordinary buffer: its popup window closes, and the display chain shows it in a work window. Makes any other buffer a popup: its window shows the buffer it showed before, and the buffer shows at the bottom. |
 
-The keys are the keys that the popper README suggests. A mode map can bind the same key. `detail-mode` binds `` C-` `` to `detail-next`, so in a detail window that key walks the details.
+The keys are the keys that the popper README suggests, except `` C-` ``. That key runs `group-next-buffer`, so `popper-toggle` has no key.
 
 `group-next-buffer` has no global key now. Run it with `M-x`.
 

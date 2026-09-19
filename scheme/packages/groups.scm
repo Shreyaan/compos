@@ -2561,8 +2561,9 @@ is forgotten and that group falls back to creation order in the switcher."
                          (string-append "This pane cycles " mode)
                          "This window cycles its preferred mode"))))))))
 
-;; group-next-buffer walks the buffers this pane cycles, chat or not. It
-;; has no global key: popper.scm binds the backtick family.
+;; one key, one meaning in every pane: C-` walks the buffers this pane
+;; cycles, chat or not.
+(global-set-key "C-`" "group-next-buffer")
 
 ;; a verb here acts on every marked group, or on the row at point when
 ;; nothing is marked — the rule every list follows. The marks go when the
