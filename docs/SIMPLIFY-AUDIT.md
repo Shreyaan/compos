@@ -1777,6 +1777,101 @@ config-test for the record and the migration, mcp-hub-test for the one
 table. Measure: line counts of llm-config.scm, setup.scm, mcp-hub.scm
 before and after (951, 713, 419 today).
 
+**Phase 2, the window design: three kinds of saved state and one preview
+verb (2026-09-19, proposed; waits for the owner's answers below).**
+
+*What is there now (measured).* Seventeen mechanisms save a frame's
+arrangement or a window's buffer and put it back later (about 770
+lines), and ten mechanisms show a buffer for a while without keeping it
+(about 700 lines). They are listed with file:line in the inventory of
+2026-09-19. The same moment often writes the same thing more than once:
+a group switch writes the tree to winner, to the group record, and (from
+the switcher) to a closure; an entered popup keeps three records and
+also pushes winner; the invoking window of a list prompt is put back by
+three separate Scheme copies (switch.scm twice, ibuffer.scm once), while
+the Elixir leaf already holds the same fact as `preview_origin`.
+
+*The design.* A saved arrangement has one of three lifetimes, and each
+lifetime gets one place to live.
+
+1. **The window: `restore` on the leaf.** A window remembers what to do
+   when its current display ends: `'delete` (the display made this
+   window) or the buffer and point it covered. This is Emacs
+   `quit-restore` as leaf data. It replaces the global
+   `*window-quit-restore*`, the three home-window copies (switch-home,
+   the bare-prompt closure, ibuffer-prompt-home), the definition-peek
+   restore by hand, and the Elixir `preview_origin` field, which it
+   generalises. `quit-window` reads it; a kill of the shown buffer reads
+   it. The 4.2 `owner` field (the window that asked for this one) sits
+   beside it on the same leaf.
+
+2. **The frame: one return stack.** An arrangement that a mode or a
+   prompt puts over the frame and takes away again is one entry on a
+   frame-local stack: `(arrangement-push! REASON)` answers a token,
+   `(arrangement-pop! TOKEN)` puts the tree, the group, the layout
+   target and the focus back, and `(arrangement-drop! TOKEN)` keeps
+   what is on screen now. The ibuffer and chat-list transient frames,
+   the entered popup, the overview, the group switcher's look, the
+   window-layout prompt and the movie return become callers. The focus
+   token around a retile stays as it is: it saves focus only, for the
+   length of one call.
+
+3. **The group: its saved layout.** A group's own arrangement stays on
+   the group record, because it outlives the frame and the session. It
+   is written in one place: when the frame leaves the group. The
+   switcher and the foreign-pane save points go, because a switch now
+   enters the buffer's group (the ruling of 2026-09-19) and the
+   switcher's look is a stack entry.
+
+Winner is the history of what the user did, not a fourth store: it
+records the tree once per completed window command, from the one
+window-state change path, instead of the eleven `winner-push!` calls
+today. A stack entry, a preview and a layout reflow do not enter it.
+
+*One preview verb.* `(preview-show BUF WHERE)` and `(preview-end KEEP)`,
+one slot per frame (the peek ruling). WHERE is `here` (the invoking
+window, restored from its leaf), `other` (the owned window of 4.6),
+`float` (the popup card, the one floating overlay) or `frame` (a
+whole-frame look, a stack entry). A preview never bumps the MRU, never
+moves focus and never enters winner. `KEEP` true commits what is shown
+(RET twice keeps, the peek ruling); false puts back what was there.
+Peek, listing-preview, the switcher preview, the candidate previews
+(switch, project ripgrep, code, lsp, chat-list), collect, the group
+preview, the layout preview, definition-peek and the list-mode
+`preview` hook become callers that choose BUF and WHERE. Each keeps its
+own one-line policy in front of the verb (the 1 MB peek cap, the
+debounce, the text copy for a listing). The private state goes:
+`peek-window`, `peek-shown`, the `listing-preview-*` locals,
+`*collect-window*`, `*peek*`.
+
+*What goes.* Hidden windows (layouts.scm, `*hidden-windows*`), by the
+amendment "you can get rid of everything else". The detail window stays
+a display, not a preview: it opens an owned work window that the user
+keeps.
+
+*Order of work, one commit each, lines counted after each.*
+(a) `restore` on the leaf; the three home copies, the global
+quit-restore and `preview_origin` go. (b) The preview slot and verb; the
+callers move one at a time. (c) The return stack; the six frame-level
+callers move. (d) Winner from one path; the scattered pushes go.
+(e) Hidden windows go; the group layout is written in one place.
+Expected: the 1,470 lines become about 600. Tests per step:
+window-config, peek, detail, display-buffer, ibuffer-prompt,
+group-switch, layout-policy, layouts, winner and the popup tests, which
+assert the leaf data, that MRU and winner did not change under a
+preview, and what each dismissal restores. Measure the window
+rearrange time before and after each step (a rearrange that takes
+seconds is a first-class defect).
+
+*Questions for the owner.*
+1. A list row's preview: the floating card (what ibuffer and ichat do
+   today, and the ruling "a chosen row may pop up") or the other window
+   (the 2026-09-07 ruling "previews always in the other window, never a
+   popup")? The two rulings disagree; the design needs one default.
+2. Winner records every completed window command automatically (Emacs
+   winner-mode), yes?
+3. Hidden windows go, yes?
+
 *5.1 M-o.* Decided and shipped as the chat merge above: llm-mode stays
 the lane, a hidden chat per document, `C-u M-o` picks the target.
 
