@@ -247,6 +247,13 @@ defmodule Compos.MarkdownHtmlTest do
     assert html =~ ~s(<pre data-src="0-29">)
   end
 
+  test "the preview page carries the ts face colours into its frame" do
+    faces = %{"ts-keyword" => %{"fg" => "#123456", "weight" => "700"}, "ts-type" => %{"fg" => "var(--x)"}}
+    page = Html.document("```elixir\ndef f, do: 1\n```\n", 0, nil, faces)
+    assert page =~ ".f-ts-keyword{color:#123456;font-weight:700}"
+    refute page =~ ".f-ts-type{"
+  end
+
   test "chat prose highlights a fence the same way" do
     html = Html.prose("see\n\n```json\n{\"a\": 1}\n```\n")
     assert html =~ ~s(<span class="f-ts-number"><span class="s" data-s="19">1</span></span>)

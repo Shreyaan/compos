@@ -1362,6 +1362,7 @@ defmodule Compos.Core.Markdown.Html do
     .mk{display:inline-block;width:0;height:0}
     .ln{display:inline-block;width:0;height:0}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
+    #{ts_css(faces)}
     </style></head><body>#{body}</body></html>
     """
   end
@@ -1394,6 +1395,33 @@ defmodule Compos.Core.Markdown.Html do
       [before, rest] -> before <> style <> "</body>" <> rest
       [_] -> text <> style
     end
+  end
+
+  # The page is a sandboxed frame: the editor's stylesheet does not reach
+  # it, so the code spans get their ts-* face colours here. A value that
+  # names a CSS variable of the editor cannot resolve in the frame.
+  defp ts_css(faces) when is_map(faces) do
+    for {"ts-" <> _ = name, attrs} when is_map(attrs) <- faces,
+        rules = ts_rules(attrs),
+        rules != "",
+        into: "",
+        do: ".f-#{name}{#{rules}}"
+  end
+
+  defp ts_css(_faces), do: ""
+
+  defp ts_rules(attrs) do
+    [{"fg", "color"}, {"weight", "font-weight"}, {"style", "font-style"}]
+    |> Enum.flat_map(fn {key, prop} ->
+      case attrs[key] do
+        v when is_binary(v) and v != "" ->
+          if String.contains?(v, "var(") or String.contains?(v, ";"), do: [], else: ["#{prop}:#{v}"]
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.join(";")
   end
 
   defp face(faces, name, attr, fallback),
