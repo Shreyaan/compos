@@ -1863,14 +1863,14 @@ preview, and what each dismissal restores. Measure the window
 rearrange time before and after each step (a rearrange that takes
 seconds is a first-class defect).
 
-*Questions for the owner.*
-1. A list row's preview: the floating card (what ibuffer and ichat do
-   today, and the ruling "a chosen row may pop up") or the other window
-   (the 2026-09-07 ruling "previews always in the other window, never a
-   popup")? The two rulings disagree; the design needs one default.
-2. Winner records every completed window command automatically (Emacs
-   winner-mode), yes?
-3. Hidden windows go, yes?
+*Ruled by the owner (2026-09-19).*
+1. A list row's preview is the floating card (`float`), as ibuffer and
+   ichat do now. This replaces the 2026-09-07 ruling "previews always in
+   the other window, never a popup" for list rows; peek of a file or a
+   definition keeps `other`.
+2. Winner records every completed window command automatically, from
+   the one window-state change path (Emacs winner-mode).
+3. Hidden windows go.
 
 *5.1 M-o.* Decided and shipped as the chat merge above: llm-mode stays
 the lane, a hidden chat per document, `C-u M-o` picks the target.
