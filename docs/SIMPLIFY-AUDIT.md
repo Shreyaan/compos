@@ -2191,6 +2191,56 @@ ProcRegistry and ProcSupervisor leave application.ex, so a live daemon
 keeps two idle children until its next restart. A raw terminal now
 counts as busy for buffer sleep. Net: -117 non-test lines.
 
+**Popups after popper.el: the survey (2026-09-19, at d657abbb).** The
+owner ruled: a popup is an ordinary buffer in an ordinary window, shown
+through display-buffer; the popup window kind, its buffer stack and its
+focus code go; preview windows stay as they are. What exists:
+
+- window.scm, the popup window: `popup--class?`, `popup--by-class`,
+  `popup-window`, `popup-buffer`, `popup-open?`, read from the frame
+  locals `popup-window` and `popup-buffer` and from the `window-class`
+  string.
+- window.scm, the popup's buffer stack: `popup-stack`,
+  `popup-stack-push!`, `popup-stack-drop!`, `*popup-dismissing*`,
+  `popup-dismiss!`.
+- window.scm, the focus code: `popup-remember!`, `popup-forget!`,
+  `popup-layout-live?` (a return-stack entry with the reason `popup`),
+  `popup-close!` (the return to the focus window), `popup-show-on`
+  (selects the popup).
+- window.scm, the move keys: the `popup-mode` minor mode, `*popup-keys*`,
+  `popup-keys!`, `popup-move!`, `popup-move-left/right/up/down`, the
+  `popup-side` local, `popup-default-side` (layouts.scm sets it).
+- The commands: `popup-toggle` (M-\`), `popup-bufferize` (C-M-\`, with
+  `popup-bufferize-hook` in groups.scm), `popup-buffer` (C-c p), and the
+  popup branches of quit-window, delete-window, delete-other-windows and
+  keyboard-quit (editor.scm).
+- The display: the `popup` action and `display-buffer-popup!` already
+  took the window chain; `popup-show` read the rule's side.
+- Callers of the class float, which stay: `preview-show ... 'float`
+  (`popup-show-quietly`, the listing card of ibuffer.scm), the `shaped`
+  action (the panel and modal shapes of the ibuffer prompt and the chat
+  prompt; `window-shape!` and `minibuffer-list-shape` in editor.scm),
+  the peek verbs, `fill-candidate?`, `display--work-windows`,
+  `layout-visible-window?`, `layout-target-on-change!`,
+  `display-buffer-in-window!`, `switch-to-buffer-here!`, the window
+  swap, `tile-windows!`, three group predicates in groups.scm,
+  `scroll-other-window-target` (collect.scm), dismiss.scm, movie.scm,
+  and `restore-buffer-runtime!` (the move keys came back on restore).
+- telemetry.scm: `telemetry-toggle` read `popup-open?`, which no display
+  made true, so the toggle only opened.
+- Elixir: editor.ex `release_buffer` closes a window whose buffer wears
+  the class; the render passes `window-class` and `window-style`. No
+  other Elixir code knows the popup.
+- UI: editor.css places `.window.popup-SIDE`; the PeekCard hook in
+  app.js places the card. app.js has no popup focus code.
+- Tests: popup-move-test.scm (the whole file), seven editor_test.exs
+  tests (all seven red at d657abbb), and about 20 files that read
+  `popup-open?`, `popup-buffer` or `popup-window` for the card.
+
+Finding: no display reaches the popup window. The class float has two
+live users, the row preview card and the shaped prompt surfaces. They
+keep a small mechanism, the float, and the rest goes.
+
 ## 11. Rules so it does not grow back
 
 - A seam in core is one custom that holds a function. The provider lives in
