@@ -1847,6 +1847,21 @@ defmodule Compos.Core.SchemeAPI do
           end
         end,
 
+      # A diff side is a list of lines, drawn one row each. The lines
+      # parse as one text, so a string or a comment that spans lines keeps
+      # its colour.
+      {"ts-highlight-lines",
+       "(ts-highlight-lines LANG LINES) — highlight LINES as one LANG text; return per line its (START END SCOPE) runs, in the line's bytes, without overlap."} =>
+        fn [lang, lines] ->
+          if is_binary(lang) and is_list(lines) and Enum.all?(lines, &is_binary/1) do
+            lang
+            |> Compos.Core.TS.highlight_lines(lines)
+            |> Enum.map(fn runs -> Enum.map(runs, fn {s, e, scope} -> [s, e, scope] end) end)
+          else
+            []
+          end
+        end,
+
       # search: returns (start end) byte range or #f
       {"buffer-search",
        "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f."} =>

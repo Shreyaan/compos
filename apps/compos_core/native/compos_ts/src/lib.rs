@@ -456,7 +456,7 @@ fn ts_query_ranges_nif(
 fn ts_langs() -> Vec<String> {
     let mut langs: Vec<String> =
         vec!["elixir".into(), "json".into(), "rust".into(), "html".into(),
-             "markdown".into(), "markdown-inline".into()];
+             "diff".into(), "markdown".into(), "markdown-inline".into()];
     langs.extend(dynamic().lock().unwrap().keys().cloned());
     langs.sort();
     langs

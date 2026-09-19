@@ -503,13 +503,15 @@
 ;; everything above the first card or section header: a revision's own
 ;; header and message, already in the shape a reader wants. Generated
 ;; working-tree text starts with a section header, so this is "" there.
+;; The first card starts where the diff grammar found the first file.
 (define (diff--preamble buf)
-  (let loop ((ls (split-lines (buffer-text buf))) (acc '()))
-    (cond ((null? ls) (string-trim (string-join (reverse acc) "\n")))
-          ((or (string-prefix? "diff --git " (car ls))
-               (diff--section-line? buf (car ls)))
-           (string-trim (string-join (reverse acc) "\n")))
-          (else (loop (cdr ls) (cons (car ls) acc))))))
+  (let ((first (and (pair? (diff-layout buf)) (diff--get (car (diff-layout buf)) 'start))))
+    (let loop ((ls (split-lines (buffer-text buf))) (n 1) (acc '()))
+      (cond ((null? ls) (string-trim (string-join (reverse acc) "\n")))
+            ((or (and first (>= n first))
+                 (diff--section-line? buf (car ls)))
+             (string-trim (string-join (reverse acc) "\n")))
+            (else (loop (cdr ls) (+ n 1) (cons (car ls) acc)))))))
 
 (define (diff--count-section layout sec)
   (length (filter (lambda (c) (equal? (diff--get c 'section) sec)) layout)))
@@ -609,10 +611,45 @@
                                         (diff--rows (diff--get h 'lines)
                                                     (diff--get h 'old-start)
                                                     (diff--get h 'new-start)
-                                                    (diff--get h 'line)))))
+                                                    (diff--get h 'line))
+                                        (diff--hunk-syntax (diff--get c 'file) h))))
                 '())))))
 
-(define (diff--row-blocks rows)
+;;; --- syntax -------------------------------------------------------------------
+;;; Each side of a hunk is code in the file's language. The file name names
+;;; its mode (auto-mode-alist), the mode names the language, and the
+;;; fence-kind registry answers the loaded grammar for it, or #f.
+
+(define (diff--file-ts-lang file)
+  (let ((mode (and (string? file) (auto-mode-for file))))
+    (and (string? mode)
+         (string-suffix? "-mode" mode)
+         (fence-kind-ts-lang (substring mode 0 (- (string-length mode) 5))))))
+
+;; the text of one side: the context lines and the lines of KIND
+(define (diff--side-lines lines kind)
+  (map cadr (filter (lambda (l) (or (equal? (car l) 'ctx) (equal? (car l) kind))) lines)))
+
+;; -> (OLD-RUNS NEW-RUNS OLD-START NEW-START), or #f for a language with no
+;; grammar. A side parses as one text, so a string over two lines keeps
+;; its colour; each RUNS holds one list of (START END SCOPE) per line.
+(define (diff--hunk-syntax file h)
+  (let ((lang (diff--file-ts-lang file)))
+    (and lang
+         (list (ts-highlight-lines lang (diff--side-lines (diff--get h 'lines) 'del))
+               (ts-highlight-lines lang (diff--side-lines (diff--get h 'lines) 'add))
+               (diff--get h 'old-start)
+               (diff--get h 'new-start)))))
+
+;; the runs for file line NO on one side, or '()
+(define (diff--line-runs syntax old? no)
+  (if (and syntax (number? no))
+      (let ((runs (if old? (car syntax) (cadr syntax)))
+            (i (- no (list-ref syntax (if old? 2 3)))))
+        (if (and (>= i 0) (< i (length runs))) (list-ref runs i) '()))
+      '()))
+
+(define (diff--row-blocks rows &optional syntax)
   (let loop ((rs rows) (acc '()))
     (if (null? rs)
         (reverse acc)
@@ -625,14 +662,16 @@
                                         " unchanged lines"))
                           acc))
               (loop (cdr rs)
-                    (cons (diff--cell r "new") (cons (diff--cell r "old") acc))))))))
+                    (cons (diff--cell r "new" syntax)
+                          (cons (diff--cell r "old" syntax) acc))))))))
 
-(define (diff--cell r side)
+(define (diff--cell r side &optional syntax)
   (let* ((old? (equal? side "old"))
          (kind (symbol->string (diff--get r 'kind)))
          (no (diff--get r (if old? 'old-no 'new-no)))
          (text (diff--get r (if old? 'old 'new)))
          (words (diff--get r (if old? 'old-words 'new-words)))
+         (runs (diff--line-runs syntax old? no))
          (bline (diff--get r (if old? 'old-line 'new-line))))
     (list 'tag "div"
           'class (string-append "diff-side " side " k-" kind)
@@ -643,20 +682,45 @@
                         'text (if (number? no) (number->string no) "")))
             (if (string? text)
                 (list (list 'tag "span" 'class "diff-text"
-                            'segs (diff--text-segs text words)))
+                            'segs (diff--text-segs text words runs)))
                 '())))))
 
-;; the word-diff emphasis as flat segs; empty ends are simply omitted
-(define (diff--text-segs text words)
-  (if (not words)
+;; The syntax runs and the word-diff emphasis as flat segs: a run wears
+;; its f-ts-* face, and the changed words add "hl". Empty pieces are
+;; omitted.
+(define (diff--text-segs text words &optional runs)
+  (if (and (not words) (or (not runs) (null? runs)))
       (list (list "" text))
       (let* ((len (string-byte-length text))
-             (s (min (car words) len))
-             (e (min (cadr words) len)))
-        (append
-          (if (> s 0) (list (list "" (substring-bytes text 0 s))) '())
-          (if (> e s) (list (list "hl" (substring-bytes text s e))) '())
-          (if (> len e) (list (list "" (substring-bytes text e len))) '())))))
+             (hl (and words (list (min (car words) len) (min (cadr words) len)))))
+        (apply append
+          (map (lambda (p) (diff--split-hl text p hl))
+               (diff--pieces (or runs '()) 0 len '()))))))
+
+;; RUNS as (START END CLASS) pieces that cover 0..LEN, the gaps in ""
+(define (diff--pieces runs pos len acc)
+  (cond
+    ((null? runs)
+     (reverse (if (< pos len) (cons (list pos len "") acc) acc)))
+    (else
+     (let* ((r (car runs))
+            (s (max pos (min (car r) len)))
+            (e (min (cadr r) len)))
+       (diff--pieces (cdr runs) (max s e) len
+         (append (if (> e s) (list (list s e (string-append "f-ts-" (caddr r)))) '())
+                 (if (> s pos) (list (list pos s "")) '())
+                 acc))))))
+
+;; one piece as segs, split where the changed words start and end
+(define (diff--split-hl text p hl)
+  (let* ((s (car p)) (e (cadr p)) (cls (caddr p))
+         (hs (if hl (max s (min (car hl) e)) e))
+         (he (if hl (max hs (min (cadr hl) e)) e))
+         (hcls (if (equal? cls "") "hl" (string-append cls " hl"))))
+    (append
+      (if (> hs s) (list (list cls (substring-bytes text s hs))) '())
+      (if (> he hs) (list (list hcls (substring-bytes text hs he))) '())
+      (if (> e he) (list (list cls (substring-bytes text he e))) '()))))
 
 (define (diff--commit-blocks commits)
   (if (null? commits)

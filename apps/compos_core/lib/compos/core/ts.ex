@@ -26,6 +26,52 @@ defmodule Compos.Core.TS do
   def ts_query_nif(_lang, _text, _query), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
+  Highlight LINES as one text in LANG, so a construct that spans lines
+  keeps its colour. Answer one list per line: the {start, stop, scope} runs
+  in that line's own bytes, in order, with no overlap. Where captures nest,
+  the inner one wins; where the grammar names one node twice, the later
+  name wins.
+  """
+  def highlight_lines(lang, lines) do
+    text = Enum.join(lines, "\n")
+
+    spans =
+      lang
+      |> ts_highlight(text)
+      |> Enum.with_index()
+      |> Enum.sort_by(fn {{s, e, _}, i} -> {s, -e, i} end)
+      |> Enum.map(&elem(&1, 0))
+
+    {rows, _} =
+      Enum.map_reduce(lines, 0, fn line, at ->
+        stop = at + byte_size(line)
+        {line_runs(spans, at, stop), stop + 1}
+      end)
+
+    rows
+  end
+
+  defp line_runs(spans, at, stop) do
+    inside =
+      for {s, e, scope} <- spans, s < stop, e > at, do: {max(s, at) - at, min(e, stop) - at, scope}
+
+    cuts =
+      inside
+      |> Enum.flat_map(fn {s, e, _} -> [s, e] end)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    cuts
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.flat_map(fn [a, b] ->
+      case inside |> Enum.filter(fn {s, e, _} -> s <= a and e >= b end) |> List.last() do
+        nil -> []
+        {_, _, scope} -> [{a, b, scope}]
+      end
+    end)
+  end
+
+  @doc """
   Several queries over one parse of TEXT: one [{capture, start, stop}]
   list per query.
   """
