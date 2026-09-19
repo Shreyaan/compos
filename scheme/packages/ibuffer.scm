@@ -1699,15 +1699,8 @@
 ;; restores can put the table straight back on screen. A table left
 ;; standing is no longer a popup to anything, so nothing else would ever
 ;; close it. The close reads the result rather than trusting the attempt.
-(define (ibuffer-prompt-restore-home! view &optional keep)
-  ;; the preview borrowed the invoking window; put back what it showed,
-  ;; before either cancel or commit. Commit must resolve mode affinity from
-  ;; the real arrangement, not from a temporarily previewed buffer.
-  (window-preview-end! (buffer-local view 'ibuffer-prompt-home-window)))
-
 (define (ibuffer-prompt-close! view &optional keep)
   (listing-preview-dismiss! view)
-  (ibuffer-prompt-restore-home! view keep)
   ;; a dock is a pane of the frame: deleting it gives its rows back to
   ;; the windows it took them from, and the tree is as it was
   (window-undock! view)
