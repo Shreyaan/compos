@@ -43,7 +43,7 @@ its list's.
 
 ## The three verbs
 
-1. `switch-to-buffer!` visits a buffer. With a target layout it reuses an existing view, fills spare capacity, then replaces the selected pane. Without a target it takes the selected window. Foreign buffers use the popup.
+1. `switch-to-buffer!` visits a buffer. With a target layout it reuses an existing view, fills spare capacity, then replaces the selected pane. Without a target it takes the selected window.
 2. `display-buffer` shows a buffer somewhere else and selects nothing. A result, a listing, a help page, a shell take their window through it. It returns the window.
 3. `pop-to-buffer` is `display-buffer` and then a `select-window!`. A listing you open to work in uses it (`list-mode-show!`).
 
@@ -62,9 +62,10 @@ The actions:
 | `reuse-window` | a window that shows the buffer already |
 | `mode-window` | a work window whose buffer has the same major mode; the selected window first |
 | `pop-up-window` | split the largest work window when it is big enough (`split-window-sensibly`), else the selected one |
-| `use-some-window` | the least recently used other work window; excludes the popup and peeks |
+| `use-some-window` | the least recently used other work window; excludes the float, popups and peeks |
 | `same-window` | the selected window (`same` is the same action) |
-| `popup` | the side window (`popup-show`, docs/POPUPS.md) |
+| `shaped` | the dock or the float, by the buffer's `window-shape` |
+| `popper-bottom` | the popup window at the bottom of the frame (popper.scm, docs/POPUPS.md) |
 
 `define-display-action!` adds one. An action is a function of the name and the alist that returns a window or `#f`.
 
@@ -97,10 +98,10 @@ work before companions. The picker captures this order once; highlighting
 another layout or accepting it distributes the same sequence over its slots.
 Existing panes keep their buffers, including Dired, other special lists,
 visible non-members and deliberate duplicate views. A layout change never
-substitutes hidden work for an already occupied slot. Floating popup windows
-are excluded from the base arrangement.
+substitutes hidden work for an already occupied slot. The float and popup
+windows are excluded from the base arrangement.
 
-Only hidden fillers are subject to eligibility: no peeks, floating popups,
+Only hidden fillers are subject to eligibility: no peeks, floating buffers,
 special buffers, context-only buffers or foreign group members. Existing
 group chats and scratch buffers are eligible fillers. Fixed targets cap the
 sequence at their capacity. With no group, flexible layouts use visible panes
@@ -151,23 +152,17 @@ with a disposable-frame runner and keyboard-path test in
 
 ## Rules
 
-`(add-display-rule! PATTERN ACTION [PARAMS])` puts a rule in front. PATTERN is a substring of the buffer name, or `(category KIND)` for a kind of display the caller names in the alist. ACTION is one action name or a list of them. A rule's actions come before the base action and the fallback, so a rule that names `popup` always lands in the popup, and a rule that names `same-window` never splits.
+`(add-display-rule! PATTERN ACTION [PARAMS])` puts a rule in front. PATTERN is a substring of the buffer name, `(category KIND)` for a kind of display the caller names in the alist, or a procedure of NAME and ALIST (Emacs `display-buffer-alist`). ACTION is one action name or a list of them. A rule's actions come before the base action and the fallback, so a rule that names `same-window` never splits.
 
 The callers pass an alist, a plist:
 
 - `'category KIND`: the kind of display. A peek passes `preview`, a list's row detail passes `detail`. The stock rule `((category preview) (reuse-window use-some-window pop-up-window))` is last in the alist, so a rule for a name wins over it.
-- A display of a buffer from outside the frame's group that names no category is a display of category `foreign` (`display-foreign?`, answered by groups.scm). The stock rule `((category foreign) popup)` sends it to the popup, so a group's panes stay sealed (docs/groups.md). `switch-to-buffer!` obeys this rule (Emacs `switch-to-buffer-obey-display-actions`); a mechanism that fills a window it chose calls `switch-to-buffer-here!`. To route foreign buffers through the window chain instead: `(add-display-rule! '(category foreign) 'pop-up-window)`.
+- A display of a buffer from outside the frame's group that names no category is a display of category `foreign` (`display-foreign?`, answered by groups.scm). The stock rule sends it through the window chain (docs/groups.md). `switch-to-buffer!` obeys this rule (Emacs `switch-to-buffer-obey-display-actions`); a mechanism that fills a window it chose calls `switch-to-buffer-here!`. To route foreign buffers through the window chain instead: `(add-display-rule! '(category foreign) 'pop-up-window)`.
 - `'inhibit-same-window #t`: keep the selected window out of the chain. `display-buffer-other-window!` is `display-buffer` with this set.
 
 ## Previews are a rule
 
-A peek (docs/PEEK.md) is a display of category `preview`. By the stock rule it goes through the window chain: dired and the browser show a file beside the listing without keeping it, in a window that is not the reader's. A popup moves the layout and hides the work under it, so no preview takes one. The next peek takes the same window, and dismissing the peek puts the window back. To preview in the popup instead, in `init.scm`:
-
-```scheme
-(add-display-rule! '(category preview) 'popup)
-```
-
-Point stays in the listing either way.
+A peek (docs/PEEK.md) is a display of category `preview`. By the stock rule it goes through the window chain: dired and the browser show a file beside the listing without keeping it, in a window that is not the reader's. A popup rule does not take a look (docs/POPUPS.md). The next peek takes the same window, and dismissing the peek puts the window back. Point stays in the listing.
 
 ## Details are a rule and a memory
 

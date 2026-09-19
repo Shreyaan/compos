@@ -2241,6 +2241,23 @@ Finding: no display reaches the popup window. The class float has two
 live users, the row preview card and the shaped prompt surfaces. They
 keep a small mechanism, the float, and the rest goes.
 
+**Popups after popper.el: landed (2026-09-19).** Three commits on
+d657abbb. Net lines are source files only, tests and docs excluded.
+
+| Step | Commit | Net |
+|---|---|---|
+| The survey above | a93806c3 | 0 |
+| The popup window goes; the card and the shaped prompts keep the float | dc0b9bb3 | -272 |
+| popper.scm: popper-toggle, popper-cycle, popper-toggle-type | this commit | +195 |
+
+Net: -77 source lines. docs/POPUPS.md states the model. The keys are
+the popper README keys: C-\` toggles, M-\` cycles, C-M-\` changes the
+type. C-\` ran group-next-buffer before; that command has no global key
+now. popper-reference-buffers is empty by default, so no buffer is a
+popup until the user names it. The popper default list made help-mode a
+popup, and display-buffer-test's temporary-cover test then went red,
+because the help window stopped being a work window.
+
 ## 11. Rules so it does not grow back
 
 - A seam in core is one custom that holds a function. The provider lives in

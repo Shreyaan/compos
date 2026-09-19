@@ -1,20 +1,59 @@
 # Popups
 
-A popup is one window that floats over the frame: a listing, the messages, the telemetry, a shell. It stays an ordinary window in the tree, so every window command reaches it; its class takes its split out of the flow.
+A popup is an ordinary buffer in an ordinary window. The model is popper.el from Emacs. `scheme/packages/popper.scm` holds all of it. There is no popup window kind.
 
-In Emacs terms the popup is a side window. A buffer reaches it by a display rule that names `popup`; a buffer with no rule takes the window chain in docs/DISPLAY-BUFFER.md, which splits a real window instead.
+## Which buffers are popups
 
-## Rules
+`popper-reference-buffers` is a custom list. Each entry names popups:
 
-1. The default side is the right edge, on every frame. A display rule can name another side (`(add-display-rule! NAME 'popup '(side bottom size 0.4))`).
-2. In the popup, `M-<left>`, `M-<right>`, `M-<up>`, and `M-<down>` move it to that edge (`popup-move-left` and friends). The keys are the popup's, not the buffer's: they go in when the buffer floats and out when it stops floating, and the buffer's mode then gives it its own `M-<arrows>` back. `s-RET` (Cmd-RET) in the popup runs `popup-bufferize`, so you keep what floats with one key; outside the popup that chord is `autolayout`.
-3. The side a buffer was moved to is the side it opens on next (`popup-side` local); a rule's side still wins.
-4. The popup shows one buffer at a time, and a buffer shown over another keeps it underneath (popper's stack). Dismissing the top one — `q` in a listing, `C-t` on the telemetry — brings back the one under it; dismissing the last closes the popup. `C-\`` closes the whole popup and empties the stack. A peek never waits on the stack (replaced, it is killed), and the stack holds live buffers only: it is pruned on every write.
-8. A buffer floats only in the popup window. The class that floats it is a buffer-local, so `popup-show-on` un-floats the buffer it replaces, and a buffer shown in any window but the popup's is an ordinary buffer again, whatever class it carried. A buffer that kept the class floated in every window it was shown in after.
-9. A floating popup is always the second window in the tree, whatever its side: the class places it, and the window it covers keeps its id and its place. `popup-bufferize` swaps it into first place when it becomes a real window on the left or the top.
-10. A peek popup — a popup that takes no focus — is transparent to the point. `popup-show-quietly` sets the popup window's buffer in place and moves the selection nowhere (a new popup is split, filled, and the selection put back in one step), and it records nothing: no return place, no work windows, no layout, so closing it restores nothing — the restores are for a popup you entered, and they carried every window's point back to the moment the popup opened. Nothing that manages point or focus sees a peek popup: `other-window` and the focus chords pass it by, a selection report from another window is dropped, a kill never fills a window with it, and un-floating a peek runs no mode setup. `popup-show-on` selects the popup and records the return place; a listing you open to work in uses it.
-11. `M-<down>` and `M-<up>` outside the popup scroll it (`scroll-other-window` reads the popup beside your work before the next window); `scroll-popup` and `scroll-popup-down` scroll it by name.
-5. `C-\`` toggles the popup (closed, it shows the last popup buffer again); `C-M-\`` (`popup-bufferize`) makes it an ordinary window in the place it occupies; `C-c p` puts any buffer in the popup; `q` in a listing dismisses it (rule 4).
-6. A popup is a visit, not a place: it says nothing about the frame's group (docs/groups.md).
-12. A buffer from outside the frame's group floats here: a switch to it is a display of category `foreign`, and the stock rule sends that category to the popup, so the group's panes stay sealed (docs/groups.md, "A foreign buffer floats"). `popup-bufferize` on such a buffer adds it to the group first (`popup-bufferize-hook`), then settles it into the layout. A chat is the exception: a chat never floats. A chat belongs to exactly one group, so a switch to a chat outside this frame's group enters that group and opens the chat as an ordinary buffer there.
-7. `*Messages*`, `*Telemetry*`, `*ibuffer*`, `*shell*`, `*llm*`, and `*opencode…` are popups by rule.
+- A string is a regexp on the buffer name, for example `"\\*Messages\\*"`.
+- A symbol is a major mode, for example `help-mode`. A derived mode matches too.
+- A procedure takes the buffer name and answers true or false.
+
+The list is empty by default, so no buffer is a popup until you name it. `popper-toggle-type` overrides the list for one buffer. It writes the buffer-local `popper-popup-status`: `popup` or `raised`.
+
+A buffer with a leading space, a peek, and a float are never popups. Each of them has its own window.
+
+## Where a popup shows
+
+A display of a popup goes through `display-buffer`. popper.scm adds one display rule. The rule has a procedure as its pattern, and the procedure answers true for a popup. The rule's action is `popper-bottom`:
+
+1. A window that shows the popup already takes it.
+2. Else the window of the latest popup on screen takes it. The new popup covers the old one.
+3. Else the frame's root splits, and a new window across the bottom of the frame takes it. It gets one third of the frame.
+
+The popup window then has the selection, as in popper. It is an ordinary window with normal focus. Every window command reaches it.
+
+A look at a popup (a peek or a row preview) is not a popper display. It takes the preview rule, as any other look does.
+
+The layout does not tile a popup window. `window-work-buffer?` answers false for a popup, so the layout target does not count it and a display of another buffer does not take it.
+
+## The commands
+
+| Command | Key | What it does |
+|---|---|---|
+| `popper-toggle` | `` C-` `` | Closes the popup on screen. With no popup on screen, it shows the latest popup again. |
+| `popper-cycle` | `` M-` `` | Shows another popup in the popup window. It shows the popup used least recently, so each press reaches a different popup. With no popup on screen, it shows the latest popup. |
+| `popper-toggle-type` | `` C-M-` `` | Makes the current popup an ordinary buffer: its popup window closes, and the display chain shows it in a work window. Makes any other buffer a popup: its window shows the buffer it showed before, and the buffer shows at the bottom. |
+
+The keys are the keys that the popper README suggests. A mode map can bind the same key. `detail-mode` binds `` C-` `` to `detail-next`, so in a detail window that key walks the details.
+
+`group-next-buffer` has no global key now. Run it with `M-x`.
+
+## Closing a popup
+
+A close is the quit-window restore. It reads the `restore` record on the window's leaf:
+
+1. When the popup covered another buffer, the window shows that buffer again. When that buffer is a popup too, that popup comes back, and the window keeps the record that a popup display made it. The next close deletes the window.
+2. When a popup display made the window, the window goes. The last window of a frame never goes.
+3. With no record, the window shows the last buffer of its history that is not a popup (Emacs `switch-to-prev-buffer`). With no such buffer, the window goes when another window is left.
+
+A close never kills the popup buffer. The latest popup is the first popup in the buffer ring (`popper-buffers`), so `popper-toggle` can show it again.
+
+## The float is not a popup
+
+A float is a window whose buffer wears the float class (window.scm, "the float"). Two surfaces float: the card of a row preview (`preview-show ... 'float`) and a prompt's table in the panel or the modal shape. The float is a preview surface, not a popup. The class string keeps its stylesheet name, `popup popup-SIDE`.
+
+## What went
+
+The earlier model floated a popup over the frame as a side window. The side window, the popup's own buffer stack, the return arrangement, the popup focus code, the move keys (`popup-move-*`), `popup-toggle`, `popup-buffer` (`C-c p`), and `popup-bufferize` are gone.

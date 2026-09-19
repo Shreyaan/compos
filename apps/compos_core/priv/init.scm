@@ -113,6 +113,8 @@
 ;; and binds C-c C-z and C-c C-e in it
 (load "repl.scm")
 (load "peek.scm")
+;; popups after popper.el; its keys take the backtick family from groups.scm
+(load "popper.scm")
 (load "scratch.scm")
 (load "sentry.scm")
 (load "setup.scm")
