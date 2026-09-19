@@ -471,6 +471,10 @@ defmodule Compos.Core.SchemeAPI do
       {"buffer-list-mru",
        "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers."} =>
         fn [] -> Editor.buffer_mru() end,
+      {"buffer-bury!", "(buffer-bury! BUF) — move BUF to the end of the buffer list."} => fn [buf] ->
+        Editor.mru_bury(Compos.Core.Prims.s(buf))
+        :void
+      end,
       {"window-prev-buffers",
        "(window-prev-buffers [ID]) — return the window's previous buffers, most recent first."} =>
         fn

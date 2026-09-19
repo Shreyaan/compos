@@ -5611,6 +5611,32 @@
   (lambda () (buffer-cycle! 1)))
 (define-command "next-buffer" "Walk back toward the most recently used buffer"
   (lambda () (buffer-cycle! -1)))
+;; Emacs bury-buffer: BUF goes to the end of the buffer list, and the
+;; selected window, when it shows BUF, shows the buffer it had before
+(define (bury-buffer! buf)
+  (buffer-bury! buf)
+  (when (equal? (window-buffer (active-window)) buf)
+    (let* ((prev (filter (lambda (b) (and (not (equal? b buf)) (buffer-known? b)))
+                         (window-prev-buffers)))
+           (other (filter (lambda (b) (not (equal? b buf))) (buffer-list-mru)))
+           (next (cond ((pair? prev) (car prev))
+                       ((pair? other) (car other))
+                       (else #f))))
+      (when next (switch-to-buffer-here! next)))))
+
+;; Emacs unbury-buffer: switch to the last buffer in the buffer list
+(define (unbury-buffer!)
+  (let ((bs (buffer-list-mru)))
+    (if (null? bs)
+        (message "No buffer to unbury")
+        (switch-to-buffer! (car (reverse bs))))))
+
+(define-command "bury-buffer" "Put this buffer at the end of the buffer list; its window shows the one before"
+  (lambda () (bury-buffer! (current-buffer))))
+(define-command "unbury-buffer" "Switch to the last buffer in the buffer list"
+  (lambda () (unbury-buffer!)))
+(catalog-meta! 'command "bury-buffer" 'domain 'buffers 'effects '(write display))
+(catalog-meta! 'command "unbury-buffer" 'domain 'buffers 'effects '(write display))
 (catalog-meta! 'command "previous-buffer" 'domain 'buffers 'effects '(write display))
 (catalog-meta! 'command "next-buffer" 'domain 'buffers 'effects '(write display))
 

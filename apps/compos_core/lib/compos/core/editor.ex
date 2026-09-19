@@ -310,6 +310,9 @@ defmodule Compos.Core.Editor do
   @doc "Buffers in most-recently-displayed order (Emacs buffer list)."
   def buffer_mru, do: GenServer.call(__MODULE__, :buffer_mru)
 
+  @doc "Move BUFFER to the end of the buffer list (Emacs bury-buffer)."
+  def mru_bury(buffer), do: GenServer.call(__MODULE__, {:mru_bury, buffer})
+
   @doc "Previous buffers for one window, most recently displayed first."
   def window_buffer_history(win \\ nil, fid \\ nil),
     do: GenServer.call(__MODULE__, {:window_buffer_history, win, fid(fid)})
@@ -1508,6 +1511,15 @@ defmodule Compos.Core.Editor do
         |> Map.put(:sel_touched, f.minibuffer.list.touched)
 
     changed(reply, put_frame(state, %{f | minibuffer: nil}), f.id)
+  end
+
+  # The whole known list goes into the MRU in its shown order, then BUFFER
+  # moves to its end: a buffer never used would otherwise sort after it.
+  def handle_call({:mru_bury, buffer}, _from, state) do
+    known = MapSet.new(Compos.Core.buffer_names())
+    live = Enum.filter(state.mru, fn b -> is_binary(b) and MapSet.member?(known, b) end)
+    rest = Enum.sort(Compos.Core.buffer_names() -- live)
+    {:reply, :ok, %{state | mru: List.delete(live ++ rest, buffer) ++ [buffer]}}
   end
 
   def handle_call(:buffer_mru, _from, state) do
