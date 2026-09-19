@@ -521,7 +521,6 @@ defmodule Compos.Ui.EditorLiveTest do
 
     Compos.Core.Editor.set_window_buffer(document)
     Compos.Core.Buffer.set_local(document, "render-mode", "markdown")
-    Compos.Core.Buffer.set_local(document, "preview-engine", "earmark")
 
     {:ok, view, _} = live(conn, "/")
     [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, render(view))

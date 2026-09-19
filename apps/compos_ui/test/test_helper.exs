@@ -6,18 +6,34 @@ case Application.get_env(:compos_core, :home) do
   _ -> :ok
 end
 
-# The chat transcript renders markdown through the page renderer, which
-# needs the reader's installed grammars. Load the real ones read-only when
-# they are there, the way apps/compos_core/test/test_helper.exs does; the
-# tests otherwise exercise the Earmark fallback.
-for name <- ["markdown", "markdown-inline"] do
-  dir = Path.expand("~/.compos/grammars")
-  lib = Path.join(dir, name <> if(:os.type() |> elem(1) == :darwin, do: ".dylib", else: ".so"))
-  query = Path.join(dir, name <> "-highlights.scm")
+defmodule Compos.Ui.PreviewMarkup do
+  @moduledoc """
+  A preview page without its source bookkeeping. Every element names its
+  byte range and every run of text sits in a span that names its first
+  byte. A test that reads the page as a reader sees it removes both.
+  """
 
-  if File.exists?(lib) and File.exists?(query) do
-    Compos.Core.TS.ts_load_grammar(name, lib, File.read!(query))
+  def shown(html) do
+    html
+    |> String.replace(~r/ data-(?:src|s)="[^"]*"/, "")
+    |> String.replace(~r/<span class="s">(.*?)<\/span>/s, "\\1")
   end
+
+  @doc "The markdown preview of TEXT, as `shown/1` answers it."
+  def preview(text, point, mark \\ nil, overlays \\ [], opts \\ []),
+    do:
+      shown(
+        Compos.Ui.EditorLive.preview_doc(
+          "markdown",
+          text,
+          point,
+          mark,
+          %{},
+          false,
+          overlays,
+          opts
+        )
+      )
 end
 
 ExUnit.start()

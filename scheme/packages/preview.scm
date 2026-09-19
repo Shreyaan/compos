@@ -156,8 +156,8 @@
 ;; One renderer draws a Markdown page: the tree-sitter engine. It draws
 ;; from the grammar's own tree, so it knows where every byte was drawn:
 ;; the caret lands on the byte it belongs to, and a click maps back to the
-;; source. Elixir falls back to Earmark only where the markdown grammar is
-;; not installed, and that fallback is mechanism, not a choice.
+;; source. The Markdown grammars are built into the tree-sitter NIF, so
+;; every Markdown page draws through this one engine.
 (defgroup 'preview "Rendered pages.")
 
 ;; A generated buffer has no extension to read a renderer from, so it says

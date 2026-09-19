@@ -100,9 +100,8 @@ defmodule Compos.Ui.AgentViewTest do
     assert html =~ "profile redisplay"
     assert has_element?(view, ".ag-status .ag-label", "SUMMARY")
     assert has_element?(view, ".ag-status-text", "Profiling the editor repaint path.")
-    # markdown became HTML in the prose block; the assertion holds for the
-    # page renderer (data-src attributes, byte spans) and for the Earmark
-    # fallback (bare tags) alike
+    # markdown became HTML in the prose block; the page renderer puts
+    # data-src attributes and byte spans around the text
     assert html =~ ~r/<strong[^>]*>(<span[^>]*>)?0\.6ms/
     # tool card with verb, title, status; body present
     assert html =~ "ag-verb"
@@ -422,7 +421,7 @@ defmodule Compos.Ui.AgentViewTest do
   end
 
   # block offsets go stale when text before them is edited; a boundary that
-  # lands mid-codepoint must not take down the whole render (Earmark badarg)
+  # lands mid-codepoint must not take down the whole render (a badarg)
   test "stale block offsets mid-multibyte char still render", %{conn: conn} do
     buf = "*agent: utf8-test*"
     {:ok, _} = Compos.Core.create_buffer(buf)
@@ -449,8 +448,8 @@ defmodule Compos.Ui.AgentViewTest do
   end
 
   # A table shrinks to the width it is given and clips the rest, so the
-  # scrollbar must sit on a box OUTSIDE it. Earmark emits a bare <table>;
-  # the renderer wraps each one. Lose the wrapper and a wide table clips.
+  # scrollbar must sit on a box OUTSIDE it. The renderer wraps each table.
+  # Lose the wrapper and a wide table clips.
   test "a markdown table renders inside its own scroll box", %{conn: conn} do
     buf = "*agent: table-test*"
     {:ok, _} = Compos.Core.create_buffer(buf)

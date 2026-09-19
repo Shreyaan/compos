@@ -1,14 +1,12 @@
 defmodule Compos.Ui.PreviewFenceTest do
   use ExUnit.Case, async: true
 
-  alias Compos.Ui.EditorLive
-
-  @faces %{}
+  import Compos.Ui.PreviewMarkup
 
   test "the text before a fence stays before the fence" do
     text = "# Title\n\nIntro line.\n\n```scheme\n(+ 1 2)\n```\n\nAfter.\n"
 
-    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+    html = preview(text, 0)
 
     assert html =~ "<h1>"
     assert html =~ "Intro line."
@@ -22,7 +20,7 @@ defmodule Compos.Ui.PreviewFenceTest do
   test "an unmatched inline backtick does not eat the rest of the page" do
     text = "A `broken span here.\n\nSecond paragraph.\n\n```sh\necho hi\n```\n\nTail.\n"
 
-    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+    html = preview(text, 0)
 
     assert html =~ "Second paragraph."
     assert html =~ "Tail."

@@ -1,30 +1,29 @@
 defmodule Compos.Ui.PreviewEmbedTest do
   use ExUnit.Case, async: true
 
-  alias Compos.Ui.EditorLive
+  import Compos.Ui.PreviewMarkup
   alias Compos.Ui.Oembed
   alias Compos.Core.Markdown.Html
 
-  @faces %{}
   @pt ~s(<span class="pt"></span>)
 
   test "a bare image URL renders as an inline image" do
     html =
-      EditorLive.preview_doc("markdown", "look:\n\nhttps://pics.example/cat.png\n", 0, @faces, false)
+      preview("look:\n\nhttps://pics.example/cat.png\n", 0)
 
     assert html =~ ~s(<img src="https://pics.example/cat.png")
   end
 
   test "the image survives a query string" do
     html =
-      EditorLive.preview_doc("markdown", "https://pics.example/cat.jpeg?w=800\n", 0, @faces, false)
+      preview("https://pics.example/cat.jpeg?w=800\n", 0)
 
     assert html =~ ~s(<img src="https://pics.example/cat.jpeg?w=800")
   end
 
   test "point at the end of a pasted image URL keeps the image and the cursor" do
     text = "https://pics.example/cat.png"
-    html = EditorLive.preview_doc("markdown", text, byte_size(text), @faces, false)
+    html = preview(text, byte_size(text))
 
     assert html =~ ~s(<img src="https://pics.example/cat.png")
     assert html =~ @pt
@@ -32,14 +31,14 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
   test "a written link stays a link" do
     html =
-      EditorLive.preview_doc("markdown", "[cat](https://pics.example/cat.png)\n", 0, @faces, false)
+      preview("see [cat](https://pics.example/cat.png)\n", 40)
 
     refute html =~ "<img"
     assert html =~ ~s(<a href="https://pics.example/cat.png">cat</a>)
   end
 
   test "a non-image URL stays a link" do
-    html = EditorLive.preview_doc("markdown", "https://example.com/page\n", 0, @faces, false)
+    html = preview("https://example.com/page\n", 0)
 
     refute html =~ "<img"
     assert html =~ ~s(<a href="https://example.com/page")
@@ -47,21 +46,21 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
   test "a standalone bare YouTube URL renders as a video card" do
     url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=43"
-    html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
+    html = preview(url <> "\n", 0)
 
     assert html =~ ~s(class="youtube-card")
     assert html =~ ~s(src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
-    assert html =~ ~s(href="#{url}")
+    assert html =~ ~s(href="#{String.replace(url, "&", "&amp;")}")
   end
 
   test "a standalone embed directive renders a YouTube video card" do
     url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=43"
     source = "#+embed: #{url}\n"
-    html = EditorLive.preview_doc("markdown", source, byte_size(source), @faces, false)
+    html = preview(source, byte_size(source))
 
     assert html =~ ~s(class="youtube-card")
     assert html =~ ~s(src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
-    assert html =~ ~s(href="#{url}")
+    assert html =~ ~s(href="#{String.replace(url, "&", "&amp;")}")
     assert html =~ @pt
   end
 
@@ -72,14 +71,14 @@ defmodule Compos.Ui.PreviewEmbedTest do
           "https://youtube.com/embed/dQw4w9WgXcQ",
           "https://youtu.be/dQw4w9WgXcQ?t=43"
         ] do
-      html = EditorLive.preview_doc("markdown", "#+embed: #{url}\n", 0, @faces, false)
+      html = preview("#+embed: #{url}\n", 0)
       assert html =~ ~s(class="youtube-card")
     end
   end
 
   test "an embed word inside a paragraph stays text and a link" do
     url = "https://youtu.be/dQw4w9WgXcQ"
-    html = EditorLive.preview_doc("markdown", "Use #+embed: #{url} here.\n", 0, @faces, false)
+    html = preview("Use #+embed: #{url} here.\n", 0)
 
     refute html =~ ~s(class="youtube-card")
     assert html =~ "Use #+embed:"
@@ -88,7 +87,7 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
   test "a bare YouTube URL inside prose stays a link" do
     url = "https://youtu.be/dQw4w9WgXcQ"
-    html = EditorLive.preview_doc("markdown", "Watch #{url} later.\n", 0, @faces, false)
+    html = preview("Watch #{url} later.\n", 0)
 
     refute html =~ ~s(class="youtube-card")
     assert html =~ ~s(href="#{url}")
@@ -96,13 +95,7 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
   test "a written YouTube link stays a link" do
     html =
-      EditorLive.preview_doc(
-        "markdown",
-        "[video](https://youtu.be/dQw4w9WgXcQ)\n",
-        0,
-        @faces,
-        false
-      )
+      preview("[video](https://youtu.be/dQw4w9WgXcQ)\n", 0)
 
     refute html =~ ~s(class="youtube-card")
     assert html =~ ">video</a>"
@@ -110,7 +103,7 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
   test "an embed directive with a malformed video id stays text and a link" do
     url = "https://youtu.be/too-short"
-    html = EditorLive.preview_doc("markdown", "#+embed: #{url}\n", 0, @faces, false)
+    html = preview("#+embed: #{url}\n", 0)
 
     refute html =~ ~s(class="youtube-card")
     assert html =~ "#+embed:"
@@ -129,13 +122,7 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
   test "an uncached tweet URL renders a pending card" do
     html =
-      EditorLive.preview_doc(
-        "markdown",
-        "https://x.com/pending_user/status/990\n",
-        0,
-        @faces,
-        false
-      )
+      preview("https://x.com/pending_user/status/990\n", 0)
 
     assert html =~ "tweet-pending"
     assert html =~ ~s(<a href="https://x.com/pending_user/status/990")
@@ -143,22 +130,20 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
   test "a share-sheet query string still makes a tweet card" do
     html =
-      EditorLive.preview_doc(
-        "markdown",
-        "https://x.com/paulfinneyx/status/2087738406403215769?s=20\n",
-        0,
-        @faces,
-        false
-      )
+      preview("https://x.com/paulfinneyx/status/2087738406403215769?s=20\n", 0)
 
     assert html =~ ~s(<div class="tweet)
   end
 
   test "a cached tweet URL renders the card verbatim" do
     url = "https://twitter.com/jack/status/20"
-    Oembed.put(url, {:ok, ~s(<blockquote class="twitter-tweet"><p>just setting up</p></blockquote>)})
 
-    html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
+    Oembed.put(
+      url,
+      {:ok, ~s(<blockquote class="twitter-tweet"><p>just setting up</p></blockquote>)}
+    )
+
+    html = preview(url <> "\n", 0)
 
     assert html =~ ~s(<div class="tweet">)
     assert html =~ "just setting up"
@@ -169,7 +154,7 @@ defmodule Compos.Ui.PreviewEmbedTest do
     url = "https://x.com/gone/status/404123"
     Oembed.put(url, :error)
 
-    html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
+    html = preview(url <> "\n", 0)
 
     refute html =~ ~s(<div class="tweet)
     assert html =~ ~s(<a href="#{url}")

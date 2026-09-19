@@ -43,7 +43,6 @@ defmodule Compos.Core.MixProject do
       # Agents create short-lived inbound HTTP servers. Bandit owns the
       # socket and HTTP byte parsing; Scheme owns every request handler.
       {:bandit, "~> 1.5"},
-      {:earmark, "~> 1.4"},
       # fsevents/inotify: how a diff buffer learns that an agent wrote to disk
       {:file_system, "~> 1.0"},
       {:exqlite, "~> 0.27"},

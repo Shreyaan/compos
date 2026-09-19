@@ -12,7 +12,6 @@ defmodule Compos.Ui.EditorLive do
   import Compos.Ui.ComposML, only: [sigil_M: 2]
 
   alias Compos.Core.{Events, Input}
-  alias Compos.Core.Markdown.Classic
   alias Compos.Scheme.Text
   alias Compos.Ui.{AppServer, LocalFile, LocalImage}
 
@@ -1861,13 +1860,13 @@ defmodule Compos.Ui.EditorLive do
         <c-text id={@id} class="x-card" contenteditable="false" data-len={@len}><%= case @card do %><% {:ok, html} -> %>{Phoenix.HTML.raw(html)}<% _ -> %><c-text class="x-pending">{@txt}</c-text><% end %></c-text>
         """
 
-      cls =~ "youtube-embed" and Classic.youtube_id(txt) ->
-        id = Classic.youtube_id(txt)
+      cls =~ "youtube-embed" and Compos.Core.Markdown.Html.youtube_id(txt) ->
+        id = Compos.Core.Markdown.Html.youtube_id(txt)
 
         assigns =
           assign(assigns,
             len: byte_size(txt),
-            thumbnail: Classic.youtube_thumbnail(id)
+            thumbnail: Compos.Core.Markdown.Html.youtube_thumbnail(id)
           )
 
         ~M"""
@@ -2580,7 +2579,8 @@ defmodule Compos.Ui.EditorLive do
       preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
 
     leaf = %{leaf | text: text}
-    {tree, cache} = md_tree(leaf, {leaf.buffer, leaf.version, leaf.hidden_lines}, cache)
+    key = {leaf.buffer, leaf.version, leaf.hidden_lines, leaf.overlays}
+    {tree, cache} = md_tree(leaf, key, cache)
 
     html =
       Compos.Core.Markdown.Html.document(
@@ -2617,8 +2617,9 @@ defmodule Compos.Ui.EditorLive do
   end
 
   @doc """
-  The Earmark page (`Compos.Core.Markdown.Classic`) with this client's
-  image and card hooks: the renderer of a home with no Markdown grammar.
+  A preview page with this client's image and card hooks. Markdown draws
+  through `Compos.Core.Markdown.Html.document/5`; an html buffer through
+  `Compos.Core.Markdown.Html.html_document/3`.
   """
   def preview_doc(rm, text, point, faces, authored),
     do: preview_doc(rm, text, point, nil, faces, authored, [])
@@ -2629,10 +2630,14 @@ defmodule Compos.Ui.EditorLive do
   def preview_doc(rm, text, point, mark, faces, authored, overlays),
     do: preview_doc(rm, text, point, mark, faces, authored, overlays, [])
 
-  def preview_doc(rm, text, point, mark, faces, authored, overlays, opts) do
+  def preview_doc("markdown", text, point, mark, faces, _authored, overlays, opts) do
     ui = [local_url: &Compos.Ui.LocalImage.url/1, tweet_card: &Compos.Ui.Oembed.card/1]
-    Compos.Core.Markdown.Classic.preview_doc(rm, text, point, mark, faces, authored, overlays, Keyword.merge(ui, opts))
+    opts = Keyword.merge(ui, opts) ++ [overlays: overlays]
+    Compos.Core.Markdown.Html.document(text, point, mark, faces, opts)
   end
+
+  def preview_doc(_rm, text, _point, _mark, faces, authored, _overlays, _opts),
+    do: Compos.Core.Markdown.Html.html_document(text, faces, authored)
 
   defp csv_source_reader(buffer) do
     fn target ->
@@ -2660,7 +2665,7 @@ defmodule Compos.Ui.EditorLive do
         {tree, cache}
 
       _ ->
-        case Compos.Core.Markdown.parse(Compos.Core.Markdown.Html.overlay_source(leaf.text, leaf.overlays)) do
+        case Compos.Core.Markdown.Html.parse(leaf.text, leaf.overlays) do
           {:ok, tree} -> {tree, Map.put(cache, {:md_tree, leaf.id}, {tree_key, tree})}
           {:error, _} -> {nil, cache}
         end

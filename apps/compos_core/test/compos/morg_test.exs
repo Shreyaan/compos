@@ -112,7 +112,7 @@ defmodule Compos.MorgTest do
   # switch. The contract below is the design; building it needs the mode, a
   # major-mode teardown in set-mode!, and a morg teardown that undoes them.
   @tag :skip
-  test "markdown-mode is separate and keeps the Earmark preview" do
+  test "markdown-mode is separate and keeps the Markdown preview" do
     buf = morg_buffer("# title\n\nbody\n")
 
     {:ok, _} = Session.eval(~s{(set-mode! "markdown-mode")})

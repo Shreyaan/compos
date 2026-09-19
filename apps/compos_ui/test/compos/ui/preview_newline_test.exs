@@ -1,11 +1,9 @@
 defmodule Compos.Ui.PreviewNewlineTest do
   use ExUnit.Case, async: true
 
-  alias Compos.Ui.EditorLive
+  import Compos.Ui.PreviewMarkup
 
-  @faces %{}
-
-  defp body(text), do: EditorLive.preview_doc("markdown", text, 0, @faces, false)
+  defp body(text), do: preview(text, 0)
 
   test "a newline inside a paragraph draws as a line break" do
     html = body("One line\nsecond line\n")
