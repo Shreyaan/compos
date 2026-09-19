@@ -265,3 +265,19 @@
     (agent-thought-reveal! "zz-dead")
     (check-false! (agent-thought-full "zz-dead")
                   "the reveal cleared the dead run without writing")))
+
+(deftest 'a-revived-chat-drops-its-stopped-markers-and-keeps-quoted-ones
+  "agent-drop-stopped-markers! cuts each [agent stopped] meta block; a tool block that quotes it stays"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-agent-stopped*"
+                 "hi\n[agent stopped]\ntool says [agent stopped]\n[agent stopped]\nbye")))
+      ;; hi\n = 0-3, marker 3-19, tool 19-45, marker 45-61, bye 61-64
+      (buffer-set-local! buf 'agent-blocks
+        '((61 64 "prose") (45 61 "meta") (19 45 "tool" "tc" "Echo" "read" "completed" 30) (3 19 "meta") (0 3 "user")))
+      (check-equal! (agent-drop-stopped-markers! buf) 2 "two markers go")
+      (check-equal! (buffer-text buf) "hi\ntool says [agent stopped]\nbye"
+                    "the quoted text in the tool block stays")
+      (check-equal! (length (filter (lambda (b) (equal? (nth 2 b) "meta"))
+                                    (buffer-local buf 'agent-blocks)))
+                    0 "no meta block is left")
+      (buffer-kill! buf))))

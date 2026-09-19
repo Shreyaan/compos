@@ -649,6 +649,12 @@
         (chat-prompt-snapshot-parts target 'direct live)
         live)))
 
+;; A model can run its tools and end the turn with no text, which leaves
+;; the user asking "done?". The direct lane then sends this once, in the
+;; same turn. "" turns the nudge off.
+(defvar 'chat-empty-reply-nudge
+  "You ended your turn without a reply. In two or three sentences, tell the user what you did and what is left.")
+
 (define (chat-thread-context slug display)
   (let* ((name (agent-buf slug))
          (buf (or (buffer-ref name) name))
@@ -660,7 +666,8 @@
     (list 'turns (reverse (chat-model-record buf))
           'system (prompt-parts-text (chat-system-prompt-parts buf tools?))
           'tools (if tools? (chat-tools buf) '())
-          'dispatcher (chat-tool-dispatch slug))))
+          'dispatcher (chat-tool-dispatch slug)
+          'empty-reply-nudge chat-empty-reply-nudge)))
 
 (domain! 'chat)
 (effects! '(read))

@@ -227,6 +227,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
       reasoning_effort: effort,
       on_record: fn role, blocks -> record(slug, role, blocks_to_record(blocks), false) end,
       on_round_usage: fn usage -> GenServer.cast(backend, {:turn_usage, usage}) end,
+      empty_reply_nudge: Map.get(ctx, :empty_reply_nudge),
       # steering: text the user typed while this turn ran joins the wire
       # at the next round. The raw typed text goes — the display and the
       # record then agree, and the turn already carries its editor context.

@@ -164,9 +164,25 @@ defmodule Compos.Core.LLM do
         usage = add_usage(usage, resp)
         report_usage(opts, usage)
 
+        text = Enum.map_join(blocks, "", &(&1["text"] || ""))
+
         case steered_blocks(opts[:steer]) do
           [] ->
-            {:ok, Enum.map_join(blocks, "", &(&1["text"] || "")), usage, stop_of(resp)}
+            case empty_reply_nudge(text, rounds, opts) do
+              nil ->
+                {:ok, text, usage, stop_of(resp)}
+
+              # the model ran tools and then said nothing: ask once, in the
+              # same turn, for the reply the user is owed. The words are
+              # Scheme's (the context's empty-reply-nudge).
+              nudge ->
+                ask = [%{"type" => "text", "text" => nudge}]
+                record(opts, "user", ask)
+                prior = if blocks == [], do: [], else: [%{role: "assistant", content: blocks}]
+                messages = messages ++ prior ++ [%{role: "user", content: ask}]
+                opts = Map.put(opts, :empty_reply_nudge, nil)
+                tool_loop(messages, system, tools, dispatcher, rounds + 1, usage, opts)
+            end
 
           steered ->
             record(opts, "user", steered)
@@ -181,6 +197,15 @@ defmodule Compos.Core.LLM do
       {:error, msg} ->
         {:error, msg}
     end
+  end
+
+  # the nudge applies once, only after tool rounds, and only to a blank reply
+  defp empty_reply_nudge(text, rounds, opts) do
+    nudge = opts[:empty_reply_nudge]
+
+    if is_binary(nudge) and nudge != "" and rounds > 0 and String.trim(text) == "",
+      do: nudge,
+      else: nil
   end
 
   defp stop_of(%{"stop_reason" => r}) when is_binary(r), do: r

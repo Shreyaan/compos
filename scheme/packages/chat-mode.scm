@@ -1705,6 +1705,9 @@
     (buffer-set-local! buf 'agent-seed-context
       (and (not (connector-can? cname 'stateless)) (> mark 0) (not (equal? said ""))))
     (let ((slug (chat-attach-agent! buf cname)))
+      ;; a chat that comes back leaves no "[agent stopped]" line behind
+      (when (boundp (quote agent-drop-stopped-markers!))
+        (agent-drop-stopped-markers! buf))
       (unless (equal? said "")
         (message (string-append "agent " slug ": revived (fresh session)")))
       slug)))

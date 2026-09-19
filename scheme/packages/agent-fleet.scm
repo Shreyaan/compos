@@ -397,6 +397,24 @@
       (let ((start (agent-render! slug "\n[agent stopped]\n" "agent-meta")))
         (agent-block-push! buf start (agent-mark slug) "meta" '())))))
 
+;; A revived chat drops the "[agent stopped]" lines its stops left behind
+;; (the owner, 2026-09-19): the transcript says what was said, and a stop
+;; the chat came back from is not part of that. Each marker is a meta block
+;; of exactly that text; tool output that quotes it stays.
+(define (agent-drop-stopped-markers! buf)
+  (let* ((text (buffer-text buf))
+         (marks (filter (lambda (blk)
+                          (and (equal? (nth 2 blk) "meta")
+                               (equal? (string-trim (substring-bytes text (car blk) (cadr blk)))
+                                       "[agent stopped]")))
+                        (or (buffer-local buf 'agent-blocks) '())))
+         ;; last first, so each cut leaves the earlier offsets as they were
+         (spans (reverse (sort (map (lambda (blk) (list (car blk) (cadr blk))) marks)))))
+    (for-each (lambda (s) (agent-excise-range! buf (car s) (cadr s))) spans)
+    (when (and (pair? spans) (boundp (quote chat-view-sync!)))
+      (chat-view-sync! buf))
+    (length spans)))
+
 (define (agent-release-windows! buf)
   (let* ((others (filter (lambda (b) (and (not (equal? b buf))
                                           (not (string-prefix? "*agent" b))))

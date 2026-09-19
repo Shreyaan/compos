@@ -147,7 +147,8 @@ defmodule Compos.Core.Agent.Backend do
                turns: plist_get(plist, "turns") || [],
                system: plist_str(plist_get(plist, "system")),
                tools: plist_get(plist, "tools") || [],
-               dispatcher: plist_get(plist, "dispatcher")
+               dispatcher: plist_get(plist, "dispatcher"),
+               empty_reply_nudge: plist_str(plist_get(plist, "empty-reply-nudge"))
              }}
 
           {:error, msg} ->
