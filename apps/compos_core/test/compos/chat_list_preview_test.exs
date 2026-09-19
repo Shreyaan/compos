@@ -72,7 +72,7 @@ defmodule Compos.ChatListPreviewTest do
     assert eval!(~S{(list-current "*chat-list*")}) == ~s("*zz-dp-b*")
     assert eval!("*zz-dp-calls*") == "()"
     eventually(fn -> eval!("*zz-dp-calls*") == ~s{("*zz-dp-b*")} end)
-    assert eval!("(frame-local 'listing-preview-owner)") == ~s("*chat-list*")
+    assert eval!("(listing-preview-owner)") == ~s("*chat-list*")
   end
 
   test "typing updates input before drawing the filtered list and preview" do

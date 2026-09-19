@@ -23,7 +23,6 @@
 (define *collect-cancel* #f)
 (define *collect-complete* #f)   ; path prompts resolve a label through it
 (define *collect-input* "")
-(define *collect-window* #f)     ; the window the prompt ran in
 
 (define (collect-forget!)
   (set! *collect-select* #f)
@@ -48,14 +47,16 @@
       cands)))
 
 ;; the list opens in another window: the window the prompt ran in must keep
-;; showing what the preview acts on
+;; showing what the preview acts on, and the list's window names it as owner
 (define (collect-open! prompt cands)
-  (buffer-create *collect-buffer*)
-  (collect-fill! prompt cands)
-  (let ((showing (window-showing *collect-buffer*)))
-    (if showing
-        (select-window! showing)
-        (begin (split-window! 'v 0.6) (other-window!))))
+  (let ((prompt-window (active-window)))
+    (buffer-create *collect-buffer*)
+    (collect-fill! prompt cands)
+    (let ((showing (window-showing *collect-buffer*)))
+      (if showing
+          (select-window! showing)
+          (begin (split-window! 'v 0.6) (other-window!))))
+    (set-window-owner! (active-window) prompt-window))
   (switch-to-buffer! *collect-buffer*)
   (set-mode! "collect-mode")
   (goto-char! 0)
@@ -76,15 +77,12 @@
     (if (and (>= ln 0) (< ln (length labels))) (list-ref labels ln) #f)))
 
 ;; the preview goes where the prompt's preview went: the window the prompt
-;; ran in. If that window is gone, any other window does. The preview must
-;; never land in the list itself, so a lone *Collect* window previews
-;; nothing.
+;; ran in, the list window's owner. If that window is gone, any other
+;; window does. The preview must never land in the list itself, so a lone
+;; *Collect* window previews nothing.
 (define (collect-target-window)
   (let ((me (active-window)))
-    (if (and *collect-window* (window-exists? *collect-window*)
-             (not (equal? *collect-window* me)))
-        *collect-window*
-        (other-window-id me))))
+    (or (window-owner me) (other-window-id me))))
 
 (define (collect-preview!)
   (let ((label (collect-current)) (w (collect-target-window)))
@@ -93,7 +91,6 @@
           (let ((back (active-window)))
             (select-window! w)
             (*collect-select* label)
-            (set! *collect-window* w)
             (select-window! back))
           (message "No other window to preview in")))))
 
@@ -164,7 +161,6 @@
                   (set! *collect-cancel* (cadr (assoc 'cancel d)))
                   (set! *collect-complete* (cadr (assoc 'complete d)))
                   (set! *collect-input* (cadr (assoc 'input d)))
-                  (set! *collect-window* (active-window))
                   (collect-open! (cadr (assoc 'prompt d)) cands))))))))
 
 (define-mode "collect-mode"

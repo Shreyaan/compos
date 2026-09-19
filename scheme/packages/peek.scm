@@ -21,10 +21,9 @@
 (domain! 'code)
 (effects! '(read))
 
-;; (name window origin opened? buffer origin-buffer origin-point) or #f.
-;; The window's leaf records what the peek covers (window-restore).
-(define *peek* #f)
-
+;; The peek is the frame's look (preview-show ... 'other): the slot
+;; holds the window, and its data is (definition NAME OPENED? ORIGIN-BUFFER
+;; ORIGIN-POINT). The window's leaf records what the peek covers.
 (define (peek--chars)
   *scheme-ide-chars*)
 
@@ -36,83 +35,57 @@
 (define (definition-locate name &optional kind)
   (scheme-ide--find-def name kind))
 
-(define (peek--window-live? win) (assoc win (window-list)))
+;; the definition look on screen: (NAME OPENED? ORIGIN-BUFFER ORIGIN-POINT)
+(define (peek--data)
+  (let ((d (preview-data)))
+    (and (pair? d) (equal? (car d) 'definition) (cdr d))))
+
+(define (peek--window) (and (peek--data) (nth 3 (preview-slot))))
 
 (define (peek--show! name hit)
-  (let* ((me (active-window))
-         (kind (car hit))
-         (target (cadr hit))
-         (pos (caddr hit))
+  (let* ((target (cadr hit))
          (opened? (not (buffer-exists? target)))
-         (other (other-window-id me))
-         (covered (if other
-                      (list 'other (window-buffer other) (window-point other))
-                      '(window #f #f))))
-    (if other
-        (select-window! other)
-        (begin (split-window! 'h 0.5) (other-window!)))
-    (if (equal? kind 'buffer) (switch-to-buffer! target) (visit target))
-    (goto-char! pos)
-    (let ((win (active-window)))
-      (set-window-restore! win covered)
-      (select-window! me)
-      (let ((origin-buf (peek--buffer-of me)))
-        (set! *peek* (list name win me opened?
-                           (if (equal? kind 'buffer) target (peek--buffer-of win))
-                           origin-buf (buffer-point origin-buf))))
-      win)))
-
-(define (peek--buffer-of win)
-  (let ((hit (assoc win (window-list))))
-    (and hit (cadr hit))))
+         (buf (if (equal? (car hit) 'buffer) target (visit-quietly target)))
+         (origin (window-buffer (active-window)))
+         (win (preview-show buf 'other #f
+                (list 'definition name opened? origin (buffer-point origin)))))
+    (when win (window-set-point! win (caddr hit)))
+    win))
 
 (define (peek-discard!)
-  (when *peek*
-    (let* ((p *peek*)
-           (win (list-ref p 1))
-           (origin (list-ref p 2))
-           (opened? (list-ref p 3))
-           (buf (list-ref p 4)))
-      (set! *peek* #f)
-      (when (peek--window-live? win) (window-quit-restore! win))
-      (when (peek--window-live? origin) (select-window! origin))
-      (when (and opened? buf (buffer-exists? buf)
-                 (not (window-showing buf))
-                 (not (buffer-modified? buf)))
-        (buffer-kill! buf)))))
+  (let ((d (peek--data)))
+    (when d
+      (let ((buf (car (preview-end #f))))
+        (when (and (cadr d) (buffer-exists? buf) (not (window-showing buf))
+                   (not (buffer-modified? buf)))
+          (buffer-kill! buf))))))
 
 (define (peek-go!)
-  (let ((p *peek*))
-    (set! *peek* #f)
+  (let ((name (car (peek--data))) (win (peek--window)))
+    (preview-end #t)
     (lsp--push-marker!)
-    (select-window! (list-ref p 1))
-    (message (string-append "Definition of " (car p)))))
+    (select-window! win)
+    (message (string-append "Definition of " name))))
 
 ;; the reader is where the peek was made: the origin window is active, it
 ;; still shows the origin buffer, and that buffer's point did not move.
 ;; Everything is read by id or name, so the answer does not depend on
 ;; which buffer the calling lane treats as current.
-(define (peek--still-here? p)
-  (let ((origin (list-ref p 2))
-        (buf (list-ref p 5)))
+(define (peek--still-here? d)
+  (let ((origin (nth 2 (preview-slot))) (buf (nth 2 d)))
     (and (equal? (active-window) origin)
-         (equal? (peek--buffer-of origin) buf)
+         (equal? (window-buffer origin) buf)
          (buffer-exists? buf)
-         (equal? (buffer-point buf) (list-ref p 6)))))
+         (equal? (buffer-point buf) (nth 3 d)))))
 
 (define (peek--post-command!)
-  (when *peek*
-    (cond ((equal? (active-window) (list-ref *peek* 1))
-           ;; the reader moved into the window by any road: it is theirs
-           (set! *peek* #f))
-          ((peek--still-here? *peek*) #t)
-          (else (peek-discard!)))))
-
-;; Register once. A reload re-runs only the forms whose text changed, so
-;; this flag survives it and the hook list gets no second entry. The
-;; lambda looks the hook up by name at run time, so a reloaded
-;; peek--post-command! is the one that runs.
-(define *peek-hook-installed* #f)
+  (let ((d (peek--data)))
+    (when d
+      (cond ((equal? (active-window) (peek--window))
+             ;; the reader moved into the window by any road: it is theirs
+             (preview-end #t))
+            ((peek--still-here? d) #t)
+            (else (peek-discard!))))))
 
 (add-hook! 'post-command-hook 'peek--post-command!)
 
@@ -127,7 +100,7 @@
     (let ((name (peek--name)))
       (cond
         ((not name) (message "No name at point"))
-        ((and *peek* (equal? name (car *peek*)) (peek--window-live? (list-ref *peek* 1)))
+        ((and (peek--window) (equal? name (car (peek--data))))
          (peek-go!))
         (else
           (peek-discard!)
@@ -143,7 +116,7 @@
 (define-command "definition-peek-go"
   "Go to the definition the peek window shows"
   (lambda ()
-    (if (and *peek* (peek--window-live? (list-ref *peek* 1)))
+    (if (peek--window)
         (peek-go!)
         (message "No peek to go to"))))
 

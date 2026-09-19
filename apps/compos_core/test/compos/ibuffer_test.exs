@@ -205,7 +205,7 @@ defmodule Compos.IbufferTest do
     # The work window holds the listing; the popup holds a separate copy.
     assert eval!("(popup-open?)") == "#f"
     refute tree.() == before
-    assert eval!("(frame-local 'listing-preview-owner)") == "#f"
+    assert eval!("(listing-preview-owner)") == "#f"
     refute eval!("(popup-buffer)") == ~s{"*zz-collected-one*"}
 
     press("q")
@@ -261,7 +261,7 @@ defmodule Compos.IbufferTest do
 
     # The window form previews too: the row under the highlight shows in
     # another window as a peek, and q gives that window back.
-    assert eval!("(frame-local 'listing-preview-owner)") == "#f"
+    assert eval!("(listing-preview-owner)") == "#f"
 
     # The reused ibuffer owns ordinary marks and moves the whole marked set.
     eval!(~s{(local-set-key* "*ibuffer*" "<f8>" "list-mark")})

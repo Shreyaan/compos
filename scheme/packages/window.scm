@@ -524,6 +524,86 @@
         (popup-default-side))
     (display-param name 'size)))
 
+;;; --- the preview verb ----------------------------------------------------------
+;;; A look shows a buffer for a while without keeping it. It never bumps
+;;; the MRU, never moves focus, and never enters winner's ring. A frame
+;;; holds one look: (BUF WHERE FROM SHOWN DATA TREE). WHERE says where:
+;;;   here   the window FROM itself; its leaf records what the look covers
+;;;   other  a window FROM owns: the one it owns already, else a display
+;;;   float  the popup card, the one floating overlay
+;;;   frame  the whole frame: BUF is a procedure that draws the look, and
+;;;          TREE is the arrangement it covers
+;;; DATA is the caller's own note. (preview-end KEEP) ends the look: KEEP
+;;; #t keeps what is shown (RET twice keeps), #f puts back what was there.
+
+(define (preview-slot) (frame-local 'preview))
+(define (preview-buffer) (let ((s (preview-slot))) (and s (car s))))
+(define (preview-data) (let ((s (preview-slot))) (and s (nth 4 s))))
+
+(define (preview--owned-window owner)
+  (let loop ((rows (window-list)))
+    (cond ((null? rows) #f)
+          ((equal? (window-owner (car (car rows))) owner) (car (car rows)))
+          (else (loop (cdr rows))))))
+
+;; show BUF in the look slot; answers the window that shows it
+(define (preview-show buf where &optional win data)
+  (let* ((me (active-window))
+         (from (or win me))
+         (slot (preview-slot))
+         (same? (and slot (equal? (nth 1 slot) where) (equal? (nth 2 slot) from)))
+         (winner *winner-inhibit*))
+    ;; one look per frame: a look from elsewhere ends the last one first
+    (when (and slot (not same?)) (preview-end #f))
+    (set! *winner-inhibit* #t)
+    (let* ((tree (if same? (nth 5 slot) (and (equal? where 'frame) (window-tree))))
+           (shown
+             (cond
+               ((equal? where 'here) (window-preview-buffer! buf from) from)
+               ((equal? where 'other)
+                (let* ((own (preview--owned-window from))
+                       (rec (and own (window-restore own)))
+                       (w (or own (with-display-preview
+                                    (lambda ()
+                                      (display-buffer buf '(category preview inhibit-same-window #t)))))))
+                  ;; the next look takes over the last one's record
+                  (when own
+                    (window-preview-buffer! buf own)
+                    (when rec (set-window-restore! own rec)))
+                  (when (and w (not (equal? w from))) (set-window-owner! w from))
+                  w))
+               ((equal? where 'float)
+                (let ((old (and (popup-open?) (popup-buffer))))
+                  (popup-show-quietly buf (or (and old (popup-side-of old)) (peek-side-away-from from))
+                                      (plist-get *display-buffer-defaults* 'size))))
+               (else (buf) (active-window)))))
+      (set! *winner-inhibit* winner)
+      ;; a frame look draws the focus with the frame
+      (unless (or (equal? where 'frame) (not (window-exists? me)) (equal? (active-window) me))
+        (select-window! me))
+      (set-frame-local! 'preview (list buf where from shown data tree))
+      shown)))
+
+;; end the look; KEEP #t keeps what it shows. Answers the slot it ended.
+(define (preview-end keep)
+  (let ((slot (preview-slot)) (winner *winner-inhibit*))
+    (set-frame-local! 'preview #f)
+    (set! *winner-inhibit* #t)
+    (when slot
+      (let ((buf (nth 0 slot)) (where (nth 1 slot)) (w (nth 3 slot)))
+        (cond
+          ((equal? where 'frame) (unless keep (window-tree-preview! (nth 5 slot))))
+          ((equal? where 'float)
+           (unless (or keep (not (popup-open?)) (not (equal? (popup-buffer) buf)))
+             (with-layout-suppressed (lambda () (popup-dismiss!)))))
+          ((not (and w (window-exists? w) (equal? (window-buffer w) buf))) #f)
+          ((equal? where 'here)
+           (if keep (window-set-buffer! w buf) (window-preview-end! w)))
+          (keep (set-window-owner! w #f) (set-window-restore! w #f))
+          (else (set-window-owner! w #f) (window-quit-restore! w)))))
+    (set! *winner-inhibit* winner)
+    slot))
+
 ;; Nothing floats any more. The old popup door is kept so an older
 ;; caller still works, and it shows the buffer in an ordinary window.
 ;; SIDE and SIZE say nothing.
@@ -1131,13 +1211,6 @@
                   (peek-drop! b)))
               (peek-buffers))))
 
-;; The peek slot is the window the last peek used, per frame. It is
-;; remembered, not derived: a peek of a buffer that already existed
-;; leaves no mark behind, and the next peek must still land in the
-;; same window instead of splitting again. Keeping the buffer in the
-;; slot releases the window (peek-keep!).
-;; show NAME as the peek: in another window, always. The selected
-;; window and its point stay. Returns the window the peek took.
 ;; the side away from the window the peek was asked from. The stock
 ;; rule sends no peek to the popup any more, so this answers only a
 ;; rule of your own that does. A window on the right half of the frame
@@ -1146,49 +1219,13 @@
   (let ((r (assoc win (window-rects))))
     (if (and r (> (+ (nth 2 r) (* 0.5 (nth 4 r))) 0.5)) 'left 'right)))
 
-;; A peek is a preview: it takes no focus. The window shows it without
-;; a selection change, and the focus commands pass it by.
-;; A peek is a display of category preview. The stock rule sends it
-;; through the window chain, and the next peek takes the window the last
-;; one had. A rule of your own ((add-display-rule! '(category preview)
-;; 'popup)) puts it back in the popup, and the popup path below answers.
+;; show NAME as the peek: the frame's look, in a window the selected one
+;; owns (preview-show ... 'other). The next peek takes that window again,
+;; and the buffer it replaced comes back when the peek goes. The selected
+;; window and its point stay. Returns the window the peek took.
 (define (peek-show! name)
-  (let* ((me (active-window))
-         ;; a look leaves the MRU ring where it was: the reader looked,
-         ;; the reader did not switch. A peek is always a window beside
-         ;; the reader: nothing floats.
-         (win (with-display-preview
-                (lambda () (peek-show-in-window! name me)))))
-    (set-frame-local! 'peek-window win)
-    ;; what the look put on screen, by name: a buffer that existed
-    ;; before wears no mode, and q must still take it away
-    (set-frame-local! 'peek-shown name)
+  (let ((win (preview-show name 'other)))
     (peek-drop-others! name)
-    win))
-
-(define (peek-show-in-popup! name me)
-  (let* ((old (and (popup-open?) (popup-buffer)))
-         (side (or (and old (popup-side-of old)) (peek-side-away-from me))))
-    (popup-show-quietly name side (plist-get *display-buffer-defaults* 'size))))
-
-;; the window the last peek used, while it still shows that peek
-(define (peek--window-to-reuse me)
-  (let ((pw (frame-local 'peek-window))
-        (shown (frame-local 'peek-shown)))
-    (and pw shown (window-exists? pw) (not (equal? pw me))
-         (not (and (popup-open?) (equal? pw (popup-window))))
-         (equal? (window-buffer pw) shown)
-         pw)))
-
-(define (peek-show-in-window! name me)
-  (let* ((reuse (peek--window-to-reuse me))
-         (rec (and reuse (window-restore reuse)))
-         (win (if reuse
-                  (display-buffer-in-window! reuse name)
-                  (display-buffer name '(category preview inhibit-same-window #t)))))
-    ;; the next look takes over the last one's record
-    (when rec (set-window-restore! reuse rec))
-    (unless (equal? (active-window) me) (select-window! me))
     win))
 
 ;; a window the focus commands may land on: not a peek's
@@ -1276,32 +1313,29 @@
       (peek-open! known open)
       (begin (peek! known open) 'peek)))
 
-;; the buffer the last look put in the popup, while the popup still
-;; shows it: a peek, or a buffer that existed before and only shows
+;; the buffer the frame's look shows beside the reader or in the card,
+;; while it still shows: a peek, or a buffer that existed before
 (define (peek-shown)
-  (let ((b (frame-local 'peek-shown))
-        (w (frame-local 'peek-window)))
-    (and b
-         (or (and (popup-open?) (equal? (popup-buffer) b))
-             (and w (window-exists? w) (equal? (window-buffer w) b)))
-         b)))
+  (let ((s (preview-slot)))
+    (and s (member (nth 1 s) '(other float))
+         (window-exists? (nth 3 s)) (equal? (window-buffer (nth 3 s)) (car s))
+         (car s))))
 
-;; dismiss the look on screen: the popup gives the buffer up, and a
-;; buffer the peek made goes to recent. #t when there was one.
+;; dismiss the look on screen: its window goes or gives back what it
+;; covered, and a buffer the peek made goes to recent. #t when there was one.
 (define (peek-dismiss!)
-  (let ((shown (dedupe-names
-                 (append (let ((b (peek-shown))) (if b (list b) '()))
-                         (filter window-showing (peek-buffers))))))
+  (let* ((b (peek-shown))
+         (shown (dedupe-names (append (if b (list b) '())
+                                      (filter window-showing (peek-buffers))))))
+    (when b (preview-end #f))
     (for-each (lambda (p)
-                (if (and (popup-open?) (equal? (popup-buffer) p))
-                    (popup-dismiss!)
-                    ;; a peek the window chain placed: the window it made
-                    ;; goes, or the buffer it replaced comes back
-                    (let ((w (window-showing p)))
-                      (when w (window-quit-restore! w))))
+                (unless (equal? p b)
+                  (if (and (popup-open?) (equal? (popup-buffer) p))
+                      (popup-dismiss!)
+                      (let ((w (window-showing p)))
+                        (when w (window-quit-restore! w)))))
                 (when (peek-buffer? p) (peek-drop! p)))
               shown)
-    (set-frame-local! 'peek-shown #f)
     (pair? shown)))
 
 ;; any work window that is not ME: the popup is not one
@@ -1346,10 +1380,8 @@
 (define (peek-keep! name)
   (when (peek-buffer? name)
     (disable-minor-mode! name "peek-mode")
-    ;; a kept buffer keeps its window: the slot moves on
-    (let ((w (frame-local 'peek-window)))
-      (when (and w (equal? (window-buffer w) name))
-        (set-frame-local! 'peek-window #f)))
+    ;; a kept buffer keeps its window: the look is over
+    (when (equal? (peek-shown) name) (preview-end #t))
     (peek-forget-recent! (or (buffer-path name)
                              (buffer-local name 'browse-url)
                              (buffer-local name 'dired-dir)
@@ -1883,12 +1915,11 @@
       (tile-visible-adaptive! requested)
       (tile-visible-windows! (string->symbol name) requested)))
 
+;; a look at layout NAME: the frame's look (preview-show ... 'frame)
 (define (window-layout-preview-without-history! name &optional requested)
-  (let ((was *winner-inhibit*))
-    (set! *winner-inhibit* #t)
-    (let ((result (window-layout-preview! name requested)))
-      (set! *winner-inhibit* was)
-      result)))
+  (let ((result #f))
+    (preview-show (lambda () (set! result (window-layout-preview! name requested))) 'frame)
+    result))
 
 (define-command "window-layout-columns" "Tile visible buffers in equal columns"
   (window-layout-command 'columns))
@@ -1916,12 +1947,15 @@
   ;; it. Restoring first and applying again was the two-step flash.
   (debounce-cancel! "window-layout-preview")
   (cond ((equal? name "free")
+         (preview-end #t)
          (window-tree-set! saved)
          (layout-target-set! #f)
          (message "Layout free: a display may split a window again"))
         (else
           (winner-push! saved)
-          (if (window-layout-preview-without-history! name requested)
+          (if (let ((ok (window-layout-preview-without-history! name requested)))
+                (preview-end #t)
+                ok)
               (begin
                 (layout-target-set! (string->symbol name))
                 (message (string-append "Layout " name " is the target")))
@@ -1937,7 +1971,7 @@
           (saved-order (layout-request-buffers)))
       (define (restore-preview!)
         (debounce-cancel! "window-layout-preview")
-        (window-tree-set! saved)
+        (preview-end #f)
         (layout-target-note-slots! saved-panes))
       (minibuffer-read-preview "Window layout: "
         '(("adaptive" "choose from usable monitor width")

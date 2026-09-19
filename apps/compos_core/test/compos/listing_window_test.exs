@@ -171,7 +171,7 @@ defmodule Compos.ListingWindowTest do
       eval!("(listing-preview! (mb-list-target) \"*zz-lw-chat-home*\")", frame)
 
       assert eval!("(popup-open?)", frame) == "#t"
-      assert eval!("(equal? (frame-local 'listing-preview-owner) (mb-list-target))", frame) == "#t"
+      assert eval!("(equal? (listing-preview-owner) (mb-list-target))", frame) == "#t"
 
       assert eval!(
                "(equal? (buffer-local (popup-buffer) 'listing-preview-source) \"*zz-lw-chat-home*\")",
@@ -228,11 +228,11 @@ defmodule Compos.ListingWindowTest do
       Process.sleep(650)
       KeyDispatch.handle_key(frame, "<up>")
       Process.sleep(250)
-      assert eval!("(frame-local 'listing-preview-owner)", frame) == "#f"
+      assert eval!("(listing-preview-owner)", frame) == "#f"
       assert eval!("(window-buffer *lw-prompt-window*)", frame) == "\"*zz-lw-prompt-target*\""
       # Minibuffer previews never create a floating card.
       eval!("(listing-preview! *mb-list-buffer* \"*zz-lw-prompt-target*\")", frame)
-      assert eval!("(frame-local 'listing-preview-owner)", frame) == "#f"
+      assert eval!("(listing-preview-owner)", frame) == "#f"
       KeyDispatch.handle_key(frame, "C-g")
       assert eval!("(window-buffer *lw-prompt-window*)", frame) == "\"*zz-lw-prompt-source*\""
       assert eval!("(window-point *lw-prompt-window*)", frame) == "3"

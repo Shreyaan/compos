@@ -359,7 +359,7 @@
         (w (switch-home-window buf)))
     (when (and w (not (switch-container? e)) (buffer-known? b))
       (let ((sleeping (not (buffer-exists? b))))
-        (window-preview-buffer! b w)
+        (preview-show b 'here w)
         ;; the primitive wakes a sleeper; the mode setup must follow, or
         ;; switch-to-buffer! later sees the buffer live and skips it
         (when (and sleeping (buffer-exists? b))
@@ -369,7 +369,7 @@
 ;; put HOME back to what it showed at open — the cancel path, and the
 ;; guard before a kill takes the previewed buffer off screen
 (define (switch-restore-home! buf)
-  (window-preview-end! (switch-home-window buf)))
+  (preview-end #f))
 
 ;; close the popup and settle dormancy; KEEP stays awake (#f keeps none)
 ;; a pick from outside the group takes another window (docs/groups.md,
@@ -875,7 +875,7 @@
                       (switch-buffer-info-candidates candidates rows (ibuffer-table-group-labels))
                       (map car candidates)))
          (woken '())
-         (restore! (lambda () (window-preview-end! home)))
+         (restore! (lambda () (preview-end #f)))
          (sleep-woken! (lambda (keep)
                          (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b))) woken)
                          (set! woken '()))))
@@ -884,7 +884,7 @@
         (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
           (if (and target (buffer-known? target) (window-exists? home))
               (let ((sleeping? (not (buffer-exists? target))))
-                (window-preview-buffer! target home)
+                (preview-show target 'here home)
                 (when (and sleeping? (buffer-exists? target))
                   (restore-buffer-runtime! target)
                   (set! woken (cons target woken))))

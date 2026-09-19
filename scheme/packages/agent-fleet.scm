@@ -631,7 +631,6 @@
            (row-of (lambda (label)
                      (let ((r (assoc label rows)))
                        (and r (not (chat-prompt-separator? r)) r))))
-           (restore-here! (lambda () #f))
            ;; the preview wakes a sleeping chat; every one nobody picked
            ;; goes back to sleep (the switcher's contract)
            (woken '())
@@ -650,19 +649,16 @@
             (lambda (label)
               (let ((r (row-of label)))
                 (cond
-                  ((not r) (restore-here!) (message "No chat by that name"))
+                  ((not r) (message "No chat by that name"))
                   ((equal? (nth 2 r) "saved")
-                   (restore-here!)
                    (visit-in-group (nth 3 r) (frame-group))
                    (end-of-buffer!))
                   (other-window?
-                   (restore-here!)
                    (let ((win (display-buffer-other-window! (nth 3 r))))
                      (when win (select-window! win))))
                   (else (switch-to-buffer! (nth 3 r)) (end-of-buffer!)))
                 (sleep-woken! (and r (nth 3 r)))))
-            ;; C-g: the window takes back what it was showing
-            (lambda () (restore-here!) (sleep-woken! #f))
+            (lambda () (sleep-woken! #f))
             ;; the status and the buffer name match what you type, so a
             ;; chat is found by its title first and by its state second
             2)))))
@@ -1442,7 +1438,7 @@
     ;; presses also lost the frame -- the card's restore put the list
     ;; back on screen, and the second q found nothing recorded and
     ;; deleted the window instead of giving the arrangement back.
-    (when (equal? (frame-local 'listing-preview-owner) (chat-list-buffer))
+    (when (equal? (listing-preview-owner) (chat-list-buffer))
       (listing-peek-dismiss!))
     (chat-list-leave! #f)))
 

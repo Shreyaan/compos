@@ -122,3 +122,58 @@
         (check-true! (window-quit-restore! w) "quit undoes the display")
         (check-equal! (length (window-list)) 1 "and deletes the window it made")))
     (t--wr-done!)))
+
+;;; the preview verb: one look per frame, no MRU, no focus, no winner
+
+(deftest 'a-look-here-moves-nothing-and-its-end-puts-back
+  "preview-show here shows in the window, preview-end #f puts back what it covered"
+  (lambda ()
+    (t--wr-setup!)
+    (let ((w (active-window)) (mru (buffer-list-mru)))
+      (set-frame-local! 'winner-ring '())
+      (preview-show "zz-wr-b" 'here)
+      (preview-show "zz-wr-c" 'here)
+      (check-equal! (window-buffer w) "zz-wr-c" "the look shows")
+      (check-equal! (buffer-list-mru) mru "the MRU did not change")
+      (check-equal! (frame-local 'winner-ring) '() "winner did not change")
+      (check-equal! (active-window) w "the focus stays")
+      (preview-end #f)
+      (check-equal! (window-buffer w) "zz-wr-a" "the end puts back what the first look covered")
+      (check-false! (preview-slot) "the slot is empty")
+      (preview-show "zz-wr-b" 'here)
+      (preview-end #t)
+      (check-equal! (window-buffer w) "zz-wr-b" "keep commits the look")
+      (check-equal! (car (window-prev-buffers w)) "zz-wr-a" "as a visit"))
+    (t--wr-done!)))
+
+(deftest 'a-look-in-another-window-is-owned-and-goes-with-its-end
+  "preview-show other shows in a window the invoking one owns; preview-end #f removes it"
+  (lambda ()
+    (t--wr-setup!)
+    (let ((me (active-window)) (mru (buffer-list-mru)))
+      (set-frame-local! 'winner-ring '())
+      (let ((w (preview-show "zz-wr-b" 'other)))
+        (check-true! (and w (not (equal? w me))) "another window shows the look")
+        (check-equal! (window-owner w) me "the invoking window owns it")
+        (check-equal! (active-window) me "the focus stays")
+        (check-equal! (preview-show "zz-wr-c" 'other) w "the next look takes the same window")
+        (check-equal! (buffer-list-mru) mru "the MRU did not change")
+        (check-equal! (frame-local 'winner-ring) '() "winner did not change")
+        (preview-end #f)
+        (check-false! (window-exists? w) "the end deletes the window the look made")
+        (check-equal! (window-buffer me) "zz-wr-a" "and the reader's window is as it was")))
+    (t--wr-done!)))
+
+(deftest 'a-definition-peek-is-the-frames-look
+  "the definition peek shows through the slot; a discard gives the window back"
+  (lambda ()
+    (t--wr-setup!)
+    (let ((me (active-window)))
+      (let ((w (peek--show! "zz-name" '(buffer "zz-wr-b" 0))))
+        (check-equal! (window-buffer w) "zz-wr-b" "the definition shows beside")
+        (check-equal! (car (peek--data)) "zz-name" "the slot names the definition")
+        (peek-discard!)
+        (check-false! (preview-slot) "the discard ends the look")
+        (check-equal! (length (window-list)) 1 "and the window the peek made goes")
+        (check-equal! (active-window) me "the reader stays")))
+    (t--wr-done!)))

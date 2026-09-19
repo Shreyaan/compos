@@ -2316,23 +2316,18 @@ is forgotten and that group falls back to creation order in the switcher."
                (prompt-rows (group-switch-prompt-rows))
                (candidates (car prompt-rows))
                (index (group-members-index))
-               ;; the arrangement you came from: a look replaces the
-               ;; whole frame, so the whole frame is what comes back
-               (here-windows (window-tree))
                ;; #f once the prompt closed: a look that was still
                ;; waiting must not draw after it
                (open #t)
                (woken '())
-               ;; #t only once a look has replaced the frame. Putting the
-               ;; windows back is itself a whole-frame draw, so a prompt that
-               ;; never looked closes without repainting anything
-               (drew #f)
+               ;; a look replaces the whole frame (preview-show ... 'frame),
+               ;; and its end puts back the whole frame you came from. A
+               ;; prompt that never looked closes without repainting anything
                (show-here!
                  (lambda ()
-                   (when drew
-                     (set! drew #f)
+                   (when (preview-slot)
                      (group-preview-forget!)
-                     (window-tree-preview! here-windows))))
+                     (preview-end #f))))
                (sleep-woken!
                  (lambda ()
                    (for-each (lambda (buf) (buffer-sleep! buf)) woken)
@@ -2354,9 +2349,10 @@ is forgotten and that group falls back to creation order in the switcher."
                    (when open
                      (let ((id (group-switch-id name)))
                        (if id
-                           (begin
-                             (set! drew #t)
-                             (set! woken (append (group-preview-draw! index id) woken)))
+                           (preview-show
+                             (lambda ()
+                               (set! woken (append (group-preview-draw! index id) woken)))
+                             'frame)
                            ;; An unmatched filter leaves the invoking windows intact.
                            (show-here!))))))
                ;; RET in the rail goes to that buffer, in its own group.

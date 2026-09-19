@@ -1394,10 +1394,17 @@
              (or (equal? (window-buffer (active-window)) owner)
                  (equal? (mb-list-target) owner))
              (not (equal? (buffer-local owner 'listing-peek-dismissed-row) target)))
-    (when (frame-local 'listing-preview-highlight)
-      (listing-preview-dismiss! (frame-local 'listing-preview-owner)))
-    (set-frame-local! 'listing-preview-target target)
     (listing-preview-copy! owner target)))
+
+;; the card is the frame's look (preview-show ... 'float); the copy it
+;; shows names the list and the row: these read them back
+(define (listing-preview-owner)
+  (let ((b (preview-buffer)))
+    (and b (equal? (nth 1 (preview-slot)) 'float) (buffer-known? b)
+         (buffer-local b 'listing-preview-owner))))
+
+(define (listing-preview-target)
+  (and (listing-preview-owner) (buffer-local (preview-buffer) 'listing-preview-source)))
 
 (define (listing-peek-show! copy source)
   ;; The card floats. A floating window's split takes no room -- its
@@ -1411,7 +1418,7 @@
   ;; Re-showing is already right here: with a popup open, popup-show-quietly
   ;; fills the popup's window rather than splitting again.
   (buffer-set-local! copy 'popup-return-layout #f)
-  (peek-show-in-popup! copy source))
+  (preview-show copy 'float source))
 
 (define (listing-preview-copy! owner target)
   (let ((source (if (equal? (window-buffer (active-window)) owner)
@@ -1464,16 +1471,14 @@
             (string-append (or (buffer-local copy 'window-style) "") ";--peek-source-window:"
               (number->string source) ";--peek-source-point:"
               (number->string (window-point source))))
-          (popup-keys! copy #f)
-          (set-frame-local! 'listing-preview-owner owner)
-          (set-frame-local! 'listing-preview-buffer copy)))
+          (popup-keys! copy #f)))
         (when (window-exists? focus) (select-window! focus))
         copy))))
 
 (define-command "listing-peek-open-other" "Open the selected preview in another work window"
   (lambda ()
-    (let* ((owner (frame-local 'listing-preview-owner))
-           (target (frame-local 'listing-preview-target)))
+    (let* ((owner (listing-preview-owner))
+           (target (listing-preview-target)))
       (if (and owner target)
           (begin
             (listing-preview-dismiss! owner)
@@ -1484,7 +1489,7 @@
           (run-command "other-window")))))
 
 (define (listing-peek-track!)
-  (let ((owner (frame-local 'listing-preview-owner)))
+  (let ((owner (listing-preview-owner)))
     (when (and owner (not (equal? (window-buffer (active-window)) owner))
                (not (equal? (mb-list-target) owner)))
       (listing-preview-dismiss! owner))))
@@ -1520,10 +1525,9 @@
       (message (if disabled "Previews off" "Previews on")))))
 
 (define (listing-peek-dismiss!)
-  (let ((owner (frame-local 'listing-preview-owner)))
+  (let ((owner (listing-preview-owner)))
     (when owner
-      (buffer-set-local! owner 'listing-peek-dismissed-row
-                         (frame-local 'listing-preview-target))
+      (buffer-set-local! owner 'listing-peek-dismissed-row (listing-preview-target))
       (listing-preview-dismiss! owner))))
 
 (define-command "listing-peek-dismiss" "Dismiss the preview card or window highlight; keep focus in its source"
@@ -1533,19 +1537,9 @@
 (define (listing-preview-dismiss! owner)
   (set-frame-local! 'listing-peek-ticket (+ 1 (or (frame-local 'listing-peek-ticket) 0)))
   (debounce-cancel! (string-append "listing-peek:" (selected-frame)))
-  (when (equal? owner (frame-local 'listing-preview-owner))
-    (let ((copy (frame-local 'listing-preview-buffer)) (focus (active-window)))
-      (let ((highlight (frame-local 'listing-preview-highlight)))
-        (when (and highlight (buffer-known? (car highlight)))
-          (buffer-set-local! (car highlight) 'window-highlight-ids
-            (remove (lambda (w) (member w (cadr highlight)))
-                    (or (buffer-local (car highlight) 'window-highlight-ids) '())))))
-      (set-frame-local! 'listing-preview-highlight #f)
-      (set-frame-local! 'listing-preview-target #f)
-      (set-frame-local! 'listing-preview-owner #f)
-      (set-frame-local! 'listing-preview-buffer #f)
-      (when (and copy (popup-open?) (equal? (popup-buffer) copy))
-        (with-layout-suppressed (lambda () (popup-dismiss!))))
+  (when (and owner (equal? owner (listing-preview-owner)))
+    (let ((copy (preview-buffer)) (focus (active-window)))
+      (preview-end #f)
       (when (window-exists? focus) (select-window! focus))
       (when (and copy (buffer-known? copy)) (buffer-kill! copy)))))
 
@@ -1812,7 +1806,7 @@
     ;; invoking pane is the user's, not the preview's.
     ;; Cancel anything queued while initializing the prompt view.
     (listing-preview-dismiss! view)
-    (let ((owner (frame-local 'listing-preview-owner)))
+    (let ((owner (listing-preview-owner)))
       (when owner (listing-preview-dismiss! owner)))
     (ibuffer-prompt-line! view label pick)
     (ibuffer-preview! view)))
@@ -1831,8 +1825,7 @@
         ((and (equal? where 'other) (buffer-known? row))
          (let ((w (window-showing row)))
            (when (peek-buffer? row) (peek-keep! row))
-           (set-frame-local! 'peek-shown #f)
-           (set-frame-local! 'peek-window #f)
+           (when (peek-shown) (preview-end #t))
            (close!)
            (if (and w (window-exists? w) (equal? (window-buffer w) row))
                (select-window! w)
@@ -1883,7 +1876,7 @@
 
 (define-command "ibuffer-quit" "Dismiss the preview, else give the frame back"
   (lambda ()
-    (if (equal? (frame-local 'listing-preview-owner) (ibuffer-view))
+    (if (equal? (listing-preview-owner) (ibuffer-view))
         (listing-peek-dismiss!)
         (begin (listing-preview-dismiss! (ibuffer-view))
                ;; a transient frame mode gives the arrangement back whole;
@@ -2054,9 +2047,8 @@
                   (list-unmark-key! view target)
                   ;; The card is a separate buffer: killing its original
                   ;; cannot remove the copy or its floating window.
-                  (let ((copy (frame-local 'listing-preview-buffer)))
-                    (when (and copy
-                               (equal? (frame-local 'listing-preview-owner) view)
+                  (let ((copy (preview-buffer)))
+                    (when (and (equal? (listing-preview-owner) view)
                                (equal? (buffer-local copy 'listing-preview-source) target))
                       (listing-preview-dismiss! view))))
                 (ibuffer-kill-targets! view

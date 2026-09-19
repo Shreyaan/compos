@@ -319,7 +319,7 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
        (goto-char! (line-start-position (nth 2 m))))
       ((peek-too-big? path) (peek-say-too-big! path))
       (else
-       (window-preview-buffer! (find-file path))
+       (preview-show (find-file path) 'here)
        (auto-mode path)
        (goto-char! (line-start-position (nth 2 m)))))))
 
@@ -338,9 +338,9 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
             (let ((m (assoc label matches)))
               (if m
                   (rg--show root m #f)
-                  (begin (window-preview-buffer! here) (goto-char! orig)))))
+                  (begin (preview-end #f) (goto-char! orig)))))
           (lambda ()
-            (window-preview-buffer! here)
+            (preview-end #f)
             (goto-char! orig))))))
 
 ;;; --- known projects ----------------------------------------------------------
