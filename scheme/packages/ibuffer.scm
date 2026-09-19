@@ -1189,7 +1189,7 @@
 ;; mode's own words, and the meta line says so.
 (define (ibuffer-compact-footer buf) (ibuffer-wide-footer buf))
 (define (ibuffer-wide-footer buf)
-  '(("RET" "visit") ("p" "preview") ("SPC" "mark") ("u" "unmark") ("U" "unmark all")
+  '(("RET" "visit") ("C-c v" "previews on/off") ("SPC" "mark") ("u" "unmark") ("U" "unmark all")
     ("d" "flag") ("x" "execute") ("k" "kill") ("K" "kill group")
     ("g" "refresh") ("/" "group") (">" "sort") ("TAB" "fold")
     ("M-↓/↑" "next/previous group") ("G" "add to group")
@@ -1384,6 +1384,10 @@
   (buffer-text target))
 
 (define (listing-preview! owner target)
+  ;; Every listing form previews the same way: a floating card over the
+  ;; list's own window. Not a highlight on a window that already shows the
+  ;; row, and not the invoking pane. Both of those reach for a window the
+  ;; user did not offer, and the highlight shows nothing new at all.
   (when (and (buffer-known? owner) (buffer-known? target)
              (not (equal? owner target))
              (not (buffer-local owner 'ibuffer-prompt-home-window))
@@ -1391,64 +1395,29 @@
              (or (equal? (window-buffer (active-window)) owner)
                  (equal? (mb-list-target) owner))
              (not (equal? (buffer-local owner 'listing-peek-dismissed-row) target)))
-    (let ((shown (map car (filter (lambda (w) (equal? (cadr w) target)) (window-list)))))
-      (cond ((pair? shown)
-             (listing-preview-dismiss! (frame-local 'listing-preview-owner))
-             (desktop-skip! target 'window-highlight-ids)
-             (buffer-set-local! target 'window-highlight-ids
-               (append shown (or (buffer-local target 'window-highlight-ids) '())))
-             (set-frame-local! 'listing-preview-owner owner)
-             (set-frame-local! 'listing-preview-target target)
-             (set-frame-local! 'listing-preview-highlight (list target shown))
-             target)
-            (else
-              (when (frame-local 'listing-preview-highlight)
-                (listing-preview-dismiss! (frame-local 'listing-preview-owner)))
-              (set-frame-local! 'listing-preview-target target)
-              (listing-preview-copy! owner target))))))
-
-(define (listing-peek-host source copy)
-  ;; the window a card overlays: the largest window that is neither the
-  ;; list's own nor the card itself. #f when the list is alone in the
-  ;; frame — there the popup has to split for itself.
-  (let ((rows (filter (lambda (r) (and (not (equal? (nth 0 r) source))
-                                       (not (equal? (nth 1 r) copy))))
-                      (window-rects))))
-    (and (pair? rows)
-         (nth 0 (let loop ((best (car rows)) (rest (cdr rows)))
-                  (cond ((null? rest) best)
-                        ((> (* (nth 4 (car rest)) (nth 5 (car rest)))
-                            (* (nth 4 best) (nth 5 best)))
-                         (loop (car rest) (cdr rest)))
-                        (else (loop best (cdr rest)))))))))
+    (when (frame-local 'listing-preview-highlight)
+      (listing-preview-dismiss! (frame-local 'listing-preview-owner)))
+    (set-frame-local! 'listing-preview-target target)
+    (listing-preview-copy! owner target)))
 
 (define (listing-peek-show! copy source)
-  ;; A card lies over a neighbour. peek-show-in-popup! splits the
-  ;; selected window to make room, which is the list's own window: with
-  ;; anything beside the list that squeezed the list to a third and left
-  ;; the card in a sliver between the two panes. The neighbour keeps its
-  ;; window; the saved tree is what popup-close! puts back.
-  (let ((host (and (not (popup-open?)) (listing-peek-host source copy))))
-    (if (not host)
-        (peek-show-in-popup! copy source)
-        (let ((rect (assoc host (window-rects)))
-              (focus (active-window)))
-          (buffer-set-local! copy 'popup-return-layout (window-tree))
-          (popup-stack-drop! copy)
-          (set-frame-local! 'popup-buffer copy)
-          (set-frame-local! 'popup-window host)
-          (popup-float! copy
-            (if (> (+ (nth 2 rect) (* 0.5 (nth 4 rect))) 0.5) 'right 'left)
-            (plist-get *display-buffer-defaults* 'size))
-          (window-show-buffer! host copy)
-          (when (window-exists? focus) (select-window! focus))
-          (window-state-changed!)
-          (popup-window)))))
+  ;; The card floats. A floating window's split takes no room -- its
+  ;; sibling fills the space and the card is drawn over the frame -- so
+  ;; the popup splits the list's own window for itself and nothing else
+  ;; on screen is touched. It was laid over a neighbouring window for a
+  ;; while instead, on the strength of window-rects showing the list
+  ;; squeezed into a third; those are tree numbers, not what is drawn,
+  ;; and the price was a card that took another buffer's window away.
+  ;;
+  ;; Re-showing is already right here: with a popup open, popup-show-quietly
+  ;; fills the popup's window rather than splitting again.
+  (buffer-set-local! copy 'popup-return-layout #f)
+  (peek-show-in-popup! copy source))
 
 (define (listing-preview-copy! owner target)
   (let ((source (if (equal? (window-buffer (active-window)) owner)
                     (active-window) (window-showing owner))))
-    (when (and source (not (buffer-local owner 'ibuffer-prompt-home-window))
+    (when (and source
                (not (buffer-local owner 'listing-peek-disabled)) (buffer-known? target) (not (equal? owner target))
                (or (equal? (active-window) source) (equal? (mb-list-target) owner))
                (not (equal? (buffer-local owner 'listing-peek-dismissed-row) target)))
@@ -1531,8 +1500,7 @@
       (buffer-set-local! owner 'listing-peek-dismissed-row #f))
     (unless (and (string? target) (buffer-known? target))
       (listing-preview-dismiss! owner))
-    (when (and (not (buffer-local owner 'ibuffer-prompt-home-window))
-               (not (buffer-local owner 'listing-peek-disabled))
+    (when (and (not (buffer-local owner 'listing-peek-disabled))
                (string? target) (buffer-known? target))
       (unless (equal? target (buffer-local owner 'listing-peek-dismissed-row))
         (buffer-set-local! owner 'listing-peek-dismissed-row #f)
@@ -1848,7 +1816,8 @@
     ;; way out of the prompt has to be able to give it back.
     (buffer-set-local! view 'ibuffer-prompt-home-window home)
     (buffer-set-local! view 'ibuffer-prompt-home-buffer was)
-    ;; The prompt previews in its invoking pane, never in a floating card.
+    ;; The prompt previews in a floating card, like the window form: its
+    ;; invoking pane is the user's, not the preview's.
     ;; Cancel anything queued while initializing the prompt view.
     (listing-preview-dismiss! view)
     (let ((owner (frame-local 'listing-preview-owner)))
@@ -1971,21 +1940,15 @@
 
 ;; Row motion schedules an isolated card; it never visits the source buffer.
 (define (ibuffer-preview! &optional buf b)
-  (let ((owner (or buf (ibuffer-view))))
-    (let ((home (buffer-local owner 'ibuffer-prompt-home-window))
-          (target (or b (ibuffer-current owner))))
-      ;; A section is navigation, not a request to clear the last preview.
-      (unless (ibuffer-heading? target)
-      (if home
-          (when (and (equal? (mb-list-target) owner) (window-exists? home))
-            (if (and (string? target) (buffer-known? target))
-                (with-layout-suppressed
-                  (lambda () (window-preview-buffer! target home)))
-                (ibuffer-prompt-restore-home! owner)))
-          (begin
-            ;; Explicit row navigation can reopen a dismissed card.
-            (buffer-set-local! owner 'listing-peek-dismissed-row #f)
-            (listing-preview-schedule! owner target)))))))
+  (let* ((owner (or buf (ibuffer-view)))
+         ;; the prompt view can be gone already: a cancel closes it, and
+         ;; the close kills it, while the open is still returning
+         (target (and (buffer-known? owner) (or b (ibuffer-current owner)))))
+    ;; A section is navigation, not a request to clear the last preview.
+    (when (and target (not (ibuffer-heading? target)))
+      ;; Explicit row navigation can reopen a dismissed card.
+      (buffer-set-local! owner 'listing-peek-dismissed-row #f)
+      (listing-preview-schedule! owner target))))
 
 (define-command "ibuffer-next-group" "Move to the next group in this buffer list"
   (lambda () (list-move-section! (ibuffer-view) 1)))
@@ -2319,7 +2282,7 @@
             ("C-c i" "ibuffer-toggle-info") ("C-c p" "ibuffer-toggle-pretty")
             ("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
             ("RET" "ibuffer-visit")
-            ("p" "ibuffer-toggle-preview")
+            ("C-c v" "ibuffer-toggle-preview")
             ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
             ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")
             ("TAB" "ibuffer-toggle-filter-group")

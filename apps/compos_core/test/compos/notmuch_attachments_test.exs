@@ -9,6 +9,7 @@ defmodule Compos.NotmuchAttachmentsTest do
       (define zz-attachment-old-open nm--open-attachment!)
       (define zz-attachment-old-visit visit)
       (define zz-attachment-old-profile notmuch-profile)
+      (define zz-attachment-old-host notmuch-host)
       (define zz-attachment-opened #f)
       (define zz-attachment-chosen #f)
       (define zz-attachment-msg
@@ -21,6 +22,7 @@ defmodule Compos.NotmuchAttachmentsTest do
                   (id 6 content-type "text/plain" filename "letter.txt" content "Attached text")
                   (id 7 content-type "text/html" filename "page.html" content "Attached HTML"))))))
       (set! notmuch-profile "attachment-account")
+      (set! notmuch-host "")
       (set! nm--show-msgs (lambda (thread) (list zz-attachment-msg)))
       (set! nm--open-attachment! (lambda (a) (set! zz-attachment-chosen a)))
       (set! visit (lambda (path) (set! zz-attachment-opened path)))
@@ -41,6 +43,7 @@ defmodule Compos.NotmuchAttachmentsTest do
         (set! nm--open-attachment! zz-attachment-old-open)
         (set! visit zz-attachment-old-visit)
         (set! notmuch-profile zz-attachment-old-profile)
+        (set! notmuch-host zz-attachment-old-host)
         (when (buffer-exists? "*mail*") (buffer-kill! "*mail*")))
       """)
     end)

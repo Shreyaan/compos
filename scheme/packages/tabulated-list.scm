@@ -128,10 +128,15 @@
 ;; the 0-based index of the entry line BUF's point is on, or #f above the
 ;; entries. BUF's own point, not (point): a context provider asks about a
 ;; list buffer while another buffer is current.
+;; A buffer that has never been displayed has no point yet, and a list
+;; built for a minibuffer prompt is asked about before it ever is. No
+;; point is above the entries, the same answer as point 0.
 (define (line-index-at buf header-lines)
-  (let* ((before (substring-bytes (buffer-text buf) 0 (buffer-point buf)))
-         (ln (- (length (string-split before "\n")) 1 header-lines)))
-    (and (>= ln 0) ln)))
+  (let ((at (buffer-point buf)))
+    (and (number? at)
+         (let* ((before (substring-bytes (buffer-text buf) 0 at))
+                (ln (- (length (string-split before "\n")) 1 header-lines)))
+           (and (>= ln 0) ln)))))
 
 (define (list-entries buf) (or (buffer-local buf 'list-entries) '()))
 

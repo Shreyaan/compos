@@ -43,6 +43,9 @@
   (write-file! t--nm-program t--nm-script)
   (shell-command->string (string-append "chmod +x " t--nm-program))
   (set! notmuch-program t--nm-program)
+  ;; an unset mailbox raises (notmuch.scm); the fake store is this machine's
+  (set! notmuch-host "")
+  (set! notmuch-profile "")
   (set! notmuch-auto-preview #f)
   ;; a test asserts what a preview DOES, not when: no rest timer between
   ;; the move and the assertion

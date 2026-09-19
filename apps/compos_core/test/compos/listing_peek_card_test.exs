@@ -109,12 +109,17 @@ defmodule Compos.ListingPeekCardTest do
           KeyDispatch.handle_key(frame, "<up>")
           Process.sleep(250)
           assert eval!("(popup-open?)", frame) == "#t"
-          KeyDispatch.handle_key(frame, "p")
+          # C-c v turns previews off and on. p walks rows, as p does in
+          # every list -- binding the toggle there switched previews off
+          # for anyone who pressed p to go up a line.
+          KeyDispatch.handle_key(frame, "C-c")
+          KeyDispatch.handle_key(frame, "v")
           assert eval!("(popup-open?)", frame) == "#f"
           KeyDispatch.handle_key(frame, "<up>")
           Process.sleep(250)
           assert eval!("(popup-open?)", frame) == "#f"
-          KeyDispatch.handle_key(frame, "p")
+          KeyDispatch.handle_key(frame, "C-c")
+          KeyDispatch.handle_key(frame, "v")
           assert eval!("(popup-open?)", frame) == "#t"
           KeyDispatch.handle_key(frame, "q")
         end

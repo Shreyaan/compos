@@ -29,18 +29,19 @@
 
 (defcustom 'notmuch-program "notmuch"
   "The notmuch executable." 'group 'notmuch)
-(defcustom 'notmuch-profile ""
-  "NOTMUCH_PROFILE for every call; \"\" uses the default database."
+(defcustom 'notmuch-profile #f
+  "NOTMUCH_PROFILE for every call. #f until a mailbox is chosen; \"\" is the default database."
   'group 'notmuch)
 ;;; The mail store can live on another machine. One host at a time: search,
 ;;; show, count and tag all run where the database is, so a thread id always
 ;;; means the same thing.
-(defcustom 'notmuch-host ""
-  "Machine that owns the mail store; empty is this one, anything else is an ssh destination."
+(defcustom 'notmuch-host #f
+  "Machine that owns the mail store. #f until a mailbox is chosen; \"\" is this one,
+anything else is an ssh destination."
   'group 'notmuch)
 
-(defcustom 'notmuch-hosts '("")
-  "The machines notmuch-switch-host offers; empty is this one."
+(defcustom 'notmuch-mailboxes '(("" ""))
+  "The mailboxes notmuch-switch-host offers, each (HOST PROFILE); empty host is this machine."
   'group 'notmuch)
 
 (defcustom 'notmuch-ssh-program
@@ -186,7 +187,24 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- CLI plumbing -------------------------------------------------------------
 
+;;; A mailbox is a host and a profile, chosen together. Neither has a usable
+;;; default: an unset value used to fall through to whatever database this
+;;; machine opens by itself, and every count, search and tag then answered
+;;; from the wrong mail store without a word. Unset stops the call instead.
+(define (nm--mailbox-set?)
+  (and (string? notmuch-host) (string? notmuch-profile)))
+
+(define (nm--mailbox-check!)
+  (unless (nm--mailbox-set?)
+    (error (string-append
+             "No notmuch mailbox chosen: host "
+             (if (string? notmuch-host) (string-append "\"" notmuch-host "\"") "unset")
+             ", profile "
+             (if (string? notmuch-profile) (string-append "\"" notmuch-profile "\"") "unset")
+             ". Run M-x notmuch-switch-host. Refusing to read this machine's default database."))))
+
 (define (nm--cmd args)
+  (nm--mailbox-check!)
   (let ((here (string-append
                 (if (equal? notmuch-profile "")
                     ""
@@ -199,7 +217,13 @@ when a message has no text/plain part." 'group 'notmuch)
                        " " (sh-quote here)))))
 
 (define (nm--host-label)
-  (if (equal? notmuch-host "") "this machine" notmuch-host))
+  (cond ((not (string? notmuch-host)) "no mailbox")
+        ((equal? notmuch-host "") "this machine")
+        (else notmuch-host)))
+
+(define (nm--mailbox-label host profile)
+  (string-append (if (equal? host "") "local" host)
+                 (if (equal? profile "") "" (string-append " [" profile "]"))))
 
 ;; which notmuch: several databases answer to the same program name, so
 ;; the identity is the host, the profile, and the database that profile
@@ -208,7 +232,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define *nm-db-paths* '())
 
 (define (nm--db-key)
-  (string-append (nm--host-label) "|" notmuch-profile))
+  (string-append (nm--host-label) "|" (if (string? notmuch-profile) notmuch-profile "unset")))
 
 (define (nm--db-path)
   (let ((hit (assoc (nm--db-key) *nm-db-paths*)))
@@ -223,7 +247,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--source-label)
   (let ((path (nm--db-path)))
     (string-append (nm--host-label)
-                   (if (equal? notmuch-profile "")
+                   (if (or (not (string? notmuch-profile)) (equal? notmuch-profile ""))
                        ""
                        (string-append " [" notmuch-profile "]"))
                    (if (equal? path "") "" (string-append ":" path)))))
@@ -477,7 +501,7 @@ when a message has no text/plain part." 'group 'notmuch)
     'composml-root (lambda (buf)
       (list 'tag "mailbox" 'attrs
         (list (list "source" (nm--host-label))
-              (list "profile" notmuch-profile)
+              (list "profile" (if (string? notmuch-profile) notmuch-profile ""))
               (list "query" (nm--query-of buf)))))
     'collection "mail-threads"
     'composml (lambda (buf th) (nm--thread-composml buf th))
@@ -776,15 +800,23 @@ when a message has no text/plain part." 'group 'notmuch)
   (list-refresh! buf)
   (message (string-append "Mail on " (nm--source-label))))
 
-(define-command "notmuch-switch-host" "Read mail from another machine"
+;; One act picks both halves. A command that set the host alone could leave
+;; the profile unset, and the mailbox unusable.
+(define-command "notmuch-switch-host" "Read mail from another mailbox"
   (lambda ()
     (let ((buf (current-buffer)))
-      (minibuffer-read "Mail host: "
-        (map (lambda (h) (if (equal? h "") "local" h)) notmuch-hosts)
-        (lambda (h)
-          (let* ((typed (string-trim h))
-                 (host (if (or (equal? typed "local") (equal? typed "")) "" typed)))
+      (minibuffer-read "Mailbox: "
+        (map (lambda (m) (nm--mailbox-label (car m) (cadr m))) notmuch-mailboxes)
+        (lambda (choice)
+          (let* ((typed (string-trim choice))
+                 (hit (filter (lambda (m) (equal? (nm--mailbox-label (car m) (cadr m)) typed))
+                              notmuch-mailboxes))
+                 (host (if (null? hit)
+                           (if (equal? typed "local") "" typed)
+                           (car (car hit))))
+                 (profile (if (null? hit) "" (cadr (car hit)))))
             (customize-save! 'notmuch-host host)
+            (customize-save! 'notmuch-profile profile)
             (nm--host-changed! buf)))))))
 
 ;; the mail views are derived state — killing them loses nothing. The

@@ -86,6 +86,7 @@
   '(("https://substack.com" "substack.xsl" #t)
     ("https://html.duckduckgo.com" "duckduckgo.xsl" #f)
     ("https://news.ycombinator.com" "hackernews.xsl" #f)
+    ("https://timesofindia.indiatimes.com" "toi.xsl" #f)
     ("https://www.linkedin.com/talent" "linkedin-recruiter.xsl" #t)
     ("https://mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
     ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)))

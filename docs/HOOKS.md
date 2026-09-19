@@ -48,6 +48,7 @@ list. The local table lives in Scheme, keyed by buffer name.
 | `buffer-renamed-hook` | OLD NEW | `rename-buffer!` |
 | `buffer-shown-hook` | BUFFER | the switcher filled a window |
 | `fs-change-hook` | ROOT | the watcher saw a change under ROOT |
+| `editing-state-hook` | BUF | the buffer entered or left the editing state |
 | `llm-config-changed-hook` | BUF | llm-config exited and the buffer's setup changed |
 | `group-membership-hook`, `group-kill-hook` | | see docs/groups.md |
 

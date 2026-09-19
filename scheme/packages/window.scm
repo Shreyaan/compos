@@ -1950,17 +1950,18 @@
           ("main-bottom" "2/3 + 1/3 (companion below)")
           ("main-top" "2/3 + 1/3 (companion above)")
           ("free" "no target: a display may split a window"))
-        ;; A move applies the candidate to the panes on screen, and only
-        ;; those: applying a layout is idempotent, so no restore comes
-        ;; first and no vacancy fills from the pool. The panes keep their
-        ;; windows, and a pane keeps its window's render. The original
-        ;; arrangement comes back once, on cancel, or under the choice.
-        ;; and it waits for the arrow to rest: a held key applies one
-        ;; layout, not one per step (the owner's ruling, 2026-09-19)
+        ;; A move applies the candidate from the same buffer order the
+        ;; choice uses, so the preview is what you get: applying a layout
+        ;; is idempotent, so no restore comes first and the choice adds no
+        ;; pane. The panes keep their windows, and a pane keeps its
+        ;; window's render. The original arrangement comes back once, on
+        ;; cancel, or under the choice. and it waits for the arrow to
+        ;; rest: a held key applies one layout, not one per step (the
+        ;; owner's ruling, 2026-09-19)
         (lambda (name)
           (unless (equal? name "free")
             (debounce! "window-layout-preview" window-layout-preview-delay-ms
-              (lambda (n) (window-layout-preview-without-history! n saved-panes))
+              (lambda (n) (window-layout-preview-without-history! n saved-order))
               name)))
         ;; the choice applies from the preview, one step; cancel restores
         (lambda (name) (window-layout-choose! saved name saved-order))

@@ -7,9 +7,16 @@ defmodule Compos.ListingWindowTest do
     value
   end
 
-  for {command, quit} <- [{"ibuffer", "ibuffer-quit"}, {"ichat", "chat-list-quit"}] do
+  # ibuffer leaves in two presses: the first takes the card down, the
+  # second the list. The chat list leaves in one, because it is a picker
+  # you are passing through — see docs/CHAT-LIST.md.
+  for {command, quit, card_press?} <- [
+        {"ibuffer", "ibuffer-quit", true},
+        {"ichat", "chat-list-quit", false}
+      ] do
     @command command
     @quit quit
+    @card_press card_press?
     test "#{command} opens here with an inert card and retains the listing on quit" do
       previous = Editor.last_active_frame()
       {:ok, frame} = Editor.attach_frame(nil)
@@ -52,8 +59,11 @@ defmodule Compos.ListingWindowTest do
         assert eval!("(popup-open?)", frame) == "#t"
         assert eval!("(window-point (window-showing \"*zz-lw-left*\"))", frame) == "3"
         assert eval!("(equal? (active-window) *lw-window*)", frame) == "#t"
-        KeyDispatch.handle_key(frame, "<f10>")
-        assert eval!("(equal? (current-buffer) *lw-view*)", frame) == "#t"
+        if @card_press do
+          KeyDispatch.handle_key(frame, "<f10>")
+          assert eval!("(equal? (current-buffer) *lw-view*)", frame) == "#t"
+        end
+
         KeyDispatch.handle_key(frame, "<f10>")
         assert eval!("(current-buffer)", frame) == "\"*zz-lw-right*\""
         assert eval!("(buffer-known? *lw-copy*)", frame) == "#f"
@@ -123,6 +133,63 @@ defmodule Compos.ListingWindowTest do
         """
         (for-each buffer-kill! (list *lw-first* *lw-second* "*zz-lw-target*"))
         (group-record-delete! *lw-a*) (group-record-delete! *lw-b*)
+        """,
+        frame
+      )
+
+      Editor.delete_frame(frame)
+      Editor.select_frame(previous)
+    end
+  end
+
+  # The chat picker is a table in the minibuffer, so it previews the way
+  # the window form does: a card over its own window. The pane it was
+  # invoked from is the user's and it keeps what it was showing.
+  test "the chat picker previews in a card and leaves the invoking pane alone" do
+    previous = Editor.last_active_frame()
+    {:ok, frame} = Editor.attach_frame(nil)
+
+    try do
+      eval!(
+        """
+        (test-buffer! "*zz-lw-chat-home*" "home")
+        (switch-to-buffer-here! "*zz-lw-chat-home*")
+        (define *lw-chat-window* (active-window))
+        """,
+        frame
+      )
+
+      KeyDispatch.handle_key(frame, "C-x")
+      KeyDispatch.handle_key(frame, "c")
+      Process.sleep(400)
+
+      assert eval!("(equal? (mb-list-target) *chat-prompt-buffer*)", frame) == "#t"
+      assert eval!("(window-buffer *lw-chat-window*)", frame) == "\"*zz-lw-chat-home*\""
+
+      # a test session need not hold a chat, so the row is named rather
+      # than walked to: what is under test is where the preview lands
+      eval!("(listing-preview! (mb-list-target) \"*zz-lw-chat-home*\")", frame)
+
+      assert eval!("(popup-open?)", frame) == "#t"
+      assert eval!("(equal? (frame-local 'listing-preview-owner) (mb-list-target))", frame) == "#t"
+
+      assert eval!(
+               "(equal? (buffer-local (popup-buffer) 'listing-preview-source) \"*zz-lw-chat-home*\")",
+               frame
+             ) == "#t"
+
+      # the card is a copy over the list's own window, so the pane the
+      # picker was invoked from still shows what it showed
+      assert eval!("(window-buffer *lw-chat-window*)", frame) == "\"*zz-lw-chat-home*\""
+
+      KeyDispatch.handle_key(frame, "C-g")
+      assert eval!("(popup-open?)", frame) == "#f"
+      assert eval!("(window-buffer *lw-chat-window*)", frame) == "\"*zz-lw-chat-home*\""
+    after
+      eval!(
+        """
+        (when (minibuffer-state) (minibuffer-cancel!))
+        (when (buffer-known? "*zz-lw-chat-home*") (buffer-kill! "*zz-lw-chat-home*"))
         """,
         frame
       )

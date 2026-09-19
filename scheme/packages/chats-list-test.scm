@@ -153,7 +153,9 @@
     (check-true! (ibuffer-view? *chat-prompt-buffer*) "the form's view is registered")))
 
 (deftest 'the-row-at-point-previews-its-chat
-  "the row under the cursor floats the same card ibuffer floats, over the window beside the list"
+  "the row under the cursor floats the same card ibuffer floats, over the
+   list's own window. Nothing else on screen is touched: a card that took
+   the neighbour's window would be disturbing a buffer nobody offered."
   (lambda ()
     (chats-test-open! 'none 'name)
     (delete-other-windows!)
@@ -170,11 +172,14 @@
         (check-true! (popup-open?) "a card is floated")
         (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) row
                       "and it reads the row at point")
-        (check-equal! (popup-window) side
-                      "the card lies over the window beside the list, not a pane split off it")
-        (check-equal! (window-buffer home) *chat-list*
-                      "so the list keeps its own window whole")))
-    (listing-preview-dismiss! *chat-list*)
+        (check-true! (not (member (popup-window) (list home side)))
+                     "the card is its own window, neither the list's nor the neighbour's")
+        (check-equal! (window-buffer side) "*zz-chats-side*"
+                      "the window beside the list keeps what it was showing")
+        (listing-preview-dismiss! *chat-list*)
+        (check-equal! (popup-open?) #f "dismissing takes the card down")
+        (check-equal! (window-buffer side) "*zz-chats-side*"
+                      "and gives the neighbour back untouched")))
     (buffer-kill! "*zz-chats-side*")
     (chats-test-reset!)))
 
@@ -225,6 +230,47 @@
       (check-equal! (length (window-list)) before "and gave the arrangement back")
       (check-equal! (window-buffer (active-window)) "*zz-chats-a*"
                     "showing what it displaced"))
+    (chats-test-reset!)))
+
+(deftest 'moving-again-keeps-the-card-where-it-stands
+  "the second row fills the card the first one opened, and adds no window"
+  (lambda ()
+    (chats-test-reset!)
+    (chats-test-chat! "*zz-chats-a*" #f)
+    (chats-test-chat! "*zz-chats-b*" #f)
+    (chats-test-chat! "*zz-chats-c*" #f)
+    (delete-other-windows!)
+    (switch-to-buffer-here! "*zz-chats-a*")
+    (split-window! 'h 0.5)
+    (run-command "chat-list")
+    (let ((view (chat-list-buffer)))
+      (listing-preview! view "*zz-chats-b*")
+      (let ((windows (length (window-list))) (host (popup-window)))
+        (check-true! (popup-open?) "the first row lays a card over the neighbour")
+        (listing-preview! view "*zz-chats-c*")
+        (check-equal! (length (window-list)) windows
+                      "the second row adds no window")
+        (check-equal! (popup-window) host "and the card stands where it stood")))
+    (run-command "chat-list-quit")
+    (chats-test-reset!)))
+
+(deftest 'one-q-leaves-with-a-card-up
+  "the card is the list's own preview, so taking it and leaving are one press"
+  (lambda ()
+    (chats-test-reset!)
+    (chats-test-chat! "*zz-chats-a*" #f)
+    (chats-test-chat! "*zz-chats-b*" #f)
+    (delete-other-windows!)
+    (switch-to-buffer-here! "*zz-chats-a*")
+    (split-window! 'h 0.5)
+    (let ((before (length (window-list))))
+      (run-command "chat-list")
+      (listing-preview! (chat-list-buffer) "*zz-chats-b*")
+      (check-true! (popup-open?) "the row floats a card over the neighbour")
+      (run-command "chat-list-quit")
+      (check-false! (popup-open?) "one q takes the card")
+      (check-false! (window-showing (chat-list-buffer)) "and the list with it")
+      (check-equal! (length (window-list)) before "the arrangement comes back whole"))
     (chats-test-reset!)))
 
 (deftest 'the-resting-list-is-flat-and-most-recent-first
@@ -326,6 +372,25 @@
                     "and no one chat answers as the chat at point")
       (chats-test-reset!))))
 
+;; the list shows sleeping chats, so a verb has to act on one. The
+;; targets asked buffer-exists?, which answers #f for every dormant row,
+;; and that left nearly every verb saying there was no chat here.
+(deftest 'a-verb-acts-on-a-sleeping-chat
+  "a chat the editor put to sleep is still the chat the row at point names"
+  (lambda ()
+    (chats-test-open! 'none 'name)
+    (let ((row (list-current *chat-list*)))
+      (check-equal! row "*zz-chats-a*" "the first row by name")
+      (buffer-sleep! row)
+      (check-true! (wait-until (lambda () (not (buffer-exists? row))) 3000 20)
+                   "the chat sleeps")
+      (check-true! (buffer-known? row) "and the editor still knows it")
+      (check-equal! (agents-targets) (list row)
+                    "the verb acts on the sleeping chat, not on nothing")
+      (check-false! (agents-runtime-slug row)
+                    "and it has no runtime to answer with"))
+    (chats-test-reset!)))
+
 (deftest 'chats-sections-by-state
   "the grouping cycles none, group, state, model; a chat with no runtime sits under idle"
   (lambda ()
@@ -388,23 +453,46 @@
       (check-equal! (length (car mine)) 3 "a heading has label, annotation, kind"))
     (chats-test-reset!)))
 
-(deftest 'the-prompt-reads-the-chat-itself-in-the-other-window
-  "C-x c: the row under the cursor is the chat buffer in the window you came
-   from, not an isolated copy floated over the rows"
+(deftest 'the-prompt-previews-in-a-card-like-the-window-form
+  "C-x c: the row under the cursor floats an inert card over the rows. The
+   pane the picker was invoked from is the user's and keeps what it held."
   (lambda ()
     (chats-test-reset!)
     (chats-test-chat! "*zz-chats-a*" (group-record-create! "zz-chats-one"))
     (chats-test-chat! "*zz-chats-b*" (group-record-by-name "zz-chats-one"))
     (run-command "chat-prompt")
-    (let ((view *chat-prompt-buffer*))
+    (let* ((view *chat-prompt-buffer*)
+           (home (buffer-local view 'ibuffer-prompt-home-window))
+           (was (and home (window-buffer home))))
       (list-set-filters! view (list (list "match" "zz-chats-")))
       (list-refresh! view)
       (ibuffer-goto-first-row! view)
-      (ibuffer-preview! view)
-      (let ((home (buffer-local view 'ibuffer-prompt-home-window))
-            (row (list-current view)))
+      (let ((row (list-current view)))
         (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
-        (check-equal! (window-buffer home) row "the window it was invoked from holds that chat")
-        (check-equal! (popup-open?) #f "and no card was floated to do it")))
+        (listing-preview! view row)
+        (check-equal! (popup-open?) #t "the row floats a card")
+        (check-equal! (buffer-local (popup-buffer) 'listing-preview-source) row
+                      "the card holds the row's chat")
+        (check-equal! (window-buffer home) was
+                      "the pane it was invoked from is untouched")))
     (run-command "minibuffer-cancel")
     (chats-test-reset!)))
+
+;; the prompt view is asked for its row before it has been drawn, so it may
+;; have no point yet. That used to raise out of the open, and C-x c did
+;; nothing at all: no list, no card, no error the user could see.
+(deftest 'a-list-with-no-point-yet-answers-instead-of-raising
+  "asking an undrawn list buffer for its row answers, error-free"
+  (lambda ()
+    (let ((buf "*zz-chats-unpointed*"))
+      (buffer-create buf)
+      (check-equal! (ignore-errors (lambda () (list 'ok (line-index-at buf 0))))
+                    (list 'ok 0)
+                    "an empty buffer sits on the first entry line")
+      (check-equal! (ignore-errors (lambda () (list 'ok (line-index-at buf 3))))
+                    (list 'ok #f)
+                    "and under a header it is above the entries")
+      (check-equal! (ignore-errors (lambda () (list 'ok (ibuffer-current buf))))
+                    (list 'ok #f)
+                    "so it has no row, rather than raising")
+      (buffer-kill! buf))))

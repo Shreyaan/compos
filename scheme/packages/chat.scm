@@ -1141,6 +1141,10 @@
   "How long a chat's title may be. The name is a label, not a sentence."
   'group 'chat 'type 'integer)
 
+(defcustom 'chat-title-min-bytes 25
+  "The shortest opening prompt that earns a title when JEV cannot judge one. Below it the chat stays untitled and the next prompt tries again."
+  'group 'chat 'type 'integer)
+
 ;; How many words a chat's title may hold. The card writer answers with a factual title of three to eight words; a chat shows a label.
 (define chat-title-max-words 6)
 
@@ -1156,14 +1160,32 @@
                          (substring-bytes head 0 sp)
                          head)))))
 
-;; A chat's title is a label, not a sentence. The card writer was
-;; fine-tuned on a prompt that asks for three to eight words, so the
-;; editor clips its title to the words it shows instead of changing the
-;; prompt the model was trained on.
+;; Words that cannot end a label. The clip below is a hard cut at a word
+;; count, and a hard cut is what left this chat wearing "A user requests a
+;; correction to": a title hanging on its preposition.
+(define chat-title--dangling
+  '("a" "an" "and" "as" "at" "but" "by" "for" "from" "in" "into" "is"
+    "its" "of" "on" "or" "that" "the" "their" "this" "to" "was" "were"
+    "with"))
+
+(define (chat-title--trim-dangling words)
+  (if (or (null? words) (null? (cdr words)))
+      words
+      (let ((last (string-downcase (car (reverse words)))))
+        (if (member last chat-title--dangling)
+            (chat-title--trim-dangling (reverse (cdr (reverse words))))
+            words))))
+
+;; A chat's title is a label, not a sentence. The card writer is asked for
+;; three to six words; anything longer is clipped here, and then trimmed
+;; back to a word that can end a phrase, so a clipped label still names
+;; something instead of trailing off.
 (define (chat-title--short s)
   (let ((words (filter (lambda (w) (not (equal? w "")))
                        (string-split (string-trim s) " "))))
-    (string-join (chat-take words chat-title-max-words) " ")))
+    (string-join (chat-title--trim-dangling
+                   (chat-take words chat-title-max-words))
+                 " ")))
 
 ;; The bar and the buffer name hold one line, and the card writer answers
 ;; in one sentence or two: the first names the work, the second elaborates.
@@ -1310,6 +1332,38 @@
 
 (public! 'chat-title-first-prompt!
   "(chat-title-first-prompt! BUF [FORCE?]) -- name a chat from its first prompt, once")
+(define (chat-title--long-enough? ask)
+  (>= (string-byte-length (string-trim ask)) chat-title-min-bytes))
+
+;; A hello is not a subject. K gets #t once the chat has said something to
+;; name it by, and agent.scm asks again on every user message while
+;; chat-title is unset, so the first substantive turn is the one that
+;; titles. JEV judges it when there is a key to reach it with; without one
+;; the length of the ask stands in for the judgement.
+(define (chat-title--substantive? ask k)
+  (if (and (boundp 'jev-ask) (boundp 'jev-noul))
+      (jev-ask ask
+        (list 'substantive
+              (jev-noul (string-append
+                          "Does this passage state a task, a question, or a"
+                          " problem the writer wants addressed? Answer no"
+                          " when it is only a greeting, thanks, or small"
+                          " talk.")))
+        (lambda (reply)
+          (let ((p (and reply (jev-answer-noul reply 'substantive))))
+            (k (if p (>= p 0.5) (chat-title--long-enough? ask))))))
+      (k (chat-title--long-enough? ask))))
+
+(define (chat-title--land-card! buf ask force?)
+  (title-card ask
+    (lambda (card)
+      (when (and (pair? card) (buffer-known? buf)
+                 (or force? (not (string? (buffer-local buf 'chat-title)))))
+        (chat-title buf (chat-title--short
+                          (chat-summary--clip
+                            (chat-summary--flatten (car card))
+                            chat-title-max-bytes)))))))
+
 (define (chat-title-first-prompt! buf &optional force?)
   (and (buffer-known? buf)
        (or force? (not (string? (buffer-local buf 'chat-title))))
@@ -1324,14 +1378,13 @@
        (let ((ask (chat-summary--brief buf)))
          (and (string? ask) (not (equal? (string-trim ask) ""))
               (begin
-                (title-card ask
-                  (lambda (card)
-                    (when (and (pair? card) (buffer-known? buf)
-                               (or force? (not (string? (buffer-local buf 'chat-title)))))
-                      (chat-title buf (chat-title--short
-                                        (chat-summary--clip
-                                          (chat-summary--flatten (car card))
-                                          chat-title-max-bytes))))))
+                ;; a forced retitle is the user naming the chat on purpose:
+                ;; it asks for no permission from the greeting gate.
+                (if force?
+                    (chat-title--land-card! buf ask force?)
+                    (chat-title--substantive? ask
+                      (lambda (yes)
+                        (when yes (chat-title--land-card! buf ask force?)))))
                 #t)))))
 
 (public! 'chat-summary-turn!
@@ -1574,11 +1627,28 @@
         'moved))))
 
 (define (chat-cwd-note what dir)
-  (string-append "chat directory: " (abbreviate-file-name dir)
-    (cond ((equal? what 'moved) " — agent restarted there")
-          ((equal? what 'deferred) " — agent moves when this turn ends")
-          ((equal? what 'workspace) " — agent keeps its own workspace")
-          (else " — no agent attached"))))
+  (cond ((equal? what 'not-a-chat) "not a chat buffer")
+        ((equal? what 'no-such-directory)
+         (string-append "no such directory: " dir))
+        (else
+         (string-append "chat directory: " (abbreviate-file-name dir)
+           (cond ((equal? what 'moved) " — agent restarted there")
+                 ((equal? what 'deferred) " — agent moves when this turn ends")
+                 ((equal? what 'workspace) " — agent keeps its own workspace")
+                 (else " — no agent attached"))))))
+
+(define (chat-cwd-target? buf)
+  (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+
+(define (chat-cwd-move! buf dir)
+  (if (not (chat-cwd-target? buf))
+      (list 'not-a-chat "")
+      (let ((dir (expand-path (normalize-file-input (string-trim dir)))))
+        (if (not (file-directory? dir))
+            (list 'no-such-directory dir)
+            (list (begin (chat-cwd-set! buf dir)
+                         (chat-cwd-move-runtime! buf))
+                  dir)))))
 
 ;; one listener, registered by name, so a reload replaces it instead of
 ;; stacking a second one
@@ -1593,19 +1663,21 @@
 (define-command "chat-cwd" "Set this chat's working directory, and move its agent there"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
-          (message "not a chat buffer")
+      (if (not (chat-cwd-target? buf))
+          (message (chat-cwd-note 'not-a-chat ""))
           (read-file-name-initial "Chat working directory: " (buffer-directory buf)
             (lambda (input)
-              (let ((dir (expand-path (normalize-file-input (string-trim input)))))
-                (if (not (file-directory? dir))
-                    (message (string-append "no such directory: " dir))
-                    (message (chat-cwd-note (begin (chat-cwd-set! buf dir)
-                                                   (chat-cwd-move-runtime! buf))
-                                            dir))))))))))
+              (let ((r (chat-cwd-move! buf input)))
+                (message (chat-cwd-note (car r) (cadr r))))))))))
 
 (public! 'chat-cwd-of "(chat-cwd-of BUF) -> the directory this chat works in")
 (public! 'chat-cwd-set!
   "(chat-cwd-set! BUF DIR) -> move it; the agent takes it at its next attach")
 (public! 'chat-cwd-move-runtime!
   "(chat-cwd-move-runtime! BUF) -> reconnect the thread in the chat's directory: 'moved, 'deferred, 'workspace or 'none")
+(public! 'chat-cwd-target?
+  "(chat-cwd-target? BUF) -> #t when BUF is a chat the cwd can be moved for")
+(public! 'chat-cwd-move!
+  "(chat-cwd-move! BUF DIR) -> validate, set and move in one call: (STATUS DIR), STATUS 'not-a-chat, 'no-such-directory, 'moved, 'deferred, 'workspace or 'none")
+(public! 'chat-cwd-note
+  "(chat-cwd-note STATUS DIR) -> the one-line report for a chat-cwd-move! result")

@@ -38,11 +38,21 @@
                (plist-get (cadr t) 'effects)))
        (reverse *llm-tools*)))
 
+;; tool-call-hook is the one seam that can still say no. Each function on
+;; it gets (NAME ARGS) and answers #f to stay out of the way; the first
+;; that answers anything else aborts the call and its answer becomes the
+;; result the model reads. A veto is a return value, never an exception,
+;; so the refusal reaches the model as an ordinary tool result and the
+;; turn carries on. The permission policy gates whether a call may run at
+;; all; this gates what a call that is allowed to run may contain.
 (define (llm-tool-call name args)
-  (let ((t (assoc (string->symbol name) *llm-tools*)))
-    (if t
-        ((plist-get (cadr t) 'handler) args)
-        (string-append "no such tool: " name))))
+  (let ((veto (run-hook-with-args-until-success 'tool-call-hook name args)))
+    (if veto
+        (if (string? veto) veto (value->string veto))
+        (let ((t (assoc (string->symbol name) *llm-tools*)))
+          (if t
+              ((plist-get (cadr t) 'handler) args)
+              (string-append "no such tool: " name))))))
 
 (define (llm-tool-read-only? name)
   (let* ((tool (assoc (string->symbol name) *llm-tools*))

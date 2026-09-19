@@ -5452,19 +5452,32 @@
 ;; to the movement state would never answer the focus chords again.
 (editing-state-maps-off! "chat-mode" '("editing-caret-map"))
 
+;; The state is a fact the presentation carries: the header line's state
+;; tag is what the window's ground reads -- a cua window sits, a focus
+;; window floats -- and nothing else invalidates that line when the maps go
+;; in or out. Without this the window keeps the ground it last drew, so a
+;; buffer you had begun to edit went on floating until some unrelated event
+;; refreshed its header. The hook carries the buffer.
+(define (editing--state-changed! buf)
+  (run-hook-with-args 'editing-state-hook buf))
+
 (define (editing-state-on! buf)
-  (unless (editing-state? buf)
-    (buffer-minor-maps! buf (append (editing--maps-for buf) (buffer-minor-maps buf))))
-  (unless (equal? (buffer-local buf 'editing-state) #t)
-    (buffer-set-local! buf 'editing-state #t)
-    (desktop-skip! buf 'editing-state)))
+  (let ((was (editing-state? buf)))
+    (unless was
+      (buffer-minor-maps! buf (append (editing--maps-for buf) (buffer-minor-maps buf))))
+    (unless (equal? (buffer-local buf 'editing-state) #t)
+      (buffer-set-local! buf 'editing-state #t)
+      (desktop-skip! buf 'editing-state))
+    (unless was (editing--state-changed! buf))))
 
 (define (editing-state-off! buf)
-  (when (editing-state? buf)
-    (buffer-minor-maps! buf
-      (remove (lambda (m) (member m *editing-state-maps*)) (buffer-minor-maps buf))))
-  (when (buffer-local buf 'editing-state)
-    (buffer-set-local! buf 'editing-state #f)))
+  (let ((was (or (editing-state? buf) (and (buffer-local buf 'editing-state) #t))))
+    (when (editing-state? buf)
+      (buffer-minor-maps! buf
+        (remove (lambda (m) (member m *editing-state-maps*)) (buffer-minor-maps buf))))
+    (when (buffer-local buf 'editing-state)
+      (buffer-set-local! buf 'editing-state #f))
+    (when was (editing--state-changed! buf))))
 
 (define (editing--landing)
   (let ((w (active-window)))

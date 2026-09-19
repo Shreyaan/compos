@@ -1534,7 +1534,10 @@
     code-agent-saved
     workspace-id workspace-name workspace-root workspace-project-root
     workspace-backend workspace-daemon workspace-llm-defaults
-    workspace-isolation-choice project-defaults-inherited chat-companion-of))
+    workspace-isolation-choice project-defaults-inherited chat-companion-of
+    ;; the group whose ai-config.scm this chat already ran: a chat takes it
+    ;; once, so the mark has to outlive a restart
+    group-config-loaded))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
@@ -1566,6 +1569,11 @@
     ;; the running summary and every paragraph before it: a reset starts
     ;; a new conversation with nothing to say yet
     chat-summary chat-summary-log
+    ;; this chat had a runtime and something took it away, so chats-start-all
+    ;; knows what to open again. A conversation local, not a global: the flag
+    ;; outlives a daemon restart the way chat-turn-active does, and a reset
+    ;; drops it with the rest of the conversation
+    chat-was-running
     ;; and the title the first one wrote, fixed for the life of the
     ;; conversation: a reset earns a new one
     chat-title

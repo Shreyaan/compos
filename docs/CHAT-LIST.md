@@ -11,11 +11,16 @@ whose name I half remember". `C-x b` is the same form over the buffers.
 verbs, the grouping and the folds; the minibuffer form borrows none of
 that state, so the sort and folds you set in one stay where you left them.
 
-The window form is one list per group, the way `ibuffer` is: it opens in
-the group you called it from and stays there, and different groups get
-separate `*chat-list*` buffers. A single list in a group of its own was
-tried and reverted — arriving had to cross groups, which dragged the
-frame through that group's whole layout.
+The window form is one list. It opens in the window you called it from
+and joins that window's group. A view per group — what `ibuffer` does —
+made a `*chat-list*<n>` for every group the frame had ever stood in, so
+which list you got depended on where you were standing. A list in a
+group of its own was tried and reverted too: arriving had to cross
+groups, which dragged the frame through that group's whole layout.
+
+`t` turns the sections off and on. Off is the flat list, most recent
+first — the chat you half-remember the name of is near the top. `/`
+cycles what a section is: none, group, state, model.
 
 ## One window, a floating card, and the frame comes back
 
@@ -44,26 +49,42 @@ list found is recorded on arrival and restored when the list leaves — by
 `q`, and by `RET` too, so the chat you pick lands in the arrangement you
 were working in.
 
-The minibuffer form keeps its own preview: it reads the chat into the
-window it was invoked from, the way `C-x b` does.
+The minibuffer form previews the same way the window form does: a card
+over its own rows. It used to read the chat into the window it was
+invoked from, which took a pane the user had not offered and, when that
+pane was the only other one, looked like no preview at all.
+
+`C-x c` used to raise before it drew anything. The prompt view is asked
+for the row under the cursor while it is still empty, and a buffer that
+has never been displayed has no point yet; asking where that point fell
+in the text raised out of the open. `line-index-at` answers for a list
+with no point now.
 
 ## Listing buffers and floating peek cards
 
 `M-x ibuffer` opens an ordinary listing buffer in the window that invoked
 it, reusing a matching one in the current group without selecting another
 window that shows it. Different groups get separate listing buffers. The
-rows identify buffers. Both window listings — ibuffer and the chat list —
-preview with the card described below. Only the minibuffer forms do not:
-they read the real buffer into the window they were invoked from, the way
-`C-x b` does.
+rows identify buffers. Every listing that draws its rows in a window —
+ibuffer, the chat list, and the chat picker in the minibuffer — previews
+with the card described below. A row whose buffer is already on screen
+gets a card too: highlighting the window that holds it showed nothing new
+and reached for a window the list does not own.
 
-A card lies **over a neighbouring window**, and the list keeps its own
-window whole. It used to split the list's own window to make room, which
-with anything beside the list squeezed the list to a third and left the
-card in a sliver between the two panes. The tree the card covered is
-saved on the card buffer, so dismissing it puts the neighbour back
-exactly. Alone in the frame the list has no neighbour to cover, and the
-card takes a split of its own — the only way to show one at all.
+`C-x b` is the exception, and not by design: its candidates are a
+completion list rather than a drawn table, so there is no window to float
+a card beside, and it still reads the buffer into its destination pane.
+
+A card **floats over the frame and disturbs nothing**. The popup splits
+the list's own window for itself, and a floating window's split takes no
+room: it is drawn absolutely over the frame and its sibling fills the
+space, so the list keeps its width and no other window loses its buffer.
+Dismissing it deletes that split and the list is whole again.
+
+It was laid over a neighbouring window for a while instead, on the
+strength of `window-rects` reporting the list squeezed into a third.
+Those are tree numbers, not what is drawn — the price of that reading
+was a card that took another buffer's window away.
 
 Row navigation shows a **Preview** card after a short pause. The card is inset
 from the window borders, raised with a soft shadow, and connected by a line
@@ -73,8 +94,14 @@ sized and uses normal text size; changing groups in the list does not resize it.
 
 The body starts at the bottom and scrolls with the mouse wheel or trackpad.
 Its content cannot take focus, edit, or activate links. The card's control is
-`q` to dismiss. Focus stays in the source list. The first `q` closes
-the card; a second `q` leaves the list. Dismissing a card suppresses it for that
+`q` to dismiss. Focus stays in the source list. Moving again fills the card
+where it already stands rather than splitting for a second one. In `ibuffer` the first
+`q` closes the card and a second leaves the list; in the chat list one
+`q` does both, because the card is the list's own preview and not a
+thing to put away first. Two presses also cost the frame there: the
+card's restore put the list back on screen, and the second `q` found
+nothing recorded and deleted the window instead of giving the
+arrangement back. Dismissing a card suppresses it for that
 row until selection changes. `RET` in the source list opens the real buffer.
 Closing a picker removes its card too. `C-x o` or `Cmd-RET` while peeking
 opens the original buffer in another work window. Showing a peek never animates
@@ -111,6 +138,17 @@ idea, not an application's.
 - `a` archives it: the runtime stops, the buffer goes, the file stays
 - `g` draws the list again
 - `+` starts a new chat
+
+A verb asks `buffer-known?`, never `buffer-exists?`. Most rows in this
+list are chats the editor has put to sleep: the editor knows them, their
+locals still answer, and they are still what the row at point names.
+`buffer-exists?` says #f for every one of them, and a verb that asked it
+answered "no chat here" on nearly every row.
+
+`s` wakes a sleeping chat, because steering one is a message to send it.
+`y`, `d` and `k` do not: a chat with no runtime is asking nothing and has
+nothing to stop, so they say which chat is asleep rather than claiming
+there is no chat under the cursor.
 
 ## The list is still
 

@@ -294,6 +294,16 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
   (project-require! root)
   (rg--matches root pattern))
 
+;; grep is the name a person reaches for, so it is the name the editor
+;; answers to. The shell's grep searches a directory; this searches the
+;; project — ripgrep, gitignore and the untracked files git already knows
+;; about — and PATTERN leads, because the pattern is the thought and the
+;; root is the detail. Outside a repo the working directory is the root.
+(define (grep pattern &optional root)
+  (project-search-matches
+    (or root (project-root-cached (default-directory)) (default-directory))
+    pattern))
+
 ;; preview borrows the window, the jump takes it. Both load the file once,
 ;; so a previewed match costs the same read as an opened one. The mode is
 ;; set AFTER the window shows the buffer: set-mode! acts on the current
@@ -754,6 +764,9 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 (public! 'project-search-matches
   "(project-search-matches ROOT PATTERN) -> search project text files as (PATH:LINE PATH LINE TEXT) matches")
 (catalog-meta! 'function "project-search-matches" 'domain 'project 'effects '(read execute))
+(public! 'grep
+  "(grep PATTERN [ROOT]) -> search the project for PATTERN as (PATH:LINE PATH LINE TEXT) matches; ROOT defaults to this buffer's project")
+(catalog-meta! 'function "grep" 'domain 'project 'effects '(read execute))
 (public! 'project-open-files
   "(project-open-files ROOT) -> paths of ROOT's open buffers, relative, MRU first")
 (public! 'add-project-grouping-rule!

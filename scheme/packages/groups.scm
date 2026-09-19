@@ -740,6 +740,10 @@ is forgotten and that group falls back to creation order in the switcher."
             'group #f 'companion-of #f))
     (buffer-group-display-refresh! b)
     (group-current-recalculate!)
+    ;; the group's shared config is the chat's starting setup: what the
+    ;; user has already chosen here stays (group-config.scm)
+    (when (and id (boundp 'group-configure-buffer!))
+      (group-configure-buffer! b))
     id))
 
 ;; A role belongs to the membership, not globally to the buffer: one buffer
@@ -803,6 +807,10 @@ is forgotten and that group falls back to creation order in the switcher."
             (buffer-set-local! b 'companion-of #f)
             (buffer-group-display-refresh! b)
             (group-current-recalculate!)
+            ;; joining is adopting: the group's config is this buffer's
+            ;; default now (group-config.scm)
+            (when (boundp 'group-configure-buffer!)
+              (group-configure-buffer! b))
             id))))
 
 (define (buffer-add-group-as! b value role)
@@ -817,7 +825,10 @@ is forgotten and that group falls back to creation order in the switcher."
           (buffer-set-locals! b
             (list 'group-ids (if id (list id) '()) 'group-roles '()
                   'group #f 'group-inherited #f 'companion-of #f))
-          (buffer-group-display-refresh! b)))
+          (buffer-group-display-refresh! b)
+          ;; the destination's config takes over from the old group's
+          (when (and id (boundp 'group-configure-buffer!))
+            (group-configure-buffer! b))))
     (group-current-recalculate!)
     id))
 

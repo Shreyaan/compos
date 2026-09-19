@@ -316,9 +316,18 @@
     (and b (buffer-local b 'agent-slug))))
 
 ;; the chats a verb acts on: the row at point, or every chat under it
-;; when that row is a group
+;; when that row is a group. A chat the editor put to sleep is still a
+;; chat the list shows, and its locals still answer, so the question is
+;; buffer-known?: buffer-exists? dropped every dormant row, which left
+;; nearly every verb saying there was no chat here.
 (define (agents-targets)
-  (filter (lambda (b) (buffer-exists? b)) (ibuffer-targets (chat-list-buffer))))
+  (filter buffer-known? (ibuffer-targets (chat-list-buffer))))
+
+;; the slug of a chat whose runtime is up. A dormant chat keeps its slug
+;; local, so the local alone does not say there is a runtime to answer.
+(define (agents-runtime-slug b)
+  (let ((slug (buffer-local b 'agent-slug)))
+    (and slug (not (equal? (agent-status slug) 'dead)) slug)))
 
 (define (agents-report verb bs)
   (message (if (= (length bs) 1)
@@ -328,7 +337,7 @@
 (define-command "chats-retitle" "Give the chat at point a title"
   (lambda ()
     (let ((b (ibuffer-current (chat-list-buffer))))
-      (if (not (and (string? b) (buffer-exists? b)))
+      (if (not (and (string? b) (buffer-known? b)))
           (message "no chat here")
           (minibuffer-read
             (string-append "Title for " b ": ")
@@ -359,16 +368,20 @@
                 (agents-report "steered" bs))))))))
 
 (define (agents-answer! exact prefix verb)
-  (let ((bs (filter (lambda (b) (buffer-local b 'agent-slug)) (agents-targets))))
-    (if (null? bs)
-        (message "no chat with a runtime here")
-        (begin
-          (for-each (lambda (b)
-                      (agent-answer-permission! (buffer-local b 'agent-slug)
-                                                exact prefix))
-                    bs)
-          (agents-relist!)
-          (agents-report verb bs)))))
+  (let* ((targets (agents-targets))
+         (bs (filter agents-runtime-slug targets)))
+    (cond ((null? targets) (message "no chat here"))
+          ;; the row is a chat, it is just not awake to be asking: say
+          ;; which chat, not that there is nothing here
+          ((null? bs)
+           (message (string-append (chats-title (car targets))
+                                   " is asleep: nothing is asking")))
+          (else
+           (for-each (lambda (b)
+                       (agent-answer-permission! (agents-runtime-slug b) exact prefix))
+                     bs)
+           (agents-relist!)
+           (agents-report verb bs)))))
 
 (define-command "agents-allow" "Allow the pending permission of the chat at point"
   (lambda () (agents-answer! "allow_once" "allow" "allowed")))
@@ -396,10 +409,13 @@
       (window-list-all))))
 
 (define (agents-kill-runtime! b)
-  (let ((slug (buffer-local b 'agent-slug)))
+  (let ((slug (agents-runtime-slug b)))
     (and slug
          (begin (agent-note-stopped! slug)
                 (llm-session-close! slug)
+                ;; the chat remembers it was running, so chats-start-all has
+                ;; something durable to read instead of a list in memory
+                (buffer-set-local! b 'chat-was-running #t)
                 #t))))
 
 (define (agents-archive! b)
@@ -428,10 +444,56 @@
 (define-command "chats-kill-runtime"
   "Stop the runtime of the chat at point and keep its transcript"
   (lambda ()
-    (let ((bs (filter agents-kill-runtime! (agents-targets))))
+    (let* ((targets (agents-targets))
+           (bs (filter agents-kill-runtime! targets)))
+      (cond ((null? targets) (message "no chat here"))
+            ((null? bs)
+             (message (string-append (chats-title (car targets))
+                                     " is already stopped")))
+            (else (agents-relist!) (agents-report "stopped" bs))))))
+
+;; the other half of agents-kill-runtime!: give a dormant chat its
+;; runtime back and send it nothing. agent-continue! is this plus a
+;; message, so a chat started here is the same chat a send would revive.
+(define (agents-start-runtime! b)
+  (buffer-set-local! b 'chat-was-running #f)
+  (and (not (agents-runtime-slug b))
+       (let ((slug (chat-ensure-runtime! b)))
+         (and slug
+              (begin (when (equal? (agent-status slug) 'dead)
+                       (agent-revive! slug))
+                     #t)))))
+
+;; every chat at once, for when you want the filesystem quiet. stop-all
+;; closes every runtime and keeps every transcript; start-all opens again
+;; exactly the ones it closed, so a chat you left dormant on purpose stays
+;; that way and a hundred old conversations never wake together.
+;;
+;; which chats those are is the chat's own answer, not a list kept here:
+;; agents-kill-runtime! leaves chat-was-running on the buffer, and that
+;; local survives a daemon restart the way chat-turn-active does. So a
+;; restart between the two commands loses nothing.
+(define (chats-was-running-bufs)
+  (filter (lambda (b) (buffer-local b 'chat-was-running)) (chat-list-bufs)))
+
+(define-command "chats-stop-all"
+  "Stop every chat runtime and keep the transcripts"
+  (lambda ()
+    (let ((bs (filter agents-kill-runtime! (chat-list-bufs))))
       (if (null? bs)
-          (message "no chat with a runtime here")
+          (message "no chat is running")
           (begin (agents-relist!) (agents-report "stopped" bs))))))
+
+(define-command "chats-start-all"
+  "Start every chat whose runtime was stopped"
+  (lambda ()
+    (let ((targets (chats-was-running-bufs)))
+      (if (null? targets)
+          (message "no chat is waiting to be started")
+          (let ((bs (filter agents-start-runtime! targets)))
+            (if (null? bs)
+                (message "every stopped chat is running again")
+                (begin (agents-relist!) (agents-report "started" bs))))))))
 
 ;;; --- the chats, as a candidate prompt -------------------------------------
 ;;; The chat list is the application; this is the same chats drawn as a
@@ -633,6 +695,8 @@
 (category! 'chat)
 (catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))
 (catalog-meta! 'command "chats-kill-runtime" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chats-stop-all" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chats-start-all" 'domain 'chat 'effects '(write external execute))
 (public! 'chats-note-activity!
   "(chats-note-activity! BUF) — stamp the time of the last event that reached the chat BUF")
 (public! 'chats-state-label
@@ -981,7 +1045,9 @@
              "title is found in the text of every alive chat, and the row "
              "shows the words around it. C-g closes the filter and leaves the "
              "list standing. RET enters the chat's own group and raises the "
-             "window that holds it; q leaves and changes nothing. / cycles "
+             "window that holds it; q leaves and changes nothing. t turns the "
+             "sections off and on: off is the flat list, the chat you used "
+             "last at the top of it. / cycles "
              "what a section is: none, group, state, model. > cycles the "
              "order inside a section: most recent first, by name, or by the "
              "size of the transcript on disk. The verbs act on the chat at point "
@@ -1026,6 +1092,7 @@
               ("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
               ("a" "chats-archive") ("r" "chats-retitle")
               ("k" "chats-kill-runtime") ("g" "agents-refresh")
+              ("t" "chat-list-toggle-groups")
               ("+" "agent-open")))))
 ;; The list rests in sections, one per group: a chat belongs to the work
 ;; it was opened for, and the group it sits in says which. ; cycles that
@@ -1036,9 +1103,21 @@
 
 (define (chat-list-group) (group-ensure-record! *chat-list-group-name*))
 
+(define (chat-list-view!)
+  ;; one list, and it opens in the window you called it from. A view per
+  ;; group -- what ibuffer does -- made a *chat-list*<n> for every group
+  ;; the frame ever stood in, so which list you got depended on where you
+  ;; were standing. There is one, it comes to the current window, and it
+  ;; joins the group that window is in.
+  (let ((buf *chat-list-buffer*))
+    (unless (buffer-known? buf)
+      (buffer-create buf)
+      (ibuffer-view! buf))
+    buf))
+
 (define (chat-list-arrive!)
-  ;; one list per group, as ibuffer is one per group: the list opens in
-  ;; the group you called it from and stays there.
+  ;; the list opens in the window you called it from, in the group you
+  ;; called it from.
   ;;
   ;; The list takes one window and previews with a floating card, the
   ;; same way ibuffer does — one preview surface for both listings. It
@@ -1054,7 +1133,7 @@
   ;; standing without leaving through q — a listing takes its window, a
   ;; layout is applied — and the tree it promised to restore is then a
   ;; tree of windows that no longer exist.
-  (let ((buf (ibuffer-group-view! "chat-list-mode" *chat-list-buffer*)))
+  (let ((buf (chat-list-view!)))
     (unless (transient-frame-standing? 'chat-list) (chat-list-release-hold!))
     (transient-frame-rearm! 'chat-list (frame-local 'chat-list-view))
     (ibuffer-view! buf 'sort 'recent 'grouping 'group)
@@ -1173,9 +1252,17 @@
   (set-frame-local! 'chat-list-preview-window #f))
 
 (define (chat-list-uncover!)
-  ;; the list covered the frame, so leaving hands the whole arrangement
-  ;; back. With nothing recorded there is nothing to restore and the
-  ;; ordinary listing quit reveals whatever the window held before.
+  ;; the list took a window, so leaving hands the whole arrangement back.
+  ;; With nothing recorded there is nothing to restore and the ordinary
+  ;; listing quit reveals whatever the window held before.
+  ;;
+  ;; The card goes first. A card saves the arrangement it lay over, and
+  ;; that arrangement has the list in it: dismissed after the frame is
+  ;; given back, its restore lands on top and puts the list back on
+  ;; screen -- which is what made leaving take two q's, the second one
+  ;; finding no record left and deleting the window instead of giving
+  ;; the frame back.
+  (listing-preview-dismiss! (chat-list-buffer))
   (chat-list-release-hold!)
   (unless (transient-frame-exit! 'chat-list)
     (listing-quit! (chat-list-buffer))))
@@ -1327,8 +1414,14 @@
 (define-command "chat-list-quit"
   "Leave the chat list and change nothing"
   (lambda ()
-    (if (equal? (frame-local 'listing-preview-owner) (chat-list-buffer))
-        (listing-peek-dismiss!) (chat-list-leave! #f))))
+    ;; one q leaves. The card is the list's own preview, not something
+    ;; to put away first: dismissing it and leaving are one move. Two
+    ;; presses also lost the frame -- the card's restore put the list
+    ;; back on screen, and the second q found nothing recorded and
+    ;; deleted the window instead of giving the arrangement back.
+    (when (equal? (frame-local 'listing-preview-owner) (chat-list-buffer))
+      (listing-peek-dismiss!))
+    (chat-list-leave! #f)))
 
 (define-command "ichat" "Open the chat buffer listing here"
   (lambda () (chat-list-open!)))
@@ -1369,6 +1462,24 @@
     (minibuffer-read "Chat where: " '()
       (lambda (words) (chat-list-open! (string-trim words))))))
 
+(define-command "chat-list-toggle-groups"
+  "Turn the chat list's sections on or off; off is the flat list, most recent first"
+  (lambda ()
+    (let* ((buf (chat-list-buffer))
+           (grouping (ibuffer-grouping buf)))
+      (if (equal? grouping 'none)
+          ;; back to the sections you last had, not to a fixed default
+          (let ((back (or (buffer-local buf 'chat-list-grouping-was) 'group)))
+            (ibuffer-set-grouping! back buf)
+            (message (string-append "grouped by " (symbol->string back))))
+          (begin
+            (buffer-set-local! buf 'chat-list-grouping-was grouping)
+            ;; groups off means the one list you half-remember a name in:
+            ;; flat, and the chat you used last at the top of it
+            (ibuffer-set-sort! 'recent buf)
+            (ibuffer-set-grouping! 'none buf)
+            (message "ungrouped — most recent first"))))))
+
 (define-command "chat-list-regroup"
   "Cycle what a section of the chat list is: none, group, state, model"
   (lambda ()
@@ -1391,5 +1502,6 @@
 (catalog-meta! 'command "chat-list-visit" 'domain 'chat 'effects '(write display))
 (catalog-meta! 'command "chat-list-quit" 'domain 'chat 'effects '(write display))
 (catalog-meta! 'command "chat-where" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-list-toggle-groups" 'domain 'chat 'effects '(write display))
 (public! 'chat-list-open!
   "(chat-list-open! [SEARCH]) — open the chat list application, with SEARCH standing")

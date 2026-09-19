@@ -8,8 +8,8 @@
 ;;; OpenAI chat API and req_llm's vllm provider is exactly that shape, so a
 ;;; local model is a model string like any other and keys.scm carries its
 ;;; address. What this file owns is the part that cannot be config: the
-;;; prompt the model was fine-tuned against, byte for byte, and the tolerant
-;;; parse of its two labelled lines.
+;;; prompt the card writer is asked with, and the tolerant parse of its two
+;;; labelled lines.
 ;;;
 ;;; chat.scm's running summary uses it whenever it is ready, which is the
 ;;; point of installing it: a label and a title for every chat, on device,
@@ -31,6 +31,17 @@
 (defcustom 'title-server-port 8127
   "The loopback port the card writer answers on." 'group 'title 'type 'integer)
 
+;; Which model writes the cards. "local" is the on-device fine-tune in
+;; title-model-directory; "default" is the session model; anything else is a
+;; model id. It defaults away from local on evidence: the 350M returns
+;; byte-identical cards for the trained prompt and a rewritten one, so the
+;; prompt below is unreadable to it and no wording fixes the titles. A real
+;; model reads the prompt. The trade is money and a round trip per turn --
+;; that is what "local" is still here for.
+(defcustom 'title-model "default"
+  "The model that writes cards: \"default\" for the session model, \"local\" for the on-device fine-tune, or a model id."
+  'group 'title 'type 'string)
+
 ;; The token cap on one card. It stops a degenerate run, a real failure mode for a small instruct model given unusual input.
 (define title-max-tokens 96)
 
@@ -42,7 +53,14 @@
 (define (title--base-url)
   (string-append "http://127.0.0.1:" (number->string title-server-port) "/v1"))
 
-(define (title--model) (string-append "vllm:" title-model-directory))
+(define (title--local-model) (string-append "vllm:" title-model-directory))
+
+(define (title--local?) (equal? title-model "local"))
+
+(define (title--model)
+  (cond ((title--local?) (title--local-model))
+        ((equal? title-model "default") (llm-model))
+        (else title-model)))
 
 (register-llm-base-url! "vllm" (title--base-url))
 (register-llm-key! "vllm" "local")
@@ -76,25 +94,52 @@
   (message "title: the on-device card writer is loading"))
 
 (define (title-ready?)
-  (and (title-installed?)
-       (or *title-server-ready*
-           (cond ((title--listening?) (set! *title-server-ready* #t) #t)
-                 (*title-server-started* #f)
-                 (else (set! *title-server-started* #t) (title--start!) #f)))))
+  (if (not (title--local?))
+      ;; a hosted model has nothing to install and nothing to warm: it is
+      ;; ready the moment there is an id to call. Callers gate on this, so
+      ;; answering #f here is what used to make chat.scm fall back.
+      (let ((m (title--model))) (and (string? m) (not (equal? m ""))))
+      (and (title-installed?)
+           (or *title-server-ready*
+               (cond ((title--listening?) (set! *title-server-ready* #t) #t)
+                     (*title-server-started* #f)
+                     (else (set! *title-server-started* #t) (title--start!) #f))))))
 
 ;;; --- the prompt -----------------------------------------------------------------
 
-;; The prompt the model is fine-tuned against, byte for byte, copied from
-;; Titles.prompt in the SDK rather than rewritten. A paraphrase is a different
-;; task to this model: an earlier version of that property shipped a string
-;; training had never used, so the model was served an unseen prompt on every
-;; call, and the rule it spent four lines on could not have been learned. It
-;; says passage and not clip because the model is not clip-specific.
+;; The prompt the card writer is asked with. It diverges from the fine-tune's
+;; trained string: it asks for a title that names the problem or the task, and
+;; a description of what was investigated and what was fixed.
+;;
+;; MEASURED, and the measurement matters more than the wording: this model
+;; does not read the instruction. At temp 0.0 the trained prompt and this one
+;; return byte-identical cards on real passages -- a chat about titling, and a
+;; coding turn with tools. Asking it harder makes it worse, not better: a
+;; longer version of this prompt had the 350M echo the instructions back as
+;; the card ("Writing a noun phrase about a task"), and naming files,
+;; functions and errors in the rules had it title the rules instead of the
+;; passage. Every content noun in the prompt becomes an answer.
+;;
+;; So this string states the intent and buys nothing at runtime. The title
+;; shape is changed downstream, not here -- chat.scm's chat-title--short is
+;; what clipped "A user requests a correction to the summarizer" into a
+;; six-word fragment -- and the hosted fallback in chat-summary-refresh! is
+;; the prompt that a model actually obeys. Retrain against this string to make
+;; it real. It says passage and not clip because the model is not
+;; clip-specific.
 (define (title--prompt text)
   (string-append
-    "Write a factual title (3-8 words) and a 1-2 sentence description for this passage."
-    "Be specific enough to identify this passage. No emoji, no hashtags, no hype."
-    "Write in the same language as the passage.\n\nPASSAGE:\n"
+    "Write a card for the passage below, as exactly two lines and nothing"
+    " else. Begin the first line with TITLE: and the second with DESC:.\n"
+    "TITLE: three to six words naming the problem or the task. A noun phrase,"
+    " not a sentence about the speaker: the issue itself, never A user...,"
+    " The person..., or A request....\n"
+    "DESC: one or two sentences saying what was investigated and what was"
+    " fixed. Name the files, functions, commands and errors involved, so"
+    " someone can find this by searching for them. If nothing was fixed, say"
+    " what was investigated and what was found.\n"
+    "Plain text only: no markdown, no bold, no emoji, no hashtags, no hype."
+    " Write in the same language as the passage.\n\nPASSAGE:\n"
     text))
 
 ;; Tolerant, the same way the SDK's parse is: a card model that drifts off
@@ -113,6 +158,12 @@
                 ((string-prefix? "DESC:" up) (loop (cdr lines) title (rest 5)))
                 ((and (equal? title "") (not (equal? line "")))
                  (loop (cdr lines) line desc))
+                ;; positional fallback: a model that answers with the two
+                ;; lines and no labels at all is still answering. Line one
+                ;; titled, so line two describes -- dropping it is how the
+                ;; running summary silently went empty on the hosted model.
+                ((and (equal? desc "") (not (equal? line "")))
+                 (loop (cdr lines) title line))
                 (else (loop (cdr lines) title desc)))))))
 
 ;;; --- the card -------------------------------------------------------------------
@@ -127,7 +178,9 @@
   "Start the on-device card writer, or say where it stands"
   (lambda ()
     (message
-      (cond ((not (title-installed?))
+      (cond ((not (title--local?))
+             (string-append "title: cards are written by " (title--model)))
+            ((not (title-installed?))
              (string-append "title: no model in " title-model-directory))
             ((title-ready?) (string-append "title: ready on " (title--base-url)))
             (else "title: loading")))))

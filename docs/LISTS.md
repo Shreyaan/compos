@@ -139,8 +139,10 @@ The management buffer uses the original responsive table renderer and keymap:
 narrow below 64 columns, compact below 100, wide otherwise. The key hint bar
 fits the available width. Names use the theme's fixed-pitch face; group labels
 use its fixed-pitch and bold faces, keeping the calculated line widths valid.
-The management key hints wrap at the window width, including `p` for preview
-and `M-↓/↑` for group navigation. The reusable `ui/keymap` component gives keys
+The management key hints wrap at the window width, including `C-c v` for
+previews on/off and `M-↓/↑` for group navigation. The preview toggle is a
+chord on purpose: `p` walks rows in every list, and binding the toggle there
+switched previews off for anyone who pressed `p` to go up a line. The reusable `ui/keymap` component gives keys
 small theme-colored keycaps and labels in the theme's proportional font.
 `footer-line-blocks` carries the component through the normal block renderer;
 it is rebuilt on redraw/restore and cleared on a mode change.

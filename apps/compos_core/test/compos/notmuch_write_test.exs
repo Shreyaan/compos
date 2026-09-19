@@ -19,12 +19,12 @@ defmodule Compos.NotmuchWriteTest do
 
     assert {:ok, _} =
              Session.eval(
-               "(begin (define zz-write-program notmuch-program) (define zz-write-host notmuch-host) (set! notmuch-host \"\") (set! notmuch-program #{inspect("sh " <> path)}))"
+               "(begin (define zz-write-program notmuch-program) (define zz-write-host notmuch-host) (define zz-write-profile notmuch-profile) (set! notmuch-host \"\") (set! notmuch-profile \"\") (set! notmuch-program #{inspect("sh " <> path)}))"
              )
 
     on_exit(fn ->
       Session.eval(
-        "(begin (set! notmuch-program zz-write-program) (set! notmuch-host zz-write-host))"
+        "(begin (set! notmuch-program zz-write-program) (set! notmuch-host zz-write-host) (set! notmuch-profile zz-write-profile))"
       )
 
       File.rm(path)

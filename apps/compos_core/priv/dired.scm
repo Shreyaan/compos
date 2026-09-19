@@ -334,6 +334,15 @@
 
 ;; the whole directory, before the filters: the biggest file sets the
 ;; scale of the size bars, and the header counts what the narrowing hid
+;; ls is the name a person reaches for, so the editor answers to it. Dired
+;; itself has no path-to-files call — every listing it owns hangs off a
+;; buffer and applies that buffer's filters, sort and marks. This is the
+;; layer under the mode: the same entries dired reads, before any of its
+;; opinions, as (name type bytes mtime size date perms) plists. A bad path
+;; comes back as (error REASON), the way directory-entries reports it.
+(define (ls &optional dir)
+  (directory-entries (or dir (default-directory))))
+
 (define (dired-read-directory! buf dir)
   (let ((entries (directory-entries dir)))
     (if (and (pair? entries) (equal? (car entries) 'error))
@@ -953,6 +962,8 @@
 (public! 'dired-dir "(dired-dir BUF) — the directory a Dired buffer is showing")
 (public! 'dired-visible "(dired-visible BUF DIR) — the entries a Dired buffer is showing, after its filters")
 (public! 'dired-marks "(dired-marks BUF) — the marked entries, as (name mark-char) pairs")
+(public! 'ls "(ls [DIR]) — the files in DIR as (name type bytes mtime size date perms) plists; DIR defaults to this buffer's directory")
+(catalog-meta! 'function "ls" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "dired-open" 'effects '(write))
 
 (domain! 'files)
