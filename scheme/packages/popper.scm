@@ -6,21 +6,21 @@
 ;;; mode matches too), and a procedure takes the name and answers.
 ;;;
 ;;; A display of a popup goes through display-buffer. The rule here sends
-;;; it to the bottom of the frame: to the window that shows a popup
-;;; already, else to a new window split from the root of the frame. The
-;;; popup window then has the selection, as in popper. It has normal
-;;; focus and takes every window command. The layout does not tile it
-;;; (window-work-buffer?).
+;;; it to the popup window: the one window across the bottom of the frame
+;;; that popper made. The frame local 'popper-window names that window.
+;;; Popper changes no other window. A popup buffer that the reader shows
+;;; in a work window stays there. A display from code does not move the
+;;; focus. popper-toggle and popper-cycle select the popup window, and a
+;;; close gives the focus back to the window that had it. The layout does
+;;; not tile the popup window (window-work-buffer?).
 ;;;
 ;;; popper-toggle closes the popup on screen, or shows the latest popup
 ;;; again. popper-cycle shows the next popup in the popup window.
 ;;; popper-toggle-type makes the popup an ordinary buffer, or makes the
 ;;; current buffer a popup.
 ;;;
-;;; A close is the quit-window restore: the window shows the buffer the
-;;; popup covered, or the window goes when a popup display made it. When
-;;; the buffer under a popup is a popup too, that popup comes back, and
-;;; its own close deletes the window.
+;;; A close shows the popup that the closed popup covered in the popup
+;;; window. When no popup is under it, the close deletes the popup window.
 
 (domain! 'windows)
 (effects! '(read))
@@ -60,15 +60,13 @@
                ((equal? status 'raised) #f)
                (else (popper--reference? buf))))))
 
-;; the window of the latest popup on screen: the selected window when it
-;; shows a popup, else the first window that shows one, or #f
+;; the popup window: the window that popper made, while it lives and
+;; shows a popup, else #f
 (define (popper-window)
-  (if (popper-popup? (window-buffer (active-window)))
-      (active-window)
-      (let loop ((ws (window-list)))
-        (cond ((null? ws) #f)
-              ((popper-popup? (cadr (car ws))) (car (car ws)))
-              (else (loop (cdr ws)))))))
+  (let ((w (frame-local 'popper-window)))
+    (and w (assoc w (window-list))
+         (popper-popup? (window-buffer w))
+         w)))
 
 ;; the popups, most recent first: the buffer ring is the record of use
 (define (popper-buffers)
@@ -82,18 +80,19 @@
        (not (plist-get alist 'category))
        (popper-popup? name)))
 
-;; popper-select-popup-at-bottom: the window that shows NAME, else the
-;; popup window, else a new window across the bottom of the frame. The
-;; window is selected.
+;; popper-display-popup-at-bottom: the popup window, else a new window
+;; across the bottom of the frame. A popup display of NAME covers the
+;; popup there, and the close shows that popup again.
 (define-display-action! 'popper-bottom
   (lambda (name alist)
-    (let ((win (or (window-showing name)
-                   (popper-window)
-                   (split-root! 'v (- 1 popper-window-height)))))
+    (let* ((own (popper-window))
+           (win (or own (split-root! 'v (- 1 popper-window-height)))))
       (when win
+        (unless own
+          (set-frame-local! 'popper-window win)
+          (set-frame-local! 'popper-return (active-window)))
         (unless (equal? (window-buffer win) name)
-          (display-buffer-in-window! win name))
-        (select-window! win))
+          (display-buffer-in-window! win name)))
       win)))
 
 (add-display-rule! popper-display-control? 'popper-bottom)
@@ -104,29 +103,30 @@
 
 ;;; --- close, toggle, cycle ----------------------------------------------------------
 
-;; Close the popup in WIN (quit-window). The window shows the buffer the
-;; popup covered, or it goes when a popup display made it. A popup that
-;; comes back this way stands in a window that popups made, so its
-;; record says so: its own close deletes the window. With no record, the
-;; window shows the last buffer of its history that is not a popup, as
-;; Emacs switch-to-prev-buffer does, or it goes.
+;; Close the popup window WIN. The window shows the popup that the closed
+;; popup covered. When no popup is under it, the window goes, and the
+;; focus goes back to the window that had it before the popup opened.
 (define (popper-close! win)
   (let* ((rec (window-restore win))
-         (kind (and rec (car rec)))
-         (under (and (equal? kind 'other) (cadr rec)))
-         (other? (pair? (cdr (window-list))))
-         (past (filter (lambda (b) (not (popper-popup? b))) (window-eligible-history win))))
-    (cond ((and under (buffer-known? under))
+         (under (and rec (equal? (car rec) 'other) (cadr rec))))
+    (cond ((and under (buffer-known? under) (popper-popup? under))
            (display-buffer-in-window! win under)
-           (when (popper-popup? under) (set-window-restore! win '(window #f #f)))
+           (set-window-restore! win '(window #f #f))
            #t)
-          ((and (equal? kind 'window) other?) (delete-window-id! win) #t)
-          ((pair? past)
-           (display-buffer-in-window! win (car past))
-           (set-window-restore! win #f)
+          ((pair? (cdr (window-list)))
+           (let ((back (frame-local 'popper-return))
+                 (had-focus (equal? (active-window) win)))
+             (delete-window-id! win)
+             (set-frame-local! 'popper-window #f)
+             (when (and had-focus back (assoc back (window-list))) (select-window! back)))
            #t)
-          (other? (delete-window-id! win) #t)
           (else (message "The popup is the last window") #f))))
+
+;; show BUF in the popup window, and select that window
+(define (popper-show! buf)
+  (let ((w (display-buffer buf)))
+    (when w (select-window! w))
+    w))
 
 ;; the latest popup that no window shows
 (define (popper-latest)
@@ -139,7 +139,7 @@
   (lambda ()
     (let ((w (popper-window)))
       (cond (w (popper-close! w))
-            ((popper-latest) (display-buffer (popper-latest)))
+            ((popper-latest) (popper-show! (popper-latest)))
             (else (message "No popup"))))))
 
 ;; The next popup is the one used least recently, so each press shows a
@@ -151,27 +151,24 @@
                     (filter (lambda (b) (not (window-showing b))) bs))))
       (cond ((null? others)
              (if w (message "No other popup") (message "No popup")))
-            (w (display-buffer (car (reverse others))))
-            (else (display-buffer (car others)))))))
+            (w (popper-show! (car (reverse others))))
+            (else (popper-show! (car others)))))))
 
-;; popper-toggle-type. A popup becomes an ordinary buffer: its popup
-;; window closes and the display chain shows it in a work window. Any
-;; other buffer becomes a popup: its window goes back to what it showed
-;; before, and the buffer shows at the bottom.
+;; popper-toggle-type. A popup becomes an ordinary buffer where it stands:
+;; its popup window becomes a work window. Any other buffer becomes a
+;; popup, and its window keeps it. The next popup display of it goes to
+;; the popup window.
 (define-command "popper-toggle-type" "Make this popup an ordinary buffer, or make this buffer a popup"
   (lambda ()
-    (let ((buf (current-buffer))
-          (win (active-window)))
+    (let ((buf (current-buffer)))
       (if (popper-popup? buf)
           (begin
+            (when (equal? (popper-window) (active-window))
+              (set-frame-local! 'popper-window #f))
             (buffer-set-local! buf 'popper-popup-status 'raised)
-            (when (equal? (window-buffer win) buf) (popper-close! win))
-            (pop-to-buffer buf)
             (message (string-append buf " is an ordinary buffer now")))
           (begin
             (buffer-set-local! buf 'popper-popup-status 'popup)
-            (when (equal? (window-buffer win) buf) (window-unwind-or-close! win))
-            (display-buffer buf)
             (message (string-append buf " is a popup now")))))))
 
 ;; popper's README keys: C-` toggles, M-` cycles, C-M-` changes the type
@@ -186,9 +183,9 @@
 (public! 'popper-popup?
   "(popper-popup? NAME) — #t when NAME is a popup: its own status, else popper-reference-buffers")
 (public! 'popper-window
-  "(popper-window) — the window of the latest popup on screen, or #f")
+  "(popper-window) — the popup window that popper made, or #f")
 (public! 'popper-buffers
   "(popper-buffers) — the popups, most recent first")
 (effects! '(write display))
 (public! 'popper-close!
-  "(popper-close! WIN) — close the popup in WIN: show the buffer it covered, or delete the window a popup display made")
+  "(popper-close! WIN) — close the popup in the popup window WIN: show the popup under it, or delete the window")

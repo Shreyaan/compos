@@ -49,7 +49,7 @@
         (buffer-set-local! t--pop-work 'mode-name #f)))))
 
 (deftest 'a-popup-shows-in-an-ordinary-window-at-the-bottom
-  "display-buffer splits the frame's root; the window is selected and is not a float"
+  "display-buffer splits the frame's root; the focus stays, and nothing floats"
   (lambda ()
     (t--pop-with
       (lambda ()
@@ -58,7 +58,7 @@
           (check-equal! (length (window-list)) 2 "one new window")
           (check-false! (equal? w me) "not the work window")
           (check-equal! (window-buffer w) t--pop-a "it shows the popup")
-          (check-equal! (active-window) w "the popup window has the selection")
+          (check-equal! (active-window) me "a display from code moves no focus")
           (check-true! (t--pop-bottom? w) "across the bottom of the frame")
           (check-false! (float-open?) "nothing floats")
           (check-false! (buffer-local t--pop-a 'window-class) "the buffer wears no float class")
@@ -71,9 +71,11 @@
     (t--pop-with
       (lambda ()
         (let ((me (active-window)))
-          (display-buffer t--pop-a)
+          (popper-show! t--pop-a)
+          (check-false! (equal? (active-window) me) "the shown popup has the focus")
           (run-command "popper-toggle")
           (check-equal! (length (window-list)) 1 "the popup window goes")
+          (check-equal! (active-window) me "the focus goes back")
           (check-equal! (window-buffer (active-window)) t--pop-work "the work shows")
           (check-true! (buffer-known? t--pop-a) "the popup buffer lives")
           (run-command "popper-toggle")
@@ -95,20 +97,23 @@
           (check-equal! (length (window-list)) 1 "the next close deletes the window")
           (check-equal! (window-buffer (active-window)) t--pop-work "the work shows"))))))
 
-(deftest 'closing-a-popup-restores-the-buffer-under-it-in-that-window
-  "in the only window, the close shows the popup under it, then the work buffer from the history"
+(deftest 'a-popup-in-a-work-window-stays-there
+  "popper changes only its own window: a popup that the reader shows in a work window keeps it"
   (lambda ()
     (t--pop-with
       (lambda ()
         (let ((me (active-window)))
           ;; the reader switches to a popup in the work window
           (switch-to-buffer! t--pop-a)
-          (check-equal! (display-buffer t--pop-b) me "a popup display reuses the window of a popup")
-          (run-command "popper-toggle")
-          (check-equal! (window-buffer me) t--pop-a "the popup under it comes back")
-          (run-command "popper-toggle")
-          (check-equal! (length (window-list)) 1 "the last window stays")
-          (check-equal! (window-buffer me) t--pop-work "and shows the buffer under the popups"))))))
+          (let ((w (display-buffer t--pop-b)))
+            (check-false! (equal? w me) "a popup display does not take the work window")
+            (check-equal! (window-buffer me) t--pop-a "the work window keeps its buffer")
+            (run-command "popper-toggle")
+            (check-equal! (length (window-list)) 1 "the close deletes only the popup window")
+            (check-equal! (window-buffer me) t--pop-a "the work window still keeps its buffer")
+            (run-command "popper-toggle")
+            (check-equal! (window-buffer (popper-window)) t--pop-b "the toggle shows the popup that no window shows")
+            (check-equal! (window-buffer me) t--pop-a "and the work window keeps its buffer")))))))
 
 (deftest 'cycle-shows-each-other-popup-in-the-popup-window
   "with a popup open, each cycle shows another popup there; the presses reach them all"
@@ -141,24 +146,21 @@
         (check-equal! (window-buffer (popper-window)) t--pop-a "the latest popup shows")))))
 
 (deftest 'toggle-type-makes-a-popup-ordinary-and-back
-  "a raised popup takes a work window; a lowered buffer shows at the bottom"
+  "toggle-type changes the status and moves no buffer"
   (lambda ()
     (t--pop-with
       (lambda ()
-        (let ((me (active-window)))
-          (display-buffer t--pop-a)
+        (let* ((me (active-window))
+               (w (popper-show! t--pop-a)))
           (run-command "popper-toggle-type")
           (check-false! (popper-popup? t--pop-a) "the buffer is ordinary now")
           (check-false! (popper-window) "no popup window stays")
-          (let ((w (window-showing t--pop-a)))
-            (check-true! (and w #t) "a window shows it")
-            (check-true! (member t--pop-a (layout-visible-buffers)) "as a work window")
-            (select-window! w)
-            (run-command "popper-toggle-type")
-            (check-true! (popper-popup? t--pop-a) "a popup again")
-            (let ((p (window-showing t--pop-a)))
-              (check-true! (and p (t--pop-bottom? p)) "at the bottom of the frame"))
-            (check-equal! (window-buffer me) t--pop-work "the work window keeps the work")))))))
+          (check-equal! (window-buffer w) t--pop-a "the buffer stays where it is")
+          (check-true! (member t--pop-a (layout-visible-buffers)) "as a work window")
+          (run-command "popper-toggle-type")
+          (check-true! (popper-popup? t--pop-a) "a popup again")
+          (check-equal! (window-buffer w) t--pop-a "the buffer still stays where it is")
+          (check-equal! (window-buffer me) t--pop-work "the work window keeps the work"))))))
 
 (deftest 'a-look-at-a-popup-takes-the-preview-rule
   "a preview of a popup buffer goes beside the reader, not to the popup window"
