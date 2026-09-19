@@ -439,21 +439,69 @@
           return;
         }
 
-        const styles = getComputedStyle(this.el.closest(".window"));
-        const color = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+        // The terminal wears the editor's theme. Every colour is a face:
+        // `terminal', `terminal-cursor', `terminal-select' and the sixteen
+        // `ansi-color-*' faces, read here as the pane's computed variables.
+        // A theme names them; this hook only reads them.
+        // The frame carries a CSS zoom (the `ui' face writes --ui-zoom, and a
+        // buffer may scale its text again). xterm measures the cell in real
+        // pixels and draws into a canvas it sizes itself, so under a zoom it
+        // counts the wrong number of rows and the text sits below the top of
+        // the pane. The pane cancels every zoom it sits under and puts the
+        // same factor on the font size: the terminal reads at the editor's
+        // scale and fits the pane exactly.
+        this.zoom = () => {
+          let z = 1;
+          for (let n = this.el.parentElement; n; n = n.parentElement) {
+            const v = parseFloat(getComputedStyle(n).zoom);
+            if (v > 0 && v !== 1) z *= v;
+          }
+          return z;
+        };
+        this.look = () => {
+          const zoom = this.zoom();
+          this.el.style.zoom = 1 / zoom;
+          const styles = getComputedStyle(this.el.closest(".window"));
+          const v = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+          const ansi = (name, fallback) => v("--ansi-color-" + name + "-fg", fallback);
+          const bg = v("--terminal-bg", "#111318");
+          return {
+            fontFamily: v("--terminal-family", "ui-monospace, Menlo, monospace"),
+            fontSize: (parseFloat(v("--terminal-size", "13px")) || 13) * zoom,
+            theme: {
+              background: bg,
+              foreground: v("--terminal-fg", "#e6e1d8"),
+              cursor: v("--terminal-cursor-bg", "#d6b95e"),
+              cursorAccent: bg,
+              selectionBackground: v("--terminal-select-bg", "#36405a"),
+              black: ansi("black", "#1c1c1c"),
+              red: ansi("red", "#cd3131"),
+              green: ansi("green", "#0dbc79"),
+              yellow: ansi("yellow", "#e5e510"),
+              blue: ansi("blue", "#2472c8"),
+              magenta: ansi("magenta", "#bc3fbc"),
+              cyan: ansi("cyan", "#11a8cd"),
+              white: ansi("white", "#e5e5e5"),
+              brightBlack: ansi("bright-black", "#666666"),
+              brightRed: ansi("bright-red", "#f14c4c"),
+              brightGreen: ansi("bright-green", "#23d18b"),
+              brightYellow: ansi("bright-yellow", "#f5f543"),
+              brightBlue: ansi("bright-blue", "#3b8eea"),
+              brightMagenta: ansi("bright-magenta", "#d670d6"),
+              brightCyan: ansi("bright-cyan", "#29b8db"),
+              brightWhite: ansi("bright-white", "#e5e5e5")
+            }
+          };
+        };
         this.term = new window.Terminal({
           cursorBlink: true,
           scrollback: 10000,
-          fontFamily: color("--font-mono", "ui-monospace, Menlo, monospace"),
-          fontSize: 13,
           lineHeight: 1.15,
-          theme: {
-            background: color("--window-bg", "#111318"),
-            foreground: color("--default-fg", "#e6e1d8"),
-            cursor: color("--cursor-bg", "#d6b95e"),
-            selectionBackground: color("--select-bg", "#36405a")
-          }
+          ...this.look()
         });
+        // the pane carries its terminal, so a console session can read what
+        // the PTY drew: document.querySelector(".terminal-view").__term
+        this.el.__term = this.term;
         this.fitAddon = new window.FitAddon.FitAddon();
         this.term.loadAddon(this.fitAddon);
         this.term.open(this.el);
@@ -465,26 +513,38 @@
           } catch (_) { this.webglAddon = null; }
         }
 
-        this.socket = new Phoenix.Socket("/terminal", {});
-        this.socket.connect();
-        this.channel = this.socket.channel("terminal", { buffer: this.el.dataset.buffer });
-        const write64 = (encoded) => {
-          if (!encoded || !this.term) return;
-          const raw = atob(encoded);
-          const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
-          this.term.write(bytes);
-        };
-        this.channel.on("output", ({ data }) => write64(data));
-        this.channel.on("exit", ({ status }) => {
-          this.term.write(`\r\n\x1b[90m[process exited: ${status}]\x1b[0m\r\n`);
-        });
-        this.channel.join()
-          .receive("ok", ({ history }) => write64(history))
-          .receive("error", ({ reason }) => {
-            this.term.write(`\r\n[terminal unavailable: ${reason}]\r\n`);
+        // The transcript replays into this terminal on every mount. It is raw
+        // PTY bytes, wrapped at the width the PTY had when it wrote them, so
+        // a terminal that is still 80 columns wide re-wraps every line and
+        // leaves blank rows above the prompt. The pane is sized first, in
+        // `connect' below, and only then does the channel join.
+        this.connect = () => {
+          this.socket = new Phoenix.Socket("/terminal", {});
+          this.socket.connect();
+          this.channel = this.socket.channel("terminal", { buffer: this.el.dataset.buffer });
+          const write64 = (encoded) => {
+            if (!encoded || !this.term) return;
+            const raw = atob(encoded);
+            const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+            this.term.write(bytes);
+          };
+          this.channel.on("output", ({ data }) => write64(data));
+          this.channel.on("exit", ({ status }) => {
+            this.term.write(`\r\n\x1b[90m[process exited: ${status}]\x1b[0m\r\n`);
           });
+          this.channel.join()
+            .receive("ok", ({ history, cols, rows }) => {
+              // wear the PTY's size, replay, then take the pane's size back
+              if (cols > 0 && rows > 0) this.term.resize(cols, rows);
+              write64(history);
+              this.fit();
+            })
+            .receive("error", ({ reason }) => {
+              this.term.write(`\r\n[terminal unavailable: ${reason}]\r\n`);
+            });
 
-        this.dataSub = this.term.onData(data => this.channel.push("input", { data }));
+          this.dataSub = this.term.onData(data => this.channel.push("input", { data }));
+        };
         this.editorSequence = false;
         this.keyboardOwnerH = (event) => {
           const owner = event.detail && event.detail.terminal;
@@ -519,16 +579,47 @@
 
         this.fit = () => {
           if (!this.term || !this.fitAddon) return;
+          // a zoom change is a font change as well as a size change
+          const z = this.zoom();
+          if (z !== this.zoomWas) {
+            this.zoomWas = z;
+            this.retheme();
+            return;
+          }
           this.fitAddon.fit();
-          this.channel.push("resize", { cols: this.term.cols, rows: this.term.rows });
+          if (this.channel) {
+            this.channel.push("resize", { cols: this.term.cols, rows: this.term.rows });
+          }
         };
         this.observer = new ResizeObserver(() => {
           cancelAnimationFrame(this.fitFrame);
           this.fitFrame = requestAnimationFrame(this.fit);
         });
         this.observer.observe(this.el);
-        requestAnimationFrame(() => {
+
+        // A theme change rewrites the face stylesheet. Nothing else writes
+        // a <style> element, so this observer fires once per theme change,
+        // and the terminal reads its colours again.
+        this.retheme = () => {
+          if (!this.term) return;
+          const look = this.look();
+          this.term.options.fontFamily = look.fontFamily;
+          this.term.options.fontSize = look.fontSize;
+          this.term.options.theme = look.theme;
           this.fit();
+        };
+        this.themeObserver = new MutationObserver(() => {
+          cancelAnimationFrame(this.themeFrame);
+          this.themeFrame = requestAnimationFrame(this.retheme);
+        });
+        document.querySelectorAll("style").forEach((s) =>
+          this.themeObserver.observe(s, {
+            childList: true, characterData: true, subtree: true
+          }));
+        requestAnimationFrame(() => {
+          // width first, transcript second
+          this.fit();
+          this.connect();
           const active = this.el.closest(".window")?.classList.contains("active");
           const editorOpen = document.querySelector(
             ".mb-panel, .which-key, .transient-panel"
@@ -538,6 +629,8 @@
       },
       destroyed() {
         if (this.observer) this.observer.disconnect();
+        if (this.themeObserver) this.themeObserver.disconnect();
+        cancelAnimationFrame(this.themeFrame);
         if (this.dataSub) this.dataSub.dispose();
         window.removeEventListener("compos:keyboard-owner", this.keyboardOwnerH);
         if (this.channel) this.channel.leave();
@@ -1476,7 +1569,11 @@
           return "";
         };
         this.handler = (e) => {
-          if (e.target.closest && e.target.closest(".terminal-view")) return;
+          // The terminal's own handler answers for xterm's keyboard surface,
+          // and only for that surface. A key that lands anywhere else in the
+          // pane reached neither handler and died there, so M-x did nothing.
+          if (e.target.closest && e.target.closest(".terminal-view") &&
+              e.target.classList.contains("xterm-helper-textarea")) return;
           const panel = document.querySelector(".which-key");
           // the filter dies with the panel it belonged to. A query
           // left standing swallowed the next chord's second key as

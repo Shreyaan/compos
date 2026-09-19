@@ -14,9 +14,13 @@
 ;;;   EMIT      each flagged row becomes an empty template. The sheet copies
 ;;;             the document and deletes those nodes.
 ;;;
-;;; The walk is top down. Ask about body's children first, then descend only
-;;; into what survives. A page's chrome sits near the top, so a page costs
-;;; two or three JEV calls, not one per node.
+;;; The walk is top down, and the whole walk arrives before the first
+;;; question. So the questions about a deeper level are asked speculatively
+;;; beside the questions about the level above it, in one call, and code
+;;; throws away every answer that sits inside a box that turned out to be
+;;; furniture. Parallel questions in one call cost no more time than one
+;;; question, and a page's chrome sits near its top, so a page costs one
+;;; JEV call, not one per level and not one per node.
 ;;;
 ;;; Discovery and the finished parser run in the same engine, so a pattern
 ;;; that selects a node during discovery selects it in production.
@@ -30,12 +34,13 @@
 (domain! 'web)
 (effects! '(read external execute))
 
-(defcustom 'xslt-discover-depth 3
+(defcustom 'xslt-discover-depth 6
   "How many levels below body discovery reports."
   'group 'web 'type 'integer)
 
-(defcustom 'xslt-chrome-threshold 0.5
-  "How sure JEV must be before a rule deletes the element."
+(defcustom 'xslt-chrome-threshold 0.7
+  "How sure JEV must be before a rule deletes the element. Half is a coin
+toss, and a sheet built on coin tosses eats the article."
   'group 'web 'type 'float)
 
 (defcustom 'xslt-token-max 40
@@ -43,11 +48,42 @@
   'group 'web 'type 'integer)
 
 (defcustom 'xslt-content-min 400
-  "The walk descends only into a kept element with this many characters."
+  "The walk descends into an element with this many characters."
+  'group 'web 'type 'integer)
+
+(defcustom 'xslt-links-min 12
+  "The walk also descends into an element with this many links, whatever
+its text volume. Text alone is the wrong gate: Wikipedia hangs its
+language menu inside the article's own header, 42 links in 393
+characters, seven under the text bound. A box of many links and little
+text is a menu, and a menu is what a reading wants gone."
   'group 'web 'type 'integer)
 
 (defcustom 'xslt-level-max 24
   "How many elements one JEV call judges. The largest go first."
+  'group 'web 'type 'integer)
+
+(defcustom 'xslt-fanout-max 64
+  "How many speculative elements one call judges below the first level.
+These are questions about boxes that may turn out to sit inside deleted
+furniture, and the answer is then thrown away. They are free in time and
+cheap in tokens, so the bound is loose."
+  'group 'web 'type 'integer)
+
+(defcustom 'xslt-learn-levels 6
+  "How deep a learn walks. A site that wraps its page in framework boxes
+puts real furniture well below the top: Wikipedia hangs its language menu
+inside the article's own header, five levels down. Since every level goes
+in one call, depth no longer costs a round trip, and xslt-question-max is
+the bound that matters."
+  'group 'web 'type 'integer)
+
+(defcustom 'xslt-question-max 96
+  "How many elements one learn judges in all. This is the real bound on a
+learn, because depth is free and width is not: a news front page is a
+grid of cards and its third level alone holds sixty boxes, while an
+article's whole tree holds forty. Shallow levels are asked first, so the
+budget runs out at the bottom, where the furniture is not."
   'group 'web 'type 'integer)
 
 ;;; --- the table ----------------------------------------------------------------
@@ -138,9 +174,17 @@
   (string-append "contains(concat(' ', normalize-space(@class), ' '), ' " tok " ')"))
 
 ;; the rarest addressable token; the longest name breaks a tie
+;; A class token earns a rule only when it is a word: lowercase letters
+;; and hyphens. "content-footer" and "ad-slot" are names a person chose
+;; and a deploy keeps. "dcr-1uu0ds5", "sc-bdVaJa" and "css-1x2y3z" are
+;; what a CSS compiler emitted this build, and a sheet built on one of
+;; them is dead the next time the site ships.
+(define (xslt--word? s)
+  (and (string? s) (not (equal? s "")) (re-match? "^[a-z][a-z-]*$" s)))
+
 (define (xslt--token row)
   (let ((ok (filter (lambda (t)
-                      (and (<= (cadr t) xslt-token-max) (xslt--plain? (car t))))
+                      (and (<= (cadr t) xslt-token-max) (xslt--word? (car t))))
                     (plist-get row 'toks))))
     (if (null? ok)
         #f
@@ -230,37 +274,14 @@
   (string-append
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
     "<xsl:stylesheet version=\"1.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">\n"
-    "  <xsl:output method=\"html\" encoding=\"UTF-8\" omit-xml-declaration=\"yes\"/>\n"
-    "  <xsl:strip-space elements=\"*\"/>\n\n"
+    ;; What to do with what is left is the same for every site, so it is
+    ;; one sheet beside this one. Fixing a rule there fixes every site
+    ;; learned so far, and nothing is learned again.
+    "  <xsl:import href=\"common.xsl\"/>\n\n"
     "  <xsl:template match=\"/\">\n"
     "    <html><body>\n"
     "      <xsl:apply-templates select=\"" keep "\" mode=\"copy\"/>\n"
     "    </body></html>\n"
-    "  </xsl:template>\n\n"
-    "  <xsl:template match=\"@*|node()\" mode=\"copy\">\n"
-    "    <xsl:copy>\n"
-    "      <xsl:apply-templates select=\"@*|node()\" mode=\"copy\"/>\n"
-    "    </xsl:copy>\n"
-    "  </xsl:template>\n\n"
-    ;; the rules every page needs. An inlined icon is never content, and an
-    ;; anchor with no text is not a link a reader can follow.
-    "  <xsl:template match=\"script|style|noscript\" mode=\"copy\"/>\n"
-    "  <xsl:template match=\"svg\" mode=\"copy\"/>\n"
-    "  <xsl:template match=\"img[starts-with(@src, 'data:')]\" mode=\"copy\"/>\n"
-    "  <xsl:template match=\"a[not(normalize-space(.))]\" mode=\"copy\"/>\n"
-    ;; a leaf whose whole text is a separator. The bar sat between an icon
-    ;; and a comment count; both went, and the bar stayed.
-    "  <xsl:template match=\"*[not(*) and normalize-space(.) = '|']\" mode=\"copy\"/>\n"
-    "  <xsl:template match=\"text()[normalize-space(.) = '|']\" mode=\"copy\"/>\n"
-    ;; A card wraps its heading in the link. Pandoc holds no block inside a
-    ;; link, so it writes an empty one and then the blocks. Put the link
-    ;; inside the heading instead: the label is the headline, and RET still
-    ;; follows it.
-    "  <xsl:template match=\"a[h1|h2|h3|h4|h5|h6]\" mode=\"copy\">\n"
-    "    <h2><a href=\"{@href}\">\n"
-    "      <xsl:value-of select=\"normalize-space((h1|h2|h3|h4|h5|h6)[1])\"/>\n"
-    "    </a></h2>\n"
-    "    <xsl:apply-templates mode=\"copy\" select=\"node()[not(self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6)]\"/>\n"
     "  </xsl:template>\n"
     (apply string-append (map xslt--rule drops))
     "</xsl:stylesheet>\n"))
@@ -339,36 +360,167 @@
 (define (xslt-discover html)
   (xslt-rows (shell-command->string (xslt--discover-command (web--write-html! html)))))
 
+;; A direct child of body keeps its place: the header, the footer and the
+;; rails are where the document starts and ends, and /html/body/footer[1]
+;; still names the footer after a redesign. Deeper down a position is the
+;; shape of one fetch and nothing more.
+(define (xslt--shallow-path? p)
+  (<= (length (filter (lambda (s) (not (equal? s ""))) (string-split p "/"))) 3))
+
+;; A rule the sheet can trust addresses its element by a name — an id, a
+;; class token that is a word, an aria-label, a lone semantic tag — or by
+;; a place at the top of the document, and says something no earlier rule
+;; said. A rule that can only point deep into this one fetch is left out:
+;; a page read with one rule missing beats a page a drifted rule deleted.
+(define (xslt--keep-drops rows furniture drops)
+  (let loop ((rs furniture) (acc drops))
+    (if (null? rs)
+        acc
+        (let ((d (xslt--drop rows (car rs))))
+          (loop (cdr rs)
+                (if (or (and (string-prefix? "/" (car d))
+                             (not (xslt--shallow-path? (car d))))
+                        (assoc (car d) acc))
+                    acc
+                    (cons d acc)))))))
+
 ;; the sheet for URL, learned from HTML. Answers a plist: the text to save,
 ;; what it deletes, and what the learning cost.
+;; A page with one root div is not a page with one section. A level that
+;; is a single box holding the rest is the framework's wrapper, and a
+;; wrapper is not a decision: step through it without spending a level.
+;; Without this a single-root page answers two questions and learns
+;; nothing, because both levels went on boxes with one child each.
+(define (xslt--unwrap rows level)
+  (if (and (= (length level) 1) (pair? (xslt-children rows (car level))))
+      (xslt--unwrap rows (xslt-children rows (car level)))
+      level))
+
+;; every level one learn asks about, outermost first, chosen from the walk
+;; and nothing else. The walk already holds the whole tree, so which boxes a
+;; deeper level could reach is known before any answer comes back. Descent
+;; here is bounded by text volume alone: whether a box is content is the
+;; question, and waiting for it is the round trip this deletes.
+(define (xslt--levels rows)
+  (let loop ((level (xslt--unwrap rows (xslt-children rows #f)))
+             (depth 0) (spent 0) (acc '()))
+    (if (or (null? level) (>= depth xslt-learn-levels) (>= spent xslt-question-max))
+        (reverse acc)
+        (let* ((room (min (if (= depth 0) xslt-level-max xslt-fanout-max)
+                          (- xslt-question-max spent)))
+               (ask (take-n level room))
+               (over (- (length level) (length ask))))
+          ;; a bounded level is a bounded reading: say what went unjudged
+          (if (> over 0)
+              (message (string-append "xslt-learn: " (number->string over)
+                                      " smaller elements not judged at level "
+                                      (number->string depth)))
+              #f)
+          (loop (xslt--unwrap rows
+                  (xslt--sort-by
+                    (apply append
+                           (map (lambda (r) (xslt-children rows r))
+                                (filter (lambda (r)
+                                          (or (>= (plist-get r 'len) xslt-content-min)
+                                              (>= (plist-get r 'a) xslt-links-min)))
+                                        ask)))
+                    (lambda (r) (- 0 (plist-get r 'len)))))
+                (+ depth 1)
+                (+ spent (length ask))
+                (cons ask acc))))))
+
+(define (xslt--under? parent row)
+  (string-prefix? (string-append (plist-get parent 'path) "/")
+                  (plist-get row 'path)))
+
+;; one flat list of answers split back into the levels it was asked in
+(define (xslt--regroup rows lens)
+  (if (null? lens)
+      '()
+      (cons (take-n rows (car lens))
+            (xslt--regroup (list-tail rows (car lens)) (cdr lens)))))
+
+;; A box the model called furniture, whose text is mostly one part it called
+;; content, is a wrapper around the article and not furniture. Deleting it
+;; deletes the page. Only a fan-out learn can doubt a box this way: the
+;; answer for the part arrives in the same call as the answer for the whole,
+;; so the second opinion costs nothing and is already in hand.
+;; libxml2 reads a `<` before a letter as the start of a tag, and a page
+;; that inlines JavaScript has plenty: amazon.in writes `i<linkKeys.length`
+;; and the parse grows elements named "length" and "linkkeys.length" that
+;; no browser has. One of them swallowed 546,736 of the shop's 1,058,311
+;; characters, the learn judged it furniture at p=0.73, and the sheet it
+;; wrote deleted half of amazon.in. A name no browser knows is a parse
+;; artefact and not a thing on the page: judge what is inside it, and never
+;; write a rule against it.
+(define *xslt-elements*
+  '("a" "abbr" "address" "area" "article" "aside" "audio" "b" "base" "bdi" "bdo"
+    "blockquote" "body" "br" "button" "canvas" "caption" "cite" "code" "col"
+    "colgroup" "data" "datalist" "dd" "del" "details" "dfn" "dialog" "div" "dl"
+    "dt" "em" "embed" "fieldset" "figcaption" "figure" "footer" "form" "h1" "h2"
+    "h3" "h4" "h5" "h6" "head" "header" "hgroup" "hr" "html" "i" "iframe" "img"
+    "input" "ins" "kbd" "label" "legend" "li" "link" "main" "map" "mark" "menu"
+    "meta" "meter" "nav" "noscript" "object" "ol" "optgroup" "option" "output"
+    "p" "param" "picture" "pre" "progress" "q" "rp" "rt" "ruby" "s" "samp"
+    "script" "search" "section" "select" "slot" "small" "source" "span" "strong"
+    "style" "sub" "summary" "sup" "svg" "table" "tbody" "td" "template"
+    "textarea" "tfoot" "th" "thead" "time" "title" "tr" "track" "u" "ul" "var"
+    "video" "wbr"
+    ;; still shipped, still parsed
+    "acronym" "big" "center" "dir" "font" "frame" "frameset" "marquee"
+    "noframes" "strike" "tt"))
+
+(define (xslt--element? tag) (and (member tag *xslt-elements*) #t))
+
+;; The page's title is not furniture, and a box is not furniture for
+;; holding it. Wikipedia hangs its language menu in the same header as the
+;; h1, so the one rule that deletes the menu deletes the title with it.
+;; Leave that box alone and the level below it takes the menu by name.
+(define (xslt--holds-the-title? rows row)
+  (let ((h1s (filter (lambda (r) (equal? (plist-get r 'tag) "h1")) rows)))
+    (and (= (length h1s) 1) (xslt--under? row (car h1s)))))
+
+(define (xslt--vetoed? row deeper cut)
+  (let ((len (plist-get row 'len)))
+    (and (> len 0)
+         (pair? (filter (lambda (k)
+                          (and (xslt--under? row k)
+                               (<= (plist-get k 'p) (- 1 cut))
+                               (>= (plist-get k 'len) xslt-content-min)
+                               (>= (* 2 (plist-get k 'len)) len)))
+                        deeper)))))
+
 (define (xslt-learn url html)
-  (let ((rows (xslt-discover html))
-        (state (xslt--state url)))
-    (let loop ((level (xslt-children rows #f)) (drops '()) (calls 0) (asked 0))
-      (if (null? level)
+  (let* ((rows (xslt-discover html))
+         (levels (xslt--levels rows))
+         (ask (apply append levels))
+         (scored (if (null? ask) '() (xslt-score ask (xslt--state url))))
+         (graded (xslt--regroup scored (map length levels)))
+         (cut xslt-chrome-threshold))
+    (let loop ((ls graded) (deleted '()) (drops '()))
+      (if (null? ls)
           (list 'sheet (xslt-stylesheet "//body" (reverse drops))
                 'drops (reverse drops)
                 'rows (length rows)
-                'calls calls
-                'asked asked)
-          (let* ((ask (take-n level xslt-level-max))
-                 (over (- (length level) (length ask))))
-            ;; a bounded level is a bounded reading: say what went unjudged
-            (if (> over 0)
-                (message (string-append "xslt-learn: " (number->string over)
-                                        " smaller elements not judged at this level"))
-                #f)
-            (let* ((scored (xslt-score ask state))
-                   (cut xslt-chrome-threshold)
-                   (furniture (filter (lambda (r) (>= (plist-get r 'p) cut)) scored))
-                   (content (filter (lambda (r) (< (plist-get r 'p) cut)) scored))
-                   (deeper (filter (lambda (r) (>= (plist-get r 'len) xslt-content-min))
-                                   content)))
-              (loop (apply append (map (lambda (r) (xslt-children rows r)) deeper))
-                    (append (reverse (map (lambda (r) (xslt--drop rows r)) furniture))
-                            drops)
-                    (+ calls 1)
-                    (+ asked (length ask)))))))))
+                'calls (if (null? ask) 0 1)
+                'asked (length ask))
+          (let* ((deeper (apply append (cdr ls)))
+                 ;; a speculative answer counts only when every box above it
+                 ;; was content. An answer about a box inside one already
+                 ;; deleted says nothing: the rule above it removed both.
+                 (live (filter (lambda (r)
+                                 (null? (filter (lambda (d) (xslt--under? d r))
+                                                deleted)))
+                               (car ls)))
+                 (furniture (filter (lambda (r)
+                                      (and (>= (plist-get r 'p) cut)
+                                           (xslt--element? (plist-get r 'tag))
+                                           (not (xslt--vetoed? r deeper cut))
+                                           (not (xslt--holds-the-title? rows r))))
+                                    live)))
+            (loop (cdr ls)
+                  (append deleted furniture)
+                  (xslt--keep-drops rows furniture drops)))))))
 
 ;;; --- keeping it ---------------------------------------------------------------
 
@@ -376,23 +528,85 @@
 (effects! '(write))
 
 (define (xslt--parsers-dir)
-  (let ((p (locate-library "web/parsers/feed.xsl")))
-    (substring p 0 (- (string-length p) (string-length "feed.xsl")))))
+  (let ((dir (string-append (compos-home) "/packages/web/parsers/")))
+    (make-directory! dir)
+    dir))
 
-(define (xslt--host url)
-  (let* ((s (string-replace (string-replace url "https://" "") "http://" ""))
-         (cut (string-index s "/")))
-    (if cut (substring s 0 cut) s)))
+(define (xslt--host url) (web--parser-host url))
 
-;; save SHEET as the parser for URL's site and register it. The next visit
-;; reads the page through it and asks JEV nothing.
+;; A learned sheet is the reader's, not the editor's: it lives under
+;; ~/.compos/packages/web/parsers, which is on the load path after the
+;; bundled parsers, so a stylesheet a person wrote still wins.
+;;
+;; save SHEET as web/parsers/HOST.xsl. The file is the registration:
+;; web--host-parser finds it by name, so the next visit reads the page
+;; through it and asks JEV nothing, this session and every later one.
 (define (xslt-save! url sheet)
-  (let* ((host (xslt--host url))
-         (name (string-append host ".xsl"))
-         (path (string-append (xslt--parsers-dir) name)))
+  (let* ((dir (xslt--parsers-dir))
+         (path (string-append dir (xslt--host url) ".xsl")))
+    ;; the sheet imports common.xsl by a relative name, so the common
+    ;; rules travel with it. Copied on every save: a learned sheet reads
+    ;; through the rules this editor has now, not the ones it had then.
+    (write-file! (string-append dir "common.xsl")
+                 (read-file (locate-library "web/parsers/common.xsl")))
     (write-file! path sheet)
-    (web-register-site! (string-append "https://" host) name #f)
     path))
+
+;;; --- learning on the way past --------------------------------------------------
+
+(domain! 'web)
+(effects! '(read external execute spend write))
+
+;; the hosts this session has already spent a learn on, whether it
+;; worked or not. A site that teaches nothing must not be asked twice.
+(define *xslt-tried* '())
+
+(defcustom 'xslt-learn-timeout 60000
+  "How long a learn may take before the page gives up on it, in milliseconds."
+  'group 'web 'type 'number)
+
+;; learn URL's sheet off the lane and save it, then call (K PATH) — or
+;; (K #f) when there is nothing to learn, nothing was learnt, or the
+;; host has been asked already. A learn is one walk and one model
+;; call; the page waits for it once and never again.
+(define (xslt-learn-site! url html k)
+  (let ((host (xslt--host url)))
+    (if (member host *xslt-tried*)
+        (k #f)
+        (begin
+          (set! *xslt-tried* (cons host *xslt-tried*))
+          (task-run!
+            (lambda () (xslt-learn url html))
+            (lambda (ok result)
+              (let ((drops (and ok (pair? result) (plist-get result 'drops))))
+                (if (and drops (pair? drops))
+                    (let ((path (xslt-save! url (plist-get result 'sheet))))
+                      (message (string-append "learned " host ".xsl: "
+                                              (number->string (length drops))
+                                              " rules"))
+                      (k path))
+                    (k #f))))
+            xslt-learn-timeout)))))
+
+;; The sheet a site already has may be the wrong one: a redesign moves
+;; the furniture, and a first learn can miss. This forgets both and
+;; learns the page on screen again.
+(define-command "browse-learn-parser" "Learn this page's site parser again, replacing the one on disk"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (url (buffer-local buf 'browse-url))
+           (html (buffer-local buf 'browse-html)))
+      (cond ((not url) (message "no page here"))
+            ((not (string? html)) (message "no source held for this page; g refetches it"))
+            (else
+              (let ((host (xslt--host url)))
+                (set! *xslt-tried* (filter (lambda (h) (not (equal? h host))) *xslt-tried*))
+                (message (string-append "learning " host " …"))
+                (xslt-learn-site! url html
+                  (lambda (path)
+                    (if path
+                        (web--reread! buf)
+                        (message "learned nothing from this page"))))))))))
 
 ;;; --- the catalog --------------------------------------------------------------
 
@@ -424,4 +638,10 @@
 (effects! '(write))
 
 (public! 'xslt-save!
-  "(xslt-save! URL SHEET) - write SHEET as web/parsers/HOST.xsl and register the site; answers the path")
+  "(xslt-save! URL SHEET) - write SHEET as web/parsers/HOST.xsl, which is how a site registers a learned parser; answers the path")
+
+(domain! 'web)
+(effects! '(read external execute spend write))
+
+(public! 'xslt-learn-site!
+  "(xslt-learn-site! URL HTML K) - learn and save URL's site parser off the lane, once per host; K gets the path, or #f")

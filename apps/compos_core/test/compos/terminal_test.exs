@@ -16,6 +16,16 @@ defmodule Compos.TerminalTest do
     name
   end
 
+  test "the size rides with the transcript, so a client replays at the width that wrote it" do
+    name = start_terminal!("cat")
+    assert {80, 24} = Terminal.size(name), "the PTY starts at the size the wrapper pins"
+
+    # the reply says whether the ioctl reached the PTY; the recorded size is
+    # what a client reads back, and a replay needs it either way
+    _ = Terminal.resize(name, 166, 48)
+    assert {166, 48} = Terminal.size(name), "a client's size is the size the bytes wrap at"
+  end
+
   test "raw PTY output bypasses the transcript and remains readable in its buffer" do
     name = start_terminal!("printf '\\033[31mrails-ready\\033[0m\\n'; cat")
     assert {:ok, history} = Terminal.subscribe(name)

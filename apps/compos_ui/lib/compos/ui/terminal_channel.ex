@@ -14,7 +14,11 @@ defmodule Compos.Ui.TerminalChannel do
   def join("terminal", %{"buffer" => buffer}, socket) when is_binary(buffer) do
     case Terminal.subscribe(buffer) do
       {:ok, history} ->
-        {:ok, %{history: Base.encode64(history)}, assign(socket, :buffer, buffer)}
+        # the size rides with the transcript: it is the width the bytes wrapped at
+        {cols, rows} = Terminal.size(buffer)
+
+        {:ok, %{history: Base.encode64(history), cols: cols, rows: rows},
+         assign(socket, :buffer, buffer)}
 
       {:error, reason} ->
         {:error, %{reason: inspect(reason)}}

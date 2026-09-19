@@ -47,7 +47,9 @@
     (buffer-set-local! "*shell*" 'mode-name "term-mode")
     (with-current-buffer "*shell*"
       (lambda () (terminal-mode-init! "*shell*")))
-    (display-buffer "*shell*")))
+    ;; a shell is a place you type: it takes the window you stand in and
+    ;; the keyboard with it. display-buffer only showed it somewhere else
+    (switch-to-buffer! "*shell*")))
 
 ;; OpenCode is a terminal application, not an editor mode: it gets the same
 ;; fast raw PTY, ANSI colour, keyboard routing, and readable transcript as

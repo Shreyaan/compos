@@ -970,7 +970,11 @@
     (list 'diff-del-word 'bg "rgba(165, 52, 42, 0.26)")
     (list 'code-scope 'bg "rgba(43, 58, 103, 0.06)")
     ;; the typewriter wrote the text; the press set everything else
-    (list 'mono 'family "'Courier Prime', 'American Typewriter', 'Courier New', 'IBM Plex Mono', monospace")
+    ;; American Typewriter is proportional: it wears a typewriter face but it
+    ;; has no fixed advance. A terminal draws one glyph per cell, so a
+    ;; proportional fallback ragged every column. Courier New is the
+    ;; typewriter this theme wants AND a monospace, and it ships with macOS.
+    (list 'mono 'family "'Courier Prime', 'Courier New', 'Nimbus Mono PS', 'IBM Plex Mono', monospace")
     (list 'serif 'family "'Iowan Old Style', 'Palatino Linotype', Palatino, Spectral, Georgia, serif")
     (list 'sans 'inherit 'serif)
     (list 'chrome 'gap "9px" 'radius "0"
@@ -1039,6 +1043,194 @@
 .linenum { font-style: italic; }
 .buf { text-rendering: optimizeLegibility; }
 "))
+;;; --- brut: the black rule and the hard shadow -------------------------------
+;;; Neobrutalism. Every surface is a flat colour on an amber desk, every box
+;;; wears a thick black rule, and a box that lifts drops a solid black shadow
+;;; with no blur. Nothing is rounded, nothing fades, nothing is translucent.
+;;; The colours are the ones a poster is printed in: one red, one blue, one
+;;; green, one violet, and no tints between them.
+
+(define-theme "brut"
+  (list
+    ;; the syntax is printed, not shaded: flat ink and a heavy weight
+    (list 'ts-keyword 'fg "#d1002e" 'weight "700")
+    (list 'ts-function 'fg "#2b53ff" 'weight "700")
+    (list 'ts-string 'fg "#146b32")
+    (list 'ts-comment 'fg "#7d7868" 'style "italic")
+    (list 'ts-number 'fg "#8b31c7" 'weight "600")
+    (list 'ts-constant 'fg "#8b31c7" 'weight "600")
+    (list 'ts-type 'fg "#b34a00" 'weight "700")
+    (list 'ts-module 'fg "#b34a00" 'weight "700")
+    (list 'ts-operator 'fg "#000000" 'weight "700")
+    (list 'ts-punctuation 'fg "#4a4a4a")
+    (list 'ts-tag 'fg "#d1002e" 'weight "700")
+    (list 'ts-attribute 'fg "#8b31c7")
+    (list 'ts-variable 'fg "#000000")
+    (list 'ts-property 'fg "#b34a00")
+    (list 'ts-escape 'fg "#d1002e" 'weight "700")
+    ;; the desk is a flat yellow, the panes are white cards on it
+    (list 'default 'bg "#ecd47f" 'fg "#000000")
+    (list 'window 'bg "#fffdf7")
+    (list 'paper 'bg "#fffdf7")
+    (list 'window-inactive 'bg "#efeadb")
+    (list 'body 'fg "#1a1a1a")
+    ;; there is one rule, and it is black
+    (list 'border-soft 'bg "#000000")
+    (list 'border 'bg "#000000")
+    (list 'modeline 'bg "#efeadb" 'fg "#3a3a3a")
+    (list 'modeline-active 'bg "#ecd47f" 'fg "#000000")
+    (list 'cursor 'bg "#000000")
+    ;; a selection is a highlighter, a match is the other highlighter
+    (list 'region 'bg "#b8ff3d")
+    (list 'select 'bg "#ff9ecb")
+    (list 'hl-line 'bg "#f9eab0")
+    (list 'linenum 'fg "#8c8676")
+    (list 'accent 'fg "#2b53ff")
+    (list 'link 'fg "#2b53ff" 'decoration "underline")
+    (list 'llm-response 'fg "#2b53ff")
+    (list 'llm-prompt 'inherit 'llm-response)
+    (list 'diff-block 'fg "#b34a00" 'weight "600")
+    (list 'diff-block-source 'fg "#7d7868")
+    (list 'dim 'fg "#5c5648")
+    (list 'faint 'fg "#8c8676")
+    (list 'warn 'fg "#b34a00" 'weight "700")
+    (list 'ok 'fg "#146b32" 'weight "700")
+    (list 'alert 'fg "#d1002e" 'weight "700")
+    (list 'org-level-1 'fg "#d1002e" 'weight "800")
+    (list 'org-level-2 'fg "#2b53ff" 'weight "800")
+    (list 'org-level-3 'fg "#146b32" 'weight "700")
+    (list 'org-level-4 'fg "#8b31c7" 'weight "700")
+    ;; six groups, six poster colours, no tints
+    (list 'group-color-1 'fg "#d1002e")
+    (list 'group-color-2 'fg "#2b53ff")
+    (list 'group-color-3 'fg "#146b32")
+    (list 'group-color-4 'fg "#8b31c7")
+    (list 'group-color-5 'fg "#b34a00")
+    (list 'group-color-6 'fg "#00807a")
+    (list 'org-todo 'fg "#d1002e" 'weight "800")
+    (list 'org-done 'fg "#146b32" 'decoration "line-through")
+    (list 'org-priority 'fg "#b34a00" 'weight "800")
+    (list 'org-date 'fg "#2b53ff" 'weight "600")
+    (list 'org-tag 'fg "#5c5648")
+    (list 'org-checkbox 'fg "#146b32" 'weight "800")
+    (list 'org-cookie 'fg "#8b31c7" 'weight "600")
+    (list 'org-meta 'fg "#7d7868")
+    (list 'fold-marker 'fg "#d1002e" 'weight "700")
+    (list 'nm-date 'fg "#5c5648")
+    (list 'nm-author 'fg "#2b53ff" 'weight "600")
+    (list 'nm-tags 'fg "#146b32")
+    (list 'nm-subject 'fg "#000000")
+    (list 'nm-marked 'fg "#d1002e" 'weight "800")
+    (list 'nm-hdr 'fg "#b34a00" 'weight "700")
+    (list 'nm-sep 'fg "#000000")
+    (list 'diff-file 'fg "#000000" 'weight "800")
+    (list 'diff-hunk 'fg "#2b53ff" 'weight "600")
+    (list 'diff-add 'fg "#0f4f24" 'bg "#ddffb0")
+    (list 'diff-del 'fg "#8f0020" 'bg "#ffd4e5")
+    (list 'diff-add-word 'bg "#b8ff3d")
+    (list 'diff-del-word 'bg "#ff9ecb")
+    (list 'code-scope 'bg "#f7eecd")
+    ;; a poster is set in a grotesque, and the prose is set in it too
+    (list 'sans 'family "'Archivo', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif")
+    (list 'serif 'inherit 'sans)
+    ;; the rule is three pixels of black, the lift is a solid shadow, and
+    ;; the gap is wide enough to see the shadow fall
+    (list 'chrome 'gap "10px" 'radius "0"
+          'border "3px solid #000000"
+          'shadow "5px 5px 0 #000000"
+          'shadow-deep "9px 9px 0 #000000")))
+
+(define-theme-skin! "brut" "
+/* A box is a black rule and a shadow with no blur. Both are constants
+   here, not steps on a scale: neobrutalism has one rule weight and one
+   shadow, and the only thing that changes is whether a box has them. */
+.window {
+  border: 3px solid var(--border-bg);
+  box-shadow: 4px 4px 0 var(--border-bg);
+}
+.window.inactive { box-shadow: 4px 4px 0 var(--border-bg); }
+.window.active { box-shadow: 6px 6px 0 var(--border-bg); }
+.window.active:has(.dash-state-focus) {
+  box-shadow: 10px 10px 0 var(--border-bg);
+  border-color: var(--border-bg);
+}
+.window.active:has(.dash-state-editing) { box-shadow: 6px 6px 0 var(--border-bg); }
+/* the desk shows between the cards, so the cards need room to drop */
+.windows { gap: 12px; padding: 4px 12px 12px 4px; }
+
+/* A mode line is the amber strip, ruled off the sheet above it. The bar
+   stays light on purpose: every fact in it draws in dim or faint ink, and
+   a knocked-out bar would leave the facts unreadable. The rule carries
+   the weight, not an inversion. */
+.modeline {
+  border-top: 3px solid var(--border-bg);
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700;
+}
+/* a heading is a printed label: the same strip, ruled underneath */
+.buffer-header {
+  border-bottom: 3px solid var(--border-bg);
+  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 800;
+}
+.buffer-footer, .dash-live, .dash-top { border-color: var(--border-bg); }
+
+/* a tab is a chip with a rule round it; the one you are on is filled */
+.ml-tab {
+  border: 2px solid var(--border-bg); padding: 1px 8px;
+  text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+}
+.ml-tab-on {
+  background: var(--accent-fg); color: var(--window-bg);
+  box-shadow: 3px 3px 0 var(--border-bg); text-decoration: none;
+}
+
+/* the echo area is the strip under the desk, ruled off from it */
+.echo-bar, .echo-area { border-color: var(--border-bg); border-width: 3px; }
+
+/* a prompt is the loudest box on the screen: the thickest rule and the
+   deepest drop, because a modal stops everything behind it */
+.mb-panel {
+  border: 4px solid var(--border-bg);
+  box-shadow: 12px 12px 0 var(--border-bg);
+}
+.mb-head, .mb-sep { border-color: var(--border-bg); }
+.mb-head-title, .mb-sep-label, .mb-label {
+  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 800;
+}
+.mb-cand.selected, .mb-rail-row.selected {
+  background: var(--region-bg); border-left-color: var(--border-bg);
+}
+.mb-preview { border-left: 3px solid var(--border-bg); }
+
+/* the transient is the same box, and its keys are printed keycaps */
+.transient-key, .transient-legend-key, .ag-kind, .transient-chip {
+  border: 2px solid var(--border-bg); background: var(--hl-line-bg);
+  color: var(--default-fg); font-weight: 800;
+}
+.transient-item.selected { background: var(--region-bg); }
+.transient-head, .transient-group-title {
+  border-color: var(--border-bg);
+  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 800;
+}
+
+/* the transcript's cards are cards: a rule and a drop, like everything */
+.ag-user {
+  border: 3px solid var(--border-bg);
+  box-shadow: 4px 4px 0 var(--border-bg);
+}
+.ag-tool, .ag-thought, .ag-perm, .ag-question {
+  border: 3px solid var(--border-bg) !important;
+  box-shadow: 4px 4px 0 var(--border-bg);
+}
+.ag-btn {
+  border: 2px solid var(--border-bg); background: var(--window-bg);
+  box-shadow: 3px 3px 0 var(--border-bg); font-weight: 800;
+}
+.ag-label, .ag-title { text-transform: uppercase; letter-spacing: 0.06em; }
+.ag-prose code, .ag-prose pre {
+  border: 2px solid var(--border-bg);
+}
+")
+
 ;;; --- the faces a package can count on -------------------------------------
 ;;; The theme owns the colours. These defaults own the shape of the syntax
 ;;; faces and give the Emacs names a home, so a package written for Emacs
@@ -1136,6 +1328,43 @@
 (defface! 'agent-you 'bg "color-mix(in srgb, var(--accent-fg) 12%, var(--window-bg))")
 (defface! 'agent-code 'bg "color-mix(in srgb, var(--default-bg) 62%, var(--window-bg))")
 (defface! 'agent-card 'border "var(--border-soft-bg)")
+
+;; The terminal is a face, not a constant. The xterm pane reads these
+;; variables when it opens, and again after a theme change, so `M-x shell'
+;; wears the theme the editor wears. Each ANSI colour takes the theme face
+;; that draws the same thing. A theme that wants its own palette names the
+;; ansi-color-* faces, as Emacs does.
+(defface! 'terminal 'bg "var(--window-bg)" 'fg "var(--default-fg)"
+                    'family "var(--font-mono)" 'size "var(--default-size)")
+(defface! 'terminal-cursor 'bg "var(--cursor-bg)")
+(defface! 'terminal-select 'bg "var(--select-bg)")
+
+;; A theme names three chromatic colours that mean something: alert, ok and
+;; warn. They are the ANSI red, green and yellow. A theme does not name a
+;; blue, a magenta and a cyan that stay apart, so each of those three is the
+;; theme's accent pulled toward a fixed hue. The theme supplies the tint and
+;; the anchor keeps the six hues distinct. A theme that wants exact terminal
+;; colours names the ansi-color-* faces itself.
+(defface! 'ansi-color-black 'fg "color-mix(in srgb, var(--default-fg) 30%, var(--default-bg))")
+(defface! 'ansi-color-red 'inherit 'alert)
+(defface! 'ansi-color-green 'inherit 'ok)
+(defface! 'ansi-color-yellow 'inherit 'warn)
+(defface! 'ansi-color-blue 'fg "color-mix(in srgb, var(--accent-fg) 70%, #4f8fd6)")
+(defface! 'ansi-color-magenta 'fg "color-mix(in srgb, var(--accent-fg) 45%, #c072d8)")
+(defface! 'ansi-color-cyan 'fg "color-mix(in srgb, var(--accent-fg) 45%, #3fb6c2)")
+(defface! 'ansi-color-white 'fg "color-mix(in srgb, var(--default-fg) 80%, var(--default-bg))")
+
+;; A bright colour is the same hue with more contrast against the paper,
+;; so each one steps toward the theme's own strongest ink. This holds for
+;; a light theme and for a dark theme.
+(defface! 'ansi-color-bright-black 'inherit 'dim)
+(defface! 'ansi-color-bright-red 'fg "color-mix(in srgb, var(--ansi-color-red-fg) 75%, var(--default-fg))")
+(defface! 'ansi-color-bright-green 'fg "color-mix(in srgb, var(--ansi-color-green-fg) 75%, var(--default-fg))")
+(defface! 'ansi-color-bright-yellow 'fg "color-mix(in srgb, var(--ansi-color-yellow-fg) 75%, var(--default-fg))")
+(defface! 'ansi-color-bright-blue 'fg "color-mix(in srgb, var(--ansi-color-blue-fg) 75%, var(--default-fg))")
+(defface! 'ansi-color-bright-magenta 'fg "color-mix(in srgb, var(--ansi-color-magenta-fg) 75%, var(--default-fg))")
+(defface! 'ansi-color-bright-cyan 'fg "color-mix(in srgb, var(--ansi-color-cyan-fg) 75%, var(--default-fg))")
+(defface! 'ansi-color-bright-white 'fg "var(--default-fg)")
 
 ;; the prompt previews: the theme under the highlight goes on screen as
 ;; you move, a rest at a time; RET keeps it and writes it, C-g puts the

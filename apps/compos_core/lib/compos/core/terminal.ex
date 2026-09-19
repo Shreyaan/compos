@@ -85,6 +85,15 @@ defmodule Compos.Core.Terminal do
       when is_integer(cols) and cols > 0 and is_integer(rows) and rows > 0,
       do: call(buffer, {:resize, cols, rows})
 
+  @doc """
+  The size the PTY has now, `{cols, rows}`.
+
+  The transcript is raw bytes, wrapped at the width that wrote them. A client
+  that replays it must wear this size first, or every long line re-wraps and
+  leaves blank rows above the prompt.
+  """
+  def size(buffer), do: call(buffer, :size)
+
   def subscribe(buffer, subscriber \\ self()),
     do: call(buffer, {:subscribe, subscriber})
 
@@ -153,6 +162,9 @@ defmodule Compos.Core.Terminal do
        port: port,
        tty: :pending,
        handshake: "",
+       # the wrapper above pins the PTY here until a client says otherwise
+       cols: 80,
+       rows: 24,
        subscribers: %{},
        raw_pending: [],
        raw_timer: nil,
@@ -171,8 +183,10 @@ defmodule Compos.Core.Terminal do
   end
 
   def handle_call({:resize, cols, rows}, _from, state) do
-    {:reply, resize_tty(state.tty, cols, rows), state}
+    {:reply, resize_tty(state.tty, cols, rows), %{state | cols: cols, rows: rows}}
   end
+
+  def handle_call(:size, _from, state), do: {:reply, {state.cols, state.rows}, state}
 
   def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
 

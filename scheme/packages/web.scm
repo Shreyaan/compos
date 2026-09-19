@@ -65,6 +65,16 @@
   "Which reading a page opens in: \"calm\" for the article alone, \"full\" for the whole document."
   'group 'web 'type 'string)
 
+;; The calm reading of an unknown site is Readability's guess. A site
+;; the editor has a stylesheet for reads better and costs one process.
+;; With this on, the first page from a new host buys that stylesheet:
+;; xslt.scm walks the document, asks the model what is furniture, and
+;; saves web/parsers/HOST.xsl. Every later page from that host is
+;; xsltproc alone, with no model in the loop.
+(defcustom 'browse-learn-parsers #t
+  "Learn an XSLT parser the first time you read a page from a new site."
+  'group 'web 'type 'boolean)
+
 ;; the reading name, normalized. Anything that is not full is calm.
 (define (web--reading name)
   (if (equal? name "full") "full" "calm"))
@@ -83,7 +93,10 @@
 ;;            the reading needs a real tab. substack.com sends 9 KB of
 ;;            scaffolding to a fetch and 123 KB of feed to a tab.
 (define *web--sites*
-  '(("https://substack.com" "substack.xsl" #t)
+  ;; SVS recruiting uses the user's browser session for its authenticated
+  ;; pages; fetch through the real browser so its cookies are preserved.
+  '(("https://svsrecruiting.com" #f #t)
+    ("https://substack.com" "substack.xsl" #t)
     ("https://html.duckduckgo.com" "duckduckgo.xsl" #f)
     ("https://news.ycombinator.com" "hackernews.xsl" #f)
     ("https://timesofindia.indiatimes.com" "toi.xsl" #f)
@@ -116,9 +129,33 @@
            (car sites))
           (else (loop (cdr sites))))))
 
+(define (web--host url)
+  (let* ((s (string-replace (string-replace url "https://" "") "http://" ""))
+         (cut (string-index s "/")))
+    (if cut (substring s 0 cut) s)))
+
+;; A learned parser needs no line in the list above. xslt-save! writes
+;; web/parsers/HOST.xsl, and that file IS the registration: the sheet
+;; survives a restart, and the list stays for the sites whose parser a
+;; person wrote by hand.
+;; One sheet serves www.example.com and example.com: they are one site,
+;; and a reader who typed the short name must not learn it twice.
+(define (web--parser-host url)
+  (let ((h (web--host url)))
+    (if (string-prefix? "www." h) (substring h 4 (string-length h)) h)))
+
+(define (web--host-parser url)
+  (let* ((name (string-append (web--parser-host url) ".xsl"))
+         (user (string-append (compos-home) "/packages/web/parsers/" name)))
+    ;; Learned parsers live in the user's compos directory, which is not
+    ;; necessarily on the Scheme library search path.
+    (cond ((file-exists? user) name)
+          ((locate-library (string-append "web/parsers/" name)) name)
+          (else #f))))
+
 (define (web--site-parser url)
   (let ((site (web--site url)))
-    (and site (car (cdr site)))))
+    (if site (car (cdr site)) (web--host-parser url))))
 
 (define (web--site-render? url)
   (let ((site (web--site url)))
@@ -172,9 +209,27 @@
   (string-append (compos-home) "/browse-fetch-"
                  (number->string *web--read-seq*) "." extension))
 
+;; A script is never read, and it breaks the parse of everything that is.
+;; libxml2 starts a tag at a `<` before a letter, and `i<linkKeys.length`
+;; in amazon.in's navigation script becomes an element named
+;; "linkkeys.length" that swallows half the shop and spills its own source
+;; into the reading as text. Take the scripts out of the bytes, before a
+;; parser sees them: the stylesheet deletes script elements anyway, so
+;; nothing that would have been read is lost.
+(define (web--without-scripts html)
+  (re-replace-all "(?s)<script\\b[^>]*>.*?</script\\s*>" html ""))
+
 (define (web--write-html! html)
   (let ((file (web--body-file! "html")))
-    (write-file! file html)
+    ;; The charset came in the HTTP header, and a file has no header. An
+    ;; HTML parser with nothing to go on reads the bytes as Latin-1, and
+    ;; every quotation mark on the page arrives as three characters. The
+    ;; page's own declaration is too late: by the time the parser reaches
+    ;; it, it has chosen. Said first, it is read first. The bytes here are
+    ;; always UTF-8, because the fetch decoded them, so this is a fact and
+    ;; not a guess.
+    (write-file! file (string-append "<meta charset=\"utf-8\">\n"
+                                     (web--without-scripts html)))
     file))
 
 (define (web--write-body! text)
@@ -459,6 +514,30 @@
 (define (web--pipeline url want k)
   (web--attempt url (web--reading want) (web--site-render? url) k))
 
+;; the browse tab reading URL, if one still is. A learn that lands after
+;; the reader moved on must not pull the page back.
+(define (web--reread-url! url)
+  (let loop ((bs (web--tabs)))
+    (cond ((null? bs) #f)
+          ((equal? (buffer-local (car bs) 'browse-url) url)
+           (web--reread! (car bs))
+           #t)
+          (else (loop (cdr bs))))))
+
+;; A site with no stylesheet gets one WHILE its first page is read. The
+;; page shows at once, through Readability; when the sheet lands the tab
+;; reads itself again and is calm from then on. It costs one learn per
+;; host, ever — every later page is xsltproc alone, with no model in the
+;; loop.
+(define (web--learn-later! url html want)
+  (when (and browse-learn-parsers
+             (equal? want "calm")
+             (string? html)
+             (boundp 'xslt-learn-site!)
+             (not (web--site-parser url)))
+    (xslt-learn-site! url html
+      (lambda (path) (when path (web--reread-url! url))))))
+
 ;; Fetch, then read. RENDERED? says this document came from a real tab,
 ;; so an empty answer stops instead of asking for a tab again.
 (define (web--attempt url want rendered? k)
@@ -474,6 +553,7 @@
           (else
             (let* ((html (web--doc-text doc))
                    (file (web--write-html! html)))
+              (web--learn-later! url html want)
               (web--read url file want
                 (lambda (md)
                   (cond

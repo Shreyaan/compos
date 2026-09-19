@@ -78,7 +78,7 @@
                               (string-append theme " does not wear paper's navy on " (symbol->string face))))))
           '(org-level-1 org-level-2 org-level-3 org-level-4)))
       '("paper" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
-        "zenburn" "ascii" "crt" "paperized"))
+        "zenburn" "ascii" "crt" "paperized" "brut"))
     (theme-test-restore!)))
 
 (deftest 'a-theme-preview-shows-faces-and-writes-nothing
@@ -157,8 +157,10 @@
                        (string-append theme ": a selection is not the row under point"))
           (check-true! (> (theme-test-distance sel reg) 20)
                        (string-append theme ": a search match is not a selection"))))
+      ;; brut is light, and the same rule holds: a row under point that
+      ;; does not stand off the sheet is a row you cannot find
       '("paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
-        "zenburn" "ascii" "crt"))
+        "zenburn" "ascii" "crt" "brut"))
     (theme-test-restore!)))
 
 ;; a theme may carry a stylesheet as well as a palette. It goes on under
@@ -188,7 +190,42 @@
     (check-contains! (theme-test-face-attr 'mono 'family) "Courier Prime" "paperized types")
     (check-contains! (style-css 'theme-skin) "feTurbulence" "paperized ships its fibre")
     (check-false! (theme-dark?) "paperized is a light theme")
+    (load-theme "brut")
+    (check-contains! (theme-test-face-attr 'sans 'family) "Archivo" "brut sets a grotesque")
+    (check-contains! (style-css 'theme-skin) "box-shadow" "brut ships its hard shadows")
+    (check-false! (theme-dark?) "brut is a light theme")
     (load-theme "zenburn")
     (check-equal! (style-css 'theme-skin) "" "zenburn is palette only")
     (check-true! (theme-dark?) "zenburn is a dark theme")
+    (theme-test-restore!)))
+
+;;; --- the terminal's faces ------------------------------------------------
+
+(define theme-test-ansi-faces
+  '(ansi-color-black ansi-color-red ansi-color-green ansi-color-yellow
+    ansi-color-blue ansi-color-magenta ansi-color-cyan ansi-color-white
+    ansi-color-bright-black ansi-color-bright-red ansi-color-bright-green
+    ansi-color-bright-yellow ansi-color-bright-blue ansi-color-bright-magenta
+    ansi-color-bright-cyan ansi-color-bright-white))
+
+(deftest 'the-terminal-takes-its-look-from-faces
+  "the PTY pane reads faces, so every theme carries a terminal and 16 colours"
+  (lambda ()
+    (for-each
+      (lambda (theme)
+        (theme-apply! theme)
+        (for-each
+          (lambda (attr)
+            (check-true! (string? (theme-test-face-attr 'terminal attr))
+                         (string-append theme ": the terminal face names "
+                                        (symbol->string attr))))
+          '(bg fg family size))
+        (for-each
+          (lambda (face)
+            (check-true! (or (string? (theme-test-face-attr face 'fg))
+                             (theme-test-face-attr face 'inherit))
+                         (string-append theme " colours " (symbol->string face))))
+          theme-test-ansi-faces))
+      '("paper" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
+        "zenburn" "ascii" "crt" "paperized" "brut"))
     (theme-test-restore!)))
