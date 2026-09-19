@@ -1069,12 +1069,6 @@
 
 (define (display-buffer name &optional alist)
   (let ((a (or alist '())))
-    ;; a board, a listing, any surface from outside the group takes its
-    ;; pane through here. Record the group's arrangement BEFORE the
-    ;; cover, or a switch made FROM the board has no way back — the
-    ;; capture rule below only fires from a member buffer, and the board
-    ;; is not one.
-    (group-layout-save-before-cover! name)
     (let ((actions (display-buffer-actions-for name a)))
       (window-display!
         (lambda ()

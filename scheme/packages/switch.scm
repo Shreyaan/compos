@@ -377,7 +377,8 @@
 ;; switch that follows finds the buffer off screen
 (define (switch-close! buf keep)
   (switch-sleep-woken! buf keep)
-  (when (and keep (display-foreign? keep)) (switch-restore-home! buf))
+  ;; the look ends: a pick keeps it, a foreign pick or none gives it back
+  (preview-end (and keep (not (display-foreign? keep)) #t))
   (run-command "quit-window"))
 
 ;;; --- typing is the filter -------------------------------------------------------
@@ -711,9 +712,6 @@
          (my-group (if again?
                        (buffer-local *switch-buffer* 'switch-group)
                        (or (buffer-group here) (frame-local 'current-group)))))
-    ;; opening the switcher snapshots this group's arrangement: wherever
-    ;; you go next, the way back is exact
-    (group-layout-save-if-shown! my-group)
     (buffer-create *switch-buffer*)
     (unless again?
       (buffer-set-local! *switch-buffer* 'switch-home-window from)
@@ -826,7 +824,6 @@
     (let ((t0 (monotonic-ms)))
       (let* ((here (or (window-buffer (active-window)) (current-buffer)))
              (my-group (or (buffer-group here) (frame-local 'current-group)))
-             (_ (group-layout-save-if-shown! my-group))
              (rows (switch-prompt-buffers here my-group (active-window))))
         (if (null? (filter (lambda (b) (not (equal? b here))) rows))
             (message "No other buffer available")

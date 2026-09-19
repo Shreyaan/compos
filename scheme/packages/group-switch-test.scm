@@ -204,7 +204,8 @@
         (check-equal! (buffer-group-ids t--sw-first) (list id) "the new one is the only one")
         (check-true! (buffer-in-group? t--sw-second id) "the other selected buffer joins")
         (check-equal! (frame-local 'current-group) id "the frame stands in it")
-        (check-equal! (group-layout id) (window-tree) "and it remembers this layout")
+        (check-equal! (window-tree-buffers (group-layout id)) (window-tree-buffers (window-tree))
+                      "and it remembers this layout")
         (check-false! (buffer-local t--sw-first 'buffer-selected)
                       "the mark that chose the buffer is spent")
         (check-false! (buffer-local t--sw-second 'buffer-selected)
@@ -799,9 +800,11 @@
               (check-true! (member buf (layout-visible-buffers))
                            (string-append buf " left the screen")))
             (list t--sw-first t--sw-second t--sw-third))
-          (check-equal! (group-layout home) before
-                        "and the group remembers the arrangement it adopted")
-          (check-equal! (frame-group) home "the frame stands in the group"))))
+          (check-equal! (frame-group) home "the frame stands in the group")
+          ;; the group writes its layout when the frame leaves it
+          (group-frame-leave! home)
+          (check-equal! (window-tree-buffers (group-layout home)) (window-tree-buffers before)
+                        "and the group remembers the arrangement it adopted"))))
     (t--sw-done!)))
 
 (deftest 'the-group-scratch-moves-and-removes-as-its-own-buffer

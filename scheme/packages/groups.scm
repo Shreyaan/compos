@@ -1259,9 +1259,7 @@ is forgotten and that group falls back to creation order in the switcher."
                                    (cddr spec))))))
           ;; leaving a group snapshots it, exactly as switching does: the
           ;; way back to where you were must stay exact
-          (when (and from (not (equal? from id)))
-            (group-layout-save-if-shown! from)
-            (set-frame-local! 'previous-group from))
+          (when (and from (not (equal? from id))) (group-frame-leave! from))
           (set-frame-local! 'current-group id)
           (frame-group-label-refresh!)
           (let* ((resolved (scene--resolve id spec))
@@ -1329,9 +1327,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (group-adopt-here! id)
           (set! *group-current-inhibit* #t)
           (let ((from (frame-group)))
-            (when (and from (not (equal? from id)))
-              (group-layout-save-if-shown! from)
-              (set-frame-local! 'previous-group from)))
+            (when (and from (not (equal? from id))) (group-frame-leave! from)))
           (layout-target-set! #f)
           (set-frame-local! 'current-group id)
           ;; An explicit switch moves an active pin. The frame stays pinned,
@@ -1343,17 +1339,9 @@ is forgotten and that group falls back to creation order in the switcher."
                 (begin
                   (group-revive-layout-files! saved)
                   (window-tree-set! saved)
-                  ;; only a restore that reproduced the saved tree may write
-                  ;; it back. A sanitized one dropped panes, and saving that
-                  ;; erases the arrangement instead of just hiding it: the
-                  ;; tree keeps naming the evicted buffer, so the layout
-                  ;; returns whole once the buffer belongs to the group again
-                  (let ((clean (group-restore-sanitize! id)))
-                    (layout-target-set! (group-layout-target id))
-                    (when clean (group-layout-save! id))))
-                (begin
-                  (group-default-layout! id)
-                  (group-layout-save! id))))
+                  (group-restore-sanitize! id)
+                  (layout-target-set! (group-layout-target id)))
+                (group-default-layout! id)))
           (set! *group-current-inhibit* #f)
           (group-current-recalculate!)
           (group-mru-note! id)
@@ -1426,15 +1414,10 @@ is forgotten and that group falls back to creation order in the switcher."
                            (group-current-choice (group-common-memberships rows) current))))
             (unless (equal? next current)
               ;; Leaving a group because a pane shows a foreign buffer saves the
-              ;; layout as it is, foreign pane and all (docs/groups.md, Save),
-              ;; and remembers the group: a switch from a frame in no group has
-              ;; nothing to save, and coming back must find what you had.
-              (when (and current (not next) (group-uncovered? current)
-                         ;; a frame with no member left on it holds no layout
-                         (pair? (filter (lambda (row) (buffer-in-group? (cadr row) current))
-                                        (window-list))))
-                (group-layout-save! current)
-                (set-frame-local! 'previous-group current))
+              ;; layout as it is, foreign pane and all (docs/groups.md, Save):
+              ;; a switch from a frame in no group has nothing to save, and
+              ;; coming back must find what you had.
+              (when (and current (not next)) (group-frame-leave! current))
               (set-frame-local! 'current-group next)
               (frame-group-label-refresh!))
             next)))))
@@ -1477,20 +1460,10 @@ is forgotten and that group falls back to creation order in the switcher."
     (with-layout-suppressed (lambda ()
       (let* ((pane (active-window))
              (mode (buffer-local b 'mode-name))
-             (preferred (or (window-showing-mode mode) (window-showing b)))
-             (hidden (and (not preferred) (boundp 'hidden-window-list)
-                       (let loop ((ids (hidden-window-list)))
-                         (cond ((null? ids) #f)
-                               ((let ((stack (hidden-window-buffers (car ids))))
-                                  (or (member b stack)
-                                      (and (pair? stack)
-                                           (equal? (buffer-local (car stack) 'mode-name) mode))))
-                                (car ids))
-                               (else (loop (cdr ids))))))))
-        (cond ((and preferred (not (equal? preferred pane)))
-               (window-swap-id! pane preferred)
-               (select-window! preferred))
-              (hidden (hidden-window-show! hidden)))
+             (preferred (or (window-showing-mode mode) (window-showing b))))
+        (when (and preferred (not (equal? preferred pane)))
+          (window-swap-id! pane preferred)
+          (select-window! preferred))
         (switch-to-buffer-here! b)
         (set-window-restore! (active-window) #f)
         (active-window))))))
@@ -1618,9 +1591,15 @@ is forgotten and that group falls back to creation order in the switcher."
                              (group-visible-membership-rows))))
                (and common (member id common)))))))
 
-(define (group-layout-save-if-shown! g)
-  (when (and (group-visible-homogeneous? g) (group-uncovered? g))
-    (group-layout-save! g)))
+;; The one place a group's saved layout is written: the frame leaves FROM.
+;; The arrangement is saved when it is FROM's own (the frame stands in
+;; FROM, a member is still on screen, and no window covers it), and FROM
+;; becomes the frame's previous group.
+(define (group-frame-leave! from)
+  (when (and (group-visible-homogeneous? from) (group-uncovered? from)
+             (pair? (filter (lambda (row) (buffer-in-group? (cadr row) from)) (window-list))))
+    (group-layout-save! from))
+  (set-frame-local! 'previous-group from))
 
 ;; a group is UNCOVERED when no window is holding another buffer's place
 ;; for it. Its own members may be special surfaces too (a mail view, a
@@ -1640,27 +1619,6 @@ is forgotten and that group falls back to creation order in the switcher."
                   (not (buffer-in-group? (cadr row) g))))
            #f)
           (else (loop (cdr windows))))))
-
-;; NAME is about to take a pane. When it comes from outside the group
-;; on screen, the arrangement it covers goes on record first. Only an
-;; uncovered arrangement counts: a second board must not overwrite the
-;; snapshot the first one earned. A group with no holder yet gets no
-;; snapshot — displaying a buffer must not create a chat.
-(define (group-layout-save-before-cover! name)
-  (let ((id (frame-group)))
-    ;; A buffer keeps the group that created it, board or not (user ruling,
-    ;; 2026-09-11). Creation runs before a board declares itself transient,
-    ;; and this used to take that one membership back again, which left
-    ;; every list pane out of its own group's section of the switcher and
-    ;; down in the ungrouped tail. 'special now says only that the
-    ;; content is derived, never that the pane belongs nowhere.
-    ;; A board still covers a group it is NOT a member of, so the layout is
-    ;; still checkpointed before a foreign pane covers it.
-    (when (and id
-               (not (buffer-in-group? name id))
-               (group-visible-homogeneous? id)
-               (group-uncovered? id))
-      (group-layout-save! id))))
 
 ;; found a group from what is on screen: every window's buffer joins,
 ;; the layout is saved, and the group chat holds the durable state
@@ -2539,10 +2497,8 @@ is forgotten and that group falls back to creation order in the switcher."
     (let* ((buffers (filter matches? (buffer-list-mru)))
            (windows (display--work-windows))
            (shown (window-buffer destination))
-           (point (window-point destination))
            (stack (cons shown (window-prev-buffers destination)))
-           (matching (append (filter matches? stack) buffers))
-           (other (filter (lambda (b) (not (matches? b))) stack)))
+           (matching (append (filter matches? stack) buffers)))
       (cond ((not (member destination windows))
              (message "Select a work window to consolidate") #f)
             ((null? buffers)
@@ -2550,19 +2506,6 @@ is forgotten and that group falls back to creation order in the switcher."
             (else
               (with-layout-suppressed
                 (lambda ()
-                  ;; Remove matching entries from existing hidden windows too.
-                  (set! *hidden-windows*
-                    (filter (lambda (r) (pair? (nth 3 r)))
-                      (map (lambda (r)
-                             (if (and (equal? (cadr r) (selected-frame))
-                                      (equal? (caddr r) group))
-                                 (list (car r) (cadr r) (caddr r)
-                                       (filter (lambda (b) (not (matches? b))) (nth 3 r))
-                                       (if (matches? (car (nth 3 r))) #f (nth 4 r)))
-                                 r))
-                           *hidden-windows*)))
-                  (when (pair? other)
-                    (hidden-window-create! other (and (equal? shown (car other)) point)))
                   (for-each
                     (lambda (win)
                       (unless (equal? win destination)
@@ -2588,7 +2531,7 @@ is forgotten and that group falls back to creation order in the switcher."
                   (select-window! destination)
                   (layout-target-note-slots! (layout-target-visible-buffers))))
               (message (string-append "Consolidated " (number->string (length buffers))
-                                      " " mode " buffers; other buffers are in a hidden window"))
+                                      " " mode " buffers"))
               destination)))))
 
 
@@ -2596,7 +2539,7 @@ is forgotten and that group falls back to creation order in the switcher."
   "Gather this group's preferred-mode buffers into the selected window"
   mode-consolidate!)
 (public! 'mode-consolidate!
-  "(mode-consolidate!) — gather the preferred mode's open group buffers into the selected window; move other destination buffers into an invisible window")
+  "(mode-consolidate!) — gather the preferred mode's open group buffers into the selected window; the other destination buffers leave its history")
 
 (domain! 'groups)
 (effects! '(write display))
@@ -3873,11 +3816,10 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; A move must show: a pane of the group the frame stands in stops
 ;; showing a buffer that left. The sweep is the same one a group switch
-;; runs, and the layout it leaves is saved as the group's own.
+;; runs; the switch that follows saves what it leaves.
 (define (group-move-sweep! here to)
   (when (and here (not (equal? here to)))
-    (group-restore-sanitize! here)
-    (group-layout-save! here)))
+    (group-restore-sanitize! here)))
 
 ;; Put the buffers a move brought here on screen, and let the frame's own
 ;; layout algorithm place them: the one you were on becomes the main pane,
@@ -3893,8 +3835,7 @@ is forgotten and that group falls back to creation order in the switcher."
       (let ((w (window-showing (car mine))))
         (when w (select-window! w)))
       (when autolayout-mode
-        (autolayout-apply! (car mine)))
-      (group-layout-save! id))))
+        (autolayout-apply! (car mine))))))
 
 ;; The screen already IS the destination's arrangement when every pane
 ;; shows a buffer of that group, or one of the buffers that is joining
@@ -3933,7 +3874,6 @@ is forgotten and that group falls back to creation order in the switcher."
   (set-frame-local! 'current-group id)
   (when (group-pinned) (set-frame-local! 'pinned-group id))
   (frame-group-label-refresh!)
-  (group-layout-save! id)
   (group-mru-note! id)
   (windows-shown-catchup!))
 

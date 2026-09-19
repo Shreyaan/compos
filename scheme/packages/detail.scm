@@ -108,8 +108,7 @@
          (kept (and (not shown) (detail-window o)))
          (win (cond
                 (shown shown)
-                (kept (group-layout-save-before-cover! name)
-                      (window-display! (lambda () (display-buffer-in-window! kept name))))
+                (kept (window-display! (lambda () (display-buffer-in-window! kept name))))
                 (else
                   (or (display-buffer name '(category detail inhibit-same-window #t))
                       ;; nowhere to go: one window, or a target layout that

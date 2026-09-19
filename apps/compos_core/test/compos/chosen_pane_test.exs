@@ -53,30 +53,5 @@ defmodule Compos.ChosenPaneTest do
       end
     end
   end
-  test "hidden stack exchanges with the chosen pane" do
-    previous = Editor.last_active_frame()
-    {:ok, frame} = Editor.attach_frame(nil)
-    try do
-      eval!("""
-      (test-buffer! "*zz-hidden-home*" "home")
-      (test-buffer! "*zz-hidden-detail*" "detail")
-      (test-buffer! "*zz-hidden-second*" "second")
-      (buffer-set-local! "*zz-hidden-detail*" 'mode-name "amazon-detail-mode")
-      (buffer-set-local! "*zz-hidden-second*" 'mode-name "amazon-detail-mode")
-      (switch-to-buffer-here! "*zz-hidden-home*")
-      (define *hidden-test-pane* (active-window))
-      (define *hidden-test-id* (hidden-window-create! '("*zz-hidden-detail*" "*zz-hidden-second*")))
-      (switch-to-buffer-in-chosen-pane! "*zz-hidden-detail*")
-      """, frame)
-      assert eval!("(equal? (active-window) *hidden-test-pane*)", frame) == "#t"
-      assert eval!("(length (window-list))", frame) == "1"
-      assert eval!("(window-prev-buffers (active-window))", frame) =~ "*zz-hidden-second*"
-      assert eval!("(hidden-window-buffers *hidden-test-id*)", frame) =~ "*zz-hidden-home*"
-    after
-      eval!("(for-each buffer-kill! '(\"*zz-hidden-home*\" \"*zz-hidden-detail*\" \"*zz-hidden-second*\"))", frame)
-      Editor.delete_frame(frame)
-      Editor.select_frame(previous)
-    end
-  end
 
 end
