@@ -21,7 +21,8 @@
 (domain! 'code)
 (effects! '(read))
 
-;; (name window origin prev split? opened? buffer origin-buffer origin-point) or #f
+;; (name window origin opened? buffer origin-buffer origin-point) or #f.
+;; The window's leaf records what the peek covers (window-restore).
 (define *peek* #f)
 
 (define (peek--chars)
@@ -44,16 +45,19 @@
          (pos (caddr hit))
          (opened? (not (buffer-exists? target)))
          (other (other-window-id me))
-         (prev (and other (window-buffer other))))
+         (covered (if other
+                      (list 'other (window-buffer other) (window-point other))
+                      '(window #f #f))))
     (if other
         (select-window! other)
         (begin (split-window! 'h 0.5) (other-window!)))
     (if (equal? kind 'buffer) (switch-to-buffer! target) (visit target))
     (goto-char! pos)
     (let ((win (active-window)))
+      (set-window-restore! win covered)
       (select-window! me)
       (let ((origin-buf (peek--buffer-of me)))
-        (set! *peek* (list name win me prev (not other) opened?
+        (set! *peek* (list name win me opened?
                            (if (equal? kind 'buffer) target (peek--buffer-of win))
                            origin-buf (buffer-point origin-buf))))
       win)))
@@ -67,18 +71,10 @@
     (let* ((p *peek*)
            (win (list-ref p 1))
            (origin (list-ref p 2))
-           (prev (list-ref p 3))
-           (split? (list-ref p 4))
-           (opened? (list-ref p 5))
-           (buf (list-ref p 6)))
+           (opened? (list-ref p 3))
+           (buf (list-ref p 4)))
       (set! *peek* #f)
-      (when (peek--window-live? win)
-        (cond (split? (delete-window-id! win))
-              (prev
-                (let ((me (active-window)))
-                  (select-window! win)
-                  (switch-to-buffer! prev)
-                  (when (peek--window-live? me) (select-window! me))))))
+      (when (peek--window-live? win) (window-quit-restore! win))
       (when (peek--window-live? origin) (select-window! origin))
       (when (and opened? buf (buffer-exists? buf)
                  (not (window-showing buf))
@@ -98,11 +94,11 @@
 ;; which buffer the calling lane treats as current.
 (define (peek--still-here? p)
   (let ((origin (list-ref p 2))
-        (buf (list-ref p 7)))
+        (buf (list-ref p 5)))
     (and (equal? (active-window) origin)
          (equal? (peek--buffer-of origin) buf)
          (buffer-exists? buf)
-         (equal? (buffer-point buf) (list-ref p 8)))))
+         (equal? (buffer-point buf) (list-ref p 6)))))
 
 (define (peek--post-command!)
   (when *peek*

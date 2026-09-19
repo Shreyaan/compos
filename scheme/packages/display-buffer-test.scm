@@ -130,7 +130,7 @@
             (check-true! (not (equal? win me)) "and it is not the selected one")
             (check-equal! (nth 3 (t--db-rect win)) (nth 3 (t--db-rect me)) "beside: the same top")
             (check-true! (> (nth 2 (t--db-rect win)) (nth 2 (t--db-rect me))) "to the right")
-            (check-equal! (cadr (window-quit-restore win)) 'window "noted as a window the display made")))))))
+            (check-equal! (car (window-restore win)) 'window "noted as a window the display made")))))))
 
 (deftest 'pop-up-window-splits-below-when-the-window-is-tall
   "the height threshold wins over the width one, as in Emacs"
@@ -180,8 +180,8 @@
               (check-equal! (length (window-list)) 2 "no third window")
               (check-equal! (window-buffer other) "*zz-db-b*" "and shows the second buffer")
               (check-equal! (active-window) me "point stays")
-              (check-equal! (cadr (window-quit-restore win)) 'other "noted as a window the display took")
-              (check-equal! (caddr (window-quit-restore win)) "*zz-db-a*" "with what it showed")
+              (check-equal! (car (window-restore win)) 'other "noted as a window the display took")
+              (check-equal! (cadr (window-restore win)) "*zz-db-a*" "with what it showed")
               (window-quit-restore! win)
               (check-equal! (window-buffer other) "*zz-db-a*" "quit puts the first buffer back"))))))))
 
@@ -355,7 +355,7 @@
         (buffer-create "*zz-db-a*")
         (buffer-create "*zz-db-b*")
         (let ((source (active-window)) (win (display-buffer "*zz-db-a*")))
-          (window-quit-restore-forget! win)
+          (set-window-restore! win #f)
           (set-window-prev-buffers! win '())
           (select-window! win)
           (run-command "quit-window")
@@ -372,7 +372,7 @@
         (buffer-create "*zz-db-a*")
         (switch-to-buffer-here! "*zz-db-a*")
         (set-window-prev-buffers! (active-window) '())
-        (window-quit-restore-forget! (active-window))
+        (set-window-restore! (active-window) #f)
         (run-command "quit-window")
         (check-equal! (current-buffer) "*zz-db-a*" "the final window stays on its buffer")
         (check-true! (buffer-known? "*zz-db-a*") "the final buffer is not killed")))))

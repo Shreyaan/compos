@@ -142,13 +142,13 @@ defmodule Compos.DismissTest do
     (set-frame-local! 'current-group zz-dismiss-group)
     (set-window-prev-buffers! (active-window)
       '("zz-dismiss-under" "zz-dismiss-parent"))
-    (window-quit-restore-note! (active-window) 'other "zz-dismiss-under")
+    (set-window-restore! (active-window) '(other "zz-dismiss-under" #f))
     (group-layout-save! zz-dismiss-group)
     (switch-to-group! zz-dismiss-away)
     (switch-to-group! zz-dismiss-group)
     """, f)
     assert eval!("(window-prev-buffers (active-window))", f) == ~s{("zz-dismiss-parent")}
-    assert eval!("(window-quit-restore (active-window))", f) == "#f"
+    assert eval!("(window-restore (active-window))", f) == "#f"
   end
 
   test "a mode declares dismissal without naming its quit command", %{frame: f} do

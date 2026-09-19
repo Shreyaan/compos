@@ -321,6 +321,21 @@ defmodule Compos.Core.Editor do
   def set_window_history(win, history, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_window_history, win, history, fid(fid)})
 
+  @doc "What quit-window undoes in WIN (Emacs quit-restore): `{kind, buffer, point}`, or nil."
+  def window_restore(win, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:window_restore, win, fid(fid)})
+
+  @doc "Set WIN's restore record to `{kind, buffer, point}`, or nil to clear it."
+  def set_window_restore(win, restore, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_window_restore, win, restore, fid(fid)})
+
+  @doc "The window that asked for WIN (4.2 owner), or nil."
+  def window_owner(win, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:window_owner, win, fid(fid)})
+
+  def set_window_owner(win, owner, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_window_owner, win, owner, fid(fid)})
+
   def mru_all, do: GenServer.call(__MODULE__, :mru_all)
   def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
 
@@ -1573,6 +1588,39 @@ defmodule Compos.Core.Editor do
     end
   end
 
+  def handle_call({:window_restore, win, fid}, _from, state) do
+    f = (win && find_window_frame(state, win)) || frame(state, fid)
+
+    reply =
+      case leaf_restore(find_leaf(f.tree, win || f.active)) do
+        {kind, covered, point, _shown, _under} -> {kind, covered, point}
+        nil -> nil
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:set_window_restore, win, restore, fid}, _from, state) do
+    update_leaf(state, win, fid, fn leaf ->
+      case restore do
+        {kind, covered, point} ->
+          Map.put(leaf, :restore, {kind, covered, point, leaf.buffer, nil})
+
+        nil ->
+          Map.delete(leaf, :restore)
+      end
+    end)
+  end
+
+  def handle_call({:window_owner, win, fid}, _from, state) do
+    f = (win && find_window_frame(state, win)) || frame(state, fid)
+    owner = (leaf = find_leaf(f.tree, win || f.active)) && Map.get(leaf, :owner)
+    {:reply, owner && find_leaf(f.tree, owner) && owner, state}
+  end
+
+  def handle_call({:set_window_owner, win, owner, fid}, _from, state),
+    do: update_leaf(state, win, fid, &put_owner(&1, owner))
+
   # the WHOLE history, group marks included: a group switch is an entry
   # like any buffer visit, so one stream ranks every place you went
   def handle_call(:mru_all, _from, state) do
@@ -1957,17 +2005,7 @@ defmodule Compos.Core.Editor do
 
         {leaf, _started} ->
           Buffer.touch(buffer)
-          origin = Map.get(leaf, :preview_origin, leaf.buffer)
-
-          previewed =
-            %{leaf | buffer: buffer, top: 0, manual: false}
-            |> then(fn next ->
-              if buffer == origin,
-                do: Map.delete(next, :preview_origin),
-                else: Map.put(next, :preview_origin, origin)
-            end)
-
-          tree = replace_leaf(f.tree, target, previewed)
+          tree = replace_leaf(f.tree, target, preview_leaf(leaf, buffer))
           changed(:ok, put_frame(state, %{f | tree: tree}))
       end
     else
@@ -1990,6 +2028,7 @@ defmodule Compos.Core.Editor do
     old_panes = leaf_ids_buffers(f.tree)
     {tree, _minted} = build_tree(spec, state.next_win)
     {tree, next_win} = reuse_window_ids(tree, old_panes, state.next_win)
+    tree = prune_owners(tree, leaf_ids(tree))
 
     # A buffer that cannot start leaves its pane to *scratch*: a window
     # must show a live buffer, and the dormant one keeps its files.
@@ -2246,7 +2285,9 @@ defmodule Compos.Core.Editor do
       top: Map.get(leaf, :top, 0),
       point: safe_win_point(b, id),
       manual: Map.get(leaf, :manual, false),
-      ctop: Map.get(leaf, :ctop, 0)
+      ctop: Map.get(leaf, :ctop, 0),
+      restore: Map.get(leaf, :restore),
+      owner: Map.get(leaf, :owner)
     }
   end
 
@@ -2432,6 +2473,7 @@ defmodule Compos.Core.Editor do
     do:
       leaf
       |> Map.update(:history, [], &Enum.map(&1, fn b -> if b == from, do: to, else: b end))
+      |> put_restore(restore_rename(Map.get(leaf, :restore), from, to))
       |> then(fn renamed ->
         if renamed.buffer == from,
           do: %{renamed | buffer: to, top: 0, manual: false},
@@ -2458,19 +2500,22 @@ defmodule Compos.Core.Editor do
     history = leaf |> Map.get(:history, []) |> List.delete(buffer)
 
     if leaf.buffer == buffer do
-      # a preview writes no history: the buffer it covers is the origin,
-      # and it leads what this window showed before
+      # the buffer the display or the look covered leads what this window
+      # showed before (a preview writes no history)
       back =
-        case Map.get(leaf, :preview_origin) do
-          nil -> history
-          origin -> List.delete([origin | List.delete(history, origin)], buffer)
+        case leaf_restore(leaf) do
+          {_kind, covered, _, _, _} when is_binary(covered) ->
+            List.delete([covered | List.delete(history, covered)], buffer)
+
+          _ ->
+            history
         end
 
       own = Enum.find(back, &(&1 not in shown and Buffer.exists?(&1)))
       next = own || fallback
 
       %{leaf | buffer: next, history: List.delete(back, next), top: 0, manual: false}
-      |> Map.delete(:preview_origin)
+      |> Map.delete(:restore)
     else
       %{leaf | history: history}
     end
@@ -2489,7 +2534,8 @@ defmodule Compos.Core.Editor do
     do: %{split | children: Enum.map(split.children, &replace_leaf(&1, id, new))}
 
   defp visit_buffer(leaf, buffer) do
-    previous = Map.get(leaf, :preview_origin, leaf.buffer)
+    record = leaf_restore(leaf)
+    previous = if match?({:preview, _, _, _, _}, record), do: elem(record, 1), else: leaf.buffer
     history = Map.get(leaf, :history, [])
 
     history =
@@ -2499,9 +2545,77 @@ defmodule Compos.Core.Editor do
         Enum.take([previous | List.delete(List.delete(history, previous), buffer)], 500)
       end
 
-    leaf
-    |> Map.delete(:preview_origin)
-    |> Map.merge(%{buffer: buffer, history: history, top: 0, manual: false})
+    # a visit ends a look, and a display's record goes with its buffer
+    keep? = buffer == leaf.buffer and previous == leaf.buffer
+    leaf = if keep?, do: leaf, else: Map.delete(leaf, :restore)
+    Map.merge(leaf, %{buffer: buffer, history: history, top: 0, manual: false})
+  end
+
+  # The leaf's restore record, {kind, covered, point, shown, under}, while
+  # the leaf still shows SHOWN, the buffer it was made for (Emacs checks
+  # quit-restore the same way). UNDER is the record a preview covers.
+  defp leaf_restore(%{type: :leaf, buffer: b} = leaf) do
+    case Map.get(leaf, :restore) do
+      {_kind, _covered, _point, ^b, _under} = record -> record
+      _ -> nil
+    end
+  end
+
+  defp leaf_restore(_), do: nil
+
+  # A preview covers what the window showed and writes no history. The
+  # first look records the covered buffer; the next look keeps that
+  # record; a look back onto the covered buffer ends it and puts back the
+  # record the look was made over.
+  defp preview_leaf(leaf, buffer) do
+    shown = %{leaf | buffer: buffer, top: 0, manual: false}
+
+    case leaf_restore(leaf) do
+      {:preview, ^buffer, _, _, under} ->
+        put_restore(shown, under)
+
+      {:preview, covered, point, _, under} ->
+        Map.put(shown, :restore, {:preview, covered, point, buffer, under})
+
+      _ when buffer == leaf.buffer ->
+        shown
+
+      under ->
+        point = safe_win_point(leaf.buffer, leaf.id)
+        Map.put(shown, :restore, {:preview, leaf.buffer, point, buffer, under})
+    end
+  end
+
+  # an owner names a window of this tree, or the link is dropped
+  defp prune_owners(%{type: :leaf} = leaf, ids),
+    do: if(Map.get(leaf, :owner) in (ids -- [leaf.id]), do: leaf, else: Map.delete(leaf, :owner))
+
+  defp prune_owners(%{type: :split} = split, ids),
+    do: %{split | children: Enum.map(split.children, &prune_owners(&1, ids))}
+
+  defp put_restore(leaf, nil), do: Map.delete(leaf, :restore)
+  defp put_restore(leaf, record), do: Map.put(leaf, :restore, record)
+  defp put_owner(leaf, owner) when is_integer(owner), do: Map.put(leaf, :owner, owner)
+  defp put_owner(leaf, _), do: Map.delete(leaf, :owner)
+
+  @doc false
+  def restore_rename({kind, covered, point, shown, under}, old, new) do
+    swap = fn b -> if b == old, do: new, else: b end
+    {kind, swap.(covered), point, swap.(shown), restore_rename(under, old, new)}
+  end
+
+  def restore_rename(other, _old, _new), do: other
+
+  defp update_leaf(state, win, fid, fun) do
+    f = (win && find_window_frame(state, win)) || frame(state, fid)
+
+    case find_leaf(f.tree, win || f.active) do
+      nil ->
+        {:reply, false, state}
+
+      leaf ->
+        {:reply, true, put_frame(state, %{f | tree: replace_leaf(f.tree, leaf.id, fun.(leaf))})}
+    end
   end
 
   # returns the tree with the leaf removed, or nil if the tree IS that leaf
@@ -2557,6 +2671,13 @@ defmodule Compos.Core.Editor do
   defp build_tree({:leaf, buffer, top, point, manual, ctop, history}, n) do
     {leaf, n} = build_tree({:leaf, buffer, top, point, manual, ctop}, n)
     {%{leaf | history: Enum.filter(history, &is_binary/1)}, n}
+  end
+
+  # 9-tuple adds the restore record and the owner (Phase 2). Older layouts
+  # and every desktop file read with neither.
+  defp build_tree({:leaf, buffer, top, point, manual, ctop, history, restore, owner}, n) do
+    {leaf, n} = build_tree({:leaf, buffer, top, point, manual, ctop, history}, n)
+    {leaf |> put_restore(restore) |> put_owner(owner), n}
   end
 
   defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)

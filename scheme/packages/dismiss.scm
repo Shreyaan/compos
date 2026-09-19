@@ -161,18 +161,18 @@
           (for-each
             (lambda (row)
               (when (equal? (cadr row) child)
-                (let* ((win (car row)) (rec (window-quit-restore win))
+                (let* ((win (car row)) (rec (window-restore win))
                        (past (window-eligible-history win)))
                   (cond
                     ((and (popup-open?) (equal? win (popup-window))) (popup-dismiss!))
-                    ((and rec (equal? (cadr rec) 'window) (> (length (window-list)) 1))
+                    ((and rec (equal? (car rec) 'window) (> (length (window-list)) 1))
                      (delete-window-id! win))
                     ((pair? past)
                       (window-set-buffer! win (car past))
                       (set-window-prev-buffers! win (cdr past)))
                     ((> (length (window-list)) 1) (delete-window-id! win))
                     (else (message "No previous buffer; this is the last window")))
-                  (window-quit-restore-forget! win))))
+                  (set-window-restore! win #f))))
             (window-list))
           ;; A child displayed in another frame remains that frame's view.
           (unless (let loop ((rows (window-list-all)))

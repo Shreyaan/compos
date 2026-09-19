@@ -1569,7 +1569,7 @@
     (let ((win (active-window)))
       (set-window-prev-buffers! win
         (cons view (filter (lambda (b) (not (equal? b view))) (window-prev-buffers win))))
-      (window-quit-restore-forget! win))))
+      (set-window-restore! win #f))))
 
 (public! 'ibuffer-group-view! "(ibuffer-group-view! MODE BASE) — reuse a listing buffer owned by this group, or create one")
 (public! 'listing-preview-schedule! "(listing-preview-schedule! OWNER TARGET) — debounce a read-only card tied to the selected source row")
@@ -1710,11 +1710,7 @@
   ;; the preview borrowed the invoking window; put back what it showed,
   ;; before either cancel or commit. Commit must resolve mode affinity from
   ;; the real arrangement, not from a temporarily previewed buffer.
-  (let ((w (buffer-local view 'ibuffer-prompt-home-window))
-        (orig (buffer-local view 'ibuffer-prompt-home-buffer)))
-    (when (and w orig (window-exists? w) (buffer-known? orig)
-               (not (equal? (window-buffer w) orig)))
-      (window-preview-buffer! orig w))))
+  (window-preview-end! (buffer-local view 'ibuffer-prompt-home-window)))
 
 (define (ibuffer-prompt-close! view &optional keep)
   (listing-preview-dismiss! view)
@@ -1801,8 +1797,7 @@
 ;; classes and the line numbers go on before the display rule floats the
 ;; buffer: popup-float! reads them when it writes the window class.
 (define (ibuffer-prompt! scope view mode label pick &optional shape options)
-  (let* ((home (active-window))
-         (was (and home (window-buffer home))))
+  (let ((home (active-window)))
     (buffer-create view)
     ;; the shape goes on before the display: the display reads it
     (buffer-set-locals! view
@@ -1810,11 +1805,9 @@
             'window-shape (or shape minibuffer-default-shape)))
     (ibuffer-open! scope view mode #t options)
     ;; Mode setup clears ordinary locals, so remember the invoking window
-    ;; after the prompt view has been opened and initialized. The buffer
-    ;; it showed rides along: the preview borrows that window, so every
-    ;; way out of the prompt has to be able to give it back.
+    ;; after the prompt view has been opened and initialized. The preview
+    ;; borrows that window, and the window's leaf records what it covers.
     (buffer-set-local! view 'ibuffer-prompt-home-window home)
-    (buffer-set-local! view 'ibuffer-prompt-home-buffer was)
     ;; The prompt previews in a floating card, like the window form: its
     ;; invoking pane is the user's, not the preview's.
     ;; Cancel anything queued while initializing the prompt view.

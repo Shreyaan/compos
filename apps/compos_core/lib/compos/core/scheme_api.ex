@@ -2008,6 +2008,37 @@ defmodule Compos.Core.SchemeAPI do
               active: if(active == old, do: new, else: active)
           }
         end,
+      # Emacs quit-restore as leaf data: what quit-window undoes in a window
+      {"window-restore",
+       "(window-restore WIN) — (KIND BUFFER POINT) while WIN still shows what a display or a look put there, else #f. KIND window: the display made WIN; other: it covered BUFFER; preview: a look covers BUFFER."} =>
+        fn [id] ->
+          case Editor.window_restore(id) do
+            {kind, covered, point} ->
+              [{:sym, Atom.to_string(kind)}, covered || false, point || false]
+
+            nil ->
+              false
+          end
+        end,
+      {"set-window-restore!",
+       "(set-window-restore! WIN RECORD) — set WIN's restore record, (KIND BUFFER POINT) as window-restore answers, or #f to clear it."} =>
+        fn
+          [id, false] ->
+            Editor.set_window_restore(id, nil)
+
+          [id, [{:sym, kind}, covered, point]] when kind in ["window", "other", "preview"] ->
+            Editor.set_window_restore(
+              id,
+              {%{"window" => :window, "other" => :other, "preview" => :preview}[kind],
+               if(is_binary(covered), do: covered), if(is_integer(point), do: point)}
+            )
+        end,
+      {"window-owner",
+       "(window-owner WIN) — the window that asked for WIN (a preview's or a display's owner), or #f."} =>
+        fn [id] -> Editor.window_owner(id) || false end,
+      {"set-window-owner!",
+       "(set-window-owner! WIN OWNER) — record the window OWNER as the one that asked for WIN; #f clears it."} =>
+        fn [id, owner] -> Editor.set_window_owner(id, owner) end,
       {"window-rects",
        "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles."} =>
         fn [] -> Editor.window_rects() end,
@@ -3060,6 +3091,7 @@ defmodule Compos.Core.SchemeAPI do
   end
 
   # the desktop's tuple spec for a window tree — what restore_tree accepts
+  defp tree_buffers({:leaf, b, _, _, _, _, _, _, _}), do: [b]
   defp tree_buffers({:leaf, b, _, _, _, _, _}), do: [b]
   defp tree_buffers({:leaf, b, _, _, _, _}), do: [b]
   defp tree_buffers({:split, _, _, a, b}), do: tree_buffers(a) ++ tree_buffers(b)
@@ -3073,6 +3105,14 @@ defmodule Compos.Core.SchemeAPI do
     {:leaf, if(b == old, do: new, else: b), top, point, manual, ctop, renamed}
   end
 
+  defp tree_rename({:leaf, b, top, point, manual, ctop, history, restore, owner}, old, new) do
+    {:leaf, b2, top, point, manual, ctop, history} =
+      tree_rename({:leaf, b, top, point, manual, ctop, history}, old, new)
+
+    {:leaf, b2, top, point, manual, ctop, history, Editor.restore_rename(restore, old, new),
+     owner}
+  end
+
   defp tree_rename({:split, dir, ratio, a, b}, old, new),
     do: {:split, dir, ratio, tree_rename(a, old, new), tree_rename(b, old, new)}
 
@@ -3080,7 +3120,8 @@ defmodule Compos.Core.SchemeAPI do
 
   defp tree_spec(%{type: :leaf, buffer: b} = leaf) do
     {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
-     Map.get(leaf, :ctop, 0), Map.get(leaf, :history, [])}
+     Map.get(leaf, :ctop, 0), Map.get(leaf, :history, []), Map.get(leaf, :restore),
+     Map.get(leaf, :owner)}
   end
 
   defp tree_spec(%{type: :split, dir: dir, children: [a, b]} = s),

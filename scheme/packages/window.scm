@@ -759,47 +759,46 @@
 ;;; KIND 'window: the display made the window, and quit deletes it.
 ;;; KIND 'other: the display took a window that showed PREV, and quit
 ;;; puts PREV back.
-(define *window-quit-restore* '())
-
-(define (window-quit-restore-note! win kind prev)
-  (set! *window-quit-restore*
-    (cons (list win kind prev)
-          (filter (lambda (e) (and (not (equal? (car e) win))
-                                   (window-exists? (car e))))
-                  *window-quit-restore*))))
-
+;;; The record lives on the window's leaf (Emacs quit-restore) and the
+;;; core drops it when the window shows another buffer: (window-restore
+;;; WIN) answers (KIND BUF POINT). KIND 'window: the display made the
+;;; window, and quit deletes it. KIND 'other: the display took a window
+;;; that showed BUF, and quit puts BUF back. KIND 'preview: a look
+;;; covers BUF, and the end of the look puts BUF back.
 (define (window-display! thunk)
-  (let* ((before (map (lambda (row) (list (car row) (cadr row))) (window-list)))
+  (let* ((before (map (lambda (row) (list (car row) (cadr row) (window-point (car row))))
+                      (window-list)))
          (win (thunk))
          (previous (and win (assoc win before))))
     (when (and win (window-exists? win))
-      (cond ((not previous)
-             (window-quit-restore-note! win 'window #f))
+      (cond ((not previous) (set-window-restore! win '(window #f #f)))
+            ;; a look records itself
+            ((equal? (car (or (window-restore win) '(#f))) 'preview) #t)
             ((not (equal? (cadr previous) (window-buffer win)))
-             (window-quit-restore-note! win 'other (cadr previous)))))
+             (set-window-restore! win (list 'other (cadr previous) (caddr previous))))))
     win))
 
-(define (window-quit-restore win) (assoc win *window-quit-restore*))
-
-(define (window-quit-restore-forget! win)
-  (set! *window-quit-restore*
-    (filter (lambda (e) (not (equal? (car e) win))) *window-quit-restore*)))
+;; end the look in WIN: the buffer it covers comes back. #t when it did.
+(define (window-preview-end! win)
+  (let ((rec (and win (window-exists? win) (window-restore win))))
+    (and rec (equal? (car rec) 'preview) (buffer-known? (cadr rec))
+         (window-preview-buffer! (cadr rec) win))))
 
 ;; undo what a display did to WIN: delete it, or put back what it
 ;; showed. #t when something was undone. The last window is never deleted.
 (define (window-quit-restore! win)
-  (let ((rec (window-quit-restore win)))
-    (window-quit-restore-forget! win)
+  (let ((rec (and (window-exists? win) (window-restore win))))
+    (unless (and rec (equal? (car rec) 'preview)) (set-window-restore! win #f))
     (cond ((not rec) #f)
-          ((not (window-exists? win)) #f)
-          ((and (equal? (cadr rec) 'window) (pair? (cdr (window-list))))
+          ((equal? (car rec) 'preview) (window-preview-end! win))
+          ((and (equal? (car rec) 'window) (pair? (cdr (window-list))))
            (if (equal? win (active-window))
                (delete-window!)
                (delete-window-id! win))
            #t)
-          ((and (equal? (cadr rec) 'other) (caddr rec)
-                (fill-candidate? (caddr rec)) (window-fill-member? (caddr rec)))
-           (window-set-buffer! win (caddr rec))
+          ((and (equal? (car rec) 'other) (cadr rec)
+                (fill-candidate? (cadr rec)) (window-fill-member? (cadr rec)))
+           (window-set-buffer! win (cadr rec))
            (window-state-changed!)
            #t)
           (else #f))))
@@ -1183,9 +1182,12 @@
 
 (define (peek-show-in-window! name me)
   (let* ((reuse (peek--window-to-reuse me))
+         (rec (and reuse (window-restore reuse)))
          (win (if reuse
                   (display-buffer-in-window! reuse name)
                   (display-buffer name '(category preview inhibit-same-window #t)))))
+    ;; the next look takes over the last one's record
+    (when rec (set-window-restore! reuse rec))
     (unless (equal? (active-window) me) (select-window! me))
     win))
 
@@ -1533,7 +1535,7 @@
 (define (layout--capture-histories)
   (map (lambda (row)
          (list (cadr row) (window-prev-buffers (car row))
-               (window-point (car row)) (window-quit-restore (car row))))
+               (window-point (car row)) (window-restore (car row))))
        (window-list)))
 
 (define (layout--drop-record record records)
@@ -1550,20 +1552,18 @@
                (own (assoc buf remaining))
                (gone (filter (lambda (e) (not (member (car e) shown))) remaining))
                (record (or own (and (pair? gone) (car gone)))))
-          (window-quit-restore-forget! win)
+          (set-window-restore! win (and own (nth 3 own)))
           (cond (own
                  (set-window-prev-buffers! win (cadr own))
-                 (when (number? (caddr own)) (window-set-point! win (caddr own)))
-                 (let ((quit (nth 3 own)))
-                   (when quit (window-quit-restore-note! win (cadr quit) (caddr quit)))))
+                 (when (number? (caddr own)) (window-set-point! win (caddr own))))
                 (record (set-window-prev-buffers! win (cons (car record) (cadr record))))
                 (else (set-window-prev-buffers! win '())))
           ;; Rebuilt panes cannot inherit a foreign group's stack or return.
           (set-window-prev-buffers! win (window-eligible-history win))
-          (let ((quit (window-quit-restore win)))
-            (when (and quit (equal? (cadr quit) 'other)
-                       (not (window-history-member? win (caddr quit))))
-              (window-quit-restore-forget! win)))
+          (let ((quit (window-restore win)))
+            (when (and quit (equal? (car quit) 'other)
+                       (not (window-history-member? win (cadr quit))))
+              (set-window-restore! win #f)))
           (loop (cdr rows) (if record (layout--drop-record record remaining) remaining)))))))
 
 ;; The engine runs one arrangement at a time. switch-to-buffer! wakes a dormant
@@ -2048,16 +2048,14 @@
 (define (window-unwind-or-close! win)
   (let* ((cur (window-buffer win))
          (history (window-eligible-history win))
-         (record (window-quit-restore win)))
-    (cond ((and record (equal? (cadr record) 'window) (other-window-id win))
-           (window-quit-restore-forget! win)
+         (record (window-restore win)))
+    (cond ((and record (equal? (car record) 'window) (other-window-id win))
            (delete-window-id! win) #t)
           ((pair? history)
-           (window-quit-restore-forget! win)
            (display-buffer-in-window! win (car history))
+           (set-window-restore! win #f)
            (set-window-prev-buffers! win (cdr history)) #t)
           ((other-window-id win)
-           (window-quit-restore-forget! win)
            (delete-window-id! win) #t)
           (else
             (message "No previous buffer; this is the last window") #f))))
@@ -2434,11 +2432,9 @@
             (switch-to-buffer-here! (car eligible))
             (set-window-prev-buffers! source
               (filter (lambda (b) (not (equal? b buf))) past))
-            (window-quit-restore-forget! source)
             (select-window! (car neighbor))
             (switch-to-buffer-here! buf)
-            (window-set-point! (car neighbor) point)
-            (window-quit-restore-forget! (car neighbor))))))
+            (window-set-point! (car neighbor) point)))))
 
 (for-each
   (lambda (dir)

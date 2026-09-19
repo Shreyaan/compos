@@ -25,6 +25,8 @@
                 (when (string-prefix? t--peek-dir b) (buffer-kill! b)))
               (buffer-list))
     (set! *peek-recent* '())
+    ;; a look the last test scheduled must not land in the next one
+    (debounce-cancel! "dired-peek")
     (switch-to-buffer! "*scratch*")
     (run-command "delete-other-windows")
     out))

@@ -1101,13 +1101,13 @@ is forgotten and that group falls back to creation order in the switcher."
     (switch-to-buffer-here! main)
     ;; The surviving physical pane must not carry the group we just left.
     (set-window-prev-buffers! (active-window) '())
-    (window-quit-restore-forget! (active-window))
+    (set-window-restore! (active-window) #f)
     (when side
       (split-window! 'h 0.6)
       (other-window!)
       (switch-to-buffer-here! side)
       (set-window-prev-buffers! (active-window) '())
-      (window-quit-restore-forget! (active-window))
+      (set-window-restore! (active-window) #f)
       (let ((window (window-showing main)))
         (when window (select-window! window))))))
 
@@ -1133,10 +1133,10 @@ is forgotten and that group falls back to creation order in the switcher."
         (let ((win (car window))
               (buf (cadr window)))
           (set-window-prev-buffers! win (window-eligible-history win))
-          (let ((rec (window-quit-restore win)))
-            (when (and rec (equal? (cadr rec) 'other)
-                       (not (window-history-member? win (caddr rec))))
-              (window-quit-restore-forget! win)))
+          (let ((rec (window-restore win)))
+            (when (and rec (equal? (car rec) 'other)
+                       (not (window-history-member? win (cadr rec))))
+              (set-window-restore! win #f)))
           (unless (buffer-in-group? buf id)
             (set! clean #f)
             (let ((hidden
@@ -1432,7 +1432,10 @@ is forgotten and that group falls back to creation order in the switcher."
               ;; layout as it is, foreign pane and all (docs/groups.md, Save),
               ;; and remembers the group: a switch from a frame in no group has
               ;; nothing to save, and coming back must find what you had.
-              (when (and current (not next) (group-uncovered? current))
+              (when (and current (not next) (group-uncovered? current)
+                         ;; a frame with no member left on it holds no layout
+                         (pair? (filter (lambda (row) (buffer-in-group? (cadr row) current))
+                                        (window-list))))
                 (group-layout-save! current)
                 (set-frame-local! 'previous-group current))
               (set-frame-local! 'current-group next)
@@ -1492,7 +1495,7 @@ is forgotten and that group falls back to creation order in the switcher."
                (select-window! preferred))
               (hidden (hidden-window-show! hidden)))
         (switch-to-buffer-here! b)
-        (window-quit-restore-forget! (active-window))
+        (set-window-restore! (active-window) #f)
         (active-window))))))
 
 (public! 'switch-to-buffer-in-chosen-pane!
@@ -1634,9 +1637,9 @@ is forgotten and that group falls back to creation order in the switcher."
   (let loop ((windows (window-list)))
     (cond ((null? windows) #t)
           ((let* ((row (car windows))
-                  (rec (window-quit-restore (car row))))
+                  (rec (window-restore (car row))))
              (and rec
-                  (equal? (cadr rec) 'other)
+                  (equal? (car rec) 'other)
                   (not (buffer-in-group? (cadr row) g))))
            #f)
           (else (loop (cdr windows))))))
@@ -2577,7 +2580,7 @@ is forgotten and that group falls back to creation order in the switcher."
                                (history (window-prev-buffers win))
                                (remaining (filter (lambda (b) (not (matches? b))) history)))
                           (when (or (matches? buf) (not (equal? history remaining)))
-                            (window-quit-restore-forget! win)
+                            (set-window-restore! win #f)
                             (cond ((not (matches? buf))
                                    (set-window-prev-buffers! win remaining))
                                   ((pair? remaining)
@@ -2591,7 +2594,7 @@ is forgotten and that group falls back to creation order in the switcher."
                   (unless (matches? shown)
                     (display-buffer-in-window! destination (car matching)))
                   (set-window-prev-buffers! destination matching)
-                  (window-quit-restore-forget! destination)
+                  (set-window-restore! destination #f)
                   (select-window! destination)
                   (layout-target-note-slots! (layout-target-visible-buffers))))
               (message (string-append "Consolidated " (number->string (length buffers))
@@ -3451,7 +3454,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (let ((pane (window-showing-mode "chat-mode")))
             (when pane (select-window! pane)))
           (switch-to-buffer-here! buf)
-          (window-quit-restore-forget! (active-window))
+          (set-window-restore! (active-window) #f)
           (end-of-buffer!)
           buf))))
 

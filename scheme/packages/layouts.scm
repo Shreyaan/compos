@@ -584,7 +584,7 @@
                    (old-point (window-point (active-window))))
                (display-buffer-in-window! win (car buffers))
                (set-window-prev-buffers! win (cdr buffers))
-               (window-quit-restore-forget! win)
+               (set-window-restore! win #f)
                (window-cycle-mode! win #f)
                (when (number? (nth 4 record)) (window-set-point! win (nth 4 record)))
                (set! *hidden-windows*

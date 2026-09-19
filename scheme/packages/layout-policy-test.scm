@@ -275,8 +275,8 @@
     (switch-to-buffer! "zz-lp-result")
     (let ((win (active-window)))
       (check-equal! (current-buffer) "zz-lp-result" "the result is selected")
-      (check-equal! (cadr (window-quit-restore win)) 'other "the editor records the pane replacement")
-      (check-equal! (caddr (window-quit-restore win)) "zz-lp-a" "the editor remembers the underlying buffer")
+      (check-equal! (car (window-restore win)) 'other "the editor records the pane replacement")
+      (check-equal! (cadr (window-restore win)) "zz-lp-a" "the editor remembers the underlying buffer")
       (run-command "quit-window")
       (check-equal! (current-buffer) "zz-lp-a" "q restores the buffer under the result")
       (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c") "no unrelated buffer is duplicated")))))
@@ -331,8 +331,8 @@
         (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-foreign")
                       "the other pane shows it")
         (check-equal! (layout-target) 'two-pane "the target stays")
-        (check-equal! (cadr (window-quit-restore win)) 'other "the display records the pane it took")
-        (check-equal! (caddr (window-quit-restore win)) "zz-lp-b" "and the buffer under it")
+        (check-equal! (car (window-restore win)) 'other "the display records the pane it took")
+        (check-equal! (cadr (window-restore win)) "zz-lp-b" "and the buffer under it")
         (check-false! (frame-group) "a pane that shows a foreign buffer takes the frame out of the group"))))))
 
 (deftest 'restored-main-left-target-keeps-its-primary-slot

@@ -369,11 +369,7 @@
 ;; put HOME back to what it showed at open — the cancel path, and the
 ;; guard before a kill takes the previewed buffer off screen
 (define (switch-restore-home! buf)
-  (let ((w (switch-home-window buf))
-        (here (buffer-local buf 'switch-here)))
-    (when w
-      (cond ((and here (buffer-known? here)) (window-preview-buffer! here w))
-            ((buffer-known? "*scratch*") (window-preview-buffer! "*scratch*" w))))))
+  (window-preview-end! (switch-home-window buf)))
 
 ;; close the popup and settle dormancy; KEEP stays awake (#f keeps none)
 ;; a pick from outside the group takes another window (docs/groups.md,
@@ -879,9 +875,7 @@
                       (switch-buffer-info-candidates candidates rows (ibuffer-table-group-labels))
                       (map car candidates)))
          (woken '())
-         (restore! (lambda ()
-                     (when (and (window-exists? home) (buffer-known? here))
-                       (window-preview-buffer! here home))))
+         (restore! (lambda () (window-preview-end! home)))
          (sleep-woken! (lambda (keep)
                          (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b))) woken)
                          (set! woken '()))))
