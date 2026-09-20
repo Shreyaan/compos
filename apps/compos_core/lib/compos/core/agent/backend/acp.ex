@@ -492,11 +492,23 @@ defmodule Compos.Core.Agent.Backend.ACP do
       # tokens held and the window they are held in. It is a snapshot, not
       # an increment — Scheme keeps the latest, it does not add them up.
       "usage_update" ->
-        emit(state,
-          type: :context,
-          used: acp_int(update, "used"),
-          size: acp_int(update, "size")
-        )
+        state =
+          emit(state,
+            type: :context,
+            used: acp_int(update, "used"),
+            size: acp_int(update, "size")
+          )
+
+        # The adapter sends this update on every SDK message that moves the
+        # token count, and only the one at a cycle's terminal result carries
+        # a cost. That makes the cost the one client-visible proof that a
+        # cycle produced its result. A steered turn needs it: the adapter
+        # moves such a turn's settlement off the result and onto an idle
+        # signal it can lose, and then never answers session/prompt. The
+        # Agent's settle grace reads this event.
+        if Map.has_key?(update, "cost"),
+          do: emit(state, type: :"cycle-result"),
+          else: state
 
       "config_option_update" ->
         ingest_config_options(state, Map.get(update, "configOptions"))

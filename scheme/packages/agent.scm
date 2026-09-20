@@ -384,6 +384,17 @@
        (when (boundp (quote chat-log-save!))
          (chat-log-save! buf)))
 
+      ;; A steered turn that the agent never closed. The runtime waited for
+      ;; the close, did not get it, and ended the turn. The chat says so
+      ;; once: the reply above it is complete.
+      ((equal? type 'turn-settled)
+       (let ((start (agent-render! slug
+                      (string-append "\n[the agent did not end this steered turn; compos ended it after "
+                                     (number->string (or (plist-get e 'seconds) 0))
+                                     "s]\n")
+                      "agent-meta")))
+         (agent-block-push! buf start (agent-mark slug) "meta" '())))
+
       ((equal? type 'dead)
        (chat-activity! buf "disconnected")
        (buffer-set-local! buf 'chat-turn-active #f)

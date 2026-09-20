@@ -20,6 +20,8 @@ defmodule Compos.Core.Agent.Backend do
 
     * `ready` — session established; the thread goes idle and pops its queue
     * `turn-failed` — the turn died with no result; idle without a turn-end
+    * `cycle-result` — one model cycle produced its terminal result; the
+      Agent arms the settle grace of a steered turn on it
 
   Steering negotiation and acknowledgements are control events too:
   `steering-ready`, `steering-disabled`, `steering-accepted`, and
@@ -148,7 +150,8 @@ defmodule Compos.Core.Agent.Backend do
                system: plist_str(plist_get(plist, "system")),
                tools: plist_get(plist, "tools") || [],
                dispatcher: plist_get(plist, "dispatcher"),
-               empty_reply_nudge: plist_str(plist_get(plist, "empty-reply-nudge"))
+               empty_reply_nudge: plist_str(plist_get(plist, "empty-reply-nudge")),
+               steer_settle_seconds: plist_get(plist, "steer-settle-seconds")
              }}
 
           {:error, msg} ->

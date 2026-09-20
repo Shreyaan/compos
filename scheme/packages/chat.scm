@@ -655,6 +655,13 @@
 (defvar 'chat-empty-reply-nudge
   "You ended your turn without a reply. In two or three sentences, tell the user what you did and what is left.")
 
+;; A steer moves an ACP turn's close off the model result and onto an idle
+;; signal the adapter can lose. The turn then never closes on the wire and
+;; the chat says "streaming" at an agent that stopped. The runtime waits
+;; this many seconds after the result for the close, then ends the turn
+;; itself. 0 turns the recovery off.
+(defvar 'chat-steer-settle-seconds 45)
+
 (define (chat-thread-context slug display)
   (let* ((name (agent-buf slug))
          (buf (or (buffer-ref name) name))
@@ -667,7 +674,8 @@
           'system (prompt-parts-text (chat-system-prompt-parts buf tools?))
           'tools (if tools? (chat-tools buf) '())
           'dispatcher (chat-tool-dispatch slug)
-          'empty-reply-nudge chat-empty-reply-nudge)))
+          'empty-reply-nudge chat-empty-reply-nudge
+          'steer-settle-seconds chat-steer-settle-seconds)))
 
 (domain! 'chat)
 (effects! '(read))

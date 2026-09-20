@@ -33,6 +33,13 @@ defmodule Compos.Core.Agent do
   @chunk_batch_ms 25
   @batch_max_events 200
 
+  # How long a steered turn waits, after the cycle result the adapter
+  # settles on, for the reply to session/prompt. The healthy reply follows
+  # the result within milliseconds, so this only expires when the adapter
+  # lost the idle it needed. Scheme overrides it per turn through the turn
+  # context (steer-settle-seconds); 0 turns the recovery off.
+  @settle_grace_ms 45_000
+
   # --- api --------------------------------------------------------------------
 
   def start(slug, config) when is_map(config) do
@@ -230,6 +237,14 @@ defmodule Compos.Core.Agent do
        steering_fallbacks: [],
        pending_turn_end: nil,
        steering_settle_timer: nil,
+       # A steer moves an ACP turn's settlement off the model result and
+       # onto an idle signal the adapter can lose, so a steered turn can
+       # end with no reply to session/prompt. These two fields are the
+       # recovery: the turn remembers that it was steered, and the timer
+       # runs from the cycle result the adapter settles on.
+       steered_turn: false,
+       settle_timer: nil,
+       settle_grace_ms: @settle_grace_ms,
        # how many terminal backend events belong to turns this side has
        # already ended (see the cancel above): each one is swallowed once
        stale_turn_ends: 0,
@@ -543,6 +558,8 @@ defmodule Compos.Core.Agent do
        # unresolved steer. Every stall in this area lived in this field and
        # nothing reported it.
        ending: not is_nil(state.pending_turn_end),
+       # a steered turn whose result landed, counting down to the recovery
+       settling: not is_nil(Map.get(state, :settle_timer)),
        steers: length(state.pending_steer_order),
        permission:
          case state.pending_permission do
@@ -609,7 +626,7 @@ defmodule Compos.Core.Agent do
         context = context |> Map.put(:display, display) |> Map.put(:images, images)
         state.backend.prompt(state.handle, text, context)
 
-        {:noreply, state}
+        {:noreply, settle_grace_from(state, context)}
 
       {:error, why} ->
         state =
@@ -680,6 +697,28 @@ defmodule Compos.Core.Agent do
   # dead reference blocks re-arming and parks every later turn-end
   def handle_info({:steering_settle_timeout, _stale_epoch}, state),
     do: {:noreply, %{state | steering_settle_timer: nil}}
+
+  # The steered turn produced its result and then said nothing, and the
+  # adapter never answered session/prompt. The turn is over: the adapter
+  # settles such a turn on an idle signal, and it lost that idle. End the
+  # turn HERE, tell the adapter so it drops the turn it still holds, and
+  # swallow the reply if one arrives after all.
+  def handle_info({:settle_grace, epoch}, %{epoch: epoch, status: :running} = state) do
+    grace = Map.get(state, :settle_grace_ms, @settle_grace_ms)
+    state = Map.put(state, :settle_timer, nil)
+    state.backend.cancel(state.handle)
+
+    state =
+      state
+      |> enqueue(Backend.plist(type: :"turn-settled", seconds: div(grace, 1000)))
+      |> Map.put(:stale_turn_ends, state.stale_turn_ends + 1)
+      |> finish_turn(Backend.plist(type: :"turn-end", "stop-reason": "end_turn"))
+
+    {:noreply, state}
+  end
+
+  def handle_info({:settle_grace, _stale}, state),
+    do: {:noreply, Map.put(state, :settle_timer, nil)}
 
   def handle_info(_msg, state), do: {:noreply, state}
 
@@ -767,7 +806,25 @@ defmodule Compos.Core.Agent do
   # The status machine reads the event stream. A failed backend turn still
   # becomes a normal terminal event for Scheme. Without that event, the Agent
   # goes idle while the chat keeps its active flag and waiting presentation.
+  # Bookkeeping events say nothing about whether the turn still produces.
+  # Every other event does: it is output, so the adapter has not reached the
+  # result a steered turn settles on, and the settle grace disarms.
+  @settle_quiet_events ~w(context usage model-state mode-state status cycle-result
+                          steering-ready steering-disabled steering-accepted
+                          steering-fallback)
+
   defp apply_backend_event(state, event) do
+    type = Backend.event_type(event)
+
+    state =
+      if is_nil(Map.get(state, :settle_timer)) or type in @settle_quiet_events,
+        do: state,
+        else: cancel_settle_timer(state)
+
+    apply_event(state, event)
+  end
+
+  defp apply_event(state, event) do
     case Backend.event_type(event) do
       # the terminal event of a turn this side already ended -- a backend
       # that answered our cancel after we stopped waiting for it. Ending
@@ -775,6 +832,12 @@ defmodule Compos.Core.Agent do
       # turn that is not the one it belongs to.
       t when t in ["turn-end", "turn-failed"] and state.stale_turn_ends > 0 ->
         %{state | stale_turn_ends: state.stale_turn_ends - 1}
+
+      # The cycle produced its terminal result. On a steered turn the adapter
+      # holds the reply to session/prompt until an idle signal that may never
+      # come, so start counting from here.
+      "cycle-result" ->
+        arm_settle(state)
 
       "steering-ready" ->
         %{state | steering: :push}
@@ -792,7 +855,7 @@ defmodule Compos.Core.Agent do
         state |> set_status(:idle) |> pop_prompt_queue()
 
       "turn-failed" ->
-        apply_backend_event(
+        apply_event(
           state,
           Backend.plist(type: :"turn-end", "stop-reason": "error")
         )
@@ -859,8 +922,10 @@ defmodule Compos.Core.Agent do
   defp queue_prompt(state, text, display, images),
     do: %{state | prompt_queue: state.prompt_queue ++ [{text, display, images}]}
 
+  # The adapter injected the text into the running turn, which moves that
+  # turn's settlement off its result (see arm_settle).
   defp steering_accepted(state, event) do
-    settle_steering(state, event, :accepted)
+    settle_steering(Map.put(state, :steered_turn, true), event, :accepted)
   end
 
   defp steering_fallback(state, event) do
@@ -929,6 +994,8 @@ defmodule Compos.Core.Agent do
     # a turn that ends with a request still open (the agent gave up,
     # the wire died) resolves it cancelled — never a stuck banner
     state
+    |> cancel_settle_timer()
+    |> Map.put(:steered_turn, false)
     |> cancel_steering_settle_timer()
     |> restore_boundary_steering()
     |> restore_push_fallbacks()
@@ -939,6 +1006,49 @@ defmodule Compos.Core.Agent do
     |> enqueue(event)
     |> set_status(:idle)
     |> pop_prompt_queue()
+  end
+
+  # A steered turn only. An ordinary ACP turn answers session/prompt at its
+  # result, so it needs no net, and arming one there would put a deadline on
+  # a healthy turn.
+  defp arm_settle(%{steered_turn: true, status: :running} = state) do
+    grace = Map.get(state, :settle_grace_ms, @settle_grace_ms)
+
+    if is_integer(grace) and grace > 0 do
+      state = cancel_settle_timer(state)
+
+      Map.put(
+        state,
+        :settle_timer,
+        Process.send_after(self(), {:settle_grace, state.epoch}, grace)
+      )
+    else
+      state
+    end
+  end
+
+  defp arm_settle(state), do: state
+
+  # Scheme says how long the recovery waits, per turn, the way it says the
+  # empty-reply nudge. A turn that names no number keeps the default.
+  defp settle_grace_from(state, context) do
+    case Map.get(context, :steer_settle_seconds) do
+      n when is_integer(n) and n >= 0 -> Map.put(state, :settle_grace_ms, n * 1000)
+      _ -> state
+    end
+  end
+
+  # Map.get/Map.put, not the struct-update syntax: an Agent started before a
+  # hot reload carries a state map without these keys
+  defp cancel_settle_timer(state) do
+    case Map.get(state, :settle_timer) do
+      nil ->
+        state
+
+      ref ->
+        Process.cancel_timer(ref)
+        Map.put(state, :settle_timer, nil)
+    end
   end
 
   defp cancel_steering_settle_timer(%{steering_settle_timer: nil} = state), do: state
@@ -979,6 +1089,8 @@ defmodule Compos.Core.Agent do
       # a backend that never answered the last cancel never will: drop the
       # debt here, or the swallow would eat THIS turn's end instead
       |> Map.put(:stale_turn_ends, 0)
+      |> cancel_settle_timer()
+      |> Map.put(:steered_turn, false)
       |> Map.put(:status, :running)
       |> emit_status(:running)
 

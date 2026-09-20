@@ -8,6 +8,8 @@ defmodule Compos.Core.Agent.Backend.Stub do
   plists. Each prompt replays the next turn's events and ends the turn with
   `turn-end`. A `permission` event pauses the replay until
   `respond_permission` (answers are recorded in the handle for assertions).
+  A `hang` event stops the replay for good and sends no `turn-end`, which
+  is the wedged adapter the settle grace recovers from.
 
   Scheme boundary note: `plist_to_map` stringifies symbols, so script events
   arrive as `["type", "chunk", "text", "hi"]` — keys are rebuilt into
@@ -96,12 +98,20 @@ defmodule Compos.Core.Agent.Backend.Stub do
   end
 
   defp play(state, [event | rest]) do
-    send(state.owner, {:backend_event, event})
+    case Backend.event_type(event) do
+      # the turn an adapter starts and never ends: the replay stops here and
+      # no turn-end follows. It is the only way to script the wedge the
+      # Agent's settle grace recovers from.
+      "hang" ->
+        state
 
-    if Backend.event_type(event) == "permission" do
-      %{state | paused: rest}
-    else
-      play(state, rest)
+      "permission" ->
+        send(state.owner, {:backend_event, event})
+        %{state | paused: rest}
+
+      _ ->
+        send(state.owner, {:backend_event, event})
+        play(state, rest)
     end
   end
 
