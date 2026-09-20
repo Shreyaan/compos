@@ -26,7 +26,10 @@ defmodule Compos.Core.LLM do
 
   alias Compos.Core.Session
 
-  @max_tool_rounds 25
+  # How many tool rounds one turn may run. A coding turn reads, edits and
+  # checks its work, and each step is a round: 25 stopped real work in the
+  # middle of a task.
+  @max_tool_rounds 200
 
   @doc "Synchronous request — for callers managing their own tasks."
   def request(prompt), do: run_request(prompt, model())
