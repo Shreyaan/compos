@@ -79,12 +79,31 @@ defmodule Compos.Core.Display do
   # A window builds the rows it ships: its viewport and two more screens
   # for the client to scroll through. A peek card scrolls on its own and
   # takes more, up to a bound: a whole large file is never built.
-  @peek_max_lines 2_000
+  #
+  # A window under the bound ships every line. The server windows a buffer
+  # by SOURCE lines, and every line-content wraps (white-space: pre-wrap),
+  # so one source line is many screen rows and a server top by source line
+  # cannot keep point or the last line on screen. The last screenful the
+  # server clamps to then stands below the window and the reader cannot
+  # reach the end of the buffer. This is not a visual-line-mode matter:
+  # code wraps too, by character instead of by word. The browser measures
+  # the wrapped rows and scrolls them itself.
+  @ship_all_max_lines 2_000
 
   defp want(leaf) do
-    if String.contains?(leaf.window_class || "", "listing-peek"),
-      do: leaf.total_lines |> min(@peek_max_lines) |> max(1),
-      else: max(leaf.rows * 3 + 8, 1)
+    cond do
+      String.contains?(leaf.window_class || "", "listing-peek") ->
+        leaf.total_lines |> min(@ship_all_max_lines) |> max(1)
+
+      leaf.total_lines <= @ship_all_max_lines ->
+        max(leaf.total_lines, 1)
+
+      # over the bound the windowed path stays, because a whole large file
+      # is never built. Its bottom is reachable only while its lines do not
+      # wrap: the server would need the screen rows to do better.
+      true ->
+        max(leaf.rows * 3 + 8, 1)
+    end
   end
 
   defp viewport_lines(rope, leaf, want, client_scroll?) do

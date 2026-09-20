@@ -19,7 +19,7 @@ defmodule Compos.DisplayTest do
     {:ok, name: name}
   end
 
-  test "a window builds the rows of its viewport, not the buffer" do
+  test "a window over the bound builds the rows of its viewport, not the buffer" do
     leaf = Editor.render_state().tree
     {drawn, _entry} = Display.window(leaf, nil)
 
@@ -51,5 +51,32 @@ defmodule Compos.DisplayTest do
     {drawn, _} = Display.window(leaf, nil)
 
     assert length(drawn.lines) == 2_000
+  end
+
+  # A wrapped line is many screen rows, so a server top by source line
+  # cannot reach the end of the buffer. The browser scrolls it instead.
+  test "a window under the bound ships every line, whatever its mode" do
+    leaf = Editor.render_state().tree
+
+    for mode <- [true, false] do
+      small = %{leaf | total_lines: 300} |> Map.put(:visual_line_mode, mode)
+      {drawn, _} = Display.window(small, nil)
+      assert drawn.client_scroll?
+      assert length(drawn.lines) == 300
+    end
+
+    big = Map.put(leaf, :visual_line_mode, true)
+    {drawn, _} = Display.window(big, nil)
+    refute drawn.client_scroll?
+  end
+
+  # Code wraps by character rather than by word, so it strands its bottom
+  # the same way. It is under the bound, so the browser scrolls it.
+  test "a code window reaches its last line" do
+    leaf = %{Editor.render_state().tree | total_lines: 1_100}
+    {drawn, _} = Display.window(leaf, nil)
+
+    assert drawn.client_scroll?
+    assert List.last(drawn.lines).num == 1_100
   end
 end
