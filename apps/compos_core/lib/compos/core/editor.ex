@@ -455,6 +455,37 @@ defmodule Compos.Core.Editor do
     do: GenServer.call(__MODULE__, {:swap_windows, first, second})
   def active_window(fid \\ nil), do: GenServer.call(__MODULE__, {:active_window, fid(fid)})
 
+  @doc """
+  A hidden window is a window with no pane. It keeps its id, buffer,
+  history and point, and a pane can show it again. The frame holds its
+  hidden windows most recently used first. Scheme decides when a window
+  hides and when it comes back.
+  """
+  def hidden_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:hidden_windows, fid(fid)})
+
+  @doc "Make a hidden window on BUFFER; return its id."
+  def new_hidden_window(buffer, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:new_hidden_window, buffer, fid(fid)})
+
+  @doc "Put hidden window HIDDEN in the pane of VISIBLE; VISIBLE becomes hidden."
+  def swap_hidden_window(visible, hidden),
+    do: GenServer.call(__MODULE__, {:swap_hidden_window, visible, hidden})
+
+  @doc """
+  Lay the frame out as one line of the windows IDS, visible or hidden,
+  along DIR (:h or :v). The first pane takes RATIO; each later split
+  divides the rest evenly. A visible window not in IDS becomes hidden.
+  """
+  def arrange_line(dir, ratio, ids, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:arrange_line, dir, ratio, ids, fid(fid)})
+
+  @doc "Delete hidden window ID."
+  def delete_hidden_window(id), do: GenServer.call(__MODULE__, {:delete_hidden_window, id})
+
+  @doc "Replace the frame's hidden windows with windows built from SPECS (tree leaf specs)."
+  def set_hidden_windows(specs, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_hidden_windows, specs, fid(fid)})
+
   def delete_other_windows(fid \\ nil),
     do: GenServer.call(__MODULE__, {:delete_other_windows, fid(fid)})
 
@@ -867,7 +898,13 @@ defmodule Compos.Core.Editor do
         _ -> nil
       end
 
-    {:reply, %{tree: dtree(f.tree), active_buffer: active, faces: state.faces}, state}
+    {:reply,
+     %{
+       tree: dtree(f.tree),
+       hidden: Enum.map(hidden(f), &dtree/1),
+       active_buffer: active,
+       faces: state.faces
+     }, state}
   end
 
   def handle_call({:set_overriding_map, name, lock?, until?, fid}, _from, state) do
@@ -1158,6 +1195,7 @@ defmodule Compos.Core.Editor do
 
     frames =
       Map.new(state.frames, fn {id, f} ->
+        f = Map.put(f, :hidden, release_buffer_from_hidden(hidden(f), buffer))
         victim_ids = wins_showing(f.tree, buffer)
         others = f.tree |> leaf_ids_buffers() |> Enum.reject(fn {win, _} -> win in victim_ids end)
 
@@ -1191,7 +1229,10 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:rename_buffer, old, new}, _from, state) do
     frames =
-      Map.new(state.frames, fn {id, f} -> {id, %{f | tree: swap_buffer(f.tree, old, new)}} end)
+      Map.new(state.frames, fn {id, f} ->
+        f = Map.put(f, :hidden, Enum.map(hidden(f), &swap_buffer(&1, old, new)))
+        {id, %{f | tree: swap_buffer(f.tree, old, new)}}
+      end)
 
     mru = state.mru |> Enum.map(&if(&1 == old, do: new, else: &1)) |> Enum.uniq()
 
@@ -1920,6 +1961,111 @@ defmodule Compos.Core.Editor do
   def handle_call({:window_rects, fid}, _from, state),
     do: {:reply, leaf_rects(frame(state, fid).tree, {0.0, 0.0, 1.0, 1.0}), state}
 
+  # --- hidden windows -------------------------------------------------------
+  # Map.get: a hot swap keeps frames built before the :hidden key existed
+
+  def handle_call({:hidden_windows, fid}, _from, state) do
+    rows = for leaf <- hidden(frame(state, fid)), do: {leaf.id, leaf.buffer}
+    {:reply, rows, state}
+  end
+
+  def handle_call({:new_hidden_window, buffer, fid}, _from, state) do
+    case Compos.Core.ensure_buffer(buffer) do
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+
+      _started ->
+        f = frame(state, fid)
+
+        leaf = %{
+          type: :leaf,
+          id: state.next_win,
+          buffer: buffer,
+          history: [],
+          top: 0,
+          manual: false
+        }
+
+        f = Map.put(f, :hidden, [leaf | hidden(f)])
+        changed(leaf.id, put_frame(%{state | next_win: state.next_win + 1}, f), f.id)
+    end
+  end
+
+  def handle_call({:swap_hidden_window, visible, hidden_id}, _from, state) do
+    with %{} = f <- find_window_frame(state, visible),
+         %{} = out <- find_leaf(f.tree, visible),
+         %{} = inn <- Enum.find(hidden(f), &(&1.id == hidden_id)) do
+      rest = Enum.reject(hidden(f), &(&1.id == hidden_id))
+      active = if f.active == visible, do: hidden_id, else: f.active
+
+      f =
+        %{f | tree: replace_leaf(f.tree, visible, inn), active: active}
+        |> Map.put(:hidden, [out | rest])
+
+      changed(:ok, state |> put_frame(f) |> resync_swap(), f.id)
+    else
+      _ -> {:reply, {:error, :no_window}, state}
+    end
+  end
+
+  def handle_call({:arrange_line, dir, ratio, ids, fid}, _from, state) when dir in [:h, :v] do
+    f = frame(state, fid)
+    visible = leaves(f.tree)
+    pool = visible ++ hidden(f)
+    chosen = ids |> Enum.uniq() |> Enum.map(fn id -> Enum.find(pool, &(&1.id == id)) end)
+
+    if chosen == [] or Enum.any?(chosen, &is_nil/1) do
+      {:reply, {:error, :no_window}, state}
+    else
+      used = MapSet.new(chosen, & &1.id)
+      # the panes that leave go to the front, the selected one first
+      {sel, others} =
+        visible |> Enum.reject(&MapSet.member?(used, &1.id)) |> Enum.split_with(&(&1.id == f.active))
+
+      left = hidden(f) |> Enum.reject(&MapSet.member?(used, &1.id))
+      active = if MapSet.member?(used, f.active), do: f.active, else: hd(chosen).id
+
+      f =
+        %{f | tree: line_tree(chosen, dir, ratio), active: active}
+        |> Map.put(:hidden, sel ++ others ++ left)
+
+      changed(:ok, state |> put_frame(f) |> resync_swap(), f.id)
+    end
+  end
+
+  def handle_call({:delete_hidden_window, id}, _from, state) do
+    case Enum.find(Map.values(state.frames), fn f -> Enum.any?(hidden(f), &(&1.id == id)) end) do
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      f ->
+        leaf = Enum.find(hidden(f), &(&1.id == id))
+        drop_point(leaf)
+        f = Map.put(f, :hidden, Enum.reject(hidden(f), &(&1.id == id)))
+        changed(:ok, put_frame(state, f), f.id)
+    end
+  end
+
+  def handle_call({:set_hidden_windows, specs, fid}, _from, state) do
+    f = frame(state, fid)
+    Enum.each(hidden(f), &drop_point/1)
+
+    {leaves, next_win} =
+      Enum.reduce(specs || [], {[], state.next_win}, fn spec, {acc, n} ->
+        {leaf, n} = build_tree(spec, n)
+
+        # a window on a buffer that cannot start has nothing to show
+        case leaf.type == :leaf and Compos.Core.ensure_buffer(leaf.buffer) do
+          {:error, _} -> {acc, n}
+          false -> {acc, n}
+          _started -> {[leaf | acc], n}
+        end
+      end)
+
+    f = Map.put(f, :hidden, Enum.reverse(leaves))
+    changed(:ok, put_frame(%{state | next_win: next_win}, f), f.id)
+  end
+
   # selecting a window selects its frame: bare window ids arrive from Scheme
   # (ibuffer buffer-locals, agent closures) with no frame attached
   def handle_call({:swap_windows, first, second}, _from, state) do
@@ -2165,6 +2311,25 @@ defmodule Compos.Core.Editor do
   defp frame(state, fid), do: state.frames[fid] || state.frames[hd(state.frame_mru)]
 
   defp put_frame(state, f), do: %{state | frames: Map.put(state.frames, f.id, f)}
+
+  defp hidden(f), do: Map.get(f, :hidden, [])
+
+  defp leaves(%{type: :leaf} = leaf), do: [leaf]
+  defp leaves(%{type: :split, children: c}), do: Enum.flat_map(c, &leaves/1)
+
+  defp drop_point(%{buffer: b, id: id}) do
+    if Buffer.exists?(b), do: wp_safely(fn -> Buffer.drop_win_point(b, id) end)
+  end
+
+  # One line of LEAVES, nested to the right: the first takes RATIO, and
+  # each later split gives its first pane 1/COUNT of what is left. This is
+  # the tree layout--fill-line! makes with split-window!.
+  defp line_tree([leaf], _dir, _ratio), do: leaf
+
+  defp line_tree([first | rest], dir, ratio) do
+    ratio = if is_number(ratio) and ratio > 0 and ratio < 1, do: ratio, else: 1 / (length(rest) + 1)
+    %{type: :split, dir: dir, ratio: ratio, children: [first, line_tree(rest, dir, nil)]}
+  end
 
   # the history holds buffer names and group marks. A window with no buffer
   # offers `false` here; it names no place, so it never enters the history.
@@ -2553,6 +2718,32 @@ defmodule Compos.Core.Editor do
       split
       | children: Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback, shown))
     }
+
+  # A hidden window on BUFFER shows the buffer it showed before, from its
+  # own history. With no live buffer there, the window has nothing to be,
+  # and it goes.
+  defp release_buffer_from_hidden(hidden, buffer) do
+    Enum.flat_map(hidden, fn leaf ->
+      history = leaf |> Map.get(:history, []) |> List.delete(buffer)
+
+      cond do
+        leaf.buffer != buffer ->
+          [%{leaf | history: history}]
+
+        next = Enum.find(history, &Buffer.exists?/1) ->
+          drop_point(leaf)
+
+          [
+            %{leaf | buffer: next, history: List.delete(history, next), top: 0, manual: false}
+            |> Map.delete(:restore)
+          ]
+
+        true ->
+          drop_point(leaf)
+          []
+      end
+    end)
+  end
 
   defp replace_leaf(%{type: :leaf} = leaf, id, new),
     do: if(leaf.id == id, do: new, else: leaf)

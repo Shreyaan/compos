@@ -1,6 +1,6 @@
 defmodule Compos.StripSlideTest do
   @moduledoc """
-  A focus move past the frame edge scrolls the strip, and the scroll asks
+  A focus move past the frame edge scrolls the window ring, and the scroll asks
   the frame's client to slide the panes. The client then shows which
   buffer went out and which buffer came in.
 
@@ -14,7 +14,7 @@ defmodule Compos.StripSlideTest do
 
   @scenes Path.expand("../../../../scheme/packages/layout-policy-test.scm", __DIR__)
 
-  test "a focus move past the edge scrolls the strip and asks for a slide in its direction" do
+  test "a focus move past the edge scrolls the window ring and asks for a slide in its direction" do
     previous = Editor.last_active_frame()
     {:ok, frame} = Editor.attach_frame(nil)
 
@@ -29,6 +29,7 @@ defmodule Compos.StripSlideTest do
                  (lp-buffer! "b") (lp-buffer! "c")
                  (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
                  (layout-target-set! 'two-pane)
+                 (window-new-hidden! "zz-lp-c")
                  (select-window! (window-showing "zz-lp-b"))
                  (global-set-key "<f9>" "focus-right")
                  (global-set-key "<f10>" "focus-left")
@@ -44,7 +45,7 @@ defmodule Compos.StripSlideTest do
       KeyDispatch.handle_key(frame, "<f9>")
       assert Editor.take_slide(frame) == nil
 
-      # past the right edge: the strip scrolls forward
+      # past the right edge: the ring scrolls forward
       KeyDispatch.handle_key(frame, "<f9>")
 
       assert {:ok, ~s|("zz-lp-b" "zz-lp-c")|} =
@@ -53,7 +54,7 @@ defmodule Compos.StripSlideTest do
       assert Editor.take_slide(frame) == "forward"
       assert Editor.take_slide(frame) == nil, "the take clears the request"
 
-      # past the left edge: the strip scrolls backward
+      # past the left edge: the ring scrolls backward
       assert {:ok, _} = Session.eval(~s|(select-window! (window-showing "zz-lp-b"))|, frame)
       KeyDispatch.handle_key(frame, "<f10>")
 

@@ -1526,7 +1526,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (for-each (lambda (b)
               (when (and (not (buffer-known? b)) (file-exists? b))
                 (visit b)))
-            (window-tree-buffers saved)))
+            (append (window-tree-buffers saved) (window-tree-hidden-buffers saved))))
 
 (define *group-current-inhibit* #f)
 
@@ -1560,7 +1560,9 @@ is forgotten and that group falls back to creation order in the switcher."
                   (window-tree-set! saved)
                   (group-restore-sanitize! id)
                   (layout-target-set! (group-layout-target id)))
-                (group-default-layout! id)))
+                ;; the windows the frame hid belong to the group it left
+                (begin (window-hidden-clear!)
+                       (group-default-layout! id))))
           (set! *group-current-inhibit* #f)
           (group-current-recalculate!)
           (group-mru-note! id)

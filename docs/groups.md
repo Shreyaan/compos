@@ -455,13 +455,13 @@ When a member is killed, its window stays in the group. The window shows the mem
 
 ### The target layout
 
-The layout chosen at `window-layout` (`C-x l`), or a `window-layout-*` command, is a persistent target. There are five, and each holds a fixed number of panes: `single` one, `two-pane` two, `halves` two, `columns` three, `rows` two. A layout works with one buffer and grows as work opens, up to its capacity. At capacity, a visit replaces the selected slot and a passive result replaces the least recently used other pane. Focus changes do not reorder slots. Closing a pane reflows the survivors without reopening hidden work.
+The layout chosen at `window-layout` (`C-x l`), or a `window-layout-*` command, is a persistent target. There are five, and each holds a fixed number of panes: `single` one, `two-pane` two, `halves` two, `columns` three, `rows` two. A layout works with one buffer and grows as work opens, up to its capacity. At capacity, a visit replaces the buffer of the selected slot. A passive result opens a new window in the least recently used other pane, and the window that had the pane becomes hidden. Focus changes do not reorder slots. Closing a pane reflows the survivors without reopening hidden work.
 
-Every layout shows a run of the frame's strip: the frame's buffers in one cyclic order. `layout-forward` (`C-x l <right>`) moves the run one buffer forward and `layout-backward` (`C-x l <left>`) one back, so each layout goes on for ever in both directions. A Cmd-arrow that finds no window does the same: the edge of the frame is not the end of the buffers.
+Every layout shows a run of the frame's window ring. The ring holds windows, not buffers: the panes, then the hidden windows. A hidden window has no pane, and it keeps its buffer, history, and point. A window joins the ring when it is made, and a smaller layout hides windows instead of deleting them. `layout-forward` (`C-x l <right>`) moves the run one window forward and `layout-backward` (`C-x l <left>`) one back, so each layout goes on for ever in both directions. A Cmd-arrow that finds no window does the same. A walk takes the order of the ring when it starts: the panes in screen order, then the hidden windows, most recently used first. The hidden windows belong to the group: `switch` saves them with the group's layout and restores them, and the desktop saves them.
 
 Targets belong to the group's saved layout on each frame, and the active target also survives desktop save. A new group starts without inheriting the outgoing target. `window-layout-free` drops the target. See [Display buffer](DISPLAY-BUFFER.md#layout-presets) for eligibility, ordering, replacement, preview, and measured geometry rules.
 
-A tile builds its windows from one survivor, so the build hands each new pane the history of the pane that showed its buffer. A pane on a buffer no window showed takes the history of a pane that went away, that pane's buffer first.
+A tile uses the window that shows each buffer: a pane first, then a hidden window, else a new window. So each pane keeps its own history. A pane that the tile leaves out becomes a hidden window.
 
 The frame has no other layouts. `window-layout-free` releases the target, and a display may split a window again.
 

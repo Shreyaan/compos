@@ -377,7 +377,7 @@ The arrow names the main pane's side.
 | Case | Command or trigger | Setup and action | Required result |
 | --- | --- | --- | --- |
 | K01 — Layout prefix | `C-x l 1`, `C-x l 2`, `C-x l =`, `C-x l c`, `C-x l r` | Press C-x l, then each of 1, 2, =, c, and r in separate runs. | Select single, two-pane, halves, columns, and rows respectively. Each uses the window-preservation and group-boundary rules above. |
-| K01b — Scroll the layout | `C-x l <right>`, `C-x l <left>` | Press C-x l, then an arrow. | Move the panes one buffer along the frame's strip. The strip is cyclic, so neither direction reaches an end. |
+| K01b — Scroll the layout | `C-x l <right>`, `C-x l <left>` | Press C-x l, then an arrow. | Move the panes one window along the frame's window ring. The ring is cyclic, so neither direction reaches an end. The window that leaves becomes hidden; it keeps its buffer, history, and point. |
 | K02 — Main direction | `C-x l` plus left, right, up, down | Press C-x l followed by left, right, up, or down. | Place the main pane on the named side. Preserve logical window stacks while changing pane geometry. |
 | K03 — Chooser | `C-x l l`, then `RET` / `C-g` | Press C-x l l, preview layouts, then accept or cancel. | Open the chooser and follow L15–L17. Cancellation restores the original arrangement. |
 | K04 — Free layout | `window-layout-free` (`C-x l f`) | Press C-x l f. | Select free layout. Mode routing, consolidation, and group ownership still apply. |

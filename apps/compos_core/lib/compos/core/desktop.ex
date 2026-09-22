@@ -206,7 +206,12 @@ defmodule Compos.Core.Desktop do
 
     frames =
       for {fid, view} <- views do
-        %{id: fid, tree: serialize(view.tree), active_buffer: view.active_buffer}
+        %{
+          id: fid,
+          tree: serialize(view.tree),
+          hidden: Enum.map(Map.get(view, :hidden, []), &serialize/1),
+          active_buffer: view.active_buffer
+        }
       end
 
     {globals, state} = scheme_globals(state)
@@ -482,7 +487,12 @@ defmodule Compos.Core.Desktop do
   # Every buffer the saved trees name. A leaf is `{:leaf, name, ...}`; a
   # split ends in its two children, whatever rides between.
   defp tree_buffers(%{frames: frames}) when is_list(frames),
-    do: frames |> Enum.flat_map(&leaf_names(Map.get(&1, :tree))) |> Enum.uniq()
+    do:
+      frames
+      |> Enum.flat_map(fn f ->
+        leaf_names(Map.get(f, :tree)) ++ Enum.flat_map(Map.get(f, :hidden, []), &leaf_names/1)
+      end)
+      |> Enum.uniq()
 
   defp tree_buffers(%{tree: tree}), do: tree |> leaf_names() |> Enum.uniq()
   defp tree_buffers(_), do: []
@@ -631,9 +641,10 @@ defmodule Compos.Core.Desktop do
   # before restore ran gets its same-id frame overwritten and re-renders.
   # v1 (single :tree key): one frame, restored into the default.
   defp restore_frames(%{frames: frames}) do
-    for %{id: fid, tree: tree, active_buffer: active} <- Enum.reverse(frames) do
+    for %{id: fid, tree: tree, active_buffer: active} = frame <- Enum.reverse(frames) do
       {:ok, ^fid} = Editor.attach_frame(fid)
       Editor.restore_tree(tree, active, fid)
+      Editor.set_hidden_windows(Map.get(frame, :hidden, []), fid)
     end
   end
 

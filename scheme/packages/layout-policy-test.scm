@@ -25,6 +25,7 @@
   (when (minibuffer-state) (minibuffer-cancel!))
   (when (float-open?) (float-close!))
   (delete-other-windows!)
+  (window-hidden-clear!)
   (switch-to-buffer-here! "*scratch*")
   (set-frame-local! 'current-group #f)
   (set-frame-local! 'previous-group #f)
@@ -251,14 +252,20 @@
     (select-window! (window-showing "zz-lp-c"))
     (select-window! (window-showing "zz-lp-b"))
     (select-window! (window-showing "zz-lp-a"))
-    (let ((win (display-buffer "zz-lp-result")))
+    (let* ((c-win (window-showing "zz-lp-c"))
+           (win (display-buffer "zz-lp-result")))
       (lp-snapshot! 'passive-result)
       (check-equal! (current-buffer) "zz-lp-a" "display takes no focus")
       (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-result") "oldest other pane is reused")
+      (check-false! (equal? win c-win) "the result is a new window")
+      (check-equal! (assoc c-win (window-hidden-list)) (list c-win "zz-lp-c")
+                    "the pane's window is hidden with its buffer")
       (select-window! win)
       (run-command "quit-window")
       (lp-snapshot! 'result-quit)
       (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c") "quitting restores the borrowed pane")
+      (check-equal! (window-showing "zz-lp-c") c-win "with the window that had it")
+      (check-false! (assoc win (window-hidden-list)) "the result's window is gone")
       (lp-rect! "zz-lp-c" (/ 2 3) 0 (/ 1 3) 1)))))
 
 (deftest 'selected-result-quit-restores-the-buffer-under-it
@@ -313,51 +320,111 @@
     (lp-rect! "zz-lp-c" window-layout-main-ratio 0 (- 1 window-layout-main-ratio) 1)
     (check-equal! (current-buffer) "zz-lp-c" "new work receives focus"))))
 
-(deftest 'a-layout-scrolls-along-the-strip
-  "the layouts go on for ever: forward shows the next buffer, backward comes back"
+(deftest 'a-layout-scrolls-along-the-window-ring
+  "the layouts go on for ever: forward shows the next window, backward comes back"
   (lp-journey (lambda ()
     (lp-start!)
     (lp-buffer! "b") (lp-buffer! "c")
     (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
     (layout-target-set! 'two-pane)
-    (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b") "the run starts at the panes")
-    (run-command "layout-forward")
-    (lp-snapshot! 'scrolled-forward)
-    (check-equal! (layout-target-visible-buffers) '("zz-lp-b" "zz-lp-c") "forward moves the run one along")
-    (run-command "layout-backward")
-    (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b") "backward returns where forward came from")
-    (run-command "layout-backward")
-    (check-equal! (layout-target-visible-buffers) '("zz-lp-c" "zz-lp-a") "the strip is cyclic: backward past the front arrives at the back"))))
+    (let ((c-win (window-new-hidden! "zz-lp-c"))
+          (a-win (window-showing "zz-lp-a")))
+      (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b") "the run starts at the panes")
+      (run-command "layout-forward")
+      (lp-snapshot! 'scrolled-forward)
+      (check-equal! (layout-target-visible-buffers) '("zz-lp-b" "zz-lp-c") "forward moves the run one window along")
+      (check-equal! (window-showing "zz-lp-c") c-win "the hidden window itself comes in, not a new one")
+      (check-equal! (assoc a-win (window-hidden-list)) (list a-win "zz-lp-a") "the window that left is hidden")
+      (run-command "layout-backward")
+      (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b") "backward returns where forward came from")
+      (check-equal! (window-showing "zz-lp-a") a-win "with the same window")
+      (run-command "layout-backward")
+      (check-equal! (layout-target-visible-buffers) '("zz-lp-c" "zz-lp-a") "the ring is cyclic: backward past the front arrives at the back")))))
 
-(deftest 'a-kill-evicts-the-buffer-from-every-frame-strip-at-once
-  "a buffer name is global, not frame-local: dying takes it out of the strip immediately, not on the next read"
+(deftest 'a-buffer-with-no-window-is-not-in-the-ring
+  "the ring holds windows: a buffer that no window shows is not a stop"
+  (lp-journey (lambda ()
+    (lp-start!)
+    (lp-buffer! "b") (lp-buffer! "c")
+    (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'two-pane)
+    (window-hidden-clear!)
+    (run-command "layout-forward")
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b") "no hidden window: the run stays"))))
+
+(deftest 'a-walk-meets-the-hidden-windows-most-recent-first
+  "forward from the panes brings the hidden window used last"
+  (lp-journey (lambda ()
+    (lp-start!)
+    (lp-buffer! "b") (lp-buffer! "c") (lp-buffer! "d")
+    (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'two-pane)
+    (window-new-hidden! "zz-lp-c")
+    (window-new-hidden! "zz-lp-d")
+    (run-command "layout-forward")
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-b" "zz-lp-d") "d was hidden last, so d comes first"))))
+
+(deftest 'a-kill-takes-a-hidden-window-out-of-the-ring
+  "a hidden window whose buffer dies, with nothing in its past, goes; the walk passes it"
   (lp-journey (lambda ()
     (lp-start!)
     (lp-buffer! "b") (lp-buffer! "c") (lp-buffer! "d") (lp-buffer! "e")
     (tile-visible-windows! 'columns '("zz-lp-a" "zz-lp-b" "zz-lp-c"))
     (layout-target-set! 'columns)
+    (window-new-hidden! "zz-lp-d")
+    (window-new-hidden! "zz-lp-e")
     (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c")
                   "three columns to start")
-    ;; "d" is next in the strip, past the visible run, when it dies
     (buffer-kill! "zz-lp-d")
+    (check-false! (member "zz-lp-d" (map cadr (window-hidden-list))) "the window on d is gone")
     (run-command "layout-forward")
-    (lp-snapshot! 'scrolled-past-where-a-dead-buffer-was)
+    (lp-snapshot! 'scrolled-past-where-a-dead-window-was)
     (check-equal! (length (window-list)) 3 "still three panes, not two")
     (check-equal! (layout-target-visible-buffers) '("zz-lp-b" "zz-lp-c" "zz-lp-e")
-                  "the run reaches the next LIVE buffer, \"d\" already gone from the strip"))))
+                  "the run reaches the next LIVE window"))))
 
-(deftest 'a-scroll-with-no-live-buffers-left-past-the-run-declines-instead-of-shrinking
-  "eviction can leave the strip no longer than the layout; a scroll then says so rather than tiling short"
+(deftest 'a-scroll-with-no-hidden-window-left-declines-instead-of-shrinking
+  "a kill can leave the ring no longer than the layout; a scroll then says so rather than tiling short"
   (lp-journey (lambda ()
     (lp-start!)
     (lp-buffer! "b") (lp-buffer! "c") (lp-buffer! "d")
     (tile-visible-windows! 'columns '("zz-lp-a" "zz-lp-b" "zz-lp-c"))
     (layout-target-set! 'columns)
+    (window-new-hidden! "zz-lp-d")
     (buffer-kill! "zz-lp-d")
     (run-command "layout-forward")
     (check-equal! (length (window-list)) 3 "the three columns stand unchanged")
     (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c")
                   "the run never moved"))))
+
+(deftest 'a-smaller-layout-hides-windows-and-a-larger-one-shows-them-again
+  "columns to single hides two windows; single to columns shows the same windows"
+  (lp-journey (lambda ()
+    (lp-start!)
+    (lp-buffer! "b") (lp-buffer! "c")
+    (tile-visible-windows! 'columns '("zz-lp-a" "zz-lp-b" "zz-lp-c"))
+    (let ((b-win (window-showing "zz-lp-b")) (c-win (window-showing "zz-lp-c")))
+      (select-window! (window-showing "zz-lp-a"))
+      (tile-visible-windows! 'single)
+      (check-equal! (length (window-list)) 1 "single shows one pane")
+      (check-equal! (length (window-hidden-list)) 2 "the other two windows are hidden")
+      (tile-visible-windows! 'columns)
+      (check-equal! (window-showing "zz-lp-b") b-win "b's window comes back")
+      (check-equal! (window-showing "zz-lp-c") c-win "c's window comes back")
+      (check-equal! (window-hidden-list) '() "no window stays hidden")))))
+
+(deftest 'a-group-keeps-its-hidden-windows-across-a-switch
+  "hidden windows belong to the group: another group does not see them, and a switch back restores them"
+  (lp-journey (lambda ()
+    (lp-start!)
+    (lp-buffer! "b") (lp-buffer! "c")
+    (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+    (window-new-hidden! "zz-lp-c")
+    (lp-group! "other")
+    (check-equal! (window-hidden-list) '() "the new group has no hidden windows")
+    (switch-to-group! "zz-lp-group")
+    (check-equal! (map cadr (window-hidden-list)) '("zz-lp-c")
+                  "the switch back restores the group's hidden window"))))
 
 (deftest 'a-foreign-display-takes-a-pane-and-the-frame-leaves-the-group
   "the ruling of 2026-09-19: nothing floats; a foreign display takes the window chain, and a pane that shows it takes the frame out of the group"

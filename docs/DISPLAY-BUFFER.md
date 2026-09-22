@@ -135,7 +135,7 @@ that deliberately construct a layout.
 | Visit an already visible buffer | select its existing pane |
 | Open a new member below capacity | append a slot, reflow, select it |
 | Open a member at capacity | replace the selected slot |
-| Display an ordinary result | fill capacity, else replace the least recently used other pane; preserve focus |
+| Display an ordinary result | fill capacity, else put a new window in the least recently used other pane, which becomes hidden; preserve focus |
 | Close a pane | reflow surviving slots; do not pull hidden work back in |
 | Kill a buffer | refill from eligible pane history, then hidden group work, then existing group companions |
 | Quit a displayed result | restore the borrowed pane or remove the pane created for it |
@@ -148,7 +148,7 @@ not open or rearrange visible panes. Mode-entry layouts and automatic
 relayout hooks defer to an explicitly selected target.
 
 Relayout preserves each view's point and buffer history. The active target is saved with the desktop even without
-switching groups. `window-layout-free` releases the target. A layout holds a fixed number of panes, so work past that number does not add a pane: it takes one, and the buffers the frame is not showing sit on the strip, where `layout-forward` and `layout-backward` reach them.
+switching groups. `window-layout-free` releases the target. A layout holds a fixed number of panes, so work past that number does not add a pane. It takes a pane, and the window that had the pane becomes hidden. The hidden windows make the window ring with the panes, and `layout-forward` and `layout-backward` reach them. `quit-window` in the new window gives the pane back to the hidden window.
 
 The measured regression journeys are in `priv/tests/layout-policy-test.scm`,
 with a disposable-frame runner and keyboard-path test in

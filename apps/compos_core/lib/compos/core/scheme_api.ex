@@ -1971,6 +1971,31 @@ defmodule Compos.Core.SchemeAPI do
       {"window-eat-id!",
        "(window-eat-id! ID VICTIM) — window ID takes the space of window VICTIM; #t when it did."} =>
         fn [id, victim] -> Editor.eat_window(id, victim) == :ok end,
+      # hidden windows: a window with no pane keeps its id, buffer, history
+      # and point. Which window hides, and when, is Scheme's decision.
+      {"window-hidden-list",
+       "(window-hidden-list) — return (WIN BUFFER) pairs for the selected frame's hidden windows, most recently used first."} =>
+        fn [] -> Enum.map(Editor.hidden_windows(), fn {id, b} -> [id, b] end) end,
+      {"window-new-hidden!",
+       "(window-new-hidden! BUFFER) — make a hidden window on BUFFER; return its id, or #f."} =>
+        fn [buffer] ->
+          case Editor.new_hidden_window(buffer) do
+            id when is_integer(id) -> id
+            _ -> false
+          end
+        end,
+      {"window-swap-hidden!",
+       "(window-swap-hidden! VISIBLE HIDDEN) — show hidden window HIDDEN in the pane of VISIBLE, which becomes hidden; #t when it did."} =>
+        fn [visible, hidden] -> Editor.swap_hidden_window(visible, hidden) == :ok end,
+      {"window-arrange-line!",
+       "(window-arrange-line! DIR RATIO IDS) — lay the frame out as one line of windows IDS, visible or hidden; DIR h is side by side, v is stacked; the first pane takes RATIO; a visible window not in IDS becomes hidden; #t when it did."} =>
+        fn [dir, ratio, ids] ->
+          dir = if plain(dir) == "v", do: :v, else: :h
+          Editor.arrange_line(dir, ratio, ids) == :ok
+        end,
+      {"window-hidden-delete!",
+       "(window-hidden-delete! WIN) — delete hidden window WIN; #t when it did."} =>
+        fn [id] -> Editor.delete_hidden_window(id) == :ok end,
       {"window-list",
        "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows."} => fn [] ->
         Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end)
@@ -1983,13 +2008,21 @@ defmodule Compos.Core.SchemeAPI do
        "(window-tree) — return the frame's window layout as an opaque value for window-tree-set!."} =>
         fn [] ->
           v = Editor.desktop_view()
-          %{tree: tree_spec(v.tree), active: v.active_buffer}
+
+          %{
+            tree: tree_spec(v.tree),
+            active: v.active_buffer,
+            hidden: Enum.map(Map.get(v, :hidden, []), &tree_spec/1)
+          }
         end,
       {"window-tree-set!",
        "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree."} =>
-        fn [%{tree: tree, active: active}]
+        fn [%{tree: tree, active: active} = layout]
            when elem(tree, 0) in [:leaf, :split] ->
           Editor.restore_tree(tree, active)
+          # the layout's hidden windows replace the frame's; a layout saved
+          # before hidden windows existed has none
+          Editor.set_hidden_windows(Map.get(layout, :hidden, []))
           :void
         end,
       # the same look, one level up from window-preview-buffer!: a whole
@@ -2007,6 +2040,11 @@ defmodule Compos.Core.SchemeAPI do
       {"window-tree-buffers",
        "(window-tree-buffers LAYOUT) — return the buffer names a layout from window-tree holds."} =>
         fn [%{tree: tree}] -> tree_buffers(tree) end,
+      {"window-tree-hidden-buffers",
+       "(window-tree-hidden-buffers LAYOUT) — return the buffer names of the hidden windows a layout from window-tree holds."} =>
+        fn [layout] when is_map(layout) ->
+          Enum.flat_map(Map.get(layout, :hidden, []), &tree_buffers/1)
+        end,
       # A rename must reach a stored layout too, not only the live frame.
       # The swap is tree mechanics; which stores hold a layout is policy,
       # so Scheme owns the sweep and this returns one renamed copy.
@@ -2018,6 +2056,7 @@ defmodule Compos.Core.SchemeAPI do
             | tree: tree_rename(tree, old, new),
               active: if(active == old, do: new, else: active)
           }
+          |> Map.update(:hidden, [], fn hidden -> Enum.map(hidden, &tree_rename(&1, old, new)) end)
         end,
       # Emacs quit-restore as leaf data: what quit-window undoes in a window
       {"window-restore",
