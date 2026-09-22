@@ -28,6 +28,16 @@ defmodule Compos.Core.Telemetry do
     [:compos, :scheme, :task],
     [:compos, :scheme, :gc],
     [:compos, :ui, :refresh],
+    [:compos, :chat, :stage],
+    # the HTTP stack under every model call: pool wait, TLS connect, and
+    # the time to put the request on the wire. A 1.6 MB conversation is a
+    # 1.6 MB upload, and only these rows say how long that took.
+    [:finch, :queue, :stop],
+    [:finch, :connect, :stop],
+    [:finch, :send, :stop],
+    # no measurements: its presence is the signal that a round did not pay
+    # for a new connection
+    [:finch, :reused_connection],
     [:phoenix, :live_view, :handle_event, :start],
     [:phoenix, :live_view, :handle_event, :stop],
     [:phoenix, :live_view, :render, :stop]
@@ -264,6 +274,45 @@ defmodule Compos.Core.Telemetry do
     })
   end
 
+  defp normalize([:compos, :chat, :stage], measurements, metadata, time) do
+    row(%{
+      kind: "chat",
+      layer: "chat",
+      time_ms: time,
+      duration_ms: measurements.duration,
+      queue_ms: Map.get(measurements, :queue, 0),
+      owner: Map.get(metadata, :slug, ""),
+      label: Map.get(metadata, :stage, ""),
+      detail: Map.get(metadata, :detail, "")
+    })
+  end
+
+  defp normalize([:finch, :reused_connection], _measurements, metadata, time) do
+    row(%{
+      kind: "http",
+      layer: "http",
+      time_ms: time,
+      duration_ms: 0,
+      queue_ms: 0,
+      owner: finch_host(metadata),
+      label: "http reused",
+      detail: "connection reused"
+    })
+  end
+
+  defp normalize([:finch, step, :stop], measurements, metadata, time) do
+    row(%{
+      kind: "http",
+      layer: "http",
+      time_ms: time,
+      duration_ms: native_ms(measurements[:duration] || 0),
+      queue_ms: 0,
+      owner: finch_host(metadata),
+      label: "http #{step}",
+      detail: finch_detail(step, measurements)
+    })
+  end
+
   defp normalize([:compos, :scheme, :task], measurements, metadata, time) do
     row(%{
       kind: "task",
@@ -379,6 +428,15 @@ defmodule Compos.Core.Telemetry do
 
   defp socket_frame(%{assigns: %{frame: frame}}), do: frame
   defp socket_frame(_), do: nil
+
+  defp finch_host(%{request: %{host: host}}) when is_binary(host), do: host
+  defp finch_host(%{host: host}) when is_binary(host), do: host
+  defp finch_host(_), do: "http"
+
+  # the request body is the interesting number on a send: it is the
+  # conversation going up the wire, once per round
+  defp finch_detail(:send, %{idle_time: idle}) when is_integer(idle), do: ""
+  defp finch_detail(_step, _measurements), do: ""
 
   defp frame_owner(frame) when is_binary(frame), do: "frame #{frame}"
   defp frame_owner(_), do: "frame"

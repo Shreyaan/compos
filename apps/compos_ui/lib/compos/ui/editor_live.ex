@@ -62,6 +62,7 @@ defmodule Compos.Ui.EditorLive do
           wk_timer: nil,
           wk_shown: false,
           wk_pending: [],
+          wk_token: 0,
           boot_id: :persistent_term.get(:compos_boot_id, "dev"),
           instance_name: identity.name,
           instance_accent: identity.accent
@@ -502,8 +503,25 @@ defmodule Compos.Ui.EditorLive do
   @impl true
   def handle_info({:frame_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
 
-  def handle_info(:which_key_show, socket) do
-    {:noreply, socket |> assign(wk_timer: nil, wk_shown: true) |> refresh()}
+  # A token travels with the timer message, because the message carries no
+  # other identity: a chord that finished and a new one that started
+  # between arming the timer and it firing both look like "some refresh
+  # happened" to this process. A stale timer -- one `arm_which_key` already
+  # tried to cancel, but the message had already queued -- sets wk_shown for
+  # whatever chord is pending NOW, not the one the delay was timed for, and
+  # wk_shown then never comes back down: every later prefix key skips the
+  # debounce and shows the panel at once.
+  #
+  # The token is not the pending keys. The keys repeat: C-x, a command, then
+  # C-x again is the most common chord pair there is, and the stale timer of
+  # the first C-x carries the same keys as the second one. Every arm takes a
+  # number of its own, so no message can ever answer for a later timer.
+  def handle_info({:which_key_show, token}, socket) do
+    if token == socket.assigns[:wk_token] do
+      {:noreply, socket |> assign(wk_timer: nil, wk_shown: true) |> refresh()}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:editor_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
@@ -589,13 +607,27 @@ defmodule Compos.Ui.EditorLive do
 
   defp arm_which_key(state, socket, pending) do
     if t = socket.assigns[:wk_timer], do: Process.cancel_timer(t)
-    timer = Process.send_after(self(), :which_key_show, which_key_delay_ms(state))
-    assign(socket, wk_timer: timer, wk_shown: false, wk_pending: pending)
+    token = socket.assigns[:wk_token] + 1
+    timer = Process.send_after(self(), {:which_key_show, token}, which_key_delay_ms(state))
+    assign(socket, wk_timer: timer, wk_shown: false, wk_pending: pending, wk_token: token)
   end
 
+  # The token moves here too: a chord that ends retires its timer, so the
+  # message that timer already queued answers for nothing.
   defp cancel_which_key(socket) do
-    if t = socket.assigns[:wk_timer], do: Process.cancel_timer(t)
-    assign(socket, wk_timer: nil, wk_shown: false, wk_pending: [])
+    token = socket.assigns[:wk_token]
+
+    token =
+      case socket.assigns[:wk_timer] do
+        nil ->
+          token
+
+        t ->
+          Process.cancel_timer(t)
+          token + 1
+      end
+
+    assign(socket, wk_timer: nil, wk_shown: false, wk_pending: [], wk_token: token)
   end
 
   @which_key_default_ms 500
@@ -1037,7 +1069,9 @@ defmodule Compos.Ui.EditorLive do
       <c-windows class="windows" role="main">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </c-windows>
-      <c-which-key :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key mb-geom-panel">
+      <c-which-key :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil}
+        id="which-key" phx-hook="WhichKey" data-pending={Enum.join(@state.pending, " ")}
+        class="which-key mb-geom-panel">
         <c-group class="wk-title">
           <c-text>
             {Enum.join(@state.pending, " ")} —

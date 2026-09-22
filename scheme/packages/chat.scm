@@ -662,6 +662,13 @@
 ;; itself. 0 turns the recovery off.
 (defvar 'chat-steer-settle-seconds 45)
 
+;; The other silence. A connector can take the prompt and say nothing at
+;; all: no text, no tool, no result, no end. Such a turn never closes on
+;; the wire and the chat waits at "waiting..." for good. The runtime waits
+;; this many seconds for the connector's FIRST event, then ends the turn
+;; and reconnects the session. 0 turns the recovery off.
+(defvar 'chat-silent-turn-seconds 180)
+
 (define (chat-thread-context slug display)
   (let* ((name (agent-buf slug))
          (buf (or (buffer-ref name) name))
@@ -675,7 +682,8 @@
           'tools (if tools? (chat-tools buf) '())
           'dispatcher (chat-tool-dispatch slug)
           'empty-reply-nudge chat-empty-reply-nudge
-          'steer-settle-seconds chat-steer-settle-seconds)))
+          'steer-settle-seconds chat-steer-settle-seconds
+          'silent-turn-seconds chat-silent-turn-seconds)))
 
 (domain! 'chat)
 (effects! '(read))
@@ -724,6 +732,7 @@
 ;;   (set! *llm-models* (list "openai:gpt-5.6-luna" "deepseek:deepseek-chat" ...))
 (define *llm-models*
   (list "openai:gpt-5.6-luna"
+        "openrouter:x-ai/grok-4.7"
         "openrouter:anthropic/claude-sonnet-5"
         "claude-sonnet-5"
         "claude-opus-5"

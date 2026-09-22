@@ -750,6 +750,63 @@
                     "a preset names the whole setup and stands alone")
       (buffer-kill! buf))))
 
+(deftest 'the-api-lane-adds-a-usage-fact-once-a-turn-has-billed
+  "tokens, cost and cache hit rate join the mode line, ranked to shed first"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-usage*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (check-false! (dash--usage buf) "nothing billed yet")
+      (chat-usage-note! buf '(input 100 output 20 cache-read 900 cache-write 50 cost 0.01))
+      (chat-usage-note! buf '(input 10 output 5 cache-read 1000 cache-write 0 cost 0.02))
+      (let* ((facts (dash--modeline-facts buf #f))
+             (usage (assoc "usage" facts)))
+        (check-equal! (map car facts) '("mode" "llm" "lane" "usage")
+                      "usage sheds before mode, llm and lane")
+        (check-equal! (list-ref usage 3) 3 "usage sheds first")
+        (check-equal! (cadr usage) "135 tok · $0.0300 · 94% hit"
+                      "tokens, cost and cache hit rate, in one value"))
+      (buffer-kill! buf))))
+
+(deftest 'the-acp-lane-reports-no-usage-fact
+  "an ACP connector counts tokens on a subscription and prices nothing here"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-usage-acp*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (buffer-set-local! buf 'agent-connector "claude-code")
+      (chat-usage-note! buf '(input 100 output 20 cache-read 900 cache-write 50))
+      (check-false! (dash--usage buf) "the acp lane shows no usage fact")
+      (check-equal! (map car (dash--modeline-facts buf #f)) '("mode" "llm" "lane")
+                    "the mode line stays the same three facts")
+      (buffer-kill! buf))))
+
+(deftest 'a-preset-still-carries-its-usage-fact
+  "a tool preset names the setup, and the usage fact joins it, not replaces it"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-usage-preset*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (chat-usage-note! buf '(input 100 output 20 cache-read 900 cache-write 50))
+      (check-equal! (map car (dash--modeline-facts buf (list "review")))
+                    '("mode" "preset" "usage")
+                    "the preset still stands alone; usage still ships")
+      (buffer-kill! buf))))
+
+(deftest 'usage-never-borrows-a-groups-other-buffers-spend
+  "unlike the cost card, the usage fact answers only for a chat buffer itself"
+  (lambda ()
+    (let ((chat "*chat:zz-modeline-usage-owner*")
+          (sibling "*zz-modeline-usage-sibling*"))
+      (test-buffer! chat "")
+      (buffer-set-local! chat 'mode-name "chat-mode")
+      (chat-usage-note! chat '(input 100 output 20 cache-read 900 cache-write 50))
+      (test-buffer! sibling "")
+      (check-false! (dash--usage sibling)
+                    "a non-chat buffer names no usage, even beside a spending chat")
+      (buffer-kill! chat)
+      (buffer-kill! sibling))))
+
 (deftest 'an-editing-buffer-wears-the-cua-tag
   "the design's word for a buffer that stays put"
   (lambda ()

@@ -27,20 +27,6 @@
 ;; must not lead the answer: seven graphql recipes led "string", because
 ;; every one of them writes (string->symbol ...). A hit that only the
 ;; expression made says so, and the ranking puts it back with the rest.
-(define (recipe-search query)
-  (let ((words (apropos--words query)))
-    (apropos--compact
-      (map (lambda (r)
-             (let ((task-hit? (apropos--hit? (car r) words))
-                   (any-hit? (apropos--hit? (string-append (car r) " " (cadr r)) words)))
-               (and any-hit?
-                    (apropos--enrich
-                      (append
-                        (list 'kind "recipe" 'task (car r) 'name (car r)
-                              'run (cadr r) 'inputs (caddr r))
-                        (if task-hit? '() (list 'match "expression")))
-                      "recipe"))))
-           *recipes*))))
 
 ;; the primer's tail: enough recipes to work from, not the whole book
 (define (recipes-text)
@@ -110,6 +96,11 @@
         (list 'new "With: ")))
 (defrecipe! "make a scratch buffer and show it"
   "(begin (buffer-create \"*notes*\") (switch-to-buffer! \"*notes*\"))")
+
+(defrecipe! "kill a buffer"
+  "(buffer-kill! {{buffer}})"
+  '((buffer "Buffer: ")))
+(catalog-meta! 'recipe "kill a buffer" 'domain 'buffers 'effects '(destroy))
 (catalog-meta! 'recipe "make a scratch buffer and show it"
   'domain 'buffers 'effects '(write display))
 (defrecipe! "save the current buffer"
@@ -188,7 +179,51 @@
   "(run-command {{command}})"
   (list (list 'command "M-x command: ")))
 
+;;; --- the words people use -----------------------------------------------------
+;;
+;; A title is one phrasing of a task; a directive arrives in another. Search
+;; wants every word of the query to appear somewhere in the entry, so "show
+;; it beside this" only reaches the other-window recipe if "beside" is
+;; written down. Synonyms live here rather than bloating the titles.
+
+(define (recipe-aliases! title words)
+  (catalog-meta! 'recipe title 'aliases words))
+
+(recipe-aliases! "show a buffer in the other window"
+  "beside side by side next pane other pane second window adjacent over there elsewhere alongside right left split view without switching keep focus display show put open peek")
+(recipe-aliases! "other buffer"
+  "beside next pane over there elsewhere other window second window show display open")
+(recipe-aliases! "open a file"
+  "visit load find edit open file path here same window")
+(recipe-aliases! "open a file in a split"
+  "split open show file beside new pane side by side two windows")
+(recipe-aliases! "split the window side by side"
+  "vertical split two panes horizontally beside side by side divide")
+(recipe-aliases! "split the window above and below"
+  "horizontal split stacked top bottom above below divide")
+(recipe-aliases! "one window again"
+  "unsplit single only window full screen maximize maximise maximize buffer maximize this buffer close other windows delete others")
+(recipe-aliases! "switch to the previous buffer"
+  "back last previous buffer toggle switch return")
+(recipe-aliases! "what windows are open"
+  "windows panes layout frame list open")
+(recipe-aliases! "list the open buffers"
+  "buffers list open what files")
+(recipe-aliases! "read a buffer"
+  "read contents text show content whole file")
+(recipe-aliases! "save the current buffer"
+  "save write file to disk")
+(recipe-aliases! "make a scratch buffer and show it"
+  "new empty buffer notes create")
+(recipe-aliases! "open a directory"
+  "directory folder dired browse files listing")
+
 (category! 'discovery)
 (public! 'recipes "(recipes) — every task -> expression recipe")
+(public! 'recipe-aliases!
+  "(recipe-aliases! \"task\" \"words people use\") — extra search vocabulary for a recipe")
 (public! 'defrecipe!
   "(defrecipe! \"task\" \"expression\" [INPUTS]) — add a recipe; INPUTS are (name prompt) rows substituted into {{name}} safely")
+
+(recipe-aliases! "kill a buffer"
+  "kill close delete remove discard buffer")

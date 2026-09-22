@@ -23,7 +23,7 @@
         (writing--layout-apply! buf)))
     (buffer-list)))
 
-(defcustom 'writing-measure "62ch"
+(defcustom 'writing-measure "120ch"
   "Column width of the centered text measure (any CSS length)."
   'group 'writing 'type 'string 'set writing--refresh!)
 

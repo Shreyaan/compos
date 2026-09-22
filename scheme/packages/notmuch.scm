@@ -73,9 +73,6 @@ when a message has no text/plain part." 'group 'notmuch)
   "How long the highlight rests on a row before the mail pane fetches it, in milliseconds. A fetch is a round trip to the mail host, so a held n reaches the row you want before one call goes out. 0 fetches on every move."
   'group 'notmuch 'type 'number)
 
-(defcustom 'notmuch-group-name "*notmuch*"
-  "The group the mail app lives in. The mailboxes, the index and the thread view are one app, so they always open in this group and a layout holding them is saved and restored with it."
-  'group 'notmuch)
 
 ;; (substring-of-From-or-filename  send-command) — first match wins,
 ;; "" is the fallback route. set! your accounts' routes in init.scm.
@@ -85,35 +82,23 @@ when a message has no text/plain part." 'group 'notmuch)
 (define *notmuch-search-buffer* "*notmuch*")
 
 ;; The mail views are singletons: one *mailboxes*, one *notmuch*, one
-;; *mail* for the whole editor, and a buffer lives in ONE group. The three
-;; are one app, so they have one home group and never move house. They used
-;; to join whatever group the frame was in, which made the thread view
-;; ungrouped whenever the preview timer opened it with no frame group: an
-;; ungrouped pane reads as a cover, the group then refuses to save its
-;; layout on the way out, and coming back restores a tree from before mail
-;; was ever on screen.
-(define (nm-home-group!)
-  ;; The mail app has one home, not whichever group happened to be current
-  ;; when a key was pressed. Ensure the record so the first open founds it.
-  (and (string? notmuch-group-name) (not (equal? notmuch-group-name "")) (group-ensure-record! notmuch-group-name)))
+;; *mail* for the whole editor, and a buffer lives in ONE group. What ties
+;; the three together is this app id, not a group of their own: an app that
+;; owned a named group pulled the frame into that group's saved layout the
+;; moment any of its panes was shown, which changed the arrangement under
+;; the reader. The id says "these three are one app" wherever they are.
+(define *nm-app-id* "mail")
 
-(define (nm--enter-group!)
-  ;; Opening mail enters the mail group, the way opening a project enters
-  ;; its own: the panes the app builds next are that group's layout, and
-  ;; the group you came from is checkpointed on the way out.
-  (let ((id (nm-home-group!)))
-    (when (and id (boundp 'switch-to-group!) (not (equal? (frame-group) id)))
-      (switch-to-group! id))
-    id))
 
-(define (nm--join-group! buf)
-  ;; The three views are one app, not three visitors: they join the mail
-  ;; group whatever frame opened them. A pane holding a member is a place,
-  ;; so the group saves the mail layout and restores it whole.
-  (when (and (buffer-exists? buf) (boundp 'frame-group))
-    (let ((id (or (nm-home-group!) (frame-group))))
-      (when (and id (not (buffer-in-group? buf id)))
-        (buffer-add-group! buf id)))))
+(define (nm--join-group! buf &optional role)
+  ;; The three views are one app, not three visitors. What makes them one is
+  ;; the app id they carry, not a group of their own: they open in the group
+  ;; the frame stands in, like every other buffer, and app-buffers finds them
+  ;; there whatever that group is.
+  (when (buffer-exists? buf)
+    (when (boundp 'app-claim!) (app-claim! buf *nm-app-id* (or role 'aux)))
+    (when (boundp 'buffer-join-here!) (buffer-join-here! buf)))
+  buf)
 
 ;; A search has one base and a stack of added terms. Commands change only
 ;; these two locals. The effective query is derived, so no command can leave
@@ -568,7 +553,7 @@ when a message has no text/plain part." 'group 'notmuch)
          (cached? (and (buffer-exists? buf)
                        (pair? (buffer-local buf 'list-entries)))))
     (unless (buffer-exists? buf) (buffer-create buf))
-    (nm--join-group! buf)
+    (nm--join-group! buf 'list)
     (nm--query-reset! buf query)
     (switch-to-buffer! buf)
     (set-mode! "notmuch-mode")
@@ -771,8 +756,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let ((buf *notmuch-hello-buffer*))
       (unless (buffer-exists? buf) (buffer-create buf))
-      (nm--enter-group!)
-      (nm--join-group! buf)
+      (nm--join-group! buf 'home)
       (switch-to-buffer! buf)
       (set-mode! "notmuch-hello-mode")
       (list-goto-first-entry buf))))
@@ -830,19 +814,13 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define-command "notmuch-quit" "Close mail: kill the view buffers, back to work"
   (lambda ()
-    ;; land on real work: not a mail view, and not a member of whatever
-    ;; group the mail scene lives in. That group is the index's own — the
-    ;; name is the user's to choose, and buffer-group answers with an id,
-    ;; so neither one can be compared against a literal here.
-    (let* ((mail-ids (if (buffer-exists? *notmuch-search-buffer*)
-                         (buffer-group-ids *notmuch-search-buffer*)
-                         '()))
-           (others (filter (lambda (b)
-                             (and (not (member b (nm--view-buffers)))
-                                  (not (fold (lambda (hit id)
-                                               (or hit (buffer-in-group? b id)))
-                                             #f mail-ids))))
-                           (buffer-list-mru))))
+    ;; land on real work: any buffer that is not one of the mail app's own.
+    ;; The app id names them wherever they are, so no group has to, and mail
+    ;; now shares the group of whatever you were doing when you opened it.
+    (let ((others (filter (lambda (b)
+                            (and (not (member b (nm--view-buffers)))
+                                 (not (equal? (app-id b) *nm-app-id*))))
+                          (buffer-list-mru))))
       (delete-other-windows!)
       (switch-to-buffer! (if (null? others) "*scratch*" (car others)))
       (for-each buffer-kill! (nm--view-buffers))
@@ -2396,11 +2374,12 @@ them the address is live, so a purge never follows one."
     (unless (buffer-exists? buf) (buffer-create buf))
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
-    ;; the thread view is the same app as the index, so it joins the same
-    ;; home group. Membership is 'group-ids and joining is buffer-add-group!:
-    ;; writing the legacy 'group local here left the view ungrouped, because
-    ;; the reader clears that local the moment a buffer has real memberships.
-    (nm--join-group! buf)
+    ;; the thread view is the same app as the index, so it carries the same
+    ;; app id and joins the group the index is in. Membership is 'group-ids
+    ;; and joining is buffer-add-group!: writing the legacy 'group local here
+    ;; left the view ungrouped, because the reader clears that local the
+    ;; moment a buffer has real memberships.
+    (nm--join-group! buf 'detail)
     ;; render into the buffer and into no window at all. Placement belongs
     ;; to the caller (nm--show-pane!): a switch here takes whichever window
     ;; happens to be current, which is the index's own window.

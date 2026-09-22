@@ -45,8 +45,8 @@
                 (buffer-kill! b)))
             (buffer-list)))
 
-;; A fresh tab's group is decided when it opens: the group of the buffer
-;; that opens it, and the frame's group only when that buffer has none.
+;; A fresh tab's group is decided when it opens: the group the frame
+;; stands in, and the opening buffer's group only when the frame has none.
 ;; Stand the frame in GROUP for the thunk and give the frame its
 ;; own group back after; a throwaway group created here is removed when
 ;; the test ends. The frame is PINNED to GROUP too: a window change
@@ -708,6 +708,44 @@
     (check-contains! ((web--mime-reader "text/plain") "/tmp/zz.txt" "https://h.test/a.txt")
                      "cat" "plain text reads as it is")
     (check-false! (web--mime-reader "application/zip") "and nothing reads an archive")))
+
+(deftest 'a-bot-wall-is-not-a-page
+  "DuckDuckGo's challenge reads as nothing, so the reader retries instead of showing it"
+  (lambda ()
+    (check-true! (web--blocked? "Unfortunately, bots use DuckDuckGo too.")
+                 "the challenge is a wall")
+    (check-false! (web--blocked? "# opencode\n\n## [OpenCode](https://opencode.ai)")
+                  "a results page is not")
+    (check-false! (web--blocked? #f) "and neither is a failed read")))
+
+;; A page x.com answers a bare fetch with is 300kb of "Something went
+;; wrong" — too big for the thin test to catch, so the reader used to
+;; show the error page AS the page. The tab goes first now, and the
+;; fetch is the fallback that can still answer bytes.
+(deftest 'the-reader-tries-the-tab-and-the-fetch-once-each
+  "whichever way it starts, the other way gets one try and the flag ends it"
+  (lambda ()
+    (let ((saved *web-fetch-html*))
+      (define (ways-tried from)
+        (let ((seen '()) (answer 'none))
+          (set! *web-fetch-html*
+                (lambda (url k &optional revalidate? render?)
+                  (set! seen (append seen (list (and render? #t))))
+                  (k #f)))
+          (web--attempt "https://site.test/" "calm" from
+                        (lambda (found) (set! answer found)))
+          (list seen answer)))
+      (let ((tab-first (ways-tried #t))
+            (fetch-first (ways-tried #f)))
+        (set! *web-fetch-html* saved)
+        (check-equal! (nth 0 tab-first) (list #t #f)
+                      "from the tab: the tab, then the fetch")
+        (check-equal! (nth 0 fetch-first) (list #f #t)
+                      "from the fetch: the fetch, then the tab")
+        (check-equal! (nth 1 tab-first) (list #f #f #f)
+                      "two ways tried is the end of it")
+        (check-equal! (nth 1 fetch-first) (list #f #f #f)
+                      "and the same from the other side")))))
 
 (deftest 'text-that-lost-its-bytes-is-not-a-document
   "a PDF decoded as text is not markup, whatever the browser called it"

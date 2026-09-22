@@ -199,7 +199,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
     parts =
       for %{mime: mime, path: path} <- images,
           {:ok, bytes} <- [File.read(path)],
-          do: %{type: "image", data: Base.encode64(bytes), mime: mime}
+          do: %{type: "image", data: bytes, mime: mime}
 
     case parts do
       [] -> %{role: "user", content: text}
@@ -207,16 +207,34 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
     end
   end
 
+  defp stage(slug, stage, ms, detail \\ "") do
+    :telemetry.execute(
+      [:compos, :chat, :stage],
+      %{duration: ms, queue: 0},
+      %{slug: slug, stage: stage, detail: detail}
+    )
+  end
+
   defp run_turn(backend, slug, model, effort, text, ctx) do
     ev = fn kvs -> GenServer.cast(backend, {:turn_event, kvs}) end
     display = Map.get(ctx, :display, text)
     messages = Enum.map(ctx.turns, &turn_to_message/1)
+    sent_at = Map.get(ctx, :sent_at)
+    first = :atomics.new(1, [])
+
+    note_first = fn name ->
+      if :atomics.compare_exchange(first, 1, 0, 1) == :ok and is_integer(sent_at) do
+        stage(slug, name, System.monotonic_time(:millisecond) - sent_at, model || "")
+      end
+    end
 
     # the user turn joins the record before the wire carries it. The
     # blocks hold what the transcript shows; `wire` holds what was
     # actually sent, which carries the editor context preamble the
     # user never typed.
+    t0 = System.monotonic_time(:millisecond)
     record(slug, "user", [["text", display]], if(text == display, do: false, else: text))
+    stage(slug, "record", System.monotonic_time(:millisecond) - t0)
 
     LLM.run_tool_loop(
       messages ++ [prompt_message(text, Map.get(ctx, :images) || [])],
@@ -224,6 +242,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
       ctx.tools,
       ctx.dispatcher,
       model: model,
+      slug: slug,
       reasoning_effort: effort,
       on_record: fn role, blocks -> record(slug, role, blocks_to_record(blocks), false) end,
       on_round_usage: fn usage -> GenServer.cast(backend, {:turn_usage, usage}) end,
@@ -237,8 +256,14 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
           _ -> []
         end
       end,
-      on_chunk: fn t -> ev.(type: :chunk, text: t) end,
-      on_thinking: fn t -> ev.(type: :thought, text: t) end,
+      on_chunk: fn t ->
+        note_first.("first token")
+        ev.(type: :chunk, text: t)
+      end,
+      on_thinking: fn t ->
+        note_first.("first thought")
+        ev.(type: :thought, text: t)
+      end,
       tool_handler: fn name, input -> intrinsic_tool(slug, name, input) end,
       # compos owns permissions on BOTH lanes: the same Scheme policy
       # that answers ACP's requests gates every direct-lane tool call

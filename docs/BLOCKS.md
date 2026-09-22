@@ -91,6 +91,8 @@ Rules:
 - `editor/blocks/csv-block.scm` gives `csv` and `result-csv` their page
   rows: a comma outside quotes is a column bar, the first row is the
   head, and a wide row scrolls right.
+- `editor/blocks/table-block.scm` registers `table`: a table whose cells
+  take font colors from rules on the fence. See docs/MARKDOWN.md, Tables.
 - `editor/blocks/run-block.scm` registers the runners: the shell rows of
   `*morg-babel-runners*`, `scheme`, `llm`/`ask`/`chat`, and `csv`. Its
   result lands through `editor/blocks/result-block.scm`, and a running

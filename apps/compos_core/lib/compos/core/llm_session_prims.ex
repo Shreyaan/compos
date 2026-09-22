@@ -68,6 +68,14 @@ defmodule Compos.Core.LLMSession.Prims do
           Compos.Core.LLMSession.cancel(s(id))
           :void
         end,
+      {"llm-session-dequeue!",
+       "(llm-session-dequeue! ID TEXT) — remove one queued prompt without running it; #f when it already left the queue."} =>
+        fn [id, text] ->
+          case Compos.Core.LLMSession.dequeue(s(id), s(text)) do
+            :ok -> true
+            {:error, _} -> false
+          end
+        end,
       {"llm-session-close!", "(llm-session-close! ID) — close an LLM session."} => fn [id] ->
         Compos.Core.LLMSession.close(s(id))
         :void

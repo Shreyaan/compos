@@ -27,4 +27,27 @@ Markdown has no caption syntax of its own. The page uses the shape most renderer
 4. A picture alone stays a paragraph with an image.
 5. The rows renderer (writing-mode, `markdown-paint`) paints the same shape: the stars step back, the words wear `md-caption`, and the row wears `row-caption`, which the page centres and shrinks under the picture. Away from a picture, `*text*` is emphasis (italic), as `_text_` is. The rows are lenient about a space before the closing star; the page's parser (CommonMark) is not, so write `*The caption.*` with no space inside the stars.
 
+## Tables
+
+The page draws three kinds of table.
+
+1. A pipe table: a head row, a rule row of dashes, and body rows. Each row is a table row, and the columns divide the width evenly.
+2. An aligned table: an indented code block whose words stand in shared columns. The grammar finds the block. The rows stay monospace and do not wrap, so the spaces keep the columns. A first row with no digits draws bold, with a line under it.
+3. A `table` fence: a pipe table or an aligned table whose cells take font colors.
+
+```table green=strong yellow=potential red=unfit green>=.7 yellow>=.4 red<.4
+| candidate | sonnet | jev | spec |
+|---|---|---|---|
+| Abhiram R | potential | unfit | .64 |
+```
+
+The fence arguments are color rules. The editor tries them in order, and the first rule that matches a cell colors it.
+
+- `COLOR=A,B` matches a cell whose text is `A` or `B`.
+- `COLOR<N`, `COLOR<=N`, `COLOR>N`, and `COLOR>=N` match a cell that holds a number. `.6` is a number.
+- A cell that no rule matches tries each of its words.
+- The colors are red, green, yellow, blue, purple, cyan, and gray. Each is a theme face (`table-red` and the others), so it follows the theme.
+
+The source view and the page both draw the colors. Another Markdown renderer shows a `table` fence as a code block.
+
 Tests: `apps/compos_core/test/compos/markdown_html_test.exs`.

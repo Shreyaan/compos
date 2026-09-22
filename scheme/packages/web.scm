@@ -196,6 +196,14 @@
 ;; under this many bytes a reading found nothing worth showing
 (define *web--thin-bytes* 200)
 
+;; A bot wall is not a page. DuckDuckGo answers a client it does not
+;; trust with "bots use DuckDuckGo too" and a picture challenge; showing
+;; that is worse than showing nothing, because nothing retries through a
+;; real browser tab and the wall does not.
+(define (web--blocked? md)
+  (and (string? md)
+       (string-contains? md "bots use DuckDuckGo too")))
+
 (define (web--thin? md)
   (or (not (string? md))
       (< (string-byte-length (string-trim md)) *web--thin-bytes*)))
@@ -252,8 +260,8 @@
               (string? md)
               (string-contains? md "[TABLE]"))
          (shell-command->string (web--flatten-command file)
-           (lambda (flat) (k (if (web--thin? flat) #f flat)))))
-        ((web--thin? md) (k #f))
+           (lambda (flat) (k (if (or (web--thin? flat) (web--blocked? flat)) #f flat)))))
+        ((or (web--thin? md) (web--blocked? md)) (k #f))
         (else (k md))))))
 
 ;;; --- content types --------------------------------------------------------------
@@ -426,12 +434,14 @@
   (let* ((file (web--body-file! "body"))
          (u (sh-quote url))
          (f (sh-quote file))
-         (dir (sh-quote (string-append (compos-home) "/web-etags"))))
+         (dir (sh-quote (string-append (compos-home) "/web-etags")))
+         (ua (sh-quote
+               "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")))
     (shell-command->string
       (string-append
         "mkdir -p " dir "; "
         "e=" dir "/$(printf %s " u " | cksum | cut -d' ' -f1); "
-        "curl -sL --max-time 20 --etag-save \"$e.new\" "
+        "curl -sL --max-time 20 -A " ua " --etag-save \"$e.new\" "
         (if revalidate? "--etag-compare \"$e\" " "")
         "-w '%{content_type}\\n' " u " -o " f "; "
         "if [ -s " f " ]; then mv -f \"$e.new\" \"$e\"; fi; "
@@ -500,10 +510,19 @@
 ;; browser at all, curl answers either way, and so does a browser that
 ;; could not hand the body back as a document.
 (define (web--html-pipeline url k &optional revalidate? render?)
-  ((if render? browser-snapshot browser-fetch) url
-    (lambda (reply)
-      (let ((doc (web--browser-document reply)))
-        (if doc (k doc) (web--curl-fetch url k revalidate?))))))
+  ;; The browser is the reader. Its fetch carries the user's cookies and
+  ;; Chrome's own client, which is the only client a search engine will
+  ;; answer. curl is the fallback for a machine with no extension
+  ;; attached, and it names itself as a browser: a bare "compos" agent
+  ;; is what DuckDuckGo answers with a challenge instead of results.
+  (let ((finish (lambda (reply)
+                  (let ((doc (web--browser-document reply)))
+                    (if doc
+                        (k doc)
+                        (web--curl-fetch url k revalidate?))))))
+    (cond (render? (browser-snapshot url finish))
+          ((browser-connected?) (browser-fetch url finish))
+          (else (finish #f)))))
 
 (define *web-fetch-html* web--html-pipeline)
 
@@ -512,7 +531,19 @@
 ;; URL and the WANTed reading -> the reading that was found, its
 ;; markdown, and the html it came from. K gets that list, or (#f #f #f).
 (define (web--pipeline url want k)
-  (web--attempt url (web--reading want) (web--site-render? url) k))
+  ;; A REAL TAB is the browser. The extension's plain fetch carries the
+  ;; user's cookies, but it is still a bare HTTP client, and the sites
+  ;; that matter answer a bare client with something other than their
+  ;; page: DuckDuckGo sends a bot wall, and x.com sends 300kb of
+  ;; "Something went wrong" — big enough to pass the thin test, so the
+  ;; reader accepted the error page AS the page and never retried.
+  ;; So the tab goes first whenever a browser is attached. A body html
+  ;; cannot read is what the fetch is still for: a snapshot of a PDF is
+  ;; Chrome's viewer shell, which reads thin, and web--retry falls back
+  ;; to the fetch that answers bytes.
+  (web--attempt url (web--reading want)
+                (or (web--site-render? url) (browser-connected?))
+                k))
 
 ;; the browse tab reading URL, if one still is. A learn that lands after
 ;; the reader moved on must not pull the page back.
@@ -540,12 +571,12 @@
 
 ;; Fetch, then read. RENDERED? says this document came from a real tab,
 ;; so an empty answer stops instead of asking for a tab again.
-(define (web--attempt url want rendered? k)
+(define (web--attempt url want rendered? k &optional retried?)
   (*web-fetch-html* url
     (lambda (fetched)
       (let ((doc (web--as-document fetched)))
         (cond
-          ((not doc) (k (list #f #f #f)))
+          ((not doc) (web--retry url want #f rendered? k retried?))
           ;; a body html cannot read has a reader of its own
           ((not (web--markup-type? (web--doc-type doc)))
            (web--read-mime url want doc k))
@@ -566,8 +597,8 @@
                        (lambda (full)
                          (if full
                              (web--answer file (list "full" full html) k)
-                             (web--retry url want file rendered? k)))))
-                    (else (web--retry url want file rendered? k))))))))))
+                             (web--retry url want file rendered? k retried?)))))
+                    (else (web--retry url want file rendered? k retried?))))))))))
     *web--revalidate*
     rendered?))
 
@@ -605,11 +636,15 @@
 
 ;; No document at all: the server sent a script shell, and only a real
 ;; tab renders one.
-(define (web--retry url want file rendered? k)
-  (delete-file! file)
-  (if rendered?
+(define (web--retry url want file rendered? k &optional retried?)
+  ;; One read each way, then stop. A tab that answered a shell tries the
+  ;; fetch, which can answer bytes; a fetch that answered a bot wall or
+  ;; an error page tries the tab. RETRIED? is what makes it once: the
+  ;; flag, not the direction, is the terminator.
+  (if file (delete-file! file))
+  (if retried?
       (k (list #f #f #f))
-      (web--attempt url want #t k)))
+      (web--attempt url want (not rendered?) k #t)))
 
 (define *web-fetch* web--pipeline)
 
@@ -1509,10 +1544,13 @@
 ;; group anywhere — a bare scratch frame — the dedicated browse group
 ;; still gathers the tabs.
 (define (web--tab-group!)
-  (if (boundp 'group-spawn-target)
-      (or (group-spawn-target) (web--browse-group!))
-      (or (frame-group)
-          (web--browse-group!))))
+  ;; A browse tab opens in the group it was launched from: the group of the
+  ;; window that opened it, else the group the frame stands in. Nothing here
+  ;; carries the frame off to another group's saved layout, because the tab
+  ;; comes to you. Only a frame in no group at all falls back to browse's own.
+  (or (and (boundp 'group-spawn-target) (group-spawn-target))
+      (frame-group)
+      (web--browse-group!)))
 
 (define (web--view-label view)
   (cond ((equal? view "mono") "rendered monospace")
@@ -1690,17 +1728,25 @@ the tabs. C-s searches to any link.")
 ;; opened it. The tab is made and its fetch starts without a window
 ;; move, so the caller decides where it shows.
 (define (web--tab-for! url)
-  (or (web--buffer-for url)
-      (let ((name (string-append "*browse:" (web--slug url) "*")))
-        (buffer-create name)
-        (buffer-add-group! name (web--tab-group!))
-        (with-current-buffer name (lambda () (set-mode! "browse-mode")))
-        (web--goto-url! name url #t)
-        name)))
+  (let ((group (web--tab-group!))
+        (existing (web--buffer-for url)))
+    (if existing
+        ;; a tab you open a second time joins the group you opened it
+        ;; from, so showing it never pulls the frame back to the group it
+        ;; was born in
+        (begin
+          (when group (buffer-add-group! existing group))
+          existing)
+        (let ((name (string-append "*browse:" (web--slug url) "*")))
+          (buffer-create name)
+          (when group (buffer-add-group! name group))
+          (with-current-buffer name (lambda () (set-mode! "browse-mode")))
+          (web--goto-url! name url #t)
+          name))))
 
 (define (web--open-tab! url)
-  ;; A fresh tab belongs to the window that opened it, so the frame
-  ;; never leaves for a dedicated browse group.
+  ;; A tab belongs to the group it was launched from, so showing it never
+  ;; takes the frame to another group's layout.
   (let ((tab (web--tab-for! url)))
     (switch-to-buffer! tab)
     tab))

@@ -417,14 +417,11 @@
                  "the split")
     (check-true! (member "visit" (t--ap-names (apropos "open a file")))
                  "the open")
-    ;; and the recipe says it in one line, which is cheaper still: the
-    ;; whole composition, not three names to assemble
-    (let ((recipes (filter (lambda (e) (equal? (plist-get e 'kind) "recipe"))
-                           (apropos "open a file in a split"))))
-      (check-true! (> (length recipes) 0) "a recipe answers")
-      (when (> (length recipes) 0)
-        (check-contains! (plist-get (car recipes) 'run) "split-window!" "the split")
-        (check-contains! (plist-get (car recipes) 'run) "visit" "the open")))))
+    ;; a recipe is a line to run, not a name to find. The primer carries
+    ;; them; apropos answers with the commands and the functions.
+    (check-false! (pair? (filter (lambda (e) (equal? (plist-get e 'kind) "recipe"))
+                                 (apropos "open a file in a split")))
+                  "no recipe rides the search")))
 
 (deftest 'the-primer-carries-recipes-so-a-cold-agent-has-working-lines
   "a name to assemble is not as good as a line to run"
@@ -584,23 +581,18 @@
     (check-equal! (apropos--flag '(kind "command" wait #f) 'wait #t) #f
                   "and it reads past the other filters")))
 
-;;; Seven graphql recipes led the answer for "string": every one of them
-;;; writes (string->symbol ...), and a recipe led the ranking whatever it
-;;; matched on.
+;;; Seven graphql recipes once led the answer for "string": every one of
+;;; them writes (string->symbol ...), and a recipe led the ranking whatever
+;;; it matched on. Recipes have left the search, so a name leads it now.
 
-(deftest 'a-recipe-leads-only-when-its-task-matched
-  "an expression-only recipe hit ranks with the rest, not ahead of the names"
+(deftest 'no-kind-buys-a-place-in-the-ranking
+  "a name leads on its own merit; being a recipe once bought the second row"
   (lambda ()
-    (let ((task-hit '(kind "recipe" task "fetch a URL" name "fetch a URL"))
-          (expression-hit '(kind "recipe" task "run a graphql query"
-                            name "run a graphql query" match "expression"))
+    (let ((recipe-hit '(kind "recipe" task "fetch a URL" name "fetch a URL"))
           (function-hit '(kind "function" name "string-index")))
-      (let ((ranked (apropos--rank-by-name
-                      (list expression-hit function-hit task-hit) "string")))
-        (check-equal! (plist-get (car ranked) 'task) "fetch a URL"
-                      "the task-level hit leads")
-        (check-equal! (plist-get (nth 1 ranked) 'name) "string-index"
-                      "the name beats the expression match")))))
+      (let ((ranked (apropos--rank-by-name (list recipe-hit function-hit) "string-index")))
+        (check-equal! (plist-get (car ranked) 'name) "string-index"
+                      "the exact name leads, and no recipe rides ahead of it")))))
 
 (deftest 'a-recipe-hit-does-not-say-how-it-matched
   "the match marker ranks the hit; it is not result data"
@@ -610,3 +602,25 @@
                                  match "expression"))
                              'match)
                   "the marker stays private")))
+
+(deftest 'apropos-answers-a-directive-with-a-recipe
+  "a recipe is a task phrased the way a person phrases it, and search skipped them"
+  (lambda ()
+    (let ((hits (apropos "show beside" 'kind "recipe" 'lexical #t)))
+      (check-true! (pair? hits) "a recipe answers the words a directive uses")
+      (check-equal! (plist-get (car hits) 'name)
+                    "show a buffer in the other window"
+                    "and the task it names leads the answer")
+      (check-contains! (plist-get (car hits) 'use)
+                       "display-buffer-other-window!"
+                       "a recipe carries the expression that performs it"))))
+
+(deftest 'apropos-searches-a-recipes-aliases
+  "the title is one phrasing; the words people actually use live in aliases"
+  (lambda ()
+    (check-true!
+      (pair? (apropos "next pane" 'kind "recipe" 'lexical #t))
+      "the alias words reach the recipe")
+    (check-true!
+      (pair? (apropos "unsplit" 'kind "recipe" 'lexical #t))
+      "and so does a word no title contains")))

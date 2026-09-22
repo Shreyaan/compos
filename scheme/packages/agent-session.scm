@@ -165,6 +165,12 @@
             raw images))
         (llm-session-send! slug msg raw images))))
 
+;; #f means TEXT already left the runtime's queue (it was promoted into
+;; the running turn as steering) between the row rendering and the key
+;; that asked to remove it.
+(define (agent-dequeue! slug text)
+  (llm-session-dequeue! slug text))
+
 (define (agent-continue! thread text)
   (let ((buf (if (buffer-exists? thread) thread (agent-buf thread))))
     (if (not (and buf (buffer-exists? buf)))
@@ -328,18 +334,29 @@
     (end-of-buffer!)
     (message (if ok "ok" (cadr result)))))
 
+;; An input that opens with ! is prose for fast-code: it resolves to Scheme
+;; before it runs, and then takes the same path a parenthesised input takes.
+;; Without fast-code loaded, ! is ordinary prose and goes to the agent.
+(define (chat-fast-input? text)
+  (and (boundp 'fast-chat-input?) (fast-chat-input? text)))
+
+(define (chat-fast-code text)
+  (fast-chat-code text))
+
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
     (let* ((buf (current-buffer))
            (chat? (equal? (buffer-local buf 'mode-name) "chat-mode"))
            (typed (string-trim (chat-input-text buf))))
-      (if (and chat? (chat-scheme-input? typed))
-          ;; the prompt is a REPL before it is a conversation. Malformed
-          ;; Scheme goes nowhere: not to the reader, not to the model.
-          (if (chat-scheme-well-formed? typed)
-              (chat-scheme-run! buf typed (and (current-prefix-arg) #t))
-              (begin (insert! "\n")
-                     (message "unbalanced expression — RET runs it once it closes")))
+      (if (and chat? (or (chat-scheme-input? typed) (chat-fast-input? typed)))
+          ;; the prompt is a REPL before it is a conversation, and an input
+          ;; that opens with ! is prose fast-code resolves to Scheme first.
+          ;; Malformed Scheme goes nowhere: not to the reader, not to the model.
+          (let ((src (if (chat-fast-input? typed) (chat-fast-code typed) typed)))
+            (if (chat-scheme-well-formed? src)
+                (chat-scheme-run! buf src (and (current-prefix-arg) #t))
+                (begin (insert! "\n")
+                       (message "unbalanced expression — RET runs it once it closes"))))
           (let* (;; say something the moment RET lands: the first send spawns a
                  ;; backend and mounts MCP servers, seconds with nothing moving
                  (feedback (when chat?
@@ -414,14 +431,23 @@
 ;; file. It answers only inside an expression. While you write prose it
 ;; answers with nothing and stops the collect there, because dabbrev
 ;; popping up mid-sentence is worse than no completion at all.
+;;; The chat input completes by its opening character. ( is the editor's
+;;; own vocabulary; ! is the same line over every recipe instead. Prose
+;;; still offers nothing, and does not fall through to dabbrev.
 (define (chat-scheme--capf)
-  (let ((buf (current-buffer)))
-    (if (and chat-scheme-input
-             (boundp 'scheme-ide--capf)
-             (>= (point) (chat-input-start buf))
-             (string-prefix? "(" (string-trim (chat-input-text buf))))
-        (scheme-ide--capf)
-        (list (point) (point) '()))))
+  (let* ((buf (current-buffer))
+         (nothing (list (point) (point) '()))
+         (input (string-trim (chat-input-text buf))))
+    (if (< (point) (chat-input-start buf))
+        nothing
+        (cond
+          ((and (string-prefix? "!" input) (boundp 'fast-chat-capf))
+           (or (fast-chat-capf) nothing))
+          ((and chat-scheme-input
+                (boundp 'scheme-ide--capf)
+                (string-prefix? "(" input))
+           (scheme-ide--capf))
+          (else nothing)))))
 
 (define (chat-scheme--mode-hook!)
   (let ((buf (current-buffer)))
@@ -536,19 +562,58 @@
                   (or (buffer-local buf 'chat-history-draft) "")
                   (nth next h)))))))
 
+;; the queued rows walk newest first, same direction as sent history, so
+;; index 0 is the message closest to the input -- the one chat-unqueue
+;; already treats as "the newest queued message"
+(define (chat-queued-for buf) (reverse (or (buffer-local buf 'chat-queued) '())))
+
+(define (chat-queued-recall! buf dir)
+  (let* ((q (chat-queued-for buf))
+         (pos (or (buffer-local buf 'chat-queued-pos) -1))
+         (next (if (< dir 0) (+ pos 1) (- pos 1))))
+    (cond ((>= next (length q))
+           ;; walked past the oldest queued row: restore the draft this walk
+           ;; started from, so the sent-history walk starts from it too,
+           ;; not from whatever queued text happens to be showing
+           (chat-replace-input! buf (or (buffer-local buf 'chat-queued-draft) ""))
+           (buffer-set-local! buf 'chat-queued-pos #f)
+           (chat-history-recall! buf dir))
+          ((< next -1) #f)
+          (else
+            (when (= pos -1)
+              (buffer-set-local! buf 'chat-queued-draft (chat-input-text buf)))
+            (buffer-set-local! buf 'chat-queued-pos (if (= next -1) #f next))
+            (chat-replace-input! buf
+              (if (= next -1)
+                  (or (buffer-local buf 'chat-queued-draft) "")
+                  (nth next q)))
+            (when (>= next 0)
+              (message (string-append "queued " (number->string (+ next 1)) "/"
+                                      (number->string (length q))
+                                      " -- C-c C-d removes it, RET re-sends it")))))))
+
 (define (chat-history-move! dir)
   (let* ((buf (current-buffer))
          (motion (if (< dir 0) "previous-line" "next-line")))
     (chat-history-seed! buf)
-    (if (or (not (buffer-local buf 'agent-saved-mark))
-            (not (chat-in-input? buf))
-            (null? (chat-history buf))
-            ;; inside a multi-line input, up and down are still motion
-            (if (< dir 0)
-                (not (chat-on-first-input-line? buf))
-                (not (chat-on-last-input-line? buf))))
-        (run-command motion)
-        (chat-history-recall! buf dir))))
+    (cond
+      ;; already walking the queued rows: stay in that walk
+      ((buffer-local buf 'chat-queued-pos) (chat-queued-recall! buf dir))
+      ((or (not (buffer-local buf 'agent-saved-mark))
+           (not (chat-in-input? buf))
+           ;; inside a multi-line input, up and down are still motion
+           (if (< dir 0)
+               (not (chat-on-first-input-line? buf))
+               (not (chat-on-last-input-line? buf))))
+       (run-command motion))
+      ;; an empty draft, going up, with rows waiting to run: those come
+      ;; before the sent history, since they are what point is closest to
+      ((and (< dir 0)
+            (equal? (string-trim (chat-input-text buf)) "")
+            (pair? (buffer-local buf 'chat-queued)))
+       (chat-queued-recall! buf dir))
+      ((null? (chat-history buf)) (run-command motion))
+      (else (chat-history-recall! buf dir)))))
 
 (define-command "chat-history-previous" "Recall the previous thing you typed at a prompt"
   (lambda () (chat-history-move! -1)))
@@ -640,24 +705,35 @@
                          "chat hidden; dismissing after the current run"
                          "chat dismissed")))))))
 
-(define-command "chat-unqueue" "Remove the newest queued message and return it to the input"
+(define (list-remove-at lst i)
+  (let loop ((l lst) (n 0) (acc '()))
+    (cond ((null? l) (reverse acc))
+          ((= n i) (append (reverse acc) (cdr l)))
+          (else (loop (cdr l) (+ n 1) (cons (car l) acc))))))
+
+(define-command "chat-unqueue"
+  "Remove the previewed queued message (or the newest one) and return it to the input"
   (lambda ()
     (let* ((buf (current-buffer))
            (slug (agent-slug-of buf))
-           (texts (or (buffer-local buf 'chat-queued) '())))
-      (if (null? texts)
+           (q (chat-queued-for buf))
+           (walked (buffer-local buf 'chat-queued-pos))
+           (idx (if (and walked (< walked (length q))) walked 0)))
+      (if (null? q)
           (message "no queued messages")
-          (let* ((rev (reverse texts))
-                 (text (car rev))
-                 (kept (reverse (cdr rev)))
+          (let* ((text (nth idx q))
                  (removed (if (and slug (not (equal? (agent-status slug) 'dead)))
                               (agent-dequeue! slug text)
                               #t)))
             (if (not removed)
                 (message "already committed as steering")
                 (begin
-                  (buffer-set-local! buf 'chat-queued (if (null? kept) #f kept))
-                  (let ((draft (chat-input-text buf)))
+                  (buffer-set-local! buf 'chat-queued
+                    (let ((kept (reverse (list-remove-at q idx))))
+                      (if (null? kept) #f kept)))
+                  (buffer-set-local! buf 'chat-queued-pos #f)
+                  (let ((draft (if walked (or (buffer-local buf 'chat-queued-draft) "")
+                                   (chat-input-text buf))))
                     (chat-replace-input! buf
                       (if (equal? (string-trim draft) "")
                           text

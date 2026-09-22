@@ -40,6 +40,14 @@ defmodule Compos.Core.Agent do
   # context (steer-settle-seconds); 0 turns the recovery off.
   @settle_grace_ms 45_000
 
+  # How long a turn waits for the connector to say ANYTHING. A connector
+  # that takes the prompt and emits no event at all cannot end its own
+  # turn, so the chat waits at "waiting..." for good. The number is high on
+  # purpose: the direct lane's first event is the first token, and a slow
+  # model must never lose a live turn to this. Scheme overrides it per turn
+  # through the turn context (silent-turn-seconds); 0 turns the recovery off.
+  @silent_grace_ms 180_000
+
   # --- api --------------------------------------------------------------------
 
   def start(slug, config) when is_map(config) do
@@ -245,6 +253,11 @@ defmodule Compos.Core.Agent do
        steered_turn: false,
        settle_timer: nil,
        settle_grace_ms: @settle_grace_ms,
+       # The other silence: a turn that never produced a first event. The
+       # timer runs from the moment the prompt goes to the connector and
+       # stops at the connector's first word.
+       silent_timer: nil,
+       silent_grace_ms: @silent_grace_ms,
        # how many terminal backend events belong to turns this side has
        # already ended (see the cancel above): each one is swallowed once
        stale_turn_ends: 0,
@@ -560,6 +573,8 @@ defmodule Compos.Core.Agent do
        ending: not is_nil(state.pending_turn_end),
        # a steered turn whose result landed, counting down to the recovery
        settling: not is_nil(Map.get(state, :settle_timer)),
+       # a turn the connector has not answered with one event yet
+       silent: not is_nil(Map.get(state, :silent_timer)),
        steers: length(state.pending_steer_order),
        permission:
          case state.pending_permission do
@@ -618,15 +633,21 @@ defmodule Compos.Core.Agent do
   end
 
   # the context for a turn that is still the current one
-  def handle_info({:context, epoch, text, display, images, result}, %{epoch: epoch} = state) do
+  def handle_info({:context, epoch, text, display, images, sent_at, result}, %{epoch: epoch} = state) do
     state = %{state | context_pending: false}
 
     case result do
       {:ok, context} ->
         context = context |> Map.put(:display, display) |> Map.put(:images, images)
-        state.backend.prompt(state.handle, text, context)
+        state.backend.prompt(state.handle, text, Map.put(context, :sent_at, sent_at))
 
-        {:noreply, settle_grace_from(state, context)}
+        state =
+          state
+          |> settle_grace_from(context)
+          |> silent_grace_from(context)
+          |> arm_silent()
+
+        {:noreply, state}
 
       {:error, why} ->
         state =
@@ -719,6 +740,27 @@ defmodule Compos.Core.Agent do
 
   def handle_info({:settle_grace, _stale}, state),
     do: {:noreply, Map.put(state, :settle_timer, nil)}
+
+  # The connector took the prompt and said nothing at all: no chunk, no
+  # tool, no result, no end. Such a turn never closes itself, so the chat
+  # waits for good. End it HERE and tell the adapter to drop the turn it
+  # still holds. Scheme decides what happens to the session next.
+  def handle_info({:silent_turn, epoch}, %{epoch: epoch, status: :running} = state) do
+    grace = Map.get(state, :silent_grace_ms, @silent_grace_ms)
+    state = Map.put(state, :silent_timer, nil)
+    state.backend.cancel(state.handle)
+
+    state =
+      state
+      |> enqueue(Backend.plist(type: :"turn-silent", seconds: div(grace, 1000)))
+      |> Map.put(:stale_turn_ends, state.stale_turn_ends + 1)
+      |> finish_turn(Backend.plist(type: :"turn-end", "stop-reason": "error"))
+
+    {:noreply, state}
+  end
+
+  def handle_info({:silent_turn, _stale}, state),
+    do: {:noreply, Map.put(state, :silent_timer, nil)}
 
   def handle_info(_msg, state), do: {:noreply, state}
 
@@ -820,6 +862,10 @@ defmodule Compos.Core.Agent do
       if is_nil(Map.get(state, :settle_timer)) or type in @settle_quiet_events,
         do: state,
         else: cancel_settle_timer(state)
+
+    # Every event counts here, bookkeeping included: the silence watchdog
+    # asks only whether the connector speaks at all.
+    state = cancel_silent_timer(state)
 
     apply_event(state, event)
   end
@@ -995,6 +1041,7 @@ defmodule Compos.Core.Agent do
     # the wire died) resolves it cancelled — never a stuck banner
     state
     |> cancel_settle_timer()
+    |> cancel_silent_timer()
     |> Map.put(:steered_turn, false)
     |> cancel_steering_settle_timer()
     |> restore_boundary_steering()
@@ -1029,11 +1076,38 @@ defmodule Compos.Core.Agent do
 
   defp arm_settle(state), do: state
 
+  # Every turn, every connector: the prompt is on the wire and the first
+  # event has not come back yet.
+  defp arm_silent(%{status: :running} = state) do
+    grace = Map.get(state, :silent_grace_ms, @silent_grace_ms)
+
+    if is_integer(grace) and grace > 0 do
+      state = cancel_silent_timer(state)
+
+      Map.put(
+        state,
+        :silent_timer,
+        Process.send_after(self(), {:silent_turn, state.epoch}, grace)
+      )
+    else
+      state
+    end
+  end
+
+  defp arm_silent(state), do: state
+
   # Scheme says how long the recovery waits, per turn, the way it says the
   # empty-reply nudge. A turn that names no number keeps the default.
   defp settle_grace_from(state, context) do
     case Map.get(context, :steer_settle_seconds) do
       n when is_integer(n) and n >= 0 -> Map.put(state, :settle_grace_ms, n * 1000)
+      _ -> state
+    end
+  end
+
+  defp silent_grace_from(state, context) do
+    case Map.get(context, :silent_turn_seconds) do
+      n when is_integer(n) and n >= 0 -> Map.put(state, :silent_grace_ms, n * 1000)
       _ -> state
     end
   end
@@ -1048,6 +1122,17 @@ defmodule Compos.Core.Agent do
       ref ->
         Process.cancel_timer(ref)
         Map.put(state, :settle_timer, nil)
+    end
+  end
+
+  defp cancel_silent_timer(state) do
+    case Map.get(state, :silent_timer) do
+      nil ->
+        state
+
+      ref ->
+        Process.cancel_timer(ref)
+        Map.put(state, :silent_timer, nil)
     end
   end
 
@@ -1090,6 +1175,7 @@ defmodule Compos.Core.Agent do
       # debt here, or the swallow would eat THIS turn's end instead
       |> Map.put(:stale_turn_ends, 0)
       |> cancel_settle_timer()
+      |> cancel_silent_timer()
       |> Map.put(:steered_turn, false)
       |> Map.put(:status, :running)
       |> emit_status(:running)
@@ -1112,9 +1198,20 @@ defmodule Compos.Core.Agent do
     epoch = state.epoch + 1
     display = display || text
 
+    sent_at = System.monotonic_time(:millisecond)
+
     Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+      t0 = System.monotonic_time(:millisecond)
       result = Backend.context(slug, display)
-      send(me, {:context, epoch, text, display, images, result})
+      ms = System.monotonic_time(:millisecond) - t0
+
+      :telemetry.execute(
+        [:compos, :chat, :stage],
+        %{duration: ms, queue: max(t0 - sent_at, 0)},
+        %{slug: slug, stage: "context", detail: ""}
+      )
+
+      send(me, {:context, epoch, text, display, images, sent_at, result})
     end)
 
     %{state | epoch: epoch, context_pending: true}

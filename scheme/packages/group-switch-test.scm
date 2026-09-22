@@ -1947,16 +1947,34 @@
       (group-record-delete! away))
     (t--sw-done!)))
 
-(deftest 'a-switch-to-an-ungrouped-buffer-takes-the-window-and-leaves-the-group
-  "no group to enter: the pane shows it and the derived rule drops the group"
+(deftest 'a-switch-to-an-ungrouped-buffer-joins-it-to-the-group
+  "the ruling of 2026-09-22: a buffer opens in the current group, and the frame keeps it"
   (lambda ()
     (t--sw-setup!)
     (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
            (win (active-window)))
       (switch-to-buffer! foreign)
       (check-false! (float-open?) "nothing floats")
-      (check-equal! (window-buffer win) foreign "the selected window shows it")
-      (check-false! (frame-group) "the frame is in no group")
+      (check-true! (and (window-showing foreign) #t) "a pane shows it")
+      (check-true! (buffer-in-group? foreign home) "it joined the group it opened in")
+      (check-equal! (frame-group) home "so the frame keeps its group")
+      (t--sw-sealed-done! foreign))
+    (t--sw-done!)))
+
+(deftest 'a-switch-to-a-buffer-of-another-group-brings-it-here
+  "the ruling of 2026-09-22: the buffer comes to you; the frame never follows it home"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
+           (away (group-record-create! "zzsw-elsewhere"))
+           (panes (length (window-list))))
+      (buffer-add-group! foreign away)
+      (check-true! (group-foreign-buffer? foreign) "it starts in another group")
+      (switch-to-buffer! foreign)
+      (check-equal! (frame-group) home "the frame stands where it stood")
+      (check-equal! (length (window-list)) panes "and no other group's layout replaced the panes")
+      (check-true! (buffer-in-group? foreign home) "the buffer joined this group")
+      (check-false! (buffer-in-group? foreign away) "and left the one it came from")
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
 (deftest 'a-switch-to-a-visible-member-selects-the-window-that-shows-it

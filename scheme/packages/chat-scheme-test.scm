@@ -39,6 +39,24 @@
     (check-equal! (chat-scheme-unescape "\\(+ 1 2)") "(+ 1 2)"
                   "and the backslash never reaches the model")))
 
+(deftest 'a-bang-input-is-prose-for-fast-code
+  "! resolves to Scheme here and never reaches the model"
+  (lambda ()
+    (check-true! (chat-fast-input? "!switch to paper") "a bang opens a fast intent")
+    (check-false! (chat-fast-input? "what does ! mean") "a bang mid-sentence is prose")
+    (check-false! (chat-fast-input? "(+ 1 2)") "a parenthesised input is the other path")
+    (check-equal! (chat-fast-code "!switch to paper") "(load-theme \"paper\")"
+                  "the intent resolves to the precise call")
+    (check-true! (chat-scheme-well-formed? (chat-fast-code "!switch to paper"))
+                 "and what it resolves to is well-formed, so RET runs it")))
+
+(deftest 'a-bang-that-resolves-to-nothing-says-so
+  "a miss reports in the transcript; it never falls through to a turn"
+  (lambda ()
+    (let ((code (chat-fast-code "!xyzzy frobnicate the quux")))
+      (check-true! (string-prefix? "(error" code) "a miss is an expression that errors")
+      (check-true! (chat-scheme-well-formed? code) "and it is still well-formed"))))
+
 (deftest 'malformed-scheme-goes-nowhere
   "an unbalanced expression is neither evaluated nor sent"
   (lambda ()

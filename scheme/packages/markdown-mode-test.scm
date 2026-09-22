@@ -131,6 +131,38 @@
         "preview mode repaints the restored URL")
       (t--md-done!))))
 
+(deftest 'an-indented-block-is-code-and-aligned-columns-are-a-table
+  "the indent steps back; words in shared columns make a table, a head row
+   without digits is bold, and prose-shaped code stays code"
+  (lambda ()
+    (t--md-fresh! (string-append "para\n\n"
+                                 "    name   score  rank\n"
+                                 "    alpha  1.00   1\n"
+                                 "    beta   0.50   2\n\n"
+                                 "text\n\n"
+                                 "    select a from b\n"))
+    (check-true! (t--md-has? '(6 28 "row-code")) "an indented line is code")
+    (check-true! (t--md-has? '(6 10 "md-marker")) "and its indent steps back")
+    (check-true! (t--md-has? '(6 28 "row-table-aligned")) "the columns make a table")
+    (check-true! (t--md-has? '(6 28 "row-table-aligned-head")) "the first row is the head")
+    (check-true! (t--md-has? '(29 48 "row-table-aligned")) "a body row is a table row")
+    (check-false! (t--md-has? '(29 48 "row-table-aligned-head")) "and not the head")
+    (check-true! (t--md-has? '(76 95 "row-code")) "the second block is code")
+    (check-false! (t--md-has? '(76 95 "row-table-aligned")) "one line of code is no table")
+    (check-false! (t--md-has? '(0 4 "row-code")) "a paragraph is not code")
+    (t--md-done!)))
+
+(deftest 'a-table-fence-colors-cells-by-its-rules
+  "a value rule and a number threshold each color the cell they match"
+  (lambda ()
+    ;; offsets count from the buffer start; the body starts at 42
+    (t--md-fresh! "```table green=strong red=unfit green>=.5\n| unfit | .64 |\n| strong | .2 |\n```\n")
+    (check-true! (t--md-has? '(44 49 "table-red")) "unfit takes red")
+    (check-true! (t--md-has? '(52 55 "table-green")) ".64 passes the threshold")
+    (check-true! (t--md-has? '(60 66 "table-green")) "strong takes green")
+    (check-false! (t--md-has? '(69 71 "table-green")) ".2 is under the threshold")
+    (t--md-done!)))
+
 (deftest 'a-table-takes-its-columns-from-the-bars
   "the head, the rule and the body rows each take their row face; every bar
    is a column boundary and the space that pads a cell steps back"
@@ -142,7 +174,7 @@
     (check-true! (t--md-has? '(7 8 "md-table-bar")) "so is the bar between cells")
     (check-true! (t--md-has? '(1 2 "md-marker")) "the space before a cell steps back")
     (check-true! (t--md-has? '(6 7 "md-marker")) "and the space after it")
-    (check-true! (t--md-has? '(15 28 "row-table-rule")) "the rule row draws the line")
+    (check-true! (t--md-has? '(15 28 "row-conceal")) "the page hides the rule row")
     (check-true! (t--md-has? '(15 28 "md-marker")) "and its dashes step back")
     (check-true! (t--md-has? '(29 38 "row-table")) "a body row is a table row")
     (check-false! (t--md-has? '(40 50 "row-table"))

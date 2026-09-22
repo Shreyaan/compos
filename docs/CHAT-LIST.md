@@ -172,10 +172,12 @@ and revives it, where you stood when you asked for it.
 
 ## Grouping
 
-`;` cycles what a section is. `none` is the flat list in most recently
-used order, and it is the default.
+`<` cycles what a section is. `none` is the flat list in most recently
+used order, and it is the default. A row carries the name of its chat's
+group in its own column, so the group reads without the sections;
+sectioning by group drops the column rather than say it twice.
 
-- none (MRU)
+- none (MRU) — the group in a column
 - group
 - state
 - model

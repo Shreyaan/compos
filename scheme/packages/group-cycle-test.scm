@@ -174,7 +174,7 @@
   (layout-target-set! #f)
   (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
   (buffer-set-local! "*zz-cyc-work-there*" 'mode-name "text-mode")
-  (tile-windows! 'grid '("*zz-cyc-work-a*" "*zz-cyc-work-b*"
+  (tile-windows! 'columns '("*zz-cyc-work-a*" "*zz-cyc-work-b*"
                          "*zz-cyc-three*" "*zz-cyc-work-b*"))
   (let ((windows (map car (window-list))))
     (set-window-prev-buffers! (nth 0 windows) '("*zz-cyc-work-there*"))

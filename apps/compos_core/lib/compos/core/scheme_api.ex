@@ -296,7 +296,7 @@ defmodule Compos.Core.SchemeAPI do
       "ok" => status in 200..299,
       "status" => status,
       "headers" => http_reply_headers(headers),
-      {"body", ""} => body
+      "body" => body
     }
 
     reply = if truncated?, do: Map.put(reply, "truncated", true), else: reply
@@ -366,7 +366,26 @@ defmodule Compos.Core.SchemeAPI do
       {"telemetry-clear!", "(telemetry-clear!) — discard retained telemetry events."} => fn [] ->
         :ok = Compos.Core.Telemetry.clear()
         :void
-      end
+      end,
+      {"llm-catalog-info",
+       "(llm-catalog-info) — the loaded model catalog: snapshot-id, captured-at, models, providers, stale-days, path."} =>
+        fn [] -> catalog_plist(Compos.Core.ModelCatalog.snapshot_info()) end,
+      {"llm-catalog-install!",
+       "(llm-catalog-install! CALLBACK) — fetch the newest published model catalog, keep it, and load it. The callback gets one list: ok and then either the catalog info or an error message. It runs off the lane, being a network fetch of several megabytes."} =>
+        fn [callback] ->
+          async_dispatch(callback, fn ->
+            case Compos.Core.ModelCatalog.refresh() do
+              {:ok, info} -> [true, catalog_plist(info)]
+              {:error, msg} -> [false, to_string(msg)]
+            end
+          end)
+        end,
+      {"telemetry-reattach!",
+       "(telemetry-reattach!) — attach the collector's handler again. A reload that adds an event needs this: the running collector attached the list it started with."} =>
+        fn [] ->
+          :ok = Compos.Core.Telemetry.reattach()
+          :void
+        end
     }
   end
 
@@ -2895,6 +2914,16 @@ defmodule Compos.Core.SchemeAPI do
     end)
 
     :void
+  end
+
+  # a plist Scheme reads: nil becomes #f, which every caller already handles
+  defp catalog_plist(info) when is_map(info) do
+    for key <- [:snapshot_id, :captured_at, :models, :providers, :stale_days, :path],
+        reduce: [] do
+      acc ->
+        name = key |> Atom.to_string() |> String.replace("_", "-")
+        acc ++ [{:sym, name}, Map.get(info, key) || false]
+    end
   end
 
   defp git_value({:ok, value}, shape), do: shape.(value)

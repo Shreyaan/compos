@@ -517,7 +517,12 @@ body {
 .line { display: flex; align-items: flex-start; gap: 12px; padding: 0 16px 0 8px;
         /* empty lines must keep their height even with .linenum hidden (no-nums, writing-mode) */
         min-height: 1lh; }
-.window.active .line.hl-line { background: var(--hl-line-bg, #f5f1e6); }
+.window.active .line.hl-line { background: var(--hl-line-bg, #f5f1e6); }.window.active .line.hl-line { background: var(--hl-line-bg, #f5f1e6); }
+/* Selected list rows use the theme's normal ink for model names. */
+.window.active .line.hl-line .f-models-name {
+  color: var(--default-fg, inherit);
+}
+
 /* A select overlay names complete logical rows. Paint each touched
    display line across the window, including its line-number area. */
 .window .line.selected-line,
@@ -626,6 +631,9 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
 .line.row-picture .line-content { text-align: center; }
 .line.row-picture img.img-embed { margin: 6px 0; }
 .line.row-fence .line-content { font-size: .72em; color: var(--dim-fg, #8a857a); }
+/* the source view's fence lines (morg-line-spans): small type, the
+   markers stay visible */
+.line.row-morg-fence .line-content { font-size: .72em; }
 /* hl-line-mode off: the current line draws like any other */
 .buf[data-hl-line="false"] .line.hl-line { background: transparent; }
 /* a table (markdown-mode md--table-row-spans): each source row is
@@ -642,6 +650,17 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
   overflow: hidden; color: transparent;
 }
 .line.row-table-head .line-content { font-weight: 600; }
+/* cell borders: every bar draws the line between two columns, and each
+   row draws the line under itself */
+.line.row-table .line-content {
+  border-bottom: 1px solid var(--border-bg, #cfc8b6);
+}
+.line.row-table .f-md-table-bar {
+  border-left: 1px solid var(--border-bg, #cfc8b6);
+}
+/* a marker line the page hides whole: the fence of a block that draws
+   its own rows, and a table's rule row */
+.line.row-conceal { display: none; }
 /* a CSV row keeps its columns at their width: the sheet scrolls
    right instead of folding into the window */
 .line.row-csv .line-content {
@@ -654,6 +673,16 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
   content: ""; position: absolute; left: 0; right: 0; top: 50%;
   border-top: 1px solid var(--border-bg, #cfc8b6);
 }
+/* an aligned table (markdown-mode md--icode-line-spans): an indented
+   block whose words stand in columns. The spaces carry the columns,
+   so the row stays monospace and never wraps. */
+.line.row-table-aligned .line-content {
+  white-space: pre; word-break: normal; background: transparent;
+}
+.line.row-table-aligned-head .line-content {
+  font-weight: 600; border-bottom: 1px solid var(--border-bg, #cfc8b6);
+}
+.line.row-table-aligned .f-md-table-pipe { color: var(--dim-fg, #8a857a); }
 /* visual-line-mode off: continuation lines, wrapped wherever the
    window ends (Emacs's default); on: wrapped at words */
 .buf[data-visual-lines="false"] .line-content { word-break: break-all; }
@@ -797,7 +826,10 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
 /* The caret is the editing state made visible: in the movement
    state (a landing, ESC, C-g) it is gone, and the floating
    window says where the keys go instead. */
-.window.active[data-editing="false"] .buf .cursor { visibility: hidden; }
+/* The block goes; the character under it stays text. */
+.window.active[data-editing="false"] .buf .cursor {
+  background: transparent; color: inherit; box-shadow: none;
+}
 body.unfocused .window.active .cursor {
   background: transparent !important;
   color: inherit !important;
@@ -1314,6 +1346,15 @@ body.unfocused .window.active .cursor {
 .ml-fact-v {
   font-size: var(--fs-meta); color: var(--text-strong);
   white-space: nowrap;
+}
+.ml-fact-v {
+  font-size: var(--fs-meta); color: var(--text-strong);
+  white-space: nowrap;
+}
+/* Model names use the accent in their value, but active dark modelines
+   need a light value for readable contrast. */
+.window.active .ml-fact[rank="1"] .ml-fact-v {
+  color: var(--modeline-active-fg, var(--text-strong));
 }
 .ml-fact-v.ok { color: var(--ok); }
 .ml-fact-v.warn { color: var(--warn); }

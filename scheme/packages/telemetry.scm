@@ -428,6 +428,233 @@
 (define-command "telemetry" "Show the duration of every layer's work: scheme, live, browser"
   (lambda () (list-mode-show! "telemetry-mode")))
 
+;; --- chat-perf ---------------------------------------------------------------
+;; One chat's last turn, step by step. Elixir stamps a row for every stage
+;; and every step: the context build, the record, the stream handshake, the
+;; model request of each round, and each tool call. The stamps land in the
+;; same collector as M-x telemetry.
+;;
+;; The collector keeps the end time and the duration of each row, so a row
+;; knows when it started. That is enough to place every step on one time
+;; line: the bar column is a flame graph, drawn in text like the bar in
+;; M-x telemetry.
+
+(define *chat-perf-buffer* "*chat-perf*")
+(define *chat-perf-flame-width* 44)
+
+(define (chat-perf--slug buf)
+  (or (buffer-local buf 'agent-slug) ""))
+
+(define (chat-perf--ms row)
+  (let ((n (plist-get row 'duration-ms)))
+    (if (number? n) n 0)))
+
+(define (chat-perf--end row)
+  (let ((n (plist-get row 'time-ms)))
+    (if (number? n) n 0)))
+
+(define (chat-perf--start row)
+  (- (chat-perf--end row) (chat-perf--ms row)))
+
+(define (chat-perf--step row) (or (plist-get row 'label) ""))
+
+;; Every turn opens with one "context" stamp, so the last one starts the
+;; last turn. Without this cut the list spans every turn the ring still
+;; holds, and the flame graph measures a window nobody waited through.
+(define (chat-perf--last-turn rows)
+  (let loop ((rs rows) (seen '()))
+    (cond ((null? rs) (reverse seen))
+          ((equal? (chat-perf--step (car rs)) "context")
+           (loop (cdr rs) (list (car rs))))
+          (else (loop (cdr rs) (cons (car rs) seen))))))
+
+(define (chat-perf--window rows)
+  (if (null? rows)
+      (list 0 1)
+      (let loop ((rs rows) (lo (chat-perf--start (car rows))) (hi (chat-perf--end (car rows))))
+        (if (null? rs)
+            (list lo (max hi (+ lo 1)))
+            (loop (cdr rs)
+                  (min lo (chat-perf--start (car rs)))
+                  (max hi (chat-perf--end (car rs))))))))
+
+;; the column of one instant, inside the drawn width
+;; The HTTP stack does not know which chat it carries, so its rows name no
+;; slug. They belong to the turn they ran inside, and the flame graph places
+;; every row by time, so the window decides: an http row between the first
+;; start and the last end of the turn is part of that turn.
+(define (chat-perf--http-rows lo hi events)
+  (filter (lambda (row)
+            (and (equal? (plist-get row 'layer) "http")
+                 (>= (chat-perf--start row) lo)
+                 (<= (chat-perf--start row) hi)))
+          events))
+
+;; ascending by start; term order compares the head of each pair first
+(define (chat-perf--by-start rows)
+  (map cadr (sort (map (lambda (r) (list (chat-perf--start r) r)) rows))))
+
+;; The collector answers newest first. A turn reads in the order it ran.
+(define (chat-perf--rows slug)
+  (if (equal? slug "")
+      '()
+      (let* ((events (telemetry-events 1000))
+             (mine (chat-perf--last-turn
+                     (reverse
+                       (filter (lambda (row)
+                                 (and (equal? (plist-get row 'layer) "chat")
+                                      (equal? (plist-get row 'owner) slug)))
+                               events)))))
+        (if (null? mine)
+            '()
+            (let* ((win (chat-perf--window mine))
+                   (http (chat-perf--http-rows (car win) (cadr win) events)))
+              (chat-perf--by-start (append mine http)))))))
+
+;; The collector is a ring that rolls over in about two minutes, so a
+;; redraw after the turn finds nothing. Keep the last steps we saw.
+(define (chat-perf--keep! buf)
+  (let ((rows (chat-perf--rows (or (buffer-local buf 'chat-perf-slug) ""))))
+    (if (null? rows)
+        (or (buffer-local buf 'chat-perf-kept) '())
+        (begin (buffer-set-local! buf 'chat-perf-kept rows) rows))))
+
+;; A tool runs inside the round that called it, so it reads one level in.
+;; "first thought" and "first token" measure from the send, so they span
+;; every step above them and stay at the margin.
+(define (chat-perf--depth row)
+  (if (or (string-prefix? "tool " (chat-perf--step row))
+          (string-prefix? "http " (chat-perf--step row)))
+      1
+      0))
+
+(define (chat-perf--label row)
+  (string-append (string-repeat "  " (chat-perf--depth row))
+                 (chat-perf--step row)))
+
+;;; --- the flame graph ----------------------------------------------------------
+;;; Every step is one bar, placed by when it started and how long it ran.
+;;; The window is the first start to the last end, so the bars line up
+;;; under each other and a gap in the row is a gap in the turn.
+
+(define (chat-perf--col at lo span)
+  (max 0 (min (- *chat-perf-flame-width* 1)
+              (quotient (* *chat-perf-flame-width* (- at lo)) span))))
+
+(define (chat-perf--flame row lo span)
+  (let* ((a (chat-perf--col (chat-perf--start row) lo span))
+         (b (chat-perf--col (chat-perf--end row) lo span))
+         ;; a step too short to fill a column still gets one, or it
+         ;; disappears from a graph that is meant to show every step
+         (wide (max 1 (- b a))))
+    (string-append (string-repeat " " a)
+                   (string-repeat "█" wide))))
+
+;; A narrow window cannot hold the flame and the detail both. The flame is
+;; the reason to open this list, so the detail goes first.
+(define (chat-perf--narrow-columns buf)
+  (list (list "step" 22)
+        (list "ms" 7 'right)
+        (list "flame" *chat-perf-flame-width*)))
+
+(define (chat-perf--narrow-cells buf row)
+  (let ((cs (chat-perf--cells buf row)))
+    (list (car cs) (cadr cs) (caddr cs))))
+
+(define (chat-perf--cells buf row)
+  (let* ((rows (chat-perf--keep! buf))
+         (win (chat-perf--window rows))
+         (lo (car win))
+         (span (max 1 (- (cadr win) lo))))
+    (list (chat-perf--label row)
+          (number->string (chat-perf--ms row))
+          (chat-perf--flame row lo span)
+          (or (plist-get row 'detail) ""))))
+
+;; the chat this list was opened from, by name; the slug is the fallback
+;; for a list restored from a desktop that lost the buffer
+(define (chat-perf--name buf)
+  (let ((chat (buffer-local buf 'chat-perf-chat)))
+    (if (and chat (buffer-exists? chat))
+        chat
+        (or (buffer-local buf 'chat-perf-slug) "no chat"))))
+
+(define (chat-perf--meta buf)
+  (let* ((slug (or (buffer-local buf 'chat-perf-slug) ""))
+         (drawn (list-entries buf))
+         (rows (if (null? drawn) (chat-perf--keep! buf) drawn))
+         (win (chat-perf--window rows))
+         (wall (- (cadr win) (car win)))
+         (busy (let loop ((rs rows) (n 0))
+                 (if (null? rs) n (loop (cdr rs) (+ n (chat-perf--ms (car rs))))))))
+    (string-append slug " · "
+                   (number->string (length rows)) " steps · "
+                   (number->string wall) " ms wall · "
+                   (number->string busy) " ms summed")))
+
+(domain! 'diagnostics)
+(effects! '(read))
+(define-list-mode! "chat-perf-mode"
+  (list
+    'doc (string-append
+           "One chat's last turn, step by step. Each row is a step the "
+           "editor stamped: context is Scheme building the prompt, record "
+           "writes the user turn, and round N model is that round's model "
+           "request. http open is the stream setup only: it starts a lazy "
+           "stream and does not touch the network. http queue, http "
+           "connect and http send are the HTTP stack under that round, and "
+           "a tool row is one tool call. first thought and "
+           "first token measure from the send, so they cover every step "
+           "above them. The bar column is a flame graph: each step sits "
+           "where it ran between the first start and the last end, so a "
+           "gap in the column is a gap in the turn. g redraws; q quits.")
+    'buffer *chat-perf-buffer*
+    'rows (lambda (buf) (chat-perf--keep! buf))
+    'id (lambda (row) (string-append (chat-perf--step row) "@"
+                                     (number->string (chat-perf--end row))))
+    'columns (lambda (buf)
+               (list (list "step" 22)
+                     (list "ms" 7 'right)
+                     (list "flame" *chat-perf-flame-width*)
+                     (list "detail" #f)))
+    'cells chat-perf--cells
+    'layouts (list (list 'name 'narrow
+                         'max-cols 99
+                         'columns chat-perf--narrow-columns
+                         'cells chat-perf--narrow-cells)
+                   (list 'name 'wide 'default #t))
+    'title (lambda (buf)
+             (string-append "Chat perf: " (chat-perf--name buf)))
+    'no-marks #t
+    'meta chat-perf--meta
+    'footer (lambda (buf) '(("g" "refresh") ("q" "quit")))
+    'keys '(("g" "list-revert")
+            ("q" "quit-window"))))
+
+(domain! 'diagnostics)
+(effects! '(read display))
+(define-command "chat-perf" "Show every step of this chat's last turn, with a flame graph"
+  (lambda ()
+    (let* ((chat (current-buffer))
+           (slug (chat-perf--slug chat)))
+      (if (equal? slug "")
+          (if (buffer-local chat 'agent-saved-mark)
+              ;; a chat whose runtime died (a restart, a module swap) keeps
+              ;; its conversation but stamps nothing until it runs again
+              (message "this chat has no live runtime — send once, then M-x chat-perf")
+              (message "not a chat"))
+          (begin
+            (buffer-create *chat-perf-buffer*)
+            ;; the kept steps belong to the chat they came from. Opening
+            ;; this list on another chat must not show the last one's turn.
+            (unless (equal? (buffer-local *chat-perf-buffer* 'chat-perf-slug) slug)
+              (buffer-set-local! *chat-perf-buffer* 'chat-perf-kept '()))
+            (buffer-set-local! *chat-perf-buffer* 'chat-perf-slug slug)
+            ;; the reader knows the chat by its name, not by its slug
+            (buffer-set-local! *chat-perf-buffer* 'chat-perf-chat chat)
+            (list-mode-show! "chat-perf-mode")
+            (list-redraw! *chat-perf-buffer*))))))
+
 ;;; --- the toggle ---------------------------------------------------------------
 ;;; One chord opens the list with current rows and closes it again. The
 ;;; list takes the display chain like any listing, and the close undoes

@@ -382,9 +382,12 @@
 ;; site's own sessions, SSO redirects and scripts run — and the
 ;; RENDERED document comes back. Slower than browser-fetch; right when
 ;; logged-in content matters. K gets the html, or #f.
-(define (browser-snapshot url k)
+;; WAIT names a CSS selector the caller knows the content by. A page that
+;; renders itself is not finished when the load is, and without a selector
+;; there is nothing to watch for but the clock.
+(define (browser-snapshot url k &optional wait)
   (if (browser-connected?)
-      (browser-call "snapshot" (list 'url url)
+      (browser-call "snapshot" (if wait (list 'url url 'wait wait) (list 'url url))
         (lambda (reply)
           (k (let ((h (plist-get reply 'html)))
                (and (string? h) (not (equal? h "")) h)))))
@@ -437,6 +440,26 @@
       (or (plist-get (browser-call-sync "frames" '() 3000) 'frames) '())
       '()))
 
+;; Which browser window this frame belongs to. Every tab carries its own, so
+;; this is what tells a tab in front of the reader from a tab on another
+;; screen.
+(define (tab-window)
+  (chrome-window-resolve!))
+
+;; The tabs in THIS frame's browser window. tab-list answers the whole
+;; browser, and a browser is not one place: 55 tabs across 7 windows on the
+;; machine this was written on, 10 of them here. A tab in another window is
+;; another screen and another piece of work, so an app looking for a tab it
+;; may drive wants this list, not that one. Answers every tab when the frame
+;; has no window of its own to speak of.
+(define (tabs-here k)
+  (let ((here (tab-window)))
+    (tab-list
+      (lambda (ts)
+        (k (if here
+               (filter (lambda (t) (equal? (plist-get t 'window) here)) ts)
+               ts))))))
+
 (define (chrome-window-resolve!)
   (or (chrome-window)
       (let* ((rows (chrome--frames-sync))
@@ -452,10 +475,15 @@
               ((pair? rows) (plist-get (car rows) 'window))
               (else #f)))))
 
-(define (tab-open url &optional window)
+;; BACKGROUND opens the tab without taking the reader there. The default is
+;; the front, because a tab opened by a key the reader pressed is usually one
+;; they want to look at; a tab opened so the editor can work in it is not.
+(define (tab-open url &optional window background)
   (let ((w (or window (chrome-window-resolve!))))
     (chrome-call "open"
-      (if w (list 'url url 'window w) (list 'url url))
+      (append (list 'url url)
+              (if w (list 'window w) '())
+              (if background (list 'active #f) '()))
       chrome-ignore)))
 (define (tab-activate tab) (chrome-call "activate" (list 'tab (chrome--tab-id tab)) chrome-ignore))
 (define (tab-close tab) (chrome-call "close" (list 'tab (chrome--tab-id tab)) chrome-ignore))
@@ -529,15 +557,17 @@
               (if tab (chrome--goto-tab! tab pick) (message "No such tab")))))))))
 
 (category! 'chrome)
-(public! 'tab-list "(tab-list K) — K gets every open browser tab as plists: id, title, url, active")
+(public! 'tab-list "(tab-list K) — K gets every open browser tab, in every window, as plists: id, title, url, active, window")
+(public! 'tab-window "(tab-window) — the browser window this frame belongs to, or #f")
+(public! 'tabs-here "(tabs-here K) — K gets only the tabs in this frame's browser window")
 (public! 'tab-eval "(tab-eval TAB CODE K) — run JS in a tab; TAB is an id or a tab from tab-list")
 (public! 'tab-read "(tab-read TAB K) — K gets the tab's url, title and visible text; TAB is an id or a tab from tab-list")
 (public! 'tab-say "(tab-say TAB TEXT) — put a line on that tab's screen")
 (public! 'tab-type "(tab-type TAB TEXT) — type into the tab for real (trusted input, via CDP)")
 (public! 'tab-click "(tab-click TAB X Y) — a real click at viewport coordinates")
-(public! 'tab-open "(tab-open URL &optional WINDOW) — open a new tab, in this frame's browser window unless WINDOW says otherwise")
+(public! 'tab-open "(tab-open URL &optional WINDOW BACKGROUND) — open a new tab, in this frame's browser window unless WINDOW says otherwise; BACKGROUND opens it without going there")
 (public! 'browser-fetch "(browser-fetch URL K) — fetch URL through the browser, cookies and cache included; K gets (TYPE TEXT BASE64) — TEXT for a text body, BASE64 for bytes, never both — or #f")
-(public! 'browser-snapshot "(browser-snapshot URL K) — load URL in a background tab and answer the RENDERED html; sessions and scripts run; K gets html or #f")
+(public! 'browser-snapshot "(browser-snapshot URL K &optional WAIT) — load URL in a background tab and answer the RENDERED html; sessions and scripts run; WAIT is a CSS selector to wait for before reading; K gets html or #f")
 (public! 'tab-activate "(tab-activate TAB) — bring a tab to the front")
 (public! 'tab-close "(tab-close TAB) — close a tab")
 (public! 'tab-cdp "(tab-cdp TAB METHOD PARAMS K) — raw Chrome DevTools Protocol")
@@ -599,3 +629,41 @@
   "(dom-measure SELECTOR [LIMIT]) — measure matching elements in this frame's editor tab: rect, display, font, visible; synchronous")
 (public! 'dom-eval
   "(dom-eval JS) — run JS in this frame's editor tab and return the value; synchronous")
+
+;; what the user has highlighted: the page selection, or a selection inside a
+;; focused input or textarea, which window.getSelection() does not report.
+(define dom-selection-js
+  (string-append
+    "(() => { const s = window.getSelection();"
+    " const t = s ? s.toString() : '';"
+    " let html = '';"
+    " if (s && s.rangeCount && t) { const d = document.createElement('div');"
+    " d.appendChild(s.getRangeAt(0).cloneContents()); html = d.innerHTML; }"
+    " let field = ''; const a = document.activeElement;"
+    " if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')"
+    " && typeof a.selectionStart === 'number' && a.selectionStart !== a.selectionEnd)"
+    " field = String(a.value).slice(a.selectionStart, a.selectionEnd);"
+    " const text = t || field;"
+    " return JSON.stringify({text: text, html: html, url: location.href,"
+    " title: document.title, chars: text.length, empty: !text}); })()"))
+
+(define (dom--selection-parse v)
+  (if (string? v)
+      (json-parse v)
+      (list 'text "" 'html "" 'url "" 'title "" 'chars 0 'empty #t)))
+
+(define (dom-selection)
+  (dom--selection-parse (dom-eval dom-selection-js)))
+
+(define (dom-selection-text)
+  (plist-get (dom-selection) 'text))
+
+(define (tab-selection tab k)
+  (tab-eval tab dom-selection-js (lambda (v) (k (dom--selection-parse v)))))
+
+(public! 'dom-selection
+  "(dom-selection) — what the user has highlighted in this frame's editor tab: text, html, url, title, chars, empty; synchronous")
+(public! 'dom-selection-text
+  "(dom-selection-text) — just the highlighted text in this frame's editor tab, \"\" when nothing is selected")
+(public! 'tab-selection
+  "(tab-selection TAB K) — what the user has highlighted in TAB; K gets text, html, url, title, chars, empty")

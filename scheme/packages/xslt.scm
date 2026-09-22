@@ -360,6 +360,18 @@ budget runs out at the bottom, where the furniture is not."
 (define (xslt-discover html)
   (xslt-rows (shell-command->string (xslt--discover-command (web--write-html! html)))))
 
+;; Run any stylesheet over a page and answer what it prints. discover.xsl
+;; is one such sheet and the learner's own use of it is the first caller;
+;; an app whose listing comes from an extractive sheet is the second, and
+;; it needs no wrapper of its own to get there. SHEET is a load-path name
+;; the way locate-library reads one.
+(define (xslt-apply sheet html)
+  (let ((path (locate-library sheet)))
+    (and path
+         (shell-command->string
+           (string-append (xslt--tool) " --html " (sh-quote path) " "
+                          (sh-quote (web--write-html! html)) " 2>/dev/null")))))
+
 ;; A direct child of body keeps its place: the header, the footer and the
 ;; rails are where the document starts and ends, and /html/body/footer[1]
 ;; still names the footer after a redesign. Deeper down a position is the
@@ -617,6 +629,8 @@ budget runs out at the bottom, where the furniture is not."
   "(xslt-learn URL HTML) - learn a site parser: walk the page, ask JEV what is furniture, answer (sheet TEXT drops ((PATTERN NOTE) ...) rows N calls N asked N)")
 (public! 'xslt-discover
   "(xslt-discover HTML) - the page's structure as rows: path, depth, tag, id, class, role, aria, chars, links, images, tag count, class tokens, sample")
+(public! 'xslt-apply
+  "(xslt-apply SHEET HTML) - run the stylesheet named on the load path over HTML and answer what it prints")
 (public! 'xslt-score
   "(xslt-score ROWS STATE) - every row back with 'p, how sure JEV is that it is page furniture")
 

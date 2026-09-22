@@ -1231,6 +1231,187 @@
 }
 ")
 
+;;; --- maharaja: the printed plate, ink and five colours ----------------------
+;;; Amar Chitra Katha, on newsprint. The page is turmeric cream, the rule
+;;; around a panel is printed ink, and every panel drops a hard shadow the
+;;; way a plate sits proud of the page under it. A quiet panel wears a
+;;; gold caption strip; the panel in hand wears the hero's blue. Five
+;;; printer's colours carry the rest: crimson, royal blue, parrot green,
+;;; royal purple, and the ochre a comic book uses for skin and sand alike.
+
+(define-theme "maharaja"
+  (list
+    (list 'ts-keyword 'fg "#163a7a" 'weight "700")
+    (list 'ts-function 'fg "#241407")
+    (list 'ts-string 'fg "#1f6b3d")
+    (list 'ts-comment 'fg "#8a7550")
+    (list 'ts-number 'fg "#8a5a12")
+    (list 'ts-constant 'fg "#8a5a12")
+    (list 'ts-type 'fg "#8a5a12")
+    (list 'ts-module 'fg "#8a5a12")
+    (list 'ts-operator 'fg "#5c4a2e")
+    (list 'ts-punctuation 'fg "#5c4a2e")
+    (list 'ts-tag 'fg "#c62828" 'weight "700")
+    (list 'ts-attribute 'fg "#6a2f8f")
+    (list 'ts-variable 'fg "#2e2210")
+    (list 'ts-property 'fg "#5c4a2e")
+    (list 'ts-escape 'fg "#8a5a12")
+    (list 'default 'bg "#f4e4c1" 'fg "#241407")
+    (list 'window 'bg "#faf1dc")
+    (list 'paper 'bg "#f0dfb8")
+    (list 'body 'fg "#3a2814")
+    (list 'border-soft 'bg "#e3cd9a")
+    (list 'window-inactive 'bg "#ede0bd")
+    ;; a quiet panel wears the caption strip; the panel in hand wears the
+    ;; hero's blue, cream lettering, the way a title box breaks the page
+    (list 'modeline 'bg "#e3cd9a" 'fg "#4a3510")
+    (list 'modeline-active 'bg "#163a7a" 'fg "#f4e4c1")
+    (list 'cursor 'bg "#c62828")
+    (list 'region 'bg "#f6d98a")
+    (list 'accent 'fg "#163a7a")
+    (list 'link 'fg "#0e7373" 'decoration "underline")
+    (list 'llm-response 'fg "#163a7a" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
+    (list 'diff-block 'fg "#8a5a12" 'style "italic")
+    (list 'diff-block-source 'fg "#8a7550" 'style "italic")
+    (list 'dim 'fg "#8a7550")
+    (list 'select 'bg "#f0c07a")
+    (list 'hl-line 'bg "#ecdcae")
+    (list 'linenum 'fg "#c2ab7a")
+    (list 'border 'bg "#241407")
+    (list 'warn 'fg "#c1571a")
+    (list 'faint 'fg "#c2ab7a")
+    (list 'ok 'fg "#1f6b3d")
+    (list 'alert 'fg "#c62828")
+    (list 'org-level-1 'fg "#c62828" 'weight "700")
+    (list 'org-level-2 'fg "#163a7a" 'weight "600")
+    (list 'org-level-3 'fg "#1f6b3d" 'weight "600")
+    (list 'org-level-4 'fg "#6a2f8f" 'weight "600")
+    ;; the group scale: five printer's colours and the ochre, the palette
+    ;; a plate is actually run in
+    (list 'group-color-1 'fg "#c62828")
+    (list 'group-color-2 'fg "#163a7a")
+    (list 'group-color-3 'fg "#1f6b3d")
+    (list 'group-color-4 'fg "#6a2f8f")
+    (list 'group-color-5 'fg "#8a5a12")
+    (list 'group-color-6 'fg "#0e7373")
+    (list 'org-todo 'fg "#c62828" 'weight "700")
+    (list 'org-done 'fg "#1f6b3d" 'decoration "line-through")
+    (list 'org-priority 'fg "#8a5a12" 'weight "600")
+    (list 'org-date 'fg "#163a7a" 'style "italic")
+    (list 'org-tag 'fg "#8a7550")
+    (list 'org-checkbox 'fg "#163a7a" 'weight "600")
+    (list 'org-cookie 'fg "#8a5a12")
+    (list 'org-meta 'fg "#8a7550")
+    (list 'fold-marker 'fg "#8a7550")
+    (list 'nm-date 'fg "#6b5c3e")
+    (list 'nm-author 'fg "#163a7a" 'weight "400" 'style "italic")
+    (list 'nm-tags 'fg "#8a5a12")
+    (list 'nm-subject 'fg "#2e2210")
+    (list 'nm-marked 'fg "#c62828" 'weight "700")
+    (list 'nm-hdr 'fg "#163a7a" 'weight "700")
+    (list 'nm-sep 'fg "#b39a68")
+    (list 'diff-file 'fg "#163a7a" 'weight "600")
+    (list 'diff-hunk 'fg "#8a5a12")
+    (list 'diff-add 'fg "#1a5c33" 'bg "rgba(31, 107, 61, 0.14)")
+    (list 'diff-del 'fg "#8f1c1c" 'bg "rgba(198, 40, 40, 0.12)")
+    (list 'diff-add-word 'bg "rgba(31, 107, 61, 0.32)")
+    (list 'diff-del-word 'bg "rgba(198, 40, 40, 0.28)")
+    (list 'code-scope 'bg "rgba(22, 58, 122, 0.08)")
+    ;; a plate sits proud of the page: square corners, ink around every
+    ;; edge, a hard shadow with no blur
+    (list 'chrome 'gap "6px" 'radius "3px"
+          'border "2px solid #241407"
+          'shadow "0 10px 26px rgba(36, 20, 7, 0.22)"
+          'shadow-deep "0 18px 46px rgba(36, 20, 7, 0.30)")))
+
+;; the desk between the panels: a jali screen cut in stone, ink on cream
+(define maharaja-jali
+  "url(\"data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2764%27%20height=%2764%27%3E%3Cg%20fill=%27none%27%20stroke=%27%23241407%27%20stroke-width=%271%27%20opacity=%270.10%27%3E%3Cpath%20d=%27M32%200%20L64%2032%20L32%2064%20L0%2032%20Z%27/%3E%3Cpath%20d=%27M32%2012%20L52%2032%20L32%2052%20L12%2032%20Z%27/%3E%3Ccircle%20cx=%2732%27%20cy=%2732%27%20r=%276%27/%3E%3Cpath%20d=%27M32%200%20L32%2012%20M32%2052%20L32%2064%20M0%2032%20L12%2032%20M52%2032%20L64%2032%27/%3E%3C/g%3E%3C/svg%3E\")")
+
+;; the same lattice, cut fine, for a caption strip that has only a few
+;; pixels to carve in
+(define maharaja-jali-fine
+  "url(\"data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2724%27%20height=%2724%27%3E%3Cg%20fill=%27none%27%20stroke=%27%23241407%27%20stroke-width=%270.75%27%20opacity=%270.14%27%3E%3Cpath%20d=%27M12%200%20L24%2012%20L12%2024%20L0%2012%20Z%27/%3E%3Ccircle%20cx=%2712%27%20cy=%2712%27%20r=%272.5%27/%3E%3C/g%3E%3C/svg%3E\")")
+
+;; every panel is bossed at its four corners: a carved rosette, gold at
+;; the centre, the way a haveli door is fitted with a brass medallion
+(define maharaja-medallion
+  "url(\"data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2722%27%20height=%2722%27%3E%3Cg%20fill=%27none%27%20stroke=%27%23241407%27%20stroke-width=%271%27%3E%3Ccircle%20cx=%2711%27%20cy=%2711%27%20r=%279%27/%3E%3Ccircle%20cx=%2711%27%20cy=%2711%27%20r=%275.5%27/%3E%3Cpath%20d=%27M11%202%20L11%205.5%20M11%2016.5%20L11%2020%20M2%2011%20L5.5%2011%20M16.5%2011%20L20%2011%20M4.6%204.6%20L7.1%207.1%20M14.9%2014.9%20L17.4%2017.4%20M4.6%2017.4%20L7.1%2014.9%20M14.9%207.1%20L17.4%204.6%27/%3E%3C/g%3E%3Ccircle%20cx=%2711%27%20cy=%2711%27%20r=%272%27%20fill=%27%23b3821a%27%20stroke=%27%23241407%27%20stroke-width=%271%27/%3E%3C/svg%3E\")")
+
+(define-theme-skin! "maharaja" (string-append "
+/* the desk between the panels: a jali screen, cut in stone */
+.windows {
+  background-image: " maharaja-jali ";
+  background-size: 64px 64px;
+}
+/* a panel is ink around the edge and a hard drop, never a soft lift */
+.window, .window.active, .window.inactive,
+.window.active:has(.dash-state-focus),
+.window.active:has(.dash-state-editing) { box-shadow: none; }
+.window {
+  border: 2px solid var(--border-bg);
+  box-shadow: 4px 4px 0 rgba(36, 20, 7, 0.55);
+}
+.window.inactive { box-shadow: 2px 2px 0 rgba(36, 20, 7, 0.30); }
+.window.active { box-shadow: 5px 5px 0 var(--accent-fg); }
+.window.active:has(.dash-state-focus) { box-shadow: 6px 6px 0 var(--accent-fg); }
+/* the medallion at each corner, on every panel alike */
+.window::before {
+  content: ''; position: absolute; inset: 0; z-index: 7;
+  pointer-events: none;
+  background-image: " maharaja-medallion ", " maharaja-medallion ", " maharaja-medallion ", " maharaja-medallion ";
+  background-repeat: no-repeat;
+  background-position: 2px 2px, calc(100% - 24px) 2px, 2px calc(100% - 24px), calc(100% - 24px) calc(100% - 24px);
+}
+/* the page behind the words: a cover painting's colours, turned down
+   past where they'd name themselves, the way a plate's ground still
+   warms the paper under the ink. Jungle green, gold, a touch of
+   crimson and peacock, each pooling where a painted cover pools it. */
+.buf {
+  background-image:
+    radial-gradient(ellipse at 14% 18%, rgba(31, 107, 61, 0.05) 0%, rgba(31, 107, 61, 0) 55%),
+    radial-gradient(ellipse at 88% 12%, rgba(198, 40, 40, 0.035) 0%, rgba(198, 40, 40, 0) 50%),
+    radial-gradient(ellipse at 50% 92%, rgba(217, 164, 65, 0.06) 0%, rgba(217, 164, 65, 0) 60%),
+    radial-gradient(ellipse at 92% 88%, rgba(22, 58, 122, 0.035) 0%, rgba(22, 58, 122, 0) 55%);
+}
+/* the caption strip: gold quiet, the hero's blue when the panel speaks,
+   carved fine because a strip has only a few pixels to give it */
+.modeline, .window.active .modeline {
+  border-top: 2px solid var(--border-bg);
+  background-image: " maharaja-jali-fine ";
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700;
+}
+/* the title panel: a caption box ruled off the page, set in full caps */
+.buffer-header {
+  border-bottom: 2px solid var(--border-bg);
+  background-image: " maharaja-jali-fine ";
+  text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+}
+/* a tab is a paper tag stitched to the strip; the open one is inked in */
+.ml-tab {
+  border: 1px solid var(--border-bg); padding: 1px 7px;
+  text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+}
+.ml-tab-on {
+  background: var(--accent-fg); color: var(--window-bg);
+  border-color: var(--accent-fg);
+}
+.buffer-footer, .dash-live, .dash-top, .echo-bar, .echo-area { border-color: var(--border-bg); }
+.echo-bar, .echo-area {
+  border-width: 2px;
+  background-image: " maharaja-jali-fine ";
+}
+/* a prompt is the splash panel: the thickest rule and the deepest drop */
+.mb-panel {
+  border: 3px solid var(--border-bg); box-shadow: 8px 8px 0 rgba(36, 20, 7, 0.45);
+  background-image: " maharaja-jali-fine ";
+}
+.mb-head-title, .mb-sep-label, .mb-label {
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700;
+}
+"))
+
 ;;; --- the faces a package can count on -------------------------------------
 ;;; The theme owns the colours. These defaults own the shape of the syntax
 ;;; faces and give the Emacs names a home, so a package written for Emacs

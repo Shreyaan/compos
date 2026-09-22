@@ -22,7 +22,6 @@
 
 ;; two windows: the left one on b after a, the right one on d after c
 (define (t--wh-setup!)
-  (customize-set! 'autolayout-mode #f)
   (layout-target-set! #f)
   (for-each (lambda (b) (test-buffer! b "")) t--wh-all)
   (delete-other-windows!)
@@ -55,7 +54,7 @@
   "kill d in its pane: the pane shows c, the layout stays"
   (lambda ()
     (t--wh-setup!)
-    (tile-windows! 'main-right (list t--wh-b t--wh-d))
+    (tile-windows! 'two-pane (list t--wh-b t--wh-d))
     (let ((win (window-showing t--wh-d)))
       (buffer-kill! t--wh-d)
       (check-equal! (length (window-list)) 2 "the window stays")
@@ -67,7 +66,6 @@
   "the pane's past leads with a buffer the other window shows: the next one takes the place"
   (lambda ()
     (for-each (lambda (b) (test-buffer! b "")) t--wh-all)
-    (customize-set! 'autolayout-mode #f)
     (layout-target-set! #f)
     (delete-other-windows!)
     (switch-to-buffer! t--wh-b)

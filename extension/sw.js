@@ -303,7 +303,7 @@ const OPS = {
   // one per publication subdomain, refreshed only in a real tab).
   // The tab lives in the reader's own MINIMIZED window, so nothing
   // shows in the user's tab strip.
-  async snapshot({ url }) {
+  async snapshot({ url, wait }) {
     const t = await chrome.tabs.create({
       url,
       active: false,
@@ -322,8 +322,44 @@ const OPS = {
         };
         chrome.tabs.onUpdated.addListener(listener);
       });
-      // a script-rendered page needs a beat after "complete"
-      await new Promise((r) => setTimeout(r, 1200));
+      // A script-rendered page is not done when the load is, and nothing
+      // here polls for it. WAIT names a selector the caller knows the
+      // content by: a MutationObserver inside the page answers the instant
+      // that selector arrives, so the read costs exactly as long as the page
+      // took. Without a selector there is no event to name, so the observer
+      // waits for the DOM to stop changing instead, and a page that is
+      // already still answers at once rather than serving a flat beat.
+      // Amazon's cart is the case that made this necessary: it answers
+      // "complete" with an empty basket and fills it afterwards, so reading
+      // on "complete" reads a cart with nothing in it.
+      await chrome.scripting.executeScript({
+        target: { tabId: t.id },
+        func: (sel, cap, quiet) =>
+          new Promise((resolve) => {
+            const found = () => !!sel && !!document.querySelector(sel);
+            if (found()) return resolve(true);
+            let idle;
+            const stop = (v) => {
+              obs.disconnect();
+              clearTimeout(cutoff);
+              clearTimeout(idle);
+              resolve(v);
+            };
+            // no selector: the page is done when it goes QUIET for a beat
+            const settle = () => {
+              clearTimeout(idle);
+              idle = setTimeout(() => stop(false), quiet);
+            };
+            const cutoff = setTimeout(() => stop(false), cap);
+            const obs = new MutationObserver(() => {
+              if (found()) return stop(true);
+              if (!sel) settle();
+            });
+            obs.observe(document.documentElement, { childList: true, subtree: true });
+            if (!sel) settle();
+          }),
+        args: [wait || null, 8000, 250],
+      });
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: t.id },
         func: () => document.documentElement.outerHTML,

@@ -218,7 +218,7 @@ the selected window and the mode is that window's declared or automatic preferen
 | M16 — Foreign mode buffers | `mode-consolidate` | Another group has chats, including chats with similar names. | Do not include those windows or buffers in the operation. |
 | M17 — Return records | `mode-consolidate` | A source's quit or preview record still points to a transferred chat. | Remove or rewrite that stale return route. Later dismissal cannot resurrect the chat in that source. |
 | M18 — Later open | `mode-consolidate`, then `switch-to-buffer` for a new chat | After consolidation, open a new chat in the group from a different pane. | It joins the consolidated destination. It does not start a new chat stack. |
-| M19 — Later layout change | `mode-consolidate`, then each `C-x l` layout command | After consolidation, select columns, rows, grid, or a main-and-stack layout. | The consolidated window remains one window. Its internal chats do not become individual tiles. |
+| M19 — Later layout change | `mode-consolidate`, then each `C-x l` layout command | After consolidation, select each of the five layouts. | The consolidated window remains one window. Its internal chats do not become individual tiles. |
 | M20 — Restore after consolidation | `mode-consolidate`, `group-switch` away and back; **harness:** desktop restore | Switch groups or restore the desktop after consolidation. | The mode destination and separated invisible stacks survive. Old saved layouts do not reintroduce pre-consolidation duplicates. |
 | M21 — No eligible buffers | `mode-consolidate` | Run consolidation when the preferred mode has no eligible buffers. | Leave state unchanged and report that there is nothing to consolidate. |
 
@@ -247,7 +247,7 @@ the selected window and the mode is that window's declared or automatic preferen
 | L04 — Invisible same-group windows | `window-layout-rows` (`C-x l r`) | Select a different layout without explicitly asking to reveal invisible windows. | Rearrange the visible windows only. Invisible windows remain invisible. |
 | L05 — Invisible foreign windows | `window-layout-columns` (`C-x l c`) | Select a layout while another group owns invisible windows. | They remain in the other group, untouched. |
 | L06 — Global recency changes | `window-layout-columns` (`C-x l c`); **harness:** change recency headlessly | Touch hidden buffers or run background work, then select the same layout. | The visible window set does not change because recency changed. |
-| L07 — Change geometry | `C-x l r`, `C-x l c`, `C-x l g`, then `C-x l` plus an arrow | Change rows to columns, grid, or a main layout. | Each window carries its own stack, ownership, cursor, and return state into its new pane. |
+| L07 — Change geometry | `C-x l r`, `C-x l c`, `C-x l 2`, then `C-x l` plus an arrow | Change rows to columns or two-pane, then scroll the panes. | Each window carries its own stack, ownership, cursor, and return state into its new pane. |
 | L08 — Main direction | `C-x l` plus each arrow; see the direction mapping below | Choose each main-pane direction using the layout shortcuts. | The arrow names the main pane's position. Window stacks are not reversed or exchanged accidentally. |
 | L09 — Smaller target | `window-layout-two-pane` (`C-x l 2`) from a larger arrangement | Select a target with fewer panes than the current arrangement. | Preserve surplus windows as invisible windows owned by the same group. Do not merge their histories into survivors. |
 | L10 — Focus under smaller target | `other-window`, then `window-layout-two-pane` (`C-x l 2`) | Reduce the target while a later window is selected. | Preserve the selected logical window according to the stated main/focus policy. Do not silently discard it because it was late in traversal order. |
@@ -362,15 +362,13 @@ Run these cases through keyboard dispatch, starting with `C-x l`. See
 | Key after `C-x l` | Command | Meaning |
 | --- | --- | --- |
 | `l` | `window-layout` | Preview chooser |
-| `a` | `window-layout-adaptive` | Adaptive |
-| `2` | `window-layout-two-pane` | Two panes |
-| `c` | `window-layout-columns` | Columns |
-| `r` | `window-layout-rows` | Rows |
-| `g` | `window-layout-grid` | Grid |
-| Left arrow | `window-layout-main-right` | Main pane on the left; companions on the right |
-| Right arrow | `window-layout-main-left` | Main pane on the right; companions on the left |
-| Up arrow | `window-layout-main-bottom` | Main pane above; companions below |
-| Down arrow | `window-layout-main-top` | Main pane below; companions above |
+| `1` | `window-layout-single` | One window |
+| `2` | `window-layout-two-pane` | Two panes, 2/3 + 1/3 |
+| `=` | `window-layout-halves` | Two equal panes |
+| `c` | `window-layout-columns` | Three columns |
+| `r` | `window-layout-rows` | Two rows |
+| Right arrow | `layout-forward` | Move the panes one buffer forward |
+| Left arrow | `layout-backward` | Move the panes one buffer backward |
 | `f` | `window-layout-free` | Free layout |
 
 The current main-layout command suffix names the companions' side.
@@ -378,7 +376,8 @@ The arrow names the main pane's side.
 
 | Case | Command or trigger | Setup and action | Required result |
 | --- | --- | --- | --- |
-| K01 — Layout prefix | `C-x l a`, `C-x l 2`, `C-x l c`, `C-x l r`, `C-x l g` | Press C-x l, then each of a, 2, c, r, and g in separate runs. | Select adaptive, two-pane, columns, rows, and grid respectively. Each uses the window-preservation and group-boundary rules above. |
+| K01 — Layout prefix | `C-x l 1`, `C-x l 2`, `C-x l =`, `C-x l c`, `C-x l r` | Press C-x l, then each of 1, 2, =, c, and r in separate runs. | Select single, two-pane, halves, columns, and rows respectively. Each uses the window-preservation and group-boundary rules above. |
+| K01b — Scroll the layout | `C-x l <right>`, `C-x l <left>` | Press C-x l, then an arrow. | Move the panes one buffer along the frame's strip. The strip is cyclic, so neither direction reaches an end. |
 | K02 — Main direction | `C-x l` plus left, right, up, down | Press C-x l followed by left, right, up, or down. | Place the main pane on the named side. Preserve logical window stacks while changing pane geometry. |
 | K03 — Chooser | `C-x l l`, then `RET` / `C-g` | Press C-x l l, preview layouts, then accept or cancel. | Open the chooser and follow L15–L17. Cancellation restores the original arrangement. |
 | K04 — Free layout | `window-layout-free` (`C-x l f`) | Press C-x l f. | Select free layout. Mode routing, consolidation, and group ownership still apply. |

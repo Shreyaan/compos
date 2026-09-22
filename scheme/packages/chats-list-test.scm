@@ -354,6 +354,26 @@
     (check-equal! (ibuffer-row-size "*zz-chats-c*") #f "no transcript yet is no size")
     (chats-test-reset!)))
 
+(deftest 'chats-rest-is-mru-with-the-group-in-the-row
+  "the list rests flat in MRU order and every row wears its chat's group"
+  (lambda ()
+    (let ((ids (chats-test-open! 'none 'recent)))
+      (check-equal! (ibuffer-view-default *chat-list* 'grouping) 'none
+                    "the registered view rests flat")
+      (check-equal! (ibuffer-view-default *chat-list* 'sort) 'recent
+                    "and in most recently used order")
+      (check-equal! (chats-test-headings) '() "a flat list has no sections")
+      (check-true! (member 'group (map ibuffer-field-tag
+                                       (chat-list-fields *chat-list* *chat-list-compact-fields*)))
+                   "the group is a column of the flat row")
+      (check-equal! (ibuffer-row-group-label "*zz-chats-a*") (group-short-name (car ids))
+                    "and the cell names the chat's own group")
+      (ibuffer-set-grouping! 'group *chat-list*)
+      (check-equal! (member 'group (map ibuffer-field-tag
+                                        (chat-list-fields *chat-list* *chat-list-compact-fields*)))
+                    #f "sectioning by group drops the column rather than say it twice")
+      (chats-test-reset!))))
+
 (deftest 'chats-fold-hides-a-section
   "a folded heading stands for its rows and stays a row of its own"
   (lambda ()

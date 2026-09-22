@@ -105,21 +105,22 @@
       (buffer-create scratch)
       (buffer-append! scratch
         (string-append "# Scratch — " (scratch--label owner) "\n\n")))
-    ;; set-mode! is current-buffer based, and a mode belongs to the buffer,
-    ;; not to a window: give a new scratch its mode without displaying it.
-    (scratch--set-mode! scratch)
     (let* ((group (or (buffer-group owner) (group-ensure! owner)))
-           (already-managed
+           (legacy?
              (and existed
-                  (equal? (buffer-group-role scratch group) "scratch"))))
-      ;; A legacy writing scratch becomes an ordinary, unrendered text buffer
-      ;; on first use. Disabling its old presentation preserves the text.
-      (unless already-managed
+                  (not (equal? (buffer-group-role scratch group) "scratch")))))
+      ;; A legacy writing scratch exists outside the group. Its old presentation goes
+      ;; before scratch-mode runs, so morg's own presentation is the last word.
+      ;; A new scratch is not legacy: this must not strip morg's setup.
+      (when legacy?
         (when (minor-mode-on? scratch "writing-mode")
           (disable-minor-mode! scratch "writing-mode"))
         (buffer-set-local! scratch 'render-mode #f)
         (buffer-set-local! scratch 'preview-renderer #f)
         (buffer-set-local! scratch 'visual-line-mode #f))
+      ;; set-mode! is current-buffer based, and a mode belongs to the buffer,
+      ;; not to a window: give a new scratch its mode without displaying it.
+      (scratch--set-mode! scratch)
       (scratch--attach-group! owner scratch group))
     (scratch--inherit-llm! owner scratch)))
 

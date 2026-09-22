@@ -20,6 +20,10 @@ defmodule Compos.Ui.EditorLiveTest do
   # not. Ask for the element.
   defp which_key_up?(view), do: has_element?(view, ".which-key .wk-title")
 
+  # the page's private debounce token: the test stands in for a timer that
+  # fires after the page already retired it
+  defp wk_token(view), do: :sys.get_state(view.pid).socket.assigns.wk_token
+
   defp which_key(view, specs, tries \\ 60) do
     keys(view, specs)
     wait_for_which_key(view, tries)
@@ -624,8 +628,13 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, view, _} = live(conn, "/")
     # what it must show is A PANEL after the delay, never a particular
     # binding: a binding is a preference and moves.
-    assert which_key(view, ["C-x"]) =~ ~s(class="which-key)
+    html = which_key(view, ["C-x"])
+    assert html =~ ~s(class="which-key)
     assert which_key_up?(view)
+    # the panel names the prefix it belongs to: the client drops the
+    # filter of the prefix before it when this changes
+    assert html =~ ~s(data-pending="C-x")
+    assert html =~ ~s(phx-hook="WhichKey")
 
     keys(view, ["C-g"])
   end
@@ -654,6 +663,50 @@ defmodule Compos.Ui.EditorLiveTest do
     refute which_key_up?(view), "and the armed timer must not draw one later"
 
     keys(view, ["C-g"])
+  end
+
+  # A timer armed for one chord can still be in flight when a later chord
+  # starts -- Process.cancel_timer is best-effort, and a coalesced refresh
+  # (drain/1) can skip over the momentary empty pending between two chords.
+  # Simulate the race directly: the message a stale timer sends carries the
+  # token of the arm it belongs to, so a token the page has retired must be
+  # ignored rather than sticking wk_shown for good.
+  test "a stale which-key timer for an abandoned chord draws nothing", %{conn: conn} do
+    {:ok, view, _} = live(conn, "/")
+
+    keys(view, ["C-x"])
+    stale = wk_token(view)
+    # the chord completes before the real timer would ever fire
+    keys(view, ["1"])
+    # the message that timer would have sent, arriving late
+    send(view.pid, {:which_key_show, stale})
+    render(view)
+    refute which_key_up?(view), "a stale timer for a chord that already ended draws nothing"
+
+    # the guard must not wedge the mechanism shut: a real chord afterwards
+    # still shows, once its own delay passes
+    assert which_key(view, ["C-x"]) =~ ~s(class="which-key)
+    keys(view, ["1"])
+  end
+
+  # The keys of a chord are not its identity. C-x, a command, then C-x again
+  # is the commonest pair a reader types, and a stale timer from the first
+  # C-x carries the same keys as the second one. Keys as the identity let
+  # that message answer for the second chord: the panel drew at once, and
+  # every prefix after it drew at once too.
+  test "a stale timer from an earlier press of the same prefix draws nothing", %{conn: conn} do
+    {:ok, view, _} = live(conn, "/")
+
+    keys(view, ["C-x"])
+    stale = wk_token(view)
+    keys(view, ["1"])
+    # the same prefix again, its own delay still running
+    keys(view, ["C-x"])
+    send(view.pid, {:which_key_show, stale})
+    render(view)
+    refute which_key_up?(view), "the first C-x timer must not show the second C-x panel"
+
+    keys(view, ["1"])
   end
 
   test "which-key renders ordered modifier groups with filter metadata", %{conn: conn} do

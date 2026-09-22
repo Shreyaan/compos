@@ -377,3 +377,24 @@
         (run-command "quit-window")
         (check-equal! (current-buffer) "*zz-db-a*" "the final window stays on its buffer")
         (check-true! (buffer-known? "*zz-db-a*") "the final buffer is not killed")))))
+
+(deftest 'a-buffer-shows-in-one-window-at-a-time
+  "a display of a visible buffer takes it out of the window that had it"
+  (lambda ()
+    (t--db-with t--db-wide
+      (lambda ()
+        (buffer-create "*zz-db-a*")
+        (buffer-create "*zz-db-b*")
+        (buffer-create "*zz-db-c*")
+        (let* ((home (active-window))
+               (other (display-buffer "*zz-db-a*")))
+          (display-buffer-in-window! home "*zz-db-b*")
+          (check-equal! (window-showing "*zz-db-a*") other "a sits in the other window")
+          (display-buffer-in-window! home "*zz-db-a*")
+          (check-equal! (length (filter (lambda (w) (equal? (cadr w) "*zz-db-a*"))
+                                        (window-list)))
+                        1 "one window, never two")
+          (check-equal! (window-showing "*zz-db-a*") home "the display moved it here")
+          (check-false! (equal? (window-buffer other) "*zz-db-a*")
+                        "the window that had it reveals something else"))))))
+

@@ -133,15 +133,111 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-next-color)
   (+ 1 (modulo (- *group-next-id* 1) *group-colors*)))
 
-(define (group-record-by-id id)
-  (let loop ((records *group-records*))
+;;; --- pseudo groups ----------------------------------------------------------
+;;
+;; A pseudo group has a name and members, and no record of its own. A
+;; function answers the members each time somebody asks, so the
+;; membership follows the editor and not the buffer locals. "Last chats"
+;; is the first one: the chats you used most recently.
+;;
+;; The lookups below answer a pseudo group with a record of the normal
+;; shape, so the name, the colour, the label and the switcher need no
+;; special case. The record never joins *group-records*, so save,
+;; restore, rename, dissolve and magic grouping never see one. Only
+;; membership diverts: group-buffers calls the function.
+
+(defvar '*pseudo-group-records* '())    ; records, in the order declared
+(defvar '*pseudo-group-members* '())    ; (ID . FN)
+
+;; define-pseudo-group! writes this prefix, so a string that carries it
+;; names a pseudo group and never a group a person founded.
+(define (pseudo-group-id? value)
+  (and (string? value) (string-prefix? "pseudo:" value)))
+
+(define (pseudo-record-by-id id)
+  (let loop ((records *pseudo-group-records*))
     (cond ((null? records) #f)
           ((equal? (group-record-id (car records)) id) (car records))
           (else (loop (cdr records))))))
 
+(define (pseudo-record-by-name name)
+  (let loop ((records *pseudo-group-records*))
+    (cond ((null? records) #f)
+          ((equal? (group-record-name (car records)) name) (car records))
+          (else (loop (cdr records))))))
+
+;; Name the group, and give FN the job of answering its members. FN
+;; answers buffer names, best first. A second call with the same name
+;; replaces the function, so a reload declares the group once more.
+(define (define-pseudo-group! name fn)
+  (let* ((id (string-append "pseudo:" (group-home-slug name)))
+         (record (list id name #f #f "quiet" #f (group-next-color) #f #f '())))
+    (set! *pseudo-group-records*
+          (append (remove (lambda (r) (equal? (group-record-id r) id))
+                          *pseudo-group-records*)
+                  (list record)))
+    (set! *pseudo-group-members*
+          (cons (list id fn)
+                (remove (lambda (e) (equal? (car e) id))
+                        *pseudo-group-members*)))
+    id))
+
+;; take a pseudo group away again
+(define (undefine-pseudo-group! g)
+  (let* ((record (if (pseudo-group-id? g)
+                     (pseudo-record-by-id g)
+                     (pseudo-record-by-name g)))
+         (id (and record (group-record-id record))))
+    (when id
+      (set! *pseudo-group-records*
+            (remove (lambda (r) (equal? (group-record-id r) id))
+                    *pseudo-group-records*))
+      (set! *pseudo-group-members*
+            (remove (lambda (e) (equal? (car e) id)) *pseudo-group-members*)))
+    id))
+
+(define (pseudo-group-ids)
+  (map group-record-id *pseudo-group-records*))
+
+(define (pseudo-group-names)
+  (map group-record-name *pseudo-group-records*))
+
+;; the members now: the function's answer, less the buffers that went
+(define (pseudo-group-buffers g)
+  (let ((entry (assoc (and (pseudo-group-id? g) g) *pseudo-group-members*)))
+    (if entry (filter buffer-known? ((cadr entry))) '())))
+
+;; every pseudo group BUF belongs to now
+(define (buffer-pseudo-group-ids buf)
+  (filter (lambda (id) (and (member buf (pseudo-group-buffers id)) #t))
+          (pseudo-group-ids)))
+
+(defcustom 'last-chats-limit 3
+  "How many chats the Last chats pseudo group gathers."
+  'group 'groups 'type 'number)
+
+;; The chats you used most recently, the most recent first. The recency
+;; ring holds every buffer, so the walk stops when it has enough chats.
+(define (last-chats)
+  (let loop ((rest (buffer-list-mru)) (out '()) (n 0))
+    (cond ((or (null? rest) (>= n last-chats-limit)) (reverse out))
+          ((and (buffer-known? (car rest)) (chat-buffer? (car rest)))
+           (loop (cdr rest) (cons (car rest) out) (+ n 1)))
+          (else (loop (cdr rest) out n)))))
+
+(define-pseudo-group! "Last chats" last-chats)
+
+(define (group-record-by-id id)
+  (if (pseudo-group-id? id)
+      (pseudo-record-by-id id)
+      (let loop ((records *group-records*))
+        (cond ((null? records) #f)
+              ((equal? (group-record-id (car records)) id) (car records))
+              (else (loop (cdr records)))))))
+
 (define (group-record-by-name name)
   (let loop ((records *group-records*))
-    (cond ((null? records) #f)
+    (cond ((null? records) (pseudo-record-by-name name))
           ((or (equal? (group-record-name (car records)) name)
                (equal? (group-record-origin (car records)) name))
            (car records))
@@ -1202,6 +1298,27 @@ is forgotten and that group falls back to creation order in the switcher."
 ;;; back to the layout you left behind; a scene asserts one. Two different
 ;;; questions — "where was I" and "build me this" — so two verbs.
 
+;; App windows are identified by the persistent 'app-id buffer-local.
+;; An app can assign the same id to its listing, detail, and auxiliary buffers.
+(domain! 'windows)
+(effects! '(read))
+(define (app-windows app-id)
+  "Return visible windows whose buffers belong to APP-ID."
+  (filter (lambda (row)
+            (equal? (buffer-local (cadr row) 'app-id) app-id))
+          (window-list)))
+
+(domain! 'buffers)
+(effects! '(write display))
+(define (app-move-buffers app-id destination)
+  "Move every known buffer with APP-ID to DESTINATION, including visible app windows."
+  (let ((buffers (filter (lambda (buf)
+                           (and (buffer-known? buf)
+                                (equal? (buffer-local buf 'app-id) app-id)))
+                         (buffer-list))))
+    (group-move-buffers-to! buffers destination)
+    buffers))
+
 (define *scenes* '())             ; ((group-name spec) ...) — by NAME, not id:
                                   ; a declaration outlives the record it names
 
@@ -1397,6 +1514,19 @@ is forgotten and that group falls back to creation order in the switcher."
                                 (group-ids-mru))))
             (if (pair? recent) (car recent) (car common))))))
 
+;; #t when ID is a pseudo group and every pane shows a member of it
+(define (group-pseudo-here? id)
+  (and (pseudo-group-id? id)
+       (let ((members (pseudo-group-buffers id))
+             (float (float-window)))
+         (let loop ((rows (window-list)))
+           (cond ((null? rows) #t)
+                 ((or (equal? (car (car rows)) float)
+                      (float--class? (cadr (car rows))))
+                  (loop (cdr rows)))
+                 ((member (cadr (car rows)) members) (loop (cdr rows)))
+                 (else #f))))))
+
 (define (group-current-recalculate!)
   ;; A look is not your work. While one is on screen nothing it shows is
   ;; promoted, entered, or saved: you are standing where you were standing.
@@ -1409,9 +1539,13 @@ is forgotten and that group falls back to creation order in the switcher."
           (let* ((pinned (group-pinned))
                  (rows (group-visible-membership-rows))
                  (current (frame-group))
-                 (next (if pinned
-                           pinned
-                           (group-current-choice (group-common-memberships rows) current))))
+                 (next (cond (pinned pinned)
+                             ;; A pseudo group holds the frame while its
+                             ;; members fill the panes. The members carry
+                             ;; no mark, so the rows above cannot see it.
+                             ((group-pseudo-here? current) current)
+                             (else (group-current-choice
+                                     (group-common-memberships rows) current)))))
             (unless (equal? next current)
               ;; Leaving a group because a pane shows a foreign buffer saves the
               ;; layout as it is, foreign pane and all (docs/groups.md, Save):
@@ -1535,6 +1669,24 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'group-spawn-target
   "(group-spawn-target [BUF]) -> the group a new buffer joins: the group of the buffer in the window that made it, else the frame's group")
 (catalog-meta! 'function "group-spawn-target" 'domain 'buffers 'effects '(read))
+
+(define (buffer-join-here! buf)
+  ;; A buffer opens in the group it was launched from: the group of the
+  ;; window that opened it, else the frame's. It joins that group on the way
+  ;; in, so nothing you open carries the frame off to another group's saved
+  ;; layout. A special view answers no membership, and a chat keeps the group
+  ;; that is its identity, so neither joins.
+  (let ((id (and (not *group-current-inhibit*) (group-spawn-target buf))))
+    (and id
+         (buffer-known? buf)
+         (not (chat-buffer? buf))
+         (group-context-memberships buf)
+         (not (buffer-in-group? buf id))
+         (buffer-add-group! buf id))))
+
+(public! 'buffer-join-here!
+  "(buffer-join-here! BUF) -> put BUF in the group it was launched from; the group id, or #f when it cannot join")
+(catalog-meta! 'function "buffer-join-here!" 'domain 'buffers 'effects '(write))
 
 ;; Creation is the shared placement boundary. Commands do not each need to
 ;; remember this rule, and waking a dormant buffer does not run the hook.
@@ -2593,7 +2745,10 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; members back: each work buffer joins the parent. A group with no live
 ;; parent dissolves as before, and the buffers keep only their other groups.
 (define (group-dissolve! g)
-  (let* ((id (begin (group-migrate-live!) (group-resolve-id g)))
+  (let* ((found (begin (group-migrate-live!) (group-resolve-id g)))
+         (id (if (pseudo-group-id? found)
+                 (begin (message "A pseudo group has nothing to dissolve") #f)
+                 found))
          (parent (and id (group-parent id))))
     (when id
       (for-each
@@ -2677,22 +2832,41 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; JEV's first grouping decision is made from the first running summary.
 ;; The hook is deliberately installed here, after the group primitives exist.
+(define (jev-group-option i)
+  (string->symbol (string-append "g" (number->string i))))
+
+(define (jev-group-options ids)
+  (let loop ((rest ids) (i 0) (out '()))
+    (if (null? rest) (reverse out)
+        (loop (cdr rest) (+ i 1) (cons (list (jev-group-option i) (car rest)) out)))))
+
 (define (jev-buffer-group &optional buf summary k)
-  "Return JEV's suggested existing group for BUF, or #f. With K, answer asynchronously."
+  "Return JEV's suggested existing group id for BUF, or #f. With K, answer asynchronously."
   (let* ((target (or buf (current-buffer)))
          (text (or summary
                    (buffer-local target 'chat-summary)
                    (buffer-local target 'chat-title)
                    ""))
          (ids (group-ids))
-         (options (append
-                    (apply append
-                      (map (lambda (id)
-                             (list (group-name id)
-                                   (or (group-meta id)
-                                       (string-append "Existing group " (group-name id)))))
-                           ids))
-                    (list "none" "No existing group matches this summary.")))
+         ;; A group name is free text: it repeats (two groups called
+         ;; browse), and it holds spaces and stars (JEV / LAYA,
+         ;; *amazon*). So it cannot be an option key -- the keys are g0,
+         ;; g1, ... the way notmuch's are t0 and k0. Three things follow:
+         ;; criteria encodes as the object the endpoint requires (a plist
+         ;; of strings encodes as an array, and every call 422'd on
+         ;; body.questions.group.choice.criteria), the name moves into the
+         ;; description where it belongs, and the answer resolves to one
+         ;; id rather than a name two groups answer to.
+         (options (jev-group-options ids))
+         (criteria (append
+                     (apply append
+                       (map (lambda (row)
+                              (let ((id (nth 1 row)))
+                                (list (car row)
+                                      (string-append (group-name id) " - "
+                                                     (or (group-meta id) "(no description)")))))
+                            options))
+                     (list 'none "No existing group matches this summary.")))
          (state (string-append
                   "Chat summary:\n" text
                   "\n\nExisting groups and their descriptions:\n"
@@ -2706,18 +2880,23 @@ is forgotten and that group falls back to creation order in the switcher."
          (question (list 'group
                          (jev-choice
                            "Which existing group best matches this chat summary? Choose none unless the match is clear."
-                           options))))
+                           criteria)))
+         ;; the choice comes back as the option key, so read the id off it
+         (chosen (lambda (reply)
+                   (let ((pick (and reply (jev-answer-choice reply 'group))))
+                     (cond ((not (string? pick)) #f)
+                           ((equal? pick "none") "none")
+                           (else (let ((hit (assoc (string->symbol pick) options)))
+                                   (and hit (nth 1 hit)))))))))
     (if (or (not (string? text)) (equal? (string-trim text) "") (null? ids)
             (not (and (boundp 'jev-systemone) (boundp 'jev-answer-choice))))
         (if k (k #f) #f)
         (if k
-            (jev-ask state question
-              (lambda (reply) (k (and reply (jev-answer-choice reply 'group)))))
-            (let ((reply (jev-systemone state question)))
-              (and reply (jev-answer-choice reply 'group)))))))
+            (jev-ask state question (lambda (reply) (k (chosen reply))))
+            (chosen (jev-systemone state question))))))
 
 (public! 'jev-buffer-group
-  "(jev-buffer-group BUF SUMMARY K) — ask JEV which existing group matches SUMMARY; K gets its name or #f")
+  "(jev-buffer-group BUF SUMMARY K) — ask JEV which existing group matches SUMMARY; K gets its id, \"none\", or #f")
 (catalog-meta! 'function "jev-buffer-group" 'domain 'jev 'effects '(read external execute spend))
 
 (define (buffer-magic-group! buf destination)
@@ -2908,6 +3087,8 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((id (begin (group-migrate-live!) (group-resolve-id old)))
         (clean (string-trim new)))
     (cond ((not id) (message "No such group"))
+          ((pseudo-group-id? id)
+           (message "A pseudo group keeps the name its definition gives it"))
           ((equal? clean "") (message "Group needs a name"))
           ((group-record-by-name clean)
            (message (string-append "Group " clean " already exists")))
@@ -2947,7 +3128,7 @@ is forgotten and that group falls back to creation order in the switcher."
            "row at point when nothing is marked. `/` narrows as you type "
            "and `\\` widens by one.")
     'buffer *groups-buffer*
-    'rows (lambda (buf) (list-keep buf (group-names)))
+    'rows (lambda (buf) (list-keep buf (group-names-all)))
     'columns (lambda (buf)
                (list (list "" 1)
                      (list "group" 24)
@@ -2957,7 +3138,7 @@ is forgotten and that group falls back to creation order in the switcher."
     'cells group-cells
     'title (lambda (buf) "Groups")
     'meta groups-meta
-    'total (lambda (buf) (length (group-names)))
+    'total (lambda (buf) (length (group-names-all)))
     'footer (lambda (buf)
               '(("RET" "switch") ("SPC" "mark") ("*" "all") ("r" "rename")
                 ("d" "describe") ("n" "noise") ("x" "dissolve")
@@ -3010,15 +3191,23 @@ is forgotten and that group falls back to creation order in the switcher."
                  '("mode-name" "group-id" "group-ids" "group" "companion-of")))))))
 
 (define (group-buffers g)
-  (group-members-of (buffer-list) (group-resolve-id g)))
+  (let ((id (group-resolve-id g)))
+    (if (pseudo-group-id? id)
+        (pseudo-group-buffers id)
+        (group-members-of (buffer-list) id))))
 
 ;; Members in MRU order; buffers never visited this session trail.
 ;; A group is a set, so the list dedupes by name.
 (define (group-buffers-mru g)
-  (let* ((id (group-resolve-id g))
-         (mru (group-members-of (buffer-list-mru) id)))
-    (dedupe-names
-      (append mru (remove (lambda (b) (member b mru)) (group-buffers id))))))
+  (let ((id (group-resolve-id g)))
+    ;; a pseudo group answers in its own order, and that order is the point
+    (if (pseudo-group-id? id)
+        (pseudo-group-buffers id)
+        (let ((mru (group-members-of (buffer-list-mru) id)))
+          (dedupe-names
+            (append mru
+                    (remove (lambda (b) (member b mru))
+                            (group-buffers id))))))))
 
 (define (group-user-buffers-mru g)
   (filter (lambda (b) (not (buffer-context-only? b)))
@@ -3042,6 +3231,30 @@ is forgotten and that group falls back to creation order in the switcher."
     (let ((g (frame-group)))
       (if g (group-fill-buffers g)
           (filter (lambda (b) (not (buffer-context-only? b))) (buffer-list-mru))))))
+
+;; The Cmd-up and Cmd-down walk (window.scm) reads the group itself, in MRU
+;; order and in full. The fill pool is a different list for a different
+;; question: it sorts the chats to the back and drops the scratch and the
+;; views, because those are poor choices for a pane a layout must fill.
+;; The walk makes no such choice. It goes everywhere the group goes.
+;;
+;; The group is the one C-` walks: the frame's, when the pane's buffer
+;; belongs to it, else the pane's buffer's own. A buffer in no group walks
+;; the other buffers in no group.
+;;
+;; The pane's buffer decides, not (current-buffer): a prompt makes the
+;; minibuffer current, and the walk must still answer for the window the
+;; user stands in.
+(set! window-walk-source
+  (lambda ()
+    (let* ((here (window-buffer (active-window)))
+           (frame (frame-group))
+           (gid (if (and frame (buffer-in-group? here frame))
+                    frame
+                    (buffer-group here))))
+      (filter (lambda (b) (group-cycle-member? b gid)) (buffer-list-mru)))))
+
+
 (set! window-fill-primary?
   (lambda (b) (or (not (frame-group)) (group-primary-fill? b))))
 (set! window-fill-member?
@@ -3157,6 +3370,7 @@ is forgotten and that group falls back to creation order in the switcher."
             (let ((next (group-kill-previous-member group name win (cadr place))))
               (when next (window-set-buffer! win next))))))
       places)
+    (layout-strip-forget! name)
     (lambda ()
       (for-each
         (lambda (place)
@@ -3246,6 +3460,12 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-names)
   (group-migrate-live!)
   (map group-record-name *group-records*))
+
+;; the groups a reader chooses between: the founded ones, then the
+;; pseudo groups. A destination prompt keeps to group-names, because a
+;; buffer cannot join a group that computes its own members.
+(define (group-names-all)
+  (append (group-names) (pseudo-group-names)))
 
 ;; the group's chat counts by NAME as well as by mode: a chat made by
 ;; group-chat but never shown has no mode yet, and it is still not a
@@ -3536,11 +3756,7 @@ is forgotten and that group falls back to creation order in the switcher."
         ;; The frame's chosen layout is the frame's to keep: a C-x l pick
         ;; survives a pane opening, so the chat arranges by that name and
         ;; the width decides only for a frame that never chose.
-        (let ((panes (append (layout-target-visible-buffers) (list buf)))
-              (chosen (layout-target)))
-          (if chosen
-              (tile-windows! chosen panes)
-              (tile-adaptive-windows! panes)))
+        (tile-default-windows! (append (layout-target-visible-buffers) (list buf)))
         (let ((chat-window (window-showing buf)))
           (when chat-window (select-window! chat-window)))
         (switch-to-buffer! buf))))
@@ -3846,11 +4062,15 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; row gives. group-ensure-record! still refuses an id, so a dangling
 ;; membership cannot found a group named after itself.
 (define (group-add-buffers-to! buffers destination)
-  (let ((id (group-ensure-record! destination))
+  (let ((id (if (pseudo-group-id? (group-resolve-id destination))
+                #f
+                (group-ensure-record! destination)))
         (changed 0)
         (skipped 0))
     (if (not id)
-        (message "No destination group")
+        (message (if (group-resolve-id destination)
+                     "That group computes its own members"
+                     "No destination group"))
         (begin
           (for-each
             (lambda (buf)
@@ -3943,9 +4163,7 @@ is forgotten and that group falls back to creation order in the switcher."
                     (display-buffer buf)))
                 mine)
       (let ((w (window-showing (car mine))))
-        (when w (select-window! w)))
-      (when autolayout-mode
-        (autolayout-apply! (car mine))))))
+        (when w (select-window! w))))))
 
 ;; The screen already IS the destination's arrangement when every pane
 ;; shows a buffer of that group, or one of the buffers that is joining
@@ -4415,6 +4633,13 @@ is forgotten and that group falls back to creation order in the switcher."
   'buffers)
 (effects! '(write))
 (public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
+(public! 'define-pseudo-group!
+  "(define-pseudo-group! NAME FN) — a group whose members FN answers, best first")
+(public! 'undefine-pseudo-group! "(undefine-pseudo-group! G) — take a pseudo group away again")
+(public! 'pseudo-group-buffers "(pseudo-group-buffers G) -> the members a pseudo group has now")
+(public! 'pseudo-group-ids "(pseudo-group-ids) -> the id of every pseudo group")
+(public! 'group-names-all "(group-names-all) -> every group name, the pseudo groups last")
+(public! 'last-chats "(last-chats) -> the chats you used most recently, most recent first")
 (public! 'group-buffers-as "(group-buffers-as GROUP ROLE) -> buffers with that group-relative role")
 (public! 'group-buffer-as "(group-buffer-as GROUP ROLE) -> most recent buffer with ROLE, or #f")
 (public! 'group-window-as "(group-window-as GROUP ROLE) -> visible window for ROLE, or #f")
@@ -4448,6 +4673,12 @@ is forgotten and that group falls back to creation order in the switcher."
 (catalog-meta! 'function "group-color-hex" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "buffer-filename-face" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-buffers" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "define-pseudo-group!" 'domain 'buffers 'effects '(write))
+(catalog-meta! 'function "undefine-pseudo-group!" 'domain 'buffers 'effects '(write))
+(catalog-meta! 'function "pseudo-group-buffers" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "pseudo-group-ids" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "group-names-all" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "last-chats" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "group-counts" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-counts-report" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-chat" 'domain 'buffers 'effects '(write))

@@ -1,21 +1,16 @@
-;;; layouts.scm — monitor-width-aware window policy.
+;;; layouts.scm — window layout policy.
 ;;;
-;;; Width is measured in usable text columns, not pixels. That makes the same
-;;; breakpoints respond naturally to monitor size, browser width, sidebars,
-;;; font size, and display scaling. The tiling mechanics remain in editor.scm;
-;;; this package owns only the policy that chooses among them.
+;;; The frame has five layouts and nothing else: single, two-pane, halves,
+;;; columns and rows. Each one holds a fixed number of panes and shows a
+;;; run of the frame's buffer strip, so each one goes on for ever in both
+;;; directions. The tiling mechanics remain in window.scm; this package
+;;; owns only the policy and the overview.
 
 (category! 'windows)
 (domain! 'windows)
 (effects! '(write))
 
 (defgroup 'windows "Window layout and responsive popup policy.")
-
-;; Below this usable frame width, layouts stack and popups use the bottom.
-(define window-layout-compact-cols 100)
-
-;; At this usable frame width, three panes become columns and four become a grid.
-(define window-layout-wide-cols 200)
 
 ;; peek! and the ripgrep preview (editor.scm) read this one.
 (defcustom 'peek-max-file-size 1048576
@@ -41,18 +36,10 @@
   "Rows a page scroll keeps from the screen before it. A page overlaps by this much and never leaves a gap (Emacs next-screen-context-lines)."
   'group 'windows 'type 'number)
 
-;; The main layouts (editor.scm layout--main-stack!) read these two.
+;; The two-pane layout reads this one.
 (defcustom 'window-layout-main-ratio 0.62
-  "The main pane's share of the frame in the main layouts: a fraction between 0.3 and 0.9."
+  "The first pane's share of the frame in the two-pane layout: a fraction between 0.3 and 0.9."
   'group 'windows 'type 'number)
-
-(defcustom 'window-layout-stack 'column
-  "How the other panes arrange beside the main pane: 'column stacks them, 'grid tiles them."
-  'group 'windows 'type 'choice)
-
-(defcustom 'window-layout-main-side 'left
-  "Where the auto layout puts the main pane: 'left or 'right."
-  'group 'windows 'type 'choice)
 
 (defcustom '*display-buffer-base-action* '()
   "Display actions tried after the rule for a buffer and before the fallback: a list of pop-up-window, reuse-window, use-some-window, same-window."
@@ -62,29 +49,6 @@
   '(reuse-window mode-window pop-up-window use-some-window same-window)
   "Display actions tried last for a buffer with no rule."
   'group 'windows 'type 'list)
-
-;; Deliberately pure: agents can inspect the choice before they change a frame.
-(define (window-layout-for-width width pane-count)
-  (cond
-    ((< width window-layout-compact-cols) 'main-bottom)
-    ((< width window-layout-wide-cols) 'main-right)
-    ((<= pane-count 2) 'main-right)
-    ((equal? pane-count 3) 'columns)
-    (else 'grid)))
-
-(define (tile-adaptive-windows! buffers)
-  (let ((panes (layout--known-buffers buffers)))
-    (tile-windows!
-      (window-layout-for-width (frame-cols) (length panes))
-      panes)))
-
-(define (tile-visible-adaptive! &optional requested)
-  (let ((panes (or requested (layout-request-buffers)))
-        (focus (layout-focus-token)))
-    (when (pair? panes)
-      (tile-adaptive-windows! panes)
-      (layout-focus-restore! focus)
-      panes)))
 
 ;;; --- transient frames -------------------------------------------------------
 ;;; A transient frame mode borrows the frame and gives it back. It records
@@ -138,8 +102,10 @@
   "(transient-frame-abandon! NAME) — drop NAME's record without restoring anything")
 
 ;;; --- tile-all: the overview -------------------------------------------------;;; --- tile-all: the overview -------------------------------------------------
-;;; tile-all is the context overview. It tiles each buffer in the current
-;;; group or project and locks the frame. Keys select a tile and do not edit.
+;;; tile-all is the context overview. It puts the current group or project
+;;; on the frame in three columns and locks it. The arrows select a tile,
+;;; and an arrow at the edge scrolls the columns along the group, so the
+;;; overview reaches every member. Keys select a tile and do not edit.
 ;;; SPC pops the selection out into a new group. The new group
 ;;; records the group the frame was in as its parent, and group-dissolve
 ;;; merges the members back into that parent. q restores the layout and
@@ -191,7 +157,7 @@
         (list "ESC" "overview-quit")))
 
 (define (overview--hint!)
-  (message "Overview: arrows select · m marks · SPC pops out into a new group · q quits"))
+  (message "Overview: arrows select and scroll · m marks · SPC pops out into a new group · q quits"))
 
 (define (overview-enter!)
   (if (overview-active?)
@@ -201,7 +167,7 @@
         (cond
           ((null? buffers)
            (message "Tile all is available only in a group or project") #f)
-          ((not (tile-windows! 'grid buffers)) (arrangement-drop! token) #f)
+          ((not (tile-visible-windows! 'columns buffers)) (arrangement-drop! token) #f)
           (else
             (set-frame-local! 'overview-marked '())
             (set-frame-local! 'overview-active #t)
@@ -277,7 +243,7 @@
                     (switch-to-group! id)))))))))
 
 (define-command "tile-all"
-  "Open the current group or project in one locked grid"
+  "Open the current group or project in locked columns"
   overview-enter!)
 (define-command "overview-left" "Select the overview tile to the left"
   (lambda () (overview--move! 'left)))
@@ -295,184 +261,12 @@
 (define-command "overview-quit" "Leave the overview and restore the layout"
   overview-quit!)
 
-(define-command "window-layout-adaptive"
-  "Tile visible buffers for the selected frame's usable width; the choice is the frame's target layout"
-  (lambda ()
-    (when (tile-visible-adaptive!)
-      (layout-target-set! 'adaptive))))
-
-(define-key "layout-map" "a" "window-layout-adaptive")
-
-;;; --- autolayout: one main pane, the rest beside it ---------------------------
-;;; The StumpWM shape. The selected window's buffer is the main pane on
-;;; window-layout-main-side, with window-layout-main-ratio of the frame.
-;;; The other visible buffers share the rest, as a column or as tiles
-;;; (window-layout-stack). autolayout-mode keeps the frame in this shape:
-;;; when a window comes or goes, the frame re-arranges, the main pane
-;;; stays main while its buffer is visible, and a new buffer joins the
-;;; stack. A popup and the minibuffer are not panes.
-;;; Cmd-RET (s-RET) runs autolayout: the window you are in becomes the main pane.
-;;; autolayout-mode is a custom, so the mode survives a restart.
-
-(defcustom 'autolayout-mode #f
-  "Keep the frame in the main-and-stack layout as windows come and go."
-  'group 'windows 'type 'boolean)
-
-;; main pane on the left = the stack on the right, in the tiler's names
-(define (autolayout--algorithm)
-  (if (equal? window-layout-main-side 'right) 'main-left 'main-right))
-
-;; the panes, main first: MAIN while it is visible, else the selected
-;; window's buffer. Duplicates stay: two windows on one buffer are two panes.
-(define (autolayout--panes main)
-  (let ((visible (layout-visible-buffers)))
-    (cond ((null? visible) '())
-          ((and main (member main visible))
-           (cons main (let loop ((rest visible) (dropped #f))
-                        (cond ((null? rest) '())
-                              ((and (not dropped) (equal? (car rest) main)) (loop (cdr rest) #t))
-                              (else (cons (car rest) (loop (cdr rest) dropped)))))))
-          (else visible))))
-
-(define (autolayout--same-panes? a b)
-  (and (= (length a) (length b))
-       (let loop ((xs a) (ys b))
-         (or (null? xs)
-             (and (member (car xs) ys)
-                  (loop (cdr xs) (let drop ((rest ys))
-                                   (cond ((null? rest) '())
-                                         ((equal? (car rest) (car xs)) (cdr rest))
-                                         (else (cons (car rest) (drop (cdr rest))))))))))))
-
-;; arrange the frame with MAIN as the main pane. One pane: one window.
-(define (autolayout-apply! main &optional algorithm)
-  (let ((panes (autolayout--panes main)))
-    (cond ((null? panes) #f)
-          (else
-            (set-frame-local! 'autolayout-main (car panes))
-            (set-frame-local! 'autolayout-panes panes)
-            (if (null? (cdr panes))
-                (begin (delete-other-windows!) panes)
-                (tile-windows! (or algorithm (autolayout--algorithm)) panes))))))
-
-;; the hook: the frame's panes changed, so the shape is re-made. Nothing
-;; runs while a tiler runs, or while a prompt is open.
-(define (autolayout--on-change!)
-  (when (and autolayout-mode (not (layout-target))
-             (not *layout-busy*) (not (minibuffer-state)))
-    (let ((panes (autolayout--panes (frame-local 'autolayout-main))))
-      (when (and (pair? panes)
-                 (not (autolayout--same-panes? panes (or (frame-local 'autolayout-panes) '()))))
-        (autolayout-apply! (car panes))))))
-
-(add-hook! 'window-configuration-change-hook 'autolayout--on-change!)
-
-;; a winner walk restores panes the user asked for: they become the panes
-;; autolayout keeps, not a change of panes it re-arranges
-(define (autolayout--settle!)
-  (set-frame-local! 'autolayout-panes (autolayout--panes (frame-local 'autolayout-main))))
-
-(add-hook! 'winner-restore-hook 'autolayout--settle!)
-
-;; "62", not "62.0": the dialect has no round
-(define (autolayout--percent ratio)
-  (car (string-split (number->string (* 100 ratio)) ".")))
-
-(define (autolayout--ratio-from-input text)
-  (let ((n (string->number text)))
-    (cond ((not (number? n)) #f)
-          ((> n 1) (/ n 100))
-          (else n))))
-
-(define (autolayout-select! main &optional algorithm)
-  (let* ((target (or algorithm (autolayout--algorithm)))
-         (panes (autolayout-apply! main target)))
-    (when panes (layout-target-set! target))
-    panes))
-
-(define-command "autolayout"
-  "Make the selected window's buffer the main pane; the other buffers stack beside it"
-  (lambda ()
-    (let ((target (layout-target)))
-      (autolayout-select! (window-buffer (active-window))
-        (and (member target '(main-left main-right main-top main-bottom)) target)))))
-
-(define-command "autolayout-main-left"
-  "Put the main pane on the left and arrange the frame"
-  (lambda ()
-    (customize-set! 'window-layout-main-side 'left)
-    (autolayout-select! (window-buffer (active-window)))))
-
-(define-command "autolayout-main-right"
-  "Put the main pane on the right and arrange the frame"
-  (lambda ()
-    (customize-set! 'window-layout-main-side 'right)
-    (autolayout-select! (window-buffer (active-window)))))
-
-(define-command "autolayout-set-main-width"
-  "Set the main pane's share of the frame, as a fraction or a percent, and arrange the frame"
-  (lambda ()
-    (minibuffer-read
-      (string-append "Main pane width (now "
-                     (autolayout--percent window-layout-main-ratio) "%): ")
-      '()
-      (lambda (text)
-        (let ((ratio (autolayout--ratio-from-input text)))
-          (if (and ratio (>= ratio 0.3) (<= ratio 0.9))
-              (begin
-                (customize-set! 'window-layout-main-ratio ratio)
-                (autolayout-select! (or (frame-local 'autolayout-main)
-                                       (window-buffer (active-window)))))
-              (message "The main pane takes between 30% and 90% of the frame")))))))
-
-(define-command "autolayout-toggle-stack"
-  "Arrange the other panes as a column, or as tiles; again goes back"
-  (lambda ()
-    (customize-set! 'window-layout-stack
-                    (if (equal? window-layout-stack 'grid) 'column 'grid))
-    (message (if (equal? window-layout-stack 'grid) "Tiles beside the main pane" "A column beside the main pane"))
-    (autolayout-select! (or (frame-local 'autolayout-main) (window-buffer (active-window))))))
-
-(define-command "autolayout-mode"
-  "Keep the frame in the main-and-stack layout as windows come and go; again turns it off"
-  (lambda ()
-    ;; customize-save! writes custom.scm, so the mode survives a restart
-    (customize-save! 'autolayout-mode (not autolayout-mode))
-    (if autolayout-mode
-        (begin
-          (layout-target-set! #f)
-          (autolayout-apply! (window-buffer (active-window)))
-          (message "Autolayout on: the selected buffer is the main pane"))
-        (message "Autolayout off"))))
-
-;; Cmd-RET makes the window you are in the main pane. The client claims
-;; the chord from the browser (CMD_KEYS in layouts.ex) and sends it as
-;; s-RET. The browse reader binds its own s-RET, and a local map wins.
-(global-set-key "s-RET" "autolayout")
-
-(for-each
-  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
-  '("autolayout" "autolayout-main-left" "autolayout-main-right"
-    "autolayout-set-main-width" "autolayout-toggle-stack" "autolayout-mode"))
-
-(catalog-meta! 'command "window-layout-adaptive"
-  'domain 'windows 'effects '(write display))
 (for-each
   (lambda (name)
     (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("tile-all" "overview-left" "overview-right" "overview-up" "overview-down"
     "overview-mark" "overview-pop-out" "overview-quit"))
 
-(effects! '(read))
-(public! 'window-layout-for-width
-  "(window-layout-for-width COLS COUNT) — responsive tiler chosen for a frame width and pane count")
-(effects! '(write))
-(public! 'tile-adaptive-windows!
-  "(tile-adaptive-windows! BUFFERS) — tile named buffers for the selected frame width")
-(public! 'tile-visible-adaptive!
-  "(tile-visible-adaptive!) — tile visible work windows for the selected frame width")
-(public! 'autolayout-apply!
-  "(autolayout-apply! MAIN [ALGORITHM]) — arrange MAIN and the other visible buffers using ALGORITHM or the default main side")
 (effects! '(read))
 (public! 'overview-buffers
   "(overview-buffers) — current group members, else current project buffers")

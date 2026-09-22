@@ -17,7 +17,7 @@
       (let ((pool (window-fill-buffers)))
         (check-true! (and (member a pool) (member b pool) #t) "the members are the pool")
         (check-false! (member c pool) "a buffer from elsewhere is not"))
-      (let ((panes (layout--three-columns (list a))))
+      (let ((panes (layout--fill-to (list a) 3)))
         (check-true! (and (member b panes) #t) "the columns fill from the pool")
         (check-false! (member c panes) "and pull nothing in from elsewhere"))
       (switch-to-buffer! "*scratch*")

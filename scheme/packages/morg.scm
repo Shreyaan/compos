@@ -713,7 +713,7 @@
 ;; A continuation is the indent a block carries onto its next line; it is
 ;; a quote marker when it holds a >.
 (define morg--block-markup-query
-  "(list_marker_minus) @bullet (list_marker_star) @bullet (list_marker_plus) @bullet (list_marker_dot) @ordered (list_marker_parenthesis) @ordered (block_quote_marker) @quote ((block_continuation) @quote (#match? @quote \">\")) (thematic_break) @rule (setext_h2_underline) @rule (inline) @inline (pipe_table_cell) @inline")
+  "(list_marker_minus) @bullet (list_marker_star) @bullet (list_marker_plus) @bullet (list_marker_dot) @ordered (list_marker_parenthesis) @ordered (block_quote_marker) @quote ((block_continuation) @quote (#match? @quote \">\")) (thematic_break) @rule (setext_h2_underline) @rule (inline) @inline (pipe_table_cell) @inline (indented_code_block) @icode")
 
 (define morg--inline-markup-query
   "(code_span) @code (strong_emphasis) @strong (emphasis) @emphasis (inline_link) @link (link_text) @link-text (link_destination) @link-destination (image) @image")
@@ -860,11 +860,15 @@
                      '()))))))
       ;; the open fence is the block's header: a kind that declares a
       ;; fence-face colors it apart from the plain markers
+      ;; row-morg-fence draws both fence lines in small type
       ((equal? k 'open)
        (list (list start (+ start len)
                    (or (fence-kind-get (morg-info e) 'fence-face #f)
-                       "org-meta"))))
-      ((equal? k 'close) (list (list start (+ start len) "org-meta")))
+                       "org-meta"))
+             (list start (+ start len) "row-morg-fence")))
+      ((equal? k 'close)
+       (list (list start (+ start len) "org-meta")
+             (list start (+ start len) "row-morg-fence")))
       ((equal? k 'directive) (list (list start (+ start len) "org-meta")))
       ((equal? k 'code)
        (let ((f (fence-kind-line-face (morg-info e) line fence-args)))
@@ -1176,7 +1180,7 @@
                     'eager)))))
 
 (mode-doc! "morg-mode"
-  "Markdown with org habits. `TAB` folds a heading or code block. `C-x n n` shows one heading, and `C-x n w` widens. Narrowing gives chat an outline hint, not document text. `C-c C-c` runs a block, or fills a `:show-source PATH::NAME` block from its file. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")
+  "Markdown with org habits. `TAB` folds a heading or code block. `C-x n n` shows one heading, and `C-x n w` widens. Narrowing gives chat an outline hint, not document text. `C-c C-c` runs a block, or fills a `:show-source PATH::NAME` block from its file. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page. A ```table fence colors its cells by rules on the fence: `green=strong,1.00` matches a value, and `red<.4` or `green>=.7` match a number. The first rule that matches wins. Colors: red, green, yellow, blue, purple, cyan, gray.")
 
 (mode-icon! "morg-mode" "")
 
@@ -1201,10 +1205,11 @@
 
 (define-mode "morg-mode"
   (lambda ()
-    ;; Morg owns structure and the plain faces. The prose presentation is
-    ;; writing-mode's; preview-mode draws the page in place.
+    ;; Morg owns structure and the plain faces. It wraps prose at words and
+    ;; turns on no presentation: writing-mode and preview-mode are the
+    ;; user's to turn on.
     (preview-heal! (current-buffer))
-    (enable-minor-mode! (current-buffer) "writing-mode")
+    (enable-minor-mode! (current-buffer) "visual-line-mode")
     (morg-install-keys (current-buffer))
     (morg-arm-block-keys! (current-buffer))
     (morg-ensure-hook! (current-buffer))

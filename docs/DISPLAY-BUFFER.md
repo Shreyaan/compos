@@ -43,7 +43,7 @@ its list's.
 
 ## The three verbs
 
-1. `switch-to-buffer!` visits a buffer. With a target layout it reuses an existing view, fills spare capacity, then replaces the selected pane. Without a target it takes the selected window.
+1. `switch-to-buffer!` visits a buffer. The buffer joins the group it was launched from first, so the frame never follows it home (docs/groups.md, "A buffer opens in the current group"). With a target layout it reuses an existing view, fills spare capacity, then replaces the selected pane. Without a target it takes the selected window.
 2. `display-buffer` shows a buffer somewhere else and selects nothing. A result, a listing, a help page, a shell take their window through it. It returns the window.
 3. `pop-to-buffer` is `display-buffer` and then a `select-window!`. A listing you open to work in uses it (`list-mode-show!`).
 
@@ -69,6 +69,20 @@ The actions:
 
 `define-display-action!` adds one. An action is a function of the name and the alist that returns a window or `#f`.
 
+## One buffer, one window
+
+A buffer shows in at most one window of the frame. A display that puts a
+buffer in a window takes it away from any other window that had it, and that
+window reveals what it showed before — the move `buffer-left` and
+`buffer-right` make, done for you. `window-show-buffer!` enforces it, so
+every path that gives a window a buffer obeys the same rule.
+
+Two exemptions, both of them arrangement rather than display: a peek is a
+look, not a place, and the layout engine is left alone while it arranges
+(`*layout-busy*`). One degenerate case remains: when every eligible buffer is
+already on screen there is nothing else to reveal, and the other window keeps
+what it has. That is the same case `C-x 2` hits with a single buffer.
+
 ## Splitting
 
 `split-window-sensibly` is Emacs' rule: a window with `split-height-threshold` rows (80) splits below; else a window with `split-width-threshold` columns (160) splits beside; else the sole work window splits below whatever its size. Two windows side by side on a laptop meet neither threshold, so the next display takes the other window instead of making a third. Both thresholds are `defcustom`s in the `windows` group.
@@ -83,8 +97,8 @@ the whole frame until there is another buffer to show.
 | --- | --- | --- |
 | `two-pane` | 2 | first pane 2/3, companion 1/3 |
 | `columns` | 3 | equal columns |
-| `rows`, `grid`, `main-*` | occupied panes | apply the chosen tiler as work opens |
-| `adaptive` | occupied panes | choose the tiler for the current frame width |
+| `halves`, `rows` | 2 | apply the chosen layout as work opens |
+| `single` | 1 | one window |
 | `free` | sensible splitting | no target |
 
 Pane order is stable across focus changes. Main layouts retain their logical
@@ -97,7 +111,7 @@ first, then the group's other eligible buffers in MRU order, with ordinary
 work before companions. The picker captures this order once; highlighting
 another layout or accepting it distributes the same sequence over its slots.
 Existing panes keep their buffers, including Dired, other special lists,
-visible non-members and deliberate duplicate views. A layout change never
+visible non-members. A layout change never
 substitutes hidden work for an already occupied slot. The float and popup
 windows are excluded from the base arrangement.
 
@@ -133,9 +147,8 @@ is eligible to refill a sealed group's pane. Background buffer contexts do
 not open or rearrange visible panes. Mode-entry layouts and automatic
 relayout hooks defer to an explicitly selected target.
 
-Relayout preserves each view's point and buffer history, including separate
-views of one buffer. The active target is saved with the desktop even without
-switching groups. `window-layout-free` releases the target. `s-RET` (`autolayout`) deliberately promotes the selected pane to main, preserving the existing main-layout side. The default side applies only when the current target has no main pane.
+Relayout preserves each view's point and buffer history. The active target is saved with the desktop even without
+switching groups. `window-layout-free` releases the target. A layout holds a fixed number of panes, so work past that number does not add a pane: it takes one, and the buffers the frame is not showing sit on the strip, where `layout-forward` and `layout-backward` reach them.
 
 The measured regression journeys are in `priv/tests/layout-policy-test.scm`,
 with a disposable-frame runner and keyboard-path test in

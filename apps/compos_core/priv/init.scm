@@ -59,6 +59,7 @@
 ; completion. A cold boot has no chat open then; a Session restart does.
 (load "completion.scm")
 
+(load "anchor.scm")
 (load "agenda.scm")
 (load "agent.scm")
 (load "annotate.scm")
@@ -70,6 +71,9 @@
 (load "code.scm")
 (load "daemons.scm")
 (load "db.scm")
+;; the typed-decision API: user config calls decide-config! to name the
+;; backend chain, so this loads before the user config runs
+(load "decide.scm")
 (load "diff-mode.scm")
 (load "doppler.scm")
 (load "endpoint.scm")
@@ -79,6 +83,9 @@
 (load "git.scm")
 (load "google.scm")
 (load "groups.scm")
+;; app identity: an app names the buffers of one instance, and a move
+;; retags them through group membership, so this follows groups
+(load "apps.scm")
 (load "help.scm")
 (load "http.scm")
 (load "ibuffer.scm")
@@ -90,10 +97,16 @@
 (load "keys.scm")
 (load "keymaps.scm")
 (load "layouts.scm")
+;; the on-device decision model: it registers its daemon in the endpoint
+;; registry, which models.scm reads to show and start it
+(load "laya.scm")
 (load "lsp.scm")
 (load "mcp-hub.scm")
 (load "mcp.scm")
 (load "models.scm")
+;; the on-device tool caller: it fetches its engine and weights on the
+;; first call, so a machine that never asks it pays nothing
+(load "needle.scm")
 (load "whatsapp.scm")
 (load "morg/morg-kinds.scm")
 (load "morg.scm")
@@ -144,6 +157,7 @@
 (load "editor/blocks/result-block.scm")
 (load "editor/blocks/run-block.scm")
 (load "editor/blocks/csv-block.scm")
+(load "editor/blocks/table-block.scm")
 (load "morg/morg-tangle.scm")
 (load "morg/morg-show-source.scm")
 ;; core editor behaviour, not a package: every URL and file path is a

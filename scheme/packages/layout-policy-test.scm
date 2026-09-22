@@ -38,7 +38,6 @@
             '("zz-lp-group" "zz-lp-other" "zz-lp-away")))
 (define (lp-start!)
   (set! *lp-trace* '())
-  (customize-set! 'autolayout-mode #f)
   (layout-target-set! #f)
   (set-frame-local! 'pinned-group #f)
   (lp-clean!)
@@ -74,8 +73,8 @@
                 (list (list (nth 1 r) x) (list (nth 2 r) y)
                       (list (nth 3 r) width) (list (nth 4 r) height))))))
 
-(deftest 'layout-target-starts-with-one-buffer-and-grows-in-order
-  "a rows target records one full pane, then two halves, then three thirds"
+(deftest 'layout-target-starts-with-one-buffer-and-fills-to-its-capacity
+  "a rows target records one full pane, then two halves, and stops there"
   (lp-journey (lambda ()
     (lp-start!)
     (run-command "window-layout-rows")
@@ -85,16 +84,14 @@
     (lp-buffer! "b")
     (switch-to-buffer! "zz-lp-b")
     (lp-snapshot! 'two-buffers)
-    (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b") "new work appends")
+    (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b") "new work fills the vacancy")
     (lp-rect! "zz-lp-a" 0 0 1 0.5)
     (lp-rect! "zz-lp-b" 0 0.5 1 0.5)
     (lp-buffer! "c")
     (switch-to-buffer! "zz-lp-c")
-    (lp-snapshot! 'three-buffers)
-    (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c") "opening keeps old order")
-    (lp-rect! "zz-lp-a" 0 0 1 (/ 1 3))
-    (lp-rect! "zz-lp-b" 0 (/ 1 3) 1 (/ 1 3))
-    (lp-rect! "zz-lp-c" 0 (/ 2 3) 1 (/ 1 3)))))
+    (lp-snapshot! 'a-third-buffer)
+    (check-equal! (length (lp-buffers)) 2 "rows holds two panes and grows no further")
+    (check-equal! (current-buffer) "zz-lp-c" "the new work is on screen"))))
 
 (deftest 'relayout-preserves-pane-order-and-focus
   "changing focus before relayout does not move that buffer to the first slot"
@@ -104,13 +101,13 @@
     (tile-windows! 'columns '("zz-lp-a" "zz-lp-b" "zz-lp-c"))
     (select-window! (window-showing "zz-lp-b"))
     (lp-snapshot! 'columns-b-focused)
-    (run-command "window-layout-rows")
-    (lp-snapshot! 'rows-b-focused)
     (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c") "stable spatial order")
+    (run-command "window-layout-halves")
+    (lp-snapshot! 'halves-b-focused)
+    (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b") "a smaller layout keeps the first slots")
     (check-equal! (current-buffer) "zz-lp-b" "focus survives")
-    (lp-rect! "zz-lp-a" 0 0 1 (/ 1 3))
-    (lp-rect! "zz-lp-b" 0 (/ 1 3) 1 (/ 1 3))
-    (lp-rect! "zz-lp-c" 0 (/ 2 3) 1 (/ 1 3)))))
+    (lp-rect! "zz-lp-a" 0 0 0.5 1)
+    (lp-rect! "zz-lp-b" 0.5 0 0.5 1))))
 
 (deftest 'fixed-target-fills-vacancies-then-replaces-the-selected-slot
   "two-pane opens into capacity, then replaces in place without importing foreign buffers"
@@ -198,9 +195,9 @@
   (lp-journey (lambda ()
     (lp-start!)
     (for-each lp-buffer! '("b" "c" "d"))
-    (tile-windows! 'grid '("zz-lp-a" "zz-lp-b" "zz-lp-c" "zz-lp-d"))
+    (tile-windows! 'columns '("zz-lp-a" "zz-lp-b" "zz-lp-d"))
     (select-window! (window-showing "zz-lp-d"))
-    (lp-snapshot! 'four-grid-panes)
+    (lp-snapshot! 'three-panes)
     (run-command "window-layout-columns")
     (lp-snapshot! 'three-column-capacity)
     (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-d") "capacity retains focus")
@@ -285,7 +282,7 @@
   "closing a pane reduces occupancy but keeps the target for the next open"
   (lp-journey (lambda ()
     (lp-start!)
-    (run-command "window-layout-rows")
+    (run-command "window-layout-columns")
     (lp-buffer! "b") (switch-to-buffer! "zz-lp-b")
     (lp-buffer! "c") (switch-to-buffer! "zz-lp-c")
     (select-window! (window-showing "zz-lp-b"))
@@ -293,27 +290,74 @@
     (layout-target-on-change!)
     (lp-snapshot! 'middle-pane-closed)
     (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-c") "the hidden buffer stays hidden")
-    (check-equal! (layout-target) 'rows "closing does not drop the target")
-    (lp-rect! "zz-lp-a" 0 0 1 0.5)
-    (lp-rect! "zz-lp-c" 0 0.5 1 0.5)
+    (check-equal! (layout-target) 'columns "closing does not drop the target")
+    ;; two buffers in a three-column layout share the frame evenly
+    (lp-rect! "zz-lp-a" 0 0 0.5 1)
+    (lp-rect! "zz-lp-c" 0.5 0 0.5 1)
     (switch-to-buffer! "zz-lp-b")
     (lp-snapshot! 'hidden-work-reopened)
-    (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-c" "zz-lp-b") "reopened work appends"))))
+    (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-c" "zz-lp-b") "reopened work fills the vacancy"))))
 
-(deftest 'main-left-target-keeps-its-main-and-stack-order-as-work-opens
-  "a main pane on the right retains its slot when the stack grows"
+(deftest 'a-full-layout-does-not-grow-a-pane-for-new-work
+  "a layout holds a fixed number of panes; new work takes a pane instead of adding one"
   (lp-journey (lambda ()
     (lp-start!)
     (lp-buffer! "b")
-    (tile-windows! 'main-left '("zz-lp-a" "zz-lp-b"))
-    (layout-target-set! 'main-left)
+    (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'two-pane)
     (select-window! (window-showing "zz-lp-b"))
     (lp-buffer! "c") (switch-to-buffer! "zz-lp-c")
-    (lp-snapshot! 'main-left-three)
-    (lp-rect! "zz-lp-a" (- 1 window-layout-main-ratio) 0 window-layout-main-ratio 1)
-    (lp-rect! "zz-lp-b" 0 0 (- 1 window-layout-main-ratio) 0.5)
-    (lp-rect! "zz-lp-c" 0 0.5 (- 1 window-layout-main-ratio) 0.5)
-    (check-equal! (current-buffer) "zz-lp-c" "new work receives focus without becoming main"))))
+    (lp-snapshot! 'two-pane-stays-two)
+    (check-equal! (length (window-list)) 2 "two-pane holds two panes")
+    (lp-rect! "zz-lp-a" 0 0 window-layout-main-ratio 1)
+    (lp-rect! "zz-lp-c" window-layout-main-ratio 0 (- 1 window-layout-main-ratio) 1)
+    (check-equal! (current-buffer) "zz-lp-c" "new work receives focus"))))
+
+(deftest 'a-layout-scrolls-along-the-strip
+  "the layouts go on for ever: forward shows the next buffer, backward comes back"
+  (lp-journey (lambda ()
+    (lp-start!)
+    (lp-buffer! "b") (lp-buffer! "c")
+    (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'two-pane)
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b") "the run starts at the panes")
+    (run-command "layout-forward")
+    (lp-snapshot! 'scrolled-forward)
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-b" "zz-lp-c") "forward moves the run one along")
+    (run-command "layout-backward")
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b") "backward returns where forward came from")
+    (run-command "layout-backward")
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-c" "zz-lp-a") "the strip is cyclic: backward past the front arrives at the back"))))
+
+(deftest 'a-kill-evicts-the-buffer-from-every-frame-strip-at-once
+  "a buffer name is global, not frame-local: dying takes it out of the strip immediately, not on the next read"
+  (lp-journey (lambda ()
+    (lp-start!)
+    (lp-buffer! "b") (lp-buffer! "c") (lp-buffer! "d") (lp-buffer! "e")
+    (tile-visible-windows! 'columns '("zz-lp-a" "zz-lp-b" "zz-lp-c"))
+    (layout-target-set! 'columns)
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c")
+                  "three columns to start")
+    ;; "d" is next in the strip, past the visible run, when it dies
+    (buffer-kill! "zz-lp-d")
+    (run-command "layout-forward")
+    (lp-snapshot! 'scrolled-past-where-a-dead-buffer-was)
+    (check-equal! (length (window-list)) 3 "still three panes, not two")
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-b" "zz-lp-c" "zz-lp-e")
+                  "the run reaches the next LIVE buffer, \"d\" already gone from the strip"))))
+
+(deftest 'a-scroll-with-no-live-buffers-left-past-the-run-declines-instead-of-shrinking
+  "eviction can leave the strip no longer than the layout; a scroll then says so rather than tiling short"
+  (lp-journey (lambda ()
+    (lp-start!)
+    (lp-buffer! "b") (lp-buffer! "c") (lp-buffer! "d")
+    (tile-visible-windows! 'columns '("zz-lp-a" "zz-lp-b" "zz-lp-c"))
+    (layout-target-set! 'columns)
+    (buffer-kill! "zz-lp-d")
+    (run-command "layout-forward")
+    (check-equal! (length (window-list)) 3 "the three columns stand unchanged")
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c")
+                  "the run never moved"))))
 
 (deftest 'a-foreign-display-takes-a-pane-and-the-frame-leaves-the-group
   "the ruling of 2026-09-19: nothing floats; a foreign display takes the window chain, and a pane that shows it takes the frame out of the group"
@@ -335,20 +379,18 @@
         (check-equal! (cadr (window-restore win)) "zz-lp-b" "and the buffer under it")
         (check-false! (frame-group) "a pane that shows a foreign buffer takes the frame out of the group"))))))
 
-(deftest 'restored-main-left-target-keeps-its-primary-slot
-  "new window IDs after group restoration do not invert main and companion"
+(deftest 'a-restored-target-keeps-its-first-slot
+  "new window IDs after group restoration do not invert the panes"
   (lp-journey (lambda ()
     (lp-start!) (lp-buffer! "b")
-    (tile-windows! 'main-left '("zz-lp-a" "zz-lp-b"))
-    (layout-target-set! 'main-left)
+    (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'two-pane)
     (let ((home (frame-group)))
       (lp-group! "away")
       (switch-to-group! home)
-      (lp-snapshot! 'restored-main-left)
-      (lp-buffer! "c") (switch-to-buffer! "zz-lp-c")
-      (lp-snapshot! 'restored-main-left-grown)
-      (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b" "zz-lp-c") "logical slots survive restoration")
-      (lp-rect! "zz-lp-a" (- 1 window-layout-main-ratio) 0 window-layout-main-ratio 1)))))
+      (lp-snapshot! 'restored-two-pane)
+      (check-equal! (layout-target-visible-buffers) '("zz-lp-a" "zz-lp-b") "logical slots survive restoration")
+      (lp-rect! "zz-lp-a" 0 0 window-layout-main-ratio 1)))))
 
 (deftest 'duplicate-view-focus-survives-relayout
   "the selected second view remains selected at its own point"
@@ -368,28 +410,26 @@
   "desktop state includes a newly selected target and rebuilds its runtime slots"
   (lp-journey (lambda ()
     (lp-start!) (lp-buffer! "b")
-    (tile-windows! 'main-left '("zz-lp-a" "zz-lp-b"))
-    (layout-target-set! 'main-left)
+    (tile-visible-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'two-pane)
     (let ((saved (layout-targets-state)))
       (layout-target-set! #f)
       (layout-targets-restore! saved)
-      (check-equal! (layout-target) 'main-left "active choice survives the snapshot")
+      (check-equal! (layout-target) 'two-pane "active choice survives the snapshot")
       (lp-buffer! "c") (switch-to-buffer! "zz-lp-c")
       (lp-snapshot! 'persisted-target-grown)
-      (lp-rect! "zz-lp-a" (- 1 window-layout-main-ratio) 0 window-layout-main-ratio 1)))))
+      (check-equal! (length (window-list)) 2 "the restored target keeps its capacity")))))
 
-(deftest 'explicit-main-selection-replaces-the-previous-target
-  "the existing main-pane command deliberately promotes focus and becomes the target"
+(deftest 'an-explicit-layout-replaces-the-previous-target
+  "a layout command becomes the frame's target and lays the strip again"
   (lp-journey (lambda ()
     (lp-start!) (lp-buffer! "b")
     (run-command "window-layout-rows")
-    (switch-to-buffer! "zz-lp-b")
-    (run-command "autolayout")
-    (check-equal! (layout-target) (autolayout--algorithm) "explicit main choice wins")
-    (lp-buffer! "c") (switch-to-buffer! "zz-lp-c")
-    (lp-snapshot! 'explicit-main-grown)
-    (check-equal! (car (layout-target-visible-buffers)) "zz-lp-b" "promoted main remains main")
-    (check-equal! (length (window-list)) 3 "new work joins the stack"))))
+    (check-equal! (layout-target) 'rows "the command is the target")
+    (run-command "window-layout-columns")
+    (lp-snapshot! 'columns-target)
+    (check-equal! (layout-target) 'columns "the later choice wins")
+    (check-equal! (length (window-list)) 2 "columns shows what the frame has"))))
 
 (deftest 'stale-slot-cache-cannot-reverse-the-displayed-order
   "a restored or manually reordered tree outranks older cached window IDs"
@@ -427,16 +467,16 @@
   "a C-x l pick survives a pane opening: the width decides only for a frame that never chose"
   (lp-journey (lambda ()
     (lp-start!) (lp-buffer! "b")
-    (tile-windows! 'rows '("zz-lp-a" "zz-lp-b"))
-    (layout-target-set! 'rows)
+    (tile-visible-windows! 'columns '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'columns)
     (let ((chat (group-chat (frame-group))))
       (group-chat-buffer-show! chat)
       (lp-snapshot! 'chat-opened)
-      (check-equal! (layout-target) 'rows "the frame keeps the layout it was given")
+      (check-equal! (layout-target) 'columns "the frame keeps the layout it was given")
       (check-equal! (length (lp-buffers)) 3 "and the chat is a third pane")
-      ;; three full-width bands, which is not what the width would pick
-      (lp-rect! "zz-lp-a" 0 0 1 (/ 1 3))
-      (lp-rect! "zz-lp-b" 0 (/ 1 3) 1 (/ 1 3))
-      (lp-rect! chat 0 (/ 2 3) 1 (/ 1 3))
+      ;; three equal columns, because the frame chose columns
+      (lp-rect! "zz-lp-a" 0 0 (/ 1 3) 1)
+      (lp-rect! "zz-lp-b" (/ 1 3) 0 (/ 1 3) 1)
+      (lp-rect! chat (/ 2 3) 0 (/ 1 3) 1)
       (buffer-kill! chat)
       (layout-target-set! #f)))))

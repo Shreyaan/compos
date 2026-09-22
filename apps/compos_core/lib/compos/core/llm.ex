@@ -121,6 +121,56 @@ defmodule Compos.Core.LLM do
     tool_loop(messages, system, tools, dispatcher, 0, %{}, opts)
   end
 
+  # One step of a turn, for M-x chat-perf. The collector keeps the end time
+  # and the duration, so the list can place each step on a time line.
+  defp chat_stage(nil, _stage, _ms, _detail), do: :ok
+
+  defp chat_stage(slug, stage, ms, detail) do
+    :telemetry.execute(
+      [:compos, :chat, :stage],
+      %{duration: ms, queue: 0},
+      %{slug: slug, stage: stage, detail: detail}
+    )
+  end
+
+  # what this round put on the wire, in whole kilobytes: the figure that
+  # explains a slow round better than the round number does. external_size
+  # measures the term without building the binary, so a large conversation
+  # costs the round nothing to report.
+  defp wire_kb(messages), do: "#{div(:erlang.external_size(messages), 1024)} KB wire"
+
+  # the round stamp, which only a turn with a slug pays for
+  defp stage_round(nil, _rounds, _ms, _messages, _answer), do: :ok
+
+  defp stage_round(slug, rounds, ms, messages, answer),
+    do:
+      chat_stage(
+        slug,
+        "round #{rounds + 1} model",
+        ms,
+        "#{wire_kb(messages)} · #{cache_split(answer)}"
+      )
+
+  # What THIS round paid for, not the turn's running total: the fresh
+  # tokens it had to prefill and the ones the provider served from cache.
+  # A round that reads 0 cached is a cache miss, and a turn full of them
+  # is the thing to chase.
+  defp cache_split({:ok, %{"usage" => usage}}) when is_map(usage) do
+    fresh = usage["input_tokens"] || usage["prompt_tokens"] || 0
+    cached = usage["cache_read_input_tokens"] || 0
+    total = fresh + cached
+
+    case total do
+      0 -> "no usage"
+      _ -> "#{kt(fresh)} fresh + #{kt(cached)} cached (#{div(cached * 100, total)}% hit)"
+    end
+  end
+
+  defp cache_split(_), do: ""
+
+  defp kt(n) when n >= 1000, do: "#{div(n, 1000)}k"
+  defp kt(n), do: "#{n}"
+
   defp deliver_usage(usage, on_usage) do
     cost = Compos.Core.LLMUsage.record(model(), usage)
     if on_usage, do: on_usage.(Map.put(usage, "cost", cost))
@@ -137,8 +187,22 @@ defmodule Compos.Core.LLM do
       |> maybe_put(:on_thinking, opts[:on_thinking])
       |> maybe_put(:model, opts[:model])
       |> maybe_put(:reasoning_effort, opts[:reasoning_effort])
+      # the stream stamps "http open" against this slug. Without it the
+      # stamp is silent and the turn shows no handshake.
+      |> maybe_put(:slug, opts[:slug])
 
-    case chat_fun().(req) do
+    round0 = System.monotonic_time(:millisecond)
+    answer = chat_fun().(req)
+
+    stage_round(
+      opts[:slug],
+      rounds,
+      System.monotonic_time(:millisecond) - round0,
+      messages,
+      answer
+    )
+
+    case answer do
       {:ok, %{"stop_reason" => "tool_use", "content" => blocks} = resp} ->
         emit_unstreamed_text(resp, opts)
 
@@ -252,6 +316,8 @@ defmodule Compos.Core.LLM do
   defp tool_result(call, dispatcher, opts, concurrent?, emit_start?) do
     if emit_start?, do: tool_started(call, opts)
 
+    tool0 = System.monotonic_time(:millisecond)
+
     {result, error?} =
       case gate_call(opts[:gate], call["name"], call["input"]) do
         :allow ->
@@ -264,6 +330,13 @@ defmodule Compos.Core.LLM do
         {:deny, why} ->
           {"permission denied: #{why}", true}
       end
+
+    chat_stage(
+      opts[:slug],
+      "tool #{call["name"]}",
+      System.monotonic_time(:millisecond) - tool0,
+      if(concurrent?, do: "concurrent", else: "")
+    )
 
     tool_finished(call, result, opts)
     tool_result_block(call, result, error?)
@@ -465,7 +538,18 @@ defmodule Compos.Core.LLM do
       if req[:on_chunk] do
         # only the call that STARTS the stream retries: once a delta has
         # reached the renderer, a second attempt would print the reply twice
-        case with_retry(fn -> ReqLLM.stream_text(spec, ctx, opts) end) do
+        http0 = System.monotonic_time(:millisecond)
+        opened = with_retry(fn -> ReqLLM.stream_text(req_model_arg(spec), ctx, opts) end)
+
+        if slug = req[:slug] do
+          :telemetry.execute(
+            [:compos, :chat, :stage],
+            %{duration: System.monotonic_time(:millisecond) - http0, queue: 0},
+            %{slug: slug, stage: "http open", detail: spec}
+          )
+        end
+
+        case opened do
           {:ok, sr} ->
             tee =
               Stream.map(sr.stream, fn chunk ->
@@ -492,7 +576,7 @@ defmodule Compos.Core.LLM do
             {:error, err_msg(e)}
         end
       else
-        case with_retry(fn -> ReqLLM.generate_text(spec, ctx, opts) end) do
+        case with_retry(fn -> ReqLLM.generate_text(req_model_arg(spec), ctx, opts) end) do
           {:ok, resp} -> {:ok, from_req_response(resp, spec)}
           {:error, e} -> {:error, err_msg(e)}
         end
@@ -550,6 +634,43 @@ defmodule Compos.Core.LLM do
   # — req_llm owns the providers, Scheme owns the keys.
   def req_model_spec(model) do
     if String.contains?(model, ":"), do: model, else: "anthropic:" <> model
+  end
+
+  @doc """
+  What to hand ReqLLM for SPEC: the string, or an inline model map.
+
+  ReqLLM resolves a string spec through LLMDB. A model the catalog does not
+  carry still works, but every request logs a paragraph telling us so. The
+  inline map form is the documented way to say "this model is real, I know
+  it is not in the catalog" — it skips the lookup and the warning.
+
+  We only fall back to the map. A model the catalog knows keeps its string
+  spec, so pricing, token counting and capability detection stay available.
+  """
+  def req_model_arg(spec) when is_binary(spec) do
+    case Compos.Core.ModelCatalog.lookup(spec) do
+      {:ok, _} -> spec
+      _ -> inline_model(spec)
+    end
+  end
+
+  def req_model_arg(spec), do: spec
+
+  defp inline_model(spec) do
+    case String.split(spec, ":", parts: 2) do
+      [provider, id] ->
+        # to_existing_atom: a provider req_llm supports already has its atom.
+        # An unknown one would grow the atom table on every request, so that
+        # spec stays a string and keeps its warning.
+        try do
+          %{provider: String.to_existing_atom(provider), id: id}
+        rescue
+          ArgumentError -> spec
+        end
+
+      _ ->
+        spec
+    end
   end
 
   defp provider_of(spec), do: spec |> String.split(":", parts: 2) |> hd()
@@ -810,7 +931,7 @@ defmodule Compos.Core.LLM do
     with {:ok, key_opts_list} <- key_opts(spec) do
       opts = key_opts_list ++ req_opts(spec, [])
 
-      case with_retry(fn -> ReqLLM.generate_text(spec, prompt, opts) end) do
+      case with_retry(fn -> ReqLLM.generate_text(req_model_arg(spec), prompt, opts) end) do
         {:ok, resp} ->
           Compos.Core.LLMUsage.record(
             requested_model,

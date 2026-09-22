@@ -23,17 +23,14 @@
 ;;; reading the registry would have run. The stylesheet is still where the
 ;;; page is read; only the waiting is ours.
 ;;;
-;;; The app lives in ONE group (app-creator): the listing and every project
-;;; page join *linkedin*, so the group saves the three-column layout and
-;;; gives it back. Opening a project in the real browser is the reader
+;;; The listing and every project page are one app, named by one app id.
+;;; They own no group: they open in the group you were in, and that group
+;;; saves the three-column layout and gives it back. Opening a project in the real browser is the reader
 ;;; pressing a button, never a render.
 
 (domain! 'web)
 (effects! '(read))
 
-(defcustom 'linkedin-group-name "*linkedin*"
-  "The group the LinkedIn Recruiter app lives in. The listing and the project pages are one app, so they always open in this group and a layout holding them is saved and restored with it."
-  'group 'linkedin)
 
 (defcustom 'linkedin-projects-url "https://www.linkedin.com/talent/projects"
   "The Recruiter page the listing is read from."
@@ -164,25 +161,19 @@
              (loop (cdr ls) acc head meta (substring t 2 (string-length t))))
             (else (loop (cdr ls) acc head meta body)))))))
 
-;;; --- the home group ------------------------------------------------------
+;;; --- the app's buffers ---------------------------------------------------
 
 (effects! '(write display))
 
-(define (linkedin-home-group!)
-  (and (string? linkedin-group-name) (not (equal? linkedin-group-name "")) (group-ensure-record! linkedin-group-name)))
+(define *linkedin-app-id* "linkedin")
 
-(define (linkedin-enter-group!)
-  (let ((id (linkedin-home-group!)))
-    (when (and id (boundp 'switch-to-group!) (not (equal? (frame-group) id)))
-      (switch-to-group! id))
-    id))
-
-(define (linkedin-join-group! buf)
+(define (linkedin-join-group! buf &optional role)
   (when (and buf (buffer-exists? buf))
-    (let ((id (or (linkedin-home-group!) (frame-group))))
-      (when (and id (not (buffer-in-group? buf id)))
-        (buffer-add-group! buf id))))
+    (when (boundp 'app-claim!) (app-claim! buf *linkedin-app-id* (or role 'aux)))
+    (when (boundp 'buffer-join-here!) (buffer-join-here! buf)))
   buf)
+
+
 
 (define (linkedin-log! line)
   (unless (buffer-exists? *linkedin-log*) (buffer-create *linkedin-log*))
@@ -499,7 +490,7 @@ a{color:var(--accent);text-decoration:none}
 (define (linkedin-show-detail! row)
   (when row
     (let ((buf (linkedin-render-detail! (linkedin-detail-buffer row) row)))
-      (linkedin-join-group! buf)
+      (linkedin-join-group! buf 'detail)
       (display-buffer-detail! buf *linkedin-buffer*)
       buf)))
 
@@ -808,7 +799,7 @@ a{color:var(--accent);text-decoration:none}
 ;; open, and only failing that the group's own. Laying the layout again on
 ;; every tab switch must not swap the chat someone is typing in.
 (define (linkedin--chat-pane)
-  (let* ((id (linkedin-home-group!))
+  (let* ((id (frame-group))
          (members (if (and id (boundp 'group-buffers)) (group-buffers id) '()))
          (shown (filter (lambda (b) (and (chat-buffer? b) (window-showing b))) members)))
     (if (pair? shown)
@@ -839,11 +830,11 @@ a{color:var(--accent);text-decoration:none}
   (linkedin-show-detail! (list-current *linkedin-buffer*))
   (linkedin-layout!)
   (when first?
-    (let ((id (linkedin-home-group!))) (when id (group-layout-save! id)))))
+    (let ((id (frame-group))) (when id (group-layout-save! id)))))
 
 (define (linkedin-open! first?)
   (unless (buffer-exists? *linkedin-buffer*) (buffer-create *linkedin-buffer*))
-  (linkedin-join-group! *linkedin-buffer*)
+  (linkedin-join-group! *linkedin-buffer* 'home)
   (buffer-set-local! *linkedin-buffer* 'linkedin-tab 'projects)
   (message "LinkedIn Recruiter: reading your projects...")
   (linkedin-fetch!
@@ -864,7 +855,7 @@ a{color:var(--accent);text-decoration:none}
 ;; for it -- entering the tab the first time, or g on the tab after that.
 (define (linkedin-threads-open!)
   (unless (buffer-exists? *linkedin-buffer*) (buffer-create *linkedin-buffer*))
-  (linkedin-join-group! *linkedin-buffer*)
+  (linkedin-join-group! *linkedin-buffer* 'home)
   (message "LinkedIn Recruiter: reading your inbox, this needs a tab...")
   (linkedin-threads-fetch!
     (lambda (rows)
@@ -925,7 +916,6 @@ a{color:var(--accent);text-decoration:none}
 
 (define-command "linkedin-messages" "Show the Recruiter inbox in the listing"
   (lambda ()
-    (linkedin-enter-group!)
     (if (buffer-exists? *linkedin-buffer*)
         (linkedin-set-tab! 'messages)
         (begin (buffer-create *linkedin-buffer*)
@@ -933,9 +923,7 @@ a{color:var(--accent);text-decoration:none}
                (linkedin-threads-open!)))))
 
 (define-command "linkedin" "Open the LinkedIn Recruiter app"
-  (lambda ()
-    (linkedin-enter-group!)
-    (linkedin-open! #t)))
+  (lambda () (linkedin-open! #t)))
 
 (define-command "linkedin-refresh" "Read this tab's page again"
   (lambda ()
@@ -946,7 +934,7 @@ a{color:var(--accent);text-decoration:none}
 ;;; --- the catalog ---------------------------------------------------------
 
 (public! 'linkedin-open!
-  "(linkedin-open! FIRST?) — read the Recruiter projects page and fill the listing; FIRST? also opens the group and the layout")
+  "(linkedin-open! FIRST?) — read the Recruiter projects page and fill the listing; FIRST? also lays out the panes")
 (public! 'li-parse
   "(li-parse TEXT) — the projects reading, as project rows")
 (public! 'li-parse-threads

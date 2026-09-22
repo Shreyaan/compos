@@ -243,3 +243,89 @@
                     "the helper emits the shared action-link form")
       (buffer-kill! chat)
       (t--drop! id))))
+
+;;; --- pseudo groups ------------------------------------------------------------
+;;;
+;;; A pseudo group has a name and members, and no record. A function
+;;; answers the members, so the group holds whatever the function says
+;;; at the moment somebody asks.
+
+(define t--pseudo-answer '())
+
+(define (t--pseudo! name)
+  (define-pseudo-group! (string-append "zztest-" name)
+                        (lambda () t--pseudo-answer)))
+
+(deftest 'a-pseudo-group-answers-its-members-each-time
+  "the function decides the members, and a later call sees the later answer"
+  (lambda ()
+    (let ((one (test-buffer! "*zztest-pseudo-one*" ""))
+          (two (test-buffer! "*zztest-pseudo-two*" "")))
+      (set! t--pseudo-answer (list one))
+      (let ((id (t--pseudo! "members")))
+        (check-equal! (group-resolve-id "zztest-members") id "the name resolves to the id")
+        (check-equal! (group-name id) "zztest-members" "and the id carries the name")
+        (check-equal! (group-buffers id) (list one) "the members are the answer")
+        (set! t--pseudo-answer (list two one))
+        (check-equal! (group-buffers id) (list two one) "a later ask sees the later answer")
+        (check-equal! (group-buffers-mru id) (list two one)
+                      "the function's order is the MRU order")
+        (check-equal! (buffer-pseudo-group-ids one) (list id)
+                      "a member reports the pseudo group it is in")
+        (undefine-pseudo-group! id))
+      (set! t--pseudo-answer '())
+      (buffer-kill! one)
+      (buffer-kill! two))))
+
+(deftest 'a-pseudo-group-drops-a-buffer-that-went
+  "the answer holds names, and a name without a buffer is not a member"
+  (lambda ()
+    (let ((buf (test-buffer! "*zztest-pseudo-gone*" "")))
+      (set! t--pseudo-answer (list buf "*zztest-pseudo-never*"))
+      (let ((id (t--pseudo! "gone")))
+        (check-equal! (group-buffers id) (list buf) "only the live buffer is a member")
+        (buffer-kill! buf)
+        (check-equal! (group-buffers id) '() "the killed buffer leaves the group")
+        (undefine-pseudo-group! id))
+      (set! t--pseudo-answer '()))))
+
+(deftest 'a-pseudo-group-stays-out-of-the-records
+  "the record list never holds one, so save and dissolve never see it"
+  (lambda ()
+    (let ((id (t--pseudo! "records")))
+      (check-false! (member id (group-ids)) "the id is not a record id")
+      (check-false! (member "zztest-records" (group-names)) "nor is the name a record name")
+      (check-true! (and (member "zztest-records" (group-names-all)) #t)
+                   "the reader still sees it among the groups")
+      (undefine-pseudo-group! id)
+      (check-false! (group-resolve-id "zztest-records") "and it goes away again"))))
+
+(deftest 'a-buffer-cannot-join-a-pseudo-group
+  "membership comes from the function, so no command writes it"
+  (lambda ()
+    (let ((buf (test-buffer! "*zztest-pseudo-join*" ""))
+          (id (t--pseudo! "join")))
+      (group-add-buffers-to! (list buf) id)
+      (check-false! (buffer-in-group? buf id) "the buffer did not join")
+      (check-equal! (buffer-group-ids buf) '() "and it holds no membership at all")
+      (undefine-pseudo-group! id)
+      (buffer-kill! buf))))
+
+(deftest 'a-pseudo-group-refuses-a-rename
+  "the definition owns the name"
+  (lambda ()
+    (let ((id (t--pseudo! "rename")))
+      (group-rename! id "zztest-pseudo-renamed")
+      (check-equal! (group-name id) "zztest-rename" "the name did not move")
+      (check-false! (group-resolve-id "zztest-pseudo-renamed") "the new name names nothing")
+      (undefine-pseudo-group! id))))
+
+(deftest 'last-chats-holds-the-chats-you-used-last
+  "the bundled pseudo group gathers chat buffers, most recent first"
+  (lambda ()
+    (check-true! (and (member "Last chats" (group-names-all)) #t)
+                 "the editor declares it at load")
+    (check-true! (<= (length (last-chats)) last-chats-limit)
+                 "it holds no more chats than the limit")
+    (check-true! (fold (lambda (ok b) (and ok (chat-buffer? b))) #t (last-chats))
+                 "and every member is a chat")))

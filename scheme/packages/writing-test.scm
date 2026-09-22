@@ -233,8 +233,8 @@
                     "the scratch holds the model")
       (check-contains! (buffer-local scratch 'writing-instructions) "Preserve their voice"
                        "and the instructions")
-      (check-equal! (buffer-local scratch 'minor-modes) '("llm-mode")
-                    "and llm-mode is on it")
+      (check-true! (member "llm-mode" (buffer-local scratch 'minor-modes))
+                   "and llm-mode is on it")
 
       (customize-set! 'writing-model saved)
       (t--wr-done! buf scratch))))
@@ -270,10 +270,10 @@
   "the setting is not read once at entry"
   (lambda ()
     (let ((buf (t--wr-write! "zz-writing-measure" "words here\n")))
-      (check-contains! (buffer-local buf 'style) "--writing-measure:62ch;" "the default measure")
+      (check-contains! (buffer-local buf 'style) "--writing-measure:120ch;" "the default measure")
       (customize-set! 'writing-measure "44ch")
       (check-contains! (buffer-local buf 'style) "--writing-measure:44ch;" "the new one, live")
-      (customize-set! 'writing-measure "62ch")
+      (customize-set! 'writing-measure "120ch")
       (t--wr-done! buf))))
 
 (deftest 'restore-minor-modes-re-runs-the-writing-setup-once

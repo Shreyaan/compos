@@ -368,6 +368,28 @@
         (string-append "acp · " c)
         "api")))
 
+;; tokens, cost, and cache hit rate for the API lane, on a chat buffer:
+;; "142k tok · $1.23 · 87% hit". Unlike the cost card, this never borrows
+;; a group's other buffer's spend -- only the chat buffer itself carries
+;; its own tokens. #f on the ACP lane -- that lane reports tokens on a
+;; subscription and prices nothing here -- off a chat buffer, or before
+;; the first turn has billed.
+(define (dash--usage buf)
+  (and (chat-buffer? buf)
+       (equal? (dash--lane buf) "api")
+       (let* ((total (buffer-local buf 'chat-usage-total))
+              (tok (and total (+ (or (plist-get total 'input) 0)
+                                  (or (plist-get total 'output) 0)))))
+         (and tok (> tok 0)
+              (let ((cost (buffer-local buf 'chat-cost))
+                    (rate (chat-hit-rate total)))
+                (string-join
+                  (append
+                    (list (string-append (chat-tokens-short tok) " tok"))
+                    (if cost (list (format-usd cost)) '())
+                    (if rate (list (string-append rate " hit")) '()))
+                  " · "))))))
+
 ;; the tool presets in force here: the buffer's own, or its group chat's
 (define (dash--presets buf)
   (let ((p (or (buffer-local buf 'chat-presets)
@@ -464,12 +486,17 @@
          (days (sort-by-car (dash--day-costs rows)))
          (total (fold (lambda (a d) (+ a (cadr d))) 0 days))
          (today (if (pair? days) (car (reverse days)) #f))
-         (here (dash--here-cost buf)))
+         (here (dash--here-cost buf))
+         (rate (and (chat-buffer? buf)
+                    (equal? (dash--lane buf) "api")
+                    (let ((u (buffer-local buf 'chat-usage-total)))
+                      (and u (chat-hit-rate u))))))
     (dash--section "llm"
       (append
         (list (list 'tag "div" 'class "dash-big" 'text (dash--model buf))
               (dash--row "lane" (dash--lane buf)))
         (if here (list (dash--row "this chat" (format-usd here))) '())
+        (if rate (list (dash--row "cache hit" rate)) '())
         (list (dash--row "today, all" (if today (format-usd (cadr today)) "$0") #f)
               (dash--row "total, all" (format-usd total))
               (dash--row "ledger" "M-x llm-costs" "dim"))))))
@@ -682,13 +709,15 @@
   (let* ((preset (if preset-cell (car preset-cell) (dash--preset buf)))
          (mode (or (buffer-local buf 'mode-name) "Fundamental"))
          (icon (mode-own-icon mode))
-         (mode-text (dashboard--mode-name mode)))
+         (mode-text (dashboard--mode-name mode))
+         (usage (dash--usage buf)))
     (append
       (list (list "mode" (if icon (string-append icon " " mode-text) mode-text) "glyph" 0))
       (if preset
           (list (list "preset" preset "" 1))
           (list (list "llm" (dash--model buf) "" 1)
-                (list "lane" (dash--lane buf) "ok" 2))))))
+                (list "lane" (dash--lane buf) "ok" 2)))
+      (if usage (list (list "usage" usage "" 3)) '()))))
 
 ;; What a buffer can say about itself, as rows for the switcher's narrow:
 ;; the dashboard panel, the summary log of a chat, and for an agent

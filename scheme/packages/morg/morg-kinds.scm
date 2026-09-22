@@ -21,6 +21,9 @@
 ;;;   row-spans   FN      (FN START LINE LEN HEAD?) -> the spans that draw
 ;;;                       one body line in the page, instead of the code
 ;;;                       row; HEAD? is #t on the first row after the fence
+;;;   body-spans  FN      (FN TEXT BLOCK) -> extra spans over the body in
+;;;                       both views; BLOCK is (START LANG BODY-START
+;;;                       BODY-END ...), and TEXT is the buffer text
 ;;;
 ;;; morg.scm and markdown-mode.scm read the paint keys. morg-babel.scm reads
 ;;; the run keys and registers the bundled runners.
@@ -131,8 +134,10 @@
     (lambda (acc b)
       (let* ((lang (nth 1 b)) (bs (nth 2 b)) (be (nth 3 b))
              (tsl (fence-kind-ts-lang lang))
-             (hf (fence-kind-get lang 'header-face #f)))
+             (hf (fence-kind-get lang 'header-face #f))
+             (bf (fence-kind-get lang 'body-spans #f)))
         (append acc
+          (if (and (procedure? bf) (> be bs)) (bf text b) '())
           (if (and tsl (> be bs))
               (map (lambda (sp)
                      (list (+ bs (car sp)) (+ bs (cadr sp))

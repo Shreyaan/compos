@@ -31,6 +31,14 @@ config :compos_ui, app_port: 4005
 config :compos_core, buffer_idle_timeout_ms: 24 * 60 * 60 * 1_000
 config :compos_core, daemon_registry_path: Path.expand("~/.compos/daemons.json")
 
+# One HTTP/2 connection carries every round of a turn. Under HTTP/1 the
+# editor opened a new connection for each round and paid the TLS handshake
+# again: measured at 450-600 ms a round to openrouter.ai, which is 8 s on a
+# turn of 18 rounds. Finch multiplexes an HTTP/2 connection, so the rounds
+# after the first cost no handshake. M-x chat-perf shows the http connect
+# rows, and a working pool shows one of them per turn, not one per round.
+config :req_llm, stream_pool_protocols: [:http2]
+
 # A Scheme execution runs on its own process. The bound kills that process
 # when its heap passes the limit, so one runaway loop cannot take the memory
 # of the machine. Zero disables the bound.

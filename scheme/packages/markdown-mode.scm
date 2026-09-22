@@ -278,12 +278,157 @@
              (let ((len (string-byte-length line)))
                (loop (cdr es)
                      (cons (list (list start (+ start len) "md-marker")
-                                 (list start (+ start len) "row-table-rule"))
+                                 (list start (+ start len) "row-conceal"))
                            acc)
                      #t)))
             ((and open (md--table-row? line))
              (loop (cdr es) (cons (md--table-row-spans start line '("row-table")) acc) #t))
             (else (loop (cdr es) acc #f)))))))
+
+;;; --- indented code, and aligned tables inside it -------------------------
+;;; A block indented four spaces is code (CommonMark). The grammar finds it,
+;;; so a list item's indented paragraph stays text. The page draws the block
+;;; in the code face, and the indent steps back.
+;;;
+;;; A run of lines in such a block whose words stand in shared columns is an
+;;; aligned table. The page keeps it monospace, so the spaces keep the
+;;; columns. The head row draws bold with a line under it, and a row never
+;;; wraps. A column is a stretch of bytes where some line has a word; a gap
+;;; is a stretch where every line has space or a bar.
+
+(define md--icode-indent 4)
+
+(define (md--icode-ranges caps)
+  (map cdr (filter (lambda (c) (equal? (car c) "icode")) caps)))
+
+;; the words of one line, (START END) in bytes; a bar is not a word
+(define (md--aligned-words body) (re-find* "[^ \t|]+" body))
+
+;; the union of the words of every line, as sorted, merged (START END)
+(define (md--aligned-merge spans)
+  (let loop ((ss (sort spans)) (acc '()))
+    (cond ((null? ss) (reverse acc))
+          ((and (pair? acc) (<= (car (car ss)) (cadr (car acc))))
+           (loop (cdr ss)
+                 (cons (list (car (car acc)) (max (cadr (car acc)) (cadr (car ss))))
+                       (cdr acc))))
+          (else (loop (cdr ss) (cons (car ss) acc))))))
+
+;; the gaps between the columns of WORDS (the merged union), as (START END)
+(define (md--aligned-gaps cols)
+  (if (or (null? cols) (null? (cdr cols)))
+      '()
+      (cons (list (cadr (car cols)) (car (cadr cols)))
+            (md--aligned-gaps (cdr cols)))))
+
+;; Take rows from BODIES while the columns hold. A row joins when the table
+;; keeps at least two gaps and loses no more than one. Prose under a table
+;; fills the gaps, so it ends the table. -> the number of rows taken.
+(define (md--aligned-take bodies)
+  (let loop ((bs (cdr bodies))
+             (words (md--aligned-words (car bodies)))
+             (gaps (length (md--aligned-gaps (md--aligned-merge (md--aligned-words (car bodies))))))
+             (n 1))
+    (if (null? bs)
+        n
+        (let* ((w (append words (md--aligned-words (car bs))))
+               (g (length (md--aligned-gaps (md--aligned-merge w)))))
+          (if (and (>= g 2) (>= g (- gaps 1)))
+              (loop (cdr bs) w g (+ n 1))
+              n)))))
+
+;; three rows, two gaps, and one gap two spaces wide: a table, not code
+(define (md--aligned-table? bodies)
+  (and (>= (length bodies) 3)
+       (let ((gaps (md--aligned-gaps
+                     (md--aligned-merge (apply append (map md--aligned-words bodies))))))
+         (and (>= (length gaps) 2)
+              (pair? (filter (lambda (g) (>= (- (cadr g) (car g)) 2)) gaps))))))
+
+;; the first row is a head when it holds no digit and a later row does
+(define (md--aligned-head? bodies)
+  (and (not (re-match "[0-9]" (car bodies)))
+       (pair? (filter (lambda (b) (re-match "[0-9]" b)) (cdr bodies)))))
+
+;; the spans of one indented line; TABLE is #f, 'head, or 'row
+(define (md--icode-line-spans start line table)
+  (let* ((len (string-byte-length line))
+         (ind (min md--icode-indent len)))
+    (append
+      (list (list start (+ start len) "row-code"))
+      (if (> ind 0) (list (md--span start 0 ind "md-marker")) '())
+      (if table
+          (append
+            (list (list start (+ start len) "row-table-aligned"))
+            (if (equal? table 'head)
+                (list (list start (+ start len) "row-table-aligned-head"))
+                '())
+            (map (lambda (b) (md--span start (car b) (cadr b) "md-table-pipe"))
+                 (re-find* "[|]" line)))
+          '()))))
+
+;; one run of non-blank lines, ENTRIES from the scan: find the tables in it
+(define (md--icode-run-spans es)
+  (if (null? es)
+      '()
+      (let* ((bodies (map (lambda (e)
+                            (let ((l (cadr e)))
+                              (substring-bytes l (min md--icode-indent (string-byte-length l))
+                                               (string-byte-length l))))
+                          es))
+             (n (md--aligned-take bodies))
+             (table? (md--aligned-table? (list-head bodies n)))
+             (head? (and table? (md--aligned-head? (list-head bodies n))))
+             (took (if table? n 1)))
+        (append
+          (apply append
+            (map (lambda (i)
+                   (let ((e (list-ref es i)))
+                     (md--icode-line-spans (car e) (cadr e)
+                       (cond ((not table?) #f) ((and head? (= i 0)) 'head) (else 'row)))))
+                 (iota took)))
+          (md--icode-run-spans (list-tail es took))))))
+
+;; split ENTRIES on blank lines into runs
+(define (md--icode-runs es)
+  (let loop ((es es) (run '()) (acc '()))
+    (cond ((null? es) (reverse (if (pair? run) (cons (reverse run) acc) acc)))
+          ((equal? (string-trim (cadr (car es))) "")
+           (loop (cdr es) '() (if (pair? run) (cons (reverse run) acc) acc)))
+          (else (loop (cdr es) (cons (car es) run) acc)))))
+
+;; the spans of every indented code block in SCAN; CAPS carry the blocks
+(define (markdown--icode-spans scan caps)
+  (apply append
+    (map (lambda (r)
+           (let ((in (filter (lambda (e) (and (>= (car e) (car r)) (< (car e) (cadr r))
+                                              (equal? (morg-kind e) 'text)))
+                             scan)))
+             (apply append (map md--icode-run-spans (md--icode-runs in)))))
+         (md--icode-ranges caps))))
+
+
+;; A kind that draws its own rows owns the whole block, so the page hides
+;; its fence lines the way it hides every other marker. The walk needs the
+;; scan: a closing fence names no language, only the open fence above it.
+(define (markdown--own-rows-fence-spans scan)
+  (let loop ((es scan) (own #f) (acc '()))
+    (cond
+      ((null? es) (apply append (reverse acc)))
+      (else
+        (let* ((e (car es))
+               (k (morg-kind e))
+               (start (car e))
+               (len (string-byte-length (cadr e)))
+               (conceal (list (list start (+ start len) "md-marker")
+                              (list start (+ start len) "row-conceal"))))
+          (cond
+            ((equal? k 'open)
+             (let ((own? (and (fence-kind-get (morg-info e) 'row-spans #f) #t)))
+               (loop (cdr es) own? (if own? (cons conceal acc) acc))))
+            ((equal? k 'close)
+             (loop (cdr es) #f (if own (cons conceal acc) acc)))
+            (else (loop (cdr es) own acc))))))))
 
 ;; the spans for one scan entry; block BODIES are highlighted per block in
 ;; markdown-refontify!, because a multi-line construct needs the whole body.
@@ -364,9 +509,11 @@
            ;; its picture, and a body line its block
            (line-spans (morg-markup-spans scan (cadr both) markdown--line-spans))
            (table-spans (markdown--table-spans scan))
+           (icode-spans (markdown--icode-spans scan (cadr both)))
+           (fence-spans (markdown--own-rows-fence-spans scan))
            (block-spans (fence-kind-body-spans (buffer-text buf) (morg-blocks scan buf))))
       (overlay-set! buf 'markdown
-        (append line-spans table-spans block-spans)))))
+        (append line-spans table-spans icode-spans fence-spans block-spans)))))
 
 ;;; --- the mode ----------------------------------------------------------------
 

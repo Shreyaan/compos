@@ -1178,6 +1178,10 @@
   '(("C-c m" "chat-set-model") ("C-c $" "chat-cost") ("C-c b" "llm-configure")
     ("C-c C-k" "chat-reset") ("S-RET" "newline") ("C-c C-v" "chat-toggle-view")))
 
+;; Stop the chat runtime but keep its transcript.
+(mode-keys! "chat-mode" '(("C-c k" "kill-buffer")))
+
+
 ;; there is only one chat interface: the rich group-chat surface. C-c c
 ;; opens the current buffer's group chat (founding a group if needed);
 ;; from inside a chat it is a no-op.
@@ -1611,7 +1615,10 @@
     ;; the rich view's tree, rebuilt from the conversation by
     ;; chat-view-sync!, and the reader's place in it
     render-blocks render-root render-input follow-place follow-seq
-    code-agent-switch-pending prompt-parts editing-state))
+    code-agent-switch-pending prompt-parts editing-state
+    ;; set by a turn the connector answered with silence, read once by the
+    ;; reconnect at the end of that batch
+    chat-connector-suspect))
 
 (define (chat-clear-locals! buf keys)
   (for-each (lambda (k) (buffer-set-local! buf k #f)) keys))

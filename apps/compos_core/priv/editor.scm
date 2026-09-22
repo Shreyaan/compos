@@ -3105,17 +3105,17 @@
   (when (and (not (buffer-context?)) (boundp 'buffer-promote!)
              (not (agent-edit-author? (current-edit-author))))
     (buffer-promote! buf))
+  ;; A buffer opens in the current group: it joins the group it was launched
+  ;; from on the way in, so the layout in front of you never changes under
+  ;; you and the frame never follows a buffer home (docs/groups.md, "A buffer
+  ;; opens in the current group").
+  (when (and (not (buffer-context?)) (not *layout-busy*)
+             (boundp 'buffer-join-here!))
+    (buffer-join-here! buf))
   (cond ((buffer-context?) (switch-to-buffer-here! buf))
-        ;; a buffer of another group: the frame follows it home, and the
-        ;; buffer opens there as a member. The panes of the group it left
-        ;; stay sealed, saved as they stood.
-        ((and (display-foreign? buf)
-              (let ((home (group-home-of buf)))
-                (and home (not (equal? home (frame-group))))))
-         (switch-to-buffer-in-group! buf)
-         buf)
-        ;; an ungrouped buffer: the pane shows it, and the frame leaves its
-        ;; group by the derived rule (docs/groups.md, The current group)
+        ;; what cannot join is a chat, whose group is its identity. It still
+        ;; opens in the pane you are in. The panes of its own group stay
+        ;; sealed, saved as they stood.
         ((display-foreign? buf)
          (switch-to-buffer-here! buf)
          buf)
@@ -5116,7 +5116,6 @@
     (append
       (let ((bind (command-palette--bind-hit query)))
         (if bind (list bind) '()))
-      (if (boundp (quote recipe-search)) (recipe-search query) '())
       (map command-palette--command-hit
            (filter (lambda (name)
                      (apropos-text-hit?
@@ -6077,15 +6076,15 @@
 (for-each
   (lambda (binding) (define-key "layout-map" (car binding) (cadr binding)))
   '(("l" "window-layout")
+    ("1" "window-layout-single")
     ("2" "window-layout-two-pane")
+    ("=" "window-layout-halves")
     ("c" "window-layout-columns")
     ("r" "window-layout-rows")
-    ("g" "window-layout-grid")
     ("f" "window-layout-free")
-    ("<left>" "window-layout-main-right")
-    ("<right>" "window-layout-main-left")
-    ("<up>" "window-layout-main-bottom")
-    ("<down>" "window-layout-main-top")))
+    ;; the layouts go on for ever: these move the panes along the strip
+    ("<right>" "layout-forward")
+    ("<left>" "layout-backward")))
 ;; Cmd-arrows move the focus; Cmd-Shift-arrows swap the two panes
 (global-set-key "S-<left>" "previous-buffer")
 (global-set-key "S-<right>" "next-buffer")

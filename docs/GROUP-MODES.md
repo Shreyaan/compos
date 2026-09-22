@@ -35,7 +35,7 @@ implementation contract, the phases, and the acceptance list. Read
   ```
 
   The global default is the value the editor has today: the default
-  connector and model, the autolayout customs, `*current-theme*`.
+  connector and model, the layout customs, `*current-theme*`.
 
 - **Drift** is the state where a group's settings differ from its mode. The
   modeline shows drift. Two commands end it: `group-mode-save` writes the
@@ -103,20 +103,19 @@ implementation contract, the phases, and the acceptance list. Read
 ### Layout
 
 11. A layout spec is one of:
-    - `(autolayout SIDE RATIO STACK)`: the StumpWM tiler in `layouts.scm`.
-      Enter turns `autolayout-mode` on for the frame with those parameters;
-      leave turns it off when the next group's spec is not `autolayout`.
+    - `NAME`: one of the five layouts in `layouts.scm` -- `single`,
+      `two-pane`, `halves`, `columns` or `rows`. Enter makes it the frame's
+      target layout; leave drops the target when the next group names none.
     - `(DIR RATIO PANE PANE ...)`: the `define-mode-layout!` engine. A PANE is
       `main` (the group's first work buffer by MRU), `chat` (the group chat),
       `scratch` (the group scratch), `"NAME"`, or `(ensure "NAME" "COMMAND")`.
       The engine drops a pane that names no member: a layout never brings a
       foreign buffer into the group (docs/groups.md, sealed groups).
     - a fn of the group id, for a user who wants code.
-12. The autolayout customs `window-layout-main-side`, `-main-ratio`, and
-    `-stack` stay the global defaults. `autolayout--algorithm` reads the
-    frame's group facets first.
-13. `group-default-layout!` reads the layout facet. Its current body (main
-    left, side right at 0.6) becomes the layout of the `coding` mode.
+12. The custom `window-layout-main-ratio` stays the global default for the
+    two-pane layout.
+13. `group-default-layout!` reads the layout facet. Its current body becomes
+    the layout of the `coding` mode.
 
 ### Theme
 
@@ -159,8 +158,8 @@ implementation contract, the phases, and the acceptance list. Read
 ```scheme
 (define-group-mode "coding"
   'llm "pair"
-  'layout '(autolayout left 0.62 column)
-  'doc "One main pane on the left, the rest stacked; the pair bundle")
+  'layout 'two-pane
+  'doc "Two panes, 2/3 and 1/3; the pair bundle")
 
 (define-group-mode "writing"
   'llm "draft"
@@ -204,8 +203,7 @@ shows the document. `writing-mode` (the buffer minor mode) stays as it is.
   in `llm-config-core` (buffer local -> group facet -> global), `'llm-scope`
   joins `chat-identity-locals`.
 - `transient.scm` changes: the scope selector `g`, the header, RET by scope.
-- `layouts.scm` changes: `autolayout--algorithm` reads frame group facets;
-  `group-mode-reset-layout`.
+- `layouts.scm` changes: `group-mode-reset-layout`.
 - `themes.scm`: no change. Phase 5 adds `(theme-apply! NAME FRAME)`.
 - Every public definition carries `domain!` and `effects!`.
 - Tests in `priv/tests/group-mode-test.scm`: a dummy mode, a dummy bundle,
@@ -221,7 +219,7 @@ shows the document. `writing-mode` (the buffer minor mode) stays as it is.
    the transient scope selector, drift in the header, `workspace--llm-defaults`
    retired.
 3. **Layout.** Layout specs, `group-default-layout!` reads the facet,
-   autolayout facets per group, `group-mode-reset-layout`.
+   a layout name per group, `group-mode-reset-layout`.
 4. **Stock modes and migration.** The four modes, the four bundles,
    `group-mode-guess`, `writing-layout` folded into `writing`,
    `docs/groups.md` cross-reference, `docs/COMPONENTS.md` for the chooser.
@@ -253,9 +251,8 @@ shows the document. `writing-mode` (the buffer minor mode) stays as it is.
 8. First entry into a group with no saved layout uses the mode's layout
    spec; re-entry uses the saved layout; `group-mode-reset-layout` uses the
    spec again.
-9. An autolayout spec turns `autolayout-mode` on with the spec's side,
-   ratio, and stack for that frame; a switch to a group with a pane spec
-   turns it off.
+9. A layout-name spec makes that layout the frame's target; a switch to a
+   group with a pane spec drops the target.
 10. A pane that names a non-member is dropped.
 11. A record from a desktop written before this change restores with mode
     `#f` and settings `'()`.

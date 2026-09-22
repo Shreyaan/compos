@@ -39,6 +39,34 @@
     (check-equal! (length (hook-functions '(endpoint-event "t-dup"))) 1 "one listener")
     (remove-hook! '(endpoint-event "t-dup"))))
 
+(deftest 'the-registry-names-every-connection-a-package-registered
+  "a manager of these programs reads the registry rather than keeping a list"
+  (lambda ()
+    (endpoint-register! "t-named" '(command "cat" framing "line"))
+    (check-true! (member "t-named" (endpoint-names)) "the name is in the registry")
+    (check-false! (member "t-never-registered" (endpoint-names)) "and only a registered one")))
+
+(deftest 'a-json-line-daemon-answers-the-shape-an-http-reply-answers
+  "a caller reads one shape whether it asked a server, a socket, or a pipe"
+  (lambda ()
+    (let ((r (endpoint-json-reply #t (list "{\"ok\": true, \"models\": []}"))))
+      (check-true! (http-ok? r) "ok is an answer")
+      (check-equal! (plist-get (http-json r) 'models) '() "and the body is its JSON"))
+    (let ((r (endpoint-json-reply #t (list "{\"ok\": false, \"error\": \"no\"}"))))
+      (check-false! (http-ok? r) "a refusal is not an answer"))
+    (let ((r (endpoint-json-reply #t (list "not json at all"))))
+      (check-false! (http-ok? r) "and neither is a line that is not JSON"))))
+
+(deftest 'asking-a-daemon-that-is-not-running-answers-rather-than-raising
+  "a manager asks before it knows; an unopened pipe is a reply, not a crash"
+  (lambda ()
+    (let ((got #f))
+      (endpoint-ask-json "t-not-running" '(op "models") 1000
+        (lambda (reply) (set! got reply)))
+      (check-true! (pair? got) "the callback ran at once")
+      (check-false! (http-ok? got) "and it says the daemon is not running")
+      (check-true! (string-contains? (http-message got) "not running") "in those words"))))
+
 ;;; --- discovery ---------------------------------------------------------------
 ;;; The mechanism is only useful if the person writing a connector can
 ;;; find it. These are the words they actually search for.

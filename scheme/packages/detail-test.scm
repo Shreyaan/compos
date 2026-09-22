@@ -179,7 +179,7 @@
         (buffer-set-local! "*zz-detail-a*" 'special #t)
         (switch-to-buffer-here! "*zz-detail-list*")
         (run-command "delete-other-windows")
-        (layout-target-set! 'main-right)
+        (layout-target-set! 'two-pane)
         (check-false! (fill-candidate? "*zz-detail-a*") "no layout will hold it")
         (let ((me (active-window))
               (win (display-buffer-detail! "*zz-detail-a*" "*zz-detail-list*")))

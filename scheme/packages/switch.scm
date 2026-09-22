@@ -32,10 +32,11 @@
 (define (switch-container? e)
   (and (> (length e) 2) (equal? (nth 2 e) "container")))
 
-;; group ids whose card can appear: every group, except the one you are in
+;; group ids whose card can appear: every group and every pseudo group,
+;; except the one you are in
 (define (switch-groups buf)
   (filter (lambda (g) (not (equal? g (buffer-local buf 'switch-group))))
-          (group-names)))
+          (group-names-all)))
 
 ;; every project the editor knows that is not a group yet: the
 ;; remembered list (project.scm learns one from every visited file),
@@ -416,7 +417,7 @@
 
 ;; a container card names a group by its label, or a project by its root
 (define (switch-card-target label)
-  (let loop ((gs (group-names)))
+  (let loop ((gs (group-names-all)))
     (cond ((null? gs)
            (list 'project (substring label 1 (- (string-length label) 1))))
           ((equal? (group-container-label (car gs)) label)
@@ -482,11 +483,10 @@
        (if context?
            (buffer-context-switch! name)
            (begin
-             ;; a switch of buffer is a switch of group: you go to where
-             ;; the buffer lives. The preview put it in the home window,
-             ;; and switch-to-buffer-in-group! keeps that window when the
-             ;; group does not change.
-             (switch-to-buffer-in-group! name)
+             ;; the buffer comes to you: a switch opens it in the group you
+             ;; are standing in, and the frame keeps the layout you picked
+             ;; from. The preview already put it in the home window.
+             (switch-to-buffer! name)
              (group-current-recalculate!)
              (windows-shown-catchup!))))
       ((*switch-pick* name)
@@ -834,6 +834,39 @@
               "minibuffer" options)))
       (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) t0))))
 
+
+;; The title picker is deliberately window-local: it offers only the buffers
+;; in this pane's own previous-buffer stack, not the frame-wide switch pool.
+(define (switch-window-buffers)
+  (let* ((win (active-window))
+         (here (window-buffer win)))
+    (filter (lambda (name)
+              (and (string? name)
+                   (not (equal? name here))
+                   (buffer-known? name)))
+            (window-prev-buffers win))))
+
+(define-command "switch-window-buffer"
+  "Choose another buffer from this window's title"
+  (lambda ()
+    (let* ((home (active-window))
+           (here (window-buffer home))
+           (rows (switch-window-buffers)))
+      (if (null? rows)
+          (message "No other buffer in this window")
+          (let ((restore! (lambda () (preview-end #f))))
+            (minibuffer-read-preview "Window buffers: " rows
+              (lambda (row)
+                (when (and (string? row) (buffer-known? row) (window-exists? home))
+                  (preview-show row 'here home)))
+              (lambda (row)
+                (restore!)
+                (when (and (string? row) (buffer-known? row))
+                  (switch-to-buffer-here! row)
+                  (group-current-recalculate!)))
+              restore!
+              #f "minibuffer"))))))
+
 (define (switch-bare-candidates names)
   (let* ((pairs (map (lambda (name)
                   (list (if (string-prefix? "/" name) (cadr (ibuffer-split-path name)) name) name)) names))
@@ -905,6 +938,7 @@
 (define (ibuffer-prompt-last-ms) *ibuffer-prompt-last-ms*)
 
 (global-set-key "C-x b" "ibuffer-prompt")
+(global-set-key "C-x C-t" "switch-window-buffer")
 
 (category! 'buffers)
 (catalog-meta! 'command "switch-kill" 'domain 'buffers 'effects '(destroy))

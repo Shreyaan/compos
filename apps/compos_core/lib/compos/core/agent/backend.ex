@@ -151,7 +151,8 @@ defmodule Compos.Core.Agent.Backend do
                tools: plist_get(plist, "tools") || [],
                dispatcher: plist_get(plist, "dispatcher"),
                empty_reply_nudge: plist_str(plist_get(plist, "empty-reply-nudge")),
-               steer_settle_seconds: plist_get(plist, "steer-settle-seconds")
+               steer_settle_seconds: plist_get(plist, "steer-settle-seconds"),
+               silent_turn_seconds: plist_get(plist, "silent-turn-seconds")
              }}
 
           {:error, msg} ->

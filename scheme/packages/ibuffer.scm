@@ -1190,7 +1190,7 @@
 (define (ibuffer-wide-footer buf)
   '(("RET" "visit") ("C-c v" "previews on/off") ("SPC" "mark") ("u" "unmark") ("U" "unmark all")
     ("d" "flag") ("x" "execute") ("k" "kill") ("K" "kill group")
-    ("g" "refresh") ("/" "group") (">" "sort") ("TAB" "fold")
+    ("g" "refresh") ("<" "group") (">" "sort") ("TAB" "fold")
     ("M-↓/↑" "next/previous group") ("G" "add to group")
     ("C-x n n/w" "narrow/widen") ("f" "filter") ("q" "quit") ("?" "all bindings")))
 
@@ -2153,7 +2153,7 @@
     'composml-fields (lambda (buf entry) (ibuffer-composml-fields buf entry))
     'doc (string-append
            "A traditional buffer management table. A section is a group, "
-           "a mode, or a directory; / cycles the grouping. Rows inside a "
+           "a mode, or a directory; < cycles the grouping. Rows inside a "
            "section sort by name, recency, or size; > cycles the sort. "
            "TAB folds the section at point. A narrow window shows the "
            "name and the age; a wider one adds the size and the mode, and "

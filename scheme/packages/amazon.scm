@@ -5,22 +5,23 @@
 ;;; land on renders as its own buffer beside it, so C-` flips between the
 ;;; three you are actually choosing between without going back to the list.
 ;;;
-;;; The app reads the signed-in session. (browse URL) fetches through the
-;;; reader, which carries the browser's cookies, so the prices here are the
-;;; account's own -- business prices, excluding GST, with the retail price
-;;; beside them. Nothing is scraped from a logged-out page.
+;;; The app reads the signed-in session through a background tab, which
+;;; carries the browser's cookies, so the prices here are the account's own
+;;; and so are the delivery promises. Nothing is read from a logged-out page.
 ;;;
-;;; The app lives in ONE group (app-creator): the listing and every product
-;;; page join *amazon*, so the group saves the three-column layout and
+;;; Rows come from web/parsers/amazon-rows.xsl through xslt-apply: the sheet
+;;; parses, and no line in this file reads markup. It anchors on
+;;; puis-card-container, which is products only -- Amazon marks its ad
+;;; carousels s-result-item too, and anchoring there pulls them into the
+;;; listing as if they were things you had searched for.
+;;;
+;;; The app opens where you already are: the listing and every product page
+;;; join the group the frame is in, so that group saves the layout and
 ;;; gives it back. Actions that leave the editor -- the cart -- are the
 ;;; reader pressing a button, never a render.
 
 (domain! 'web)
 (effects! '(read))
-
-(defcustom 'amazon-group-name "*amazon*"
-  "The group the Amazon app lives in. The listing and the product pages are one app, so they always open in this group and a layout holding them is saved and restored with it."
-  'group 'amazon)
 
 (defcustom 'amazon-host "www.amazon.in"
   "The Amazon storefront the app reads. Change it to shop another country's site."
@@ -31,7 +32,6 @@
   'group 'amazon)
 
 ;; How many times the app looks for the search page before giving up. Each look is 400ms.
-(define amazon-fetch-tries 25)
 
 (define *amazon-buffer* "*amazon*")
 (define *amazon-log* "*amazon-log*")
@@ -124,122 +124,21 @@
                                         (else (place (cdr xs) (cons (car xs) out))))))))))
     (map (lambda (p) (car (cdr p))) sorted)))
 
-;; "Rs1,263.56Rs1,263.56excl. GST" -- the page prints every price twice
-(define (amz-rupees s)
-  (let ((a (amz-after s "₹")))
-    (and a (let ((b (amz-before a "₹"))) (if (equal? b "") #f b)))))
-
-;; The canonical link, not a colour variant and not the next row's teaser:
-;; the ASIN we want is the one followed by a search-result ref. A sponsored
-;; row wraps its link in a click tracker, so the same pair comes URL-encoded.
-(define (amz-asin-in p)
-  (let try ((seps (list (list "/dp/" "/ref=sr_")
-                        (list "%2Fdp%2F" "%2Fref%3Dsr_")
-                        (list "/dp/" "/ref=cs_sr_dp_1"))))
-    (if (null? seps)
-        #f
-        (let* ((sep (car (car seps)))
-               (mark (car (cdr (car seps))))
-               (mlen (string-length mark))
-               (tails (cdr (string-split p sep))))
-          (let scan ((ts tails))
-            (cond ((null? ts) (try (cdr seps)))
-                  ((and (> (string-length (car ts)) (+ 10 mlen))
-                        (equal? (substring (car ts) 10 (+ 10 mlen)) mark))
-                   (substring (car ts) 0 10))
-                  (else (scan (cdr ts)))))))))
-
-(define (amz-image p)
-  (let ((a (amz-after p "](")))
-    (and a (amz-has? a "m.media-amazon.com/images/I/")
-         (amz-before (amz-before a ")") "?"))))
-
-(define *amz-chrome-titles* '("Results" "More results" "Need help?" "Filters" "Sponsored" "Highly rated"))
-
-(define (amz-title? t)
-  (and (> (string-length t) 12)
-       (not (member t *amz-chrome-titles*))
-       (not (amz-has? t " results for "))))
-
-;; the brand is its own short heading above the long one
-(define (amz--longest ts)
-  (let loop ((l ts) (best #f))
-    (cond ((null? l) best)
-          ((or (not best) (> (string-length (car l)) (string-length best))) (loop (cdr l) (car l)))
-          (else (loop (cdr l) best)))))
-
-(define (amz--brand ts long)
-  (let loop ((l ts))
-    (cond ((null? l) #f)
-          ((and (< (string-length (car l)) 22) (not (equal? (car l) long))) (car l))
-          (else (loop (cdr l))))))
-
-;; one result, from the paragraphs between two photos. A group with no
-;; "Add to cart" is a carousel, not a result, and is dropped.
-(define (amz-item paras)
-  (let loop ((ps paras) (asin #f) (img #f) (titles '()) (rating #f) (revs #f)
-             (biz #f) (incl #f) (mrp #f) (deliv #f) (spons #f) (cart #f))
-    (if (null? ps)
-        (let* ((long (amz--longest titles))
-               (brand (and long (amz--brand titles long))))
-          (and asin long cart
-               (list 'asin asin
-                     'title (amz-clean (if (and brand (not (amz-has? long brand)))
-                                           (string-append brand " " long)
-                                           long))
-                     'img img 'rating rating 'reviews revs
-                     'biz biz 'incl incl 'mrp mrp 'delivery deliv 'sponsored spons)))
-        (let ((p (car ps)))
-          (loop (cdr ps)
-                (or asin (amz-asin-in p))
-                (or img (amz-image p))
-                (if (and (> (string-length p) 3)
-                         (equal? (substring p 0 3) "## ")
-                         (amz-title? (substring p 3 (string-length p))))
-                    (cons (substring p 3 (string-length p)) titles)
-                    titles)
-                (or rating (and (amz-has? p " out of 5 stars") (amz-before p "*")))
-                (or revs (and (amz-has? p "[(") (amz-has? p "out of 5 stars")
-                              (amz-before (amz-after p "[(") ")")))
-                (or biz (and (amz-has? p "excl. GST") (amz-rupees p)))
-                (or incl (and (amz-has? p "incl. GST") (amz-rupees (or (amz-after p "[") p))))
-                (or mrp (and (> (string-length p) 7) (equal? (substring p 0 7) "M.R.P: ") (amz-rupees p)))
-                (or deliv (and (amz-has? p "delivery") (amz-clip p 44)))
-                (or spons (amz-has? p "Sponsored Ad -"))
-                (or cart (equal? p "Add to cart")))))))
-
-(define (amz-parse text)
-  (let* ((paras (string-split text "\n\n"))
-         (groups (let loop ((ps paras) (cur '()) (acc '()))
-                   (cond ((null? ps) (reverse (if (null? cur) acc (cons (reverse cur) acc))))
-                         ((amz-image (car ps))
-                          (loop (cdr ps) (list (car ps)) (if (null? cur) acc (cons (reverse cur) acc))))
-                         (else (loop (cdr ps) (if (null? cur) cur (cons (car ps) cur)) acc)))))
-         (items (filter (lambda (x) x) (map amz-item groups))))
-    (let dedupe ((is items) (seen '()) (acc '()))
-      (cond ((null? is) (reverse acc))
-            ((member (plist-get (car is) 'asin) seen) (dedupe (cdr is) seen acc))
-            (else (dedupe (cdr is) (cons (plist-get (car is) 'asin) seen) (cons (car is) acc)))))))
-
-;;; --- the home group ------------------------------------------------------
-;;; The app has one home, not whichever group the frame stood in when a key
-;;; was pressed: a pane holding a member is a place, so the group saves this
-;;; layout and restores it whole.
+;;; --- the group -----------------------------------------------------------
+;;; The app takes you nowhere. It opens in the group the frame is already in,
+;;; and every buffer it makes joins that one: a pane holding a member is a
+;;; place, so the group saves this layout and gives it back. An app opened
+;;; from an ungrouped frame has no group to join and so has no saved layout.
+;;; That is the reader's position to be in, not the app's to correct.
 
 (effects! '(write display))
 
 (define (amazon-home-group!)
-  (and (string? amazon-group-name) (not (equal? amazon-group-name "")) (group-ensure-record! amazon-group-name)))
-
-(define (amazon-enter-group!)
-  (let ((id (amazon-home-group!)))
-    (when (and id (boundp 'switch-to-group!) (not (equal? (frame-group) id)))
-      (switch-to-group! id))
-    id))
+  (frame-group))
 
 (define (amazon-join-group! buf)
   (when (and buf (buffer-exists? buf))
-    (let ((id (or (amazon-home-group!) (frame-group))))
+    (let ((id (amazon-home-group!)))
       (when (and id (not (buffer-in-group? buf id)))
         (buffer-add-group! buf id))))
   buf)
@@ -258,48 +157,80 @@
 (define (amazon-search-url query)
   (string-append "https://" amazon-host "/s?k=" (url-encode query)))
 
-(define (amz-link-url line)
-  (let ((parts (string-split line "](")))
-    (and (> (length parts) 1)
-         (let ((u (car (string-split (car (reverse parts)) ")"))))
-           (and (> (string-length u) 3) (equal? (substring u 0 3) "/s?") u)))))
-
-(define (amazon-next-url text)
-  (let loop ((ls (string-split text "\n")))
-    (cond ((null? ls) #f)
-          ((and (string-contains? (car ls) "[Next")
-                (string-contains? (car ls) "ref=sr_pg_"))
-           (let ((u (amz-link-url (car ls))))
-             (and u (string-append "https://" amazon-host u))))
-          (else (loop (cdr ls))))))
-
 (define (amazon-product-url asin)
   (string-append "https://" amazon-host "/dp/" asin))
 
-(define (amazon--land! buf tries k)
-  (let ((text (if (buffer-exists? buf) (buffer-text buf) "")))
-    (cond ((> (string-length text) 4000)
-           (let ((rows (amz-parse text))
-                 (next (amazon-next-url text)))
-             (buffer-kill! buf)
-             (k rows next)))
-          ((<= tries 0)
-           (when (buffer-exists? buf) (buffer-kill! buf))
-           (k #f #f))
-          (else
-           (debounce! 'amazon-fetch 400
-                      (lambda (_) (amazon--land! buf (- tries 1) k))
-                      #f)))))
+(define *amazon-sheet* "web/parsers/amazon-rows.xsl")
 
 (define (amazon-page-url query page)
   (let ((base (amazon-search-url query)))
     (if (<= page 1) base (string-append base "&page=" (number->string page)))))
 
+;; ONE way to read an Amazon page: a url, a sheet, and what a good answer
+;; looks like. K gets the parsed record and the html it came from, or #f.
+;;
+;; RENDER says what the page needs, because the three pages need three
+;; different things and the difference is measured, not guessed:
+;;
+;;   #f       a plain fetch. Amazon renders /dp/ on its own server, so the
+;;            bullets, both specification tables, the histogram and the
+;;            reviews are all in the bytes: about 2s against about 5s for a
+;;            background tab that renders them again, and the two parse to
+;;            the same record. A throttled fetch answers about 2KB with an
+;;            empty title, so an answer that is not good is read again in a
+;;            tab rather than shown as nothing.
+;;   #t       a tab, with no fetch tried first. The search page answers a
+;;            plain fetch with that 2KB stub nearly every time, so probing
+;;            it only spends a second to learn what we already know.
+;;   SELECTOR a tab that waits for SELECTOR. A load event is not an answer:
+;;            the cart replies complete with an empty basket and fills it
+;;            afterwards, so the read waits for a real line to arrive.
+(define (amazon-read! url sheet ok? k &optional render)
+  (if render
+      (amazon--read-rendered! url sheet ok? k (and (string? render) render))
+      (browser-fetch url
+        (lambda (reply)
+          (let* ((html (and (pair? reply) (car (cdr reply))))
+                 (data (amazon--parse sheet html)))
+            (if (and data (ok? data))
+                (k data html)
+                (amazon--read-rendered! url sheet ok? k #f)))))))
+
+(define (amazon--read-rendered! url sheet ok? k wait)
+  (browser-snapshot url
+    (lambda (html)
+      (let ((data (amazon--parse sheet html)))
+        (if (and data (ok? data)) (k data html) (k #f html))))
+    wait))
+
+(define (amazon--parse sheet html)
+  (let ((out (and (string? html) (xslt-apply sheet html))))
+    (and (string? out) (> (string-length out) 2) (json-parse out))))
+
 (define (amazon-fetch! query k)
   (amazon-fetch-page! query 1 k))
 
+;; The rendered page, not the fetched one: Amazon answers a plain fetch with
+;; a script shell, so the reading has to come from a real tab. The sheet does
+;; the parsing, and nothing in this file reads markup any more.
+;;
+;; The sheet anchors on puis-card-container, which is products only. Amazon
+;; marks its ad carousels s-result-item too: on one page, 24 s-result-item
+;; nodes were 16 products, 2 ad carousels, 3 labels, the facet rail, related
+;; searches and a help line.
 (define (amazon-fetch-page! query page k)
-  (amazon--land! (browse (amazon-page-url query page)) amazon-fetch-tries k))
+  ;; a tab: the search page is the one that will not answer a fetch
+  (amazon-read! (amazon-page-url query page) *amazon-sheet* pair?
+    (lambda (rows html)
+      ;; The s-pagination-* classes are absent from the rendered
+      ;; snapshot. The next page's own url is in it, so that is the
+      ;; signal that another page exists.
+      (k (and (pair? rows) rows)
+         (and (string? html)
+              (string-contains? html
+                (string-append "page=" (number->string (+ page 1))))
+              #t)))
+    #t))
 
 ;;; --- the product page ----------------------------------------------------
 ;;; A detail is one buffer per row, named after the ASIN, so the details
@@ -315,6 +246,23 @@
 .amazon-note { margin: 8px 12px; padding: 8px 10px; border-left: 3px solid var(--accent-fg); background: var(--hl-line-bg); white-space: pre-wrap; color: var(--fg); }
 .amazon-reviews { padding: 4px 0; font-family: var(--font-sans); color: var(--fg); }
 .amazon-photo { display: block; max-width: 200px; max-height: 200px; width: auto; height: auto; object-fit: contain; border: 1px solid var(--border-bg); border-radius: 3px; margin: 2px 0 6px; }
+.amazon-bullets { margin: 2px 0 4px; padding: 0; list-style: none; }
+.amazon-bullet { position: relative; padding-left: 14px; margin: 3px 0; font-family: var(--font-sans); line-height: 1.4; color: var(--fg); }
+.amazon-bullet:before { content: '•'; position: absolute; left: 3px; color: var(--accent-fg); }
+.amazon-prose { font-family: var(--font-sans); line-height: 1.45; color: var(--fg); white-space: pre-wrap; margin: 2px 0 4px; }
+.amazon-hist { margin: 4px 0 8px; }
+.amazon-hist-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.amazon-hist-star { font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg); min-width: 26px; }
+.amazon-hist-track { flex: 1; height: 8px; background: var(--hl-line-bg); border-radius: 2px; overflow: hidden; }
+.amazon-hist-fill { display: block; height: 100%; background: var(--accent-fg); }
+.amazon-hist-pct { font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg); min-width: 34px; text-align: right; }
+.amazon-review { margin: 6px 0; padding: 8px 10px; border: 1px solid var(--border-bg); border-radius: 3px; }
+.amazon-review-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.amazon-review-stars { font-family: var(--font-mono); font-size: 11px; color: var(--accent-fg); }
+.amazon-review-title { font-family: var(--font-sans); font-size: 13px; font-weight: 600; color: var(--fg); }
+.amazon-review-meta { font-family: var(--font-sans); font-size: 11px; color: var(--dim-fg); margin: 2px 0 4px; }
+.amazon-review-body { font-family: var(--font-sans); line-height: 1.45; color: var(--fg); white-space: pre-wrap; }
+.amazon-review-helpful { font-family: var(--font-sans); font-size: 11px; color: var(--dim-fg); margin-top: 4px; }
 ")
 
 (define (amazon--row-field row key alt) (or (plist-get row key) alt))
@@ -374,6 +322,8 @@
   (buffer-set-local! buf 'amazon-tab tab)
   (let ((row (buffer-local buf 'amazon-row)))
     (when row
+      ;; asking for a tab is asking for the page behind it
+      (amazon-detail-load! buf row)
       (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))
 
 ;; the tab bar's number hints are real keys: 1, 2 and 3 switch the tab
@@ -394,6 +344,16 @@
 (define-command "amazon-tab-reviews" "Show the product's Reviews tab"
   (lambda () (amazon-tab-here! "reviews")))
 
+(define-command "amazon-reload-detail" "Read this product's page again"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (row (buffer-local buf 'amazon-row)))
+      (if row
+          (begin (amazon-detail-reload! buf row)
+                 (amazon-detail-refresh! buf)
+                 (message "Reading the product page again"))
+          (message "Not a product page")))))
+
 (define (amazon--tab-entry buf id label key)
   (list id label (equal? (amazon-tab buf) id) key))
 
@@ -406,8 +366,19 @@
 
 ;; the search page gives one photo per row; block mode draws it as an <img>,
 ;; so the detail page keeps the product picture the listing page dropped
+(define (amazon--photo-url src)
+  ;; The listing hands over a thumbnail cropped for a table cell
+  ;; (._AC_..._SF516.0,327.0_PQ65_.jpg). Amazon serves any size from the same
+  ;; image id, so keep the id, drop the size token, and ask for a big one.
+  (let ((parts (and (string? src) (string-split src "/I/"))))
+    (if (or (not parts) (null? (cdr parts)))
+        src
+        (string-append (car parts) "/I/"
+                       (car (string-split (car (cdr parts)) "."))
+                       "._AC_SL1000_.jpg"))))
+
 (define (amazon--photo-block row)
-  (let ((src (plist-get row 'img)))
+  (let ((src (amazon--photo-url (plist-get row 'image))))
     (and src
          (list 'tag "img"
                'class "amazon-photo"
@@ -429,7 +400,6 @@
 (define (amazon--head-block row)
   (let* ((asin (plist-get row 'asin))
          (mrp (plist-get row 'mrp))
-         (incl (plist-get row 'incl))
          (rating (plist-get row 'rating))
          (revs (plist-get row 'reviews))
          (kept? (amazon-saved? asin))
@@ -443,9 +413,8 @@
             (list 'tag "div" 'class "amazon-title" 'text (plist-get row 'title))
             (list 'tag "div" 'class "amazon-price"
                   'text (string-append
-                          "₹" (amazon--row-field row 'biz "—")
-                          (if incl (string-append "  ·  ₹" incl " incl. GST") "")
-                          (if mrp (string-append "  ·  M.R.P. ₹" mrp) "")))
+                          "₹" (amazon--row-field row 'price "—")
+                                        (if mrp (string-append "  ·  M.R.P. ₹" mrp) "")))
             (list 'tag "div" 'class "amazon-chips"
                   'children
                   (filter (lambda (b) b)
@@ -458,12 +427,16 @@
                       (and in? (component 'ui/badge (list 'text "in your cart"))))))
             (amazon--actions row))))))
 
-(define (amazon--overview-blocks row)
+(define (amazon--overview-blocks buf row)
   (let* ((asin (plist-get row 'asin))
-         (incl (plist-get row 'incl))
-         (rating (plist-get row 'rating))
-         (revs (plist-get row 'reviews))
-         (deliv (plist-get row 'delivery))
+         (data (amazon-detail-data buf))
+         (rating (or (and data (plist-get data 'rating)) (plist-get row 'rating)))
+         (revs (or (and data (plist-get data 'reviewCount)) (plist-get row 'reviews)))
+         (deliv (or (and data (plist-get data 'delivery)) (plist-get row 'delivery)))
+         (bullets (amazon--uniq (or (and data (plist-get data 'bullets)) '())))
+         (desc (and data
+                    (let ((ps (amazon--uniq (or (plist-get data 'descParas) '()))))
+                      (if (pair? ps) (string-join ps "\n\n") (plist-get data 'description)))))
          (note (amazon-note asin)))
     (append
       (list
@@ -472,59 +445,276 @@
                 'body (list
                   (component 'ui/kv
                     (list 'pairs
-                      (list
-                        (list "Price" (string-append "₹" (amazon--row-field row 'biz "—") " excl. GST"))
-                        (list "With GST" (if incl (string-append "₹" incl) "—"))
-                        (list "Rating" (if rating (string-append rating " / 5") "—"))
-                        (list "Reviews" (if revs (string-append revs " ratings") "—"))
-                        (list "Delivery" (or deliv "—")))))))))
+                      (filter (lambda (p) p)
+                        (list
+                          (list "Price" (string-append "₹" (amazon--row-field row 'price "—")))
+                          (list "Rating" (if rating (string-append (amazon--stars rating) " / 5") "—"))
+                          (list "Reviews" (if revs (string-append (amazon--count revs) " ratings") "—"))
+                          (list "Delivery" (or deliv "—"))
+                          (and data (list "Brand" (or (amazon--brand data) "—")))
+                          (and data (list "Seller" (or (plist-get data 'seller) "—")))
+                          (and data (list "Availability" (or (plist-get data 'availability) "—")))))))))))
+      (if (pair? bullets)
+          (list (component 'ui/group
+                  (list 'title "About this item"
+                        'body (list
+                          (list 'tag "div" 'class "amazon-bullets"
+                                'children
+                                (map (lambda (b)
+                                       (list 'tag "div" 'class "amazon-bullet" 'text b))
+                                     bullets))))))
+          '())
+      (if (and desc (> (string-length desc) 0))
+          (list (component 'ui/group
+                  (list 'title "From the maker"
+                        'body (list (list 'tag "div" 'class "amazon-prose"
+                                          'text (amz-clip desc 2000))))))
+          '())
+      ;; the overview reads well from the row alone, so it only speaks up
+      ;; while a read is actually running
+      (if (and (null? bullets) (equal? (amazon-detail-state buf) 'loading))
+          (list (amazon--waiting buf "the description"))
+          '())
       (if note (list (list 'tag "div" 'class "amazon-note" 'text note)) '()))))
 
-(define (amazon--specs-blocks row)
+;; The product page, read once per product and kept on its buffer.
+;; A listing row carries a title, a price and a star count; everything
+;; else the page shows -- the About-this-item bullets, the specification
+;; tables, the star histogram and the reviews Amazon prints on the page
+;; itself -- comes from the product page, read on demand. The read is a
+;; rendered snapshot, so it is never done for a preview: only an opened
+;; page and a tab the reader asked for start one.
+(define *amazon-detail-sheet* "web/parsers/amazon-detail.xsl")
+
+(define (amazon-detail-data buf) (buffer-local buf 'amazon-detail))
+(define (amazon-detail-state buf) (or (buffer-local buf 'amazon-detail-state) 'cold))
+
+(define (amazon-detail-refresh! buf)
+  (let ((row (and (buffer-exists? buf) (buffer-local buf 'amazon-row))))
+    (when row
+      (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))
+
+(define (amazon-detail-load! buf row)
+  ;; a fetch: /dp/ arrives whole, and a tab only if that answer is thin
+  (let ((asin (and row (plist-get row 'asin))))
+    (when (and asin (equal? (amazon-detail-state buf) 'cold))
+      (buffer-set-local! buf 'amazon-detail-state 'loading)
+      (amazon-read! (amazon-product-url asin) *amazon-detail-sheet*
+        amazon-detail-whole?
+        (lambda (data html)
+          (buffer-set-local! buf 'amazon-detail data)
+          (buffer-set-local! buf 'amazon-detail-state (if data 'ready 'failed))
+          (amazon-detail-refresh! buf))))))
+
+;; A throttled read parses to a record with every field empty. A real
+;; product page has a title and at least one of the three things the tabs
+;; are made of -- some products carry no specification table at all, so no
+;; single block can stand for the page.
+(define (amazon-detail-whole? d)
+  (and (> (string-length (or (plist-get d 'title) "")) 0)
+       (or (pair? (or (plist-get d 'specs) '()))
+           (pair? (or (plist-get d 'bullets) '()))
+           (pair? (or (plist-get d 'reviews) '())))
+       #t))
+
+;; read the page again: the buffer keeps its name, its tab and its notes
+(define (amazon-detail-reload! buf row)
+  (buffer-set-local! buf 'amazon-detail-state 'cold)
+  (buffer-set-local! buf 'amazon-detail #f)
+  (amazon-detail-load! buf row))
+
+;; a specification table as (KEY VALUE) rows: the page repeats keys
+;; across its tables, and the first mention is the one that reads best
+;; the rating and the ASIN are already on the page's own head and in
+;; Listing, and the page prints the rating as a run of three copies
+(define *amazon-spec-skip* (list "Customer Reviews" "ASIN"))
+
+(define (amazon--pairs data key)
+  (let loop ((ps (or (plist-get data key) '())) (seen '()) (out '()))
+    (if (null? ps)
+        (reverse out)
+        (let ((k (amz-clean (or (plist-get (car ps) 'k) "")))
+              (v (amz-clean (or (plist-get (car ps) 'v) ""))))
+          (if (or (equal? k "") (equal? v "")
+                  (member k seen) (member k *amazon-spec-skip*))
+              (loop (cdr ps) seen out)
+              (loop (cdr ps) (cons k seen)
+                    (cons (list k (amz-clip v 300)) out)))))))
+
+;; the same line twice is Amazon's expander, not two bullets
+(define (amazon--uniq strs)
+  (let loop ((ss strs) (seen '()) (out '()))
+    (cond ((null? ss) (reverse out))
+          ((or (equal? (car ss) "") (member (car ss) seen)) (loop (cdr ss) seen out))
+          (else (loop (cdr ss) (cons (car ss) seen) (cons (car ss) out))))))
+
+;; the page writes a rating count as "(1,234)" and the listing as "1,234"
+(define (amazon--count s)
+  (and s (amz-replace (amz-replace s "(" "") ")" "")))
+
+;; Amazon writes the byline as "Visit the Acme Store" or "Brand: Acme"
+(define (amazon--brand data)
+  (let ((s (amz-clean (or (plist-get data 'brand) ""))))
+    (cond ((equal? s "") #f)
+          ((amz-has? s "Visit the ")
+           (let ((rest (amz-after s "Visit the ")))
+             (if (amz-has? rest " Store") (amz-before rest " Store") rest)))
+          ((amz-has? s "Brand: ") (amz-after s "Brand: "))
+          (else s))))
+
+(define (amazon--waiting buf what)
+  ;; a preview never reads the page, so a cold tab says how to read it
+  ;; rather than pretending a read is under way
+  (let ((state (amazon-detail-state buf)))
+    (cond ((equal? state 'ready) #f)
+          ((equal? state 'loading)
+           (component 'ui/empty
+             (list 'text (string-append "Reading " what " from the product page…"))))
+          ((equal? state 'failed)
+           (component 'ui/empty
+             (list 'text "Could not read the product page. g reads it again.")))
+          (else
+           (component 'ui/empty
+             (list 'text (string-append "g reads the product page for " what ".")))))))
+
+(define (amazon--specs-blocks buf row)
   (let* ((asin (plist-get row 'asin))
          (mrp (plist-get row 'mrp))
-         (incl (plist-get row 'incl))
-         (rating (plist-get row 'rating))
-         (revs (plist-get row 'reviews))
-         (deliv (plist-get row 'delivery)))
-    (list
-      (component 'ui/group
-        (list 'title "Product information"
-              'body (list
-                (component 'ui/kv
-                  (list 'pairs
-                    (list
-                      (list "Price (excl. GST)" (string-append "₹" (amazon--row-field row 'biz "—")))
-                      (list "With GST" (if incl (string-append "₹" incl) "—"))
-                      (list "M.R.P." (if mrp (string-append "₹" mrp) "—"))
-                      (list "Rating" (if rating (string-append rating " / 5") "—"))
-                      (list "Reviews" (if revs (string-append revs " ratings") "—"))
-                      (list "Delivery" (or deliv "—"))
-                      (list "ASIN" asin)
-                      (list "Sponsored" (if (plist-get row 'sponsored) "yes" "no")))))))))))
+         (data (amazon-detail-data buf))
+         (rating (or (and data (plist-get data 'rating)) (plist-get row 'rating)))
+         (revs (or (and data (plist-get data 'reviewCount)) (plist-get row 'reviews)))
+         (deliv (or (and data (plist-get data 'delivery)) (plist-get row 'delivery)))
+         (overview (and data (amazon--pairs data 'overview)))
+         (specs (and data (amazon--pairs data 'specs)))
+         (wait (amazon--waiting buf "the specifications")))
+    (append
+      (list
+        (component 'ui/group
+          (list 'title "Listing"
+                'body (list
+                  (component 'ui/kv
+                    (list 'pairs
+                      (filter (lambda (p) p)
+                        (list
+                          (list "Price" (string-append "₹" (amazon--row-field row 'price "—")))
+                          (list "M.R.P." (if mrp (string-append "₹" mrp) "—"))
+                          (and data (plist-get data 'discount)
+                               (list "Discount" (plist-get data 'discount)))
+                          (list "Rating" (if rating (string-append (amazon--stars rating) " / 5") "—"))
+                          (list "Reviews" (if revs (string-append (amazon--count revs) " ratings") "—"))
+                          (list "Delivery" (or deliv "—"))
+                          (and data (list "Sold by" (or (plist-get data 'seller) "—")))
+                          (list "ASIN" asin)
+                          (list "Sponsored" (if (plist-get row 'sponsored) "yes" "no"))))))))))
+      (if (and overview (pair? overview))
+          (list (component 'ui/group
+                  (list 'title "Product overview"
+                        'body (list (component 'ui/kv (list 'pairs overview))))))
+          '())
+      (if (and specs (pair? specs))
+          (list (component 'ui/group
+                  (list 'title "Technical details"
+                        'body (list (component 'ui/kv (list 'pairs specs))))))
+          '())
+      (if wait (list wait) '()))))
 
-(define (amazon--reviews-blocks row)
-  (let* ((rating (plist-get row 'rating))
-         (revs (plist-get row 'reviews)))
-    (list
-      (component 'ui/group
-        (list 'title "Customer reviews"
-              'body (list
-                (list 'tag "div" 'class "amazon-reviews"
-                      'text (string-append
-                              (if rating (string-append "★ " rating " / 5") "No rating yet")
-                              (if revs (string-append " · " revs " ratings") "")))
-                (component 'ui/empty
-                  (list 'text "Full reviews live on the Amazon page — open it in the browser to read them."))))))))
+(define (amazon--hist-block data)
+  (let ((h (or (plist-get data 'histogram) '())))
+    (and (pair? h)
+         (list 'tag "div" 'class "amazon-hist"
+               'children
+               (let loop ((ps h) (star 5) (out '()))
+                 (if (or (null? ps) (< star 1))
+                     (reverse out)
+                     (loop (cdr ps) (- star 1)
+                           (cons (list 'tag "div" 'class "amazon-hist-row"
+                                       'children
+                                       (list
+                                         (list 'tag "span" 'class "amazon-hist-star"
+                                               'text (string-append (number->string star) "★"))
+                                         (list 'tag "span" 'class "amazon-hist-track"
+                                               'children
+                                               (list (list 'tag "span" 'class "amazon-hist-fill"
+                                                           'attrs (list (list "style"
+                                                                              (string-append "width:" (car ps)))))))
+                                         (list 'tag "span" 'class "amazon-hist-pct" 'text (car ps))))
+                                 out))))))))
+
+(define (amazon--review-block r)
+  (let* ((stars (amazon--stars (plist-get r 'stars)))
+         (title (or (plist-get r 'title) ""))
+         (author (or (plist-get r 'author) ""))
+         (date (or (plist-get r 'date) ""))
+         (variant (amazon--uniq (or (plist-get r 'variant) '())))
+         (verified (or (plist-get r 'verified) ""))
+         (helpful (or (plist-get r 'helpful) ""))
+         ;; the paragraphs as the writer broke them, or the flat run
+         (paras (amazon--uniq (or (plist-get r 'paras) '())))
+         (body (if (pair? paras)
+                   (string-join paras "\n\n")
+                   (or (plist-get r 'body) ""))))
+    (list 'tag "div" 'class "amazon-review"
+          'children
+          (filter (lambda (b) b)
+            (list
+              (list 'tag "div" 'class "amazon-review-head"
+                    'children
+                    (filter (lambda (b) b)
+                      (list
+                        (and (> (string-length stars) 0)
+                             (list 'tag "span" 'class "amazon-review-stars"
+                                   'text (string-append stars "★")))
+                        (and (> (string-length title) 0)
+                             (list 'tag "span" 'class "amazon-review-title" 'text title))
+                        (and (> (string-length verified) 0)
+                             (component 'ui/badge (list 'text "verified"))))))
+              (list 'tag "div" 'class "amazon-review-meta"
+                    'text (string-join
+                            (filter (lambda (s) (> (string-length s) 0))
+                                    (append (list author date) variant))
+                            "  ·  "))
+              (and (> (string-length body) 0)
+                   (list 'tag "div" 'class "amazon-review-body" 'text (amz-clip body 1600)))
+              (and (> (string-length helpful) 0)
+                   (list 'tag "div" 'class "amazon-review-helpful" 'text helpful)))))))
+
+(define (amazon--reviews-blocks buf row)
+  (let* ((data (amazon-detail-data buf))
+         (rating (or (and data (plist-get data 'rating)) (plist-get row 'rating)))
+         (revs (or (and data (plist-get data 'reviewCount)) (plist-get row 'reviews)))
+         (reviews (or (and data (plist-get data 'reviews)) '()))
+         (hist (and data (amazon--hist-block data)))
+         (wait (amazon--waiting buf "the reviews")))
+    (append
+      (list
+        (component 'ui/group
+          (list 'title "Customer reviews"
+                'body (filter (lambda (b) b)
+                        (list
+                          (list 'tag "div" 'class "amazon-reviews"
+                                'text (string-append
+                                        (if rating (string-append "★ " (amazon--stars rating) " / 5") "No rating yet")
+                                        (if revs (string-append "  ·  " (amazon--count revs) " ratings") "")))
+                          hist)))))
+      (if (pair? reviews)
+          (list (component 'ui/group
+                  (list 'title (string-append "Top reviews (" (number->string (length reviews)) ")")
+                        'body (map amazon--review-block reviews))))
+          '())
+      (if wait (list wait) '())
+      (if (and (not wait) (null? reviews))
+          (list (component 'ui/empty
+                  (list 'text "The product page prints no reviews for this one.")))
+          '()))))
 
 (define (amazon--detail-blocks buf row)
   (let ((tab (amazon-tab buf)))
     (append
       (list (amazon--tabs-block buf)
             (amazon--head-block row))
-      (cond ((equal? tab "specs") (amazon--specs-blocks row))
-            ((equal? tab "reviews") (amazon--reviews-blocks row))
-            (else (amazon--overview-blocks row))))))
+      (cond ((equal? tab "specs") (amazon--specs-blocks buf row))
+            ((equal? tab "reviews") (amazon--reviews-blocks buf row))
+            (else (amazon--overview-blocks buf row))))))
 
 (define (amz-page-title row)
   (let ((title (amz-clip (string-trim (amz-replace (or (plist-get row 'title) "") "*" "")) 48)))
@@ -579,6 +769,18 @@
 (define (amazon-name-of asin)
   (let ((r (amazon-row-by-asin asin))) (if r (amz-clip (plist-get r 'title) 48) asin)))
 
+;; The listing is read from a snapshot, which leaves no tab behind. The cart
+;; cannot work that way: it clicks a real page carrying your cookies. So the
+;; cart opens the storefront once when no tab is there, and every later add
+;; reuses it.
+;; A tab is no use until its page has stopped loading: inject into a tab that
+;; is still arriving and the load wipes the globals you just set, so the answer
+;; never comes and the caller waits out its whole poll for nothing. That is a
+;; readyState away, and cheaper than guessing with a timer.
+
+
+
+
 (define (amazon--tab k)
   (tab-list (lambda (ts)
     (let loop ((ts ts))
@@ -596,35 +798,137 @@
 ;;; it after the click, and the add worked when the count moved. Anything else,
 ;;; including a page titled Shopping Cart, is a failure. A sign-in page is its
 ;;; own answer. The click needs seconds, not milliseconds; the caller polls.
+
+
+
+
+;; The cart itself, in the browser. Pressing C is the reader asking to go
+;; there, so the tab comes to the front -- this is the one place the app is
+;; allowed to take the screen, because that is what was asked for.
+;; The cart, in the app, as rows. Read from the tab's own DOM rather than a
+;; fresh snapshot: a snapshot of the cart comes back half-hydrated and drops
+;; lines, and the tab is already sitting on a fully rendered page.
+;;
+;; Only lines that carry a data-asin count. A cart page holds sc-active-* and
+;; sc-saved-*, and some sc-active-* elements are wrappers with no product in
+;; them at all -- on one real cart, 4 active elements were 2 products.
+
+
+(define (amazon--in-cart-view?)
+  (and (buffer-known? *amazon-buffer*)
+       (equal? (buffer-local *amazon-buffer* 'amazon-query) "cart")))
+
+;; The cart takes the listing over, so the listing it took over is kept and
+;; C puts it back. Without this the cart is a one-way door and the only way
+;; out is running the search again.
+(define (amazon--restore-search!)
+  (let ((rows (buffer-local *amazon-buffer* 'amazon-prev-rows))
+        (q (buffer-local *amazon-buffer* 'amazon-prev-query)))
+    (if (not (and rows q))
+        (message "No search to go back to -- s starts one")
+        (begin
+          (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
+          (buffer-set-local! *amazon-buffer* 'amazon-query q)
+          (buffer-set-local! *amazon-buffer* 'amazon-page
+                             (or (buffer-local *amazon-buffer* 'amazon-prev-page) 1))
+          (buffer-set-local! *amazon-buffer* 'list-layout-cache #f)
+          (list-refresh! *amazon-buffer*)
+          (message (string-append "back to " q))))))
+
+(define (amazon--cart-show! rows)
+  (when (and rows (buffer-known? *amazon-buffer*))
+    (unless (amazon--in-cart-view?)
+      (buffer-set-local! *amazon-buffer* 'amazon-prev-rows
+                         (buffer-local *amazon-buffer* 'amazon-rows))
+      (buffer-set-local! *amazon-buffer* 'amazon-prev-query
+                         (buffer-local *amazon-buffer* 'amazon-query))
+      (buffer-set-local! *amazon-buffer* 'amazon-prev-page
+                         (buffer-local *amazon-buffer* 'amazon-page)))
+    (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
+    (buffer-set-local! *amazon-buffer* 'amazon-query "cart")
+    (buffer-set-local! *amazon-buffer* 'amazon-page 1)
+    (buffer-set-local! *amazon-buffer* 'amazon-more #f)
+    (buffer-set-local! *amazon-buffer* 'amazon-cart
+                       (map (lambda (r) (plist-get r 'asin)) rows))
+    (buffer-set-local! *amazon-buffer* 'list-layout-cache #f)
+    (list-refresh! *amazon-buffer*)
+    (message (string-append (number->string (length rows)) " in the cart"))))
+
+
+
+(define *amazon-cart-sheet* "web/parsers/amazon-cart.xsl")
+
+;; The cart in the app, parsed by the same kind of sheet the listing uses.
+;; It reads through a snapshot, so nothing of the reader's browser moves --
+;; and it names the selector the cart is finished by, because Amazon answers
+;; "complete" with an empty basket and fills it afterwards.
+(define (amazon-goto-cart!)
+  (if (amazon--in-cart-view?) (amazon--restore-search!) (amazon--cart-fetch!)))
+
+(define (amazon--cart-fetch!)
+  (message "Reading the cart...")
+  ;; a tab that waits: the cart fills itself after the load completes
+  (amazon-read! (string-append "https://" amazon-host "/gp/cart/view.html")
+    *amazon-cart-sheet* pair?
+    (lambda (rows html)
+      (if (pair? rows)
+          (amazon--cart-show! rows)
+          (message (if (string? html) "The cart read empty" "Could not read the cart"))))
+    "[id^='sc-active-'] .sc-quantity-textfield"))
+
+;; Read the real cart and mark the listing from it.
+(define (amazon-cart-sync!)
+  ;; Marks the listing from the real cart. It reads the same sheet the cart
+  ;; view does, so it counts what the cart holds and not what the page
+  ;; mentions: a cart page also carries saved-for-later, and scraping every
+  ;; data-asin on it once marked seventeen rows for a cart holding one.
+  (task-run!
+    (lambda ()
+      (let* ((html (app-await
+                     (lambda (k)
+                       (browser-snapshot (string-append "https://" amazon-host "/gp/cart/view.html")
+                                         k "[id^='sc-active-'] .sc-quantity-textfield"))
+                     30))
+             (out (and (string? html) (xslt-apply *amazon-cart-sheet* html))))
+        (and out (json-parse out))))
+    (lambda (ok rows)
+      (when (and ok rows (pair? rows) (buffer-known? *amazon-buffer*))
+        (buffer-set-local! *amazon-buffer* 'amazon-cart
+                           (map (lambda (r) (plist-get r 'asin)) rows))
+        (list-refresh! *amazon-buffer*)
+        (amazon-log! (string-append "cart holds " (number->string (length rows)) " items"))))
+    60000))
+
 (define (amazon--cart-js asin)
+  ;; Click the button, then ask the cart whether the thing is in it. No before
+  ;; count: a count that moved says something was added, not that THIS was,
+  ;; and a stale count says nothing at all. The cart page naming the ASIN is
+  ;; the whole answer.
   (string-append
    "(function(){window.__amzcart='pending';"
-   "function cnt(d){var n=d&&d.querySelector('#nav-cart-count');"
-   "return n?parseInt(n.textContent.trim(),10):null}"
-   "function cart(){return fetch('/gp/cart/view.html',{credentials:'include'})"
-   ".then(function(r){return r.text()}).then(function(t){"
-   "return cnt(new DOMParser().parseFromString(t,'text/html'))})}"
+   "var A='" asin "';"
    "var fr=document.createElement('iframe');"
    "fr.style.cssText='position:fixed;left:-9999px;top:0;width:1280px;height:1000px;opacity:0';"
-   "var before=null,step=0,done=false;"
-   "function say(o){if(done)return;done=true;o.before=before;"
+   "var done=false,step=0,tries=0;"
+   "function say(o){if(done)return;done=true;"
    "window.__amzcart=JSON.stringify(o);try{fr.remove()}catch(e){}}"
-   "setTimeout(function(){say({added:false,error:'timed out'})},40000);"
-   "cart().then(function(b){before=b;"
-   "fr.onload=function(){if(done||step++>0)return;try{var d=fr.contentDocument;"
-   "var title=(d.title||'');"
+   "setTimeout(function(){say({added:false,error:'timed out'})},30000);"
+   "function inCart(){return fetch('/gp/cart/view.html',{credentials:'include'})"
+   ".then(function(r){return r.text()}).then(function(t){return t.indexOf(A)>=0})}"
+   "function verify(){if(done)return;tries++;inCart().then(function(yes){"
+   "if(yes){say({added:true,checks:tries})}"
+   "else if(tries>10){say({added:false,error:'not in the cart after the click'})}"
+   "else{setTimeout(verify,700)}}).catch(function(e){say({added:false,error:String(e.message)})})}"
+   "fr.onload=function(){if(done||step>0)return;try{var d=fr.contentDocument;"
+   "var title=(d.title||'');step=1;"
    "if(/sign ?in/i.test(title)||/\\/ap\\/signin/.test(String(fr.contentWindow.location.href)))"
    "{say({added:false,signin:true});return}"
    "var btn=d.querySelector('#add-to-cart-button')"
    "||d.querySelector('input[name=\"submit.add-to-cart\"]');"
    "if(!btn){say({added:false,error:'no add-to-cart button',title:title.slice(0,60)});return}"
-   "btn.click();"
-   "setTimeout(function(){if(done)return;cart().then(function(a){"
-   "say({added:(a!==null&&before!==null&&a>before),after:a,"
-   "title:(fr.contentDocument?(fr.contentDocument.title||''):'').slice(0,60)})})},5000)"
-   "}catch(e){say({added:false,error:String(e.message)})}};"
-   "fr.src='/dp/" asin "';document.body.appendChild(fr)})"
-   ".catch(function(e){say({added:false,error:String(e.message)})});"
+   "btn.click();setTimeout(verify,800)}"
+   "catch(e){say({added:false,error:String(e.message)})}};"
+   "fr.src='/dp/" asin "';document.body.appendChild(fr);"
    "return 'started'})()"))
 
 (define (amazon--cart-done! asin answer)
@@ -650,30 +954,61 @@
       (message (string-append "The cart did not move -- " (amazon-name-of asin)
                               " was not added. See " *amazon-log*))))))
 
-(define (amazon--cart-poll! tab asin tries)
-  (tab-eval tab "window.__amzcart"
-    (lambda (v)
-      (cond ((and (string? v) (not (equal? v "pending")) (not (equal? v "")))
-             (amazon--cart-done! asin v))
-            ((<= tries 0)
-             (amazon--cart-done! asin "{\"added\":false,\"error\":\"no answer\"}"))
-            (else
-             (debounce! 'amazon-cart 1200
-                        (lambda (_) (amazon--cart-poll! tab asin (- tries 1)))
-                        #f))))))
 
+
+(define (amazon--cart-tab)
+  ;; inside a task: find a tab, open one if there is none, and do not hand it
+  ;; back until its page has stopped loading -- injecting into a tab that is
+  ;; still arriving loses the globals to the load that follows
+  (let ((tab (app-await (lambda (k) (amazon--tab k)) 10)))
+    (unless tab
+      (tab-open (string-append "https://" amazon-host "/") #f #t)
+      (app-pause 800)
+      (set! tab (app-await (lambda (k) (amazon--tab k)) 10)))
+    (and tab
+         (let ready ((n 40))
+           (let ((state (app-await (lambda (k) (tab-eval tab "document.readyState" k)) 10)))
+             (cond ((equal? state "complete") tab)
+                   ((<= n 0) tab)
+                   (else (app-pause 300) (ready (- n 1)))))))))
+
+(define (amazon--cart-answer tab)
+  ;; String() so an undefined global reads as "undefined" rather than arriving
+  ;; as a non-string: "pending" means still working, "undefined" means the page
+  ;; reloaded out from under the script and no answer is ever coming.
+  (let poll ((n 80))
+    (let ((v (app-await (lambda (k) (tab-eval tab "String(window.__amzcart)" k)) 10)))
+      (cond ((and (string? v)
+                  (not (equal? v "pending"))
+                  (not (equal? v "undefined"))
+                  (not (equal? v "")))
+             v)
+            ((<= n 0)
+             (string-append "{\"added\":false,\"error\":\"no answer\",\"last\":\""
+                            (if (string? v) v "nil") "\"}"))
+            (else (app-pause 400) (poll (- n 1)))))))
+
+;; One sequence, read top to bottom, run off the lane so the editor stays
+;; live: get a loaded tab, inject, wait for the answer, report it.
 (define (amazon-cart-add! asin)
   (message (string-append "Adding " (amazon-name-of asin) " to the cart..."))
-  (amazon--tab
-   (lambda (tab)
-     (if (not tab)
-         (begin (amazon-log! (string-append asin ": no " amazon-host " tab open"))
-                (message (string-append "No " amazon-host " tab is open -- open one and try again")))
-         (begin
-           (tab-eval tab (amazon--cart-js asin) (lambda (v) #f))
-           (debounce! 'amazon-cart 2500
-                      (lambda (_) (amazon--cart-poll! tab asin 40))
-                      #f))))))
+  (task-run!
+    (lambda ()
+      (let ((tab (amazon--cart-tab)))
+        (if (not tab)
+            (list 'no-tab #f)
+            (begin
+              (app-await (lambda (k) (tab-eval tab (amazon--cart-js asin) k)) 10)
+              (list 'answer (amazon--cart-answer tab))))))
+    (lambda (ok result)
+      (cond ((not ok)
+             (amazon-log! (string-append asin " not added -- task failed"))
+             (message "The cart add failed"))
+            ((equal? (car result) 'no-tab)
+             (amazon-log! (string-append asin ": could not open a " amazon-host " tab"))
+             (message (string-append "Could not open a " amazon-host " tab")))
+            (else (amazon--cart-done! asin (cadr result)))))
+    120000))
 
 (define (amazon-open-external! asin)
   (begin (tab-open (amazon-product-url asin))
@@ -704,7 +1039,11 @@
       (list-current *amazon-buffer*)))
 
 (define-command "amazon-detail" "Show the product on this row beside the listing"
-  (lambda () (amazon-show-detail! (amazon-row-here))))
+  (lambda ()
+    ;; opening a page is the ask that pays for reading it; a preview is not
+    (let ((row (amazon-row-here)))
+      (let ((buf (amazon-show-detail! row)))
+        (when buf (amazon-detail-load! buf row))))))
 
 (define-command "amazon-cart" "Add this product to the Amazon cart"
   (lambda () (let ((r (amazon-row-here))) (when r (amazon-cart-add! (plist-get r 'asin))))))
@@ -766,23 +1105,42 @@
 
 ;;; --- the listing ---------------------------------------------------------
 
+(define (amazon--when s)
+  ;; "FREE delivery Tomorrow, 22 Sept" -> "Tomorrow, 22 Sept": the column is
+  ;; narrow and every row says FREE delivery, so the words carry nothing
+  (let* ((s (or s ""))
+         (cut (if (string-contains? s "delivery ")
+                  (car (cdr (string-split s "delivery ")))
+                  s))
+         ;; "Today 4 pm - 8 pm on ₹399 of items" -- the threshold is a
+         ;; condition on the order, not a time, and it costs half the column
+         (cut (car (string-split (or cut s) " on "))))
+    (amz-clip cut 22)))
+
+(define (amazon--stars s)
+  ;; the sheet hands over "4.8 out of 5 stars"; a column wants "4.8"
+  (car (string-split (or s "") " out of")))
+
 (define (amazon--cells buf row)
   (let ((asin (plist-get row 'asin)))
     (list (string-append (if (amazon-hidden? asin) "⊘" " ")
                          (if (amazon-saved? asin) "★" " ")
                          (if (amazon-note asin) "✎" " ")
                          (if (amazon-in-cart? asin) "✓" " "))
-          (amz-clip (plist-get row 'title) 52)
-          (or (plist-get row 'biz) "—")
-          (list (or (plist-get row 'incl) "") "dim")
-          (list (or (plist-get row 'rating) "") "dim")
-          (list (amz-delivery-label (plist-get row 'delivery)) "dim")
-          (list asin "dim"))))
+          (let* ((p (or (plist-get row 'price) ""))
+                 (p (if (string-suffix? "." p) (substring p 0 (- (string-length p) 1)) p)))
+            (if (equal? p "") "—" (string-append "₹" p)))
+          ;; the cart's basis-price carries a literal "null" in an offscreen span
+          (let ((m (or (plist-get row 'mrp) "")))
+            (list (if (string-prefix? "null" m) (substring m 4 (string-length m)) m) "dim"))
+          (list (amazon--stars (plist-get row 'rating)) "dim")
+          (list (amazon--when (plist-get row 'delivery)) "dim")
+          (amz-clip (or (plist-get row 'title) "") 80))))
 
 (define (amazon--columns buf)
-  (list (list "" 4) (list "product" 52) (list "₹" 10)
-        (list "with gst" 9) (list "rating" 7)
-        (list "delivery" 9) (list "asin" 12)))
+  ;; widest last and unbounded: the title takes whatever the frame leaves
+  (list (list "" 4) (list "₹" 9) (list "m.r.p" 9)
+        (list "★" 5) (list "delivery" 22) (list "product" #f)))
 
 ;;; A three-column app leaves the listing about 59 columns wide, which cuts the
 ;;; price, delivery and asin off the right edge and packs the key hints down to
@@ -790,14 +1148,14 @@
 ;;; product page and shortens the hints so the ones worth pressing survive; ?
 ;;; still shows every key.
 (define (amazon--narrow-columns buf)
-  (list (list "" 4) (list "product" 26) (list "₹" 9) (list "delivery" 9)))
+  ;; delivery earns its width even here: when a thing lands is half of why
+  ;; one row beats another, and a narrow frame is still a frame
+  (list (list "" 4) (list "₹" 9) (list "delivery" 19) (list "product" #f)))
 
 (define (amazon--narrow-cells buf row)
   (let ((cs (amazon--cells buf row)))
-    (list (list-ref cs 0)
-          (amz-clip (plist-get row 'title) 26)
-          (list-ref cs 2)
-          (list-ref cs 5))))
+    (list (list-ref cs 0) (list-ref cs 1) (list-ref cs 4)
+          (amz-clip (or (plist-get row 'title) "") 40))))
 
 (define (amazon--narrow-footer buf)
   (list (list "RET" "open") (list "c" "cart") (list "m" "save")
@@ -805,7 +1163,7 @@
         (list "d" "sort") (list "o" "web") (list "q" "quit")))
 
 (define-list-mode! "amazon-mode"
-  (list 'doc "Amazon Business search results, as the account sees them: the price is yours, excluding GST, with the retail price beside it. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, N writes a note on it, n and p walk to the next and previous page of results, x takes it out of the listing and X shows the hidden ones again marked ⊘, c adds it to the cart, o opens it in the real browser, w copies its link, s runs another search, g reads this page again, q quits."
+  (list 'doc "Amazon search results as the signed-in account sees them, with the retail price beside the one you pay. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, N writes a note on it, n and p walk to the next and previous page of results, x takes it out of the listing and X shows the hidden ones again marked ⊘, c adds it to the cart and C opens the cart itself, o opens it in the real browser, w copies its link, s runs another search, g reads this page again, q quits."
         'buffer *amazon-buffer*
         'transient #f
         'noun "product"
@@ -831,7 +1189,7 @@
                              'cells amazon--cells))
         'title (lambda (buf) (or (buffer-local buf 'amazon-query) "Amazon"))
         'meta (lambda (buf)
-                (string-append amazon-host " · business price, excluding GST"
+                (string-append amazon-host
                                (let ((p (or (buffer-local buf 'amazon-page) 1)))
                                  (if (> p 1) (string-append " · page " (number->string p)) ""))
                                (if (buffer-local buf 'amazon-more) "" " · last page")
@@ -850,7 +1208,7 @@
                        (length (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all)))))
         'footer (lambda (buf) (list (list "RET" "open") (list "c" "cart") (list "m" "save")
                                     (list "n/p" "page") (list "N" "note") (list "x" "hide")
-                                    (list "d" "sort") (list "o" "browser")
+                                    (list "C" "cart") (list "d" "sort") (list "o" "browser")
                                     (list "X" (if (amazon-showing-hidden?) "hide hidden" "show hidden"))
                                     (list "s" "search") (list "q" "quit")))
         'preview (lambda (buf row) (amazon-show-detail! row))
@@ -885,7 +1243,7 @@
           (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))))
 (mode-parent! "amazon-detail-mode" "special-mode")
 (mode-doc! "amazon-detail-mode"
-  "One product, as its own page. 1, 2 and 3 switch the Overview, Specs and Reviews tabs; m saves it and marks it in the listing, N writes a note that stays on this page, n and p walk the listing's pages, c adds it to the cart, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
+  "One product, as its own page. 1, 2 and 3 switch the Overview, Specs and Reviews tabs; m saves it and marks it in the listing, N writes a note that stays on this page, n and p walk the listing's pages, c adds it to the cart and C opens the cart itself, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
 (mode-keys! "amazon-detail-mode"
   (list (list "1" "amazon-tab-overview")
         (list "2" "amazon-tab-specs")
@@ -897,8 +1255,20 @@
         (list "p" "amazon-prev-page")
         (list "o" "amazon-open")
         (list "w" "amazon-copy-link")
-        (list "g" "amazon-refresh")
+        (list "g" "amazon-reload-detail")
+        (list "C" "amazon-goto-cart")
         (list "q" "quit-window")))
+
+(define-command "amazon-goto-cart" "Show the cart in the listing; again goes back to the search"
+  (lambda () (amazon-goto-cart!)))
+
+(mode-keys! "amazon-mode" (list (list "C" "amazon-goto-cart")))
+
+;; The listing and the page are one surface: a key the listing does not claim
+;; runs in the page beside it, so 1, 2 and 3 turn the product's tabs from the
+;; row that opened it and the focus never leaves the list.
+(when (boundp 'app-detail-keys!)
+  (app-detail-keys! "amazon-mode" "amazon-detail-mode"))
 
 ;; a kept page takes the product's name, not a number
 (detail-name! "amazon-detail-mode"
@@ -938,8 +1308,8 @@
          (chat (and id (boundp 'group-chat) (group-chat id)))
          (panes (filter (lambda (b) (and b (buffer-exists? b)))
                         (list *amazon-buffer* (amazon--detail-pane) chat))))
-    ;; three columns whatever the frame width -- adaptive tiling stacked them
-    ;; on a narrow frame. The listing leads the list because tile-windows!
+    ;; three columns: the app names the layout it wants, so the panes do not
+    ;; depend on what the frame happened to hold. The listing leads because tile-windows!
     ;; clears the frame and fills from the selected window outward: the first
     ;; buffer lands in the pane you were already in and keeps the focus. Lead
     ;; with the chat and the app opens beside you instead of under your hands.
@@ -975,6 +1345,9 @@
             (unless (buffer-derived-mode? *amazon-buffer* "amazon-mode")
               (with-current-buffer *amazon-buffer* (lambda () (set-mode! "amazon-mode"))))
             (list-refresh! *amazon-buffer*)
+            ;; mark the rows the cart already holds, not just the ones this
+            ;; session put there
+            (amazon-cart-sync!)
             (when first? (switch-to-buffer! *amazon-buffer*))
             (amazon-show-detail! (list-current *amazon-buffer*))
             (when first?
@@ -986,7 +1359,6 @@
 
 (define-command "amazon" "Open the Amazon app"
   (lambda ()
-    (amazon-enter-group!)
     (amazon-open! (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query))))
 
 (define-command "amazon-search" "Search Amazon and fill the listing"
@@ -994,7 +1366,6 @@
     (read-string "Amazon: "
                  (lambda (q)
                    (when (and (string? q) (not (equal? q "")))
-                     (amazon-enter-group!)
                      (amazon-open! q))))))
 
 (define-command "amazon-refresh" "Read the search again"
@@ -1021,18 +1392,16 @@
 
 ;;; --- the catalog ---------------------------------------------------------
 
+(public! 'amazon-read!
+  "(amazon-read! URL SHEET OK? K [RENDER]) — read one Amazon page through SHEET; RENDER #f fetches and falls back to a tab, #t goes straight to a tab, a string waits for that selector")
 (public! 'amazon-open!
-  "(amazon-open! QUERY) — search the storefront and fill the listing, in the app's own group")
+  "(amazon-open! QUERY) — search the storefront and fill the listing, in the group you are in")
 (public! 'amazon-open-page!
-  "(amazon-open-page! QUERY PAGE FIRST?) — fill the listing from one page of a search; FIRST? also opens the group and the layout")
-(public! 'amazon-next-url
-  "(amazon-next-url TEXT) — the search page's Next link, absolute, or #f on the last page")
+  "(amazon-open-page! QUERY PAGE FIRST?) — fill the listing from one page of a search; FIRST? also lays out the three panes")
 (public! 'amazon-cart-add!
   "(amazon-cart-add! ASIN) — add one of a product to the signed-in cart, through the reader's browser tab")
 (public! 'amazon-show-detail!
   "(amazon-show-detail! ROW) — render ROW as its own page beside the listing")
-(public! 'amz-parse
-  "(amz-parse TEXT) — the search page the reader read, as product rows")
 
 (public! 'amz-delivery-key
   "(amz-delivery-key TEXT) — the day a delivery line names, as YYYYMMDD; 99999999 when it names none")
@@ -1046,12 +1415,11 @@
 (public! 'amazon-hide-toggle!
   "(amazon-hide-toggle! ASIN) — take a product out of the listing, or put it back; a hidden one is marked ⊘ when X shows them")
 
+(catalog-meta! 'function "amazon-read!" 'domain 'web 'effects '(read external))
 (catalog-meta! 'function "amazon-open!" 'domain 'web 'effects '(read write external display))
 (catalog-meta! 'function "amazon-open-page!" 'domain 'web 'effects '(read write external display))
-(catalog-meta! 'function "amazon-next-url" 'domain 'web 'effects '(pure))
 (catalog-meta! 'function "amazon-cart-add!" 'domain 'web 'effects '(write external))
 (catalog-meta! 'function "amazon-show-detail!" 'domain 'web 'effects '(write display))
-(catalog-meta! 'function "amz-parse" 'domain 'web 'effects '(pure))
 (catalog-meta! 'function "amz-delivery-key" 'domain 'web 'effects '(read))
 (catalog-meta! 'function "amazon-save-toggle!" 'domain 'web 'effects '(write))
 (catalog-meta! 'function "amazon-note-set!" 'domain 'web 'effects '(write))

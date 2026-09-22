@@ -74,8 +74,10 @@
     if (e.metaKey && !CMD_KEYS.includes(base)) return null;
     let spec = base;
     // S- only for named keys (TAB, arrows, RET...): printable chars
-    // already encode shift in the character itself, Emacs-style
-    if (e.shiftKey && base.length > 1) spec = "S-" + spec;
+    // already encode shift in the character itself, Emacs-style.
+    // SPC is a printable character too -- Shift-Space still means
+    // space, not a chord.
+    if (e.shiftKey && base.length > 1 && base !== "SPC") spec = "S-" + spec;
     if (e.altKey) spec = "M-" + spec;
     if (e.ctrlKey) spec = "C-" + spec;
     if (e.metaKey) spec = "s-" + spec; // s- = super = Cmd
@@ -430,6 +432,10 @@
     }
   };
   window.composTelemetry = Telem;
+
+  // the Keys hook owns the keyboard state of the page; the panel's own
+  // hook reads its which-key filter from here
+  let keysHook = null;
 
   const Hooks = {
     Terminal: {
@@ -1455,6 +1461,28 @@
         if (cur) cur.scrollIntoView({ block: "nearest" });
       }
     },
+    // The panel is one surface per pending prefix, and the filter
+    // writes hidden flags on to its rows. A growing prefix -- C-x,
+    // then C-x g -- patches new rows into the same element, so the
+    // flags and the held modifiers of the prefix before it hid rows
+    // that belong to the new one: the title said "0 / 7 bindings"
+    // over "No matching commands". The hook drops the filter when
+    // the prefix changes, and applies it again after every patch, so
+    // the flags never outlive the rows they were written for.
+    WhichKey: {
+      mounted() { this.sync(); },
+      updated() { this.sync(); },
+      destroyed() { if (keysHook) keysHook.resetWhichKeyFilter(); },
+      sync() {
+        if (!keysHook) return;
+        const pending = this.el.dataset.pending || "";
+        if (pending !== this.pending) {
+          this.pending = pending;
+          keysHook.resetWhichKeyFilter();
+        }
+        keysHook.applyWhichKeyFilter();
+      }
+    },
     Keys: {
       // a page from an older daemon boot is stale: its JS and CSS
       // no longer match the server. A restart REJOINS the socket
@@ -1474,9 +1502,19 @@
         if (this.bootCheck()) return;
         Telem.attach(this);
         this.handleEvent("navigate", ({url}) => window.location.assign(url));
+        keysHook = this;
         this.whichKeyHeld = new Set();
         this.whichKeyQuery = "";
         this.whichKeyFiltering = false;
+        // A modifier held while the panel opens, and released while
+        // another window has the focus, never sends its keyup here:
+        // the filter would then hide every row of every later panel.
+        // One reset answers for that too.
+        this.resetWhichKeyFilter = () => {
+          this.whichKeyHeld.clear();
+          this.whichKeyQuery = "";
+          this.whichKeyFiltering = false;
+        };
         this.applyWhichKeyFilter = () => {
           const panel = document.querySelector(".which-key");
           if (!panel) {
@@ -1705,7 +1743,10 @@
             this._motionAt = performance.now();
             if (native) this._gestureAt = this._motionAt;
           }
-          if (native && onSurface && !onSurface.classList.contains("client-scroll") &&
+          // Up and Down go through Selection.modify on every surface:
+          // the native caret motion across the flex rows of a
+          // client-scrolled buffer stops short of the next line
+          if (native && onSurface &&
               !e.metaKey && !e.altKey && !e.ctrlKey &&
               (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             e.preventDefault();
@@ -2229,6 +2270,17 @@
                 v: parseInt(buf.dataset.v, 10), dir: dir === "backward" ? -1 : 1,
                 extend: alter === "extend", mark: anchor, count: n - i});
               return;
+            }
+          }
+          // a client-scrolled buffer scrolls itself: the caret that
+          // Selection.modify moved stays in view
+          if (buf.classList.contains("client-scroll") && sel.focusNode) {
+            const r = document.createRange();
+            r.setStart(sel.focusNode, sel.focusOffset); r.collapse(true);
+            const cr = r.getBoundingClientRect(), br = buf.getBoundingClientRect();
+            if (cr.height && (cr.top < br.top || cr.bottom > br.bottom)) {
+              buf._composSelfScroll = performance.now();
+              buf.scrollTop += cr.top < br.top ? cr.top - br.top - 8 : cr.bottom - br.bottom + 8;
             }
           }
           this.sendSelection(buf, true);

@@ -395,6 +395,18 @@
                       "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "meta" '())))
 
+      ;; The connector took the prompt and said nothing at all. The turn
+      ;; ends behind this event; the session itself is the suspect, so the
+      ;; batch reconnects it once the turn-end has rendered.
+      ((equal? type 'turn-silent)
+       (let ((start (agent-render! slug
+                      (string-append "\n[the connector said nothing for "
+                                     (number->string (or (plist-get e 'seconds) 0))
+                                     "s; compos ended the turn and reconnected the session]\n")
+                      "agent-meta")))
+         (agent-block-push! buf start (agent-mark slug) "meta" '()))
+       (buffer-set-local! buf 'chat-connector-suspect #t))
+
       ((equal? type 'dead)
        (chat-activity! buf "disconnected")
        (buffer-set-local! buf 'chat-turn-active #f)
@@ -445,7 +457,29 @@
             (filter (lambda (e) (not (equal? (plist-get e 'type) 'permission))) events))))
       ;; fleet surfaces track every batch: the modeline says at once who
       ;; needs you, and the list settles once the burst stops
-      (agents-note-event! slug)))
+      (agents-note-event! slug)
+      ;; a session that answered a whole turn with silence is not fit for
+      ;; the next one. Restart it HERE, after the batch: a reconnect stops
+      ;; the runtime, and an event still waiting behind it would be lost.
+      (agent-reconnect-if-suspect! slug)))
+
+;; the restart a silent turn asks for. It runs after the batch, never
+;; inside it, and it is the same door C-RET twice opens.
+(define (agent-reconnect-if-suspect! slug)
+  (let ((buf (agent-buf slug)))
+    (when (and (buffer-exists? buf)
+               (buffer-local buf 'chat-connector-suspect)
+               (boundp (quote agent-reconnect!)))
+      (buffer-set-local! buf 'chat-connector-suspect #f)
+      ;; a reconnect that fails must not take the batch with it: the turn
+      ;; is already closed and the transcript already says why
+      (unless (ignore-errors
+                (lambda ()
+                  (agent-reconnect! slug
+                    (or (buffer-local buf 'agent-connector) *default-connector*)
+                    (or (buffer-local buf 'agent-model) ""))
+                  #t))
+        (message (string-append "agent " slug ": could not reconnect the session"))))))
 
 ;; one batch of a runtime's events, in order, then one view sync
 (llm-session-on-event! agent-handle-events)

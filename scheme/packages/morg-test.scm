@@ -48,13 +48,13 @@
 
 ;;; --- the mode -----------------------------------------------------------------
 
-(deftest 'morg-mode-enables-writing-mode
-  "prose wants visual lines, so morg turns them on"
+(deftest 'morg-mode-enables-visual-lines-and-no-writing-mode
+  "prose wants visual lines, so morg turns them on; the presentation is the user's"
   (lambda ()
     (t--morg! t--morg-fixture 0)
     (check-true! (buffer-local t--morg-buf 'visual-line-mode) "visual lines are on")
-    (check-true! (member "writing-mode" (buffer-local t--morg-buf 'minor-modes))
-                 "writing-mode came with it")
+    (check-false! (member "writing-mode" (buffer-local t--morg-buf 'minor-modes))
+                  "writing-mode stays off")
     (t--morg-done!)))
 
 (deftest 'morg-mode-fontifies-headings-with-the-org-level-faces

@@ -27,6 +27,11 @@
   (let ((e (assoc name *endpoint-registry*)))
     (and e (cadr e))))
 
+;; Every name a package registered. A package that manages the programs
+;; behind these connections - the model list is one - reads the registry
+;; here instead of keeping a second list of its own.
+(define (endpoint-names) (map car *endpoint-registry*))
+
 (define (endpoint-connected? name)
   (let ((d (conn-detail 'endpoint name)))
     (and d (equal? (plist-get d 'status) "ready"))))
@@ -52,6 +57,35 @@
   (endpoint-stop! name)
   (endpoint-ensure! name))
 
+;;; --- a JSON line daemon ------------------------------------------------------
+;;; The convention a local daemon behind a pipe follows: one JSON object a
+;;; request, one a reply, and a reply that carries ok. The answer reads
+;;; back as the plist an http reply answers, so a caller reads one shape
+;;; whether the program it asks is a server, a socket, or this pipe.
+
+(define (endpoint-json-reply ok frames)
+  (let* ((text (cond ((and ok (pair? frames)) (string-trim (car frames)))
+                     ((string? frames) (string-trim frames))
+                     (else "")))
+         (json (if (equal? text "") #f (json-parse text))))
+    (cond ((not ok)
+           (list 'ok #f 'status #f 'body text
+                 'error (if (equal? text "") "the daemon gave no answer" text)))
+          ((not (pair? json))
+           (list 'ok #f 'status #f 'body text 'error "the daemon answered no JSON"))
+          ((plist-get json 'ok)
+           (list 'ok #t 'status 200 'body text 'json json))
+          (else
+           (list 'ok #f 'status #f 'body text
+                 'error (or (plist-get json 'error) "the daemon refused"))))))
+
+(define (endpoint-ask-json name req timeout k)
+  (if (not (endpoint-connected? name))
+      (k (list 'ok #f 'status #f 'body ""
+               'error (string-append name ": the daemon is not running")))
+      (endpoint-ask name (json-encode req) #f timeout
+        (lambda (ok frames) (k (endpoint-json-reply ok frames))))))
+
 ;;; --- events ------------------------------------------------------------------
 
 ;; the endpoint event handler is a single slot; this package owns it and fans out
@@ -75,6 +109,10 @@
   "(endpoint-restart! NAME) — close the connection and open it again from its registered spec")
 (public! 'endpoint-spec
   "(endpoint-spec NAME) — the spec registered for NAME, or #f")
+(public! 'endpoint-names
+  "(endpoint-names) — every registered connection name, the registry a manager reads")
+(public! 'endpoint-ask-json
+  "(endpoint-ask-json NAME REQ TIMEOUT K) — ask a JSON-line daemon one request; K gets the reply as the plist an http reply answers: ok, status, body, json, error")
 (public! 'endpoint-resolve-spec
   "(endpoint-resolve-spec SPEC) — resolve the \"@VAR\" references in an endpoint spec before it leaves for Elixir")
 (public! 'endpoint-connected?

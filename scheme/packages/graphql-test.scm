@@ -267,9 +267,10 @@
                  "graphql-apropos is found")))
 
 (deftest 'the-recipes-a-package-declares-reach-the-recipe-book
-  "a recipe is catalogued like everything else"
+  "a recipe is a line to run, so it lives in the book and not in the search"
   (lambda ()
-    (let ((found (apropos "run a graphql query")))
-      (check-true! (member "run a graphql query" (t--gql-names found)) "the recipe is found")
-      (check-true! (member "recipe" (map (lambda (e) (plist-get e 'kind)) found))
-                   "it is catalogued as a recipe"))))
+    (check-true! (pair? (assoc "run a graphql query" *recipes*))
+                 "the recipe is in the book")
+    (check-false! (member "recipe" (map (lambda (e) (plist-get e 'kind))
+                                       (apropos "run a graphql query")))
+                  "and it does not ride the search")))

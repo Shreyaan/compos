@@ -1,29 +1,27 @@
-;;; layouts-test.scm — responsive window policy is inspectable Scheme data.
+;;; layouts-test.scm — the five layouts and the overview.
 
 (domain! 'testing)
 (effects! '(read))
 
-(deftest 'adaptive-layout-stacks-on-compact-frames
-  "a narrow editor preserves horizontal reading room"
+(deftest 'the-five-layouts-and-their-capacities
+  "there are five layouts; each one holds a fixed number of panes"
   (lambda ()
-    (check-equal! (window-layout-for-width 80 3) 'main-bottom
-                  "compact frames stack the secondary panes")))
+    (check-equal! *window-layout-algorithms* '(single two-pane halves columns rows)
+                  "five layouts and no others")
+    (check-equal! (layout-capacity 'single) 1 "one window")
+    (check-equal! (layout-capacity 'two-pane) 2 "2/3 + 1/3")
+    (check-equal! (layout-capacity 'halves) 2 "two equal panes")
+    (check-equal! (layout-capacity 'columns) 3 "three columns")
+    (check-equal! (layout-capacity 'rows) 2 "two stacked panes")
+    (check-false! (layout-capacity 'grid) "a name that is not a layout has no capacity")))
 
-(deftest 'adaptive-layout-keeps-a-third-rail-on-regular-frames
-  "the common desktop arrangement is a main pane and side rail"
+(deftest 'the-layout-that-fits-a-pane-count
+  "a caller with panes in hand and no chosen layout gets the one that holds them"
   (lambda ()
-    (check-equal! (window-layout-for-width 140 3) 'main-right
-                  "regular frames use the one-third rail")))
-
-(deftest 'adaptive-layout-uses-monitor-width-for-wide-arrangements
-  "wide frames promote three panes to columns and four to a grid"
-  (lambda ()
-    (check-equal! (window-layout-for-width 240 2) 'main-right
-                  "two panes retain the main/rail hierarchy")
-    (check-equal! (window-layout-for-width 240 3) 'columns
-                  "three panes become exact thirds")
-    (check-equal! (window-layout-for-width 240 4) 'grid
-                  "four panes become a balanced grid")))
+    (check-equal! (layout-for-count 1) 'single "one pane")
+    (check-equal! (layout-for-count 2) 'two-pane "two panes")
+    (check-equal! (layout-for-count 3) 'columns "three panes")
+    (check-equal! (layout-for-count 9) 'columns "more panes than any layout holds still fit three")))
 
 (deftest 'overview-uses-only-the-current-group
   "the overview includes each group member and excludes other buffers"
@@ -83,18 +81,18 @@
       (switch-to-buffer-here! foreign)
       (switch-to-buffer-here! a)
       (set-frame-local! 'current-group group)
-      (let ((three (layout--three-columns (list a b))))
+      (let ((three (layout--fill-to (list a b) 3)))
         (check-equal! (length three) 3 "a third column is found")
         (check-equal! (nth 2 three) c "it is the group's other member")
         (check-false! (member foreign three) "the foreign buffer stays out"))
       ;; Members run out: leave the target underfilled.
       (buffer-remove-group! c group)
-      (let ((three (layout--three-columns (list a b))))
+      (let ((three (layout--fill-to (list a b) 3)))
         (check-equal! three (list a b) "unused capacity stays empty")
         (check-false! (member foreign three) "the foreign buffer still stays out"))
       ;; One member occupies the frame by itself.
       (buffer-remove-group! b group)
-      (let ((two (layout--three-columns (list a))))
+      (let ((two (layout--fill-to (list a) 3)))
         (check-equal! two (list a) "one member stays one pane")
         (check-false! (member foreign two) "and nothing foreign"))
       (set-frame-local! 'current-group #f)
@@ -111,7 +109,7 @@
       (set-frame-local! 'current-group #f)
       (switch-to-buffer! recent)
       (switch-to-buffer! a)
-      (let ((three (layout--three-columns (list a b))))
+      (let ((three (layout--fill-to (list a b) 3)))
         (check-equal! (length three) 3 "a third column is found")
         (check-equal! (nth 2 three) recent "it is the most recent other buffer"))
       (for-each buffer-kill! (list a b recent)))))

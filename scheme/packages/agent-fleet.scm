@@ -1058,6 +1058,39 @@
       ;; file back
       (ibuffer-section buf "archived" "archived" (chats-archived-rows) "faint" #t))))
 
+;; A flat list is reached by recency, so the group a chat belongs to is a
+;; column of the row and not a heading over it. ibuffer-field-live?
+;; already rules the column out while the sections are the groups, which
+;; is the one arrangement that says it twice.
+(define *chat-list-narrow-fields* '((last 4 right end)))
+(define *chat-list-compact-fields*
+  '((size 6 right end) (mode 10 left end) (group 14 left end) (last 4 right end)))
+(define *chat-list-wide-fields*
+  '((size 7 right end) (mode 14 left end) (group 18 left end) (last 4 right end)))
+
+;; ibuffer's own column and cell readers memoise on the field count, and
+;; the compact list and the wide one here hold the same number of fields,
+;; so read the fields straight rather than through the memo.
+(define (chat-list-fields buf all)
+  (filter (lambda (f) (ibuffer-field-live? buf (ibuffer-field-tag f))) all))
+
+;; no fitting: a group named after a saved-chat file is 32 characters
+;; wide, and growing the column to it took the room the title needs. The
+;; column holds its width and clips.
+(define (chat-list-columns buf all)
+  (ibuffer-columns buf (map ibuffer-field-column (chat-list-fields buf all))))
+
+(define (chat-list-cells buf b all)
+  (let ((fields (chat-list-fields buf all)))
+    (if (ibuffer-heading? b)
+        (ibuffer-heading-cells buf b (length fields))
+        (append (ibuffer-cell-head buf b)
+                (map (lambda (f)
+                       (let ((tag (ibuffer-field-tag f)))
+                         (list (ibuffer-field-fill (ibuffer-field-cell b tag))
+                               (if (member tag '(mode group)) "dim" "faint"))))
+                     fields)))))
+
 (mode-icon! "chat-list-mode" "")
 (define-list-mode! "chat-list-mode"
   (ibuffer-mode-opts
@@ -1076,10 +1109,12 @@
              "title is found in the text of every alive chat, and the row "
              "shows the words around it. C-g closes the filter and leaves the "
              "list standing. RET enters the chat's own group and raises the "
-             "window that holds it; q leaves and changes nothing. t turns the "
-             "sections off and on: off is the flat list, the chat you used "
-             "last at the top of it. / cycles "
-             "what a section is: none, group, state, model. > cycles the "
+             "window that holds it; q leaves and changes nothing. The list "
+             "rests flat, the chat you used last at the top of it, and every "
+             "row wears the name of the group its chat belongs to. t turns "
+             "the sections on and off, and < cycles what a section is: none, "
+             "group, state, model -- the group column steps aside while the "
+             "sections are the groups. > cycles the "
              "order inside a section: most recent first, by name, or by the "
              "size of the transcript on disk. The verbs act on the chat at point "
              "and leave the list standing: s steers it, y and d answer the "
@@ -1096,6 +1131,26 @@
       ;; many of them are running right now
       'section-note (lambda (buf members) (chats-live-note members))
       'rows (lambda (buf) (chat-list-rows buf))
+      'layouts
+        (list
+          (list 'name 'narrow
+                'max-cols (lambda (buf) (- ibuffer-narrow-cols 1))
+                'columns (lambda (buf) (chat-list-columns buf *chat-list-narrow-fields*))
+                'cells (lambda (buf b) (chat-list-cells buf b *chat-list-narrow-fields*))
+                'meta (lambda (buf) (ibuffer-compact-meta buf))
+                'footer (lambda (buf) (ibuffer-footer buf ibuffer-compact-footer)))
+          (list 'name 'compact
+                'max-cols (lambda (buf) (- ibuffer-compact-cols 1))
+                'columns (lambda (buf) (chat-list-columns buf *chat-list-compact-fields*))
+                'cells (lambda (buf b) (chat-list-cells buf b *chat-list-compact-fields*))
+                'meta (lambda (buf) (ibuffer-compact-meta buf))
+                'footer (lambda (buf) (ibuffer-footer buf ibuffer-compact-footer)))
+          (list 'name 'wide
+                'default #t
+                'columns (lambda (buf) (chat-list-columns buf *chat-list-wide-fields*))
+                'cells (lambda (buf b) (chat-list-cells buf b *chat-list-wide-fields*))
+                'meta (lambda (buf) (ibuffer-wide-meta buf))
+                'footer (lambda (buf) (ibuffer-footer buf ibuffer-wide-footer))))
       'order-filtered chat-list-rank
       'match chat-list-match?
       'regroup (lambda (buf) (run-command "chat-list-regroup"))
@@ -1127,10 +1182,17 @@
               ("k" "chats-kill-runtime") ("g" "agents-refresh")
               ("t" "chat-list-toggle-groups")
               ("+" "agent-open")))))
-;; The list rests in sections, one per group: a chat belongs to the work
-;; it was opened for, and the group it sits in says which. ; cycles that
-;; away for a flat table when you want one.
-(ibuffer-view! (chat-list-buffer) 'sort 'recent 'grouping 'group)
+;; The list rests flat, the chat you used last at the top: you reach for
+;; a chat by when you last used it, not by which group it sits in. The
+;; group is still a fact about the chat, so every row wears its name; /
+;; cycles the sections on when you want them, and the column steps aside
+;; then. The defaults live in one place because chat-list-view! registers
+;; the view again the first time the buffer is made, and a bare
+;; (ibuffer-view! buf) there replaced this entry -- the first list of a
+;; session opened under ibuffer's defaults instead of its own.
+(define (chat-list-view-defaults! &optional buf)
+  (ibuffer-view! (or buf (chat-list-buffer)) 'sort 'recent 'grouping 'none))
+(chat-list-view-defaults!)
 
 ;; ---- the application
 
@@ -1145,7 +1207,7 @@
   (let ((buf *chat-list-buffer*))
     (unless (buffer-known? buf)
       (buffer-create buf)
-      (ibuffer-view! buf))
+      (chat-list-view-defaults! buf))
     buf))
 
 (define (chat-list-arrive!)
@@ -1169,7 +1231,10 @@
   (let ((buf (chat-list-view!)))
     (unless (transient-frame-standing? 'chat-list) (chat-list-release-hold!))
     (transient-frame-rearm! 'chat-list (frame-local 'chat-list-view))
-    (ibuffer-view! buf 'sort 'recent 'grouping 'group)
+    ;; the resting sort and grouping in one place: this said 'grouping
+    ;; 'group and ran on every arrival, so the list came up in sections
+    ;; whatever the view registered and docs/CHAT-LIST.md promised
+    (chat-list-view-defaults! buf)
     (set-frame-local! 'chat-list-view buf)
     ;; arriving is an explicit request to look, so a card dismissed on
     ;; this row last time does not silence the preview on this one

@@ -532,6 +532,40 @@
        (not (equal? llm-default-bundle ""))
        (llm-bundle-named llm-default-bundle)))
 
+;;; --- model presets --------------------------------------------------------
+;;; A bundle is a whole chat setup, and a person picks it at C-c b. A preset
+;;; is smaller and code picks it: one model id for one named job. A feature
+;;; that wants "the fast model" asks by name, so no model id is written into
+;;; a feature and one table moves every job at once.
+
+(defcustom 'llm-model-presets
+  '((default . "") (fast . "") (summarize . "") (coding . ""))
+  "((ROLE . MODEL-ID) ...) - the model each named job uses. Empty means the session model."
+  'group 'llm)
+
+(define (llm-models! presets)
+  (customize-set! 'llm-model-presets presets)
+  llm-model-presets)
+
+;; An unknown role, or one left empty, falls back to the session model: the
+;; table is a preference and never a requirement.
+(define (llm-model-for role)
+  ;; This dialect has no dotted pairs: it reads (coding . "claude-opus-5") as
+  ;; the three-element list (coding . "claude-opus-5") with a bare `.` symbol
+  ;; in the middle. assq still finds the row, but (cdr row) is then (. "id")
+  ;; and not the string -- so the preset silently lost to the session model for
+  ;; every role, and the table had never once been read. Taking the first
+  ;; string in the row reads both that shape and a plain (ROLE "id") list.
+  (let* ((row (assq role llm-model-presets))
+         (ss (and row (filter (lambda (x) (string? x)) (cdr row))))
+         (id (and (pair? ss) (car ss))))
+    (if (and (string? id) (> (string-length id) 0)) id (llm-model))))
+
+(public! 'llm-models!
+  "(llm-models! '((ROLE . MODEL-ID) ...)) - declare the model each named job uses.")
+(public! 'llm-model-for
+  "(llm-model-for ROLE) - the model id for a named job, else the session model.")
+
 ;;; A new chat has no agent session yet, so its locals are the whole setup:
 ;;; the session reads them when it attaches on the first send. Going through
 ;;; llm-bundle-apply! here would attach the connector at once, and every new
@@ -970,3 +1004,81 @@
   'context-fn llm-config--context
   'detail-fn llm-fine-tune--detail
   'legend-fn llm-fine-tune--legend)
+
+;;; --- the model catalog --------------------------------------------------------
+;;; llm_db packages a catalog inside deps/. It ages from the day the lock was
+;;; written, and a model it does not carry has no price, no context limit and
+;;; no capabilities: the ledger then records a cost of #f. A published
+;;; snapshot is rebuilt every day. This keeps a copy outside the build, where
+;;; a dependency update cannot remove it.
+
+(domain! 'llm)
+(effects! '(read))
+
+(defcustom 'llm-catalog-max-age-days 7
+  "Refresh the model catalog when the loaded snapshot is older than this many days."
+  'group 'llm 'type 'number)
+
+(define (llm-catalog-age)
+  "The age of the loaded catalog in days, or #f when nothing records it."
+  (plist-get (llm-catalog-info) 'stale-days))
+
+;; the policy alone, so a test can state it without a catalog on disk. An
+;; age of #f is the catalog packaged with the build: nothing records when it
+;; was captured, so it counts as stale.
+(define (llm-catalog-stale-age? age)
+  (or (not age) (> age llm-catalog-max-age-days)))
+
+(define (llm-catalog-stale?)
+  "#t when the catalog is older than llm-catalog-max-age-days, or unrecorded."
+  (llm-catalog-stale-age? (llm-catalog-age)))
+
+(define (llm-catalog--describe info)
+  (string-append
+    (number->string (or (plist-get info 'models) 0)) " models from "
+    (number->string (or (plist-get info 'providers) 0)) " providers, captured "
+    (or (plist-get info 'captured-at) "at an unrecorded time")))
+
+(domain! 'llm)
+(effects! '(write external))
+
+(define (llm-catalog-refresh! k)
+  "Fetch the newest published catalog and load it. K gets (ok MESSAGE)."
+  (message "fetching the model catalog…")
+  ;; the lane hands a callback one value: here the list (OK INFO-OR-MESSAGE)
+  (llm-catalog-install!
+    (lambda (result)
+      (let* ((ok (car result))
+             (info (cadr result))
+             (text (if ok
+                       (string-append "catalog: " (llm-catalog--describe info))
+                       (string-append "catalog refresh failed: " info))))
+        (message text)
+        (when k (k ok text))))))
+
+(define-command "llm-catalog-refresh" "Fetch the newest model catalog and load it now"
+  (lambda () (llm-catalog-refresh! #f)))
+
+(define-command "llm-catalog-status" "Say what the loaded model catalog is and how old it is"
+  (lambda ()
+    (let* ((info (llm-catalog-info))
+           (age (plist-get info 'stale-days)))
+      (message
+        (string-append
+          (llm-catalog--describe info)
+          (if age
+              (string-append " (" (number->string age) " days old)")
+              " (age unrecorded: the catalog packaged with the build)"))))))
+
+
+;; No timer refreshes this. A catalog fetch is several megabytes over the
+;; GitHub API, which rate-limits an unauthenticated caller, and a background
+;; fetch nobody asked for is not worth that. M-x llm-catalog-status says how
+;; old the catalog is; M-x llm-catalog-refresh replaces it.
+
+(public! 'llm-catalog-stale?
+  "(llm-catalog-stale?) — #t when the loaded model catalog is older than llm-catalog-max-age-days")
+(public! 'llm-catalog-age
+  "(llm-catalog-age) — the age of the loaded model catalog in days, or #f")
+(public! 'llm-catalog-refresh!
+  "(llm-catalog-refresh! K) — fetch the newest model catalog and load it; K gets (ok MESSAGE)")

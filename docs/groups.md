@@ -455,13 +455,15 @@ When a member is killed, its window stays in the group. The window shows the mem
 
 ### The target layout
 
-The layout chosen at `window-layout` (`C-x l`), or a `window-layout-*` command, is a persistent target algorithm. It works with one buffer and grows as work opens: `two-pane` has capacity two, `columns` three, and rows/grid/main/adaptive arrange the occupied slots. At capacity, a visit replaces the selected slot and a passive result replaces the least recently used other pane. Focus changes do not reorder slots. Closing a pane reflows the survivors without reopening hidden work.
+The layout chosen at `window-layout` (`C-x l`), or a `window-layout-*` command, is a persistent target. There are five, and each holds a fixed number of panes: `single` one, `two-pane` two, `halves` two, `columns` three, `rows` two. A layout works with one buffer and grows as work opens, up to its capacity. At capacity, a visit replaces the selected slot and a passive result replaces the least recently used other pane. Focus changes do not reorder slots. Closing a pane reflows the survivors without reopening hidden work.
+
+Every layout shows a run of the frame's strip: the frame's buffers in one cyclic order. `layout-forward` (`C-x l <right>`) moves the run one buffer forward and `layout-backward` (`C-x l <left>`) one back, so each layout goes on for ever in both directions. A Cmd-arrow that finds no window does the same: the edge of the frame is not the end of the buffers.
 
 Targets belong to the group's saved layout on each frame, and the active target also survives desktop save. A new group starts without inheriting the outgoing target. `window-layout-free` drops the target. See [Display buffer](DISPLAY-BUFFER.md#layout-presets) for eligibility, ordering, replacement, preview, and measured geometry rules.
 
 A tile builds its windows from one survivor, so the build hands each new pane the history of the pane that showed its buffer. A pane on a buffer no window showed takes the history of a pane that went away, that pane's buffer first.
 
-`autolayout` is the one-main-pane layout. The selected window's buffer becomes the main pane on `window-layout-main-side` (`'left` or `'right`) with `window-layout-main-ratio` of the frame. The other visible buffers share the rest: a column, or tiles when `window-layout-stack` is `'grid`. `autolayout-set-main-width` sets the share as a fraction or a percent. `autolayout-mode` keeps the frame in this shape: when a window comes or goes, the frame re-arranges, the main pane stays main while its buffer is visible, and a new buffer joins the stack. `autolayout-main-left`, `autolayout-main-right` and `autolayout-toggle-stack` change one custom and arrange the frame. `s-RET` (Cmd-RET) runs `autolayout`, so the window you are in becomes the main pane and that arrangement becomes the target. `autolayout-mode` is a custom, so the mode survives a restart.
+The frame has no other layouts. `window-layout-free` releases the target, and a display may split a window again.
 
 `tile-all` opens the context overview. It is available only in a group or project. A group takes priority and supplies all its buffers, including chats. Otherwise, the current project supplies all its open buffers. The overview locks the frame: keys select a tile and do not edit. It saves no group layout and changes no membership by itself.
 
@@ -474,11 +476,15 @@ A tile builds its windows from one survivor, so the build hands each new pane th
 
 `switch` saves the outgoing layout as it is, every time. A layout that shows a foreign buffer is saved with it. Showing a foreign buffer in a work window takes the frame out of G (see "The current group"); that moment saves G's layout as it stands and sets `previous` to G, so a switch from a frame in no group has nothing left to save, and a switch back to G finds the arrangement the reader left.
 
-### A foreign buffer switches the group
+### A buffer opens in the current group
 
-A switch to a buffer of another group enters that group (the ruling of 2026-09-19). This covers `switch-to-buffer`, `RET` in the switcher, `find-file` on a file with a live buffer in another group, and a jump that lands in such a buffer. The frame leaves G with its layout saved as it stood, enters the buffer's home group, and the buffer opens there as a member. A switch to an ungrouped buffer takes the selected window, and the frame leaves G by the derived rule. Nothing floats on a switch.
+A buffer opens in the group it was launched from: the group of the window that opened it, else the group the frame stands in (`group-spawn-target`). It joins that group on the way in (`buffer-join-here!`), so the arrangement in front of the reader never changes under them. The frame never follows a buffer home. This covers `switch-to-buffer`, `RET` in the switcher, `find-file` on a file with a live buffer in another group, a browse tab a link opens, and a jump that lands in such a buffer. Nothing floats on a switch. (The ruling of 2026-09-22, which replaces "a foreign buffer switches the group" of 2026-09-19.)
 
-A list is different: a row chosen in ibuffer or ichat may still show its buffer in the popup, and dismissing the popup leaves G as it was. A display of a buffer outside G that is not a switch is a display of category `foreign` and takes the window chain (docs/DISPLAY-BUFFER.md); a pane that shows it takes the frame out of G.
+Two buffers cannot join and open where they are instead: a chat, whose group is its identity, and a special view, which holds no membership at all.
+
+An app is not a group. The mail, Substack and LinkedIn apps used to own a named group and pull the frame into that group's saved layout whenever one of their panes was shown. What makes an app's buffers one app is the app id they carry (`app-claim!`, `app-id`, `app-buffers` in `scheme/packages/apps.scm`), not a group, so the app opens wherever the reader already is.
+
+Entering another group is a command of its own: `group-switch`, and `RET` on a row of ibuffer. A list is different in one more way: a row chosen in ibuffer or ichat may still show its buffer in the popup, and dismissing the popup leaves G as it was. A display of a buffer outside G that is not a switch is a display of category `foreign` and takes the window chain (docs/DISPLAY-BUFFER.md); a pane that shows it takes the frame out of G.
 
 To keep a buffer in G, add it: `group-add`.
 
@@ -564,6 +570,27 @@ At the start of a turn an agent reads one `context` value:
 
 Tools an agent calls to list, search, read, or open buffers use the same three sections as the human's lists. The context is what the agent sees first, not what it is forbidden. Group membership never grants a tool permission.
 
+## Pseudo groups
+
+A pseudo group has a name and members, and no record. A function answers the members each time somebody asks, so the membership follows the editor and not the buffer locals.
+
+`Last chats` is the one the editor declares: the chats you used most recently, most recent first. `last-chats-limit` sets how many, and the default is 3.
+
+```scheme
+(define-pseudo-group! "Last chats" last-chats)   ; FN answers buffer names, best first
+(undefine-pseudo-group! "Last chats")            ; take it away again
+```
+
+A pseudo group reads like any other group. It carries a name, a colour and a label, it holds a row on the groups board, and it holds a card in the switcher. `group-buffers`, `group-buffers-mru` and `group-counts` answer for it. The frame enters it, and the members tile as the layout.
+
+The record list never holds one, so save, restore, rename, dissolve and magic grouping never see it. Three rules follow:
+
+- A buffer cannot join one. `group-add` and `group-move` offer the founded groups only, and `group-add-buffers-to!` refuses a pseudo destination.
+- A rename and a dissolve refuse, and say so.
+- The group keeps no layout and no home directory, because it keeps no record.
+
+The frame holds a pseudo group while every pane shows a member of it. The members carry no mark, so the derivation in `group-current-recalculate!` cannot see the group; `group-pseudo-here?` keeps it instead. A pane that shows anything else takes the frame back to the group the visible buffers do mark.
+
 ## Persistence
 
 `desktop.etf` stores, per group: ID, name, its members, per-frame layouts, and scratch content. Per frame: `destination` and `previous`.
@@ -617,7 +644,7 @@ The frame stands in the group its windows show. The rules:
 3. When several groups are shared by every window, the frame keeps its current one if it is among them, else the most recent of them.
 4. A pinned frame keeps its pinned group through every window change.
 5. The derivation runs after every change of the frame's windows or their buffers, whoever made the change. The editor calls `window-configuration-changed!` (Emacs `window-configuration-change-hook`) from its one commit point; a command, a kill that drops a window onto its next buffer, and an agent all reach it. The window commands also run it before they return, so their modeline is right at once.
-6. A pane that shows an ungrouped buffer leaves the group; killing that buffer drops the window onto its next buffer, and the frame is back in that buffer's group with no command involved. A switch to a buffer of another group enters that group first (see "A foreign buffer switches the group"); a switch to an ungrouped buffer makes such a pane. A layout, a swap, or a restore can still put one in a pane.
+6. A pane that shows an ungrouped buffer leaves the group; killing that buffer drops the window onto its next buffer, and the frame is back in that buffer's group with no command involved. A switch never makes such a pane out of a buffer that can join: the buffer joins the group first (see "A buffer opens in the current group"). A switch to an ungrouped buffer, or to a chat of another group, makes one. A layout, a swap, or a restore can still put one in a pane.
 
 ### Layouts
 

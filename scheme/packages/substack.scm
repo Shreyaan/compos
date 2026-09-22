@@ -3,9 +3,6 @@
 (domain! 'web)
 (effects! '(read))
 
-(defcustom 'substack-group-name "*substack*"
-  "The group that owns the Substack listing, publication pages, and readers."
-  'group 'substack)
 ;; How many recent posts each publication page lists.
 (define substack-post-limit 20)
 
@@ -58,18 +55,14 @@
                  (or (plist-get payload 'publications) '())))))
 
 (effects! '(write display))
-(define (substack-home-group!)
-  (and (string? substack-group-name)
-       (not (equal? substack-group-name ""))
-       (group-ensure-record! substack-group-name)))
-(define (substack-enter-group!)
-  (let ((id (substack-home-group!)))
-    (when (and id (not (equal? (frame-group) id))) (switch-to-group! id))
-    id))
-(define (substack-join-group! buf)
+;; The listing, the publication pages and the readers are one app. The app
+;; id says so; they own no group of their own and open in the group the
+;; frame stands in, like every other buffer.
+(define *substack-app-id* "substack")
+(define (substack-join-group! buf &optional role)
   (when (buffer-exists? buf)
-    (let ((id (or (substack-home-group!) (frame-group))))
-      (when (and id (not (buffer-in-group? buf id))) (buffer-add-group! buf id))))
+    (when (boundp 'app-claim!) (app-claim! buf *substack-app-id* (or role 'aux)))
+    (when (boundp 'buffer-join-here!) (buffer-join-here! buf)))
   buf)
 (define (substack-log! text)
   (unless (buffer-exists? *substack-log*) (buffer-create *substack-log*))
@@ -213,7 +206,7 @@
     (let ((buf (substack--detail-buffer row)))
       (unless (buffer-exists? buf) (buffer-create buf))
       (buffer-set-local! buf 'substack-publication row)
-      (substack-join-group! buf)
+      (substack-join-group! buf 'detail)
       (unless (buffer-derived-mode? buf "substack-detail-mode")
         (with-current-buffer buf
           (lambda () (set-mode! "substack-detail-mode"))))
@@ -281,7 +274,7 @@
       (unless (buffer-exists? buf) (buffer-create buf))
       (buffer-set-local! buf 'substack-publication publication)
       (buffer-set-local! buf 'substack-post post)
-      (substack-join-group! buf)
+      (substack-join-group! buf 'aux)
       (unless (buffer-derived-mode? buf "substack-reader-mode")
         (with-current-buffer buf
           (lambda () (set-mode! "substack-reader-mode"))))
@@ -429,19 +422,19 @@
 (define (substack-current-reader)
   (buffer-local *substack-buffer* 'substack-current-reader))
 (define (substack-layout!)
-  (let* ((id (substack-home-group!))
+  (let* ((id (frame-group))
          (chat (and id (group-chat id)))
          (panes (filter buffer-exists?
                         (list *substack-buffer*
                               (substack-current-detail)
                               (substack-current-reader)
                               chat))))
-    (when (pair? (cdr panes)) (tile-adaptive-windows! panes))
+    (when (pair? (cdr panes)) (tile-default-windows! panes))
     panes))
 (define (substack-sync!)
   "Fetch subscriptions and redraw the app."
   (unless (buffer-exists? *substack-buffer*) (buffer-create *substack-buffer*))
-  (substack-join-group! *substack-buffer*)
+  (substack-join-group! *substack-buffer* 'home)
   (unless (buffer-derived-mode? *substack-buffer* "substack-mode")
     (with-current-buffer *substack-buffer*
       (lambda () (set-mode! "substack-mode"))))
@@ -453,15 +446,14 @@
         (let ((row (list-current *substack-buffer*)))
           (when row (substack-show-detail! row)))
         (substack-layout!)
-        (let ((id (substack-home-group!)))
+        (let ((id (frame-group)))
           (when id (group-layout-save! id)))
         (message (string-append (number->string (length rows))
                                 " Substack subscriptions"))))))
 (define-command "substack" "Open the Substack app"
   (lambda ()
-    (substack-enter-group!)
     (unless (buffer-exists? *substack-buffer*) (buffer-create *substack-buffer*))
-    (substack-join-group! *substack-buffer*)
+    (substack-join-group! *substack-buffer* 'home)
     (unless (buffer-derived-mode? *substack-buffer* "substack-mode")
       (with-current-buffer *substack-buffer*
         (lambda () (set-mode! "substack-mode"))))

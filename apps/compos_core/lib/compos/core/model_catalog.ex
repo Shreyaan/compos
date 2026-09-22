@@ -14,6 +14,266 @@ defmodule Compos.Core.ModelCatalog do
   them into a single connector-wide "effort" list invents invalid choices.
   """
 
+  @snapshot_home "~/.compos/llm_db"
+
+  @doc """
+  Where the refreshed snapshot lives.
+
+  The catalog `llm_db` ships is inside `deps/`, which `mix deps.get` throws
+  away, and it ages from the day the dependency was locked. A snapshot this
+  editor refreshed belongs outside the build, so it survives a dependency
+  update and a rebuild.
+  """
+  def snapshot_home, do: Path.expand(@snapshot_home)
+
+  def snapshot_file, do: Path.join(snapshot_home(), "snapshot.json")
+
+  def meta_file, do: Path.join(snapshot_home(), "snapshot-meta.json")
+
+  @doc """
+  What the loaded catalog is: its id, when it was captured, and how much it
+  carries. `stale_days` is what a caller reads to decide to refresh.
+
+  The figures come from the metadata file written beside a refreshed
+  snapshot. Without one the editor runs the catalog `llm_db` packaged, whose
+  age nothing records, so `stale_days` is nil and `path` says "packaged".
+  """
+  def snapshot_info do
+    case read_meta() do
+      %{} = meta ->
+        captured = meta["captured_at"]
+
+        %{
+          snapshot_id: meta["snapshot_id"],
+          captured_at: captured,
+          models: meta["model_count"],
+          providers: meta["provider_count"],
+          stale_days: stale_days(captured),
+          path: snapshot_file()
+        }
+
+      _ ->
+        %{
+          snapshot_id: nil,
+          captured_at: nil,
+          models: nil,
+          providers: nil,
+          stale_days: nil,
+          path: "packaged"
+        }
+    end
+  end
+
+  defp read_meta do
+    with true <- File.exists?(snapshot_file()),
+         {:ok, body} <- File.read(meta_file()),
+         {:ok, meta} <- Jason.decode(body) do
+      meta
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Fetch the newest published snapshot, keep it, and load it now.
+
+  This runs the network, so a caller gives it a process of its own. It
+  returns the same shape as `snapshot_info/0` for the snapshot it installed.
+  """
+  def refresh do
+    case LLMDB.Snapshot.ReleaseStore.fetch_snapshot(:latest) do
+      {:ok, %{snapshot: snapshot}} -> install(snapshot)
+      {:ok, snapshot} when is_map(snapshot) -> install(snapshot)
+      {:error, reason} -> {:error, "catalog fetch failed: #{inspect(reason)}"}
+    end
+  rescue
+    e -> {:error, "catalog fetch failed: #{Exception.message(e)}"}
+  end
+
+  @doc """
+  Install a snapshot already on disk, instead of fetching one.
+
+  The published catalog comes from the GitHub API, which refuses an
+  unauthenticated caller that asks too often. A snapshot kept from an
+  earlier fetch installs without the network.
+  """
+  def install_file(path) do
+    with {:ok, body} <- File.read(path),
+         {:ok, snapshot} <- Jason.decode(body) do
+      install(snapshot)
+    else
+      {:error, reason} -> {:error, "catalog read failed: #{inspect(reason)}"}
+    end
+  end
+
+  # Install only a snapshot that loads. The order matters: a catalog that
+  # fails to load must not be left on disk, or the next boot reads it and
+  # the editor comes up with no models at all.
+  defp install(snapshot) do
+    snapshot = prune_unknown_providers(snapshot)
+    path = snapshot_file()
+    previous = Application.get_env(:llm_db, :snapshot_path)
+
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- write_snapshot(path, snapshot),
+         :ok <- load_from(path) do
+      write_snapshot(meta_file(), LLMDB.Snapshot.metadata(snapshot))
+      {:ok, snapshot_info()}
+    else
+      {:error, reason} ->
+        # put the editor back on the catalog it was using
+        File.rm(path)
+        File.rm(meta_file())
+        restore(previous)
+        {:error, reason}
+    end
+  end
+
+  defp load_from(path) do
+    Application.put_env(:llm_db, :snapshot_path, path)
+    LLMDB.Catalog.clear!()
+
+    case LLMDB.load() do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, "catalog load failed: #{inspect(reason)}"}
+    end
+  rescue
+    e -> {:error, "catalog load failed: #{Exception.message(e)}"}
+  end
+
+  defp restore(nil), do: restore_packaged()
+  defp restore(previous), do: (Application.put_env(:llm_db, :snapshot_path, previous); reload())
+
+  defp restore_packaged do
+    Application.delete_env(:llm_db, :snapshot_path)
+    reload()
+  end
+
+  defp reload do
+    LLMDB.Catalog.clear!()
+    LLMDB.load()
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  # A published snapshot runs ahead of the llm_db we build against: it can
+  # name a provider this version has no atom for, and the loader rejects the
+  # whole snapshot for one of them. Dropping those providers keeps every
+  # provider this editor can actually reach.
+  defp prune_unknown_providers(snapshot) do
+    case providers_of(snapshot) do
+      {key, providers} when is_map(providers) ->
+        kept =
+          providers
+          |> Map.filter(fn {id, _} -> known_provider?(id) end)
+          |> Map.new(fn {id, provider} -> {id, prune_unknown_models(provider)} end)
+
+        if kept == providers do
+          snapshot
+        else
+          # the id is an integrity hash of the contents, so a pruned
+          # snapshot has to be stamped again or the loader rejects it
+          pruned = Map.put(snapshot, key, kept)
+          Map.put(pruned, id_key(snapshot), LLMDB.Snapshot.snapshot_id(pruned))
+        end
+
+      _ ->
+        snapshot
+    end
+  end
+
+  defp id_key(snapshot) do
+    if Map.has_key?(snapshot, :snapshot_id), do: :snapshot_id, else: "snapshot_id"
+  end
+
+  defp providers_of(snapshot) when is_map(snapshot) do
+    cond do
+      is_map(snapshot["providers"]) -> {"providers", snapshot["providers"]}
+      is_map(snapshot[:providers]) -> {:providers, snapshot[:providers]}
+      true -> nil
+    end
+  end
+
+  defp providers_of(_), do: nil
+
+  defp known_provider?(id) when is_atom(id), do: true
+
+  defp known_provider?(id) when is_binary(id) do
+    case LLMDB.Generated.ProviderRegistry.fetch(id) do
+      {:ok, _} ->
+        true
+
+      _ ->
+        try do
+          String.to_existing_atom(id)
+          true
+        rescue
+          ArgumentError -> false
+        end
+    end
+  end
+
+  defp known_provider?(_), do: false
+
+  # Same skew, one level down: a published snapshot can give a model a
+  # modality this version has no atom for, and one such model fails the
+  # whole load.
+  defp prune_unknown_models(provider) when is_map(provider) do
+    case models_of(provider) do
+      {key, models} when is_map(models) ->
+        Map.put(provider, key, Map.filter(models, fn {_, m} -> known_model?(m) end))
+
+      _ ->
+        provider
+    end
+  end
+
+  defp prune_unknown_models(provider), do: provider
+
+  defp models_of(provider) when is_map(provider) do
+    cond do
+      is_map(provider["models"]) -> {"models", provider["models"]}
+      is_map(provider[:models]) -> {:models, provider[:models]}
+      true -> nil
+    end
+  end
+
+  defp models_of(_), do: nil
+
+  defp known_model?(model) when is_map(model) do
+    modalities = model["modalities"] || model[:modalities] || %{}
+
+    modalities
+    |> Map.values()
+    |> List.flatten()
+    |> Enum.all?(&known_modality?/1)
+  end
+
+  defp known_model?(_), do: true
+
+  defp known_modality?(m) when is_binary(m) or is_atom(m) do
+    match?({:ok, _}, LLMDB.Generated.ValidModalities.fetch(m))
+  end
+
+  defp known_modality?(_), do: true
+
+  defp write_snapshot(path, snapshot) do
+    LLMDB.Snapshot.write!(path, snapshot)
+    :ok
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  defp stale_days(captured) when is_binary(captured) do
+    case DateTime.from_iso8601(captured) do
+      {:ok, dt, _} -> div(DateTime.diff(DateTime.utc_now(), dt, :second), 86_400)
+      _ -> nil
+    end
+  end
+
+  defp stale_days(_), do: nil
+
   @doc """
   Pricing for a model spec, $ per million tokens, or nil when the catalog
   has no cost for it: %{input:, output:, cache_read:, cache_write:}.
@@ -126,8 +386,24 @@ defmodule Compos.Core.ModelCatalog do
     ]
   end
 
-  @doc "The catalog entry for a spec: `provider:id`, or a bare id looked up as Anthropic then OpenAI."
+  @doc """
+  The catalog entry for a spec: `provider:id`, or a bare id looked up as
+  Anthropic then OpenAI.
+
+  This answers `{:error, :unknown_model}` and never raises. llm_db reads its
+  snapshot on the first lookup and raises `LLMDB.LoadError` when the whole
+  snapshot fails to deserialize, which one unreadable entry is enough to
+  cause. Every caller here wants metadata it can do without, so a catalog
+  that will not load reads as a catalog that knows nothing, and chats keep
+  working without pricing or a context limit.
+  """
   def lookup(spec) do
+    lookup!(spec)
+  rescue
+    _ -> {:error, :unknown_model}
+  end
+
+  defp lookup!(spec) do
     case LLMDB.model(spec) do
       {:ok, _} = ok ->
         ok

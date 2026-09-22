@@ -1,23 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- A search results page, calm: the results and nothing else.
-     The whole-page reading keeps the region list, the time filters and
-     one redirect wrapper per result. A result is a title, the site it
-     is on, and a snippet. -->
+     A result is a title, the site it is on, and a snippet. -->
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
   <xsl:output method="html" encoding="UTF-8" omit-xml-declaration="yes"/>
-  <!-- No strip-space here. The engine wraps each matched word in <b>,
-       and the single spaces between those tags are whitespace-only text
-       nodes: stripping them joins the words ("EmacsLisp"). -->
+  <!-- No strip-space: the engine wraps matched words in <b>, and the
+       spaces between those tags are whitespace-only text nodes. -->
 
   <xsl:template match="/">
     <html><body>
+      <!-- the query is the page's title: without it the tab names
+           itself after the first result -->
+      <xsl:if test="//input[@name='q']">
+        <h1><xsl:value-of select="//input[@name='q']/@value"/></h1>
+      </xsl:if>
       <xsl:apply-templates select="//div[contains(@class, 'result__body')]"/>
+      <xsl:apply-templates select="//div[contains(@class, 'nav-link')]"/>
     </body></html>
   </xsl:template>
 
-  <!-- copy-of, not value-of: the engine marks the matched words with
-       <b>, and value-of would drop the tags and run the words together
-       ("GNU EmacsLisp Reference Manual"). -->
+  <!-- Next is a POST form. Its hidden fields as a query string are the
+       next page, and a link is something the reader can follow. -->
+  <xsl:template match="div[contains(@class, 'nav-link')]">
+    <xsl:variable name="href">
+      <xsl:text>/html/?</xsl:text>
+      <xsl:for-each select=".//input[not(@type) or @type='hidden']">
+        <xsl:if test="position() > 1"><xsl:text>&amp;</xsl:text></xsl:if>
+        <xsl:value-of select="@name"/>
+        <xsl:text>=</xsl:text>
+        <xsl:value-of select="@value"/>
+      </xsl:for-each>
+    </xsl:variable>
+    <p><a href="{$href}">Next</a></p>
+  </xsl:template>
+
+  <!-- copy-of, not value-of: value-of drops the <b> the engine wraps
+       matched words in, and the words run together. -->
   <xsl:template match="div[contains(@class, 'result__body')]">
     <h2>
       <a href="{.//a[contains(@class, 'result__a')]/@href}">

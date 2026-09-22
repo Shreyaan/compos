@@ -181,10 +181,21 @@ defmodule Compos.Core.Session do
     Lane.run(lane || :ui, fn _from -> exec_run_command(name, fid) end, 30_000, "command #{name}")
   end
 
-  @doc "Apply a Scheme closure (e.g. a minibuffer confirm callback)."
-  def apply_callback(closure, args, fid \\ nil, lane \\ nil) do
+  @doc """
+  Apply a Scheme closure (e.g. a minibuffer confirm callback). BUFFER, when
+  given, is the logical current buffer to restore for the call — a task's
+  callback runs in a fresh process, so without it the call would pick up
+  whatever buffer the caller's frame happens to be showing by then.
+  """
+  def apply_callback(closure, args, fid \\ nil, lane \\ nil, buffer \\ nil) do
     fid = fid(fid)
-    Lane.run(lane || :ui, fn _from -> exec_apply(closure, args, fid) end, 30_000, apply_label(closure))
+
+    Lane.run(
+      lane || :ui,
+      fn _from -> exec_apply(closure, args, fid, buffer) end,
+      30_000,
+      apply_label(closure)
+    )
   end
 
   # the slow-job log names the callback by the head of its body, so a slow
@@ -511,6 +522,20 @@ defmodule Compos.Core.Session do
 
   defp with_fid(fid, fun), do: Frame.with_frame(fid, fun)
 
+  # same, plus a logical buffer to restore around the call — the callback of
+  # a task-run! runs in a fresh process, so this is how it gets back the
+  # buffer its task body was running as (see scheme_task_run/3).
+  defp with_fid(nil, buffer, fun) do
+    Frame.clear()
+    if buffer, do: Frame.with_buffer(buffer, fun), else: fun.()
+  end
+
+  defp with_fid(fid, buffer, fun) do
+    Frame.with_frame(fid, fn ->
+      if buffer, do: Frame.with_buffer(buffer, fun), else: fun.()
+    end)
+  end
+
   # --- lane executors ---------------------------------------------------------
   # These run in lane worker processes (or inline on lane re-entry), never in
   # this GenServer: a long eval holds only its own lane. Each one registers
@@ -604,9 +629,9 @@ defmodule Compos.Core.Session do
   end
 
   @doc false
-  def exec_apply(closure, args, fid) do
+  def exec_apply(closure, args, fid, buffer \\ nil) do
     case Scheme.exec(interp(), fn interp ->
-           safe(fn -> with_fid(fid, fn -> Scheme.call(interp, closure, args) end) end)
+           safe(fn -> with_fid(fid, buffer, fn -> Scheme.call(interp, closure, args) end) end)
          end) do
       {:ok, val, _interp} ->
         root_result(val)
@@ -1328,7 +1353,7 @@ defmodule Compos.Core.Session do
       end,
       # -> (slug "a1" buffer "*agent: a1*" status idle queued 0 permission #f)
       {"agent-info",
-       "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, ending, steers, permission, question; or #f. ending is #t while a finished turn waits on an unresolved steer."} =>
+       "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, ending, steers, settling, silent, permission, question; or #f. ending is #t while a finished turn waits on an unresolved steer. settling is #t while a steered turn waits for its close; silent is #t while a turn waits for the connector's first event."} =>
         fn [slug] ->
           case Compos.Core.Agent.info(s(slug)) do
             {:error, _} ->
@@ -1382,6 +1407,12 @@ defmodule Compos.Core.Session do
                 info.ending,
                 {:sym, "steers"},
                 info.steers,
+                # the two silences a stalled chat can be in. An Agent from
+                # before a hot reload reports neither, so ask with a default
+                {:sym, "settling"},
+                Map.get(info, :settling, false),
+                {:sym, "silent"},
+                Map.get(info, :silent, false),
                 {:sym, "permission"},
                 perm,
                 {:sym, "question"},
@@ -2144,6 +2175,7 @@ defmodule Compos.Core.Session do
         key = {:scheme_task_callback, task.id}
         Roots.put(key, callback)
         fid = Frame.current()
+        buffer = Frame.buffer_context()
         lane = Lane.current() || :ui
 
         case Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
@@ -2156,7 +2188,7 @@ defmodule Compos.Core.Session do
                  end
 
                try do
-                 apply_callback(callback, args, fid, lane)
+                 apply_callback(callback, args, fid, lane, buffer)
                after
                  Roots.drop(key)
                  SchemeTask.cancel(task)

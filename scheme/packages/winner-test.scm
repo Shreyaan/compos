@@ -22,7 +22,6 @@
     (and ra rb (equal? (nth 2 ra) (nth 2 rb)) (< (nth 3 ra) (nth 3 rb)))))
 
 (define (t--wn-setup!)
-  (customize-set! 'autolayout-mode #f)
   (layout-target-set! #f)
   (for-each (lambda (b) (test-buffer! b "")) (list t--wn-a t--wn-b))
   (delete-other-windows!)
@@ -40,7 +39,6 @@
   (winner--post-command!))
 
 (define (t--wn-done!)
-  (customize-set! 'autolayout-mode #f)
   (layout-target-set! #f)
   (delete-other-windows!)
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
@@ -80,18 +78,17 @@
       (check-true! (not (t--wn-stacked?)) "redo brings the chosen layout back"))
     (t--wn-done!)))
 
-(deftest 'winner-undo-under-autolayout-mode-keeps-the-restored-arrangement
-  "autolayout re-arranges when panes change; a winner walk is not a change of panes"
+(deftest 'winner-undo-under-a-target-keeps-the-restored-arrangement
+  "the engine re-arranges when the panes change; a winner walk is not a change of panes"
   (lambda ()
     (t--wn-setup!)
-    (customize-set! 'autolayout-mode #t)
-    (t--wn-command! (lambda () (autolayout-select! t--wn-b)))
-    (check-true! (not (t--wn-stacked?)) "autolayout put the panes side by side")
+    (t--wn-command! (lambda () (tile-visible-windows! 'two-pane (list t--wn-b t--wn-a))))
+    (check-true! (not (t--wn-stacked?)) "the layout put the panes side by side")
     (layout-target-set! #f)
     (winner-previous!)
     (check-true! (t--wn-stacked?) "undo brings the stacked arrangement back")
     (window-configuration-changed!)
-    (check-true! (t--wn-stacked?) "autolayout's hook leaves the restored arrangement alone")
+    (check-true! (t--wn-stacked?) "the configuration hook leaves the restored arrangement alone")
     (t--wn-done!)))
 
 (deftest 'winner-records-nothing-under-a-look-or-a-stack-entry

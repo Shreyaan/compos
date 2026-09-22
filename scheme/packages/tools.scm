@@ -349,8 +349,12 @@
                      (else (loop (cdr rows)))))))))
 
 (define *apropos--stop-words*
-  '("a" "an" "and" "current" "do" "for" "how" "i" "in" "my" "of"
-    "please" "the" "this" "to" "with"))
+  ;; Every word must appear for a literal hit, so a filler word is not
+  ;; harmless here — it is the word that makes the right entry miss. A
+  ;; directive carries pronouns the catalog will never contain.
+  '("a" "an" "and" "current" "do" "for" "how" "i" "in" "it" "its"
+    "me" "my" "of" "please" "that" "the" "this" "to" "us" "we"
+    "with" "you" "your"))
 
 (domain! 'discovery)
 (effects! '(read))
@@ -474,8 +478,13 @@
 ;; agent: no code behind it, just the words that answer the search
 ;; before someone rebuilds what was already decided
 (define (apropos--catalog-entry e words)
+  ;; A recipe is the catalog's answer to a task phrased the way a person
+  ;; phrases it, and it carries the expression that performs it. Search
+  ;; skipped recipes entirely, so every directive had to be answered by
+  ;; ranking identifiers instead. Its `use` expression is searched too:
+  ;; the operation it calls is the best name a task phrase can carry.
   (let ((kind (catalog--get e 'kind)))
-    (and (member kind '("component" "mode" "note" "fence-kind"))
+    (and (member kind '("component" "mode" "note" "fence-kind" "recipe"))
          (apropos--hit?
            (string-append (apropos--catalog-field e 'name) " "
                           (apropos--catalog-field e 'qualified-name) " "
@@ -483,6 +492,8 @@
                           (apropos--catalog-field e 'package) " "
                           (apropos--catalog-field e 'namespace) " "
                           (apropos--catalog-field e 'domain) " "
+                          (apropos--catalog-field e 'use) " "
+                          (apropos--catalog-field e 'aliases) " "
                           (value->string (or (catalog--get e 'props) '())) " "
                           (value->string (or (catalog--get e 'example) '())))
            words)
@@ -537,9 +548,7 @@
            (tool--suggest (string-trim query)))))
 
 (define (apropos--semantic-sources rows)
-  (append
-    (if (boundp (quote recipe-search)) (recipe-search "") '())
-    (map (lambda (row) (car (cdr row))) rows)))
+  (map (lambda (row) (car (cdr row))) rows))
 
 (define (apropos--embedding-field hit key)
   (let ((value (plist-get hit key)))
@@ -554,7 +563,10 @@
     ". Signature: " (apropos--embedding-field hit 'sig)
     ". Domain: " (apropos--embedding-field hit 'domain)
     ". Effects: " (apropos--embedding-field hit 'effects)
-    ". Usage: " (or (plist-get hit 'use) (plist-get hit 'run) "")))
+    ". Usage: " (or (plist-get hit 'use) (plist-get hit 'run) "")
+    ;; The words people say for this task, which are rarely the words the
+    ;; identifier uses. "beside" has to reach the other-window operation.
+    ". Also called: " (apropos--embedding-field hit 'aliases)))
 
 ;; The sources and their embedding texts change only when the catalog does.
 ;; Rebuilding 1800 strings on every query cost more than a second, and the
@@ -797,6 +809,7 @@
        (* 0.30 name-coverage name-coverage)
        (* 0.12 signature-coverage signature-coverage)
        (* 0.06 (apropos--field-coverage doc words))
+       (* 0.20 (apropos--field-coverage (or (plist-get hit 'aliases) "") words))
        (* 0.02 (apropos--field-coverage metadata words))))))
 
 (define (apropos--rank-semantic hits query)
@@ -817,20 +830,14 @@
          (short-of (lambda (h)
                      (string-downcase (or (plist-get h 'name) (plist-get h 'task) ""))))
          (exact? (lambda (h) (or (equal? q (name-of h)) (equal? q (short-of h)))))
-         ;; a recipe whose task matched. One whose expression alone matched
-         ;; is a weaker hit than a name, and it waits with the rest.
-         (recipe? (lambda (h) (and (equal? (plist-get h 'kind) "recipe")
-                                   (not (equal? (plist-get h 'match) "expression")))))
          (prefix? (lambda (h)
                     (or (string-prefix? q (name-of h))
                         (string-prefix? q (short-of h)))))
          (exact (filter exact? hits))
-         (recipes (filter (lambda (h) (and (not (exact? h)) (recipe? h))) hits))
-         (prefixes (filter (lambda (h)
-                            (and (not (exact? h)) (not (recipe? h)) (prefix? h))) hits))
+         (prefixes (filter (lambda (h) (and (not (exact? h)) (prefix? h))) hits))
          (rest (filter (lambda (h)
-                         (and (not (exact? h)) (not (recipe? h)) (not (prefix? h)))) hits)))
-    (append exact recipes prefixes (apropos--rank-semantic rest query))))
+                         (and (not (exact? h)) (not (prefix? h)))) hits)))
+    (append exact prefixes (apropos--rank-semantic rest query))))
 
 ;; Scope "all" is the escape hatch for private globals. Keep every result
 ;; structured, so discovery can distinguish a private implementation from a
@@ -937,9 +944,8 @@
          (wait? (apropos--flag filters0 'wait #t))
          (filters (apropos--without-lexical filters0))
          (words (apropos--words query))
-         (recipes (if (boundp (quote recipe-search)) (recipe-search query) '()))
          (literal-rows (filter (lambda (row) (apropos--row-hit? row words)) rows))
-         (literal-hits (append recipes (map (lambda (row) (car (cdr row))) literal-rows)))
+         (literal-hits (map (lambda (row) (car (cdr row))) literal-rows))
          (suggestions (if (pair? literal-hits) '()
                           (apropos--name-suggestions query words index)))
          ;; The semantic pass embeds the query through a network service,

@@ -140,3 +140,13 @@ if config_env() != :test do
     config :compos_core, accent: accent
   end
 end
+
+# The model catalog the editor refreshed, when it has one. llm_db packages a
+# catalog inside deps/, which ages from the day the lock was written and which
+# mix deps.get throws away. M-x llm-catalog-refresh writes a fresh one here,
+# outside the build, and this points llm_db at it for every boot after.
+llm_db_snapshot = Path.expand("~/.compos/llm_db/snapshot.json")
+
+if File.exists?(llm_db_snapshot) do
+  config :llm_db, snapshot_path: llm_db_snapshot
+end

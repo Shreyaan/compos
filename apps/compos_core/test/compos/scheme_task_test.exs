@@ -115,6 +115,23 @@ defmodule Compos.SchemeTaskTest do
     assert backlog >= 0
   end
 
+  test "task-run!'s callback runs with the buffer that was current when the task was spawned" do
+    name = "*scheme-task-buf-#{System.unique_integer([:positive])}*"
+    {:ok, ^name} = Compos.Core.create_buffer(name)
+
+    eval!("(define *task-run-buffer* #f)")
+
+    eval!("""
+    (with-current-buffer #{inspect(name)}
+      (lambda ()
+        (task-run!
+          (lambda () 42)
+          (lambda (ok value) (set! *task-run-buffer* (current-buffer))))))
+    """)
+
+    eventually(fn -> Session.eval("*task-run-buffer*") == {:ok, "\"#{name}\""} end)
+  end
+
   test "parallel tasks serialize writes through the target buffer" do
     name = "*scheme-tasks-#{System.unique_integer([:positive])}*"
     {:ok, ^name} = Compos.Core.create_buffer(name)
