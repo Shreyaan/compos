@@ -218,6 +218,12 @@ body {
   padding: var(--chrome-gap, 0);
 }
 .windows > * { flex: 1; min-width: 0; min-height: 0; }
+/* the copy of the old panes during a strip scroll (strip-slide.js):
+   it sits behind the new panes and shows only where they are not */
+.windows.strip-ghost {
+  position: absolute; inset: 0; z-index: -1;
+  pointer-events: none;
+}
 .split { flex: 1; display: flex; min-width: 0; min-height: 0; gap: var(--chrome-gap, 0); }
 .split.h { flex-direction: row; }
 .split.v { flex-direction: column; }

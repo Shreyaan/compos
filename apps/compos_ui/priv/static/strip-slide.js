@@ -1,0 +1,128 @@
+// The slide that a strip scroll shows (layout-forward, layout-backward,
+// and a focus move past the frame edge). The daemon marks the render with
+// a new data-slide token on c-windows: "forward:N" or "backward:N".
+//
+// Before LiveView patches c-windows, `before` copies the old panes. After
+// the patch, the copy sits one pane-step behind the new panes, and the
+// two slide together. The pane that leaves goes out one side, the pane
+// that arrives comes in the other, and a pane on both sides stays where
+// the eye is. The user sees which buffer left and which buffer arrived.
+(() => {
+  const DURATION = 220;
+  let current = null;
+
+  const reduced = () =>
+    window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // the panes in screen order; a peek floats and does not scroll
+  const panes = (root) =>
+    [...root.querySelectorAll("c-window.window")].filter(
+      (w) => !w.classList.contains("listing-peek")
+    );
+
+  // The axis and the distance of one pane-step. Panes that share one left
+  // edge are rows, and the strip moves vertically. One pane moves by the
+  // frame's width.
+  function step(root, forward) {
+    const box = root.getBoundingClientRect();
+    const rs = panes(root).map((w) => w.getBoundingClientRect());
+    if (rs.length === 0) return null;
+    const vertical = rs.length > 1 && rs.every((r) => Math.abs(r.left - rs[0].left) < 1);
+    if (rs.length === 1) return { vertical: false, d: box.width };
+    const n = rs.length;
+    const d = vertical
+      ? (forward ? rs[1].top - rs[0].top : rs[n - 1].bottom - rs[n - 2].bottom)
+      : (forward ? rs[1].left - rs[0].left : rs[n - 1].right - rs[n - 2].right);
+    return d > 0 ? { vertical, d } : null;
+  }
+
+  // the scroll offsets of the old panes, by element index, so the copy
+  // shows each buffer at the place the user left it
+  function scrolls(root) {
+    const out = [];
+    root.querySelectorAll("*").forEach((el, i) => {
+      if (el.scrollTop || el.scrollLeft) out.push([i, el.scrollTop, el.scrollLeft]);
+    });
+    return out;
+  }
+
+  function ghostOf(root) {
+    const g = root.cloneNode(true);
+    g.removeAttribute("data-slide");
+    g.removeAttribute("role");
+    g.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+    g.querySelectorAll("[phx-hook]").forEach((el) => el.removeAttribute("phx-hook"));
+    g.querySelectorAll("[contenteditable]").forEach((el) => el.removeAttribute("contenteditable"));
+    g.setAttribute("aria-hidden", "true");
+    g.inert = true;
+    g.classList.add("strip-ghost");
+    return g;
+  }
+
+  function finish() {
+    if (!current) return;
+    const c = current;
+    current = null;
+    c.anim.cancel();
+    c.ghost.remove();
+  }
+
+  function restore(ghost, offsets) {
+    const all = ghost.querySelectorAll("*");
+    offsets.forEach(([i, top, left]) => {
+      const el = all[i];
+      if (el) { el.scrollTop = top; el.scrollLeft = left; }
+    });
+  }
+
+  function run(root, ghost, offsets, forward, s) {
+    const d = forward ? s.d : -s.d;
+    const t = (v) => (s.vertical ? `translateY(${v}px)` : `translateX(${v}px)`);
+    // the copy stands one step behind the new panes, in the old place
+    ghost.style.transform = t(-d);
+    root.appendChild(ghost);
+    restore(ghost, offsets);
+    // c-windows moves; the clip keeps the visible area on the frame's box
+    const clip = (v) =>
+      s.vertical ? `inset(${-v}px 0px ${v}px 0px)` : `inset(0px ${v}px 0px ${-v}px)`;
+    const anim = root.animate(
+      [
+        { transform: t(d), clipPath: clip(d) },
+        { transform: t(0), clipPath: clip(0) }
+      ],
+      { duration: DURATION, easing: "cubic-bezier(.2,.7,.2,1)" }
+    );
+    current = { anim, ghost, root, offsets };
+    anim.onfinish = () => { if (current && current.anim === anim) finish(); };
+  }
+
+  // LiveView calls this for each element it updates, before the update.
+  // It must stay cheap: every render passes here.
+  function before(from, to) {
+    if (from.tagName !== "C-WINDOWS") return;
+    const token = to.getAttribute("data-slide");
+    if (!token || token === from.getAttribute("data-slide")) return;
+    finish();
+    if (reduced()) return;
+    const forward = !token.startsWith("backward");
+    const s = step(from, forward);
+    if (!s) return;
+    const ghost = ghostOf(from);
+    const offsets = scrolls(from);
+    // the patch is synchronous: the microtask sees the new panes, and the
+    // browser paints no frame between the patch and the slide
+    queueMicrotask(() => {
+      if (from.isConnected) run(from, ghost, offsets, forward, s);
+    });
+  }
+
+  // A render during the slide removes the copy: the server does not know
+  // it. LiveView calls this after each patch, and the copy goes back.
+  function after() {
+    if (!current || current.ghost.isConnected || !current.root.isConnected) return;
+    current.root.appendChild(current.ghost);
+    restore(current.ghost, current.offsets);
+  }
+
+  window.stripSlide = { before, after };
+})();

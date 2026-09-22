@@ -1631,6 +1631,12 @@ defmodule Compos.Core.SchemeAPI do
           Path.expand("~/.compos/daemons.json")
         )
       end,
+      {"client-slide!",
+       "(client-slide! DIR) — ask this frame's client to slide its panes on the next render; DIR is \"forward\" or \"backward\"."} =>
+        fn [dir] ->
+          Editor.slide(to_string(dir))
+          :void
+        end,
       {"navigate-url!", "(navigate-url! URL) — navigate this frame's browser tab to URL."} => fn [
                                                                                                    url
                                                                                                  ] ->

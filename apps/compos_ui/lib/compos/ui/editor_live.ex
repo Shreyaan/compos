@@ -739,6 +739,18 @@ defmodule Compos.Ui.EditorLive do
         _ -> socket
       end
 
+    # a strip scroll asked the client to slide the panes. The token
+    # changes on each request, so the client sees a new one on the
+    # element before the patch replaces the panes (strip-slide.js).
+    socket =
+      case fid && Compos.Core.Editor.take_slide(fid) do
+        dir when is_binary(dir) ->
+          assign(socket, slide: "#{dir}:#{System.unique_integer([:positive])}")
+
+        _ ->
+          socket
+      end
+
     # a motion command asked the browser's layout to move the selection
     socket =
       case fid && Compos.Core.Editor.take_select(fid) do
@@ -1066,7 +1078,7 @@ defmodule Compos.Ui.EditorLive do
       </c-group>
       <.frame_header_line state={@state} tabs={@tabs} />
       <.frame_echo state={@state} />
-      <c-windows class="windows" role="main">
+      <c-windows class="windows" role="main" data-slide={assigns[:slide]}>
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </c-windows>
       <c-which-key :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil}

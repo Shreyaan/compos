@@ -3072,6 +3072,15 @@
   const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content");
   const liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
     hooks: Hooks,
+    // strip-slide.js copies the old panes before a strip scroll replaces them
+    dom: {
+      onBeforeElUpdated: (from, to) => {
+        if (window.stripSlide) window.stripSlide.before(from, to);
+      },
+      onPatchEnd: () => {
+        if (window.stripSlide) window.stripSlide.after();
+      }
+    },
     params: () => ({
       _csrf_token: csrf,
       // per-tab frame id; one-shot migration claims the old

@@ -1920,9 +1920,12 @@ keeps the buffer you were in and your point.")
 
 ;; Scroll by DELTA and stand at EDGE. The pane the move came from keeps
 ;; the focus: the buffer under it changed, the place on screen did not.
+;; The client slides the panes, so the user sees which buffer went out
+;; and which came in.
 (define (layout-scroll-to! delta edge)
   (and (layout-scroll! delta)
        (let ((panes (layout-target-visible-buffers)))
+         (client-slide! (if (> delta 0) "forward" "backward"))
          (when (pair? panes)
            (let ((home (window-showing (if (equal? edge 'last)
                                            (car (reverse panes))

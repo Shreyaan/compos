@@ -42,6 +42,7 @@ defmodule Compos.Ui.Layouts do
         <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
+        <script src={"/strip-slide.js?v=" <> @boot_id}></script>
         <script src={"/app.js?v=" <> @boot_id}></script>
       </body>
     </html>

@@ -218,6 +218,17 @@ defmodule Compos.Core.Editor do
   def take_navigation(fid), do: GenServer.call(__MODULE__, {:take_navigation, fid(fid)})
 
   @doc """
+  Ask one frame's client to slide its panes on the next render. DIR is
+  "forward" (the new pane comes in from the right or the bottom) or
+  "backward". The client animates the change that the same render
+  applies, so the user sees which pane went out and which came in.
+  """
+  def slide(dir, fid \\ nil), do: GenServer.call(__MODULE__, {:slide, dir, fid(fid)})
+
+  @doc "Take FRAME's pending slide direction, or nil. The take clears it."
+  def take_slide(fid), do: GenServer.call(__MODULE__, {:take_slide, fid(fid)})
+
+  @doc """
   Ask one frame's editable surface to move or extend its selection by the
   browser's own layout: ALTER is "move" or "extend", DIR "forward" or
   "backward", GRANULARITY "character" | "word" | "line" | "lineboundary" |
@@ -622,6 +633,8 @@ defmodule Compos.Core.Editor do
        clips: %{},
        # frame id => URL for same-tab navigation on the next client render
        navigations: %{},
+       # frame id => "forward" | "backward": the client slides its panes
+       slides: %{},
        # frame id => a Selection.modify request for the editable surface
        selects: %{}
      }}
@@ -1351,6 +1364,20 @@ defmodule Compos.Core.Editor do
     case Map.pop(state.navigations, fid) do
       {nil, _} -> {:reply, nil, state}
       {url, navigations} -> {:reply, url, %{state | navigations: navigations}}
+    end
+  end
+
+  # Map.get and Map.put: a hot swap keeps a state built before this key
+  def handle_call({:slide, dir, fid}, _from, state) do
+    f = frame(state, fid)
+    slides = Map.put(Map.get(state, :slides, %{}), f.id, dir)
+    changed(:ok, Map.put(state, :slides, slides), f.id)
+  end
+
+  def handle_call({:take_slide, fid}, _from, state) do
+    case Map.pop(Map.get(state, :slides, %{}), fid) do
+      {nil, _} -> {:reply, nil, state}
+      {dir, slides} -> {:reply, dir, Map.put(state, :slides, slides)}
     end
   end
 
