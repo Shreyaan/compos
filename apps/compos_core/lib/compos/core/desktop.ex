@@ -27,6 +27,11 @@ defmodule Compos.Core.Desktop do
   # again. The new one loads the whole stdlib before it answers.
   @reseed_retry 1_000
 
+  # How long the restore waits for the on-screen buffers to become whole
+  # before it hands the frames back. Long enough for a mode setup and a
+  # font-lock pass, short enough that one slow chat cannot hold the boot.
+  @restore_first_budget 5_000
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def path,
@@ -439,6 +444,35 @@ defmodule Compos.Core.Desktop do
   defp install_global(_), do: false
 
   # The buffers a window shows, any frame.
+  # Rebuild these buffers' runtimes before the frames go back, in parallel
+  # and on a budget. Each one runs on its own lane, so the cost is the
+  # slowest buffer rather than their sum, and boot stays the 3s it became.
+  # A buffer that does not make the budget -- a chat whose agent revival is
+  # slow -- keeps its queued rebuild and, failing that, is made whole by
+  # the first key pressed in it (editor.scm, key-binding-dispatch).
+  defp restore_runtime_first([]), do: :ok
+
+  defp restore_runtime_first(names) do
+    names
+    |> Task.async_stream(&Compos.Core.restore_runtime/1,
+      max_concurrency: max(length(names), 1),
+      timeout: @restore_first_budget,
+      on_timeout: :kill_task,
+      ordered: false
+    )
+    |> Enum.each(fn
+      {:ok, _} ->
+        :ok
+
+      {:exit, reason} ->
+        Logger.warning(
+          "desktop restore: a buffer's runtime did not rebuild before its frame " <>
+            "(#{inspect(reason)}). Its queued rebuild stands, and the first key " <>
+            "in it rebuilds it."
+        )
+    end)
+  end
+
   defp shown_buffers do
     Editor.list_windows_all()
     |> Enum.map(fn {_win, name, _frame} -> name end)
@@ -542,7 +576,6 @@ defmodule Compos.Core.Desktop do
     # when something wakes them.
     woken = tree_buffers(desktop)
     Enum.each(woken, &Compos.Core.ensure_buffer(&1, restore: false))
-    restore_frames(desktop)
 
     # Runtime setup reads persisted policy. Group modelines, for example,
     # validate buffer membership against the durable group record table.
@@ -554,14 +587,26 @@ defmodule Compos.Core.Desktop do
     state = %{state | scheme_stale?: not install_globals(state.globals)}
     if state.scheme_stale?, do: Process.send_after(self(), :reseed, @reseed_retry)
 
-    # The runtime of each buffer this boot woke is rebuilt on that buffer's
-    # own lane: the shown ones and every one a saved tree named. A frame
-    # rebuild can drop a leaf (a sealed group, a layout reflow), and a
-    # buffer woken without its runtime stays live with no mode and no keys:
-    # a chat whose RET fell through to the global map. Nothing here waits:
-    # a boot that wakes many buffers kept the Editor busy for seconds, and
-    # this process died on the wait.
-    Enum.each(Enum.uniq(shown_buffers() ++ woken), &Compos.Core.restore_runtime_later/1)
+    # ORDER, not a race. The frames used to go back first and every
+    # runtime followed as a cast, so a buffer could be on screen, with its
+    # text and its point, while its mode setup had not run: an empty local
+    # map, no keys, no overlays. A chat whose RET fell through to the
+    # global map is that, and it reads as "the restart lost chat-mode".
+    #
+    # The buffers the saved trees name are the ones that land on screen,
+    # and tree_buffers already knows them before a frame exists. Make
+    # those whole first; the frames then cannot show an unfinished buffer.
+    restore_runtime_first(woken)
+
+    restore_frames(desktop)
+
+    # Whatever the frame rebuild put on screen that the trees did not name
+    # -- a sealed group, a layout reflow, a frame that was already here --
+    # follows on its own lane. These are not on screen yet when the wait
+    # above runs, so they cannot be part of it.
+    (shown_buffers() -- woken)
+    |> Enum.uniq()
+    |> Enum.each(&Compos.Core.restore_runtime_later/1)
 
     # Faces are not restored. themes.scm persists the theme NAME and
     # derives the faces at boot, so a theme edit applies on restart.

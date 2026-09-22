@@ -171,7 +171,7 @@
             (buffer-set-local! buf 'popper-popup-status 'popup)
             (message (string-append buf " is a popup now")))))))
 
-;; popper's README keys, less C-`: C-` belongs to group-next-buffer, so
+;; popper's README keys, less C-`: C-` belongs to group-next-mode-buffer, so
 ;; popper-toggle has no key. M-` cycles, C-M-` changes the type.
 (global-set-key "M-`" "popper-cycle")
 (global-set-key "C-M-`" "popper-toggle-type")

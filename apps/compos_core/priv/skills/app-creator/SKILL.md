@@ -11,6 +11,33 @@ An app is three things and nothing more:
 - a DETAIL — one buffer per row, beside the listing
 - ACTIONS — the same verbs on both, under the same keys
 
+More generally, an app is a named collection of table-producing modes. A mode is either an `index` mode, which returns many rows, or a `show` mode, which returns one row. Each mode points at a source, and every source is normalized to a table before rendering.
+
+```scheme
+(define-app recruiting
+  (app
+    name: 'recruiting
+    modes:
+      (list
+        (index-mode
+          name: 'candidates
+          source: (browse url: "https://ats.example.com/candidates")
+          table: (table-spec key: 'id columns: '(name company status))
+          detail: 'candidate)
+        (show-mode
+          name: 'candidate
+          source: (browse url: "https://ats.example.com/candidates/:id")
+          table: (table-spec key: 'id columns: '(name company status email)))))))
+```
+
+The supported source kinds are `mcp`, direct `url` requests, and `browse`. A `browse` source discovers a site parser by default when no parser is supplied. The runtime pipeline is:
+
+```text
+mode parameters -> source request -> parser -> table -> mode renderer
+```
+
+The app compiler also generates keymaps. Framework defaults are extended by app defaults, mode defaults, and finally custom bindings. Use semantic commands such as `refresh`, `open-selected`, `filter`, and `close-detail`; the source must not affect their meaning.
+
 Name the app once and name everything after it. App `amazon` gives listing buffer `*amazon*`, modes `amazon-mode` and `amazon-detail-mode`, detail buffers `*amazon:KEY*`, commands `amazon-*`, settings `amazon-*`.
 
 Read the `mode-create` skill first. It owns how a mode and its components are built. This skill owns what makes a mode an app.

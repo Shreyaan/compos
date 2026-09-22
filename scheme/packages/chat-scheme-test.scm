@@ -81,6 +81,29 @@
                    "\n name \"agent-send\"")
                  "a wide plist breaks, one key to a line")))
 
+(deftest 'a-bang-completes-over-every-recipe
+  "! completes the whole phrase from the catalog; ( and prose are unchanged"
+  (lambda ()
+    (let ((buf (t--cs-chat! "!spl")))
+      (with-current-buffer buf
+        (lambda ()
+          (chat-scheme--mode-hook!)
+          (end-of-buffer!)
+          (let ((r (chat-scheme--capf)))
+            (check-equal! (- (cadr r) (car r)) 3
+                          "the range is the phrase after the !, not the word before point")
+            (check-equal! (car (car (caddr r))) "split the window side by side"
+                          "spl finds the recipe, and accepting writes its title"))))
+      (buffer-kill! buf))
+    (let ((buf (t--cs-chat! "!dired")))
+      (with-current-buffer buf
+        (lambda ()
+          (chat-scheme--mode-hook!)
+          (end-of-buffer!)
+          (check-equal! (car (car (caddr (chat-scheme--capf)))) "open a directory"
+                        "an alias matches but the title is what gets written")))
+      (buffer-kill! buf))))
+
 (deftest 'completion-at-the-prompt-is-the-editors-own-vocabulary
   "inside an expression it completes orderless; in prose it offers nothing"
   (lambda ()

@@ -67,3 +67,26 @@
       (buffer-mark-saved! p)
       (buffer-kill! p)
       (delete-file! p))))
+
+(define t--ffro-dir (string-append (compos-home) "/zz-find-file-read-only"))
+
+(define (t--ffro-visit rule name)
+  (let ((held (symbol-value 'find-file-read-only))
+        (path (string-append t--ffro-dir "/" name)))
+    (make-directory! t--ffro-dir)
+    (write-file! path "text\n")
+    (when (buffer-known? path) (buffer-kill! path))
+    (set-symbol-value! 'find-file-read-only rule)
+    (let ((ro (buffer-read-only? (visit path))))
+      (set-symbol-value! 'find-file-read-only held)
+      (buffer-kill! path)
+      (delete-file! path)
+      ro)))
+
+(deftest 'find-file-read-only-follows-the-user-setting
+  "#f opens a file writable, #t opens it read-only, a mode list opens only those modes read-only"
+  (lambda ()
+    (check-false! (t--ffro-visit #f "a.txt") "#f leaves the file writable")
+    (check-true! (t--ffro-visit #t "b.txt") "#t opens it read-only")
+    (check-true! (t--ffro-visit '("json-mode") "c.json") "a listed mode opens read-only")
+    (check-false! (t--ffro-visit '("json-mode") "d.txt") "a mode not in the list stays writable")))

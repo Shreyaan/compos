@@ -61,7 +61,7 @@ nonstandard install out of the built-in connector catalog."
                                       "TaskList" "TaskGet"))))
     ;; the seed only has to hold until a session reports its own list;
     ;; llm-models-seen! keeps that answer for the connector
-    models ("default" "opus[1m]" "claude-fable-5[1m]" "sonnet" "haiku")))
+    models ("default" "claude-opus-5-5[1m]" "opus[1m]" "claude-fable-5-1[1m]" "claude-fable-5[1m]" "sonnet" "haiku")))
 
 (define *codex-app-server-connector*
   '(backend "codex-app-server" cmd "codex app-server"

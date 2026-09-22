@@ -156,13 +156,20 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (pseudo-record-by-id id)
   (let loop ((records *pseudo-group-records*))
-    (cond ((null? records) #f)
+    (cond ((null? records)
+           ;; a mode group may not be read yet: refresh once, then look again
+           (and (string-prefix? "pseudo:mode-" id)
+                (not (equal? (buffer-list-mru) *mode-groups-key*))
+                (begin (mode-groups-refresh!) (pseudo-record-by-id id))))
           ((equal? (group-record-id (car records)) id) (car records))
           (else (loop (cdr records))))))
 
 (define (pseudo-record-by-name name)
   (let loop ((records *pseudo-group-records*))
-    (cond ((null? records) #f)
+    (cond ((null? records)
+           (and (string-prefix? "mode: " name)
+                (not (equal? (buffer-list-mru) *mode-groups-key*))
+                (begin (mode-groups-refresh!) (pseudo-record-by-name name))))
           ((equal? (group-record-name (car records)) name) (car records))
           (else (loop (cdr records))))))
 
@@ -197,9 +204,11 @@ is forgotten and that group falls back to creation order in the switcher."
     id))
 
 (define (pseudo-group-ids)
+  (mode-groups-refresh!)
   (map group-record-id *pseudo-group-records*))
 
 (define (pseudo-group-names)
+  (mode-groups-refresh!)
   (map group-record-name *pseudo-group-records*))
 
 ;; the members now: the function's answer, less the buffers that went
@@ -226,6 +235,99 @@ is forgotten and that group falls back to creation order in the switcher."
           (else (loop (cdr rest) out n)))))
 
 (define-pseudo-group! "Last chats" last-chats)
+
+;; Modes as groups: a major mode that mode-groups-min buffers share is a
+;; pseudo group of its own, named "mode: org" for org-mode. Nothing
+;; declares them; the pseudo readers refresh the set, and only when the
+;; buffer list has moved since the last look. One batched read of the
+;; mode names pays for the whole table.
+(defcustom 'mode-groups-min 2
+  "How many buffers a major mode needs to be a group. 0 turns mode groups off."
+  'group 'groups 'type 'number)
+
+(defcustom 'mode-groups-exclude '("fundamental-mode")
+  "Major modes that never become a group."
+  'group 'groups 'type 'list)
+
+(defvar '*mode-groups-key* #f)       ; the buffer list the table was read from
+(defvar '*mode-groups-table* '())    ; ((MODE BUF ...) ...), most recent first
+(defvar '*mode-group-ids* '())       ; the pseudo ids mode groups hold now
+
+(define (mode-group-name mode)
+  (string-append "mode: "
+                 (if (string-suffix? "-mode" mode)
+                     (substring mode 0 (- (string-length mode) 5))
+                     mode)))
+
+(define (mode-group-buffers mode)
+  (mode-groups-refresh!)
+  (let ((row (assoc mode *mode-groups-table*)))
+    (if row (cdr row) '())))
+
+(define (mode-groups-refresh!)
+  (let ((key (buffer-list-mru)))
+    (unless (equal? key *mode-groups-key*)
+      ;; the key goes first, so a define below that reads the records
+      ;; finds the table current instead of refreshing again
+      (set! *mode-groups-key* key)
+      (let* ((rows (filter (lambda (row)
+                             (let ((mode (cadr row)))
+                               (and (string? mode)
+                                    (not (member mode mode-groups-exclude)))))
+                           (buffer-read-many key '() '("mode-name"))))
+             (modes (fold (lambda (out row)
+                            (if (member (cadr row) out) out (append out (list (cadr row)))))
+                          '() rows))
+             (table (map (lambda (mode)
+                           (cons mode (map car (filter (lambda (row) (equal? (cadr row) mode))
+                                                       rows))))
+                         modes))
+             (wanted (if (> mode-groups-min 0)
+                         (filter (lambda (row) (>= (length (cdr row)) mode-groups-min)) table)
+                         '())))
+        (set! *mode-groups-table* table)
+        (let ((ids (map (lambda (row)
+                          (let* ((mode (car row))
+                                 (id (string-append "pseudo:"
+                                                    (group-home-slug (mode-group-name mode)))))
+                            ;; an existing one keeps its colour
+                            (if (member id *mode-group-ids*)
+                                id
+                                (define-pseudo-group! (mode-group-name mode)
+                                                      (lambda () (mode-group-buffers mode))))))
+                        wanted)))
+          (for-each undefine-pseudo-group!
+                    (filter (lambda (id) (not (member id ids))) *mode-group-ids*))
+          (set! *mode-group-ids* ids))))))
+
+;; buffer-goto-group: stand in a group that holds this buffer -- its own
+;; group, or a pseudo group (Last chats, its mode) that holds it now.
+(define (buffer-goto-group-ids b)
+  (let ((own (or (group-context-memberships b) '())))
+    (append own (filter (lambda (id) (not (member id own)))
+                        (buffer-pseudo-group-ids b)))))
+
+(define (buffer-goto-group! b id)
+  (unless (equal? id (frame-group)) (switch-to-group! id))
+  (let ((w (window-showing b)))
+    (if (and w (window-exists? w))
+        (select-window! w)
+        (switch-to-buffer! b)))
+  id)
+
+(define-command "buffer-goto-group"
+  "Stand in a group that holds this buffer: its own, or a pseudo group"
+  (lambda ()
+    (let* ((b (current-buffer))
+           (ids (buffer-goto-group-ids b)))
+      (cond ((null? ids) (message (string-append b " is in no group")))
+            ((null? (cdr ids)) (buffer-goto-group! b (car ids)))
+            (else
+              (completing-read "Group: " (map group-name ids)
+                (lambda (name)
+                  (let ((id (and name (group-resolve-id name))))
+                    (when id (buffer-goto-group! b id))))
+                'require-match #t))))))
 
 (define (group-record-by-id id)
   (if (pseudo-group-id? id)
@@ -2557,28 +2659,25 @@ is forgotten and that group falls back to creation order in the switcher."
 ;;; buffers and the key flips between them, the way Alt-Tab flips between two
 ;;; windows.
 
-(define *window-cycle-modes* '())
+(define *window-mode-preferences* '())
 (define *group-cycle-ring* '())
 (define *group-cycle-pos* 0)
 
-(define (window-cycle-mode id)
-  (let ((hit (assoc id *window-cycle-modes*)))
+;; A pane's mode preference. It steers ROUTING only: window-preferred-mode
+;; reads it to decide which pane a display belongs in. It used to steer the
+;; walk as well, under the name window-cycle-mode, and the walk no longer
+;; has a mode to prefer -- it goes everywhere (below).
+(define (window-mode-preference id)
+  (let ((hit (assoc id *window-mode-preferences*)))
     (and hit (cadr hit))))
 
-;; #f removes the override and restores automatic mode preference.
-(define (window-cycle-mode! id mode)
-  (set! *window-cycle-modes*
-        (filter (lambda (r) (not (equal? (car r) id))) *window-cycle-modes*))
+;; #f removes the override and restores the automatic preference.
+(define (window-mode-preference! id mode)
+  (set! *window-mode-preferences*
+        (filter (lambda (r) (not (equal? (car r) id))) *window-mode-preferences*))
   (when mode
-    (set! *window-cycle-modes* (cons (list id mode) *window-cycle-modes*)))
+    (set! *window-mode-preferences* (cons (list id mode) *window-mode-preferences*)))
   mode)
-
-;; The same preference controls routing and cycling.
-(define (group-cycle-mode)
-  (window-preferred-mode (active-window)))
-
-(define (group-cycle-kind? b mode)
-  (if mode (buffer-derived-mode? b mode) (not (chat-buffer? b))))
 
 ;; the group we walk: the frame says which one, and a buffer that is not the
 ;; frame's own falls back to its first membership
@@ -2592,26 +2691,42 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-cycle-member? b gid)
   (if gid (buffer-in-group? b gid) (not (buffer-group b))))
 
-;; the walk order: this buffer first, then the rest of the pane's kind in the
-;; group, most recently used first. Open buffers only: a dormant buffer and
-;; an archived .chat file stay known but are not places the walk stops.
-(define (group-cycle-ring)
-  (let ((open (buffer-list))
-        (gid (group-cycle-group))
-        (mode (group-cycle-mode)))
-    (cons (current-buffer)
+;; The walk order: this buffer first, then the rest of the GROUP, most
+;; recently used first. This is the escape hatch, so it skips nothing a
+;; buffer can be: a chat, a dired, a list, a view, the group scratch are
+;; all places you go. It used to walk the pane's kind alone, which left
+;; most of a group unreachable from the key meant to reach all of it.
+;;
+;; The walk holds every buffer the USER has in the group, a dormant one
+;; too: a step onto it wakes it. It leaves out a buffer only an agent
+;; opened (a context buffer), and the names that are not a buffer you can
+;; stand in -- a hidden buffer, a float and a peek.
+;; With MODE-ONLY the ring keeps the buffers of this buffer's major mode
+;; (a derived mode counts). A buffer with no mode walks the others with none.
+(define (group-cycle-ring &optional mode-only)
+  (let* ((gid (group-cycle-group))
+         (here (current-buffer))
+         (mode (buffer-local here 'mode-name)))
+    (define (same-mode? b)
+      (or (not mode-only)
+          (if mode (buffer-derived-mode? b mode) (not (buffer-local b 'mode-name)))))
+    (cons here
           (filter (lambda (b)
-                    (and (group-cycle-kind? b mode)
-                         (member b open)
-                         (group-cycle-member? b gid)
+                    (and (group-cycle-member? b gid)
+                         (same-mode? b)
                          (not (string-prefix? " " b))
                          (not (buffer-context-only? b))
-                         (not (equal? b (current-buffer)))))
+                         (not (float--class? b))
+                         (not (peek-buffer? b))
+                         (not (equal? b here))))
                   (buffer-list-mru)))))
 
-(define (group-cycle! dir)
-  (unless (member (last-command) '("group-next-buffer" "group-previous-buffer"))
-    (set! *group-cycle-ring* (group-cycle-ring))
+(define (group-cycle! dir &optional mode-only)
+  (unless (member (last-command)
+                  (if mode-only
+                      '("group-next-mode-buffer" "group-previous-mode-buffer")
+                      '("group-next-buffer" "group-previous-buffer")))
+    (set! *group-cycle-ring* (group-cycle-ring mode-only))
     (set! *group-cycle-pos* 0))
   ;; a buffer killed mid-walk leaves the ring, and the place holds
   (let ((live (filter buffer-known? *group-cycle-ring*)))
@@ -2621,7 +2736,9 @@ is forgotten and that group falls back to creation order in the switcher."
         (set! *group-cycle-pos* 0))))
   (let ((n (length *group-cycle-ring*)))
     (if (< n 2)
-        (message "No other buffer to cycle in this group")
+        (message (if mode-only
+                     "No other buffer of this mode in this group"
+                     "No other buffer to cycle in this group"))
         (begin
           (set! *group-cycle-pos* (modulo (+ *group-cycle-pos* dir) n))
           (window-display!
@@ -2630,19 +2747,27 @@ is forgotten and that group falls back to creation order in the switcher."
               (active-window)))))))
 
 (define-command "group-next-buffer"
-  "Walk this pane's kind of buffer in this group, most recently used first"
+  "Walk every buffer in this group, most recently used first"
   (lambda () (group-cycle! 1)))
 
 (define-command "group-previous-buffer"
-  "Walk this pane's kind of buffer in this group, the other way"
+  "Walk every buffer in this group, the other way"
   (lambda () (group-cycle! -1)))
+
+(define-command "group-next-mode-buffer"
+  "Walk this buffer's mode in this group, most recently used first"
+  (lambda () (group-cycle! 1 #t)))
+
+(define-command "group-previous-mode-buffer"
+  "Walk this buffer's mode in this group, the other way"
+  (lambda () (group-cycle! -1 #t)))
 
 (domain! 'windows)
 (effects! '(write display))
 
 (define (mode-consolidate!)
   (let* ((destination (active-window))
-         (mode (group-cycle-mode))
+         (mode (window-preferred-mode (active-window)))
          (group (or (frame-group) (group-cycle-group)))
          (open (buffer-list)))
     (define (matches? buf)
@@ -2676,9 +2801,9 @@ is forgotten and that group falls back to creation order in the switcher."
                                   ((pair? remaining)
                                    (display-buffer-in-window! win (car remaining))
                                    (set-window-prev-buffers! win (cdr remaining))
-                                   (window-cycle-mode! win #f))
+                                   (window-mode-preference! win #f))
                                   (else
-                                    (window-cycle-mode! win #f)
+                                    (window-mode-preference! win #f)
                                     (delete-window-id! win)))))))
                     windows)
                   (unless (matches? shown)
@@ -2701,21 +2826,27 @@ is forgotten and that group falls back to creation order in the switcher."
 (domain! 'groups)
 (effects! '(write display))
 
-;; An empty answer restores automatic mode preference.
-(define-command "window-cycle-mode" "Set the mode this pane's cycle key walks"
+;; An empty answer restores the automatic preference. This names the mode a
+;; pane PREFERS to show, which is a routing question. It used to name the
+;; mode the pane's cycle key walked as well, and the walk has no mode now.
+(define-command "window-mode-preference" "Set the mode this pane prefers to show"
   (lambda ()
     (let ((id (active-window)))
-      (minibuffer-read "Cycle mode (empty for automatic): " '()
+      (minibuffer-read "Preferred mode (empty for automatic): " '()
         (lambda (name)
           (let ((mode (if (equal? (string-trim name) "") #f (string-trim name))))
-            (window-cycle-mode! id mode)
+            (window-mode-preference! id mode)
             (message (if mode
-                         (string-append "This pane cycles " mode)
-                         "This window cycles its preferred mode"))))))))
+                         (string-append "This pane prefers " mode)
+                         "This pane takes its preferred mode from what it shows"))))))))
 
-;; one key, one meaning in every pane: C-` walks the buffers this pane
-;; cycles, chat or not.
-(global-set-key "C-`" "group-next-buffer")
+;; Two walks. The Cmd-arrows on the vertical axis walk every buffer of
+;; the group: Cmd-down is the next, Cmd-up the one before. C-` walks only
+;; the buffers of this buffer's mode. The horizontal axis moves the focus
+;; (window.scm), so the two axes never argue over a key.
+(global-set-key "C-`" "group-next-mode-buffer")
+(global-set-key "s-<down>" "group-next-buffer")
+(global-set-key "s-<up>" "group-previous-buffer")
 
 ;; a verb here acts on every marked group, or on the row at point when
 ;; nothing is marked — the rule every list follows. The marks go when the
@@ -3232,27 +3363,7 @@ is forgotten and that group falls back to creation order in the switcher."
       (if g (group-fill-buffers g)
           (filter (lambda (b) (not (buffer-context-only? b))) (buffer-list-mru))))))
 
-;; The Cmd-up and Cmd-down walk (window.scm) reads the group itself, in MRU
-;; order and in full. The fill pool is a different list for a different
-;; question: it sorts the chats to the back and drops the scratch and the
-;; views, because those are poor choices for a pane a layout must fill.
-;; The walk makes no such choice. It goes everywhere the group goes.
-;;
-;; The group is the one C-` walks: the frame's, when the pane's buffer
-;; belongs to it, else the pane's buffer's own. A buffer in no group walks
-;; the other buffers in no group.
-;;
-;; The pane's buffer decides, not (current-buffer): a prompt makes the
-;; minibuffer current, and the walk must still answer for the window the
-;; user stands in.
-(set! window-walk-source
-  (lambda ()
-    (let* ((here (window-buffer (active-window)))
-           (frame (frame-group))
-           (gid (if (and frame (buffer-in-group? here frame))
-                    frame
-                    (buffer-group here))))
-      (filter (lambda (b) (group-cycle-member? b gid)) (buffer-list-mru)))))
+
 
 
 (set! window-fill-primary?
@@ -4640,6 +4751,10 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'pseudo-group-ids "(pseudo-group-ids) -> the id of every pseudo group")
 (public! 'group-names-all "(group-names-all) -> every group name, the pseudo groups last")
 (public! 'last-chats "(last-chats) -> the chats you used most recently, most recent first")
+(public! 'mode-group-buffers "(mode-group-buffers MODE) -> the buffers in MODE, most recent first")
+(public! 'mode-groups-refresh! "(mode-groups-refresh!) -- bring the mode groups up to the buffer list")
+(public! 'buffer-goto-group-ids "(buffer-goto-group-ids B) -> every group that holds B, its own first")
+(public! 'buffer-goto-group! "(buffer-goto-group! B G) -- stand in G, then focus B there")
 (public! 'group-buffers-as "(group-buffers-as GROUP ROLE) -> buffers with that group-relative role")
 (public! 'group-buffer-as "(group-buffer-as GROUP ROLE) -> most recent buffer with ROLE, or #f")
 (public! 'group-window-as "(group-window-as GROUP ROLE) -> visible window for ROLE, or #f")
@@ -4679,6 +4794,11 @@ is forgotten and that group falls back to creation order in the switcher."
 (catalog-meta! 'function "pseudo-group-ids" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-names-all" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "last-chats" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "mode-group-buffers" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "mode-groups-refresh!" 'domain 'buffers 'effects '(write))
+(catalog-meta! 'function "buffer-goto-group-ids" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "buffer-goto-group!" 'domain 'buffers 'effects '(write display))
+(catalog-meta! 'command "buffer-goto-group" 'domain 'groups 'effects '(write display))
 (catalog-meta! 'function "group-counts" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-counts-report" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-chat" 'domain 'buffers 'effects '(write))

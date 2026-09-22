@@ -123,3 +123,38 @@
 (public! 'browser-file-path?
   "(browser-file-path? PATH) — return #t when PATH uses the browser file viewer")
 (catalog-meta! 'function "browser-file-path?" 'domain 'files 'effects '(pure))
+
+;;; A visited file can open read-only. It is the reader's choice: #f opens
+;;; every file writable, #t opens every file read-only, and a list of mode
+;;; names opens a file read-only when its major mode is one of them or
+;;; descends from one. C-x C-q makes the buffer writable. The rule reads
+;;; the mode that auto-mode set, so find-file-hook runs it. It blocks only
+;;; the user's own edits: an agent edits a read-only buffer as before.
+
+(domain! 'files)
+(effects! '(write))
+
+(defgroup 'files "Opening files.")
+
+(defcustom 'find-file-read-only #f
+  "#t opens every visited file read-only; a list of mode names opens a file read-only when its mode is in the list."
+  'group 'files)
+
+(define (find-file-read-only? buf)
+  (let ((rule (and (boundp 'find-file-read-only) (symbol-value 'find-file-read-only)))
+        (mode (buffer-local buf 'mode-name)))
+    (cond ((equal? rule #t) #t)
+          ((pair? rule)
+           (and (string? mode)
+                (let loop ((ms rule))
+                  (and (pair? ms)
+                       (or (derived-mode? mode (let ((m (car ms))) (if (symbol? m) (symbol->string m) m)))
+                           (loop (cdr ms)))))))
+          (else #f))))
+
+(define (find-file-read-only--hook!)
+  (let ((buf (current-buffer)))
+    (when (and (buffer-path buf) (find-file-read-only? buf))
+      (buffer-set-read-only! buf #t))))
+
+(add-hook! 'find-file-hook 'find-file-read-only--hook!)

@@ -11,10 +11,11 @@
 
 (define *group-cycle-test-bufs*
   (list "*zz-cyc-one*" "*zz-cyc-two*" "*zz-cyc-three*" "*zz-cyc-hidden*"
-        "*zz-cyc-other*" "*zz-cyc-work-a*" "*zz-cyc-work-b*" "*zz-cyc-work-there*"))
+        "*zz-cyc-other*" "*zz-cyc-work-a*" "*zz-cyc-work-b*" "*zz-cyc-work-there*"
+        "*zz-cyc-mate*"))
 
 (define (group-cycle-test-reset!)
-  (window-cycle-mode! (active-window) #f)
+  (window-mode-preference! (active-window) #f)
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
             *group-cycle-test-bufs*)
   (for-each (lambda (name)
@@ -58,43 +59,91 @@
 (define (group-cycle-test-mine)
   (filter (lambda (b) (string-prefix? "*zz-cyc-" b)) (group-cycle-ring)))
 
-(deftest 'group-cycle-walks-the-chats-most-recent-first
-  "in a chat pane the ring is this chat, then the group's other open chats"
+;; A chat and a work buffer in ONE group, both verified to be in it: the
+;; walk's whole point is that it crosses the kinds, so the scene has to
+;; prove the two are group-mates before it asks the ring about them.
+(define (group-cycle-pair!)
+  (let ((gid (buffer-group "*zz-cyc-three*")))
+    (test-buffer! "*zz-cyc-mate*" "")
+    (buffer-add-group! "*zz-cyc-mate*" gid)
+    (check-true! (buffer-in-group? "*zz-cyc-mate*" gid) "the work buffer joined the chat's group")
+    (check-true! (buffer-in-group? "*zz-cyc-one*" gid) "and the other chat is in it")
+    gid))
+
+(deftest 'group-cycle-walks-every-buffer-of-the-group
+  "the walk is the escape hatch: a chat and a work buffer are on the same ring"
   (lambda ()
     (group-cycle-test-open!)
-    (check-equal! (group-cycle-mode) "chat-mode"
-                  "a pane showing a chat names chat-mode by itself")
-    (check-equal! (group-cycle-test-mine)
-                  (list "*zz-cyc-three*" "*zz-cyc-two*" "*zz-cyc-one*")
-                  "this chat leads, the rest follow by use")
+    (group-cycle-pair!)
+    (switch-to-buffer! "*zz-cyc-three*")
+    (check-equal! (car (group-cycle-ring)) "*zz-cyc-three*"
+                  "the buffer you stand in leads the ring")
+    (check-true! (and (member "*zz-cyc-mate*" (group-cycle-ring)) #t)
+                 "a work buffer is on a chat pane's ring")
+    (check-true! (and (member "*zz-cyc-one*" (group-cycle-ring)) #t)
+                 "and so is the group's other chat")
+    (when (buffer-known? "*zz-cyc-mate*") (buffer-kill! "*zz-cyc-mate*"))
     (group-cycle-test-reset!)))
 
-(deftest 'group-cycle-walks-the-preferred-mode-in-a-work-window
-  "a work window automatically cycles its work buffer mode"
+(deftest 'group-mode-cycle-walks-only-this-mode
+  "the mode walk keeps this buffer's mode in this group and drops the rest"
   (lambda ()
     (group-cycle-test-open!)
-    (switch-to-buffer! "*zz-cyc-work-a*")
-    (check-equal! (group-cycle-mode) "text-mode" "the work buffer supplies the preference")
-    (check-equal! (group-cycle-test-mine)
-                  (list "*zz-cyc-work-a*")
-                  "other modes stay out of the automatic ring")
-    (check-false! (member "*zz-cyc-three*" (group-cycle-ring))
-                  "a chat is never in a work pane's ring")
+    (group-cycle-pair!)
+    (switch-to-buffer! "*zz-cyc-three*")
+    (let ((ring (group-cycle-ring #t)))
+      (check-equal! (car ring) "*zz-cyc-three*" "the buffer you stand in leads")
+      (check-true! (and (member "*zz-cyc-one*" ring) #t) "a chat of the group is on it")
+      (check-false! (member "*zz-cyc-mate*" ring) "a buffer of another mode is not")
+      (check-false! (member "*zz-cyc-work-a*" ring) "nor a text-mode buffer")
+      (check-false! (member "*zz-cyc-other*" ring) "nor a chat of another group"))
+    (group-cycle! 1 #t)
+    (check-true! (buffer-derived-mode? (current-buffer) "chat-mode")
+                 "one step lands on another chat")
+    (when (buffer-known? "*zz-cyc-mate*") (buffer-kill! "*zz-cyc-mate*"))
     (group-cycle-test-reset!)))
 
-(deftest 'group-cycle-takes-the-mode-a-pane-names
-  "name a mode on the pane and the walk is that mode's buffers alone"
+(deftest 'group-cycle-keeps-a-dormant-buffer-and-drops-an-agent-context-buffer
+  "a sleeping buffer of the group is on the ring; a buffer only an agent opened is not"
   (lambda ()
     (group-cycle-test-open!)
-    (switch-to-buffer! "*zz-cyc-work-a*")
-    (window-cycle-mode! (active-window) "text-mode")
-    (check-equal! (group-cycle-mode) "text-mode" "the pane names it")
-    (check-equal! (group-cycle-test-mine) (list "*zz-cyc-work-a*")
-                  "only the buffer in that mode")
-    (window-cycle-mode! (active-window) #f)
-    (check-equal! (group-cycle-test-mine)
-                  (list "*zz-cyc-work-a*")
-                  "clearing the override restores the automatic preference")
+    (group-cycle-pair!)
+    (switch-to-buffer! "*zz-cyc-three*")
+    (check-true! (buffer-sleep! "*zz-cyc-mate*") "the work buffer sleeps")
+    (check-true! (and (member "*zz-cyc-mate*" (group-cycle-ring)) #t)
+                 "the sleeping buffer is still on the ring")
+    (buffer-context-only! "*zz-cyc-one*")
+    (check-false! (member "*zz-cyc-one*" (group-cycle-ring))
+                  "an agent's context buffer is not on the ring")
+    (when (buffer-known? "*zz-cyc-mate*") (buffer-kill! "*zz-cyc-mate*"))
+    (group-cycle-test-reset!)))
+
+(deftest 'group-cycle-walks-the-same-ring-from-a-work-window
+  "the ring does not change with the kind of pane you stand in; only its head does"
+  (lambda ()
+    (group-cycle-test-open!)
+    (group-cycle-pair!)
+    (switch-to-buffer! "*zz-cyc-mate*")
+    (check-equal! (car (group-cycle-ring)) "*zz-cyc-mate*" "the work buffer leads now")
+    (check-true! (and (member "*zz-cyc-three*" (group-cycle-ring)) #t)
+                 "a chat is reachable from a work pane")
+    (when (buffer-known? "*zz-cyc-mate*") (buffer-kill! "*zz-cyc-mate*"))
+    (group-cycle-test-reset!)))
+
+(deftest 'a-pane-mode-preference-does-not-narrow-the-walk
+  "the pane's preferred mode steers routing, never the walk"
+  (lambda ()
+    (group-cycle-test-open!)
+    (group-cycle-pair!)
+    (switch-to-buffer! "*zz-cyc-mate*")
+    (window-mode-preference! (active-window) "text-mode")
+    (check-equal! (window-preferred-mode (active-window)) "text-mode" "the pane names it")
+    (check-true! (and (member "*zz-cyc-three*" (group-cycle-ring)) #t)
+                 "the chat is still on the ring")
+    (window-mode-preference! (active-window) #f)
+    (check-true! (and (member "*zz-cyc-three*" (group-cycle-ring)) #t)
+                 "and still there when the override goes")
+    (when (buffer-known? "*zz-cyc-mate*") (buffer-kill! "*zz-cyc-mate*"))
     (group-cycle-test-reset!)))
 
 (deftest 'group-cycle-never-leaves-the-group
@@ -107,10 +156,11 @@
     (check-false! (member "*zz-cyc-work-there*" (group-cycle-ring))
                   "and so does its work buffer")
     (switch-to-buffer! "*zz-cyc-other*")
-    (check-equal! (group-cycle-test-mine) (list "*zz-cyc-other*")
-                  "one chat there, and no way across")
-    (group-cycle! 1)
-    (check-equal! (current-buffer) "*zz-cyc-other*" "a lone buffer does not move")
+    ;; the ring there is that group's own buffers, and no way across
+    (check-false! (member "*zz-cyc-three*" (group-cycle-ring))
+                  "the first group's chat is not reachable from here")
+    (check-false! (member "*zz-cyc-one*" (group-cycle-ring))
+                  "nor its other chat")
     (group-cycle-test-reset!)))
 
 (deftest 'group-cycle-leaves-a-context-only-buffer-out
@@ -147,11 +197,11 @@
     (group-cycle-test-reset!)))
 
 (deftest 'group-cycle-has-its-commands
-  "the walk, its other way, and the naming of a pane's mode are commands"
+  "the walk, its other way, and the naming of a pane's preferred mode are commands"
   (lambda ()
     (check-true! (procedure? (command-function "group-next-buffer")) "the walk")
     (check-true! (procedure? (command-function "group-previous-buffer")) "the other way")
-    (check-true! (procedure? (command-function "window-cycle-mode")) "the naming")))
+    (check-true! (procedure? (command-function "window-mode-preference")) "the naming")))
 
 (deftest 'group-cycle-same-mode-stays-in-its-window
   "cycling text buffers preserves the selected window and its neighbor"

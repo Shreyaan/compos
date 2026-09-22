@@ -70,6 +70,11 @@ defmodule Compos.Core.Session do
   # build closures, and apropos asks for a doc per global name
   @pt_docs {__MODULE__, :primitive_docs}
 
+  # The files that failed to load at boot. A boot error has to outlive the
+  # init that made it: there is no editor to report it to until the
+  # interpreter is published.
+  @pt_boot_errors {__MODULE__, :boot_errors}
+
   # how long a waiting mcp-call! waits. The RPC layer gives an eval 30s, so
   # the call must give up first and say so.
 
@@ -119,7 +124,17 @@ defmodule Compos.Core.Session do
   rescue
     # boot: the stdlib is still loading. A call queues behind init — the
     # same wait every caller used to get from the Session mailbox.
-    ArgumentError -> GenServer.call(__MODULE__, :await_boot, 60_000)
+    ArgumentError ->
+      # ...unless this IS the Session, loading. A call then goes to this
+      # process from this process, and the VM answers "process attempted to
+      # call itself" — an exit with no file name in it, which took down the
+      # whole application. Exit with a reason the load path recognises
+      # instead, so the boot names the file and carries on without it.
+      if self() == Process.whereis(__MODULE__) do
+        exit({:calling_self, {__MODULE__, :interp, []}})
+      else
+        GenServer.call(__MODULE__, :await_boot, 60_000)
+      end
   end
 
   @doc """
@@ -415,6 +430,8 @@ defmodule Compos.Core.Session do
     # already empty by then too, so an M-x during the window finds no
     # command at all.
     restart? = :persistent_term.get(@pt, nil) != nil
+    # this boot's errors, not the last one's
+    :persistent_term.erase(@pt_boot_errors)
 
     if restart? do
       :persistent_term.erase(@pt)
@@ -490,11 +507,25 @@ defmodule Compos.Core.Session do
     # monitor, so a Desktop that restarted at the same moment still hears.
     if restart?, do: send(Process.whereis(Compos.Core.Desktop) || self(), :scheme_rebooted)
 
+    # The editor is up, so the files that did not load can say so where the
+    # user reads them. *Messages* is this session's log and it is already
+    # created above.
+    report_boot_errors!()
+
     {:ok,
      %{
        last_live: Scheme.frame_count(interp),
        reload_manifest: Hotload.Scheme.manifest()
      }}
+  end
+
+  # Report the boot errors as *Messages* rows, one per file. message/3
+  # writes an ETS row and echoes; it runs no Scheme, so the report never
+  # depends on the part of the world that failed to load.
+  defp report_boot_errors!() do
+    Enum.each(boot_errors(), fn {file, msg} ->
+      message("#{file} did not load: #{msg}", "error", source: "boot")
+    end)
   end
 
   # a primitive calling a dead GenServer (buffer killed while a callback was
@@ -830,13 +861,20 @@ defmodule Compos.Core.Session do
           # one file is one package here too
           interp = Hotload.Scheme.stamp_load_unit(interp, path, :bundled)
 
-          case Scheme.eval_string(interp, File.read!(path)) do
+          # A file that does not load is a file that is not loaded. It is
+          # never a daemon that does not start. This used to raise, which
+          # failed Session.init, which failed the supervisor, which stopped
+          # the application: one bad form in one bundled file and there was
+          # no editor to read the error in. Emacs boots and shows you the
+          # error, and so does this. record_boot_error!/2 keeps it for the
+          # *Messages* buffer, and the editor comes up without that file.
+          case safe_eval_string(interp, File.read!(path), file) do
             {:ok, _, interp} ->
               interp
 
             {:error, msg} ->
-              # the stdlib must load — a broken stdlib is a broken editor
-              raise "#{file} failed to load: #{msg}"
+              record_boot_error!(file, msg)
+              interp
           end
         end
       )
@@ -894,18 +932,78 @@ defmodule Compos.Core.Session do
       path = Path.join(Compos.Core.config_dir(), file)
 
       with true <- File.exists?(path),
-           {:ok, _, interp2} <- Scheme.eval_string(interp, File.read!(path)) do
+           {:ok, _, interp2} <- safe_eval_string(interp, File.read!(path), file) do
         interp2
       else
         false ->
           interp
 
         {:error, msg} ->
-          Logger.error("#{file} error: #{msg}")
+          record_boot_error!(file, msg)
           interp
       end
     end)
   end
+
+  # Scheme.eval_string answers {:error, msg} for a Scheme error. A
+  # primitive that raises, exits or throws answers with nothing at all: it
+  # unwinds the whole load. One boot-time example is a primitive that asks
+  # for the interpreter handle, which is unpublished until this load ends,
+  # so the ask becomes a GenServer.call from this process to itself. Turn
+  # every one of those into the same {:error, msg} the reader produces, so
+  # one bad file costs that file and nothing more.
+  defp safe_eval_string(interp, source, file) do
+    Scheme.eval_string(interp, source)
+  rescue
+    error -> {:error, "#{file}: #{Exception.message(error)}"}
+  catch
+    :exit, {:calling_self, _} ->
+      {:error,
+       "#{file}: a form called the interpreter while it was still loading. " <>
+         "Boot-time code may not ask for the published interpreter."}
+
+    :exit, reason ->
+      {:error, "#{file}: exited: #{inspect(reason)}"}
+
+    kind, value ->
+      {:error, "#{file}: #{kind}: #{inspect(value)}"}
+  end
+
+  # One package of the boot manifest. The store the loaded file wrote is
+  # kept even when a later form in it failed: the definitions that did
+  # evaluate are real, and dropping them would take working packages down
+  # with the broken one.
+  defp boot_load(eval_src, src, store, file) do
+    eval_src.(src, store)
+  rescue
+    error ->
+      record_boot_error!(file, Exception.message(error))
+      {:void, store}
+  catch
+    :exit, {:calling_self, _} ->
+      record_boot_error!(
+        file,
+        "a form called the interpreter while it was still loading. " <>
+          "Boot-time code may not ask for the published interpreter."
+      )
+
+      {:void, store}
+
+    kind, value ->
+      record_boot_error!(file, "#{kind}: #{inspect(value)}")
+      {:void, store}
+  end
+
+  # The boot errors, oldest first. They are collected during init, before
+  # there is an editor to show them in, and written to *Messages* once the
+  # interpreter is published.
+  defp record_boot_error!(file, msg) do
+    Logger.error("scheme: #{file} did not load: #{msg}")
+    :persistent_term.put(@pt_boot_errors, boot_errors() ++ [{file, msg}])
+  end
+
+  @doc "The files that did not load at boot, with the reason for each."
+  def boot_errors, do: :persistent_term.get(@pt_boot_errors, [])
 
   defp stamp_origin_user(interp) do
     case Scheme.eval_string(interp, "(origin! 'user)") do
@@ -1718,10 +1816,26 @@ defmodule Compos.Core.Session do
 
         case File.read(expanded) do
           {:ok, src} ->
-            eval_src.(src, store)
+            # At boot, priv/init.scm loads every bundled package in one
+            # eval. A file that does not read or does not evaluate must
+            # cost that file alone: raising here aborted the manifest, so
+            # one bad form in one package silently took every package
+            # after it, and the editor came up missing half of itself.
+            # Boot records the error and goes on. After boot, a load is a
+            # command the user ran and its error belongs to the caller.
+            if ready?() do
+              eval_src.(src, store)
+            else
+              boot_load(eval_src, src, store, Path.basename(expanded))
+            end
 
           {:error, reason} ->
-            raise Compos.Scheme.Eval.Error, message: "cannot load #{expanded}: #{reason}"
+            if ready?() do
+              raise Compos.Scheme.Eval.Error, message: "cannot load #{expanded}: #{reason}"
+            else
+              record_boot_error!(Path.basename(expanded), "cannot read: #{reason}")
+              {:void, store}
+            end
         end
       end,
       {"eval-region",

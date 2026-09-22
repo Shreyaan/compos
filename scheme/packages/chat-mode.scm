@@ -2099,9 +2099,14 @@
                      model))
          (live (and actual (chat-live-model-entry buf connector actual))))
     (if live
-        (list (if (pair? (cddr live)) (caddr live) '())
-              (if (pair? (cdr (cdr (cdr live))))
-                  (car (cdr (cdr (cdr live)))) ""))
+        ;; a live entry is (ID LABEL [EFFORTS [DEFAULT-EFFORT]]) and a
+        ;; connector that reports neither sends only the first two
+        (let* ((tail (if (pair? live) (cdr live) '()))
+               (tail (if (pair? tail) (cdr tail) '()))
+               (efforts (if (pair? tail) (car tail) '()))
+               (tail (if (pair? tail) (cdr tail) '())))
+          (list (if (pair? efforts) efforts '())
+                (if (pair? tail) (car tail) "")))
         (let* ((r (and actual (llm-model-reasoning actual)))
                (effort (and r (plist-get r 'effort))))
           (list (or (and effort (plist-get effort 'values)) '())

@@ -27,7 +27,7 @@ defmodule Compos.ChatListReturnTest do
                        (set-window-prev-buffers! (car ws) '("*zz-return-past-a*"))
                        (set-window-prev-buffers! (cadr ws) '("*zz-return-past-b*"))
                        (set-window-restore! (car ws) '(other "*zz-return-past-a*" #f))
-                       (window-cycle-mode! (cadr ws) "text-mode")
+                       (window-mode-preference! (cadr ws) "text-mode")
                        (window-set-point! (car ws) 2)
                        (window-set-point! (cadr ws) 6)
                        (select-window! (cadr ws))))
@@ -69,7 +69,7 @@ defmodule Compos.ChatListReturnTest do
         assert {:ok, "#t"} =
                  Session.eval("(equal? (active-window) (car (cadr (window-list))))", frame)
 
-        assert {:ok, "\"text-mode\""} = Session.eval("(window-cycle-mode (active-window))", frame)
+        assert {:ok, "\"text-mode\""} = Session.eval("(window-mode-preference (active-window))", frame)
 
         assert {:ok, "other"} =
                  Session.eval("(car (window-restore (car (car (window-list)))))", frame)

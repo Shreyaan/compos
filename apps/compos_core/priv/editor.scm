@@ -2398,9 +2398,25 @@
 
 ;; Run a major mode's setup. A derived mode inherits the behavior instead
 ;; of copying it, so the two cannot drift apart.
+;; A mode whose package did not load is not a mode. The buffer used to
+;; come back from it silently half-alive: set-mode! writes the mode-name
+;; local and installs an EMPTY local map, mode-setup! finds no setup and
+;; does nothing, and the buffer claims a mode it does not have -- no keys,
+;; no overlays, no folds. A restored chat whose RET fell through to the
+;; global map is this, and it reads as "the restart lost chat-mode".
+;;
+;; Boot no longer dies of one bad package (Session.load_stdlib!), which is
+;; right, so this path is now reachable rather than theoretical. It must
+;; never be quiet: say which mode is missing, in the buffer it happened to.
 (define (mode-setup! name)
-  (when (equal? (mode-get name 'kind) 'major)
-    ((mode-get name 'setup))))
+  (cond ((equal? (mode-get name 'kind) 'major)
+         ((mode-get name 'setup)))
+        ((not (mode-get name 'kind))
+         (message (string-append "mode " name " is not defined, so "
+                                 (current-buffer) " has none of its keys: "
+                                 "its package did not load — see *Messages*")
+                  "error"))
+        (else #f)))
 
 ;; What a mode is for, in the mode's own words. describe-mode prints it
 ;; above the key table. A mode without one still gets its keys.
@@ -5470,8 +5486,8 @@
 (define-keymap! "editing-caret-map")
 (define-key "editing-caret-map" "s-<left>" "beginning-of-line")
 (define-key "editing-caret-map" "s-<right>" "end-of-line")
-(define-key "editing-caret-map" "s-<up>" "beginning-of-buffer")
-(define-key "editing-caret-map" "s-<down>" "end-of-buffer")
+;; Cmd-up and Cmd-down always walk the group (groups.scm), in every state.
+(for-each (lambda (k) (keymap-unset! "editing-caret-map" k)) '("s-<up>" "s-<down>"))
 
 (define *editing-landing* #f)   ; (frame window buffer) of the last landing
 

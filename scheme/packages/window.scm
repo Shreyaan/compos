@@ -851,7 +851,7 @@
       (buffer-derived-mode? buf "help-mode")))
 
 (define (window-preferred-mode win)
-  (or (window-cycle-mode win)
+  (or (window-mode-preference win)
       (let loop ((buffers (cons (window-buffer win) (window-prev-buffers win))))
         (cond ((null? buffers) (window-mode win))
               ((and (buffer-known? (car buffers))
@@ -912,15 +912,28 @@
 ;; take their displays. A package adds its own (popper.scm).
 (define *display-buffer-outside-layout* '(shaped same same-window))
 
+;; An agent never opens a file on the user's screen. It works on the file
+;; buffer by name, and it hands the user a buffer link to open it. The
+;; agent gets #f, so it can tell nothing was shown.
+(define (display-buffer-agent-file? name)
+  (and (agent-edit-author? (current-edit-author))
+       (buffer-known? name)
+       (buffer-path name)
+       #t))
+
 (define (display-buffer name &optional alist)
-  (let ((a (or alist '())))
-    (let ((actions (display-buffer-actions-for name a)))
-      (window-display!
-        (lambda ()
-          (or (and (layout-target) (not *layout-busy*) (pair? actions)
-                   (not (member (car actions) *display-buffer-outside-layout*))
-                   (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
-              (display-buffer-run-actions name a actions)))))))
+  (if (display-buffer-agent-file? name)
+      (begin
+        (message (string-append "An agent does not open files. Link: " (buffer-link name)))
+        #f)
+      (let* ((a (or alist '()))
+             (actions (display-buffer-actions-for name a)))
+        (window-display!
+          (lambda ()
+            (or (and (layout-target) (not *layout-busy*) (pair? actions)
+                     (not (member (car actions) *display-buffer-outside-layout*))
+                     (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
+                (display-buffer-run-actions name a actions)))))))
 
 ;; show NAME and select its window (Emacs pop-to-buffer)
 (define (pop-to-buffer name &optional alist)
@@ -2317,92 +2330,10 @@ keeps the buffer you were in and your point.")
                        (loop (cdr l) r d)
                        (loop (cdr l) best bestd)))))))))
 
-;;; --- the context walk -------------------------------------------------------
-;;; Cmd-up and Cmd-down are the escape hatch. Where the frame has no pane
-;;; above or below, they walk the frame's context in the pane you stand in:
-;;; every buffer the group holds, most recent first, starting at the buffer
-;;; the pane already shows. Down goes deeper into the list, up comes back.
-;;;
-;;; The walk SKIPS NOTHING a buffer can be. A chat, a dired, a list, a
-;;; view, the group scratch are all places you go, and the fill pool's
-;;; reasons for declining them belong to filling a pane, not to walking.
-;;; Out go only the names that are not a buffer you can stand in: a hidden
-;;; buffer, a float, and a peek.
-;;;
-;;; editor.scm knows no groups, so the base ring is the whole MRU;
-;;; groups.scm narrows it to the group the frame stands in. defvar, not
-;;; define: a reload of this file must not put the base ring back over the
-;;; policy groups.scm installed on top of it.
-
-(defvar 'window-walk-source (lambda () (buffer-list-mru))
-  "The buffers the Cmd-up and Cmd-down walk steps through, most recent first.")
-
-(define (walk-candidate? b)
-  (and (string? b) (buffer-known? b)
-       (not (string-prefix? " " b))
-       (not (float--class? b))
-       (not (peek-buffer? b))))
-
-;; The ring is a SNAPSHOT. A switch makes the buffer most recent, so a
-;; ring read again on every step would walk between the same two buffers
-;; for ever. The snapshot belongs to one window, and it holds while the
-;; walk is under way.
-(define *window-walk-ring* '())
-
-;; The buffer the pane shows leads the ring, so the first step off it is
-;; the most recently used other buffer.
-(define (window-walk-ring)
-  (let ((here (window-buffer (active-window))))
-    (cons here
-          (filter (lambda (b) (and (walk-candidate? b) (not (equal? b here))))
-                  (window-walk-source)))))
-
-;; Where the pane's buffer sits in RING, or #f when RING does not hold it.
-(define (window-walk-position ring)
-  (let ((here (window-buffer (active-window))))
-    (let loop ((rest ring) (i 0))
-      (cond ((null? rest) #f)
-            ((equal? (car rest) here) i)
-            (else (loop (cdr rest) (+ i 1)))))))
-
-;; A walk is under way when the snapshot still holds the buffer the pane
-;; shows. Anything else -- a buffer the ring does not name, a first press
-;; -- starts a new walk. The rule reads the state the walk itself leaves,
-;; so it holds for a keypress and for a direct call alike; last-command
-;; would only answer for the keypress. The window is not part of the rule:
-;; a display rule can move the buffer to another pane, and the walk must
-;; go on from there rather than start again.
-(define (window-walk-current)
-  (let ((live (filter buffer-known? *window-walk-ring*)))
-    (and (window-walk-position live) live)))
-
-;; Step DIR (1 down, -1 up) along the ring. Answers #t when the pane
-;; changed buffer, #f when there is no other buffer to walk to.
-(define (window-walk! dir)
-  (let ((ring (or (window-walk-current) (window-walk-ring))))
-    (set! *window-walk-ring* ring)
-    (let ((n (length ring))
-          (at (or (window-walk-position ring) 0)))
-      (and (> n 1)
-           (let ((next (nth (modulo (+ at dir) n) ring)))
-             (window-display!
-               (lambda ()
-                 (switch-to-buffer-here! next)
-                 (active-window)))
-             #t)))))
-
-(public! 'window-walk!
-  "(window-walk! DIR) — step the selected pane one buffer along the frame's context, 1 forward or -1 back; #t when the pane changed")
-
-;; Cmd-arrows: a pane in that direction takes the focus. With no pane
-;; there, up and down walk the context (above) and left and right scroll
-;; the layout along its strip.
 (define (focus-move! dir)
   (let ((w (window-in-direction dir)))
     (cond (w (select-window! (car w))
              (chat-snap-to-input!))
-          ((and (equal? dir 'down) (window-walk! 1)) (chat-snap-to-input!))
-          ((and (equal? dir 'up) (window-walk! -1)) (chat-snap-to-input!))
           ((layout-edge-scroll! dir) (chat-snap-to-input!))
           (else (message (string-append "No window " (symbol->string dir)))))))
 
@@ -2579,8 +2510,13 @@ keeps the buffer you were in and your point.")
 (domain! 'unknown)
 (effects! '(unknown))
 
-;; Cmd-arrows move the focus; Cmd-Shift-arrows swap the two panes
-(focus-default-keybindings 'super)
+;; Cmd-left and Cmd-right move the focus. Cmd-up and Cmd-down do NOT: they
+;; walk the group's buffers in the pane you stand in, and groups.scm binds
+;; them, because the walk is a group's business. One escape hatch, one
+;; axis: whatever the frame looks like, Cmd-down is always the next buffer.
+;; Cmd-Shift-arrows swap the two panes.
+(global-set-key (arrow-chord 'super "<left>") "focus-left")
+(global-set-key (arrow-chord 'super "<right>") "focus-right")
 (window-default-keybindings '(shift super))
 
 ;;; --- the public API of this file ----------------------------------------------

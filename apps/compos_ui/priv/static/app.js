@@ -126,8 +126,10 @@
     // the browser handle these keys also moves its native caret.
     if (document.querySelector(".window.active .cap-pop") &&
         (NATIVE_MOTION.includes(e.key) || e.key === "Enter")) return false;
-    // A Cmd-arrow is a key until the buffer is in the editing
-    // state (editingAfterKey); then the browser moves the caret.
+    // Cmd-Up and Cmd-Down always walk the group, so they are keys.
+    // Cmd-Left and Cmd-Right are keys until the buffer is in the
+    // editing state (editingAfterKey); then the browser moves the caret.
+    if (e.metaKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) return false;
     if (e.metaKey && !e.ctrlKey && !e.altKey &&
         NATIVE_MOTION.includes(e.key) && e.key.startsWith("Arrow")) return editing === true;
     if (e.ctrlKey || e.altKey || e.metaKey) return false;

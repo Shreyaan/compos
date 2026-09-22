@@ -1129,7 +1129,14 @@
 
 (effects! '(read))
 
-(task-spawn (lambda () (decide-apropos--state-index 'file)))
+;; NOT at load. task-spawn asks Session for the published interpreter, and
+;; during boot there is none: the ask becomes a call from the Session to
+;; itself, which killed the Session, the supervisor and the application.
+;; One line here and there was no editor at all. A timer runs the warm
+;; after boot, when the interpreter is published and the ask is legal.
+(debounce! 'decide-apropos-warm 2000
+  (lambda (ignored) (task-spawn (lambda () (decide-apropos--state-index 'file))))
+  #f)
 
 ;; ── The fast model, when the catalog has nothing ───────────────
 ;; The catalog answers almost everything, and it answers in milliseconds.

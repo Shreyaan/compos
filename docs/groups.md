@@ -591,6 +591,14 @@ The record list never holds one, so save, restore, rename, dissolve and magic gr
 
 The frame holds a pseudo group while every pane shows a member of it. The members carry no mark, so the derivation in `group-current-recalculate!` cannot see the group; `group-pseudo-here?` keeps it instead. A pane that shows anything else takes the frame back to the group the visible buffers do mark.
 
+### Mode groups
+
+Every major mode that two or more buffers share is a pseudo group too, named for the mode: `mode: org` holds the org buffers, most recent first. Nobody declares them. `mode-groups-refresh!` reads the modes in one batch and runs only when the buffer list has moved since the last read, so a group appears when the second buffer opens and goes when the last but one closes. `mode-groups-min` sets the threshold (0 turns them off), and `mode-groups-exclude` names modes that never become a group — `fundamental-mode` by default.
+
+### Going to a buffer's group
+
+`M-x buffer-goto-group` stands in a group that holds the current buffer and focuses the buffer there. It offers the buffer's own group first, then every pseudo group that holds it now — `Last chats`, its mode group. With one choice it goes straight there; with more it asks. `(buffer-goto-group-ids B)` lists the choices, and `(buffer-goto-group! B G)` goes.
+
 ## Persistence
 
 `desktop.etf` stores, per group: ID, name, its members, per-frame layouts, and scratch content. Per frame: `destination` and `previous`.

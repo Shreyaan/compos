@@ -83,7 +83,7 @@ The **Command or trigger** column names the command under test.
 Invoke bare command names with `M-x`; key sequences are shortcuts for those commands.
 `C-x 0` invokes `delete-window`. It removes a window; it is not the same operation as
 `quit-window`, which first tries to reveal the window's predecessor.
-`C-x l` starts layout selection. `C-backtick` invokes `group-next-buffer`.
+`C-x l` starts layout selection. `C-backtick` invokes `group-next-mode-buffer`: it walks the group's buffers of the current buffer's mode. Cmd-down and Cmd-up invoke `group-next-buffer` and `group-previous-buffer`: they walk every buffer of the group.
 
 `window-left/right/up/down` should move the whole window stack.
 `buffer-left/right/up/down` should move only the current buffer.

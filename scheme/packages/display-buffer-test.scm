@@ -398,3 +398,28 @@
           (check-false! (equal? (window-buffer other) "*zz-db-a*")
                         "the window that had it reveals something else"))))))
 
+
+(deftest 'an-agent-does-not-display-a-file-buffer
+  "display-buffer refuses a file buffer when an agent asks, and shows a non-file buffer as before"
+  (lambda ()
+    (let ((path (string-append t--db-dir "/zz-agent-open.txt"))
+          (plain "*zz-agent-plain*"))
+      (make-directory! t--db-dir)
+      (write-file! path "text\n")
+      (when (buffer-known? path) (buffer-kill! path))
+      (visit-quietly path)
+      (test-buffer! plain "")
+      (check-false! (with-edit-author "agent:zz-db-agent"
+                      (lambda () (display-buffer-other-window! path)))
+                    "the agent gets #f for a file")
+      (check-false! (member path (map window-buffer (window-list)))
+                    "no window shows the file")
+      (check-true! (and (with-edit-author "agent:zz-db-agent"
+                          (lambda () (display-buffer-other-window! plain)))
+                        #t)
+                   "a buffer that is not a file still shows")
+      (check-true! (and (display-buffer-other-window! path) #t)
+                   "the user still opens the file")
+      (buffer-kill! plain)
+      (buffer-kill! path)
+      (delete-file! path))))

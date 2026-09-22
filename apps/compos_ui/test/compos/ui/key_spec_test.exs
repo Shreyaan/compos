@@ -114,14 +114,14 @@ defmodule Compos.Ui.KeySpecTest do
       assert Map.take(right, ["spec", "native"]) == %{"spec" => "s-<right>", "native" => false}
     end
 
-    test "the four Cmd-arrows are the browser's own motion on a surface in the editing state" do
+    test "Cmd-Left and Cmd-Right are the browser's own motion in the editing state; Cmd-Up and Cmd-Down stay keys" do
       results =
         run(
           for k <- ~w(ArrowLeft ArrowRight ArrowUp ArrowDown),
               do: %{event: event(k, k, [:metaKey]), editable: true, editing: true}
         )
 
-      assert Enum.map(results, & &1["native"]) == [true, true, true, true]
+      assert Enum.map(results, & &1["native"]) == [true, true, false, false]
     end
 
     test "the four Cmd-arrows travel as keys from a surface in the movement state" do

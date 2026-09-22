@@ -36,9 +36,9 @@ The layout does not tile a popup window. `window-work-buffer?` answers false for
 | `popper-cycle` | `` M-` `` | Shows another popup in the popup window. It shows the popup used least recently, so each press reaches a different popup. With no popup on screen, it shows the latest popup. |
 | `popper-toggle-type` | `` C-M-` `` | Makes the current popup an ordinary buffer: its popup window closes, and the display chain shows it in a work window. Makes any other buffer a popup: its window shows the buffer it showed before, and the buffer shows at the bottom. |
 
-The keys are the keys that the popper README suggests, except `` C-` ``. That key runs `group-next-buffer`, so `popper-toggle` has no key.
+The keys are the keys that the popper README suggests, except `` C-` ``. That key runs `group-next-mode-buffer`, so `popper-toggle` has no key.
 
-`group-next-buffer` has no global key now. Run it with `M-x`.
+`group-next-buffer` walks every buffer of the group. Cmd-down and Cmd-up run it.
 
 ## Closing a popup
 
