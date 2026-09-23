@@ -959,20 +959,26 @@
 ;; take their displays. A package adds its own (popper.scm).
 (define *display-buffer-outside-layout* '(shaped same same-window))
 
-;; An agent never opens a file on the user's screen. It works on the file
-;; buffer by name, and it hands the user a buffer link to open it. The
-;; agent gets #f, so it can tell nothing was shown.
-(define (display-buffer-agent-file? name)
+;; An agent never puts its work in the user's window by accident. It works
+;; on a file buffer, or on a buffer it made, by name. When the user asks to
+;; see a buffer, the agent shows it in the other window
+;; (inhibit-same-window), whoever made the buffer. Any other display of
+;; such a buffer gets #f, so the agent can tell nothing was shown.
+(define (display-buffer-agent-refuses? name alist)
   (and (agent-edit-author? (current-edit-author))
+       (not (plist-get alist 'inhibit-same-window))
        (buffer-known? name)
-       (buffer-path name)
+       (or (buffer-path name) (buffer-local name 'context-only))
        #t))
 
+(define (display-buffer-agent-refusal name)
+  (message (string-append
+             "An agent shows a buffer only in the other window: "
+             "(display-buffer-other-window! NAME). Link: " (buffer-link name))))
+
 (define (display-buffer name &optional alist)
-  (if (display-buffer-agent-file? name)
-      (begin
-        (message (string-append "An agent does not open files. Link: " (buffer-link name)))
-        #f)
+  (if (display-buffer-agent-refuses? name (or alist '()))
+      (begin (display-buffer-agent-refusal name) #f)
       (let* ((a (or alist '()))
              (actions (display-buffer-actions-for name a)))
         (window-display!

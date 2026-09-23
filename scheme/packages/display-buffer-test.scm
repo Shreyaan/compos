@@ -427,3 +427,46 @@
       (buffer-kill! plain)
       (buffer-kill! path)
       (delete-file! path))))
+
+(deftest 'an-agent-buffer-stays-out-of-the-windows-until-asked
+  "a buffer an agent makes is context-only; the agent shows it only in the other window, and that promotes it"
+  (lambda ()
+    (let ((buf "*zz-agent-work*")
+          (before (map window-buffer (window-list))))
+      (when (buffer-known? buf) (buffer-kill! buf))
+      (with-edit-author "agent:zz-db-agent"
+        (lambda () (buffer-create buf)))
+      (check-true! (buffer-context-only? buf) "the agent's new buffer is context-only")
+      (check-false! (fill-candidate? buf) "no window fills with it")
+      (check-false! (with-edit-author "agent:zz-db-agent"
+                      (lambda () (display-buffer buf)))
+                    "display-buffer refuses it in the same window")
+      (check-false! (with-edit-author "agent:zz-db-agent"
+                      (lambda () (switch-to-buffer! buf)))
+                    "switch-to-buffer! refuses it")
+      (check-equal! (map window-buffer (window-list)) before "no window changed")
+      (check-true! (and (with-edit-author "agent:zz-db-agent"
+                          (lambda () (display-buffer-other-window! buf)))
+                        #t)
+                   "the other window shows it on request")
+      (check-false! (buffer-context-only? buf) "a shown buffer is the user's")
+      (buffer-kill! buf))))
+
+(deftest 'an-agent-visit-on-the-frame-shows-nothing
+  "an agent visit outside a buffer context loads the file and leaves every window and mode alone"
+  (lambda ()
+    (let ((path (string-append t--db-dir "/zz-agent-visit.txt"))
+          (here (window-buffer (active-window))))
+      (make-directory! t--db-dir)
+      (write-file! path "text\n")
+      (when (buffer-known? path) (buffer-kill! path))
+      (let ((mode (buffer-local here 'mode-name))
+            (before (map window-buffer (window-list)))
+            (got (with-edit-author "agent:zz-db-agent"
+                   (lambda () (visit path)))))
+        (check-equal! got path "visit answers the file buffer")
+        (check-true! (buffer-context-only? path) "the file stays context-only")
+        (check-equal! (map window-buffer (window-list)) before "no window changed")
+        (check-equal! (buffer-local here 'mode-name) mode "the selected buffer keeps its mode"))
+      (buffer-kill! path)
+      (delete-file! path))))

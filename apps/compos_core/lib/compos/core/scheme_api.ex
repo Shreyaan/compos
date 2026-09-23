@@ -2166,6 +2166,12 @@ defmodule Compos.Core.SchemeAPI do
       {"frame-list", "(frame-list) — return frame ids in most-recently-used order."} => fn [] ->
         Editor.frame_list()
       end,
+      # A client subscribes to its own frame (Events.subscribe_frame), so the
+      # subscriber count is the number of clients that show the frame now.
+      {"frame-clients", "(frame-clients ID) — return the number of clients attached to frame ID."} =>
+        fn [id] ->
+          length(Registry.lookup(Compos.Core.Events.registry(), {:frame, id}))
+        end,
       {"selected-frame", "(selected-frame) — return the current frame's id."} => fn [] ->
         Compos.Core.Frame.current() || Editor.last_active_frame()
       end,

@@ -269,10 +269,15 @@ I want to start from a project or directory
 #### I want the files an agent opens to land here
 
 - A file that an agent opens or edits joins the chat's destination group.
-- A new agent file is context-only. It keeps text, undo, parser, modified, and save state.
-- Context-only buffers stay out of user switchers, window filling, and saved layouts.
+- Every buffer that an agent creates is context-only: a file or a work buffer, in a group or not.
+- A context-only buffer keeps text, undo, parser, modified, and save state.
+- Context-only buffers stay out of user switchers, the group walk, window filling, and saved layouts.
 - The group and its agents can still read, edit, save, and remove these buffers.
-- A user visit promotes the canonical buffer. The visit keeps all unsaved state.
+- An agent does not put a file or a context-only buffer in the selected window.
+  `display-buffer`, `switch-to-buffer!`, and `visit` refuse, also inside `with-frame-windows`.
+- When the user asks to see a buffer, the agent shows it in the other window
+  (`display-buffer-other-window!`). Who created the buffer does not matter.
+- A buffer that a window shows is promoted. A user visit also promotes it and keeps all unsaved state.
 - **Solution:** the creation rule and the context-only buffer state. No command.
 
 ### As a user returning later or using several frames

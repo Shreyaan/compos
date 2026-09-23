@@ -1808,9 +1808,12 @@ is forgotten and that group falls back to creation order in the switcher."
     (let ((group (group-spawn-target buf)))
       (when (and group (group-work-buffer? buf))
         (buffer-add-group! buf group)
-        (buffer-set-local! buf 'group-inherited group)
-        (when (agent-edit-author? (current-edit-author))
-          (buffer-context-only! buf))))))
+        (buffer-set-local! buf 'group-inherited group)))
+    ;; A buffer an agent makes is the agent's work, in a group or not. It
+    ;; stays out of the user's walk and fill until something shows it.
+    (when (and (group-work-buffer? buf)
+               (agent-edit-author? (current-edit-author)))
+      (buffer-context-only! buf))))
 
 ;; a layout snapshot is only true when the group is on screen: saving
 ;; a scratch detour AS the group's arrangement would overwrite the
