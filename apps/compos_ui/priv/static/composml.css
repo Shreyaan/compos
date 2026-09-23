@@ -8,7 +8,8 @@
 .semantic-list { display: block; padding: 0 .5em; }
 .semantic-list > .semantic-item {
   display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: .15em 1em; padding: .45em .85em; cursor: pointer; position: relative;
+  gap: .15em 1em; padding: .55em .85em; cursor: pointer; position: relative;
+  align-items: center;
   border-left: 2px solid transparent;
 }
 .semantic-item.selected { background: var(--hl-line-bg, rgba(128,128,128,.12)); }
@@ -19,13 +20,30 @@
 .semantic-item > .list-mark { position: absolute; left: .05em; top: .6em; font-size: .75em; color: var(--list-marked-fg, var(--accent-fg, currentColor)); }
 .semantic-item > [field] { display: block; min-width: 0; overflow-wrap: anywhere; }
 .semantic-item > [field="primary"] { grid-column: 1; }
-.semantic-item > [field="trailing"] { grid-column: 3; }
-.semantic-item > [field="secondary"] { grid-column: 1; grid-row: 2; }
+.semantic-item > [field="trailing"] {
+  grid-column: 3; font-size: .8em; text-align: right; font-variant-numeric: tabular-nums;
+}
+.semantic-item > [field="secondary"] {
+  grid-column: 1; grid-row: 2; font-size: .86em; color: var(--dim-fg, #8a857a);
+}
+/* With labels, the title runs over the label column, title and people stay
+   on one line, and the labels wrap at the right. */
+.semantic-item:has(> [field="tags"]) > [field="primary"] { grid-column: 1 / 3; }
+.semantic-item:has(> [field="tags"]) > :is([field="primary"], [field="secondary"]) {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .semantic-item > [field="detail"] { grid-column: 1 / -1; }
 .semantic-item > [field="count"] { text-align: right; font-variant-numeric: tabular-nums; }
 .semantic-item > [field="tags"] {
   grid-column: 2 / -1; grid-row: 2; display: flex; flex-wrap: wrap;
-  justify-content: end; gap: .4em;
+  justify-content: end; gap: .35em; max-width: 34em; font-size: .72em;
+}
+/* A label is a small pill in the colour of its text. */
+.semantic-item > [field="tags"] > * {
+  padding: .05em .6em; border-radius: 999px; line-height: 1.5;
+  white-space: nowrap; letter-spacing: .02em;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 .semantic-item > :is([field="trailing"], [field="tags"], [field="detail"]) { color: var(--dim-fg, #8a857a); }
 
