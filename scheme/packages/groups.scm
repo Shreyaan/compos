@@ -2239,19 +2239,17 @@ is forgotten and that group falls back to creation order in the switcher."
         (cons (list id buf) index))))
 
 (define (group-members-in index g)
-  (let ((cell (assoc (group-resolve-id g) index)))
-    (if cell (cdr cell) '())))
+  ;; a pseudo group is in no index: its function says its members
+  (if (pseudo-group-id? g)
+      (pseudo-group-buffers g)
+      (let ((cell (assoc (group-resolve-id g) index)))
+        (if cell (cdr cell) '()))))
 
-;; The rail says the whole group while the highlight rests on a card:
-;; what the group holds, the shape it opens in, and every member. The
-;; card wears the first four as chips, and a group is more than four.
-(define (group-switch-facts hint shape names)
-  (append (list (list "holds" hint)
-                (list "opens" shape))
-          (if (null? names)
-              '()
-              (cons (list "buffers" (car names))
-                    (map (lambda (name) (list "" name)) (cdr names))))))
+;; The facts beside a card say what the group holds and the shape it
+;; opens in. They list no members: the card is for choosing a group.
+(define (group-switch-facts hint shape)
+  (list (list "holds" hint)
+        (list "opens" shape)))
 
 (define (group-switch-candidate-in index g &optional label)
   (let* ((members (group-members-in index g))
@@ -2260,38 +2258,29 @@ is forgotten and that group falls back to creation order in the switcher."
          (hint (if (null? names)
                    "no buffers"
                    (string-append (number->string n) " buffer" (if (= n 1) "" "s")))))
-    ;; the card names the group and counts it; the members are the rail's
-    ;; list now, so the card does not repeat them as chips
+    ;; the card names the group and counts it, and wears no member chips
     (list (or label (group-name g))
           hint
           "container"
           '()
           ""
-          (group-switch-facts hint (group-preview-shape-in index g) names))))
+          (group-switch-facts hint (group-preview-shape-in index g)))))
 
-;; the rail for one group: its buffers as ibuffer draws them, small. The
-;; third field is the buffer itself, which the frame carries untouched and
-;; hands back on RET.
 (define (group-switch-away-candidate row)
   ;; the same card, with the count replaced by where the group is: it lives
   ;; in another workspace, so picking it goes there instead of switching here
   (cons (car row) (cons "in another window" (cdr (cdr row)))))
 
-(define (group-switch-rail-rows index g)
-  (map (lambda (b) (list (buffer-modeline-name b) (ibuffer-row-label b) b))
-       (group-members-in index g)))
-
 (define (group-switch-candidate g)
   (group-switch-candidate-in (group-members-index) g))
 
 (define (group-switch-prompt-rows)
-  ;; ((CANDIDATE ...) . ((LABEL ID RAIL-ROWS) ...)): the rows the prompt draws,
+  ;; ((CANDIDATE ...) . ((LABEL ID) ...)): the rows the prompt draws,
   ;; and the group each label means. The prompt hands a selection back as its
   ;; label and nothing else, and two groups may wear one name, so a repeated
   ;; name takes a counter and every verb here resolves through these pairs
   ;; instead of the name index, which answers with the first group of that
-  ;; name and so showed another group's buffers. The rail rows are built with
-  ;; them: moving the highlight is then a lookup and no scan.
+  ;; name and so showed another group's buffers.
   (let* ((current (frame-group))
          (all (group-ids-mru))
          (away (filter group-elsewhere-frame (group-ids-mru-all)))
@@ -2311,11 +2300,15 @@ is forgotten and that group falls back to creation order in the switcher."
                                name
                                (string-append name " #" (number->string (+ taken 1))))))
                (set! seen (cons name seen))
-               (set! rows (cons (list label g (group-switch-rail-rows index g)) rows))
+               (set! rows (cons (list label g) rows))
                (group-switch-candidate-in index g label))))
+         ;; the pseudo groups come after every real one, the empty ones left out
+         (pseudo (filter (lambda (id) (pair? (pseudo-group-buffers id)))
+                         (pseudo-group-ids)))
          (here-candidates
-           (map candidate (if (group-visible-homogeneous? current)
-                              recent (append mine-recent others))))
+           (map candidate (append (if (group-visible-homogeneous? current)
+                                      recent (append mine-recent others))
+                                  pseudo)))
          (candidates
            (append here-candidates
                    (map (lambda (g) (group-switch-away-candidate (candidate g)))
@@ -2440,7 +2433,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; group; asking for it again in a second prompt is the step this removes.
 ;; The key is M-m, not m: the prompt's letters narrow the list, and a bare
 ;; letter cannot be both a filter and a verb.
-;; The open group prompt as (LABEL ID RAIL-ROWS) rows. A selection comes back
+;; The open group prompt as (LABEL ID) rows. A selection comes back
 ;; as its label alone, so this is the one place that says which group the
 ;; highlight means. Empty while no group prompt is up, which is also how a key
 ;; bound in the minibuffer's own map knows it is somewhere else.
@@ -2571,29 +2564,12 @@ is forgotten and that group falls back to creation order in the switcher."
                              'frame)
                            ;; An unmatched filter leaves the invoking windows intact.
                            (show-here!))))))
-               ;; RET in the rail goes to that buffer, in its own group.
-               ;; The prompt closes the way C-g closes it, so the look it
-               ;; was showing is put back before the switch moves anything.
-               (rail-pick!
-                 (lambda (row)
-                   (let ((buf (caddr row)))
-                     (minibuffer-cancel!)
-                     (switch-to-buffer-in-group! buf))))
-               ;; the rail follows the highlight with no delay and no work:
-               ;; its rows were built with the candidates
-               (rail!
-                 (lambda (name)
-                   (let ((row (group-switch-row name)))
-                     (if row
-                         (mb-rail! (caddr row) rail-pick!)
-                         (mb-rail! '() #f)))))
                ;; a look per highlight that RESTS: C-n held down moves the
                ;; highlight faster than a frame draws, and each look is a
                ;; draw (and a wake, for a dormant member)
                (peek!
                  (lambda (name)
-                   (rail! name)
-                   ;; 0 keeps the frame still: the rail already names what a
+                   ;; 0 keeps the frame still: the card already says what a
                    ;; group holds, and a look is a whole-frame draw per
                    ;; highlight, panes and all
                    (when (and (number? group-switch-peek-ms)
@@ -2631,7 +2607,7 @@ is forgotten and that group falls back to creation order in the switcher."
                       (buffer-minor-maps (minibuffer-buffer)))))))))
 
 (defcustom 'group-switch-peek-ms 120
-  "How long the highlight rests on a group before the switcher previews it, in milliseconds. 0 turns the look off and leaves the frame still; the rail still names every buffer."
+  "How long the highlight rests on a group before the switcher previews it, in milliseconds. 0 turns the look off and leaves the frame still."
   'group 'groups 'type 'number)
 
 (defcustom 'group-switch-style "modal"

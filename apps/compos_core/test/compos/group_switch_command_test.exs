@@ -219,18 +219,18 @@ defmodule Compos.GroupSwitchCommandTest do
 
     group = group_id("switch-marginalia")
 
-    # the switcher's row names the group and counts it; the members are the
-    # rail's list beside it, in the same abbreviations
-    [hint, kind, members] =
+    # the switcher's row names the group and counts it; its facts name no
+    # member
+    [hint, kind, facts] =
       eval!("""
       (begin
         (visit #{Jason.encode!(project_file)})
         (buffer-add-group! #{Jason.encode!(project_file)} "#{group}")
         (buffer-add-group! #{Jason.encode!(home_buffer)} "#{group}")
-        (let ((row (group-switch-candidate "#{group}"))
-              (rail (group-switch-rail-rows (group-members-index) "#{group}")))
+        (let ((row (group-switch-candidate "#{group}")))
           (string-join
-            (list (cadr row) (nth 2 row) (string-join (map car rail) " · "))
+            (list (cadr row) (nth 2 row)
+                  (string-join (map (lambda (f) (cadr f)) (nth 5 row)) " · "))
             " | ")))
       """)
       |> Jason.decode!()
@@ -239,10 +239,8 @@ defmodule Compos.GroupSwitchCommandTest do
     assert hint == "2 buffers"
     assert kind == "container"
 
-    assert members =~ "lib/code.scm"
-    assert members =~ "~/zz-switch-home-#{n}.scm"
-    refute members =~ root
-    refute members =~ home_buffer
+    refute facts =~ "lib/code.scm"
+    refute facts =~ "zz-switch-home-#{n}.scm"
   end
 
   test "a new group record schedules desktop persistence" do

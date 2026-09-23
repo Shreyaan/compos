@@ -1682,8 +1682,8 @@
       (set! group-switch-style style))
     (t--sw-done!)))
 
-(deftest 'a-group-card-previews-the-whole-group-in-its-facts
-  "the card wears four chips; the rail it previews with names every member"
+(deftest 'a-group-card-says-what-it-holds-and-no-members
+  "the card's facts say the count and the shape, and name no member"
   (lambda ()
     (t--sw-setup!)
     (let ((g (group-record-create! "zzsw-facts")))
@@ -1694,12 +1694,12 @@
              (said (map (lambda (f) (car (cdr f))) facts))
              (members (map buffer-modeline-name (group-buffers-mru g))))
         (check-equal! (nth 2 row) "container" "the row is a container card")
-        (check-equal! (car (car facts)) "holds" "the rail leads with what it holds")
+        (check-equal! (car (car facts)) "holds" "the facts lead with what it holds")
         (check-true! (and (member "3 buffers" said) #t) "and says how many")
         (check-true! (and (member "opens" (map car facts)) #t)
                      "and the shape the group opens in")
-        (check-equal! (filter (lambda (m) (not (member m said))) members) '()
-                      "every member of the group is a fact of its own")))
+        (check-equal! (filter (lambda (m) (member m said)) members) '()
+                      "no member of the group is a fact")))
     (t--sw-done!)))
 
 (deftest 'switch-to-group-enters-the-group-it-previewed
