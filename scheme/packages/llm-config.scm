@@ -4,89 +4,236 @@
 ;;; file is the policy for one menu, the language-model setup that chat-mode
 ;;; and llm-mode share. It loads after mcp.scm, skills.scm, and prompts.scm,
 ;;; because its rows read presets, the permission policy, and the prompt
-;;; sections. The bundle record itself (llm-bundle-*) lives in editor.scm,
+;;; sections. The bundle record itself (llm-bundle-*) lives in chat-mode.scm,
 ;;; because the chat applies bundles at boot, before any menu exists.
+;;;
+;;; The menu is two columns. The left one lists the presets (saved bundles)
+;;; and the chat's own setup; the cursor moves through them, typing filters
+;;; them, and RET selects one. The right one is the config of the row under
+;;; the cursor, and every edit there is a draft of that row. Only ESC, C-g
+;;; and C-q close the menu, and each one gives the selected row's config to
+;;; the chat. Saving a draft into a preset is a separate key.
 
 (domain! 'llm)
 (effects! '(write))
 
 
-(define (llm-config--connector buf)
-  (llm-bundle-connector (llm-config-core buf)))
-
-(define (llm-config--model buf)
-  (llm-bundle-model (llm-config-core buf)))
-
-(define (llm-config--effort buf)
-  (llm-bundle-effort (llm-config-core buf)))
-
 (define (llm-config--refresh!)
   (when (transient--active) (transient--render!)))
 
-(define (llm-config--setup! _buf)
-  (set-frame-local! 'llm-config-selected #f)
-  (set-frame-local! 'llm-config-pending #f))
-
-(define (llm-config--mark-selected!)
-  (set-frame-local! 'llm-config-selected #t))
-
-;; The menu applies changes as it goes (a pick applies at once), but the
-;; dashboard line re-reads state only when told. One hook on exit tells every
-;; subscriber -- editor.scm subscribes to refresh the headline.
+;; The dashboard line re-reads state only when told. One hook on exit tells
+;; every subscriber -- editor.scm subscribes to refresh the headline.
 (define (llm-config-changed! buf)
   (run-hook-with-args 'llm-config-changed-hook buf))
 
-;;; Choosing a bundle does not apply it: it parks it as the frame's pending
-;;; choice and the menu stays open, so a wrong letter costs one more letter
-;;; and not a whole re-open. The choice applies once, when level one closes.
-;;; It carries its own target buffer, because the menu can close from a
-;;; child level whose scope is the same buffer but need not be read again.
-(define (llm-config--pending) (frame-local 'llm-config-pending))
+;; The session buffer a bundle's presets and stance belong to. chat-mode.scm
+;; resolves it, because a bundle is written and applied there too.
+(define (llm-config--session buf) (llm-config-session buf))
 
-(define (llm-config--pending-bundle)
-  (let ((p (llm-config--pending))) (and (pair? p) (cadr p))))
+;;; --- the box ----------------------------------------------------------------
+;;; Frame-locals, because the menu is the frame's:
+;;;   llm-config-box     the whole setup being edited, every field filled
+;;;   llm-config-live    the chat's setup when the menu opened
+;;;   llm-config-source  the name of the preset the box came from, or #f
+;;;   llm-config-new     #t while the box is a new preset with no name yet
+;;;   llm-config-follow  ((NAME OLD-BUNDLE) ...) presets saved in this menu;
+;;;                      other chats on the old setup follow when it closes
+;;;   llm-config-selected the preset ESC gives the chat, or #f: its own setup
+;;;   llm-config-drafts  ((NAME BOX) ...) unsaved edits; "" is the chat's own
+;;;   llm-config-filter  what was typed in the preset column
+;;;   llm-config-more    #t shows the third tier; it outlives one opening
 
-(define (llm-config--choose-bundle! buf bundle)
-  (set-frame-local! 'llm-config-pending (list buf bundle))
-  (llm-config--refresh!)
-  (message (string-append "selected " (or (llm-bundle-name bundle) "recent setup")
-                          " — applies when the menu closes")))
+(define (llm-config--box) (or (frame-local 'llm-config-box) '()))
+(define (llm-config--live) (or (frame-local 'llm-config-live) '()))
+(define (llm-config--source-name) (frame-local 'llm-config-source))
+(define (llm-config--new?) (and (frame-local 'llm-config-new) #t))
+(define (llm-config--more?) (and (frame-local 'llm-config-more) #t))
 
-(define (llm-config--commit-pending!)
-  (let ((p (llm-config--pending)))
-    (set-frame-local! 'llm-config-pending #f)
-    (when (pair? p)
-      (let ((buf (car p)) (bundle (cadr p)))
-        (llm-bundle-apply! buf bundle)
-        (llm-config-remember! bundle)
-        (set-frame-local! 'llm-config-base (llm-bundle-name bundle))
-        (set-frame-local! 'llm-config-selected #f)))))
+(define (llm-config--box-get key) (llm-bundle-get (llm-config--box) key #f))
 
+;; Every edit is also the draft of the preset the box came from, so the
+;; cursor can leave a preset and come back to the same unsaved edit.
+(define (llm-config--draft-key) (or (llm-config--source-name) ""))
+
+(define (llm-config--drafts) (or (frame-local 'llm-config-drafts) '()))
+
+(define (llm-config--box-set! key value)
+  (set-frame-local! 'llm-config-box (llm-bundle-put (llm-config--box) key value))
+  (set-frame-local! 'llm-config-drafts
+    (alist-put (llm-config--drafts) (llm-config--draft-key) (llm-config--box))))
+
+(define (llm-config--drop-draft! key)
+  (set-frame-local! 'llm-config-drafts
+    (filter (lambda (e) (not (equal? (car e) key))) (llm-config--drafts))))
+
+(define (llm-config--with-compos presets)
+  (let ((p (or presets '())))
+    (if (member 'compos p) p (cons 'compos p))))
+
+;; B as a whole setup: a field B never recorded takes LIVE's value, because
+;; applying B leaves that field as it is.
+(define (llm-config--fill b live)
+  (let ((nb (llm-bundle-normalize b)))
+    (list 'connector (llm-bundle-connector nb)
+          'model (llm-bundle-model nb)
+          'effort (llm-bundle-effort nb)
+          'presets (llm-config--with-compos
+                     (or (llm-bundle-presets nb) (llm-bundle-presets live)))
+          'permission (or (llm-bundle-permission nb) (llm-bundle-permission live))
+          'agent-mode (let ((m (llm-bundle-agent-mode nb)))
+                        (if (or (not m) (equal? m ""))
+                            (or (llm-bundle-agent-mode live) "")
+                            m))
+          'prompt-disabled (or (llm-bundle-prompt-disabled nb)
+                               (llm-bundle-prompt-disabled live)
+                               '()))))
+
+;; BUF's live setup as one whole bundle, with no name
+(define (llm-config--current buf)
+  (llm-config--fill (llm-config-combination buf) '()))
+
+(define (llm-config--set=? a b)
+  (and (= (length a) (length b))
+       (null? (filter (lambda (x) (not (member x b))) a))))
+
+(define *llm-config-box-fields*
+  '(connector model effort presets permission agent-mode prompt-disabled))
+
+(define (llm-config--field-same? key a b)
+  (let ((x (llm-bundle-get a key #f)) (y (llm-bundle-get b key #f)))
+    (cond ((equal? key 'presets)
+           (llm-config--set=? (llm-config--with-compos x) (llm-config--with-compos y)))
+          ((equal? key 'prompt-disabled)
+           (llm-config--set=? (or x '()) (or y '())))
+          (else (equal? x y)))))
+
+;; the fields of A that differ from B, both whole setups
+(define (llm-config--changes a b)
+  (filter (lambda (key) (not (llm-config--field-same? key a b)))
+          *llm-config-box-fields*))
+
+(define (llm-config--same? a b) (null? (llm-config--changes a b)))
+
+;; what the box is measured against: the saved preset it came from, as a
+;; whole setup, else the chat's own setup
+(define (llm-config--source)
+  (let* ((name (llm-config--source-name))
+         (b (and (string? name) (llm-bundle-named name))))
+    (if b (llm-config--fill b (llm-config--live)) (llm-config--live))))
+
+;; the fields the box changed against its source
+(define (llm-config--drift)
+  (llm-config--changes (llm-config--box) (llm-config--source)))
+
+(define (llm-config--drifted? key) (and (member key (llm-config--drift)) #t))
+
+;; the saved bundle whose setup equals SETUP (a whole setup), or #f
+(define (llm-config--matching setup live)
+  (let loop ((bs *llm-bundles*))
+    (cond ((null? bs) #f)
+          ((llm-config--same? setup (llm-config--fill (car bs) live)) (car bs))
+          (else (loop (cdr bs))))))
+
+;; the saved bundle whose setup equals BUF's live setup, or #f
+(define (llm-config--matching-bundle buf)
+  (let ((cur (llm-config--current buf)))
+    (llm-config--matching cur cur)))
+
+;;; The name the dashboard line shows. It follows the buffer's own setup, not
+;;; the menu's box, so a chat that drifted off its bundle names no preset.
+(define (llm-config-preset-name buf)
+  (let ((b (llm-config--matching-bundle buf)))
+    (and b (llm-bundle-name b))))
+
+(define (llm-config--setup! buf)
+  (let* ((live (llm-config--current buf))
+         (match (llm-config--matching live live)))
+    (set-frame-local! 'llm-config-live live)
+    (set-frame-local! 'llm-config-box live)
+    (set-frame-local! 'llm-config-source (and match (llm-bundle-name match)))
+    (set-frame-local! 'llm-config-selected (and match (llm-bundle-name match)))
+    (set-frame-local! 'llm-config-drafts '())
+    (set-frame-local! 'llm-config-filter "")
+    (set-frame-local! 'llm-config-new #f)
+    (set-frame-local! 'llm-config-follow '())))
+
+;; the box shows NAME's config (#f: the chat's own), its draft if it has one
+(define (llm-config--show! name)
+  (let* ((b (and (string? name) (llm-bundle-named name)))
+         (draft (transient--alist-get (llm-config--drafts) (or name "") #f)))
+    (set-frame-local! 'llm-config-source (and b name))
+    (set-frame-local! 'llm-config-new #f)
+    (set-frame-local! 'llm-config-box
+      (or draft (if b (llm-config--fill b (llm-config--live)) (llm-config--live))))))
+
+;;; A preset saved in this menu is a new setup for every chat that was on
+;;; the old one. They follow when the menu closes, once, and not on each
+;;; save: two saves then cost one reattach per chat.
+(define (llm-config--follow! target)
+  (let ((follow (or (frame-local 'llm-config-follow) '()))
+        (session (llm-config--session target))
+        (moved 0))
+    (for-each
+      (lambda (entry)
+        (let ((new (llm-bundle-named (car entry))) (old (cadr entry)))
+          (when new
+            (for-each
+              (lambda (b)
+                (when (and (not (equal? b session))
+                           (chat-buffer? b)
+                           (let ((cur (llm-config--current b)))
+                             (llm-config--same? cur (llm-config--fill old cur))))
+                  (llm-bundle-apply! b new)
+                  (set! moved (+ moved 1))))
+              (buffer-list)))))
+      follow)
+    (set-frame-local! 'llm-config-follow '())
+    moved))
+
+;; the config of one row: its draft, else the saved preset, else the chat's
+(define (llm-config--config-of name)
+  (let ((draft (transient--alist-get (llm-config--drafts) (or name "") #f))
+        (b (and (string? name) (llm-bundle-named name))))
+    (or draft (if b (llm-config--fill b (llm-config--live)) (llm-config--live)))))
+
+(define (llm-config--selected-name) (frame-local 'llm-config-selected))
+
+;;; Every exit gives the selected row's config to the chat: ESC and C-g
+;;; alike. To keep the chat as it is, select its own row.
 (define (llm-config--quit! buf)
-  (when (frame-local 'llm-config-selected)
-    (llm-config-remember! (llm-config-combination buf)))
-  (set-frame-local! 'llm-config-selected #f)
-  (llm-config-changed! buf))
+  (let ((box (llm-config--config-of (llm-config--selected-name)))
+        (applied #f))
+    (when (and (pair? box)
+               (not (llm-config--same? box (llm-config--current buf))))
+      (llm-bundle-apply! buf box)
+      (llm-config-remember! box)
+      (set! applied #t))
+    (let ((moved (llm-config--follow! buf)))
+      (message
+        (string-append
+          (if applied
+              (string-append "the chat now runs "
+                             (or (llm-config--selected-name) "its own setup"))
+              "no change")
+          (if (> moved 0)
+              (string-append " · " (number->string moved)
+                             (if (= moved 1) " other chat follows" " other chats follow")
+                             " the saved preset")
+              ""))))
+    (set-frame-local! 'llm-config-box #f)
+    (set-frame-local! 'llm-config-live #f)
+    (set-frame-local! 'llm-config-source #f)
+    (set-frame-local! 'llm-config-selected #f)
+    (set-frame-local! 'llm-config-new #f)
+    (llm-config-changed! buf)))
 
-;; level one owns the pending choice, so only its exit applies it
-(define (llm-config--quit-top! buf)
-  (llm-config--commit-pending!)
-  (llm-config--quit! buf))
-
+;;; --- tools ------------------------------------------------------------------
 ;;; Presets are the tool selection: a preset names MCP servers, and the
 ;;; servers serve the tools. So the menu picks presets and reports what
 ;;; they serve; it never offers a tool list of its own.
 
-;; The session buffer a bundle's presets and stance belong to. editor.scm
-;; resolves it, because a bundle is written and applied there too.
-(define (llm-config--session buf) (llm-config-session buf))
-
 (define (llm-config--presets buf)
   (if (boundp (quote chat-presets-of)) (chat-presets-of buf) '()))
-
-(define (llm-config--presets-label buf)
-  (let ((ps (llm-config--presets (llm-config--session buf))))
-    (if (null? ps) "none" (string-join (map symbol->string ps) " "))))
 
 ;; how many tools one server serves right now, or #f while it connects
 (define (llm-config--server-tools server)
@@ -120,27 +267,49 @@
                     (loop (cdr servers) (+ n count) pending)
                     (loop (cdr servers) n (+ pending 1))))))))))
 
-(define-command "llm-config-pick-preset" "Turn a tool preset on or off"
+;; the preset palette, with the glyphs following the box, not the chat
+(define (llm-config--preset-candidates)
+  (let* ((loaded (llm-config--with-compos (llm-config--box-get 'presets)))
+         (names (map car *chat-presets*)))
+    (append
+      (map (lambda (e)
+             (list (symbol->string (car e))
+                   (string-append (if (member (car e) loaded) "● " "○ ")
+                                  (plist-get (car (cdr e)) 'description))))
+           *chat-presets*)
+      (map (lambda (srv)
+             (list (symbol->string (car srv))
+                   (string-append (if (member (car srv) loaded) "● " "○ ") "server")))
+           (filter (lambda (srv) (not (member (car srv) names))) *mcp-registry*)))))
+
+(define (llm-config--toggle-preset! name)
+  (let ((loaded (llm-config--with-compos (llm-config--box-get 'presets))))
+    (cond ((equal? name 'compos)
+           (message "The compos preset is the editor bridge — it stays on"))
+          ((member name loaded)
+           (llm-config--box-set! 'presets (remove (lambda (p) (equal? p name)) loaded))
+           (message (string-append "Preset " (symbol->string name) " off in the box")))
+          (else
+           (llm-config--box-set! 'presets (cons name loaded))
+           (message (string-append "Preset " (symbol->string name) " on in the box"))))))
+
+(define-command "llm-config-pick-preset" "Turn a tool preset on or off in the box"
   (lambda ()
-    (let ((buf (llm-config--session (transient-scope))))
-      (if (not (boundp (quote chat-preset-candidates)))
-          (message "No MCP presets — packages/mcp.scm is not loaded")
-          (llm-config-read! "Preset: "
-            (chat-preset-candidates buf)
-            (lambda (name)
-              (unless (equal? name "")
-                (chat-preset-toggle! buf (string->symbol name))
-                (llm-config--refresh!)))
-            (lambda () #f))))))
+    (if (not (boundp (quote chat-preset-candidates)))
+        (message "No MCP presets — packages/mcp.scm is not loaded")
+        (llm-config-read! "Preset: "
+          (llm-config--preset-candidates)
+          (lambda (name)
+            (unless (equal? name "")
+              (llm-config--toggle-preset! (string->symbol name))
+              (llm-config--refresh!)))
+          (lambda () #f)
+          "RET turns the preset on or off in the box. The chat gets it when the menu closes."))))
 
-(define (llm-config--prompt-label buf)
-  (let ((off (prompt-disabled-parts (llm-config--session buf))))
-    (if (null? off)
-        "all on"
-        (string-append (number->string (length off)) " off"))))
-
+;;; --- prompt sections ----------------------------------------------------------
 ;; One child transient holds a draft. Toggling rows changes only that draft.
-;; Apply commits every section once, so a frozen chat reconnects at most once.
+;; Apply commits every section once. Under C-c b the draft starts from the
+;; box and goes back to the box; opened alone it edits the chat.
 (define *llm-config-prompt-keys*
   '("1" "2" "3" "4" "5" "6" "7" "8" "9" "0"
     "q" "w" "e" "r" "t" "y" "u" "o" "p"))
@@ -148,9 +317,24 @@
 (define (llm-config--prompt-argument name)
   (string-append "--prompt-" name))
 
+;; true while C-c b is open under the current menu: the box is live only then
+(define (llm-config--boxed?)
+  (let ((state (transient--active)))
+    (and state
+         (pair? (frame-local 'llm-config-box))
+         (let loop ((ss (cons state (or (plist-get state 'stack) '()))))
+           (cond ((null? ss) #f)
+                 ((equal? (plist-get (car ss) 'prefix) "llm-configure") #t)
+                 (else (loop (cdr ss))))))))
+
+(define (llm-config--prompt-off buf)
+  (if (llm-config--boxed?)
+      (or (llm-config--box-get 'prompt-disabled) '())
+      (prompt-disabled-parts (llm-config--session buf))))
+
 (define (llm-config--prompt-items buf)
   (let* ((session (llm-config--session buf))
-         (off (prompt-disabled-parts session)))
+         (off (llm-config--prompt-off buf)))
     (let loop ((parts (chat-prompt-source-parts session))
                (keys *llm-config-prompt-keys*)
                (items '()))
@@ -201,64 +385,47 @@
                        (if (transient-value (llm-config--prompt-argument name))
                            out
                            (cons name out))))))))
-      (chat-prompt-sections-set! buf off)
-      (llm-config--mark-selected!)
+      (if (llm-config--boxed?)
+          (llm-config--box-set! 'prompt-disabled off)
+          (chat-prompt-sections-set! buf off))
       (run-command "transient-quit-one")
-      (message "Prompt sections applied"))))
+      (message (if (llm-config--boxed?)
+                   "Prompt sections are in the box"
+                   "Prompt sections applied")))))
 
 (transient-define-prefix "llm-prompt-sections"
   "Select the prompt sections, then apply them together"
   llm-config--prompt-groups)
 
-(define-command "llm-config-pick-backend" "Choose the LLM backend"
-  (lambda ()
-    (let* ((buf (transient-scope))
-           (current (llm-config--connector buf)))
-      (llm-config-read! "Backend: "
-        (llm-config-current-first
-          (map (lambda (c)
-                 (let ((models (length (chat-model-options buf c))))
-                   (llm-config-row c (connector-description c)
-                     (list (list "backend" (connector-description c))
-                           (list "models"
-                                 (if (= models 0) "asks the backend"
-                                     (string-append (number->string models) " known")))
-                           (list "model" (if (equal? c current) (llm-config--model buf) "default"))))))
-               (connector-names))
-          current)
-        (lambda (choice)
-          (unless (equal? choice "")
-            (llm-config-apply! buf choice "default" "default")
-            (llm-config--mark-selected!)
-            (llm-config--refresh!)))
-        (lambda () #f)
-        "RET switches the backend and resets the model and effort to its defaults. The conversation carries over."))))
+;;; --- backend, model, effort -----------------------------------------------------
+;;; Each picker writes the box. THEN runs after a pick: the new-preset flow
+;;; chains the three pickers through it.
 
-(define-command "llm-config-pick-model" "Choose the LLM model"
-  (lambda ()
-    (let* ((buf (transient-scope))
-           (connector (llm-config--connector buf))
-           (current (llm-config--model buf)))
-      ;; the direct lane offers every model a provider lists, so a day-old
-      ;; catalog refreshes behind this list for the next time
-      (when (and (equal? connector "api")
-                 (boundp (quote llm-catalog-maybe-refresh!)))
-        (llm-catalog-maybe-refresh!))
-      (llm-config-read! "Model: "
-        (llm-config-current-first
-          (cons (llm-config-row "default" "connector default"
-                  (list (list "backend" connector) (list "model" "the backend's own default")))
-                (map (lambda (row) (llm-config--model-row buf connector row))
-                     (chat-model-options buf connector)))
-          current)
-        (lambda (model)
-          (unless (equal? model "")
-            (llm-config-apply! buf connector model "default")
-            (llm-config--mark-selected!)
-            (llm-config--refresh!)))
-        (lambda () #f)
-        (string-append "RET sets the model on " connector
-                       " and resets the effort to the model's default.")))))
+(define (llm-config--read-backend buf then)
+  (let ((current (llm-config--box-get 'connector)))
+    (llm-config-read! "Backend: "
+      (llm-config-current-first
+        (map (lambda (c)
+               (let ((models (length (chat-model-options buf c))))
+                 (llm-config-row c (connector-description c)
+                   (list (list "backend" (connector-description c))
+                         (list "models"
+                               (if (= models 0) "asks the backend"
+                                   (string-append (number->string models) " known")))
+                         (list "model" (if (equal? c current)
+                                           (llm-config--box-get 'model)
+                                           "default"))))))
+             (connector-names))
+        current)
+      (lambda (choice)
+        (unless (equal? choice "")
+          (llm-config--box-set! 'connector choice)
+          (llm-config--box-set! 'model "default")
+          (llm-config--box-set! 'effort "default")
+          (llm-config--refresh!)
+          (then)))
+      (lambda () #f)
+      "RET puts the backend in the box and resets the model and effort to its defaults.")))
 
 ;; one model row with the facts the rail shows: backend, provider prefix,
 ;; and the reasoning efforts the catalog or the live backend lists for it
@@ -275,35 +442,67 @@
         (if (equal? hint "") '() (list (list "name" hint)))
         (list (list "efforts" (if (null? efforts) "none listed" (string-join efforts " "))))))))
 
-(define-command "llm-config-pick-effort" "Choose the LLM reasoning effort"
-  (lambda ()
-    (let* ((buf (transient-scope))
-           (connector (llm-config--connector buf))
-           (model (llm-config--model buf))
-           (current (llm-config--effort buf))
-           (info (chat-model-effort-info buf connector model))
-           (efforts (car info))
-           (default (cadr info)))
-      (llm-config-read! "Effort: "
-        (llm-config-current-first
-          (cons (llm-config-row "default"
-                  (if (equal? default "") "model default"
-                      (string-append "model default: " default))
-                  (list (list "model" model)
-                        (list "effort" (if (equal? default "") "the model decides" default))))
-                (map (lambda (e)
-                       (llm-config-row e "reasoning effort"
-                         (list (list "model" model) (list "effort" e))))
-                     efforts))
-          current)
-        (lambda (effort)
-          (unless (equal? effort "")
-            (llm-config-apply! buf connector model effort)
-            (llm-config--mark-selected!)
-            (llm-config--refresh!)))
-        (lambda () #f)
-        (string-append "RET sets how hard " (if (equal? model "default") connector model)
-                       " reasons. More effort costs more time and tokens.")))))
+(define (llm-config--read-model buf then)
+  (let ((connector (llm-config--box-get 'connector))
+        (current (llm-config--box-get 'model)))
+    ;; the direct lane offers every model a provider lists, so a day-old
+    ;; catalog refreshes behind this list for the next time
+    (when (and (equal? connector "api")
+               (boundp (quote llm-catalog-maybe-refresh!)))
+      (llm-catalog-maybe-refresh!))
+    (llm-config-read! "Model: "
+      (llm-config-current-first
+        (cons (llm-config-row "default" "connector default"
+                (list (list "backend" connector) (list "model" "the backend's own default")))
+              (map (lambda (row) (llm-config--model-row buf connector row))
+                   (chat-model-options buf connector)))
+        current)
+      (lambda (model)
+        (unless (equal? model "")
+          (llm-config--box-set! 'model model)
+          (llm-config--box-set! 'effort "default")
+          (llm-config--refresh!)
+          (then)))
+      (lambda () #f)
+      (string-append "RET puts the model on " connector
+                     " in the box and resets the effort to the model's default."))))
+
+(define (llm-config--read-effort buf then)
+  (let* ((connector (llm-config--box-get 'connector))
+         (model (llm-config--box-get 'model))
+         (current (llm-config--box-get 'effort))
+         (info (chat-model-effort-info buf connector model))
+         (efforts (car info))
+         (default (cadr info)))
+    (llm-config-read! "Effort: "
+      (llm-config-current-first
+        (cons (llm-config-row "default"
+                (if (equal? default "") "model default"
+                    (string-append "model default: " default))
+                (list (list "model" model)
+                      (list "effort" (if (equal? default "") "the model decides" default))))
+              (map (lambda (e)
+                     (llm-config-row e "reasoning effort"
+                       (list (list "model" model) (list "effort" e))))
+                   efforts))
+        current)
+      (lambda (effort)
+        (unless (equal? effort "")
+          (llm-config--box-set! 'effort effort)
+          (llm-config--refresh!)
+          (then)))
+      (lambda () #f)
+      (string-append "RET sets how hard " (if (equal? model "default") connector model)
+                     " reasons. More effort costs more time and tokens."))))
+
+(define-command "llm-config-pick-backend" "Choose the LLM backend in the box"
+  (lambda () (llm-config--read-backend (transient-scope) (lambda () #f))))
+
+(define-command "llm-config-pick-model" "Choose the LLM model in the box"
+  (lambda () (llm-config--read-model (transient-scope) (lambda () #f))))
+
+(define-command "llm-config-pick-effort" "Choose the LLM reasoning effort in the box"
+  (lambda () (llm-config--read-effort (transient-scope) (lambda () #f))))
 
 ;;; --- what stops to ask ----------------------------------------------------
 ;;; Permissions are part of the setup, not a separate subject: the same
@@ -311,59 +510,53 @@
 ;;; asking. Three controls, and they are not the same control: the stance
 ;;; is compos's own policy, the agent mode is the backend's (ACP names it,
 ;;; and plan mode changes what a turn DOES), and the file switch says
-;;; whether the agent may go around buffers to the filesystem.
+;;; whether the agent may go around buffers to the filesystem. The stance
+;;; and the agent mode are in the box. The file switch is one setting for
+;;; the whole editor, so it applies at once.
 
-(define (llm-config--permission-label buf)
-  (symbol->string (llm-config-permission (llm-config--session buf))))
+(define (llm-config--agent-mode-text mode)
+  (if (or (not mode) (equal? mode "") (equal? mode "default")) "none" mode))
 
-(define (llm-config--agent-mode-label buf)
-  (let ((m (buffer-local (llm-config--session buf) 'agent-mode)))
-    (if (or (not m) (equal? m "")) "none" m)))
-
-;; the modes this buffer's backend can actually be put in. Empty for a
-;; backend with no ACP session at all, and for one whose modes no session
-;; has named yet: the row is hidden then, so `a` never sits there dead
+;; the modes the box's backend can be put in: the live session's list, else
+;; the connector's remembered one. Empty hides the row.
 (define (llm-config--agent-modes buf)
-  (if (and buf (boundp (quote agent-mode-options)))
-      (agent-mode-options (llm-config--session buf))
+  (if (and buf (boundp (quote chat-mode-options)))
+      (map (lambda (m) (list (car m) (or (nth 2 m) "")))
+           (chat-mode-options (llm-config--session buf)
+                              (or (llm-config--box-get 'connector)
+                                  (buffer-local (llm-config--session buf) 'agent-connector))))
       '()))
 
 (define (llm-config--filesystem)
   (if (boundp (quote agent-filesystem-tools)) agent-filesystem-tools "deny"))
 
-(define-command "llm-config-pick-permission" "Choose when this session stops to ask"
+(define-command "llm-config-pick-permission" "Choose when this session stops to ask, in the box"
   (lambda ()
-    (let ((buf (llm-config--session (transient-scope))))
-      (if (not (boundp (quote chat-permission-mode-set!)))
-          (message "No permission policy — packages/agent-permissions.scm is not loaded")
-          (llm-config-read! "Asks: "
-            (llm-config-current-first
-              (map (lambda (m) (list (symbol->string m)
-                                     (chat-permission-mode-note m)))
-                   *permission-modes*)
-              (symbol->string (llm-config-permission buf)))
-            (lambda (choice)
-              (unless (equal? choice "")
-                (chat-permission-mode-set! buf (string->symbol choice))
-                (llm-config--mark-selected!)
-                (llm-config--refresh!)))
-            (lambda () #f))))))
+    (if (not (boundp (quote chat-permission-mode-set!)))
+        (message "No permission policy — packages/agent-permissions.scm is not loaded")
+        (llm-config-read! "Asks: "
+          (llm-config-current-first
+            (map (lambda (m) (list (symbol->string m)
+                                   (chat-permission-mode-note m)))
+                 *permission-modes*)
+            (or (llm-config--box-get 'permission) ""))
+          (lambda (choice)
+            (unless (equal? choice "")
+              (llm-config--box-set! 'permission choice)
+              (llm-config--refresh!)))
+          (lambda () #f)))))
 
-(define-command "llm-config-pick-agent-mode" "Choose the agent session's own mode"
+(define-command "llm-config-pick-agent-mode" "Choose the agent session's own mode, in the box"
   (lambda ()
-    (let* ((buf (llm-config--session (transient-scope)))
-           (modes (llm-config--agent-modes buf)))
+    (let ((modes (llm-config--agent-modes (transient-scope))))
       (if (null? modes)
           (message "this backend has no session modes")
           (llm-config-read! "Agent mode: "
-            (llm-config-current-first
-              modes (or (buffer-local buf 'agent-mode) ""))
+            (llm-config-current-first modes (or (llm-config--box-get 'agent-mode) ""))
             (lambda (choice)
               (unless (equal? choice "")
-                (if (agent-mode-set! buf choice)
-                    (begin (llm-config--mark-selected!)
-                           (llm-config--refresh!))
-                    (message "the agent refused that mode"))))
+                (llm-config--box-set! 'agent-mode choice)
+                (llm-config--refresh!)))
             (lambda () #f))))))
 
 (define-command "llm-config-pick-filesystem" "Choose what the agent's own file tools may do"
@@ -378,7 +571,8 @@
         (unless (equal? choice "")
           (customize-save! 'agent-filesystem-tools choice)
           (llm-config--refresh!)))
-      (lambda () #f))))
+      (lambda () #f)
+      "One setting for every chat. It applies now, not when the menu closes.")))
 
 ;; the report never covers the chat that asked for it
 
@@ -396,7 +590,7 @@
             (buffer-set-read-only! out #t)
             (display-buffer out))))))
 
-;;; --- bundles --------------------------------------------------------------
+;;; --- the tool surface ---------------------------------------------------------
 
 ;; `t` opens this child menu: the tool surface as menu rows over the
 ;; same scope, not a buffer covering the chat. A digit echoes one
@@ -433,6 +627,10 @@
           (map (lambda (t) (if (pair? t) (car t) t))
                (or (plist-get d 'tools) '())))))))
 
+(define (llm-config--presets-label buf)
+  (let ((ps (llm-config--presets (llm-config--session buf))))
+    (if (null? ps) "none" (string-join (map symbol->string ps) " "))))
+
 (define (llm-config--tools-groups buf)
   (let* ((session (llm-config--session buf))
          (can (boundp (quote chat-tool-server)))
@@ -467,7 +665,10 @@
       (list
         (list "Change"
           (transient-infix "p" "Presets" "llm-config-pick-preset"
-            (lambda (scope) (llm-config--presets-label scope)))
+            (lambda (scope)
+              (if (llm-config--boxed?)
+                  (llm-config--field-text 'presets (llm-config--box))
+                  (llm-config--presets-label scope))))
           (transient-suffix "r" "Adopt the editor's live tools" "chat-refresh-tools")
           (transient-suffix "l" "The full list, with docs" "chat-tool-list"))))))
 
@@ -475,47 +676,102 @@
   "This chat's tool surface"
   llm-config--tools-groups)
 
+;;; --- saving the box -------------------------------------------------------------
+
 (define (llm-config--bundle-candidates)
   (map (lambda (b) (list (or (llm-bundle-name b) "?") (llm-bundle-label b)))
        *llm-bundles*))
 
-(define-command "llm-config-save-bundle" "Save this whole setup as a named bundle"
+;; S: the box under a name. A new name is a new preset; a saved name is
+;; saved over, and keeps its key.
+(define (llm-config--save-as!)
+  (minibuffer-read "Preset name: " (llm-config--bundle-candidates)
+    (lambda (name)
+      (let ((n (string-trim name)))
+        (unless (equal? n "")
+          (let ((old (llm-bundle-named n)))
+            (when old
+              (set-frame-local! 'llm-config-follow
+                (cons (list n old) (or (frame-local 'llm-config-follow) '())))))
+          (let ((box (llm-config--box)))
+            ;; the preset the edit started from stays as it was saved
+            (llm-config--drop-draft! (llm-config--draft-key))
+            (llm-bundle-save! n box)
+            (llm-config--drop-draft! n)
+            (llm-config--refresh!)
+            (llm-config--select-preset! n)
+            (message (string-append "saved as preset " n))))))))
+
+(define-command "llm-config-save-bundle" "Save this config as a preset under a name"
+  (lambda () (llm-config--save-as!)))
+
+(define-command "llm-config-save-into" "Overwrite the preset with this config"
   (lambda ()
-    (let ((buf (transient-scope)))
-      ;; the setup saved is the one on screen, so a pending choice lands first
-      (llm-config--commit-pending!)
-      ;; a free-text prompt, not a palette: the point is to type a NEW name,
-      ;; and the saved ones complete so that saving over one is easy
-      (minibuffer-read "Bundle name: " (llm-config--bundle-candidates)
-        (lambda (name)
-          (let ((n (string-trim name)))
-            (unless (equal? n "")
-              (llm-bundle-save! n (llm-config-combination buf))
+    (let* ((name (llm-config--source-name))
+           (old (and (string? name) (llm-bundle-named name))))
+      (cond ((not old) (message "this chat is no preset — S saves it under a name"))
+            ((null? (llm-config--drift)) (message (string-append name " has no unsaved changes")))
+            (else
+              (set-frame-local! 'llm-config-follow
+                (cons (list name old) (or (frame-local 'llm-config-follow) '())))
+              (llm-bundle-save! name (llm-config--box))
+              (llm-config--drop-draft! name)
               (llm-config--refresh!)
-              (message (string-append "bundle " n ": "
-                         (llm-bundle-label (llm-bundle-named n)))))))))))
+              (message (string-append "overwrote " name
+                         " · other chats on " name " follow when the menu closes")))))))
 
-(define-command "llm-config-use-bundle" "Select a saved bundle by name"
+(define-command "llm-config-revert" "Undo the unsaved changes to this config"
+  (lambda ()
+    (if (null? (llm-config--drift))
+        (message "no changes to undo")
+        (begin
+          (set-frame-local! 'llm-config-box (llm-config--source))
+          (llm-config--drop-draft! (llm-config--draft-key))
+          (llm-config--refresh!)
+          (message (string-append (or (llm-config--source-name) "this chat")
+                                  " is as saved again"))))))
+
+;; n: a new preset. The box keeps the chat's tools and stance, and the
+;; three pickers ask for what a preset is mostly about. The name comes last.
+(define-command "llm-config-new-preset" "Make a new preset: backend, model, effort, then a name"
   (lambda ()
     (let ((buf (transient-scope)))
-      (if (null? *llm-bundles*)
-          (message "no saved bundles — s saves this setup as one")
-          (llm-config-read! "Bundle: " (llm-config--bundle-candidates)
-            (lambda (name)
-              (let ((b (and (not (equal? name "")) (llm-bundle-named name))))
-                (when b (llm-config--choose-bundle! buf b))))
-            (lambda () #f))))))
+      (set-frame-local! 'llm-config-new #t)
+      (llm-config--refresh!)
+      (llm-config--read-backend buf
+        (lambda ()
+          (llm-config--read-model buf
+            (lambda ()
+              (llm-config--read-effort buf
+                (lambda () (llm-config--save-as!))))))))))
 
-(define-command "llm-config-forget-bundle" "Forget a saved bundle"
+(define-command "llm-config-use-bundle" "Move to a saved preset by name"
   (lambda ()
     (if (null? *llm-bundles*)
-        (message "no saved bundles")
-        (llm-config-read! "Forget bundle: " (llm-config--bundle-candidates)
+        (message "no saved presets — S saves this config as one")
+        (llm-config-read! "Preset: " (llm-config--bundle-candidates)
+          (lambda (name)
+            (let ((b (and (not (equal? name "")) (llm-bundle-named name))))
+              (when b (llm-config--select-preset! (llm-bundle-name b)))))
+          (lambda () #f)))))
+
+(define-command "llm-config-forget-bundle" "Forget a saved preset"
+  (lambda ()
+    (if (null? *llm-bundles*)
+        (message "no saved presets")
+        (llm-config-read! "Delete preset: "
+          (llm-config-current-first (llm-config--bundle-candidates)
+                                    (or (llm-config--source-name) ""))
           (lambda (name)
             (unless (equal? name "")
               (llm-bundle-forget! name)
+              (llm-config--drop-draft! name)
+              (when (equal? name (llm-config--source-name))
+                (llm-config--show! #f))
               (llm-config--refresh!)
-              (message (string-append "bundle " name " forgotten"))))
+              (when (equal? name (llm-config--selected-name))
+                (set-frame-local! 'llm-config-selected #f))
+              (message (string-append "preset " name " deleted"))))
           (lambda () #f)))))
 
 ;;; The bundle a new chat starts with. It is a setting like any other, so it
@@ -600,167 +856,30 @@
 (public! 'llm-default-bundle-apply!
   "(llm-default-bundle-apply! BUF) — put llm-default-bundle's setup on a new chat; #f when no default is named")
 
-(define-command "llm-config-save-default" "Make this bundle the default for new chats"
+(define-command "llm-config-save-default" "Make the box's preset the default for new chats"
   (lambda ()
-    (let* ((buf (transient-scope))
-           (b (or (llm-config--pending-bundle) (llm-config--base buf)))
-           (name (and b (llm-bundle-name b))))
-      (if (not name)
-          (message "no saved bundle here — save one first with s")
-          (begin
-            (customize-save! 'llm-default-bundle name)
-            (llm-config--refresh!)
-            (message (string-append "new chats start with " name)))))))
+    (let ((name (llm-config--source-name)))
+      (cond ((not (string? name)) (message "the box came from no preset — S saves it first"))
+            ((pair? (llm-config--drift))
+             (message (string-append "the box changed " name " — s saves it first")))
+            (else
+              (customize-save! 'llm-default-bundle name)
+              (llm-config--refresh!)
+              (message (string-append "new chats start with " name)))))))
 
-(define (llm-config--history-key index)
-  (if (= index 10) "0" (number->string index)))
+;;; --- the menu -------------------------------------------------------------------
+;;; Two columns. The left column is the presets: the cursor moves through
+;;; them, and the right column shows the config of the preset under it.
+;;; RET (or right) goes into that config; left comes back. Every key keeps
+;;; the menu open. Only ESC, C-g and C-q close it, and only then does the
+;;; chat change. The keys that save are no row: the footer names them.
 
-;;; Which row wears the active mark. Two marks share the menu: the
-;;; cursor, which the keys move, and this one, which says what the
-;;; session is on. A parked choice outranks the live setup, because
-;;; that is what the menu will apply when it closes.
-(define (llm-config--bundle-chosen? buf b)
-  (if (llm-config--pending-bundle)
-      (equal? (llm-config--pending-bundle) b)
-      (llm-config--bundle-active? buf b)))
-
-;;; A recent setup only carries the mark when no saved bundle already
-;;; does: a setup that is a named bundle is shown as that bundle.
-(define (llm-config--history-chosen? buf choice)
-  (if (llm-config--pending-bundle)
-      (equal? (llm-config--pending-bundle) choice)
-      (and (not (llm-config--matching-bundle buf))
-           (llm-config--bundle-active-against? (llm-config--current buf) choice))))
-
-(define (llm-config--history-items buf)
-  (let loop ((choices *llm-config-history*) (index 1) (items '()))
-    (if (null? choices)
-        (reverse items)
-        (let ((choice (llm-bundle-normalize (car choices))))
-          (loop (cdr choices) (+ index 1)
-            (cons
-              (transient-suffix
-                (llm-config--history-key index)
-                (llm-bundle-label choice)
-                (lambda () (llm-config--choose-bundle! buf choice))
-                'transient 'stay 'bundle choice
-                'value-fn (lambda (_scope)
-                            (if (equal? (llm-config--pending-bundle) choice)
-                                "selected" ""))
-                'active-fn (lambda (scope)
-                             (llm-config--history-chosen? scope choice)))
-              items))))))
-
-(define (llm-config--bundle-items buf)
-  (let loop ((bs *llm-bundles*) (items '()))
-    (if (null? bs)
-        (reverse items)
-        (let* ((b (car bs)) (key (llm-bundle-key b)))
-          (loop (cdr bs)
-            (if key
-                (cons
-                  (transient-suffix key
-                    (or (llm-bundle-name b) "?")
-                    (lambda () (llm-config--choose-bundle! buf b))
-                    'transient 'stay 'bundle b
-                    'value-fn (lambda (scope)
-                                (llm-config--bundle-value scope b))
-                    'active-fn (lambda (scope)
-                                 (llm-config--bundle-chosen? scope b)))
-                  items)
-                items))))))
-
-;;; Two facts share one cell: what this bundle is to the session at hand,
-;;; and whether it is the one new chats start with.
-(define (llm-config--bundle-value scope b)
-  (let ((state (cond ((llm-config--pending-bundle)
-                      (if (equal? (llm-config--pending-bundle) b)
-                          "selected" ""))
-                     ((llm-config--bundle-active? scope b) "active")
-                     (else "")))
-        (default (if (equal? (llm-bundle-name b) llm-default-bundle)
-                     "default" "")))
-    (cond ((equal? state "") default)
-          ((equal? default "") state)
-          (else (string-append state " · " default)))))
-
-;;; --- two levels ------------------------------------------------------------
-;;; Picking a bundle and tuning one field are two different acts, so they
-;;; are two levels of one menu. Level one (C-c b) is the saved bundles on
-;;; letters and the recent setups on digits: one key selects the whole
-;;; setup, the menu stays open, and closing it applies the last selection.
-;;; The rail on the right says what the highlighted row resolves to, and
-;;; marks in amber what would change.
-;;; Level two (.) is the fields. Its rail compares the live setup with the
-;;; base bundle, and u goes back to it.
-
-;; BUF's live setup as one normalized bundle, with no name
-(define (llm-config--current buf)
-  (llm-bundle-normalize (llm-config-combination buf)))
-
-;; the saved bundle whose setup equals BUF's live setup, or #f
-;; The live setup is read once for the whole walk: llm-config--current
-;; asks the session, and the session is a buffer scan. Six bundles read
-;; it six times, after every command, in the dashboard sync.
-(define (llm-config--matching-bundle buf)
-  (let ((cur (llm-config--current buf)))
-    (let loop ((bs *llm-bundles*))
-      (cond ((null? bs) #f)
-            ((llm-config--bundle-active-against? cur (car bs)) (car bs))
-            (else (loop (cdr bs)))))))
-
-(define (llm-config--optional-match? want have)
-  (or (not want) (equal? want have)))
-
-;;; A bundle can leave a field unspecified, and llm-bundle-apply! then skips
-;;; it and leaves the buffer's own value alone: presets, permission and
-;;; prompt-disabled when #f, and agent-mode when #f or "". Such a field must
-;;; not count against the match, or a bundle that deliberately leaves the
-;;; agent mode alone reads as inactive the moment it is applied.
-(define (llm-config--bundle-active? buf b)
-  (llm-config--bundle-active-against? (llm-config--current buf) b))
-
-;; CUR is the normalized live setup, read once by the caller
-(define (llm-config--bundle-active-against? cur b)
-  (let ((nb (llm-bundle-normalize b)))
-    (and (equal? (llm-bundle-connector nb) (llm-bundle-connector cur))
-         (equal? (llm-bundle-model nb) (llm-bundle-model cur))
-         (equal? (llm-bundle-effort nb) (llm-bundle-effort cur))
-         (llm-config--optional-match? (llm-bundle-presets nb)
-                                      (llm-bundle-presets cur))
-         (llm-config--optional-match? (llm-bundle-permission nb)
-                                      (llm-bundle-permission cur))
-         (or (equal? (llm-bundle-agent-mode nb) "")
-             (llm-config--optional-match? (llm-bundle-agent-mode nb)
-                                          (llm-bundle-agent-mode cur)))
-         (llm-config--optional-match? (llm-bundle-prompt-disabled nb)
-                                      (llm-bundle-prompt-disabled cur)))))
-
-;; the bundle the fine-tune level measures drift against: the one applied
-;; last in this frame, else the one the live setup equals, else #f
-(define (llm-config--base buf)
-  (let ((name (frame-local 'llm-config-base)))
-    (or (and (string? name) (llm-bundle-named name))
-        (llm-config--matching-bundle buf))))
-
-(define (llm-config--base-name buf)
-  (let ((b (llm-config--base buf)))
-    (and b (llm-bundle-name b))))
-
-;;; The name the dashboard line shows. It follows the buffer's own setup, not
-;;; the frame's last choice, so a chat that drifted off its bundle names no
-;;; preset and every other buffer keeps its own answer.
-(define (llm-config-preset-name buf)
-  (let ((b (llm-config--matching-bundle buf)))
-    (and b (llm-bundle-name b))))
-
-;; one field of a bundle as the rail shows it
+;; one field of a whole setup as a row shows it
 (define (llm-config--field-text key b)
   (let ((v (llm-bundle-get b key #f)))
     (cond
       ((equal? key 'presets)
        (cond ((not v) "as is")
-             ((null? v) "none")
              (else
                (let ((extra (remove (lambda (x) (equal? x 'compos)) v)))
                  (if (null? extra) "editor only"
@@ -769,42 +888,233 @@
        (cond ((not v) "as is")
              ((null? v) "all on")
              (else (string-append (number->string (length v)) " off"))))
-      ((equal? key 'agent-mode)
-       (if (or (not v) (equal? v "") (equal? v "default")) "none" v))
+      ((equal? key 'agent-mode) (llm-config--agent-mode-text v))
       ((equal? key 'permission) (or v "as is"))
       ((equal? key 'connector) (or v *default-connector*))
       (else (or v "default")))))
 
-(define *llm-config-fields*
-  '((connector "backend") (model "model") (effort "effort") (presets "tools")
-    (permission "asks") (agent-mode "agent mode") (prompt-disabled "prompt")))
+;; a config row's value: the box's value, and the saved value when they differ
+(define (llm-config--field-value key)
+  (let ((now (llm-config--field-text key (llm-config--box))))
+    (if (llm-config--drifted? key)
+        (string-append (llm-config--field-text key (llm-config--source)) " → " now)
+        now)))
 
-;; A bundle that recorded no presets, stance, agent mode, or prompt
-;; exceptions changes none of them when it applies.
-(define (llm-config--unrecorded? key b)
-  (and (member key '(presets permission agent-mode prompt-disabled))
-       (not (llm-bundle-get b key #f))))
+(define (llm-config--field-row key label field command &rest properties)
+  (append
+    (transient-infix key label command
+      (lambda (_scope) (llm-config--field-value field))
+      'flags-fn (lambda (_scope) (if (llm-config--drifted? field) "drift" "")))
+    properties))
 
-;; The rail rows for bundle B. A row whose value differs from AGAINST
-;; carries the drift tone; with no AGAINST every row is plain. A field B
-;; never recorded shows AGAINST's value, dimmed: applying B keeps it.
-(define (llm-config--rows b against)
-  (map (lambda (field)
-         (let* ((key (car field))
-                (v (llm-config--field-text key b))
-                (o (and against (llm-config--field-text key against))))
-           (cond ((and against (llm-config--unrecorded? key b))
-                  (list (cadr field) o "dim"))
-                 ((and against (llm-config--unrecorded? key against))
-                  (list (cadr field) v ""))
-                 ((and against (not (equal? v o)))
-                  (list (cadr field) v "drift"))
-                 (else (list (cadr field) v "")))))
-       *llm-config-fields*))
+;; the row the cursor is on, or #f
+(define (llm-config--selected-item)
+  (let* ((state (transient--active))
+         (prefix (and state (transient-prefix (plist-get state 'prefix)))))
+    (and prefix
+         (let ((items (transient--visible-items (transient--visible-groups prefix state)))
+               (i (or (plist-get state 'selected) 0)))
+           (and (< i (length items)) (nth i items))))))
 
-(define (llm-config--drift-count b against)
-  (length (filter (lambda (row) (equal? (caddr row) "drift"))
-                  (llm-config--rows b against))))
+(define (llm-config--source-row? item)
+  (and item (or (plist-get item 'bundle) (plist-get item 'live-row)) #t))
+
+(define (llm-config--on-left?) (llm-config--source-row? (llm-config--selected-item)))
+
+;; move the cursor to the first row PRED accepts; the cursor hook runs
+(define (llm-config--select-row! pred)
+  (let* ((state (transient--active))
+         (prefix (and state (transient-prefix (plist-get state 'prefix)))))
+    (when prefix
+      (let loop ((items (transient--visible-items (transient--visible-groups prefix state)))
+                 (i 0))
+        (cond ((null? items) #f)
+              ((pred (car items)) (transient--select! state i) (transient--render!) #t)
+              (else (loop (cdr items) (+ i 1))))))))
+
+(define (llm-config--select-preset! name)
+  (llm-config--select-row!
+    (lambda (item)
+      (let ((b (plist-get item 'bundle)))
+        (and b (equal? (llm-bundle-name b) name))))))
+
+;; the cursor hook: a source row shows its config on the right
+(define (llm-config--on-select _buf item)
+  (cond ((plist-get item 'bundle) (llm-config--show! (llm-bundle-name (plist-get item 'bundle))))
+        ((plist-get item 'live-row) (llm-config--show! #f))
+        (else #f)))
+
+;; RET on a row selects it: ESC then gives its config to the chat
+(define (llm-config--choose! name)
+  (set-frame-local! 'llm-config-selected name)
+  (llm-config--refresh!)
+  (message (string-append "selected " (or name "this chat")
+                          " · ESC gives it to the chat")))
+
+(define (llm-config--dirty-name? name)
+  (let ((draft (transient--alist-get (llm-config--drafts) (or name "") #f)))
+    (and draft
+         (not (llm-config--same? draft
+                (let ((b (and (string? name) (llm-bundle-named name))))
+                  (if b (llm-config--fill b (llm-config--live)) (llm-config--live))))))))
+
+(define (llm-config--dirty? name) (llm-config--dirty-name? name))
+
+(define (llm-config--selected? name) (equal? name (llm-config--selected-name)))
+
+;; the row whose config the right column shows, while the cursor is there
+(define (llm-config--shown-flag name)
+  (if (and (equal? name (llm-config--source-name)) (not (llm-config--on-left?)))
+      "shown" ""))
+
+;;; --- the filter ---------------------------------------------------------------
+;;; In the preset column a printable key types into the filter, and the list
+;;; keeps the presets whose name holds it. DEL takes a character back. In
+;;; the config column the same keys are the fields' keys.
+
+(define (llm-config--filter) (or (frame-local 'llm-config-filter) ""))
+
+(define (llm-config--filter-set! text)
+  (set-frame-local! 'llm-config-filter text)
+  (llm-config--refresh!)
+  ;; the cursor goes to the first row still in the list
+  (llm-config--select-row! llm-config--source-row?))
+
+(define (llm-config--matches? name)
+  (let ((f (llm-config--filter)))
+    (or (equal? f "")
+        (string-contains? (string-downcase name) (string-downcase f)))))
+
+(define *llm-config-filter-chars*
+  (let loop ((cs "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.") (out '()))
+    (if (equal? cs "")
+        (reverse out)
+        (loop (substring cs 1 (string-length cs)) (cons (substring cs 0 1) out)))))
+
+(define (llm-config--filter-command ch)
+  (string-append "llm-config-filter-" (if (equal? ch " ") "space" ch)))
+
+(for-each
+  (lambda (ch)
+    (define-command--raw (llm-config--filter-command ch)
+      (lambda () (llm-config--filter-set! (string-append (llm-config--filter) ch)))))
+  (cons " " *llm-config-filter-chars*))
+
+(define-command "llm-config-filter-back" "Take the last character off the preset filter"
+  (lambda ()
+    (let ((f (llm-config--filter)))
+      (unless (equal? f "")
+        (llm-config--filter-set! (substring f 0 (- (string-length f) 1)))))))
+
+;;; --- the rows -----------------------------------------------------------------
+
+(define (llm-config--by-name bundles)
+  (map cadr (sort (map (lambda (b) (list (or (llm-bundle-name b) "") b)) bundles))))
+
+(define (llm-config--preset-items)
+  (map (lambda (b)
+         (let ((name (or (llm-bundle-name b) "?")))
+           (transient-suffix ""
+             (string-append name
+               (if (llm-config--dirty? name) "*" "")
+               (if (equal? name llm-default-bundle) " · default" ""))
+             (lambda () (llm-config--choose! name))
+             'transient 'stay 'bundle b
+             'flags-fn (lambda (_scope) (llm-config--shown-flag name))
+             'value-fn (lambda (_scope) (if (llm-config--selected? name) "selected" ""))
+             'active-fn (lambda (_scope) (llm-config--selected? name)))))
+       (filter (lambda (b) (llm-config--matches? (or (llm-bundle-name b) "")))
+               (llm-config--by-name *llm-bundles*))))
+
+;; When no preset equals the chat, the chat's own setup is a row too, so
+;; the menu can open on it and the chat has a config to go into.
+(define (llm-config--live-item)
+  (transient-suffix "" (string-append "this chat" (if (llm-config--dirty? #f) "*" ""))
+    (lambda () (llm-config--choose! #f))
+    'transient 'stay 'live-row #t
+    'flags-fn (lambda (_scope) (llm-config--shown-flag #f))
+    'value-fn (lambda (_scope) (if (llm-config--selected? #f) "selected" ""))
+    'active-fn (lambda (_scope) (llm-config--selected? #f))))
+
+(define (llm-config--more-row)
+  (transient-suffix "+" (if (llm-config--more?) "fewer fields" "more fields")
+    (lambda ()
+      (set-frame-local! 'llm-config-more (not (llm-config--more?)))
+      (llm-config--refresh!))
+    'transient 'stay
+    'value-fn (lambda (_scope)
+                (if (llm-config--more?) "" "prompt · asks · agent mode · files"))))
+
+(define (llm-config--box-items)
+  (list
+    (llm-config--field-row "b" "backend" 'connector "llm-config-pick-backend")
+    (llm-config--field-row "m" "model" 'model "llm-config-pick-model")
+    (llm-config--field-row "e" "effort" 'effort "llm-config-pick-effort")
+    (llm-config--field-row "p" "tools" 'presets "llm-config-pick-preset")
+    (llm-config--more-row)))
+
+(define (llm-config--more-items)
+  (list
+    (transient-suffix "i" "prompt" "llm-prompt-sections"
+      'value-fn (lambda (_scope) (llm-config--field-value 'prompt-disabled))
+      'flags-fn (lambda (_scope) (if (llm-config--drifted? 'prompt-disabled) "drift" "")))
+    (llm-config--field-row "k" "asks" 'permission "llm-config-pick-permission")
+    (llm-config--field-row "a" "agent mode" 'agent-mode "llm-config-pick-agent-mode"
+      'if (lambda (scope) (pair? (llm-config--agent-modes scope))))
+    (transient-infix "f" "files · every chat" "llm-config-pick-filesystem"
+      (lambda (_scope) (llm-config--filesystem)))
+    (transient-suffix "t" "tool surface" "chat-tools"
+      'value-fn (lambda (scope) (llm-config--tools-label scope)))
+    (transient-suffix "v" "show prompt" "chat-show-prompt" 'transient 'stay)
+    (transient-suffix "d" "policy" "llm-config-permission-report" 'transient 'stay
+      'value-fn (lambda (_scope)
+                  (if (boundp (quote *permission-deny-patterns*))
+                      (string-append (number->string
+                                       (length *permission-deny-patterns*))
+                                     " deny patterns")
+                      "")))))
+
+;; the right column's title: whose config it is
+(define (llm-config--config-title)
+  (string-append (or (llm-config--source-name) "this chat")
+                 (if (pair? (llm-config--drift)) "*" "")
+                 " · config"))
+
+(define (llm-config--presets-title)
+  (let ((f (llm-config--filter)))
+    (if (equal? f "") "Presets" (string-append "Presets · " f))))
+
+(define (llm-config--groups _buf)
+  (append
+    (list (cons (llm-config--presets-title)
+            (append (if (or (llm-config--matching (llm-config--live) (llm-config--live))
+                            (not (llm-config--matches? "this chat")))
+                        '()
+                        (list (llm-config--live-item)))
+                    (llm-config--preset-items))))
+    (list (cons (llm-config--config-title) (llm-config--box-items)))
+    (if (llm-config--more?) (list (cons "More" (llm-config--more-items))) '())))
+
+(define (llm-config--columns _buf)
+  (list (list (llm-config--presets-title)) (list (llm-config--config-title) "More")))
+
+;; The keys that are no row. In the preset column the printable keys type
+;; into the filter, so the actions there take Meta; in the config column
+;; the letters are the fields' keys, and saving takes s S u.
+(define (llm-config--keys _buf)
+  (append
+    (if (llm-config--on-left?)
+        (append
+          (map (lambda (ch) (list ch (llm-config--filter-command ch))) *llm-config-filter-chars*)
+          (list (list "SPC" (llm-config--filter-command " "))
+                (list "DEL" "llm-config-filter-back")))
+        (list (list "s" "llm-config-save-into")
+              (list "S" "llm-config-save-bundle")
+              (list "u" "llm-config-revert")))
+    (list (list "M-s" "llm-config-save-bundle")
+          (list "M-n" "llm-config-new-preset")
+          (list "M-k" "llm-config-forget-bundle")
+          (list "M-d" "llm-config-save-default"))))
 
 ;; what the menu writes to: this buffer, or the group chat whose session
 ;; the buffer shares
@@ -818,192 +1128,53 @@
     (string-append (if (string? gname) (string-append "group " gname " · ") "")
                    (llm-config--target buf))))
 
-(define (llm-config--subtitle buf)
-  (let ((p (llm-config--pending-bundle))
-        (m (llm-config--matching-bundle buf)))
-    (cond
-      (p (string-append "selected " (or (llm-bundle-name p) "recent setup")
-                        " · applies on close"))
-      (m (string-append "on bundle " (or (llm-bundle-name m) "?")))
-      (else (string-append "off-bundle · " (llm-bundle-label (llm-config--current buf)))))))
+;; the status line: what ESC gives the chat, in one line
+(define (llm-config--subtitle _buf)
+  (let ((sel (llm-config--selected-name)))
+    (if (llm-config--new?)
+        "new preset · not saved · M-s names it"
+        (string-append "selected: " (or sel "this chat")
+                       (if (llm-config--dirty? sel) "*" "")
+                       " · ESC gives it to the chat"))))
 
-;; the rail of level one follows the highlighted row
-(define (llm-config--detail buf item)
-  (let* ((current (llm-config--current buf))
-         (b (and item (plist-get item 'bundle))))
-    (if b
-        (let* ((nb (llm-bundle-normalize b))
-               (name (llm-bundle-name nb))
-               (n (llm-config--drift-count nb current)))
-          (list (or name "recent setup")
-                (llm-config--rows nb current)
-                (string-append
-                  (if (equal? (llm-config--pending-bundle) b)
-                      (string-append "selected · applies to " (llm-config--target buf)
-                                     " when the menu closes")
-                      (string-append "RET selects " (or name "it") " for "
-                                     (llm-config--target buf)))
-                  (cond ((= n 0) "\nnothing changes: this is the live setup")
-                        ((= n 1) "\n1 field changes")
-                        (else (string-append "\n" (number->string n) " fields change"))))))
-        (list "live setup"
-              (llm-config--rows current #f)
-              (let ((m (llm-config--matching-bundle buf)))
-                (if m
-                    (string-append "equal to bundle " (or (llm-bundle-name m) "?"))
-                    ". tunes it field by field\ns saves it as a bundle"))))))
-
-(define (llm-config--key-span items)
-  (let ((keys (map (lambda (i) (plist-get i 'key)) items)))
-    (cond ((null? keys) #f)
-          ((null? (cdr keys)) (car keys))
-          (else (string-append (car keys) "…" (car (reverse keys)))))))
-
-(define (llm-config--legend buf)
-  (let ((bundles (llm-config--key-span (llm-config--bundle-items buf)))
-        (recent (llm-config--key-span (llm-config--history-items buf))))
+(define (llm-config--legend _buf)
+  (let* ((name (llm-config--source-name))
+         (drift? (pair? (llm-config--drift)))
+         (sel (llm-config--selected-name)))
     (append
-      (if bundles (list (list bundles "bundle")) '())
-      (if recent (list (list recent "recent")) '())
-      (list (list "." "fine-tune") (list "s" "save"))
-      (if (null? *llm-bundles*) '() (list (list "D" "default")))
-      (list (list "RET" "select")
-            (list "↑↓ ←→" "move")
-            (if (llm-config--pending-bundle)
-                (list "ESC" "apply and close")
-                (list "ESC" "dismiss"))))))
+      (if (llm-config--on-left?)
+          (append
+            (list (list "type" "filter") (list "↑↓" "move") (list "RET" "select")
+                  (list "→" "edit config"))
+            (list (list "M-s" "save as…") (list "M-n" "new preset"))
+            (if name (list (list "M-k" "delete…")) '())
+            (if (and name (not drift?) (not (equal? name llm-default-bundle)))
+                (list (list "M-d" "default for new chats"))
+                '()))
+          (append
+            (list (list "←" "back to presets"))
+            (if (and name drift?) (list (list "s" (string-append "overwrite " name))) '())
+            (list (list "S" "save as…"))
+            (if drift? (list (list "u" "undo changes")) '())))
+      (list (list "ESC C-g" (string-append "apply " (or sel "this chat")
+                                           (if (llm-config--dirty? sel) "*" "")
+                                           " + close"))))))
 
-;; Bundles, then the setup actions, then the recents: the groups pack
-;; column-wise on screen, so the short groups share the first column and
-;; the long recent list takes the second.
-(define (llm-config--groups buf)
-  (let ((bundles (llm-config--bundle-items buf))
-        (history (llm-config--history-items buf)))
-    (append
-      (list (cons "Bundles" bundles))
-      (list
-        (append
-          (list "Setup"
-            (transient-suffix "." "fine-tune" "llm-fine-tune")
-            (transient-suffix "s" "save as bundle" "llm-config-save-bundle"
-              'transient 'stay))
-          (if (null? *llm-bundles*)
-              '()
-              (list (transient-suffix "D" "default for new chats"
-                      "llm-config-save-default" 'transient 'stay)
-                    (transient-suffix "u" "use by name" "llm-config-use-bundle"
-                      'transient 'stay)
-                    (transient-suffix "x" "forget" "llm-config-forget-bundle"
-                      'transient 'stay)))))
-      (if (null? history) '() (list (cons "Recent" history))))))
-
-;; The groups fn is looked up by name on every render, not captured once:
-;; a hot reload of llm-config--groups then reaches the open menu, and the
-;; prefix form itself does not have to change.
+;; Every option looks its function up by name at each call, so a hot
+;; reload of one function reaches the open menu without this form changing.
 (transient-define-prefix "llm-configure"
-  "Language model"
+  "LLM setup"
   (lambda (buf) (llm-config--groups buf))
-  'columns '(("Bundles" "Setup") ("Recent"))
-  'on-setup llm-config--setup!
-  'on-quit llm-config--quit-top!
-  'subtitle-fn llm-config--subtitle
-  'context-fn llm-config--context
-  'detail-fn llm-config--detail
-  'legend-fn llm-config--legend)
+  'columns (lambda (buf) (llm-config--columns buf))
+  'layout "split"
+  'on-setup (lambda (buf) (llm-config--setup! buf))
+  'on-select (lambda (buf item) (llm-config--on-select buf item))
+  'on-quit (lambda (buf) (llm-config--quit! buf))
+  'keys-fn (lambda (buf) (llm-config--keys buf))
+  'subtitle-fn (lambda (buf) (llm-config--subtitle buf))
+  'context-fn (lambda (buf) (llm-config--context buf))
+  'legend-fn (lambda (buf) (llm-config--legend buf)))
 
-;;; level two: the fields
-
-(define (llm-fine-tune--setup! buf)
-  ;; a choice at level one is the base this level tunes from, so it lands first
-  (llm-config--commit-pending!)
-  (let ((base (llm-config--base buf)))
-    (set-frame-local! 'llm-config-base (and base (llm-bundle-name base)))))
-
-(define-command "llm-config-revert" "Put the base bundle back, every field"
-  (lambda ()
-    (let* ((buf (transient-scope))
-           (base (llm-config--base buf)))
-      (if (not base)
-          (message "no base bundle to revert to")
-          (begin
-            (llm-bundle-apply! buf base)
-            (llm-config--mark-selected!)
-            (llm-config--refresh!)
-            (message (string-append "reverted to " (or (llm-bundle-name base) "?"))))))))
-
-(define (llm-fine-tune--subtitle buf)
-  (let ((base (llm-config--base-name buf)))
-    (if base
-        (string-append "field by field · base " base)
-        "field by field · no base bundle")))
-
-(define (llm-fine-tune--detail buf _item)
-  (let* ((current (llm-config--current buf))
-         (base (llm-config--base buf))
-         (n (if base (llm-config--drift-count current (llm-bundle-normalize base)) 0)))
-    (list (if base (string-append "against " (or (llm-bundle-name base) "?")) "unsaved setup")
-          (llm-config--rows current (and base (llm-bundle-normalize base)))
-          (cond ((not base) "no bundle equals this setup\ns saves it under a name")
-                ((= n 0) (string-append "identical to " (or (llm-bundle-name base) "?")))
-                (else (string-append (number->string n)
-                        (if (= n 1) " field differs" " fields differ")
-                        " · u reverts · s saves as a bundle"))))))
-
-(define (llm-fine-tune--legend _buf)
-  '(("b m e" "model") ("p t" "tools") ("i v" "prompt") ("k a f d" "asks")
-    ("u" "revert") ("s" "save") ("↑↓ ←→" "move") ("ESC" "up")))
-
-(define (llm-fine-tune--groups buf)
-  (list
-    (list "Model"
-      (transient-infix "b" "backend" "llm-config-pick-backend"
-        (lambda (scope) (llm-config--connector scope)))
-      (transient-infix "m" "model" "llm-config-pick-model"
-        (lambda (scope) (llm-config--model scope)))
-      (transient-infix "e" "effort" "llm-config-pick-effort"
-        (lambda (scope) (llm-config--effort scope))))
-    (list "Tools"
-      (transient-infix "p" "presets" "llm-config-pick-preset"
-        (lambda (scope) (llm-config--presets-label scope)))
-      (transient-suffix "t" "tools" "chat-tools"
-        'value-fn (lambda (scope) (llm-config--tools-label scope))))
-    (list "Prompt"
-      (transient-suffix "i" "sections" "llm-prompt-sections"
-        'value-fn (lambda (scope) (llm-config--prompt-label scope)))
-      (transient-suffix "v" "show prompt" "chat-show-prompt" 'transient 'stay))
-    (list "Permissions"
-      (transient-infix "k" "asks" "llm-config-pick-permission"
-        (lambda (scope) (llm-config--permission-label scope)))
-      (transient-infix "a" "agent mode" "llm-config-pick-agent-mode"
-        (lambda (scope) (llm-config--agent-mode-label scope))
-        'if (lambda (scope) (pair? (llm-config--agent-modes scope))))
-      (transient-infix "f" "files" "llm-config-pick-filesystem"
-        (lambda (_scope) (llm-config--filesystem)))
-      (transient-suffix "d" "policy" "llm-config-permission-report"
-        'value-fn (lambda (_scope)
-                    (if (boundp (quote *permission-deny-patterns*))
-                        (string-append (number->string
-                                         (length *permission-deny-patterns*))
-                                       " deny patterns")
-                        ""))))
-    (list "Setup"
-      (transient-suffix "u"
-        (let ((base (llm-config--base-name buf)))
-          (if base (string-append "revert to " base) "revert"))
-        "llm-config-revert" 'transient 'stay)
-      (transient-suffix "s" "save as bundle" "llm-config-save-bundle"
-        'transient 'stay))))
-
-(transient-define-prefix "llm-fine-tune"
-  "Fine-tune"
-  (lambda (buf) (llm-fine-tune--groups buf))
-  'columns '(("Model" "Tools" "Prompt") ("Permissions" "Setup"))
-  'on-setup llm-fine-tune--setup!
-  'on-quit llm-config--quit!
-  'subtitle-fn llm-fine-tune--subtitle
-  'context-fn llm-config--context
-  'detail-fn llm-fine-tune--detail
-  'legend-fn llm-fine-tune--legend)
 
 ;;; --- the model catalog --------------------------------------------------------
 ;;; llm_db packages a catalog inside deps/. It ages from the day the lock was

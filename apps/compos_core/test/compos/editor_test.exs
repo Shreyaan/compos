@@ -1314,15 +1314,21 @@ defmodule Compos.EditorTest do
     {:ok, _} = Compos.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'agent-connector "api")})
     assert {"C-c b", "llm-configure"} in Editor.local_keys(buf)
 
+    {:ok, _} =
+      Compos.Core.Session.eval("(begin (set! *llm-bundles* '()) (set-frame-local! 'llm-config-more #f))")
+
     press(["C-c", "b"])
     assert Editor.current_buffer() == buf
     menu = Editor.render_state().transient
-    assert menu.title == "Configure this buffer's language model"
+    assert menu.title == "LLM setup"
 
-    assert Enum.map(hd(menu.groups).items, & &1.description) ==
-             ["Backend", "Model", "Effort", "Presets", "Tools"]
+    config = Enum.find(menu.groups, &(&1.title =~ "config"))
 
-    # The command modal uses its normal interaction: RET invokes the selected row.
+    assert Enum.map(config.items, & &1.description) ==
+             ["backend", "model", "effort", "tools", "more fields"]
+
+    # right goes into the chat's config; RET there opens the picker
+    press(["<right>"])
     press(["RET"])
     backend_menu = Editor.render_state().minibuffer
     assert backend_menu.prompt == "Backend: "
@@ -1343,26 +1349,29 @@ defmodule Compos.EditorTest do
     {:ok, _} =
       Compos.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'prompt-disabled-parts '())})
 
-    press(["C-c", "b", "i"])
+    {:ok, _} = Compos.Core.Session.eval("(set! *llm-bundles* '())")
+    press(["C-c", "b", "<right>", "+", "i"])
     menu = Editor.render_state().transient
     assert menu.title == "Select the prompt sections, then apply them together"
 
     items = Enum.flat_map(menu.groups, & &1.items)
-    assert Enum.any?(items, &(&1.description == "identity" and &1.value == "on"))
-    assert Enum.any?(items, &(&1.description == "general" and &1.value == "on"))
+    [first, second | _] = Enum.filter(items, &(&1.kind == "switch"))
+    assert first.value == "on" and second.value == "on"
 
     press(["1", "2"])
     assert Buffer.get_local(buf, "prompt-disabled-parts") == []
 
     press("x")
 
-    assert Buffer.get_local(buf, "prompt-disabled-parts") |> Enum.take(2) ==
-             ["identity", "general"]
+    # under C-c b the selection goes into the config, and ESC gives it to the chat
+    assert Buffer.get_local(buf, "prompt-disabled-parts") == []
+    assert Editor.render_state().transient.title == "LLM setup"
 
-    assert Editor.render_state().transient.title == "Configure this buffer's language model"
-
-    press("C-g")
+    press("ESC")
     assert Editor.render_state().transient == nil
+
+    assert Buffer.get_local(buf, "prompt-disabled-parts") |> Enum.take(2) ==
+             [first.description, second.description]
   end
 
   test "M-| pipes the region through the llm into *llm*", %{buf: buf} do

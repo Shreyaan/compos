@@ -1196,7 +1196,7 @@ defmodule Compos.Ui.EditorLive do
       </c-group>
       <% else %>
         <%= if @state.transient && @state.transient[:groups] do %>
-          <c-minibuffer class={"mb-panel palette mb-geom-modal transient-panel #{if @state.transient[:detail], do: "with-rail"}"}>
+          <c-minibuffer class={"mb-panel palette mb-geom-modal transient-panel #{if @state.transient[:detail], do: "with-rail"} #{if @state.transient[:layout] not in [nil, ""], do: "transient-layout-#{@state.transient.layout}"}"}>
             <c-group class="transient-head">
               <c-text class="transient-title">{@state.transient.title}</c-text>
               <c-text :if={@state.transient[:subtitle] not in [nil, ""]} class="transient-subtitle">{@state.transient.subtitle}</c-text>

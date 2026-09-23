@@ -1703,6 +1703,44 @@ c-action-key {
   color: var(--dim-fg, #8a857a); white-space: nowrap; font-size: 0.9em;
   max-width: 22ch; overflow: hidden; text-overflow: ellipsis;
 }
+/* A row whose value differs from what it is measured against: an amber
+   edge and an amber value, apart from the green of .active. */
+.transient-item.drift { border-left-color: var(--warn-fg, #7a5a1a); }
+.transient-item.drift .transient-value { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
+/* 'layout split: a list to choose from on the left, and what the chosen
+   row holds on the right. The left column keeps its width; the right one
+   takes the rest, and its values stand next to their labels. */
+.mb-panel.palette.transient-panel.transient-layout-split {
+  width: min(calc(1100px / var(--ui-zoom, 1)), calc(96vw / var(--ui-zoom, 1)));
+}
+.transient-layout-split .transient-groups { gap: 0; padding: 0; align-items: stretch; }
+.transient-layout-split .transient-column { max-width: none; padding: 14px 18px 18px; }
+/* the row whose config the right column shows, while the cursor is there */
+.transient-layout-split .transient-item.shown { border-left-color: var(--accent-fg, #26356b); }
+.transient-layout-split .transient-item.shown .transient-description { color: var(--accent-fg, #26356b); }
+.transient-layout-split .transient-column:first-child {
+  flex: 0 0 24em; border-right: 1px solid var(--border-bg, #e2dbc9);
+}
+/* a row with no key (the presets: typing filters them) shows no badge */
+.transient-layout-split .transient-item:has(.transient-key:empty) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.transient-layout-split .transient-key:empty { display: none; }
+.transient-layout-split .transient-column + .transient-column {
+  flex: 1 1 auto; background: var(--default-bg, #f4f0e6);
+}
+.transient-layout-split .transient-column + .transient-column .transient-item {
+  grid-template-columns: 2.8em 11em minmax(0, 1fr);
+}
+.transient-layout-split .transient-column + .transient-column .transient-value {
+  max-width: none; color: var(--default-fg, #1b1a17);
+}
+.transient-layout-split .transient-column + .transient-column .transient-item:not(.selected) .transient-key {
+  background: var(--window-bg, #fdfcf8);
+}
+.transient-layout-split .transient-column + .transient-column .transient-item.drift .transient-value {
+  color: var(--warn-fg, #7a5a1a);
+}
 .transient-rail {
   flex: 0 0 34%; min-width: 0; overflow: auto;
   border-left: 1px solid var(--border-bg, #e2dbc9);

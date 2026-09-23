@@ -3096,7 +3096,8 @@ defmodule Compos.Core.SchemeAPI do
 
   # The transient menu the frame renders. META rows: ("subtitle" TEXT),
   # ("context" TEXT), ("chips" ((LABEL ACTIVE?) ...)), ("columns" ((TITLE ...) ...)),
-  # ("detail" (TITLE ((KEY VALUE TONE) ...) NOTE)), ("legend" ((KEY LABEL) ...)).
+  # ("detail" (TITLE ((KEY VALUE TONE) ...) NOTE)), ("legend" ((KEY LABEL) ...)),
+  # ("layout" NAME).
   defp transient_menu(title, groups, meta) do
     meta = Map.new(meta, fn [k, v] -> {plain(k), v} end)
 
@@ -3111,6 +3112,7 @@ defmodule Compos.Core.SchemeAPI do
       title: title,
       columns: columns,
       subtitle: Map.get(meta, "subtitle", ""),
+      layout: Map.get(meta, "layout", ""),
       context: Map.get(meta, "context", ""),
       chips:
         Enum.map(Map.get(meta, "chips", []), fn [label, active] ->

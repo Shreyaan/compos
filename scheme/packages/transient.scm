@@ -44,8 +44,13 @@
                 'argument argument 'choices choices 'transient 'stay)
           properties))
 
+;; A row with no key is named by its description: rows share one prefix,
+;; and two keyless rows under one name would run the same command.
 (define (transient--item-wrapper prefix item)
-  (string-append "transient:" prefix ":" (plist-get item 'key)))
+  (let ((key (plist-get item 'key)))
+    (if (equal? key "")
+        (string-append "transient:" prefix ":row:" (plist-get item 'description))
+        (string-append "transient:" prefix ":" key))))
 
 (define (transient--install-item prefix item)
   (let ((name (transient--item-wrapper prefix item))
@@ -192,11 +197,16 @@
              (if (string? value) value (value->string value))))
           (else ""))))
 
-(define (transient--bindings groups)
+;; The rows' keys, then EXTRA (a prefix's 'keys-fn, which wins over a row
+;; with the same key), then the menu's own keys. A row with the key ""
+;; takes no key: RET on it is the only way to invoke it.
+(define (transient--bindings groups &optional extra)
   (append
     (map (lambda (item) (list (plist-get item 'key) (plist-get item 'wrapper)))
-         (transient--visible-items groups))
-    (list (list "C-g" "transient-quit-one")
+         (filter (lambda (item) (not (equal? (plist-get item 'key) "")))
+                 (transient--visible-items groups)))
+    (or extra '())
+    (list (list "C-g" "transient-cancel-one")
           (list "C-q" "transient-quit-all")
           (list "ESC" "transient-quit-one")
           (list "C-z" "transient-suspend")
@@ -235,10 +245,32 @@
 ;;; a row's display flags as one class list: what invoking it does to
 ;;; the menu, then active when it is the one in force
 (define (transient--item-flags item state)
-  (let ((behavior (value->string (or (plist-get item 'transient) 'exit))))
-    (if (transient--item-active? item state)
-        (string-append behavior " active")
-        behavior)))
+  (let* ((behavior (value->string (or (plist-get item 'transient) 'exit)))
+         (flags (if (transient--item-active? item state)
+                    (string-append behavior " active")
+                    behavior))
+         (fn (plist-get item 'flags-fn))
+         (extra (and fn (fn (plist-get state 'scope)))))
+    (if (and (string? extra) (not (equal? extra "")))
+        (string-append flags " " extra)
+        flags)))
+
+;;; A row with 'cursor 'skip takes its key and never the cursor: the arrows
+;;; skip it, and the menu never opens on it. A menu whose rows are
+;;; sources for a key, and not places to stand, uses this. (A #f value
+;;; would not do: plist-put drops it when the menu installs the row.)
+(define (transient--item-selectable? item)
+  (not (equal? (plist-get item 'cursor) 'skip)))
+
+;; the first selectable index from INDEX, stepping by DELTA with wrap;
+;; INDEX itself when no row is selectable
+(define (transient--selectable-index items index delta)
+  (let ((count (length items)))
+    (let loop ((i index) (n 0))
+      (cond ((or (= count 0) (>= n count)) index)
+            ((transient--item-selectable? (nth (modulo i count) items))
+             (modulo i count))
+            (else (loop (+ i delta) (+ n 1)))))))
 
 (define (transient--menu-groups groups state)
   (let ((selected (or (plist-get state 'selected) 0))
@@ -296,6 +328,8 @@
          (detail-fn (transient--prefix-option prefix 'detail-fn))
          (detail (and (procedure? detail-fn) (detail-fn scope item))))
     (list (list "subtitle" (transient--option-text prefix 'subtitle-fn scope))
+          ;; 'layout NAME: the frame draws the menu with that layout's class
+          (list "layout" (transient--option-text prefix 'layout scope))
           (list "context" (transient--option-text prefix 'context-fn scope))
           (list "chips" (transient--option-list prefix 'chips-fn scope))
           (list "detail" (or detail #f))
@@ -373,8 +407,10 @@
       (let* ((groups (transient--visible-groups prefix state))
              (columns (transient--columns prefix state groups))
              (target (transient--column-target
-                       groups columns (or (plist-get state 'selected) 0) delta)))
-        (transient--set-active! (plist-put state 'selected target))
+                       groups columns (or (plist-get state 'selected) 0) delta))
+             (target (transient--selectable-index
+                       (transient--visible-items groups) target 1)))
+        (transient--select! state target)
         (transient--render!)))))
 
 (define-command "transient-column-left" "Select the same row in the column to the left"
@@ -392,7 +428,11 @@
                             (max 0 (- (length items) 1))))
              (state (plist-put state 'selected selected)))
         (transient--set-active! state)
-        (transient-keymap-install! (transient--bindings groups))
+        ;; 'keys-fn (SCOPE) -> ((KEY COMMAND) ...): keys the menu answers
+        ;; that are no row; the legend is where they are named
+        (transient-keymap-install!
+          (transient--bindings groups
+            (transient--option-list prefix 'keys-fn (plist-get state 'scope))))
         (transient-show!
           (list (cadr prefix) (transient--menu-groups groups state)
                 (cons (list "columns" (transient--columns prefix state groups))
@@ -402,12 +442,13 @@
 ;;; the first. Opening on the live choice means the menu answers "what
 ;;; am I on?" before a key is pressed.
 (define (transient--initial-selection prefix state)
-  (let loop ((items (transient--visible-items
-                      (transient--visible-groups prefix state)))
-             (i 0))
-    (cond ((null? items) 0)
-          ((transient--item-active? (car items) state) i)
-          (else (loop (cdr items) (+ i 1))))))
+  (let ((all (transient--visible-items (transient--visible-groups prefix state))))
+    (let loop ((items all) (i 0))
+      (cond ((null? items) (transient--selectable-index all 0 1))
+            ((and (transient--item-active? (car items) state)
+                  (transient--item-selectable? (car items)))
+             i)
+            (else (loop (cdr items) (+ i 1)))))))
 
 (define (transient-setup name &optional scope)
   (let ((prefix (transient-prefix name)))
@@ -426,9 +467,8 @@
           ;; the setup hook decides what is in force, so the opening row
           ;; is read after it, not from the seed
           (let ((settled (transient--active)))
-            (transient--set-active!
-              (plist-put settled 'selected
-                (transient--initial-selection prefix settled))))
+            (transient--select! settled
+              (transient--initial-selection prefix settled)))
           (transient--render!)))))
 
 (define (transient--remember! state)
@@ -526,6 +566,17 @@
             (transient--set-active! #f)
             (message "Quit"))))))
 
+;;; C-g and ESC both leave one level. C-g also says "change nothing": an
+;;; on-quit hook that applies a draft reads (transient-cancelled?) and
+;;; drops the draft instead. A menu with no draft sees no difference.
+(define (transient-cancelled?) (and (frame-local 'transient-cancelled) #t))
+
+(define-command "transient-cancel-one" "Exit this transient, and tell it to change nothing"
+  (lambda ()
+    (set-frame-local! 'transient-cancelled #t)
+    (run-command "transient-quit-one")
+    (set-frame-local! 'transient-cancelled #f)))
+
 (define-command "transient-quit-all" "Exit this transient and every parent"
   (lambda ()
     (let ((state (transient--active)))
@@ -562,16 +613,44 @@
         (transient--set-active! (plist-put state 'help (not (plist-get state 'help))))
         (transient--render!)))))
 
+;;; Every change of the cursor goes through here, so a prefix can follow
+;;; the cursor: 'on-select (SCOPE ITEM) runs with the row it lands on.
+(define (transient--select! state index)
+  (let* ((prefix (transient-prefix (plist-get state 'prefix)))
+         (items (if prefix
+                    (transient--visible-items (transient--visible-groups prefix state))
+                    '()))
+         (fn (and prefix (transient--prefix-option prefix 'on-select))))
+    (transient--set-active! (plist-put state 'selected index))
+    (when (and (procedure? fn) (< index (length items)))
+      (fn (plist-get state 'scope) (nth index items)))))
+
+;;; Up and down stay in the cursor's column and wrap inside it: in a menu
+;;; whose columns mean different things, the last preset is not one row
+;;; above the first field.
 (define (transient--move-selection delta)
   (let* ((state (transient--active))
          (prefix (and state (transient-prefix (plist-get state 'prefix))))
-         (count (if prefix
-                    (length (transient--visible-items
-                              (transient--visible-groups prefix state))) 0)))
-    (when (> count 0)
-      (transient--set-active!
-        (plist-put state 'selected
-          (modulo (+ (or (plist-get state 'selected) 0) delta count) count)))
+         (groups (if prefix (transient--visible-groups prefix state) '()))
+         (items (transient--visible-items groups))
+         (selected (or (and state (plist-get state 'selected)) 0))
+         ;; only a menu that declares its columns: without the option every
+         ;; group is a column, and down still walks from group to group
+         (column (let loop ((cs (if (and prefix (transient--prefix-option prefix 'columns))
+                                    (transient--columns prefix state groups)
+                                    '())))
+                   (cond ((null? cs) #f)
+                         ((member selected (transient--column-indexes groups (car cs)))
+                          (transient--column-indexes groups (car cs)))
+                         (else (loop (cdr cs))))))
+         (ring (filter (lambda (i) (transient--item-selectable? (nth i items)))
+                       (or column
+                           (let loop ((i (- (length items) 1)) (acc '()))
+                             (if (< i 0) acc (loop (- i 1) (cons i acc))))))))
+    (when (pair? ring)
+      (let* ((n (length ring))
+             (at (transient--position selected ring)))
+        (transient--select! state (nth (modulo (+ at delta n) n) ring)))
       (transient--render!))))
 
 (define-command "transient-next" "Select the next suffix in the menu"
@@ -646,7 +725,7 @@
   (load (transient--values-file)))
 
 (public! 'transient-define-prefix
-  "(transient-define-prefix NAME DOC GROUPS [OPTIONS]) — define a temporary grouped command menu. OPTIONS: 'on-setup 'on-quit (SCOPE), 'columns ((TITLE ...) ...) the groups that share a column (left/right move between columns), 'subtitle-fn 'context-fn (SCOPE) -> text, 'chips-fn (SCOPE) -> ((LABEL ACTIVE?) ...), 'detail-fn (SCOPE ITEM) -> (TITLE ((KEY VALUE TONE) ...) NOTE) the facts rail, 'legend-fn (SCOPE) -> ((KEY LABEL) ...) the footer")
+  "(transient-define-prefix NAME DOC GROUPS [OPTIONS]) — define a temporary grouped command menu. OPTIONS: 'on-setup 'on-quit (SCOPE), 'columns ((TITLE ...) ...) the groups that share a column (left/right move between columns), 'subtitle-fn 'context-fn (SCOPE) -> text, 'chips-fn (SCOPE) -> ((LABEL ACTIVE?) ...), 'detail-fn (SCOPE ITEM) -> (TITLE ((KEY VALUE TONE) ...) NOTE) the facts rail, 'legend-fn (SCOPE) -> ((KEY LABEL) ...) the footer, 'on-select (SCOPE ITEM) runs when the cursor lands on a row, 'keys-fn (SCOPE) -> ((KEY COMMAND) ...) keys that are no row and win over a row's key; a row whose key is the empty string takes no key, 'layout NAME the frame's layout class (split: a narrow first column and a wide second one)")
 (public! 'transient-suffix
   "(transient-suffix KEY DESCRIPTION COMMAND [PROPERTIES]) — define a menu command")
 (public! 'transient-infix

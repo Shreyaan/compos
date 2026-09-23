@@ -19,6 +19,7 @@ defmodule Compos.TransientTest do
     Editor.set_pending([])
     Editor.delete_other_windows()
     Editor.set_window_buffer("transient-source-#{System.unique_integer([:positive])}")
+    Session.eval("(set-frame-local! 'llm-config-more #f)")
 
     # a menu left open holds the frame's overriding map, and every key of
     # the next test module would answer to it
@@ -67,42 +68,40 @@ defmodule Compos.TransientTest do
     assert Editor.render_state().transient == nil
   end
 
-  test "M-x opens a transient and RET invokes its selected row" do
+  test "M-x opens the LLM menu: presets left, config right, keys in the footer" do
+    eval!("(set! *llm-bundles* '())")
     press("M-x")
     type("llm-configure")
     press("RET")
 
     menu = Editor.render_state().transient
-    assert menu.title == "Language model"
-    # the header, the facts rail, and the legend come from Scheme with the rows
-    assert menu.subtitle =~ ~r/^(on bundle|off-bundle)/
+    assert menu.title == "LLM setup"
+    assert menu.layout == "split"
     assert menu.context =~ "this buffer"
-    assert menu.detail.title == "live setup"
-    assert Enum.map(menu.detail.rows, & &1.k) ==
-             ["backend", "model", "effort", "tools", "asks", "agent mode", "prompt"]
-    assert Enum.any?(menu.legend, &(&1.key == "." and &1.label == "fine-tune"))
+    # a chat on no preset is a row of its own, and the menu opens on it
+    assert [["Presets"], [config]] = menu.columns
+    assert config == "this chat · config"
+    assert selected().description == "this chat"
+    assert selected().value == "selected"
+    assert Enum.any?(menu.legend, &(&1.key == "ESC C-g"))
 
-    # RET invokes the selected row; with no bundle saved that is fine-tune
-    eval!("(set! *llm-bundles* '())")
-    Session.run_command("transient-quit-all")
-    Session.run_command("llm-configure")
-    press("RET")
-    assert Editor.render_state().transient.title == "Fine-tune"
+    # right goes into the config; no key closes the menu but ESC, C-g, C-q
+    press("<right>")
+    assert selected().key == "b"
+    assert Editor.render_state().transient.title == "LLM setup"
 
     press("RET")
-    assert Editor.render_state().transient.title == "Fine-tune"
     mb = Editor.render_state().minibuffer
     assert mb.prompt == "Backend: "
-    # the picker's rail reads facts the prompt wrote, and its own note
-    assert mb.note =~ "RET switches the backend"
-    assert Enum.any?(mb.legend, &(&1.key == "RET"))
-    assert %{facts: [{"backend", _} | _]} = Enum.find(mb.candidates, & &1.selected)
+    assert mb.note =~ "RET puts the backend"
 
+    # C-g in the picker goes back to the menu, and the menu stays
     press("C-g")
-    assert Editor.render_state().transient.title == "Fine-tune"
-    # ESC is one level up, as the legend says
+    assert Editor.render_state().transient.title == "LLM setup"
+    press("<left>")
+    assert selected().description == "this chat"
     press("ESC")
-    assert Editor.render_state().transient.title == "Language model"
+    assert Editor.render_state().transient == nil
   end
 
   test "undefined keys stay active, nested prefixes return with C-g" do
@@ -185,7 +184,7 @@ defmodule Compos.TransientTest do
     end
   end
 
-  test "the LLM menu turns tool presets on and off and counts what they serve" do
+  test "the LLM menu turns tool presets on and off in the config, and ESC applies them" do
     buf = "*zz-transient-chat*"
     on_exit(fn -> Compos.Core.kill_buffer(buf) end)
 
@@ -194,17 +193,17 @@ defmodule Compos.TransientTest do
     (buffer-set-local! "#{buf}" 'mode-name "chat-mode")
     (buffer-set-local! "#{buf}" 'chat-presets '())
     (define-preset! 'zztransient "a test preset" '())
+    (set! *llm-bundles* '())
     """)
 
     Editor.set_window_buffer(buf)
     Session.run_command("llm-configure")
-    # the fields are one level down
-    press(".")
 
-    # the editor bridge is always on, so it is always in the value
-    assert row("presets").value == "compos"
-    assert row("tools").value =~ ~r/^\d+ tools$/
+    # the editor bridge is always on, so the tools read editor only
+    assert row("tools").value == "editor only"
 
+    # the field keys answer in the config column; in the presets they filter
+    press("<right>")
     press("p")
     assert Editor.render_state().minibuffer.prompt == "Preset: "
 
@@ -215,137 +214,56 @@ defmodule Compos.TransientTest do
     type("zztransient")
     press("RET")
 
-    # the preset lands on the session and the menu stays open, changed
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "zztransient", sym: "compos"]
-    assert row("presets").value == "zztransient compos"
-
-    # the same key turns it back off
-    press("p")
-    type("zztransient")
-    press("RET")
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "compos"]
-    assert row("presets").value == "compos"
+    # the preset is in the config; the chat has it only when the menu closes
+    assert row("tools").value == "editor only → zztransient"
+    assert Buffer.get_local(buf, "chat-presets") == []
 
     # compos is the editor bridge: it never turns off
     press("p")
     type("compos")
     press("RET")
     assert Editor.snapshot().echo =~ "stays on"
-    assert row("presets").value == "compos"
 
-    press("C-q")
+    press("ESC")
+    assert Editor.render_state().transient == nil
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "zztransient", sym: "compos"]
   end
 
-  test "the LLM menu applies a previously selected combination" do
+  test "C-g and ESC both close the LLM menu and apply the config" do
     buf = Editor.current_buffer()
+    on_exit(fn -> Session.run_command("transient-quit-all") end)
 
-    on_exit(fn ->
-      Session.run_command("transient-quit-all")
-      eval!("(set! *llm-config-history* '())")
-    end)
-
-    eval!(~s{(llm-config-apply! "#{buf}" "api" "openai:gpt-5.6-luna" "medium")})
     eval!(~s{
       (set! *llm-bundles* '())
-      (set! *llm-config-history*
-        '(("codex-app-server" "gpt-5.6-terra" "high")))
+      (llm-config-apply! "#{buf}" "codex-app-server" "gpt-5.6-terra" "high")
     })
 
     Session.run_command("llm-configure")
-
-    assert %{items: recent} =
-             Enum.find(Editor.render_state().transient.groups, &(&1.title == "Recent"))
-
-    assert hd(recent).description == "codex-app-server · gpt-5.6-terra · high"
-    assert hd(recent).key == "1"
-
-    # with no bundle saved the first column holds fine-tune and save, and
-    # the recents stand in the next column: right moves there on the same
-    # row, and the rail names the fields that would change
-    assert Editor.render_state().transient.columns == [["Bundles", "Setup"], ["Recent"]]
     press("<right>")
-    detail = Editor.render_state().transient.detail
-    assert detail.title == "recent setup"
-    assert Enum.find(detail.rows, &(&1.k == "model")).tone == "drift"
-    assert detail.note =~ "RET applies"
-
-    press("1")
-
-    assert Buffer.get_local(buf, "llm-connector") == "codex-app-server"
+    press("m")
+    type("gpt-5.6-luna")
+    press("RET")
     assert Buffer.get_local(buf, "llm-model") == "gpt-5.6-terra"
-    assert Buffer.get_local(buf, "llm-effort") == "high"
+    press("C-g")
     assert Editor.render_state().transient == nil
-    assert eval!("*llm-config-history*") =~
-             ~s{connector "codex-app-server" model "gpt-5.6-terra" effort "high"}
-  end
-
-  test "the LLM menu records only a confirmed final combination" do
-    buf = Editor.current_buffer()
-
-    on_exit(fn ->
-      Session.run_command("transient-quit-all")
-      eval!("(set! *llm-config-history* '())")
-    end)
-
-    eval!(~s{
-      (set! *llm-config-history* '())
-      (llm-config-apply! "#{buf}" "codex-app-server" "gpt-5.6-terra" "high")
-    })
-
-    # Opening and cancelling a picker does not create history.
-    Session.run_command("llm-configure")
-    press(".")
-    press("m")
-    press("C-g")
-    press("C-g")
-    press("C-g")
-    assert eval!("*llm-config-history*") == "()"
-
-    # A confirmed model changes the buffer immediately. History commits only
-    # when C-g closes the fine-tune level.
-    Session.run_command("llm-configure")
-    press(".")
-    press("m")
-    type("gpt-5.6-luna")
-    press("RET")
-
     assert Buffer.get_local(buf, "llm-model") == "gpt-5.6-luna"
-    assert eval!("*llm-config-history*") == "()"
-
-    press("C-g")
-
-    assert eval!("*llm-config-history*") =~
-             ~s{connector "codex-app-server" model "gpt-5.6-luna" effort "default"}
-  end
-
-  test "an exiting LLM menu row commits the confirmed combination" do
-    buf = Editor.current_buffer()
-
-    on_exit(fn ->
-      Session.run_command("transient-quit-all")
-      eval!("(set! *llm-config-history* '())")
-    end)
-
-    eval!(~s{
-      (set! *llm-config-history* '())
-      (llm-config-apply! "#{buf}" "codex-app-server" "gpt-5.6-terra" "high")
-    })
+    eval!(~s{(llm-config-apply! "#{buf}" "codex-app-server" "gpt-5.6-terra" "high")})
 
     Session.run_command("llm-configure")
-    press(".")
+    press("<right>")
     press("m")
     type("gpt-5.6-luna")
     press("RET")
-    # d shows the whole permission policy: an exiting row
+    # an action row keeps the menu open too
+    press("+")
     press("d")
-
-    assert Editor.render_state().transient == nil
-    assert eval!("*llm-config-history*") =~
-             ~s{connector "codex-app-server" model "gpt-5.6-luna" effort "default"}
+    assert Editor.render_state().transient.title == "LLM setup"
+    press("ESC")
+    assert Buffer.get_local(buf, "llm-model") == "gpt-5.6-luna"
   end
 
-  test "the LLM menu applies a previous combination to a chat" do
-    buf = "*zz-transient-history-chat*"
+  test "typing filters the presets, RET selects one, ESC gives it to the chat" do
+    buf = "*zz-transient-preset-chat*"
     eval!(~s{(buffer-create "#{buf}")})
 
     on_exit(fn ->
@@ -353,7 +271,7 @@ defmodule Compos.TransientTest do
       eval!(~s{
         (let ((slug (buffer-local "#{buf}" 'agent-slug)))
           (when slug (llm-session-close! slug)))
-        (set! *llm-config-history* '())
+        (set! *llm-bundles* '())
       })
       Compos.Core.kill_buffer(buf)
     end)
@@ -362,18 +280,31 @@ defmodule Compos.TransientTest do
       (buffer-set-local! "#{buf}" 'mode-name "chat-mode")
       (buffer-set-local! "#{buf}" 'agent-connector "api")
       (buffer-set-local! "#{buf}" 'agent-saved-mark 0)
-      (set! *llm-config-history*
-        '(("api" "openai:gpt-5.6-luna" "high")
-          ("api" "default" "default")))
+      (set! *llm-bundles* '())
+      (llm-bundle-save! "zz-luna" '(connector "api" model "openai:gpt-5.6-luna" effort "high"))
     })
 
     Editor.set_window_buffer(buf)
     Session.run_command("llm-configure")
-    press("1")
+    type("lu")
+    assert selected().description == "zz-luna"
+    assert row("model").value == "openai:gpt-5.6-luna"
+    press("RET")
+    assert selected().value == "selected"
+    assert Editor.render_state().transient.subtitle =~ "selected: zz-luna"
+    assert Buffer.get_local(buf, "agent-model") != "openai:gpt-5.6-luna"
 
+    press("ESC")
     assert Buffer.get_local(buf, "agent-connector") == "api"
     assert Buffer.get_local(buf, "agent-model") == "openai:gpt-5.6-luna"
     assert Buffer.get_local(buf, "agent-effort") == "high"
+  end
+
+  # the row under the cursor
+  defp selected do
+    Editor.render_state().transient.groups
+    |> Enum.flat_map(& &1.items)
+    |> Enum.find(& &1.selected)
   end
 
   # one row of the active transient, by its description
