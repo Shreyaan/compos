@@ -120,6 +120,30 @@ defmodule Compos.Ui.BlockKindsTest do
     for {a, b} <- Enum.zip(list2.children, list3.children), do: assert(:erts_debug.same(a, b))
   end
 
+  # The chat transcript window draws only the tail. Its first child names
+  # its place in the whole list, so a moving window keeps every index, and
+  # with it the memo entry of every block that stays drawn.
+  test "an isolated list with an index base keeps each child's place" do
+    buf = make_buffer()
+    state = Editor.render_state()
+    {_, cache} = EditorLive.decorate_tree(state.tree, %{}, state.faces, state.active)
+    [list | rest] = Buffer.get_local(buf, "render-blocks")
+    [_first | kept] = pl_children(list)
+    windowed = list ++ [{:sym, "index-base"}, 1]
+    Buffer.set_local(buf, "render-blocks", [put_children(windowed, kept) | rest])
+    state = Editor.render_state()
+    {tree, _} = EditorLive.decorate_tree(state.tree, cache, state.faces, state.active)
+    [list2 | _] = leaf(tree).blk
+    assert Enum.map(list2.children, &List.keyfind(&1.attrs, "data-index", 0)) ==
+             [{"data-index", "1"}, {"data-index", "2"}]
+  end
+
+  defp pl_children([{:sym, "children"}, v | _]), do: v
+  defp pl_children([_, _ | rest]), do: pl_children(rest)
+
+  defp put_children([{:sym, "children"}, _ | rest], v), do: [{:sym, "children"}, v | rest]
+  defp put_children([k, x | rest], v), do: [k, x | put_children(rest, v)]
+
   test "the reader's place mirrors into follow-place", %{conn: conn} do
     buf = make_buffer()
     {:ok, view, _} = live(conn, "/")

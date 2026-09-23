@@ -37,6 +37,8 @@
         (check-equal! (plist-get (nth 1 rows) 'range) '(6 26) "prose is a range of the buffer")
         (check-equal! (plist-get (nth 1 rows) 'format) "markdown" "prose draws as Markdown")
         (check-equal! (plist-get details 'open) #f "a card starts closed")
+        (check-equal! (length (chat-view-test--children details)) 1
+                      "a closed card draws its summary and no body")
         (check-equal! (plist-get summary 'click) "chat-card:t1" "the summary toggles its card")
         (check-equal! (buffer-local buf 'render-input) "agent-saved-mark"
                       "the input starts at the chat mark")
@@ -69,6 +71,7 @@
       (let* ((tool (nth 2 (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
              (details (car (chat-view-test--children tool))))
         (check-equal! (plist-get details 'open) #t "the card is open")
+        (check-equal! (length (chat-view-test--children details)) 2 "an open card draws its body")
         (check-equal! (agent-open-cards buf) '("t1") "the open set holds the card"))
       (buffer-kill! buf))))
 
@@ -140,4 +143,76 @@
       (let ((rows (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
         (check-equal! (length rows) 3 "every block has a view")
         (check-equal! (plist-get (nth 1 rows) 'range) '(6 20) "the changed block is new"))
+      (buffer-kill! buf))))
+
+;; The transcript window. The test chat's blocks hold 6, 20 and 8 bytes,
+;; oldest first. A budget of 15 draws only the newest block.
+(define (chat-view-test--with-window bytes thunk)
+  (let ((was chat-view-window-bytes))
+    (set! chat-view-window-bytes bytes)
+    (let ((r (thunk)))
+      (set! chat-view-window-bytes was)
+      r)))
+
+(define (chat-view-test--drawn buf)
+  (map (lambda (r) (plist-get r 'class))
+       (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+
+(deftest 'chat-view-draws-the-newest-blocks-within-the-budget
+  "a transcript over the byte budget draws its newest blocks and a row that names the hidden count"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-window*")))
+      (chat-view-test--with-window 15
+        (lambda ()
+          (chat-view-sync! buf)
+          (let ((rows (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+            (check-equal! (length rows) 2 "the earlier row and the newest block")
+            (check-equal! (plist-get (car rows) 'class) "ag-earlier" "the earlier row comes first")
+            (check-equal! (plist-get (car (chat-view-test--children (car rows))) 'text)
+                          "Show earlier blocks (2 hidden)" "the row names the hidden count")
+            (check-equal! (plist-get (cadr rows) 'tag) "c-toolcall" "the newest block draws")
+            (check-equal! (plist-get (car (buffer-local buf 'render-blocks)) 'index-base) 1
+                          "the newest block keeps index 2, its place in the whole transcript"))))
+      (buffer-kill! buf))))
+
+(deftest 'chat-view-earlier-click-reveals-one-more-budget
+  "the earlier row's click draws one more budget of earlier blocks"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-earlier*")))
+      (chat-view-test--with-window 15
+        (lambda ()
+          (chat-view-sync! buf)
+          (check-true! (run-hook-with-args-until-success 'block-click buf "chat-earlier")
+                       "the chat handles its own click")
+          (let ((rows (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+            (check-equal! (map (lambda (r) (plist-get r 'tag)) (cdr rows))
+                          '("c-agent" "c-toolcall") "the prose block draws now")
+            (check-equal! (plist-get (car (chat-view-test--children (car rows))) 'text)
+                          "Show earlier blocks (1 hidden)" "one block stays hidden"))))
+      (buffer-kill! buf))))
+
+(deftest 'chat-view-window-zero-draws-everything
+  "a budget of 0 turns the window off"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-nowindow*")))
+      (chat-view-test--with-window 0
+        (lambda ()
+          (chat-view-sync! buf)
+          (check-equal! (length (chat-view-test--children (car (buffer-local buf 'render-blocks))))
+                        3 "every block draws, and no earlier row")))
+      (buffer-kill! buf))))
+
+(deftest 'chat-view-reveal-passes-a-block-over-the-budget
+  "a block larger than the budget still leaves each reveal one more block"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-big*")))
+      (chat-view-test--with-window 4
+        (lambda ()
+          (chat-view-sync! buf)
+          (run-hook-with-args-until-success 'block-click buf "chat-earlier")
+          (check-equal! (plist-get (car (chat-view-test--children
+                                           (car (chat-view-test--children
+                                                  (car (buffer-local buf 'render-blocks))))))
+                                   'text)
+                        "Show earlier blocks (1 hidden)" "the 20-byte block draws after one reveal")))
       (buffer-kill! buf))))

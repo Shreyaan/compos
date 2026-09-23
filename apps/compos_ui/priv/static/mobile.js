@@ -41,6 +41,10 @@ const Hooks = {
       this.el.addEventListener("click", this.linkH);
       this.place();
     },
+    // the distance from the reader's view to the end: a reveal of
+    // earlier blocks grows the list above the reader, and this
+    // distance is what stays the same
+    beforeUpdate() { const s = this.el; this.fromEnd = s.scrollHeight - s.scrollTop; },
     updated() {
       const seq = parseInt(this.el.dataset.followSeq || "0", 10);
       if (this.el.dataset.buf !== this.buf) { this.buf = this.el.dataset.buf; this.stick = true; }
@@ -48,6 +52,7 @@ const Hooks = {
       else if (seq !== this.followSeq) { this.stick = true; }
       this.followSeq = seq;
       if (this.stick) this.place();
+      else if (this.fromEnd !== undefined) this.el.scrollTop = this.el.scrollHeight - this.fromEnd;
     },
     place() { const s = this.el; if (this.stick) s.scrollTop = s.scrollHeight; },
     destroyed() { this.el.removeEventListener("scroll", this.scrollH); this.el.removeEventListener("click", this.linkH); clearTimeout(this.report); }

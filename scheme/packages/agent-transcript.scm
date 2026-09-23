@@ -797,7 +797,10 @@
                                               'attrs (list (list "state" status)) 'text status)))
                               (if duration (list (chat-view--text "c-text" "ag-duration" duration)) '())
                               (if tokens (list (chat-view--text "c-text" "ag-duration ag-tokens" tokens)) '()))))
-                    (if (equal? body "") '()
+                    ;; a closed card draws no body: a closed details
+                    ;; still holds its body in the page, and one 1.28 MB
+                    ;; tool result was 116k nodes behind a one-line summary
+                    (if (or (not open) (equal? body "")) '()
                         (list (list 'tag "c-result"
                                     'children (list (list 'tag "pre" 'class "ag-body"
                                                           'range (list bs e) 'format "mcp-result")))))))))))
@@ -880,6 +883,47 @@
       '()
       (cons (list (car a) (car b)) (chat-view--zip (cdr a) (cdr b)))))
 
+;; --- the transcript window ---------------------------------------------------
+;; The browser walks every node of the transcript on each patch to it, and a
+;; streamed chunk patches it. A 3 MB chat was 128k nodes and 200 ms a key. So
+;; the tree draws only the newest blocks, up to a byte budget of the text
+;; they hold. A row above them reveals one more budget of earlier blocks.
+;; The buffer keeps all of its text; only the drawing is windowed.
+
+(defcustom 'chat-view-window-bytes 262144
+  "How many bytes of transcript text a rich chat draws. Earlier blocks wait behind a row that reveals them. 0 draws all."
+  'group 'chat 'type 'integer)
+
+;; how many blocks of RAW (newest first) PAGES budgets draw. Each page
+;; takes blocks up to PER bytes and at least one block, so a block larger
+;; than the budget cannot stop a reveal.
+(define (chat-view--window-count raw per pages)
+  (let loop ((r raw) (bytes 0) (in-page 0) (page 0) (n 0))
+    (cond
+      ((null? r) n)
+      ((> page pages) n)
+      (else
+       (let ((next (+ bytes (max 0 (- (nth 1 (car r)) (nth 0 (car r)))))))
+         (if (and (> in-page 0) (> next per))
+             (loop r 0 0 (+ page 1) n)
+             (loop (cdr r) next (+ in-page 1) page (+ n 1))))))))
+
+;; the drawn views and the count of hidden views, both from newest-first lists
+(define (chat-view--window buf raw views)
+  (let* ((per (or chat-view-window-bytes 0))
+         (reveal (or (buffer-local buf 'chat-view-reveal) 0)))
+    (if (<= per 0)
+        (list views 0)
+        (let ((n (chat-view--window-count raw per reveal)))
+          (list (take views n)
+                (length (filter (lambda (v) v) (list-tail views (min n (length views))))))))))
+
+(define (chat-view--earlier n)
+  (list 'tag "c-group" 'class "ag-earlier"
+        'children (list (chat-view--button "ag-btn earlier" "chat-earlier"
+                                           (string-append "Show earlier blocks ("
+                                                          (number->string n) " hidden)")))))
+
 ;; the views of RAW, newest first. The common events push a block or change
 ;; the newest one; both reuse every older view without a walk.
 (define (chat-view--views buf raw open m)
@@ -899,12 +943,17 @@
                   (if hit (cadr hit) (chat-view-block buf b open))))
               raw))))))
 
-(define (chat-view-tree buf children verbosity queued activity)
+(define (chat-view-tree buf children verbosity queued activity hidden)
   (append
     (list (list 'tag "c-transcript" 'class (string-append "ag-scroll ag-verbosity-" verbosity)
                 'isolate #t 'follow #t 'anchor "transcript"
                 'attrs (list (list "verbosity" verbosity) (list "buffer" buf))
-                'children children))
+                ;; the first drawn block keeps its index in the whole
+                ;; transcript; the earlier row takes the index before it
+                'index-base (max 0 (- hidden 1))
+                'children (if (> hidden 0)
+                              (cons (chat-view--earlier hidden) children)
+                              children)))
     (map (lambda (q)
            (list 'tag "c-user" 'class "ag-user ag-queued ag-queued-row"
                  'attrs '(("state" "queued"))
@@ -956,17 +1005,20 @@
            (verbosity (or (buffer-local buf 'agent-verbosity) "info"))
            (queued (or (buffer-local buf 'chat-queued) '()))
            (activity (chat-activity-live buf))
-           (sig (list raw open verbosity queued activity))
+           (sig (list raw open verbosity queued activity
+                      (buffer-local buf 'chat-view-reveal)
+                      chat-view-window-bytes))
            (m (chat-view--memo buf)))
       (unless (and m (equal? (nth 3 m) sig)
                    (buffer-local buf 'render-blocks))
-        (let ((views (chat-view--views buf raw open m)))
+        (let* ((views (chat-view--views buf raw open m))
+               (win (chat-view--window buf raw views)))
           (chat-view--memo-set! buf (list raw open views sig))
           (buffer-set-locals! buf
             (list 'render-root '(tag "c-buffer" class "agent-view")
                   'render-input "agent-saved-mark"
-                  'render-blocks (chat-view-tree buf (reverse (filter (lambda (v) v) views))
-                                                 verbosity queued activity))))))))
+                  'render-blocks (chat-view-tree buf (reverse (filter (lambda (v) v) (car win)))
+                                                 verbosity queued activity (cadr win)))))))))
 
 ;; the clicks the tree carries: a tool card, a permission verb, an answer
 (add-hook! (list 'block-click 'chat)
@@ -974,6 +1026,11 @@
     (cond
       ((string-prefix? "chat-card:" id)
        (agent-card-toggle! buf (substring-bytes id 10 (string-byte-length id)))
+       (chat-view-sync! buf)
+       #t)
+      ((equal? id "chat-earlier")
+       (buffer-set-local! buf 'chat-view-reveal
+         (+ 1 (or (buffer-local buf 'chat-view-reveal) 0)))
        (chat-view-sync! buf)
        #t)
       ((string-prefix? "chat-cmd:" id)

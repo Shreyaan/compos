@@ -1254,7 +1254,42 @@
           this.place();
           return;
         }
-        if (this.stick) this.place();
+        if (this.stick) { this.place(); return; }
+        // A reader who left the tail keeps the block at the top of
+        // their view where it was. The transcript window draws
+        // earlier blocks above it on a reveal, and without this the
+        // view stays at the same scrollTop over different blocks.
+        const pin = this.pin;
+        this.pin = null;
+        const now = pin && this.el.querySelector(`[data-index="${pin.index}"]`);
+        if (!now) return;
+        const want = now.offsetTop - pin.fromTop;
+        if (Math.abs(this.scroller.scrollTop - want) <= 1) return;
+        this.placing = true;
+        this.scroller.scrollTop = want;
+        requestAnimationFrame(() => { this.placing = false; });
+      },
+      // the block at the top of the view, noted before a patch so
+      // updated() can put it back where it was
+      beforeUpdate() {
+        this.pin = null;
+        const s = this.scroller;
+        if (this.stick || !s || !s.isConnected || s.clientHeight === 0) return;
+        const r = s.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, Math.max(r.top, 0) + 2);
+        let block = hit && hit.closest && hit.closest("[data-index]");
+        // the reveal row at the top has no index: pin the first
+        // block below the top edge. The window bounds this walk.
+        if (!block || !s.contains(block)) {
+          block = null;
+          for (const b of s.querySelectorAll("[data-index]")) {
+            if (b.getBoundingClientRect().bottom > r.top) { block = b; break; }
+          }
+        }
+        if (!block) return;
+        // offsetTop, not a screen rect: it moves only when content
+        // above the block changes, which is the change to undo
+        this.pin = { index: block.dataset.index, fromTop: block.offsetTop - s.scrollTop };
       },
       destroyed() {
         this.el.removeEventListener("click", this.linkH);

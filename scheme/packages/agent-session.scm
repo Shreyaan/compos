@@ -808,6 +808,11 @@
 (define (chat-follow-again! buf)
   (let ((seq (buffer-local buf 'follow-seq)))
     (buffer-set-local! buf 'follow-place #f)
+    ;; the bottom is the transcript window's home: the earlier blocks a
+    ;; reader revealed go back behind the reveal row
+    (when (buffer-local buf 'chat-view-reveal)
+      (buffer-set-local! buf 'chat-view-reveal #f)
+      (when (boundp 'chat-view-sync!) (chat-view-sync! buf)))
     (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0)))))
 
 (define-command "chat-to-bottom" "Scroll this chat to the newest message"
@@ -819,6 +824,18 @@
             (with-current-buffer buf (lambda () (end-of-buffer!)))
             (chat-follow-again! buf)
             (buffer-windows-follow-point! buf))))))
+
+;; A chat comes back at its newest message. A browser that attaches a
+;; frame (a page load, a reconnect after a restart) shows each chat in
+;; that frame at the bottom, not at the place a reader left in an older
+;; page. Within one page the reader's place still holds.
+(define (chat-frame-to-bottom!)
+  (for-each (lambda (w)
+              (let ((buf (cadr w)))
+                (when (chat-buffer? buf) (chat-follow-again! buf))))
+            (window-list)))
+
+(add-hook! 'frame-attach-hook 'chat-frame-to-bottom!)
 
 ;; M-> is end-of-buffer everywhere else, and in a chat the end of the
 ;; buffer IS the newest message — but point alone does not move the

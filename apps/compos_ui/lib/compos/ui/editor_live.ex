@@ -2468,15 +2468,26 @@ defmodule Compos.Ui.EditorLive do
 
     {children, acc} =
       if view.isolate,
-        do: isolated_children(raw_children, text, {memo, win}, {span, fresh}),
+        do:
+          isolated_children(
+            raw_children,
+            pget(pl, "index-base") || 0,
+            text,
+            {memo, win},
+            {span, fresh}
+          ),
         else: Enum.map_reduce(raw_children, {span, fresh}, &block_build(&1, text, {memo, win}, &2))
 
     {block_fill(%{view | children: Enum.reject(children, & &1.empty)}, text), acc}
   end
 
-  defp isolated_children(raw_children, text, {memo, win}, acc) do
+  # BASE is the first child's place in the whole list. A mode that draws
+  # only the tail of a long list (the chat transcript window) passes it,
+  # so an index names the same block while the window moves: the memo key
+  # holds, and the reader's saved place still finds its block.
+  defp isolated_children(raw_children, base, text, {memo, win}, acc) do
     raw_children
-    |> Enum.with_index()
+    |> Enum.with_index(base)
     |> Enum.map_reduce(acc, fn {c, i}, {span, fresh} ->
       ranges = block_ranges(c, [])
       key = {i, c, Enum.map(ranges, fn {a, b} -> Text.slice(text, a, b) end)}

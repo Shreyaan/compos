@@ -1136,6 +1136,8 @@ body.unfocused .window.active .cursor {
 }
 .ag-btn.session { border-color: var(--ok-fg, #4a7a4a); color: var(--ok-fg, #4a7a4a); }
 .ag-btn.deny { border-color: transparent; color: var(--alert-fg, #a8342a); opacity: 0.8; }
+/* the transcript window: the row above the drawn blocks that reveals earlier ones */
+.ag-earlier { display: flex; justify-content: center; margin: 8px 0 16px; }
 .ag-wait {
   font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.85); margin: 8px 0;
   color: var(--agent-thought-fg, #8a8577);

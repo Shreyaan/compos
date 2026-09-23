@@ -1615,6 +1615,8 @@
     ;; the rich view's tree, rebuilt from the conversation by
     ;; chat-view-sync!, and the reader's place in it
     render-blocks render-root render-input follow-place follow-seq
+    ;; how many earlier budgets of the transcript the reader revealed
+    chat-view-reveal
     code-agent-switch-pending prompt-parts editing-state
     ;; set by a turn the connector answered with silence, read once by the
     ;; reconnect at the end of that batch

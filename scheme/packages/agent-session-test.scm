@@ -95,3 +95,24 @@
           (run-command "chat-unqueue")
           (check-equal! (chat-input-text buf) "" "nothing changed in the input")))
       (buffer-kill! buf))))
+
+(deftest 'a-chat-in-an-attached-frame-comes-back-at-the-bottom
+  "a frame attach clears the reader's old place, so the chat follows its newest message"
+  (lambda ()
+    (let ((buf (t--as-chat! '())))
+      (with-frame-windows (lambda () (switch-to-buffer! buf)))
+      (buffer-set-local! buf 'follow-place '(#t 120 2 7))
+      (buffer-set-local! buf 'follow-seq 3)
+      (chat-frame-to-bottom!)
+      (check-equal! (buffer-local buf 'follow-place) #f "the old place is gone")
+      (check-equal! (buffer-local buf 'follow-seq) 4 "the view gets the token to follow again")
+      (buffer-kill! buf))))
+
+(deftest 'following-again-closes-the-revealed-blocks
+  "back at the bottom, the transcript window draws only its first budget again"
+  (lambda ()
+    (let ((buf (t--as-chat! '())))
+      (buffer-set-local! buf 'chat-view-reveal 3)
+      (chat-follow-again! buf)
+      (check-equal! (buffer-local buf 'chat-view-reveal) #f "the reveals are gone")
+      (buffer-kill! buf))))
