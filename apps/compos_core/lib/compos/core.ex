@@ -113,6 +113,66 @@ defmodule Compos.Core do
     end
   end
 
+  # One buffer runtime rebuild runs at a time, whatever its lane. A mode
+  # setup writes shared Scheme globals (*keymaps* above all) with a
+  # read-modify-write. Two setups on two lanes each wrote the table from
+  # their own copy, so after a boot a chat kept mode-name chat-mode and
+  # lost its keys. The lock is re-entrant: a rebuild that wakes another
+  # buffer runs that rebuild inside its own. A holder that dies releases
+  # the lock. A wait that exceeds the bound runs the rebuild unlocked and
+  # logs it, so the lock can never wedge a lane.
+  @rebuild_lock :compos_runtime_rebuild
+  @rebuild_wait_ms 30_000
+
+  defp rebuild_runtime(name, fid) do
+    with_rebuild_lock(name, fn ->
+      Compos.Core.Session.exec_call_named("restore-buffer-runtime!", [name], fid)
+    end)
+  end
+
+  defp with_rebuild_lock(name, fun) do
+    depth = Process.get(@rebuild_lock, 0)
+
+    cond do
+      depth > 0 ->
+        Process.put(@rebuild_lock, depth + 1)
+
+        try do
+          fun.()
+        after
+          Process.put(@rebuild_lock, depth)
+        end
+
+      acquire_rebuild_lock(System.monotonic_time(:millisecond) + @rebuild_wait_ms) ->
+        Process.put(@rebuild_lock, 1)
+
+        try do
+          fun.()
+        after
+          Process.delete(@rebuild_lock)
+          :global.del_lock({@rebuild_lock, self()}, [node()])
+        end
+
+      true ->
+        require Logger
+
+        Logger.warning(
+          "buffer #{name}: another runtime rebuild held the lock for " <>
+            "#{@rebuild_wait_ms}ms; this rebuild runs without it"
+        )
+
+        fun.()
+    end
+  end
+
+  defp acquire_rebuild_lock(deadline) do
+    cond do
+      :global.set_lock({@rebuild_lock, self()}, [node()], 0) -> true
+      System.monotonic_time(:millisecond) >= deadline -> false
+      true -> Process.sleep(5) && acquire_rebuild_lock(deadline)
+    end
+  end
+
   @doc """
   Rebuild NAME's Scheme runtime on its own lane, without waiting. The
   frame in hand rides along, as it does for a synchronous call. The job
@@ -128,7 +188,7 @@ defmodule Compos.Core do
         if Buffer.exists?(name) do
           # a cast drops its reply: a failed restore must still say why,
           # or the buffer stays live with no keys and nothing names it
-          case Compos.Core.Session.exec_call_named("restore-buffer-runtime!", [name], fid) do
+          case rebuild_runtime(name, fid) do
             {:reply, {:error, msg}} = reply ->
               require Logger
               Logger.warning("buffer #{name}: the runtime restore failed: #{msg}")
@@ -151,13 +211,21 @@ defmodule Compos.Core do
   def restore_runtime(name) do
     # the buffer's own lane, with room for an agent revival: a 20s chat
     # restore on :ui froze every keystroke behind it
-    Compos.Core.Session.call_named(
-      "restore-buffer-runtime!",
-      [name],
-      nil,
-      120_000,
-      Compos.Core.Lane.for_buffer(name)
-    )
+    fid = Compos.Core.Frame.current()
+
+    case Compos.Core.Lane.run(
+           Compos.Core.Lane.for_buffer(name),
+           fn _from -> rebuild_runtime(name, fid) end,
+           120_000,
+           "call restore-buffer-runtime!"
+         ) do
+      {:error, msg} ->
+        require Logger
+        Logger.warning("buffer #{name}: the runtime restore failed: #{inspect(msg)}")
+
+      _ ->
+        :ok
+    end
 
     :ok
   end

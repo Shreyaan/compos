@@ -35,15 +35,16 @@ defmodule Compos.Scheme.Env do
   end
 
   def new(access \\ :public) when access in [:public, :protected, :private] do
-    %__MODULE__{
-      tid:
-        :ets.new(:compos_scheme_env, [
-          :ordered_set,
-          access,
-          read_concurrency: true,
-          write_concurrency: true
-        ])
-    }
+    tid =
+      :ets.new(:compos_scheme_env, [
+        :ordered_set,
+        access,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
+
+    :ets.insert(tid, {:write_gen, :atomics.new(1, signed: false)})
+    %__MODULE__{tid: tid}
   end
 
   @doc "Copyable shared rows without GC lock metadata."
@@ -91,9 +92,10 @@ defmodule Compos.Scheme.Env do
         # an ETS read copies the term, and hot values are closures whose
         # bodies are whole source trees — cache shared reads per process,
         # cleared at each exec boundary (with_eval). One lane sees its own
-        # writes at once (write-through updates the cache); another lane's
-        # mid-eval writes land at the next exec.
-        cache = Process.get(:scheme_cache) || %{}
+        # writes at once (write-through updates the cache). A write from
+        # another lane drops the cache (current_cache), so a
+        # read-modify-write of a global never starts from a stale copy.
+        cache = current_cache(store)
 
         case cache do
           %{{^ref, ^name} => val} ->
@@ -125,6 +127,65 @@ defmodule Compos.Scheme.Env do
   Frames in `local` are this eval's own and are untouched.
   """
   def forget_cached_reads, do: Process.put(:scheme_cache, %{})
+
+  # The write generation counts shared writes from every lane. A cache
+  # remembers the generation it saw. When another lane writes, the counts
+  # differ and the cache starts empty again. Before this, one lane cached
+  # a global for its whole exec: two chats that ran their mode setups in
+  # parallel each wrote *keymaps* from their own old copy, and one chat
+  # lost its keys.
+  defp current_cache(%__MODULE__{tid: tid}) do
+    cache = Process.get(:scheme_cache) || %{}
+
+    case cache do
+      %{:write_gen => {gen, seen}} ->
+        if :atomics.get(gen, 1) == seen do
+          cache
+        else
+          fresh = %{:write_gen => {gen, :atomics.get(gen, 1)}}
+          Process.put(:scheme_cache, fresh)
+          fresh
+        end
+
+      _ ->
+        case write_gen(tid) do
+          nil ->
+            cache
+
+          gen ->
+            cache = Map.put(cache, :write_gen, {gen, :atomics.get(gen, 1)})
+            Process.put(:scheme_cache, cache)
+            cache
+        end
+    end
+  end
+
+  defp write_gen(tid) do
+    :ets.lookup_element(tid, :write_gen, 2, nil)
+  end
+
+  # Count one shared write. The cache stays valid when this write is the
+  # only one since the cache last looked; else another lane wrote too.
+  defp note_write(tid) do
+    case write_gen(tid) do
+      nil ->
+        :ok
+
+      gen ->
+        now = :atomics.add_get(gen, 1, 1)
+
+        case Process.get(:scheme_cache) do
+          %{:write_gen => {^gen, seen}} = cache when seen == now - 1 ->
+            Process.put(:scheme_cache, Map.put(cache, :write_gen, {gen, now}))
+
+          %{} ->
+            Process.put(:scheme_cache, %{:write_gen => {gen, now}})
+
+          nil ->
+            :ok
+        end
+    end
+  end
 
   defp cached_parent(tid, cache, ref) do
     case cache do
@@ -199,6 +260,7 @@ defmodule Compos.Scheme.Env do
         store = promote(store, [val])
         shared_parent(tid, ref)
         :ets.insert(tid, {{:var, ref, name}, val})
+        note_write(tid)
         cache_put(ref, name, val)
         store
     end
@@ -250,6 +312,7 @@ defmodule Compos.Scheme.Env do
 
       _ ->
         :ets.delete(tid, {:var, ref, name})
+        note_write(tid)
         cache_delete(ref, name)
         store
     end

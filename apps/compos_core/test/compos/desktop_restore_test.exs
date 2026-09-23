@@ -269,6 +269,49 @@ defmodule Compos.DesktopRestoreTest do
     assert Buffer.get_local(name, "seen") == "marker"
   end
 
+  # The chat-mode loss: a boot rebuilds the buffers on screen in parallel,
+  # one lane each, and every mode setup writes the shared *keymaps* table.
+  # Two setups that ran at once each wrote the table from their own copy,
+  # so a buffer kept its mode-name and lost its own map.
+  test "parallel runtime rebuilds keep every buffer's local map" do
+    eval!("""
+    (define-mode "zz-busy-mode"
+      (lambda ()
+        (for-each
+          (lambda (i)
+            (local-set-key (string-append "<f9> " (number->string i)) "keyboard-quit"))
+          (iota 60))))
+    """)
+
+    # a table the size of a real editor's makes each write slow enough
+    # for two setups to overlap
+    eval!("""
+    (for-each (lambda (i) (define-keymap! (string-append "zz-filler-" (number->string i))))
+              (iota 400))
+    """)
+
+    names = for i <- 1..6, do: "*busy-#{i}-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> Enum.each(names, &Compos.Core.kill_buffer/1) end)
+
+    for name <- names do
+      eval!("""
+      (begin (buffer-create "#{name}")
+             (with-current-buffer "#{name}" (lambda () (set-mode! "zz-busy-mode")))
+             (clear-local-map! "#{name}"))
+      """)
+    end
+
+    names
+    |> Task.async_stream(&Compos.Core.restore_runtime/1, max_concurrency: 6, timeout: 60_000)
+    |> Stream.run()
+
+    for name <- names do
+      assert eval!(~s{(if (member "zz-busy-mode-map" (buffer-keymaps "#{name}")) "kept" "lost")}) ==
+               ~s{"kept"},
+             "#{name} lost its own map"
+    end
+  end
+
   test "group records restore before buffer runtime validates memberships" do
     n = System.unique_integer([:positive])
     name = "*group-restore-#{n}*"

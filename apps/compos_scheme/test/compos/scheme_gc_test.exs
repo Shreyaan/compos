@@ -160,6 +160,38 @@ defmodule Compos.Scheme.GCTest do
     assert {:ok, 7, _} = Task.await(task)
   end
 
+  test "a global another lane writes mid-exec is not lost to a stale cached read" do
+    interp = Scheme.new() |> Scheme.flush()
+    {:ok, _, interp} = Scheme.exec(interp, &Scheme.eval_string(&1, "(define shared-list '())"))
+    parent = self()
+
+    # lane A reads the global first, so its exec caches the value
+    a =
+      Task.async(fn ->
+        Scheme.exec(interp, fn i ->
+          {:ok, _, i} = Scheme.eval_string(i, "shared-list")
+          send(parent, :a_read)
+          receive do: (:go -> :ok)
+          Scheme.eval_string(i, "(set! shared-list (cons 'a shared-list))")
+        end)
+      end)
+
+    assert_receive :a_read, 1000
+
+    # lane B writes while lane A's exec is still open
+    b =
+      Task.async(fn ->
+        Scheme.exec(interp, &Scheme.eval_string(&1, "(set! shared-list (cons 'b shared-list))"))
+      end)
+
+    {:ok, _, _} = Task.await(b)
+    send(a.pid, :go)
+    {:ok, _, _} = Task.await(a)
+
+    {:ok, list, _} = Scheme.exec(interp, &Scheme.eval_string(&1, "shared-list"))
+    assert Enum.sort(list) == Enum.sort([{:sym, "a"}, {:sym, "b"}])
+  end
+
   test "an interpreter snapshot has private mutable globals" do
     interp = Scheme.new() |> Scheme.flush()
 
