@@ -484,7 +484,7 @@
   ;; ranking identifiers instead. Its `use` expression is searched too:
   ;; the operation it calls is the best name a task phrase can carry.
   (let ((kind (catalog--get e 'kind)))
-    (and (member kind '("component" "mode" "note" "fence-kind" "recipe"))
+    (and (member kind '("component" "mode" "note" "fence-kind" "recipe" "howto"))
          (apropos--hit?
            (string-append (apropos--catalog-field e 'name) " "
                           (apropos--catalog-field e 'qualified-name) " "

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Write docs/manual from the editor's own registries (scheme/packages/howto.scm).
+# The test boots the stock editor, renders every howto, command, and global key,
+# and writes the Markdown files. Commit the result with the change that caused it.
+set -e
+cd "$(dirname "$0")/.."
+WRITE_MANUAL=1 mix test apps/compos_core/test/compos/manual_test.exs
+git status --short docs/manual

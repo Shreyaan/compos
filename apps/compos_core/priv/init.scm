@@ -84,6 +84,10 @@
 ;; retags them through group membership, so this follows groups
 (load "apps.scm")
 (load "help.scm")
+;; the task recipes for people (C-h h) and the generated manual
+(load "howto.scm")
+;; the learn-by-doing tutorial (C-h t); its companion chat is the training app
+(load "tutorial.scm")
 (load "http.scm")
 (load "ibuffer.scm")
 ;; the chats table is the ibuffer template over the chats: it loads after it

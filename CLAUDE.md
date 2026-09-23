@@ -28,6 +28,7 @@ mix test                                    # one lane — use it when one reada
 SCHEME_TESTS=keymap mix test apps/compos_core/test/compos/scheme_suite_test.exs   # one kernel test file (priv/tests)
 SCHEME_TESTS=morg mix test --include packages apps/compos_core/test/compos/package_suite_test.exs   # a package's tests
 mix compos.reload scheme/packages/foo.scm   # a file outside the watched roots
+bin/docs                                    # regenerate docs/manual from the live registries (howto.scm)
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 ```
 

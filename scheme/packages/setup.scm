@@ -542,6 +542,7 @@
       "- **[Start the tutorial](compos:training/tutorial)** — learn by editing real\n"
       "  text.\n"
       "- Press `C-h t` to open or resume the tutorial at any time.\n"
+      "- Press `C-h h` to find how to do a task, and `C-h ?` for every help command.\n"
       "- [Set up your inference](compos:setup/inference)\n\n"
       "## Then\n\n"
       "- [M-x and the editor philosophy](compos:setup/keys)\n"

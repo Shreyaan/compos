@@ -61,6 +61,9 @@
     (buffer-delete-range! *help-buffer* 0 (buffer-size *help-buffer*))
     (buffer-append! *help-buffer* markdown)
     (buffer-set-local! *help-buffer* 'help-title title)
+    ;; a run link on the page runs its command in the reader's window
+    (unless (equal? (window-buffer from) *help-buffer*)
+      (buffer-set-local! *help-buffer* 'help-from-window from))
     (display-buffer *help-buffer*)
     ;; select the popup the display rule opened, the way ibuffer does
     (let ((w (window-showing-other *help-buffer* from)))
@@ -307,6 +310,8 @@
     (cond
       ((equal? kind "recipe")
        (list "Recipes" (plist-get h 'task) (plist-get h 'run) ""))
+      ((equal? kind "howto")
+       (list "How do I" (plist-get h 'name) "" ""))
       ((equal? kind "command")
        (list "Commands" (plist-get h 'name)
              (or (plist-get h 'key) "") doc))
@@ -356,6 +361,8 @@
   (cond ((equal? section "Commands")
          "`M-x` runs a command by name. The key after a name also runs it.\n\n")
         ((equal? section "Functions") "Call a function from Scheme.\n\n")
+        ((equal? section "How do I")
+         "`C-h h` opens a task by its title.\n\n")
         ((equal? section "Modes")
          "`M-x` with the mode's name turns it on in this buffer.\n\n")
         (else "")))

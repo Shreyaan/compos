@@ -1,4 +1,7 @@
-;;; training.scm --- the Emacs-style tutorial and its optional companion.
+;;; training.scm --- the tutorial's optional companion: the guided tour and the C-x k offer.
+;;;
+;;; The tutorial itself is stock (tutorial.scm). This app adds the companion
+;;; chat that teaches it, and loads only when the user init names it.
 
 (domain! 'learning)
 (effects! '(read write external))
@@ -8,85 +11,6 @@
 (defcustom 'training-bot-silent-mode #f
   "Start the tour without changing the editor window setup."
   'group 'training 'type 'boolean)
-
-(define *training-tutorial-buffer* "TUTORIAL")
-
-(define (training-document-path)
-  "Return the bundled, immutable tutorial master."
-  (string-append (compos-priv-dir) "/tutorials/COMPOS"))
-
-(define (training-state-dir)
-  (string-append (compos-home) "/tutorial"))
-
-(define (training-state-path)
-  (string-append (training-state-dir) "/COMPOS.tut"))
-
-(define (training-encode-state point text)
-  (string-append (number->string point) "\n" text))
-
-(define (training-decode-state raw)
-  (and (string? raw)
-       (let ((nl (string-index raw "\n")))
-         (and nl
-              (let* ((head (substring-bytes raw 0 nl))
-                     (point (string->number head)))
-                (and (re-match "^[0-9]+$" head)
-                     (number? point)
-                     (>= point 0)
-                     (list point
-                           (substring-bytes raw (+ nl 1) (string-byte-length raw)))))))))
-
-(define (training-read-state)
-  (let ((raw (read-file (training-state-path))))
-    (and raw (training-decode-state raw))))
-
-(define (training-save-state! buf)
-  (make-directory! (training-state-dir))
-  (write-file! (training-state-path)
-               (training-encode-state (buffer-point buf) (buffer-text buf)))
-  #t)
-
-(define (training--load-tutorial! text point)
-  (let ((buf *training-tutorial-buffer*))
-    (buffer-create buf)
-    (buffer-set-read-only! buf #f)
-    (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-insert! buf 0 text)
-    (with-current-buffer buf (lambda () (set-mode! "text-mode")))
-    (let ((point (max 0 (min point (buffer-size buf)))))
-      (buffer-goto! buf point)
-      (buffer-set-local! buf 'training-starting-point point))
-    (buffer-set-local! buf 'training-tutorial #t)
-    (buffer-mark-saved! buf)
-    buf))
-
-(define (training-fresh-tutorial!)
-  (let ((text (read-file (training-document-path))))
-    (if text
-        (training--load-tutorial! text 0)
-        (error "The bundled Compos tutorial is missing"))))
-
-(define (training-resume-tutorial! state)
-  (training--load-tutorial! (cadr state) (car state)))
-
-(define (training--show! buf)
-  (switch-to-buffer! buf)
-  buf)
-
-(define (training--prepare-document!)
-  (if (buffer-known? *training-tutorial-buffer*)
-      (buffer-create *training-tutorial-buffer*)
-      (let ((state (training-read-state)))
-        (if state
-            (training-resume-tutorial! state)
-            (training-fresh-tutorial!)))))
-
-(define (training--open-tutorial!)
-  (training--show! (training--prepare-document!)))
-
-(define-command "help-with-tutorial"
-  "Select the Compos learn-by-doing tutorial, resuming saved progress"
-  (lambda () (training--open-tutorial!)))
 
 (define (training--tutorial-progressed? buf)
   (or (buffer-modified? buf)
@@ -119,7 +43,6 @@
             (if (equal? name "") cur name)
             (lambda (killed?) #t)))))))
 
-(define-key "help-map" "t" "help-with-tutorial")
 (global-set-key "C-x k" "training-kill-buffer")
 
 (define (training-tour-prompt)
@@ -214,10 +137,6 @@
 (add-hook! (list 'preview-link "training") training--follow-link)
 
 (category! 'training)
-(public! 'training-document-path
-  "(training-document-path) — the bundled immutable tutorial master")
-(public! 'training-state-path
-  "(training-state-path) — the reader's saved tutorial content and point")
 (public! 'training-tour-prompt
   "(training-tour-prompt) — the first companion turn in the interactive curriculum")
 (public! 'training-mode-summary-prompt
