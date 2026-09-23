@@ -53,9 +53,11 @@
         ;; a preview takes another window, and buffer replacement puts
         ;; the window back. A buffer from outside the frame's group
         ;; takes a window the same way.
+        ;; A peek goes to the window of its own mode first, so a Markdown
+        ;; file from Dired replaces the Markdown file shown, not the chat.
         ;; Last, so a rule for a name wins, and a rule of your own
         ;; (add-display-rule! conses in front) wins too
-        (list '(category preview) '(reuse-window use-some-window pop-up-window) '())
+        (list '(category preview) '(reuse-window mode-window use-some-window pop-up-window) '())
         (list '(category foreign) '(reuse-window use-some-window pop-up-window) '())))
 
 ;; A buffer from outside the frame's group. groups.scm answers; with no
@@ -402,8 +404,12 @@
              (cond
                ((equal? where 'here) (window-preview-buffer! buf from) from)
                ((equal? where 'other)
-                (let* ((own (preview--owned-window from))
-                       (rec (and own (window-restore own)))
+                ;; the last look's window is this one's only while it still
+                ;; shows that look: once its own buffer came back, the claim
+                ;; is spent and the display chain chooses again
+                (let* ((owned (preview--owned-window from))
+                       (rec (and owned (window-restore owned)))
+                       (own (and rec owned))
                        (there (window-showing-other buf from))
                        (w (or own (with-display-preview
                                     (lambda ()
@@ -612,7 +618,7 @@
               ;; three-column target is no licence to show two chats: the
               ;; second one takes the pane the first one already holds.
               (kin (and (not shown)
-                        (window-showing-mode (buffer-local name 'mode-name)
+                        (window-showing-mode (display-buffer-mode name)
                                              (and inhibit-same? selected))))
               (panes (layout-target-visible-buffers))
               (capacity (layout-target-capacity (layout-target))))
@@ -842,17 +848,16 @@
 ;; but the float stops floating.
 (define (display-buffer-in-window! win name)
   (when (and (not *display-preview*) (boundp 'buffer-promote!)) (buffer-promote! name))
-  ;; A dormant buffer wakes when a window asks for it, and the wake
-  ;; queues its runtime rather than building it. switch-to-buffer-here!
-  ;; has always made the buffer whole on this path; this one did not, so
-  ;; a display could put a buffer on screen with its text and no mode.
-  ;; Same rule in both doors: whole, then shown.
-  (let ((restoring (not (buffer-exists? name))))
-    (let ((float (float-window)))
-      (window-show-buffer! win name)
-      (when restoring (restore-buffer-runtime! name))
-      (when (and (float--class? name) (not (equal? win float)))
-        (window-float-class! name #f))))
+  ;; A dormant buffer wakes when a window asks for it, and the wake queues
+  ;; its runtime rather than building it. switch-to-buffer-here! has always
+  ;; made the buffer whole on this path; this one did not, so a display
+  ;; could put a buffer on screen with its text and no mode.
+  (let ((float (float-window))
+        (restoring (not (buffer-exists? name))))
+    (window-show-buffer! win name)
+    (when restoring (restore-buffer-runtime! name))
+    (when (and (float--class? name) (not (equal? win float)))
+      (window-float-class! name #f)))
   (window-state-changed!)
   win)
 
@@ -912,6 +917,12 @@
 
 ;; The selected window comes first, so a command that opens one thing still
 ;; opens it where you are: you are already in the window of its mode.
+;; the major mode NAME has, or the one it is about to open in: a file a
+;; peek just read has no mode yet, and it still belongs beside its kin
+(define (display-buffer-mode name)
+  (or (buffer-local name 'mode-name)
+      (and (buffer-known? name) (auto-mode-for-buffer name))))
+
 (define (window-showing-mode mode &optional except)
   (and (string? mode)
        (let ((me (active-window))
@@ -927,10 +938,44 @@
                      ((fits? (car ws)) (car ws))
                      (else (loop (cdr ws)))))))))
 
+;; What the user sees, the last visited first. An agent reads "this" here.
+(define (get-visible-buffers)
+  (let loop ((ws (window-list)) (seen '()))
+    (if (null? ws)
+        (map cadr (sort (map (lambda (b) (list (- (or (buffer-last-seen b) 0)) b))
+                             seen)))
+        (let ((b (cadr (car ws))))
+          (loop (cdr ws) (if (member b seen) seen (cons b seen)))))))
+
+;; The window a display for the user goes to, never the active one. While
+;; the frame shows fewer panes than its target layout holds, the layout
+;; gains a pane with the most recent buffer not on screen, and that pane
+;; answers. Otherwise the window whose buffer the user saw longest ago.
+(define (get-other-window)
+  (let* ((me (active-window))
+         (target (layout-target))
+         (capacity (and target (layout-target-capacity target)))
+         (panes (layout-target-visible-buffers))
+         (spares (if (and capacity (< (length panes) capacity))
+                     (filter (lambda (b) (and (fill-candidate? b) (not (member b panes))))
+                             (buffer-list-mru))
+                     '()))
+         (others (filter (lambda (r) (not (equal? (car r) me))) (window-list))))
+    (define (seen r) (or (buffer-last-seen (cadr r)) 0))
+    (cond ((pair? spares)
+           (layout-target-arrange! (append panes (list (car spares))) (window-buffer me))
+           (window-showing (car spares)))
+          ((null? others) (split-window! 'h) (other-window-id me))
+          (else
+           (let loop ((rs (cdr others)) (best (car others)))
+             (cond ((null? rs) (car best))
+                   ((< (seen (car rs)) (seen best)) (loop (cdr rs) (car rs)))
+                   (else (loop (cdr rs) best))))))))
+
 (define-display-action! 'mode-window
   (lambda (name alist)
     (let ((win (window-showing-mode
-                 (buffer-local name 'mode-name)
+                 (display-buffer-mode name)
                  (and (plist-get alist 'inhibit-same-window) (active-window)))))
       (and win (display-buffer-in-window! win name)))))
 
@@ -1138,9 +1183,8 @@ keeps the buffer you were in and your point.")
 ;; and the buffer it replaced comes back when the peek goes. The selected
 ;; window and its point stay. Returns the window the peek took.
 (define (peek-show! name)
-  (let ((win (preview-show name 'other)))
-    (peek-drop-others! name)
-    win))
+  ;; Peeks are deprecated: a show is an ordinary display in another window
+  (display-buffer-other-window! name))
 
 ;; a window the focus commands may land on: not a peek's
 ;; Peeks are deprecated, so no window refuses the focus. A preview shows
@@ -1157,20 +1201,14 @@ keeps the buffer you were in and your point.")
 ;; (visit-quietly); an opener that showed it in the selected window has
 ;; the listing put back there, in place, with no selection change.
 (define (peek! known open)
-  (let* ((existed? (and (string? known) (buffer-known? known) #t))
-         (me (active-window))
-         (here (current-buffer))
+  ;; Peeks are deprecated. The peek verbs stay for their callers, and each
+  ;; one opens an ordinary buffer in another window by the display chain:
+  ;; the window of its own mode first. Nothing marks it, nothing kills it
+  ;; later, and the focus stays where it is.
+  (let* ((here (current-buffer))
          (buf (open)))
     (when (and (string? buf) (not (equal? buf here)))
-      (unless (equal? (window-buffer me) here)
-        (window-preview-buffer! here me))
-      ;; Peeks are deprecated. A preview opens an ordinary buffer in an
-      ;; ordinary window: focusable, editable, and yours. All that is kept
-      ;; is the bookkeeping — a buffer the preview itself opened is the
-      ;; preview's to dispose of when it leaves the slot, so a walk down a
-      ;; listing does not leave a buffer per row behind.
-      (unless existed? (buffer-set-local! buf 'preview-opened #t))
-      (peek-show! buf))
+      (display-buffer-other-window! buf))
     buf))
 (domain! 'files)
 (effects! '(read))
@@ -1224,15 +1262,13 @@ keeps the buffer you were in and your point.")
 ;; point. peek! is the other door, for a listing that shows a row as the
 ;; highlight moves; only that one leaves the buffer disposable.
 (define (peek-or-keep! known open)
-  (let ((buf (peek! known open)))
-    (when (string? buf) (buffer-set-local! buf 'preview-opened #f))
-    'shown))
+  (peek! known open)
+  'shown)
 
 ;; RET on a row: preview KNOWN, or open it when it is the one on screen
 (define (peek-or-open! known open)
-  (if (and (string? known) (peek-buffer? known) (window-showing known))
-      (peek-open! known open)
-      (begin (peek! known open) 'peek)))
+  (peek! known open)
+  'open)
 
 ;; the buffer the frame's look shows beside the reader or in the card,
 ;; while it still shows: a peek, or a buffer that existed before
@@ -1335,17 +1371,17 @@ keeps the buffer you were in and your point.")
 (public! 'fill-candidate?
   "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, special, context-only, floating or peek")
 (public! 'peek!
-  "(peek! KNOWN OPEN) — show the buffer OPEN returns beside the selected window as a peek; KNOWN is its name, so a buffer that already existed is only shown and never killed; the next peek replaces it")
+  "(peek! KNOWN OPEN) — deprecated name: open the buffer OPEN returns in another window by the display chain, its own mode's window first; the focus stays")
 (public! 'peek-or-keep!
-  "(peek-or-keep! KNOWN OPEN) — peek KNOWN, or keep it and go there when it is the peek on screen (browse's M-RET twice)")
+  "(peek-or-keep! KNOWN OPEN) — deprecated name: open KNOWN in another window, as peek! does")
 (public! 'peek-or-open!
-  "(peek-or-open! KNOWN OPEN) — RET on a row: peek KNOWN, or open it as your own when it is the peek on screen")
+  "(peek-or-open! KNOWN OPEN) — deprecated name: open KNOWN in another window, as peek! does")
 (public! 'peek-dismiss!
   "(peek-dismiss!) — dismiss every peek on screen; #t when there was one")
 (public! 'peek-open!
   "(peek-open! KNOWN OPEN) — open KNOWN as your own in the selected window: a peek is kept and the float gives it up; not a peek yet, OPEN runs")
 (public! 'peek-file!
-  "(peek-file! PATH) — peek the file at PATH")
+  "(peek-file! PATH) — deprecated name: open the file at PATH in another window, as peek! does")
 (public! 'peek-keep!
   "(peek-keep! NAME) — keep a peek: clear the mark; the buffer and its window stay")
 (public! 'peek-buffer?
@@ -2639,6 +2675,12 @@ keeps the buffer you were in and your point.")
   "(window-prefers-buffer? WIN BUF) — whether BUF matches WIN's preferred mode, including derived modes")
 (public! 'window-showing-mode
   "(window-showing-mode MODE [EXCEPT]) — the work window preferring or showing MODE, or #f")
+(public! 'get-visible-buffers
+  "(get-visible-buffers) — the buffers in the user's frame windows, most recently visited first")
+(effects! '(write display))
+(public! 'get-other-window
+  "(get-other-window) — the window to show a buffer in for the user, never the active one; below the target layout's capacity the layout gains a pane")
+(effects! '(read))
 (public! 'split-window-sensibly
   "(split-window-sensibly WIN) — split WIN below when it is tall enough, beside when wide enough; the new window or #f")
 (public! 'window-quit-restore!

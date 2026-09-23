@@ -872,12 +872,8 @@ an API surface. The four palettes restate the ts faces because
 load-theme writes only the faces a theme names, as the paper palette's
 comment says; a base palette with overrides changes that contract and
 waits.
-Section 5 item 15, sentry.scm: the list, detail and events buffers,
-their verbs and their three modes are gone; the file is its credentials,
-the wire, the five API calls a model reaches through eval, and the one
-text rendering of an issue (361 lines from 915). Nothing outside the
-file named any of the 73 definitions; the test covers the API and the
-text.
+Section 5 item 15, sentry.scm: the owner keeps M-x sentry; the list,
+detail and events buffers, their verbs and their three modes stay.
 Item 16 of section 3, first half: transient.scm and chrome.scm are
 packages in scheme/packages, loaded from init.scm (transient first, a
 package defines its prefixes at load; chrome after dired, sentry and

@@ -158,13 +158,15 @@
         (check-equal! (length (filter (lambda (p) (equal? (car p) "code-agent"))
                                       tool-parts))
                       1 "the named code-agent fragment occurs once")
-        (check-equal! (map car system-parts) *prompt-section-order*
-                      "the direct wire uses the six semantic sections")
-        (check-equal! (map car acp-parts) *prompt-section-order*
-                      "the ACP wire uses the same six sections")
-        (check-contains! (cadr (assoc "code" system-parts))
+        (check-equal! (list-head (map car system-parts) (length (prompt-files)))
+                      (map car (prompt-files))
+                      "the direct wire starts with one section per prompt file")
+        (check-equal! (list-head (map car acp-parts) (length (prompt-files)))
+                      (map car (prompt-files))
+                      "the ACP wire starts with the same sections")
+        (check-contains! (cadr (assoc "code-agent" system-parts))
                          "CODE-EDITING SKILL"
-                         "the mode fragment is inside the code section")
+                         "the mode fragment is its own section")
         (check-contains! (prompt-parts-text system-parts)
                          (chat-preamble chat)
                          "the general preamble is in the wire text")

@@ -1,3 +1,0 @@
-READING — treat every file as structured content. Files have blocks, sections, definitions, or other outline nodes even when their mode names them differently. Inspect the file's outline first and read only the relevant blocks. Prefer tree-sitter structure when a grammar is available. Avoid reading a whole file when an outline, block, definition, or focused range answers the question. 
-
-For generic fenced blocks, use `(block-list BUF)` to discover them, `(block-at-line BUF LINE)` to locate the block containing a line, `(block-text BUF LINE)` to read the complete block, and `(block-body BLOCK)` to read its contents without fences. Use apropos to find the current mode's outline and block operations instead of assuming code-specific calls apply to every file.

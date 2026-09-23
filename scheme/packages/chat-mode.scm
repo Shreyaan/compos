@@ -1964,7 +1964,10 @@
 ;; walk to find the session. The menu redraws on every keystroke, so what
 ;; the menu shows comes from here.
 (define (llm-config-core buf)
-  (let ((chat? (equal? (buffer-local buf 'mode-name) "chat-mode")))
+  ;; read from the session, as llm-config-combination does for the rest: a
+  ;; plain buffer in a group shows its chat's model, not a codex fallback
+  (let* ((buf (llm-config-session buf))
+         (chat? (equal? (buffer-local buf 'mode-name) "chat-mode")))
     (list
       'connector
       (or (buffer-local buf (if chat? 'agent-connector 'llm-connector))
@@ -2029,27 +2032,30 @@
 ;; choice to their durable session; ordinary buffers persist it as llm-mode
 ;; locals, and their next turn resumes or starts the matching session.
 (define (llm-config-apply! buf connector model effort)
-  (if (equal? (buffer-local buf 'mode-name) "chat-mode")
-      (chat-llm-apply! buf connector model effort)
-      (begin
-        (let ((same-connector
-                (equal? connector (buffer-llm-connector buf))))
-          ;; A model/effort change can resume the same Codex thread with new
-          ;; overrides. A connector change cannot carry a foreign thread id.
-          (llm-mode-reset-runtime! buf same-connector))
-        (buffer-set-local! buf 'llm-connector connector)
-        (buffer-set-local! buf 'llm-model
-          (if (equal? model "default") #f model))
-        (buffer-set-local! buf 'llm-effort
-          (if (equal? effort "default") #f effort))
-        (unless (minor-mode-on? buf "llm-mode")
-          (enable-minor-mode! buf "llm-mode"))
-        (message
-          (string-append "LLM: " connector
-            (if (equal? model "default") "" (string-append " · " model))
-            (if (equal? effort "default") "" (string-append " · " effort))))))
-  (when (boundp (quote workspace-llm-defaults-note!))
-    (workspace-llm-defaults-note! buf)))
+  ;; the model belongs to the same session the presets and stance do: from a
+  ;; plain buffer in a group, that is the group's chat, not the buffer itself
+  (let ((buf (llm-config-session buf)))
+    (if (equal? (buffer-local buf 'mode-name) "chat-mode")
+        (chat-llm-apply! buf connector model effort)
+        (begin
+          (let ((same-connector
+                  (equal? connector (buffer-llm-connector buf))))
+            ;; A model/effort change can resume the same Codex thread with new
+            ;; overrides. A connector change cannot carry a foreign thread id.
+            (llm-mode-reset-runtime! buf same-connector))
+          (buffer-set-local! buf 'llm-connector connector)
+          (buffer-set-local! buf 'llm-model
+            (if (equal? model "default") #f model))
+          (buffer-set-local! buf 'llm-effort
+            (if (equal? effort "default") #f effort))
+          (unless (minor-mode-on? buf "llm-mode")
+            (enable-minor-mode! buf "llm-mode"))
+          (message
+            (string-append "LLM: " connector
+              (if (equal? model "default") "" (string-append " · " model))
+              (if (equal? effort "default") "" (string-append " · " effort))))))
+    (when (boundp (quote workspace-llm-defaults-note!))
+      (workspace-llm-defaults-note! buf))))
 
 ;; Applying a bundle applies ALL of it, in one pass: the stance and the
 ;; presets go in first so the reattach that a connector or model change

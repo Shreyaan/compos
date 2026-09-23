@@ -82,5 +82,5 @@
     (let ((entry (catalog-entry 'function "sentry-list-issues")))
       (check-equal! (plist-get entry 'domain) "sentry" "the domain")
       (check-equal! (plist-get entry 'effects) '("read" "external") "the effects"))
-    (check-equal! (plist-get (catalog-entry 'function "sentry-resolve-issue") 'effects)
-                  '("write" "external") "the resolve call writes too")))
+    (check-equal! (plist-get (catalog-entry 'command "sentry") 'effects)
+                  '("write" "external") "the command writes a buffer too")))

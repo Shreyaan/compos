@@ -16,6 +16,14 @@ defmodule Compos.Core.Browser do
   `serve/1`. It runs in a task, never in this process: a handler that blocks on
   the interpreter must not stall the socket, and one that crashes must not take
   the bridge — and with it every buffer — down.
+
+  More than one extension may be connected: one per Chrome profile that has
+  it installed. Each keeps its own socket. A call goes to the extension that
+  owns the tab or the window it names, then to the one the calling frame's
+  editor page registered from, and only then to the most recent. A request
+  is answered on the socket it came from. With a single socket, as before,
+  there was one profile's tabs, and the last profile to connect took every
+  call — a background tab opened in a profile without the reader's login.
   """
   use GenServer
   require Logger
@@ -32,8 +40,13 @@ defmodule Compos.Core.Browser do
   @doc "Released on disconnect; in-flight calls fail rather than hang."
   def detach(pid), do: GenServer.cast(__MODULE__, {:detach, pid})
 
-  @doc "Raw frame in from the extension."
-  def incoming(text), do: GenServer.cast(__MODULE__, {:incoming, text})
+  @doc """
+  Raw frame in from the extension. The transport passes its own pid, so a
+  request is answered on the socket it came from and a socket that attached
+  before this module was loaded is adopted on its first frame.
+  """
+  def incoming(text), do: GenServer.cast(__MODULE__, {:incoming, nil, text})
+  def incoming(pid, text), do: GenServer.cast(__MODULE__, {:incoming, pid, text})
 
   @doc "Register the Scheme closure that answers the extension's requests."
   def serve(handler), do: GenServer.cast(__MODULE__, {:serve, handler})
@@ -43,24 +56,61 @@ defmodule Compos.Core.Browser do
 
   @doc """
   Send OP with ARGS; CALLBACK gets `{:ok, result}` or `{:error, message}`.
+  FRAME is the compos frame that asked, so a call that names no tab or window
+  goes to the extension that frame's editor page lives in.
 
   Async on purpose — a page operation is slow and the Session process must stay
   free to service keystrokes while it runs.
   """
-  def call(op, args, callback) when is_function(callback, 1),
-    do: GenServer.cast(__MODULE__, {:call, op, args, callback})
+  def call(op, args, callback, frame \\ nil) when is_function(callback, 1),
+    do: GenServer.cast(__MODULE__, {:call, op, args, callback, frame})
 
   @impl true
-  def init(_), do: {:ok, %{sock: nil, pending: %{}, next_id: 1, handler: nil}}
+  def init(_), do: {:ok, fresh()}
+
+  defp fresh do
+    %{
+      socks: [],
+      home: nil,
+      windows: %{},
+      tabs: %{},
+      frames: %{},
+      pending: %{},
+      probes: %{},
+      next_id: 1,
+      handler: nil
+    }
+  end
+
+  # A daemon that reloads this module keeps the one-socket state it started
+  # with. Carry that socket over rather than crash the bridge.
+  defp norm(%{socks: _, probes: _} = state), do: state
+  defp norm(%{socks: _} = state), do: Map.put(state, :probes, %{})
+
+  defp norm(%{sock: sock} = old) do
+    pending = Map.new(old.pending, fn {id, {cb, timer}} -> {id, {cb, timer, sock}} end)
+
+    %{
+      fresh()
+      | socks: if(sock, do: [sock], else: []),
+        pending: pending,
+        next_id: old.next_id,
+        handler: old.handler
+    }
+  end
 
   @impl true
-  def handle_call(:connected?, _from, state), do: {:reply, state.sock != nil, state}
+  def handle_call(:connected?, _from, state) do
+    state = norm(state)
+    {:reply, state.socks != [], state}
+  end
 
   @impl true
-  def handle_cast({:attach, pid}, state) do
-    Logger.info("browser: extension attached")
-    Process.monitor(pid)
-    state = %{state | sock: pid}
+  def handle_cast(msg, state), do: cast(msg, norm(state))
+
+  defp cast({:attach, pid}, state) do
+    state = adopt(state, pid, :newest)
+    Logger.info("browser: extension attached (#{length(state.socks)} connected)")
 
     # Tell Scheme the browser is here, so it can warm anything it wants ready
     # before the first keystroke — the tab list, in chrome.scm's case. Without
@@ -74,27 +124,55 @@ defmodule Compos.Core.Browser do
     {:noreply, state}
   end
 
-  def handle_cast({:detach, pid}, %{sock: pid} = state), do: {:noreply, drop(state)}
-  def handle_cast({:detach, _pid}, state), do: {:noreply, state}
+  defp cast({:detach, pid}, state), do: {:noreply, forget(state, pid)}
 
-  def handle_cast({:serve, handler}, state), do: {:noreply, %{state | handler: handler}}
+  defp cast({:serve, handler}, state), do: {:noreply, %{state | handler: handler}}
 
-  def handle_cast({:call, _op, _args, callback}, %{sock: nil} = state) do
-    run(fn -> callback.({:error, "no browser: load the compos extension in Chrome"}) end)
-    {:noreply, state}
+  # A call that names a tab or a window no connected extension is known to
+  # own asks every extension for its tabs first, then routes. Before, it fell
+  # through to the newest socket, and a tab meant for this frame's window
+  # opened in another profile's reader window, logged out and out of sight.
+  defp cast({:call, op, args, callback, fid}, state) do
+    if unowned(state, Map.new(args)) != [] and length(state.socks) > 1,
+      do: {:noreply, probe(state, {:call, op, args, callback, fid, :probed})},
+      else: cast({:call, op, args, callback, fid, :probed}, state)
   end
 
-  def handle_cast({:call, op, args, callback}, state) do
-    id = state.next_id
-    frame = args |> Map.new() |> Map.merge(%{"id" => id, "op" => op})
-    Logger.info("browser => #{op} #{brief(args)}")
-    send(state.sock, {:browser_send, Jason.encode!(frame)})
-
-    timer = Process.send_after(self(), {:timeout, id}, @timeout)
-    {:noreply, %{state | next_id: id + 1, pending: Map.put(state.pending, id, {callback, timer})}}
+  defp cast({:probed, token}, state) do
+    case Map.get(state.probes, token) do
+      {1, call} -> cast(call, %{state | probes: Map.delete(state.probes, token)})
+      {n, call} -> {:noreply, put_in(state.probes[token], {n - 1, call})}
+      nil -> {:noreply, state}
+    end
   end
 
-  def handle_cast({:incoming, text}, state) do
+  defp cast({:call, op, args, callback, fid, :probed}, state) do
+    amap = Map.new(args)
+
+    case {unowned(state, amap), route(state, amap, fid)} do
+      {[{key, v} | _], _} when length(state.socks) > 1 ->
+        run(fn -> callback.({:error, "#{key} #{v} is in no connected browser"}) end)
+        {:noreply, state}
+
+      {_, nil} ->
+        run(fn -> callback.({:error, "no browser: load the compos extension in Chrome"}) end)
+        {:noreply, state}
+
+      {_, sock} ->
+        id = state.next_id
+        frame = args |> Map.new() |> Map.merge(%{"id" => id, "op" => op})
+        Logger.info("browser => #{op} #{brief(args)}")
+        send(sock, {:browser_send, Jason.encode!(frame)})
+
+        timer = Process.send_after(self(), {:timeout, id}, @timeout)
+        pending = Map.put(state.pending, id, {callback, timer, sock})
+        {:noreply, %{state | next_id: id + 1, pending: pending}}
+    end
+  end
+
+  defp cast({:incoming, from, text}, state) do
+    state = if from, do: adopt(state, from, :oldest), else: state
+
     case Jason.decode(text) do
       # the extension's own console, forwarded. Its service worker log lives in
       # a devtools window nobody has open, so an error in there used to be
@@ -106,33 +184,158 @@ defmodule Compos.Core.Browser do
           else: Logger.warning("browser-ext: #{line}")
 
         {:noreply, state}
+
       # a reply to something we asked
-      {:ok, %{"id" => id, "ok" => _} = msg} -> {:noreply, resolve(state, id, reply_of(msg))}
+      {:ok, %{"id" => id, "ok" => _} = msg} ->
+        {:noreply, resolve(state, id, reply_of(msg))}
+
       # a request from the browser
-      {:ok, %{"id" => id, "op" => op} = msg} -> {:noreply, serve_request(state, id, op, msg)}
-      _ -> {:noreply, state}
+      {:ok, %{"id" => id, "op" => op} = msg} ->
+        state = if from, do: learn_request(state, from, op, msg), else: state
+        {:noreply, serve_request(state, from, id, op, msg)}
+
+      _ ->
+        {:noreply, state}
     end
   end
 
   @impl true
   def handle_info({:timeout, id}, state),
-    do: {:noreply, resolve(state, id, {:error, "browser timed out"}, :expired)}
+    do: {:noreply, resolve(norm(state), id, {:error, "browser timed out"}, :expired)}
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{sock: pid} = state),
-    do: {:noreply, drop(state)}
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state),
+    do: {:noreply, forget(norm(state), pid)}
 
   def handle_info(_msg, state), do: {:noreply, state}
 
+  # --- which extension ---------------------------------------------------------
+
+  # A socket joins once. :newest takes the calls that name nothing; a socket
+  # adopted from its traffic goes last, so it never steals them.
+  defp adopt(state, pid, where) do
+    if pid in state.socks do
+      state
+    else
+      Process.monitor(pid)
+      socks = if where == :newest, do: [pid | state.socks], else: state.socks ++ [pid]
+      %{state | socks: socks}
+    end
+  end
+
+  defp forget(state, pid) do
+    {mine, rest} = Enum.split_with(state.pending, fn {_id, {_cb, _t, sock}} -> sock == pid end)
+
+    # every in-flight call fails loudly on disconnect: a silently dropped
+    # callback leaves a Scheme closure rooted forever
+    Enum.each(mine, fn {_id, {callback, timer, _sock}} ->
+      Process.cancel_timer(timer)
+      run(fn -> callback.({:error, "browser disconnected"}) end)
+    end)
+
+    keep = fn map -> map |> Enum.reject(fn {_k, v} -> v == pid end) |> Map.new() end
+
+    %{
+      state
+      | socks: List.delete(state.socks, pid),
+        home: if(state.home == pid, do: nil, else: state.home),
+        windows: keep.(state.windows),
+        tabs: keep.(state.tabs),
+        frames: keep.(state.frames),
+        pending: Map.new(rest)
+    }
+  end
+
+  # The tab, then the window, then the frame's own editor page, then the
+  # profile the editor registered from, then the newest.
+  defp route(state, args, fid) do
+    owner = fn map, key ->
+      case arg(args, key) do
+        nil -> nil
+        v -> live(state, Map.get(map, v))
+      end
+    end
+
+    owner.(state.tabs, "tab") ||
+      owner.(state.windows, "window") ||
+      (fid && live(state, Map.get(state.frames, fid))) ||
+      live(state, state.home) ||
+      List.first(state.socks)
+  end
+
+  # the tab and window ARGS name that no live extension is known to own
+  defp unowned(state, args) do
+    for {key, map} <- [{"tab", state.tabs}, {"window", state.windows}],
+        v = arg(args, key),
+        v not in [nil, false],
+        live(state, Map.get(map, v)) == nil,
+        do: {key, v}
+  end
+
+  # Ask every extension for its tabs; the replies teach the maps, and the
+  # last one to answer, or to time out, releases CALL.
+  defp probe(state, call) do
+    token = make_ref()
+    state = put_in(state.probes[token], {length(state.socks), call})
+
+    Enum.reduce(state.socks, state, fn sock, s ->
+      id = s.next_id
+      send(sock, {:browser_send, Jason.encode!(%{"id" => id, "op" => "tabs"})})
+      timer = Process.send_after(self(), {:timeout, id}, 5_000)
+      done = fn _ -> GenServer.cast(__MODULE__, {:probed, token}) end
+      %{s | next_id: id + 1, pending: Map.put(s.pending, id, {done, timer, sock})}
+    end)
+  end
+
+  defp arg(args, key), do: Map.get(args, key) || Map.get(args, String.to_atom(key))
+
+  defp live(_state, nil), do: nil
+  defp live(state, pid), do: if(pid in state.socks, do: pid, else: nil)
+
+  # The editor page registers the window it sits in; that profile is home.
+  defp learn_request(state, from, op, msg) do
+    state = if op == "register", do: %{state | home: from}, else: state
+    state = if msg["window"], do: put_in(state.windows[msg["window"]], from), else: state
+    if msg["frame"], do: put_in(state.frames[msg["frame"]], from), else: state
+  end
+
+  # A reply names the tabs and windows that profile holds.
+  defp learn_reply(state, sock, {:ok, %{} = r}) do
+    state = if r["tab"], do: put_in(state.tabs[r["tab"]], sock), else: state
+    state = if r["window"], do: put_in(state.windows[r["window"]], sock), else: state
+
+    case r["tabs"] do
+      list when is_list(list) ->
+        Enum.reduce(list, state, fn
+          %{} = t, s ->
+            s = if t["id"], do: put_in(s.tabs[t["id"]], sock), else: s
+            if t["window"], do: put_in(s.windows[t["window"]], sock), else: s
+
+          _, s ->
+            s
+        end)
+
+      _ ->
+        state
+    end
+  end
+
+  defp learn_reply(state, _sock, _reply), do: state
+
   # --- inbound ---------------------------------------------------------------
 
-  defp serve_request(%{handler: nil} = state, id, _op, _msg) do
-    push(state, %{"id" => id, "ok" => false, "error" => "this daemon serves no browser requests"})
+  defp serve_request(%{handler: nil} = state, from, id, _op, _msg) do
+    push(answer_to(state, from), %{
+      "id" => id,
+      "ok" => false,
+      "error" => "this daemon serves no browser requests"
+    })
+
     state
   end
 
-  defp serve_request(state, id, op, msg) do
+  defp serve_request(state, from, id, op, msg) do
     handler = state.handler
-    sock = state.sock
+    sock = answer_to(state, from)
     args = Map.drop(msg, ["id", "op"])
 
     # The frame the request came from — one browser window, one compos frame.
@@ -155,14 +358,17 @@ defmodule Compos.Core.Browser do
             %{"id" => id, "ok" => false, "error" => reason}
         end
 
-      send(sock, {:browser_send, Jason.encode!(reply)})
+      push(sock, reply)
     end)
 
     state
   end
 
-  defp push(%{sock: nil}, _frame), do: :ok
-  defp push(%{sock: sock}, frame), do: send(sock, {:browser_send, Jason.encode!(frame)})
+  # the socket that asked, else the one calls go to
+  defp answer_to(state, from), do: live(state, from) || route(state, %{}, nil)
+
+  defp push(nil, _frame), do: :ok
+  defp push(sock, frame), do: send(sock, {:browser_send, Jason.encode!(frame)})
 
   # --- outbound --------------------------------------------------------------
 
@@ -184,7 +390,7 @@ defmodule Compos.Core.Browser do
       {nil, _} ->
         state
 
-      {{callback, timer}, rest} ->
+      {{callback, timer, sock}, rest} ->
         if expired != :expired, do: Process.cancel_timer(timer)
 
         case reply do
@@ -193,19 +399,8 @@ defmodule Compos.Core.Browser do
         end
 
         run(fn -> callback.(reply) end)
-        %{state | pending: rest}
+        learn_reply(%{state | pending: rest}, sock, reply)
     end
-  end
-
-  # every in-flight call fails loudly on disconnect: a silently dropped
-  # callback leaves a Scheme closure rooted forever
-  defp drop(state) do
-    Enum.each(state.pending, fn {_id, {callback, timer}} ->
-      Process.cancel_timer(timer)
-      run(fn -> callback.({:error, "browser disconnected"}) end)
-    end)
-
-    %{state | sock: nil, pending: %{}}
   end
 
   # Anything touching Scheme runs off this process. Doing it inline would

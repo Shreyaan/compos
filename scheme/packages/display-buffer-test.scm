@@ -403,8 +403,8 @@
                         "the window that had it reveals something else"))))))
 
 
-(deftest 'an-agent-does-not-display-a-file-buffer
-  "display-buffer refuses a file buffer when an agent asks, and shows a non-file buffer as before"
+(deftest 'an-agent-opens-a-file-only-in-the-other-window
+  "an agent's display-buffer refuses a file buffer in the same window, and shows it in the other window"
   (lambda ()
     (let ((path (string-append t--db-dir "/zz-agent-open.txt"))
           (plain "*zz-agent-plain*"))
@@ -414,10 +414,14 @@
       (visit-quietly path)
       (test-buffer! plain "")
       (check-false! (with-edit-author "agent:zz-db-agent"
-                      (lambda () (display-buffer-other-window! path)))
-                    "the agent gets #f for a file")
+                      (lambda () (display-buffer path)))
+                    "the agent gets #f for a file in the same window")
       (check-false! (member path (map window-buffer (window-list)))
                     "no window shows the file")
+      (check-true! (and (with-edit-author "agent:zz-db-agent"
+                          (lambda () (display-buffer-other-window! path)))
+                        #t)
+                   "the agent opens a file in the other window")
       (check-true! (and (with-edit-author "agent:zz-db-agent"
                           (lambda () (display-buffer-other-window! plain)))
                         #t)

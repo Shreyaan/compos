@@ -28,13 +28,18 @@ defmodule Compos.Core.Browser.Prims do
         # it came from, not in whichever was last active when the reply landed
         fid = Frame.current()
 
-        Compos.Core.Browser.call(s(op), browser_args(args), fn reply ->
-          try do
-            Session.apply_callback(callback, [browser_reply(reply)], fid)
-          after
-            Roots.drop(key)
-          end
-        end)
+        Compos.Core.Browser.call(
+          s(op),
+          browser_args(args),
+          fn reply ->
+            try do
+              Session.apply_callback(callback, [browser_reply(reply)], fid)
+            after
+              Roots.drop(key)
+            end
+          end,
+          fid
+        )
 
         :void
       end,
@@ -51,9 +56,12 @@ defmodule Compos.Core.Browser.Prims do
           me = self()
           ref = make_ref()
 
-          Compos.Core.Browser.call(s(op), browser_args(a), fn reply ->
-            send(me, {:browser_sync, ref, reply})
-          end)
+          Compos.Core.Browser.call(
+            s(op),
+            browser_args(a),
+            fn reply -> send(me, {:browser_sync, ref, reply}) end,
+            Frame.current()
+          )
 
           receive do
             {:browser_sync, ^ref, reply} -> browser_reply(reply)

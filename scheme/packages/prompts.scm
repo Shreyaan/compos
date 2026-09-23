@@ -8,28 +8,53 @@
 (domain! 'chat)
 (effects! '(read))
 
-;; Static guidance lives as plain text so code review shows prompt changes
-;; without Scheme quoting. Both connector lanes read the same ordered files.
-(define *compos-prompt-files*
-  '(("compos-identity" "identity.txt")
-    ("quiet-editor" "quiet-editor.txt")
-    ("scope" "scope.txt")
-    ("chat-context" "chat-context.txt")
-    ("scheme-api" "scheme-api.txt")
-    ("discovery" "discovery.txt")
-    ("reading" "reading.txt")
-    ("repository" "repository.txt")
-    ("scheme-authoring" "scheme-authoring.txt")
-    ("browser" "browser.txt")))
+;; Standing guidance lives as Markdown files, so code review shows prompt
+;; changes without Scheme quoting. Each FILE.md in prompts-directories is one
+;; prompt section named FILE. An earlier directory wins a name, so
+;; (add-to-list! 'prompts-directories DIR) overrides a default file with DIR's.
+(defcustom 'prompts-directories (list (string-append (compos-priv-dir) "/prompts"))
+  "Directories of Markdown prompt files. Each FILE.md is one prompt section named FILE; an earlier directory wins a name."
+  'group 'chat 'type 'list)
+
+;; The default files keep this order, so the prompt bytes stay stable and the
+;; identity leads. Any other file follows, by name.
+(define *prompt-file-order*
+  '("identity" "quiet-editor" "scope" "chat-context" "scheme" "discovery"
+    "reading" "repository" "browser"))
+
+(define (prompt--rank name)
+  (let loop ((names *prompt-file-order*) (i 0))
+    (cond ((null? names) i)
+          ((equal? (car names) name) i)
+          (else (loop (cdr names) (+ i 1))))))
+
+(define (prompt--stem file)
+  (if (string-suffix? ".md" file)
+      (substring file 0 (- (string-length file) 3))
+      file))
+
+(define (prompt-files)
+  (let loop ((dirs prompts-directories) (acc '()))
+    (if (null? dirs)
+        (map cdr (sort (map (lambda (e) (cons (prompt--rank (car e)) e)) acc)))
+        (let ((dir (expand-path (car dirs))))
+          (loop (cdr dirs)
+                (fold (lambda (acc file)
+                        (let ((name (prompt--stem file)))
+                          (if (or (not (string-suffix? ".md" file)) (assoc name acc))
+                              acc
+                              (cons (list name (string-append dir "/" file)) acc))))
+                      acc
+                      (if (file-directory? dir) (list-dir dir) '())))))))
 
 (define (prompt-file-text file)
-  (string-trim
-    (read-file (string-append (compos-priv-dir) "/prompts/" file))))
+  (let ((hit (assoc (prompt--stem file) (prompt-files))))
+    (if hit (string-trim (read-file (cadr hit))) "")))
 
 (define (compos-shared-prompt-parts)
   (append
-    (map (lambda (entry) (list (car entry) (prompt-file-text (cadr entry))))
-         *compos-prompt-files*)
+    (map (lambda (entry) (list (car entry) (string-trim (read-file (cadr entry)))))
+         (prompt-files))
     (list
       (list "catalog"
         (string-append
@@ -45,49 +70,30 @@
 (define (prompt-parts-text parts)
   (string-join (map (lambda (part) (car (cdr part))) parts) "\n\n"))
 
-;; The preset surface is deliberately small and semantic. Providers can keep
-;; supplying focused fragments; users enable or disable these stable sections.
-(define *prompt-section-order*
-  '("identity" "general" "scheme" "reading" "code" "context"))
-
-(define (prompt-fragment-section name)
-  (cond
-    ((member name '("compos-identity")) "identity")
-    ((member name '("scheme-api" "scheme-authoring" "catalog" "recipes")) "scheme")
-    ((member name '("reading")) "reading")
-    ((member name '("repository" "code" "code-agent")) "code")
-    ((member name '("chat-context")) "context")
-    (else "general")))
-
+;; Every fragment is its own section: a prompt file, a generated part
+;; (catalog, recipes, mcp) or a part a mode added. An empty one is dropped.
 (define (prompt-section-parts fragments)
-  (map
-    (lambda (section)
-      (list section
-        (prompt-parts-text
-          (filter (lambda (part)
-                    (equal? (prompt-fragment-section (car part)) section))
-                  fragments))))
-    *prompt-section-order*))
+  (filter (lambda (part) (not (equal? (cadr part) ""))) fragments))
 
 ;; A prompt preset records only exceptions. New fragments therefore arrive on,
 ;; instead of silently disappearing from every bundle saved before they existed.
+;; A name no fragment has any more is harmless: it switches nothing off.
 (define (prompt-disabled-parts buf)
-  (filter (lambda (name) (member name *prompt-section-order*))
-          (or (buffer-local buf 'prompt-disabled-parts) '())))
+  (or (buffer-local buf 'prompt-disabled-parts) '()))
 
 (define (prompt-parts-enabled buf parts)
   (let ((disabled (prompt-disabled-parts buf)))
     (filter (lambda (part) (not (member (car part) disabled))) parts)))
 
 (define (prompt-parts-set-disabled! buf names)
-  (let ((next (filter (lambda (name) (member name *prompt-section-order*)) names))
+  (let ((next (filter string? names))
         (old (or (buffer-local buf 'prompt-disabled-parts) '())))
     (unless (equal? next old)
       (buffer-set-local! buf 'prompt-disabled-parts next))
     next))
 
 ;; Compatibility values for callers that still request one joined string.
-(define *agent-quiet-prompt* (prompt-file-text "quiet-editor.txt"))
+(define *agent-quiet-prompt* (prompt-file-text "quiet-editor.md"))
 (define *llm-system* (prompt-parts-text (compos-direct-prompt-parts)))
 
 ;; The RPC initialize response and ACP use the same shared composition.
@@ -130,8 +136,8 @@
 (define (chat-prompt-snapshot buf)
   (buffer-local buf 'chat-prompt-snapshot))
 
-;; The unfiltered source is for configuration and inspection. It contains six
-;; stable semantic sections; current group membership is fetched by chat-context.
+;; The unfiltered source is for configuration and inspection. It holds one
+;; section per fragment; current group membership is fetched by chat-context.
 (define (chat-prompt-source-parts buf)
   (prompt-section-parts
     (if (chat-prompt-direct? buf)
@@ -274,6 +280,8 @@
   "(prompt-disabled-parts BUF) — section names disabled for this LLM surface")
 (public! 'prompt-buffer-parts
   "(prompt-buffer-parts BUF) — named prompt fragments that modes added to one buffer")
+(public! 'prompt-files
+  "(prompt-files) — every prompt file as (NAME PATH): one section each, from prompts-directories")
 (public! 'compos-shared-prompt-parts
   "(compos-shared-prompt-parts) — named standing guidance shared by direct and ACP agents")
 (public! 'compos-direct-prompt-parts
@@ -285,7 +293,7 @@
 (public! 'chat-prompt-parts
   "(chat-prompt-parts BUF) — current named prompt sections for a chat's connector lane")
 (public! 'chat-prompt-source-parts
-  "(chat-prompt-source-parts BUF) — the six live prompt sections before filtering")
+  "(chat-prompt-source-parts BUF) — the live prompt sections, one per fragment, before filtering")
 (public! 'chat-prompt-report
   "(chat-prompt-report BUF) — markdown with a chat prompt's parts, lifecycle, and joined text")
 (public! 'chat-prompt-frozen?

@@ -71,9 +71,6 @@
 (load "code.scm")
 (load "daemons.scm")
 (load "db.scm")
-;; the typed-decision API: user config calls decide-config! to name the
-;; backend chain, so this loads before the user config runs
-(load "decide.scm")
 (load "diff-mode.scm")
 (load "doppler.scm")
 (load "endpoint.scm")
@@ -146,6 +143,7 @@
 (load "test.scm")
 (load "treesit.scm")
 (load "web.scm")
+(load "xslt.scm")
 (load "web-server.scm")
 (load "worktrees.scm")
 (load "writing.scm")

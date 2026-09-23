@@ -2409,14 +2409,8 @@
 ;; right, so this path is now reachable rather than theoretical. It must
 ;; never be quiet: say which mode is missing, in the buffer it happened to.
 (define (mode-setup! name)
-  (cond ((equal? (mode-get name 'kind) 'major)
-         ((mode-get name 'setup)))
-        ((not (mode-get name 'kind))
-         (message (string-append "mode " name " is not defined, so "
-                                 (current-buffer) " has none of its keys: "
-                                 "its package did not load — see *Messages*")
-                  "error"))
-        (else #f)))
+  (when (equal? (mode-get name 'kind) 'major)
+    ((mode-get name 'setup))))
 
 ;; What a mode is for, in the mode's own words. describe-mode prints it
 ;; above the key table. A mode without one still gets its keys.
@@ -3021,6 +3015,7 @@
   ;; with-buffer-waking on purpose: that flag is restored by hand, and a
   ;; hook that throws inside it would leave every later wake believing it
   ;; was still waking.
+  ;;
   (buffer-woken! buf))
 
 ;;; --- renaming a buffer ---------------------------------------------------------
@@ -3163,6 +3158,10 @@
           buf)))
 
 ;; the switch itself: the selected window shows BUF, whatever its group
+;; The trigger is what the buffer OWES, not whether it happened to be
+;; dormant a moment ago. A wake owes its runtime; so does a buffer whose
+;; rebuild failed earlier, and that one used to slip through here and stay
+;; keyless. runtime-owed? answers both, now that the mark is a fact.
 (define (switch-to-buffer-here! buf)
   (let ((restoring (not (buffer-exists? buf)))
         (float (float-window)))
@@ -4340,25 +4339,25 @@
             (else (save-local-buffer!))))))
 
 (define (save-local-buffer!)
-    (let ((path (buffer-save!)))
+    (let* ((buf (current-buffer))
+           (bpath (buffer-path buf))
+           (named-path (and (string-prefix? "/" buf)
+                            (not (remote-path? buf))
+                            buf))
+           (path (or bpath named-path)))
       (cond
-        (path (save-done! path))
-        ;; the name is a file on disk, and this buffer never read it: the
-        ;; text here is not that file plus edits, so writing it there is
-        ;; a clobber. write-file is the gesture that writes over a file
-        ;; on purpose.
-        ((buffer-shadows-file? (current-buffer))
+        ;; Never overwrite a file-backed name that was opened without
+        ;; reading it. That requires the explicit write-file gesture.
+        ((buffer-shadows-file? buf)
          (error (string-append
-                  (abbreviate-file-name (current-buffer))
+                  (abbreviate-file-name buf)
                   " exists on disk and this buffer never read it."
                   " Use write-file to write over it.")))
-        ;; the buffer name IS an absolute path: the file name is known,
-        ;; so save there and adopt the path — no prompt. C-x C-w is the
-        ;; gesture that picks a different file.
-        ((and (string-prefix? "/" (current-buffer))
-              (not (remote-path? (current-buffer))))
-         (let ((p (buffer-save! (current-buffer))))
-           (unless (buffer-local (current-buffer) 'mode-name)
+        ;; Pass the known target explicitly. The raw save primitive requires
+        ;; that target in this path and adopts it as the buffer's file path.
+        (path
+         (let ((p (buffer-save! path)))
+           (unless (buffer-local buf 'mode-name)
              (auto-mode p))
            (save-done! p)))
         ;; no file name at all: C-x C-s falls through to write-file

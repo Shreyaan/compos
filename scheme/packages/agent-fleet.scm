@@ -1593,6 +1593,17 @@
     (minibuffer-read "Chat where: " '()
       (lambda (words) (chat-list-open! (string-trim words))))))
 
+(define-command "chat-finder"
+  "Find chats by a keyword in their content"
+  (lambda ()
+    (minibuffer-read "Chat keyword: " '()
+      (lambda (keyword)
+        (let ((q (string-trim keyword)))
+          (if (equal? q "")
+              (message "Enter a keyword")
+              (chat-list-open! q)))))))
+
+
 (define-command "chat-list-toggle-groups"
   "Turn the chat list's sections on or off; off is the flat list, most recent first"
   (lambda ()
@@ -1633,6 +1644,8 @@
 (catalog-meta! 'command "chat-list-visit" 'domain 'chat 'effects '(write display))
 (catalog-meta! 'command "chat-list-quit" 'domain 'chat 'effects '(write display))
 (catalog-meta! 'command "chat-where" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-finder" 'domain 'chat 'effects '(write display))
+
 (catalog-meta! 'command "chat-list-toggle-groups" 'domain 'chat 'effects '(write display))
 (public! 'chat-list-open!
   "(chat-list-open! [SEARCH]) — open the chat list application, with SEARCH standing")

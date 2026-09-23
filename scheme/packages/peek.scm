@@ -6,24 +6,19 @@
 ;;; in a code buffer is pop-to-buffer at the definition.
 ;;;
 ;;; A prose buffer names many definitions. The reader wants to check each
-;;; one and go to few. That is display-buffer plus one rule: the window
-;;; lives until the next command, unless that command goes there. The
-;;; peek command run again on the same name goes there. Any other
-;;; command discards the window, and the buffer with it when the peek
-;;; opened it.
+;;; one and go to few. That is display-buffer: the definition shows in
+;;; another window by the display chain and the focus stays. The command
+;;; run again on the same name goes there.
 ;;;
-;;; The post-command hook runs before the editor records last-command, and
-;;; it can run more than once per key. So the hook does not count
-;;; commands. It compares where the reader is with where the reader was
-;;; when the peek was made: the same window, buffer, and point keep the
-;;; peek; the peek window itself adopts it; anything else discards it.
+;;; Peeks are deprecated. The window is an ordinary window and the buffer
+;;; an ordinary buffer: nothing closes or kills them on the next command.
 
 (domain! 'code)
 (effects! '(read))
 
-;; The peek is the frame's look (preview-show ... 'other): the slot
-;; holds the window, and its data is (definition NAME OPENED? ORIGIN-BUFFER
-;; ORIGIN-POINT). The window's leaf records what the peek covers.
+;; the last definition shown: (NAME WINDOW), or #f
+(define peek--last #f)
+
 (define (peek--chars)
   *scheme-ide-chars*)
 
@@ -35,59 +30,30 @@
 (define (definition-locate name &optional kind)
   (scheme-ide--find-def name kind))
 
-;; the definition look on screen: (NAME OPENED? ORIGIN-BUFFER ORIGIN-POINT)
-(define (peek--data)
-  (let ((d (preview-data)))
-    (and (pair? d) (equal? (car d) 'definition) (cdr d))))
-
-(define (peek--window) (and (peek--data) (nth 3 (preview-slot))))
+;; the window of the last definition shown, while it still shows it
+(define (peek--window)
+  (and peek--last
+       (window-exists? (cadr peek--last))
+       (cadr peek--last)))
 
 (define (peek--show! name hit)
   (let* ((target (cadr hit))
-         (opened? (not (buffer-exists? target)))
          (buf (if (equal? (car hit) 'buffer) target (visit-quietly target)))
-         (origin (window-buffer (active-window)))
-         (win (preview-show buf 'other #f
-                (list 'definition name opened? origin (buffer-point origin)))))
-    (when win (window-set-point! win (caddr hit)))
+         (win (display-buffer-other-window! buf)))
+    (when (window-exists? win) (window-set-point! win (caddr hit)))
+    (set! peek--last (list name win))
     win))
 
+;; forget the last definition; its window and buffer stay
 (define (peek-discard!)
-  (let ((d (peek--data)))
-    (when d
-      (let ((buf (car (preview-end #f))))
-        (when (and (cadr d) (buffer-exists? buf) (not (window-showing buf))
-                   (not (buffer-modified? buf)))
-          (buffer-kill! buf))))))
+  (set! peek--last #f))
 
 (define (peek-go!)
-  (let ((name (car (peek--data))) (win (peek--window)))
-    (preview-end #t)
+  (let ((name (car peek--last)) (win (peek--window)))
+    (set! peek--last #f)
     (lsp--push-marker!)
     (select-window! win)
     (message (string-append "Definition of " name))))
-
-;; the reader is where the peek was made: the origin window is active, it
-;; still shows the origin buffer, and that buffer's point did not move.
-;; Everything is read by id or name, so the answer does not depend on
-;; which buffer the calling lane treats as current.
-(define (peek--still-here? d)
-  (let ((origin (nth 2 (preview-slot))) (buf (nth 2 d)))
-    (and (equal? (active-window) origin)
-         (equal? (window-buffer origin) buf)
-         (buffer-exists? buf)
-         (equal? (buffer-point buf) (nth 3 d)))))
-
-(define (peek--post-command!)
-  (let ((d (peek--data)))
-    (when d
-      (cond ((equal? (active-window) (peek--window))
-             ;; the reader moved into the window by any road: it is theirs
-             (preview-end #t))
-            ((peek--still-here? d) #t)
-            (else (peek-discard!))))))
-
-(add-hook! 'post-command-hook 'peek--post-command!)
 
 
 (define-command "definition-peek"
@@ -100,7 +66,7 @@
     (let ((name (peek--name)))
       (cond
         ((not name) (message "No name at point"))
-        ((and (peek--window) (equal? name (car (peek--data))))
+        ((and (peek--window) (equal? name (car peek--last)))
          (peek-go!))
         (else
           (peek-discard!)
@@ -108,7 +74,7 @@
             (cond
               (hit
                 (peek--show! name hit)
-                (message (string-append "Definition of " name " in the other window; press again to go there, any other key closes it")))
+                (message (string-append "Definition of " name " in the other window; press again to go there")))
               ((and (boundp 'primitive-doc) (primitive-doc name))
                (message (string-append name " is a primitive: " (primitive-doc name))))
               (else (message (string-append "No definition of " name)))))))))
@@ -121,7 +87,7 @@
         (message "No peek to go to"))))
 
 (define-command "definition-peek-discard"
-  "Close the peek window"
+  "Forget the last definition shown; its window stays"
   (lambda () (peek-discard!)))
 
 (for-each (lambda (name) (undo-exempt! name))
@@ -130,4 +96,4 @@
 (public! 'definition-locate
   "(definition-locate NAME [KIND]) -- (SOURCE-KIND TARGET BYTE-POS) of NAME's definition, or #f")
 (public! 'peek-discard!
-  "(peek-discard!) -- close the peek window; kill its buffer when the peek opened it")
+  "(peek-discard!) -- deprecated: forget the last definition shown; its window and buffer stay")

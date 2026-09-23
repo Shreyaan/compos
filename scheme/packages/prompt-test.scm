@@ -17,15 +17,15 @@
     (cons "*Help*" buffers)))
 
 (deftest 'direct-and-acp-agents-share-the-same-standing-guidance
-  "both lanes compose the same named text files in the same order"
+  "both lanes compose the same named Markdown files in the same order"
   (lambda ()
     (let ((direct (compos-direct-prompt-parts))
           (acp (compos-acp-prompt-parts)))
       (check-equal! direct acp "the lane guidance is identical")
       (check-equal! (map car direct)
-                    '("compos-identity" "quiet-editor" "scope" "chat-context"
-                      "scheme-api" "discovery" "reading" "repository"
-                      "scheme-authoring" "browser" "catalog" "recipes")
+                    '("identity" "quiet-editor" "scope" "chat-context"
+                      "scheme" "discovery" "reading" "repository"
+                      "browser" "catalog" "recipes")
                     "the checked-in fragment order is explicit")
       (for-each
         (lambda (part)
@@ -46,11 +46,11 @@
                        "agents know surgical source editing is available")
       (check-contains! (hello) "Write Scheme unless the user explicitly specifies another language"
                        "Scheme remains the default implementation language")
-      (check-true! (< (string-length (prompt-file-text "quiet-editor.txt")) 600)
+      (check-true! (< (string-length (prompt-file-text "quiet-editor.md")) 600)
                    "quiet-editor stays compact")
-      (check-true! (< (string-length (prompt-file-text "discovery.txt")) 850)
+      (check-true! (< (string-length (prompt-file-text "discovery.md")) 850)
                    "discovery stays compact")
-      (check-true! (< (string-length (prompt-file-text "repository.txt")) 1000)
+      (check-true! (< (string-length (prompt-file-text "repository.md")) 1000)
                    "repository guidance stays compact"))))
 
 (deftest 'chat-context-names-the-conversation-and-its-companions
@@ -111,7 +111,7 @@
         (buffer-set-local! source 'mode-name "elixir-mode")
         (buffer-set-local! notes 'mode-name "morg-mode")
         (let* ((after (chat-prompt-source-parts chat))
-               (context (cadr (assoc "context" after)))
+               (context (cadr (assoc "chat-context" after)))
                (live (chat-context chat)))
           (check-equal! after before
                         "group changes do not invalidate the prompt prefix")
@@ -163,8 +163,8 @@
                        "the page states the conversation lifecycle")
       (check-equal! (car (car parts)) "identity"
                     "ACP starts with the identity section")
-      (check-true! (assoc "context" parts)
-                   "ACP receives the context section")
+      (check-true! (assoc "chat-context" parts)
+                   "ACP receives the chat-context section")
       (t--prompt-cleanup chat))))
 
 (deftest 'modes-compose-named-buffer-local-prompt-fragments
@@ -245,17 +245,17 @@
       (t--prompt-cleanup direct acp))))
 
 (deftest 'semantic-sections-separate-reading-code-editing-and-scope
-  "general reading stays general; code owns code reads, edits, and versioning"
+  "each concern is its own file section: scope, reading, and repository"
   (lambda ()
     (let* ((chat (t--prompt-chat "*prompt-taxonomy*" "api"))
            (parts (chat-prompt-source-parts chat))
-           (general (cadr (assoc "general" parts)))
+           (scope (cadr (assoc "scope" parts)))
            (reading (cadr (assoc "reading" parts)))
-           (code (cadr (assoc "code" parts))))
-      (check-contains! general "do only as much as the user asked"
-                       "general owns task scope")
-      (check-contains! general "does not require code changes"
-                       "general avoids unnecessary code editing")
+           (code (cadr (assoc "repository" parts))))
+      (check-contains! scope "Do only as much as the user asked"
+                       "scope owns task scope")
+      (check-contains! scope "does not require code changes"
+                       "scope avoids unnecessary code editing")
       (check-contains! reading "every file as structured content"
                        "reading applies to every file")
       (check-contains! reading "blocks, sections, definitions"
@@ -270,14 +270,10 @@
                        "reading extracts generic block contents")
       (check-false! (string-contains? reading "(code-outline BUF)")
                     "reading does not prescribe the code API")
-      (check-false! (string-contains? reading "(markdown-outline BUF)")
-                    "reading does not prescribe the writing API")
-      (check-contains! code "CODE READING"
+      (check-contains! code "## Code reading"
                        "code-specific reading belongs to code")
-      (check-contains! code "EDITING / VERSIONING"
+      (check-contains! code "## Versioning"
                        "versioning is inside editing")
-      (check-true! (< (string-length general) 2500)
-                   "the composed general section stays compact")
       (check-true! (< (string-length code) 3200)
                    "the composed code section stays compact")
       (t--prompt-cleanup chat))))

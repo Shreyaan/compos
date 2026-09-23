@@ -181,7 +181,25 @@
   overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
 .dash-persistent .dseg-chat-title:not(.dseg-title-mono) .dseg-v { text-transform: uppercase; }
 .dash-persistent .dseg-chat-title .dseg-strong { font-weight: 300; }
-.dseg-fill { flex: 1 1 auto; min-width: 8px; height: var(--hair); background: var(--edge-soft); align-self: center; }
+/* a file's name, with its directory below it: small, muted, ~ for home.
+   The two lines sit tight, so the header line grows as little as it can. */
+.dseg-title-stack { display: flex; flex-direction: column; min-width: 0; gap: 0; }
+.dash-persistent .dseg-chat-title .dseg-title-stack .dseg-v { line-height: 1.1; }
+.dash-persistent .dseg-chat-title .dseg-title-stack .dseg-strong { font-weight: 600; }
+.dash-persistent .dseg-chat-title .dseg-path {
+  display: block; font-family: var(--font-mono); font-size: 9px;
+  line-height: 1.1; color: var(--text-dim); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.window.inactive .dash-persistent .dseg-chat-title .dseg-path { color: var(--text-faint); }
+/* the file name of the window you are in glows in the accent */
+.window.active .dash-persistent .dseg-chat-title .dseg-title-stack .dseg-v {
+  color: var(--accent);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent); }
+/* the fill only pushes the tail to the end; it draws no line */
+.dseg-fill { flex: 1 1 auto; min-width: 8px; }
+/* the open jj change takes the free width of the row, so the fill steps aside */
+.dash-persistent .dseg-wide[name=jj] { flex: 1 1 0; min-width: 0; }
+.dash-persistent:has(.dseg-wide[name=jj]) .dseg-fill { display: none; }
 /* the state needs no word: a floating window says it */
 .dash-state-mark { display: none; }
 /* the verbosity switch: three tracked words, the current one in ink with
@@ -368,28 +386,6 @@
         (string-append "acp · " c)
         "api")))
 
-;; tokens, cost, and cache hit rate for the API lane, on a chat buffer:
-;; "142k tok · $1.23 · 87% hit". Unlike the cost card, this never borrows
-;; a group's other buffer's spend -- only the chat buffer itself carries
-;; its own tokens. #f on the ACP lane -- that lane reports tokens on a
-;; subscription and prices nothing here -- off a chat buffer, or before
-;; the first turn has billed.
-(define (dash--usage buf)
-  (and (chat-buffer? buf)
-       (equal? (dash--lane buf) "api")
-       (let* ((total (buffer-local buf 'chat-usage-total))
-              (tok (and total (+ (or (plist-get total 'input) 0)
-                                  (or (plist-get total 'output) 0)))))
-         (and tok (> tok 0)
-              (let ((cost (buffer-local buf 'chat-cost))
-                    (rate (chat-hit-rate total)))
-                (string-join
-                  (append
-                    (list (string-append (chat-tokens-short tok) " tok"))
-                    (if cost (list (format-usd cost)) '())
-                    (if rate (list (string-append rate " hit")) '()))
-                  " · "))))))
-
 ;; the tool presets in force here: the buffer's own, or its group chat's
 (define (dash--presets buf)
   (let ((p (or (buffer-local buf 'chat-presets)
@@ -486,17 +482,12 @@
          (days (sort-by-car (dash--day-costs rows)))
          (total (fold (lambda (a d) (+ a (cadr d))) 0 days))
          (today (if (pair? days) (car (reverse days)) #f))
-         (here (dash--here-cost buf))
-         (rate (and (chat-buffer? buf)
-                    (equal? (dash--lane buf) "api")
-                    (let ((u (buffer-local buf 'chat-usage-total)))
-                      (and u (chat-hit-rate u))))))
+         (here (dash--here-cost buf)))
     (dash--section "llm"
       (append
         (list (list 'tag "div" 'class "dash-big" 'text (dash--model buf))
               (dash--row "lane" (dash--lane buf)))
         (if here (list (dash--row "this chat" (format-usd here))) '())
-        (if rate (list (dash--row "cache hit" rate)) '())
         (list (dash--row "today, all" (if today (format-usd (cadr today)) "$0") #f)
               (dash--row "total, all" (format-usd total))
               (dash--row "ledger" "M-x llm-costs" "dim"))))))
@@ -546,6 +537,10 @@
              ;; the header line's one switcher opens the narrow about HERE
              ((equal? id "buffer-switcher")
               (with-current-buffer buf (lambda () (run-command "buffer-switcher")))
+              #t)
+             ;; the header line's i opens the panel C-x ? opens
+             ((equal? id "modeline-expand")
+              (with-current-buffer buf (lambda () (run-command "modeline-expand")))
               #t)
              ;; a verbosity word in the header line
              ((string-prefix? "agent-verbosity-" id)
@@ -695,10 +690,10 @@
 ;; The one switcher: a single action at the end of the header line that
 ;; opens a narrow about this buffer. The design keeps one icon, not three.
 (define (dash--switcher buf)
-  (list 'tag "c-action" 'class "dseg-action" 'text "≡"
-        'click "buffer-switcher"
-        'attrs (list (list "target" "buffer-switcher")
-                     (list "title" "about this buffer"))))
+  (list 'tag "c-action" 'class "dseg-action" 'text "i"
+        'click "modeline-expand"
+        'attrs (list (list "target" "modeline-expand")
+                     (list "title" "about this buffer (C-x ?)"))))
 
 ;; The window's mode line carries the state: the mode, the model and the
 ;; lane, each a key and a value, ranked so a narrow window sheds the lane
@@ -709,15 +704,13 @@
   (let* ((preset (if preset-cell (car preset-cell) (dash--preset buf)))
          (mode (or (buffer-local buf 'mode-name) "Fundamental"))
          (icon (mode-own-icon mode))
-         (mode-text (dashboard--mode-name mode))
-         (usage (dash--usage buf)))
+         (mode-text (dashboard--mode-name mode)))
     (append
       (list (list "mode" (if icon (string-append icon " " mode-text) mode-text) "glyph" 0))
       (if preset
           (list (list "preset" preset "" 1))
           (list (list "llm" (dash--model buf) "" 1)
-                (list "lane" (dash--lane buf) "ok" 2)))
-      (if usage (list (list "usage" usage "" 3)) '()))))
+                (list "lane" (dash--lane buf) "ok" 2))))))
 
 ;; What a buffer can say about itself, as rows for the switcher's narrow:
 ;; the dashboard panel, the summary log of a chat, and for an agent
@@ -799,7 +792,12 @@
          ;; every buffer names itself: a chat's own title when it wrote one,
          ;; and the buffer's name when it has none. The name comes through
          ;; whole, so a system buffer is *Messages* and never messages.
-         (title (or (dash--summary buf) (buffer-modeline-name buf)))
+         ;; a file names itself by its file name, with its directory below
+         (file (if (dash--summary buf) (list #f #f) (dash--file-parts buf)))
+         (title (or (dash--summary buf)
+                    (and (car file)
+                         (if (peek-buffer? buf) (string-append "peek · " (car file)) (car file)))
+                    (buffer-modeline-name buf)))
          (preset (if preset-cell (car preset-cell) (dash--preset buf)))
          ;; every segment carries its name, so a narrow window keeps the
          ;; ones its mode declared and drops the rest
@@ -822,7 +820,8 @@
                                (if (dash--summary buf)
                                    "dseg-chat-title"
                                    "dseg-chat-title dseg-title-mono")
-                               (mode-own-icon (buffer-local buf 'mode-name)))))
+                               (mode-own-icon (buffer-local buf 'mode-name))
+                               (cadr file))))
                      (if (and vcs (not (dash--summary buf)))
                          (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
          (width (buffer-cols buf))
@@ -889,18 +888,41 @@
           (dash--ruled (append (map cadr top) (map cadr meta)))
           tail))))
 
-(define (dash--wide-seg key text &optional title-class glyph)
-  (let ((base (dash--seg key (list (list (if title-class "dseg-strong" "f-dim") text))
-                         'left (string-append "dseg-inline dseg-wide"
-                                  (if title-class (string-append " " title-class) "")))))
+(define (dash--wide-seg key text &optional title-class glyph dir)
+  (let* ((base (dash--seg key (list (list (if title-class "dseg-strong" "f-dim") text))
+                          'left (string-append "dseg-inline dseg-wide"
+                                   (if title-class (string-append " " title-class) ""))))
+         ;; a file's directory sits under its name, small and muted
+         (children (if dir
+                       (list (list 'tag "c-group" 'class "dseg-title-stack"
+                                   'children (append (plist-get base 'children)
+                                                     (list (list 'tag "c-text" 'class "dseg-path"
+                                                                 'text dir)))))
+                       (plist-get base 'children))))
     (list 'tag "c-action"
           'class (plist-get base 'class)
-          'children (plist-get base 'children)
+          'children children
           'click "summary-log"
           'attrs (append (if key (list (list "name" key)) '())
                          (if glyph (list (list "glyph" glyph)) '())
                          (list (list "target" "summary-log")
                                (list "title" "open the summary log"))))))
+
+;; the file or directory a buffer shows, as (NAME DIR): the last segment of
+;; its path, and the path above it with the home directory written as ~.
+;; A buffer that is not a file gives (#f #f).
+(define (dash--file-parts buf)
+  (let* ((path (or (buffer-path buf)
+                   (and (string-prefix? "/" buf) buf)))
+         (bare (and (string? path) (> (string-length path) 1)
+                    (if (string-suffix? "/" path)
+                        (substring path 0 (- (string-length path) 1))
+                        path)))
+         (name (and bare (file-name-nondirectory bare))))
+    (if (and name (not (equal? name "")))
+        (let ((dir (substring bare 0 (- (string-length bare) (string-length name) 1))))
+          (list name (if (equal? dir "") "/" (abbreviate-file-name dir))))
+        (list #f #f))))
 
 ;; The modeline names the buffer the short way: project coordinates inside
 ;; a project, "~" for the home directory outside one. The buffer name keeps

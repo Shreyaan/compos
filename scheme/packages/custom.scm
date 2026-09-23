@@ -90,6 +90,17 @@
   (set! *custom-set-vars* (alist-put *custom-set-vars* name value))
   (custom-write!))
 
+;; Emacs add-to-list: ELEMENT goes first, or last with APPEND, unless the
+;; list holds it already. The value of the session only; customize-save!
+;; keeps a value for good.
+(define (add-to-list! name element &optional at-end)
+  (let ((old (if (boundp name) (symbol-value name) '())))
+    (if (member element old)
+        old
+        (let ((new (if at-end (append old (list element)) (cons element old))))
+          (set-symbol-value! name new)
+          new))))
+
 (define (customize-save-face! face &rest attrs)
   (custom-set-faces! (list face attrs))
   (custom-write!))
@@ -210,3 +221,5 @@
 (public! 'customize-save! "(customize-save! 'name VALUE) — set + persist to custom.scm")
 (public! 'customize-apropos "(customize-apropos PATTERN) — search customizables by name/doc")
 (public! 'customize-save-face! "(customize-save-face! 'face 'attr VALUE) — persist one face attribute")
+(effects! '(write))
+(public! 'add-to-list! "(add-to-list! 'name ELEMENT [APPEND]) — put ELEMENT first in the list variable, or last with APPEND, unless it is there")

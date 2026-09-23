@@ -783,12 +783,15 @@
         (cond ((equal? entry "..")
                (dired-open-parent! (dired-dir (current-buffer))))
               ((dired-directory? entry) (visit p group))
+              ;; a file opens in another window by the display chain, so it
+              ;; replaces the window of its own mode; Dired keeps the focus
               (else
-               (peek-or-open! p (lambda () (visit-quietly p group)))
+               (let ((buf (visit-quietly p group)))
+                 (when buf (display-buffer-other-window! buf)))
                p))
         (message "No file on this line"))))
 
-(define-command "dired-visit" "Peek the file on this line in the other window; RET again opens it here. A directory opens here"
+(define-command "dired-visit" "Open the file on this line in another window, the one of its own mode first. A directory opens here"
   (lambda ()
     ;; The Dired buffer's group is more specific than a frame or project
     ;; fallback. An explicit visit also replaces inherited placement.

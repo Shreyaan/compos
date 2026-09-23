@@ -478,7 +478,7 @@
   (buffer-set-local! buf 'app-generation
                      (+ 1 (or (buffer-local buf 'app-generation) 0))))
 
-(define (app-buffers)
+(define (preview-app-buffers)
   (let loop ((bs (buffer-list)) (acc '()))
     (cond ((null? bs) (reverse acc))
           ((app-buffer? (car bs)) (loop (cdr bs) (cons (car bs) acc)))
@@ -508,7 +508,7 @@
 
 (define-command "app-reload" "Reload every running app"
   (lambda ()
-    (let ((bs (app-buffers)))
+    (let ((bs (preview-app-buffers)))
       (for-each app-reload! bs)
       (message (string-append "Reloaded " (number->string (length bs)) " app(s)")))))
 
@@ -516,7 +516,7 @@
 ;; code. The app server reads buffers, not files, so an unsaved edit in a
 ;; sibling file shows on the next reload too.
 (define (preview--after-save-hook!)
-  (for-each app-reload! (app-buffers)))
+  (for-each app-reload! (preview-app-buffers)))
 
 (add-hook! 'after-save-hook 'preview--after-save-hook!)
 

@@ -11,32 +11,7 @@ An app is three things and nothing more:
 - a DETAIL — one buffer per row, beside the listing
 - ACTIONS — the same verbs on both, under the same keys
 
-More generally, an app is a named collection of table-producing modes. A mode is either an `index` mode, which returns many rows, or a `show` mode, which returns one row. Each mode points at a source, and every source is normalized to a table before rendering.
-
-```scheme
-(define-app recruiting
-  (app
-    name: 'recruiting
-    modes:
-      (list
-        (index-mode
-          name: 'candidates
-          source: (browse url: "https://ats.example.com/candidates")
-          table: (table-spec key: 'id columns: '(name company status))
-          detail: 'candidate)
-        (show-mode
-          name: 'candidate
-          source: (browse url: "https://ats.example.com/candidates/:id")
-          table: (table-spec key: 'id columns: '(name company status email)))))))
-```
-
-The supported source kinds are `mcp`, direct `url` requests, and `browse`. A `browse` source discovers a site parser by default when no parser is supplied. The runtime pipeline is:
-
-```text
-mode parameters -> source request -> parser -> table -> mode renderer
-```
-
-The app compiler also generates keymaps. Framework defaults are extended by app defaults, mode defaults, and finally custom bindings. Use semantic commands such as `refresh`, `open-selected`, `filter`, and `close-detail`; the source must not affect their meaning.
+An app over a website is not written by hand. It is a SPEC for the site-app engine (`site-app.scm`): the site's URL patterns, and one extractive XSLT sheet per page kind. See [Apps from a website](#apps-from-a-website). Write Scheme for an app only when its source is not a website.
 
 Name the app once and name everything after it. App `amazon` gives listing buffer `*amazon*`, modes `amazon-mode` and `amazon-detail-mode`, detail buffers `*amazon:KEY*`, commands `amazon-*`, settings `amazon-*`.
 
@@ -59,19 +34,9 @@ But every app buffer must JOIN that group. A pane holding a group member is a pl
 
 So: no group of the app's own, and no ungrouped app buffers either.
 
-```scheme
-;; every buffer the app opens joins the group the reader is already in —
-;; the listing and every detail
-(define (amazon-join-group! buf)
-  (when (buffer-exists? buf)
-    (let ((id (frame-group)))
-      (when (and id (not (buffer-in-group? buf id)))
-        (buffer-add-group! buf id)))))
-```
+
 
 Every render joins. No exceptions: a detail opened by a preview timer with no frame group is exactly the case that loses the layout.
-
-An app opened from an ungrouped frame has no group to join, and so has no saved layout. That is the reader's position to be in, not the app's to correct.
 
 ### 2. The listing is a list mode
 
@@ -204,6 +169,44 @@ at most three, and the extra buffers sit on the frame's strip, where Cmd-left an
 Cmd-right reach them. That is the whole layout policy. Save the arrangement with
 `(group-layout-save! id)` once the panes stand.
 
+## Apps from a website
+
+Status: `site-app.scm` is being built, and svsrecruiting.com is its first spec. Until `(boundp 'define-site-app)` answers `#t`, the contract below is the design, not the API.
+
+A website app is one engine plus one spec per site. The engine is written once. The spec has no Scheme logic in it, so a new site is a few XSLT sheets.
+
+**The site stays live.** The app keeps one background tab of the user's own Chrome open on the site, with their login. It reads the page from that tab, and an action clicks the real button in that tab. Nothing talks to the site's API, and nothing re-implements a button. That is what makes it work on LiveView, React and the rest, where the buttons are events and not links: a fetched copy of the page cannot press them, but the live tab can.
+
+**Every page kind has one extractive sheet**, and every sheet emits the same small vocabulary:
+
+```xml
+<nav>    <link href="" key="" label=""/> …                                    </nav>
+<list>   <row href="" key=""> <field name="">…</field> </row> …               </list>
+<facets> <facet group="" label="" count="" href="" active=""/> …               </facets>
+<page>   <title/> <section name=""> <field name=""/> <link href=""/> </section> …
+         <action key="" label="" click="CSS selector" confirm=""/> …          </page>
+```
+
+The engine draws the vocabulary, the same way on every site:
+
+| element | becomes |
+|---|---|
+| `<nav>` | the tab line over the listing |
+| `<list>` | a list mode: one row per record, `/` narrows, `RET` opens the detail |
+| `<facets>` | the margin filters, picked on `f`; a facet is a link, so picking one reads that URL |
+| `<page>` | a detail buffer of our own drawing, one per row, with every link opening inside the app |
+| `<action>` | a key on the listing and the detail: click the selector in the live tab, wait for the page to change, read it again, redraw |
+
+**Detail pages preserve the site's information, not its container tree.** Apply the page-kind stylesheet to the live HTML and keep every substantive section and action. The sheet replaces generic `div` structure with semantic compos elements such as `<c-candidate>`, `<c-profile-details>`, `<c-assessment>`, `<c-application>`, `<c-job>` and `<c-actions>`. Use the narrowest honest name, preserve links and relationships as attributes or child elements, and do not discard a section merely because the first interface does not draw it yet. The reader, navigation commands and future views must be able to recover real records and relationships from the transformed page rather than scrape presentation text.
+
+**The spec** (`site.scm` beside the sheets) names the site, its URL patterns and the sheet for each, and the keys: which `<nav>` link is the home, and which `<action>` label takes which letter.
+
+**Writing a sheet.** Read the page from the live tab, run `xslt-discover` with `xslt-discover-depth` raised, find the record anchor (see the four ways it goes wrong below), and write the sheet by hand. `xslt-learn` makes subtractive sheets for reading; it cannot make records. Prefer `data-testid`, ids and ARIA roles over classes. When the site is the user's own and hard to read, fix the site: add `data-testid` to rows and buttons, and make tabs and filters real links.
+
+**Checking a spec.** Keep a saved copy of each page kind with the counts its sheet must find, and check the live site against them. A redesign then shows up as a failed check, not as an empty list.
+
+**What does not work.** A button that opens the browser's own dialog, a file upload, or anything behind a captcha. Say so in the detail rather than drawing a key that fails.
+
 ## Where the rows come from
 
 A listing is only as good as what fills it, and this is where an app is most often built wrong.
@@ -229,6 +232,8 @@ The callback is not a reason to write a polling loop. There is already a way to 
 ```
 
 Every hand-rolled `debounce!` retry chain in an app is this, written again and worse.
+
+A website app that keeps its live tab reads from that tab instead: `(tab-eval TAB "document.documentElement.outerHTML" K)`. A snapshot opens and closes a tab each time, and the page it reads is not the one the actions click.
 
 ### The sheet that extracts, not the sheet that deletes
 

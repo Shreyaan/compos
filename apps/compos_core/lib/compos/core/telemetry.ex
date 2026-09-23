@@ -53,7 +53,19 @@ defmodule Compos.Core.Telemetry do
   # same LiveView process
   @tid_key :compos_tid
 
-  def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  # fullsweep_after: 0 -- every collection is a full sweep.
+  #
+  # This process holds a BOUNDED working set: @max_events rows and nothing
+  # else. Its heap, though, grew without bound -- 121 MB, then 160 MB
+  # fifteen minutes later, with the queue still capped at 2000. That is not
+  # the rows; it is garbage the generational collector never got to. A
+  # process this busy (90M reductions in forty minutes) promotes its
+  # garbage to the old heap faster than the default fullsweep_after: 65535
+  # ever sweeps it, so the old heap only grows. A full sweep every time is
+  # cheap here precisely because the live set is small and fixed.
+  def start_link(opts \\ []),
+    do:
+      GenServer.start_link(__MODULE__, opts, name: __MODULE__, spawn_opt: [fullsweep_after: 0])
 
   @doc "Return at most LIMIT events, newest first."
   def events(limit \\ 200) when is_integer(limit) and limit >= 0 do

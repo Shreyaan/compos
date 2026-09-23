@@ -102,7 +102,7 @@ defmodule Compos.Core do
 
     case DynamicSupervisor.start_child(@buffer_sup, {Buffer, Keyword.put(opts, :name, name)}) do
       {:ok, _pid} ->
-        if restore? and Keyword.has_key?(opts, :checkpoint), do: restore_runtime_later(name)
+        if restore? and Keyword.has_key?(opts, :checkpoint), do: restore_runtime_on_wake(name)
         {:ok, name}
 
       {:error, {:already_started, _}} ->
@@ -110,6 +110,49 @@ defmodule Compos.Core do
 
       other ->
         other
+    end
+  end
+
+  # A dormant buffer that wakes must be WHOLE before the caller goes on to
+  # use it. The rebuild used to be a cast here too, so a wake returned a
+  # buffer with its text, its point and its locals but no mode setup: an
+  # empty local map and no keys until the cast ran. That is the same race
+  # the desktop restore had, entered by a different door.
+  #
+  # ORDER it when the caller is Scheme. Inside a lane the rebuild runs
+  # right here, in this process, before the wake returns -- no lane hop,
+  # so no cross-lane wait and no way to block on ourselves.
+  #
+  # Outside a lane the caller is the Editor GenServer or a LiveView, and
+  # a rebuild calls back into the Editor: waiting there would deadlock the
+  # process we are waiting for. Those keep the cast, and every one of them
+  # goes on to display through Scheme, which makes the buffer whole
+  # itself (switch-to-buffer-here!, display-buffer-in-window!).
+  @waking :compos_waking_buffer
+
+  defp restore_runtime_on_wake(name) do
+    # A rebuild can wake a buffer of its own -- a mode setup that opens its
+    # list, a hook that visits a file. One level deep is ordered; deeper is
+    # a cast, so a wake can never stand inside its own wake.
+    if Compos.Core.Lane.current() && is_nil(Process.get(@waking)) do
+      Process.put(@waking, name)
+
+      try do
+        case rebuild_runtime(name, Compos.Core.Frame.current()) do
+          {:reply, {:error, msg}} ->
+            require Logger
+            Logger.warning("buffer #{name}: the runtime restore failed on wake: #{msg}")
+
+          _ ->
+            :ok
+        end
+      after
+        Process.delete(@waking)
+      end
+
+      :ok
+    else
+      restore_runtime_later(name)
     end
   end
 

@@ -404,7 +404,7 @@
       (check-contains! hello "windows" "another area")
       ;; Discovery has a stopping rule: known recipes run directly and an
       ;; unfamiliar operation gets one search, not a synonym loop.
-      (check-contains! hello "WORKFLOW — search once, then act" "the workflow")
+      (check-contains! hello "## Workflow" "the workflow")
       (check-contains! hello "do not rediscover them" "the recipes rule")
       (check-contains! hello "Never repeat an equivalent search" "the stopping rule")
       (check-contains! hello "read the affected state back" "the check rule"))))

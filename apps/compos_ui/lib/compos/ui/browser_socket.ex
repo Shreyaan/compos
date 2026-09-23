@@ -27,7 +27,9 @@ defmodule Compos.Ui.BrowserSocket do
 
   @impl true
   def handle_in({text, _opts}, state) do
-    Browser.incoming(text)
+    # our pid rides along: a request is answered on this socket, not on
+    # whichever profile's extension connected last
+    Browser.incoming(self(), text)
     {:ok, state}
   end
 

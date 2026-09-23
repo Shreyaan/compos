@@ -393,6 +393,46 @@
                (and (string? h) (not (equal? h "")) h)))))
       (k #f)))
 
+
+(domain! 'chrome)
+(effects! '(read external))
+
+(define (tab-navigate tab url k &optional wait)
+  (chrome-call "navigate"
+    (append (list 'tab (chrome--tab-id tab) 'url url)
+            (if wait (list 'wait wait) '()))
+    (lambda (reply)
+      (let ((html (plist-get reply 'html)))
+        (k (and (string? html)
+                (not (equal? html ""))
+                (list 'tab (plist-get reply 'tab)
+                      'url (plist-get reply 'url)
+                      'title (plist-get reply 'title)
+                      'html html)))))))
+
+(public! 'tab-navigate
+  "(tab-navigate TAB URL K [WAIT]) — navigate the persistent background TAB, wait for rendered WAIT, and give K its url, title and html")
+
+;; Press a button on the live page the way the user would, through the
+;; extension (no debugger). K gets the rendered html once the page settled,
+;; or #f when the button is missing or the page never answered.
+(define (tab-press tab selector k &optional wait)
+  ;; browser-call, not chrome-call: a failed press must answer #f at once.
+  ;; chrome-call drops errors, and a caller waiting on K would hang.
+  (browser-call "press"
+    (append (list 'tab (chrome--tab-id tab) 'selector selector)
+            (if wait (list 'wait wait) '()))
+    (lambda (reply)
+      (let ((html (and (plist-get reply 'ok) (plist-get reply 'html))))
+        (unless (plist-get reply 'ok)
+          (message (string-append "tab-press: " (or (plist-get reply 'error) "failed"))))
+        (k (and (string? html)
+                (not (equal? html ""))
+                (not (plist-get reply 'timedOut))
+                html))))))
+
+(public! 'tab-press
+  "(tab-press TAB SELECTOR K [WAIT]) — click SELECTOR in the background TAB through the extension; K gets the html once LiveView patched and WAIT matches")
 (define (tab-eval tab code k)
   (chrome-call "eval" (list 'tab (chrome--tab-id tab) 'code code)
     (lambda (r) (k (plist-get r 'value)))))
@@ -470,20 +510,38 @@
                (let ((w (plist-get (car mine) 'window)))
                  (when w (set-frame-local! 'chrome-window w))
                  w))
-              ;; another frame's editor tab: the reader's browser window, but
-              ;; not this frame's, so answer without claiming it
-              ((pair? rows) (plist-get (car rows) 'window))
+              ;; no tab answers for this frame. Another frame's window is the
+              ;; wrong answer: a tab opened there lands out of sight, in a
+              ;; profile that may not share this one's logins. #f lets the
+              ;; bridge route by this frame instead.
               (else #f)))))
 
 ;; BACKGROUND opens the tab without taking the reader there. The default is
 ;; the front, because a tab opened by a key the reader pressed is usually one
 ;; they want to look at; a tab opened so the editor can work in it is not.
+;; The tab this frame is drawn in. Two frames can share one browser window,
+;; one per daemon or per chat, so the window alone does not name this frame.
+(define (chrome-tab-resolve!)
+  (or (frame-local 'chrome-tab)
+      (let* ((here (selected-frame))
+             (mine (filter (lambda (e) (equal? (plist-get e 'frame) here))
+                           (chrome--frames-sync))))
+        (and (pair? mine)
+             (let ((t (plist-get (car mine) 'tab)))
+               (when t (set-frame-local! 'chrome-tab t))
+               t)))))
+
 (define (tab-open url &optional window background)
-  (let ((w (or window (chrome-window-resolve!))))
+  (let ((w (or window (chrome-window-resolve!)))
+        (after (and (not window) (chrome-tab-resolve!))))
     (chrome-call "open"
       (append (list 'url url)
               (if w (list 'window w) '())
-              (if background (list 'active #f) '()))
+              ;; beside this frame's own tab: two frames can share a window
+              (if after (list 'after after) '())
+              ;; its own flag: a #f crosses the wire as null, and the
+              ;; extension read `active: null` as active
+              (if background (list 'background #t) '()))
       chrome-ignore)))
 (define (tab-activate tab) (chrome-call "activate" (list 'tab (chrome--tab-id tab)) chrome-ignore))
 (define (tab-close tab) (chrome-call "close" (list 'tab (chrome--tab-id tab)) chrome-ignore))

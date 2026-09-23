@@ -15,7 +15,7 @@
   (lambda ()
     (for-each
       (lambda (prompt)
-        (check-contains! prompt "QUIET EDITOR" "quiet is the default")
+        (check-contains! prompt "## Quiet editor" "quiet is the default")
         (check-contains! prompt "reachable through Scheme without making a buffer visible"
                          "Scheme does not need display")
         (check-contains! prompt "Do not select, switch to, or display a buffer merely to work"
@@ -222,8 +222,8 @@
       (let* ((parts (chat-prompt-source-parts scratch))
              (wire (prompt-parts-text parts))
              (context (chat-context scratch)))
-        (check-contains! (cadr (assoc "context" parts)) "(chat-context)"
-                         "the context section names the pull operation")
+        (check-contains! (cadr (assoc "chat-context" parts)) "(chat-context)"
+                         "the chat-context section names the pull operation")
         (check-false! (string-contains? wire buf)
                       "the source buffer is not hardcoded")
         (check-false! (string-contains? wire scratch)

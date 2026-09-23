@@ -240,6 +240,65 @@ function base64(buf) {
   return btoa(s);
 }
 
+async function waitTabComplete(tab, cap = 25000) {
+  const current = await chrome.tabs.get(tab);
+  if (current.status === "complete") return true;
+  return new Promise((resolve) => {
+    const done = (value) => {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(false), cap);
+    const listener = (id, info) => {
+      if (id === tab && info.status === "complete") done(true);
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function waitRendered(tab, selector, cap = 8000, quiet = 250) {
+  await chrome.scripting.executeScript({
+    target: { tabId: tab },
+    func: (sel, timeout, quietMs) =>
+      new Promise((resolve) => {
+        const found = () => !!sel && !!document.querySelector(sel);
+        if (found()) return resolve(true);
+        let idle;
+        const stop = (value) => {
+          observer.disconnect();
+          clearTimeout(cutoff);
+          clearTimeout(idle);
+          resolve(value);
+        };
+        const settle = () => {
+          clearTimeout(idle);
+          idle = setTimeout(() => stop(false), quietMs);
+        };
+        const cutoff = setTimeout(() => stop(false), timeout);
+        const observer = new MutationObserver(() => {
+          if (found()) return stop(true);
+          if (!sel) settle();
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+        if (!sel) settle();
+      }),
+    args: [selector || null, cap, quiet],
+  });
+}
+
+async function renderedPage(tab) {
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId: tab },
+    func: () => ({
+      html: document.documentElement.outerHTML,
+      url: location.href,
+      title: document.title,
+    }),
+  });
+  return result?.result || { html: "", url: "", title: "" };
+}
+
 const OPS = {
   // Run Chrome's built-in Gemini Nano Prompt API in the active page. The
   // model is local to Chrome, so this connector needs no network credential.
@@ -372,6 +431,52 @@ const OPS = {
     }
   },
 
+  // Navigate the app's persistent background tab and answer only when the
+  // rendered page is ready. The tab stays where it is and never takes focus.
+  async navigate({ tab, url, wait }) {
+    await chrome.tabs.update(tab, { url, active: false });
+    await waitTabComplete(tab);
+    await waitRendered(tab, wait || null);
+    return { tab, ...(await renderedPage(tab)) };
+  },
+
+  // Press a button in the app's background tab, the way a person would, and
+  // answer with the page once it has settled. No debugger: el.click() is
+  // enough for LiveView. LiveView marks the pressed element phx-click-loading
+  // until the server's patch lands, and applies the patch in one task, so the
+  // first mutation after the mark clears (and WAIT matches) is the finished page.
+  async press({ tab, selector, wait, cap = 10000 }) {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab },
+      func: (sel, wait, cap) =>
+        new Promise((resolve) => {
+          const el = document.querySelector(sel);
+          if (!el) return resolve({ error: `no element: ${sel}` });
+          const ready = () =>
+            !document.querySelector(".phx-click-loading") && (!wait || !!document.querySelector(wait));
+          const stop = (timedOut) => {
+            obs.disconnect();
+            clearTimeout(cutoff);
+            resolve({ html: document.documentElement.outerHTML, timedOut });
+          };
+          const obs = new MutationObserver(() => ready() && stop(false));
+          obs.observe(document.documentElement, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            characterData: true,
+          });
+          const cutoff = setTimeout(() => stop(true), cap);
+          el.click();
+          if (ready()) stop(false);
+        }),
+      args: [selector, wait || null, cap],
+    });
+    const r = res?.result;
+    if (r?.error) throw new Error(r.error);
+    return { tab, ...r };
+  },
+
   // Every compos tab answers a frame probe with its frame id. The daemon
   // sweeps frames with M-x refresh-frames: a frame no tab answers for is
   // dead. Probe ALL localhost tabs, not the editors map — that map keeps
@@ -485,9 +590,19 @@ const OPS = {
   // browser window — the one its frame is displayed in — and the tab opens
   // there, not in whichever window Chrome last focused. Without this, a chat
   // on the left screen answers by opening a tab on the right one.
-  async open({ url, active, window }) {
-    const create = { url, active: active !== false };
-    if (await windowExists(window)) create.windowId = window;
+  // BACKGROUND opens it behind the tab you are on. It is its own flag because
+  // the daemon sends a Scheme #f as null, and `active: null` read as "not
+  // false" and took the focus.
+  async open({ url, active, window, background, after }) {
+    const create = { url, active: !background && active !== false };
+    // AFTER is the tab of the frame that asked: two frames can share a
+    // window, so the window alone does not say whose tab this is. The new
+    // tab sits right after it.
+    const at = after && (await chrome.tabs.get(after).catch(() => null));
+    if (at) {
+      create.windowId = at.windowId;
+      create.index = at.index + 1;
+    } else if (await windowExists(window)) create.windowId = window;
     const t = await chrome.tabs.create(create);
     return { tab: t.id, window: t.windowId };
   },
