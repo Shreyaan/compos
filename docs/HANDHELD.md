@@ -8,7 +8,7 @@ The client is a second client of the same frame payload the desktop draws.
 It attaches a frame, reads `Compos.Core.Editor.render_state/1`, and sends
 every gesture as the same `key` event the desktop sends. No editor logic
 lives in the client. The policy lives in
-`apps/compos_core/priv/packages/handheld.scm`.
+`scheme/packages/handheld.scm`.
 
 ## The screen
 
@@ -58,8 +58,8 @@ lives in the client. The policy lives in
 - `apps/compos_ui/lib/compos/ui/mobile_live.ex` — the LiveView.
 - `apps/compos_ui/lib/compos/ui/mobile_layouts.ex` — the root layout: the
   stylesheet and the `Handheld` hook.
-- `apps/compos_core/priv/packages/handheld.scm` — the policy.
-- `apps/compos_core/priv/tests/handheld-test.scm` — the policy tests.
+- `scheme/packages/handheld.scm` — the policy.
+- `scheme/packages/handheld-test.scm` — the policy tests.
 - `apps/compos_ui/test/compos/ui/mobile_live_test.exs` — the view tests.
 
 ## Customs

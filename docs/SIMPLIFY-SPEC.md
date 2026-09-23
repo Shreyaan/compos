@@ -4,11 +4,18 @@ Rewritten 2026-08-08. Audience: a coding agent (or human) implementing
 this with NO prior context on the repo. Read Part 0 and Part 1 fully
 before touching code. Nothing is started unless marked LANDED.
 
+> **Status (2026-09-24):** no item carries a LANDED mark, but most work
+> items are in the code: the backend seam (`agent/backend.ex` with `acp`,
+> `req_llm`, and `stub`), the one-tool registry with "did you mean" in
+> `tools.scm`, and the three chat locals lists in `chat-mode.scm`. The
+> packages moved from `scheme/packages/` to `scheme/packages/`. Line numbers
+> describe the tree of 2026-08-08. Check the code before you start an item.
+
 ## Part 0: How to work in this repo (read first)
 
 - **The one rule: Elixir supplies mechanism, Scheme decides policy.**
   Commands, keybindings, modes, chat behavior live in
-  `apps/compos_core/priv/*.scm`. Before adding Elixir, ask whether
+  `scheme/packages/*.scm`; the kernel is `apps/compos_core/priv/*.scm`. Before adding Elixir, ask whether
   Scheme plus one small primitive does it. Usually yes.
 - **The Scheme dialect is NOT Emacs Lisp and NOT R7RS.** Symbols are
   `{:sym, _}` BEAM terms, plists are flat lists, there is no `nil`
@@ -28,13 +35,14 @@ before touching code. Nothing is started unless marked LANDED.
 
   ```sh
   mix test                                   # all four apps must stay green
-  pkill -f "mix run"; sleep 1
-  (mix run --no-halt >> ~/.compos/daemon.log 2>&1 &); sleep 6
   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
   ```
 
-  A daemon restart is REQUIRED to reload `priv/*.scm`. Editor state
-  restores from `~/.compos/desktop.etf`.
+  A restart is NOT required to reload `.scm` or `.ex` files:
+  `Compos.Core.Hotload` reloads a saved file. Use `M-x restart-daemon`
+  for a new dependency, a supervision tree change, or a NIF rebuild.
+  Never `pkill` a daemon. Editor state restores from
+  `~/.compos/desktop.etf`.
 - **Tests** drive the editor through `KeyDispatch.handle_key/1` — the
   same path the GUI uses. ACP is tested against `FakeTransport`
   (`apps/compos_core/test/compos/agent_test.exs`) — no adapter binary,
@@ -49,7 +57,7 @@ before touching code. Nothing is started unless marked LANDED.
   a real browser before committing. svs runs MULTIPLE Claude sessions
   in this tree concurrently: `git status` before committing, commit
   only files you changed.
-- Reference docs: `ARCHITECTURE.md` (read once), `HANDOFF.html`
+- Reference docs: `ARCHITECTURE.md` (read once), `SIMPLIFY-AUDIT.md`
   (project state), `CLAUDE.md` (style).
 
 ## Part 1: Why this work exists, and how things work today
@@ -145,7 +153,7 @@ the buffer; do keep the marker out of anything a user or model sees
 `chat-send` (priv/editor.scm:1277) branches:
 
 - `'agent-slug` set → delegate to `agent-send`
-  (priv/packages/agent.scm:499): the thread lane. A GenServer
+  (scheme/packages/agent.scm): the thread lane. A GenServer
   (`Compos.Core.Agent`, one per slug) owns the turn: prompt queue,
   streaming events, permissions, revive-on-dead.
 - else → `chat-send-rich!` (editor.scm:1557): the api lane, inline in
@@ -224,7 +232,7 @@ half-built version of what W3 builds properly, and W3 deletes it.
   (1601), `chat-preamble` (1219 — the per-send system prompt; a
   grouped chat points the model at the group's live buffers,
   pull-context via tools).
-- **`priv/packages/agent.scm`** — the thread lane: event renderer
+- **`scheme/packages/agent.scm`** — the thread lane: event renderer
   (`agent-handle-event` 215–325) recording blocks/folds/overlays;
   permission answering (327–369; option matching by kind
   exact-then-prefix; "approving is invisible, denying is recorded" —
@@ -238,13 +246,13 @@ half-built version of what W3 builds properly, and W3 deletes it.
   flag), `llm` (`'type llm` — the in-process special case);
   `agent-resolve-config` (596–624) which also injects `'mcp-servers`
   from presets; the `*chats*` fleet (720–964).
-- **`priv/packages/mcp.scm`** — server registry (`mcp-register!`),
+- **`scheme/packages/mcp.scm`** — server registry (`mcp-register!`),
   presets (`define-preset!`, `'chat-presets` buffer-local,
   `chat-extra-tool-specs` pulls bridged specs at send time), and the
   ACP translation (`mcp-acp-server(s)`, `presets-acp-servers` — compos
   proxy always + preset servers; `"@VAR"` env values resolve to keys
   Elixir-side so config files stay secret-free).
-- **`priv/packages/tools.scm`** — `define-tool!` registry, the 14
+- **`scheme/packages/tools.scm`** — `define-tool!` registry, the 14
   current tools, `*llm-system*` (the standing system prompt),
   the MCP proxy surface (`mcp-proxy-tools-json`, `mcp-proxy-call`).
 
@@ -348,8 +356,8 @@ discoverable public API, not per-domain tools. What makes one-tool
 viable is error feedback: the observed failure mode is a model
 guessing `buffer-insert`, `insert-string`, … six round-trips in a row.
 
-**Where**: `priv/packages/tools.scm` (registry, all tools);
-`priv/packages/notmuch.scm` (the three mail tools);
+**Where**: `scheme/packages/tools.scm` (registry, all tools);
+`scheme/packages/notmuch.scm` (the three mail tools);
 `public!` registry in `priv/editor.scm:15`.
 
 **Steps**:
@@ -379,7 +387,7 @@ precedent one level down.
 `lib/compos/core/agent/backend.ex`,
 `lib/compos/core/agent/backend/acp.ex`,
 `lib/compos/core/agent/backend/stub.ex`; connectors in
-`priv/packages/agent.scm:541–628`.
+`scheme/packages/agent.scm:541–628`.
 
 **Steps**:
 1. Define the behaviour:
@@ -495,7 +503,7 @@ spec): an agent holding eval-scheme in a local editor is already
 trusted; per-call modals are theater EXCEPT for irreversible,
 outward-facing acts — send mail, permanent deletion, push/publish.
 
-**Where**: `priv/packages/agent.scm` 327–369 (answering machinery
+**Where**: `scheme/packages/agent.scm` 327–369 (answering machinery
 exists); `agent.ex` `pending_permission`; `Backend.ReqLLM` dispatcher
 (W3); new Scheme: policy fn + modality plumbing.
 
@@ -597,7 +605,7 @@ initialize still advertises `fs: false` and fs/* frames still answer
 mid-conversation silently does nothing until some later reconnect.
 Silent no-ops read as broken features.
 
-**Where**: `priv/packages/mcp.scm` (`llm-set-preset` /
+**Where**: `scheme/packages/mcp.scm` (`llm-set-preset` /
 `llm-unset-preset`); reconnect machinery in agent.scm.
 
 **Steps**: on preset change in a chat whose backend is a live ACP

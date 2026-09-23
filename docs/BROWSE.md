@@ -2,7 +2,7 @@
 
 `browse` is compos's readable-web mode. It fetches a URL, extracts either the article or the complete document, converts the result to Markdown, and presents it in a read-only buffer with browser-like navigation.
 
-The implementation lives primarily in `apps/compos_core/priv/packages/web.scm`. Markdown preview behavior lives in `apps/compos_core/priv/packages/preview.scm` and `apps/compos_core/priv/packages/markdown-mode.scm`.
+The implementation lives primarily in `scheme/packages/web.scm`. Markdown preview behavior lives in `scheme/packages/preview.scm` and `scheme/packages/markdown-mode.scm`.
 ## Pipeline at a glance
 
 ```text
@@ -57,8 +57,12 @@ A registered site can replace `readable` with an XSLT stylesheet under `web/pars
 
 | Site | Parser | Render first? |
 | --- | --- | --- |
+| `svsrecruiting.com` | none (`readable`) | yes |
 | `substack.com` | `substack.xsl` | yes |
 | `html.duckduckgo.com` | `duckduckgo.xsl` | no |
+| `news.ycombinator.com` | `hackernews.xsl` | no |
+| `timesofindia.indiatimes.com` | `toi.xsl` | no |
+| `www.linkedin.com/talent` | `linkedin-recruiter.xsl` | yes |
 | `mukeshbishnoi.com` | `mukeshbishnoi.xsl` | no |
 | `www.mukeshbishnoi.com` | `mukeshbishnoi.xsl` | no |
 
@@ -101,7 +105,7 @@ New browse tabs enable the real `preview-mode` minor mode by default. It sets:
 
 The existing Markdown renderer owns headings, lists, block quotes, emphasis, tables, links, and images. Browse still applies its page-specific metadata and article-separator overlays, restores point, updates the title and modeline, and records the visit.
 
-`C-c C-v` disables preview to reveal the unchanged Markdown source. Pressing it again renders the same source in the same tab.
+`C-c C-v` (`browse-cycle-view`) cycles the tab through three views: rendered monospace, rendered serif, and the Markdown source. The source view turns preview off and paints the unchanged Markdown.
 ## Images
 
 Images remain ordinary Markdown image nodes in the buffer:
@@ -174,7 +178,7 @@ Successful renders enter persistent web history with URL, title, and time. `H` o
 | `b`, `B` | Set or list bookmarks |
 | `s` | List browse tabs |
 | `M-n`, `M-p` | Cycle browse tabs |
-| `C-c C-v` | Toggle Markdown source/preview in this tab |
+| `C-c C-v` | Cycle monospace, serif, and Markdown source views in this tab |
 | `q` | Quit the window |
 
 ## Preview integration
@@ -193,7 +197,7 @@ The source remains authoritative. Preview state changes presentation only; cachi
 
 Browse behavior is covered by:
 
-- `apps/compos_core/priv/tests/web-browse-test.scm`;
+- `scheme/packages/web-browse-test.scm`;
 - `apps/compos_core/test/compos/web_browse_test.exs`;
 - `apps/compos_core/test/compos/window_follow_test.exs`;
-- Markdown and image-overlay tests under `apps/compos_core/priv/tests` and `apps/compos_ui/test`.
+- Markdown and image-overlay tests under `scheme/packages` and `apps/compos_ui/test`.

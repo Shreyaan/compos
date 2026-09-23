@@ -4,11 +4,15 @@
 buffer version it drew and the byte offsets where visual rows begin) after
 every paint; `Editor.set_wrap_maps/2` keeps it; `(window-wrap-map WIN)` reads
 it; `visual-next-line!`, `visual-previous-line!`, `visual-beginning-of-line!`
-and `visual-end-of-line!` in `editor.scm` decide, with `priv/tests/visual-line-test.scm`
-as the rules. `visualLineMove`, `visualLineEdge`, `sourceSpot` and
-`previewSpot` are gone; `exactSpot` resolves clicks and drags. A stale map
+and `visual-end-of-line!` in `scheme/packages/visual-line.scm` decide, with
+`scheme/packages/visual-line-test.scm` as the rules. `visual-row-start` and
+`visual-row-end` exist; `visual-row-next` does not (`visual-row-move!` holds
+the goal column). `visualLineMove`, `visualLineEdge` and `sourceSpot` are
+gone; `exactSpot` resolves clicks and drags. `previewSpot` remains: it
+resolves a click in raw HTML by text match, not a key. A stale map
 (the buffer moved on) falls back to the source line at once; a key never
-waits on a measurement.
+waits on a measurement. An editable text surface measures no map. There,
+Scheme asks the browser to move the selection with `client-select!`.
 
 A task for an agent with a fresh context. Read `ARCHITECTURE.md` and
 `BEAM-POWER.md` (the section "The client measures. Scheme decides.") first.
@@ -38,7 +42,7 @@ out what a key MEANS by firing pixel probes at the DOM:
 | `previewSpot` | the same again, by matching text |
 
 None of them can be tested. The file has no coverage, and
-`.agents/skills/code-change/SKILL.md` forbids driving compos through a browser
+`apps/compos_core/priv/skills/code-change/SKILL.md` forbids driving compos through a browser
 to get some. Deciding that `End` means "end of visual row" is policy, and the
 one rule of this repository puts policy in Scheme.
 

@@ -3,6 +3,7 @@
 The rules each subsystem keeps are beside it: ARCHITECTURE.md names them.
 
 - [Architecture](ARCHITECTURE.md) — the one rule, the layers, and the per-subsystem documents.
+- [Manual](manual/README.md) - the generated user manual: [How do I](manual/HOW-DO-I.md), [Commands](manual/COMMANDS.md), and [Global keys](manual/KEYS.md). The editor writes it from its own registries. Run `bin/docs` after a change to a command, a key, or a howto.
 - [Simplification audit](SIMPLIFY-AUDIT.md) — the current state, what to look for, the queue.
 - [Known failures](KNOWN-FAILURES.md) — the tests that were already red.
 - [Cleanup queue](CLEANUP-QUEUE.md) — the 2026-08-22 scan; open items are marked in the audit.

@@ -11,7 +11,15 @@ minor mode that toggles onto a Dired buffer or a file buffer, the way
 that shows the summary of what point is on, and definitions in the popup.
 
 This document is the user experience. `docs/CODE-BROWSER-PLAN.md` is the
-mechanism and the build order. This document is in this order:
+mechanism and the build order.
+
+> **Status (2026-09-24):** this is a design. `scope-mode`, the `*scope*` side
+> window, the summary store, and the `scope-*` commands and tools are not
+> built. `diff-explain` exists on `?` in diff-mode, not `e`. It shows the
+> explanation in another window and updates no summary. `definition-peek`
+> exists and shows the definition in the other window, not in a popup.
+
+This document is in this order:
 
 1. The model.
 2. The user stories.
@@ -194,7 +202,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 `M-x scope` opens Dired at the project root with scope-mode on. The listing is Dired's, with one more column. The popup on the right is the side window.
 
 ```
-+-- /Users/svs/src/compos/apps/compos_core/priv/packages ------------+-- *scope* ---------------------------------------+
++-- /Users/svs/src/compos/scheme/packages ---------------------------+-- *scope* ---------------------------------------+
 | packages  61 entries . 2 modified                                   | code.scm                                stale     |
 |                                                                     |                                                  |
 |   ..                                                                | code.scm reads a source file with structural     |
@@ -255,7 +263,7 @@ The `summary` column is the first sentence of the entry's summary, or a badge: `
 `M-x diff-mode` in the listing opens the diff for the directory, as today. `e` on a card explains it:
 
 ```
-+-- *git: compos/apps/compos_core/priv/packages ---------------------------------+
++-- *git: compos/scheme/packages ------------------------------------------------+
 | v code.scm                                                   +41 -6   explained |
 |   v what changed                                                                |
 |     Adds a code--doc-inside reader so the outline's DOC column takes the        |

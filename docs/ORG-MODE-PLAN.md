@@ -1,9 +1,11 @@
 # Org-mode for compos.el
 
-> **Status (2026-08-06):** PR1–PR6 implemented on the `org-mode` branch —
+> **Status (2026-09-24):** PR1-PR6 are on `main`:
 > interpreter additions, regex/time builtins, overlays, folding, S- keys,
-> on-change hook, and `priv/org.scm` with the de-dent extension. Phase 2
-> (timestamps, agenda, tags, links, tables) not started.
+> on-change hook, and org-mode with the de-dent extension. Org-mode is now
+> `scheme/packages/org.scm`, not `priv/org.scm`. Phase 2
+> (timestamps, agenda, tags, links, tables) is not started in `org.scm`.
+> The separate `morg.scm` package has its own agenda (see MORG-DEMO.md).
 
 ## Context
 

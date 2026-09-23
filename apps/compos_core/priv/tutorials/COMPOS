@@ -25,6 +25,8 @@ easy to repair:
   M-x    Run a command by name.
   C-h t  Open or resume this tutorial.
 
+C-h h (how-do-i) lists recipes for common tasks. C-h ? lists every help command.
+
 The characters ">>" at the left margin mark directions for you to try. The
 indented lines below them explain what to do. For example:
 
@@ -415,9 +417,12 @@ Compos applications share one list interface:
   g          Refresh, when the list supports refreshing
 
 A list mode adds its own actions, such as RET to visit a row and q to quit.
+A list mode can also give a shared key a different action. C-n and C-p
+always move by rows.
 
 >> Type M-x ibuffer.
-   This list manages buffers. Move through the rows, type / and part of a
+   This list manages buffers. Move through the rows with C-n and C-p. In
+   ibuffer, p turns the row preview on and off. Type / and part of a
    buffer name, press RET to accept the filter, then press Backslash to widen
    the list again.
 
@@ -452,7 +457,7 @@ In browse mode:
   o            Open the page in the outside browser
   w            Copy the link at point, or the page URL
   H            Open the reading history
-  C-c C-v      Toggle the rendered preview and the Markdown source
+  C-c C-v      Cycle the view: monospace, serif, then Markdown source
 
 The web is not reduced to a screenshot, and an agent does not have to guess at
 DOM selectors. The readable page has a buffer, named commands, links, history,
@@ -497,8 +502,9 @@ The commands in this section are optional. They need a model provider, and
 your provider may charge for the requests they send.
 
   M-x chat-new             Start a new chat buffer
-  M-x agent-switch         Choose this chat's connector and model
-  C-c b                    Configure its model, effort, tools and permissions
+  C-c b                    Choose the chat's connector, model, effort, tools
+                           and permissions
+  M-x agent-switch         Move a running chat to another connector and model
   C-c w                    Switch between a work buffer and its chat
   M-x chat-companion-ask   Ask the companion a question without leaving the
                            work buffer
@@ -525,9 +531,12 @@ agent as a process and exchange structured messages, tools and permissions
 with it. Codex now uses its app-server protocol instead. The older codex-acp
 connector is deprecated and is not shown in the picker.
 
->> Type M-x chat-new. In the new chat, type M-x agent-switch and choose
-   codex-app-server. Choose a model, or submit an empty model for the connector
-   default. Type a message and press RET to send it.
+>> Type M-x chat-new. In the new chat, type C-c b. The left column lists
+   saved presets, and the right column shows this chat's setup.
+   Press <right> to move to the setup. Press b and choose codex-app-server.
+   Press m and choose a model, or choose default for the connector default.
+   Press ESC to give the setup to the chat.
+   Type a message and press RET to send it.
 
 If codex login status says you are logged in using ChatGPT, that chat uses the
 same account. Otherwise, run codex login in a terminal first.

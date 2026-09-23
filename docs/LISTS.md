@@ -1,20 +1,20 @@
 # Lists
 
-The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dired, the switcher, feeds, sentry, the telemetry. A mode says what its columns are and what one row puts in them. The mechanism lays out, pads, colours, pages, narrows, and draws. This document holds the rules the mechanism keeps.
+The list mode in `scheme/packages/tabulated-list.scm` draws every table in the editor: ibuffer, dired, the switcher, feeds, sentry, the telemetry. A mode says what its columns are and what one row puts in them. The mechanism lays out, pads, colours, pages, narrows, and draws. This document holds the rules the mechanism keeps.
 
 ## One draw
 
 1. A draw reads the mode once. The row context (`list-row-ctx`) carries the mark column, the column lines, the mode's `cells`, `row-cells`, `render`, and `key` fns, and the marks. Every row reads the context. No row calls `list-opt` or reads a buffer-local: a buffer-local read is a call into the buffer's process (0.16 ms), and a row that asked ten times cost 6 ms.
 2. The header is computed once per draw and passed down with its line count. Each displayed row computes its cells and text lines once; semantic records reuse both. Selection overlays use the saved row offsets, so cursor movement never recomputes cells.
 3. The chip (the narrowing and its count) is computed only while the list is narrowed. Counting asks the mode about every row.
-   The key bar (the mode's `'footer` keys) defaults to a header line under the counts. With `'keymap-component #t`, the shared `ui/keymap` component lives in a pinned footer; it wraps without discarding hints.
+   The key bar (the mode's `'footer` keys) is the `ui/keys-bar` card at the bottom corner of the window. It shows the main keys and `? all N`; `?` (`list-keys-toggle`) grows it into the whole keymap.
 4. A draw is few buffer changes: one `buffer-replace-range!` of the whole text, one `buffer-set-locals!` for the offsets, the head count, the row height, the width, and the stamp, one overlay set, one goto. Every change is a frame refresh and a render. A delete and then an append let a render between them see an empty buffer, reset the window's top, and write it back; the view jumped. `list_draw_test.exs` holds a redraw at eight changes or fewer.
 5. Numbers that hold this: 400 rows draw in about 330 ms and 60 rows in about 150 ms, on a laptop, with faces on every cell.
 
 ## Pages
 
 1. A mode with many rows declares `'page-size N`. The draw writes the first page. The entries keep every row, so the counts, the filters, and the marks see them all. The drawn rows are a prefix of the entries, so an index names the same row in both.
-2. `n` on the last drawn row and PgDn (`scroll-up-command`, remapped in every table to `list-page-down`) draw the page they land on first, so a screen never ends in the key bar with rows to come. `list-more` draws the next page by name.
+2. `n` on the last drawn row and PgDn (`scroll-up-command`, remapped in every table to `list-page-down`) draw the page they land on first, so a screen never ends in the key bar with rows to come. `(list-more! BUF)` draws the next page.
 3. The meta line says "N of M shown, PgDn draws more" while rows remain.
 4. An open shows the first page again. The pages you drew were for the last visit.
 5. Wheel scroll does not draw pages: the server owns scrolling, and a scroll runs no command.
@@ -26,7 +26,7 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 3. `ibuffer` sections its rows by group, by mode, or by directory. Under the group sectioning the frame's group comes first, then the other groups by name, then the ungrouped rows. Inside a section the rows sort by name, by recency (MRU), or by size; the defaults are `ibuffer-default-grouping` and `ibuffer-default-sorting-mode`.
 4. A folded section (`ibuffer-toggle-filter-group`) is one heading row that carries the member count, the modified count, and the bytes. It is not a separator: the narrowing keeps it while a member matches, the highlight can rest on it, and RET opens it. The meta line counts folded members.
 5. A right-aligned last column pads on its left, so its text ends at the column's edge; its face span starts after the padding.
-6. The key bar fits the window. A key that does not fit is dropped from the end, and a bar that dropped any ends in `? keys`, where `?` shows them all. A bar that wrapped took two lines and pushed the rows down.
+6. The key bar shows only the main keys that the mode declares, and ends in `? all N`, where `?` shows every key. The card floats over the rows, so it does not push the rows down.
 7. A mode's `'meta` answers a string, or `(TEXT SPANS)` with its own faces. The ibuffer wide head says the grouping and the sort as chips this way, the current one lit.
 ## Point
 
@@ -73,7 +73,7 @@ The minibuffer picker also defers its table draw by 60 ms and flushes before sel
 
 ## Fast buffer picker
 
-`ibuffer-prompt` and `ibuffer` use the same `ibuffer-mode` renderer.
+`ibuffer-prompt-pretty` and `ibuffer` use the same ibuffer table renderer.
 The prompt uses a minibuffer dock; the management command uses an ordinary window. It loads
 metadata with one `buffer-read-many` call, then groups, filters, and formats
 that snapshot. Each visible row is formatted once. Text and CSS field ranges

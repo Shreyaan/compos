@@ -2,8 +2,8 @@
 
 Advice attaches behavior to a named function. The function does not need a hook or knowledge of its advisers.
 Each registration has a name. You can inspect it, disable it, enable it, or remove it.
-Scheme owns the registry and execution policy in `priv/packages/advice.scm`.
-The stock loader loads this package before the other bundled packages.
+Scheme owns the registry and execution policy in `scheme/packages/advice.scm`.
+The stock loader (`priv/init.scm`) loads this package early, before most bundled packages.
 
 ## API
 
@@ -120,6 +120,6 @@ Scheme supplies all registration, ordering, and toggle behavior.
 
 ## Tests
 
-`priv/tests/advice-test.scm` checks the public policy through the real Scheme session.
-`test/compos/advice_test.exs` runs those tests and checks reload behavior.
+`scheme/packages/advice-test.scm` checks the public policy through the real Scheme session.
+`apps/compos_core/test/compos/advice_test.exs` runs those tests and checks reload behavior.
 The interpreter tests check binding replacement, lexical shadowing, closure collection, and primitive refresh.

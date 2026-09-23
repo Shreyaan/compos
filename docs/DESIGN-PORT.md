@@ -60,7 +60,7 @@ stage. Each stage is one commit, verified live and by a screenshot.
 
 ## Open questions
 
-- Mode glyphs come from a Nerd Font (`mode-icons`). The brief says Unicode
+- Mode glyphs come from a Nerd Font (`mode-icon!` in editor.scm). The brief says Unicode
   glyphs only, derived from the mode: `λ` code, `◍` chat, `✉` mail. A
   later stage swaps the registry.
 - Two `editor_live_test.exs` tests assert the old `phx-value-cmd="mode:..."`

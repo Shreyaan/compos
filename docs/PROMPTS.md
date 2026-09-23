@@ -4,7 +4,8 @@ Prompt composition is a public architectural contract. Every fragment is one
 section: each Markdown prompt file, each generated part (`catalog`, `recipes`,
 `mcp`), and each part a mode adds (`chat-preamble`, `code`, `code-agent`).
 
-`C-c b i` opens the sections as switches, in prompt order. The default files are
+`C-c b` (`llm-configure`), then `+` (more fields), then `i` opens the
+sections as switches, in prompt order. The default files are
 `identity`, `quiet-editor`, `scope`, `chat-context`, `scheme`, `discovery`,
 `reading`, `repository` and `browser`.
 
@@ -30,7 +31,7 @@ sections. `(prompt-files)` answers every file as `(NAME PATH)`. The default
 files keep a fixed order (`*prompt-file-order*`), so the prompt bytes stay
 stable; other files follow by name.
 
-`priv/editor.scm` defines the stable chat preamble and code-edit protocol.
+`scheme/packages/chat-mode.scm` defines the stable chat preamble and code-edit protocol.
 Feature packages can add focused, named fragments with `prompt-part-set!`.
 `scheme/packages/prompts.scm` owns the files, the canonical join, selection,
 snapshots, and inspection.
@@ -39,7 +40,7 @@ snapshots, and inspection.
 
 At the start of every direct API turn, `Agent.send_prompt` asks
 `Compos.Core.Agent.Backend.context/2` for context. The registered Scheme closure
-is `chat-thread-context` in `priv/packages/chat.scm`.
+is `chat-thread-context` in `scheme/packages/chat.scm`.
 
 `chat-system-prompt-parts` returns the selected sections.
 `chat-thread-context` joins them with `prompt-parts-text` and places the result in

@@ -1,6 +1,9 @@
 # Annotations — design note
 
-Status: design, 2026-08-20. Nothing here is built.
+Status: design, 2026-08-20. The flymake client and the overlay property bag
+in this note are not built. `scheme/packages/annotate.scm` builds a separate
+annotation layer: the buffer-local `annotations` holds the data, and the
+overlays, the `*annotations*` list, and the echo line show it.
 
 The task is not "build flymake". The task is an annotation vocabulary.
 Flymake is the first client of that vocabulary.
@@ -22,7 +25,7 @@ The architecture passes when each override needs no repo edit.
 |---|---|---|
 | how it shows | passes | shadow the face; user `define-style!` loads last |
 | where, inline ranges | passes | replace the display fn; call `overlay-set!` |
-| where: gutter, eol text, popup | fails | an overlay is `(start end face)`; no line class, no virtual text, no DOM attributes |
+| where: gutter, eol text, popup | half | an overlay is `(start end face)`; an `f-row-CLASS` face puts a class on the line; `chrome-before` / `chrome-after` draw virtual text; no DOM attributes, no popup |
 | animations, transitions | half | the renderer rebuilds spans on each keystroke; a transition never fires; an animation re-fires on each render |
 | what JS it speaks | fails | `define-style!` exists; `define-script!` does not; the DOM carries no id or data for JS to find |
 

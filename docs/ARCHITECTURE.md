@@ -69,8 +69,9 @@ dispatch it to another worker.
 - **KeyDispatch** — runs in the *caller's* process (never inside Editor or
   Session), so commands can call both freely. Routes: minibuffer → completion
   popup → buffer keymap; breaks the undo chain for non-undo commands.
-- **Session** — owns the Scheme interpreter; loads `priv/*.scm`, then
-  `~/.compos/ai-config.scm`, then `~/.compos/init.scm`. All commands are Scheme
+- **Session** — owns the Scheme interpreter; loads `priv/editor.scm`,
+  `priv/themes.scm`, and `priv/init.scm`, then `~/.compos/ai-config.scm`,
+  `~/.compos/init.scm`, and `~/.compos/custom.scm`. All commands are Scheme
   closures in an ETS table. Ordinary evaluation runs on lanes: one serial
   worker per owner (the UI, a group, a buffer, an RPC client, an agent).
 - **SchemeTask** — one-shot Scheme computations in supervised BEAM processes
@@ -86,7 +87,8 @@ dispatch it to another worker.
   of one keystroke share it. `telemetry.scm` owns the list mode (`M-x
   telemetry`), filtering, thresholds, and commands.
 - **TS** — Rustler NIF (`native/compos_ts`): highlight, structural nav, queries.
-- **Proc** — PTY processes streaming into buffers (comint).
+- **Terminal** — PTY processes streaming into buffers (raw terminal, or comint
+  with `raw: false`).
 - **Endpoint** — named long-lived connections to the world outside the
   editor. Two transports (`exec` a subprocess, `tcp` a socket) and five
   framings (line, delimiter, content-length, length, raw) — `length`
@@ -108,8 +110,11 @@ dispatch it to another worker.
   so a buffer crash cannot take the model with it.
 - **Reactor** — debounced buffer-change rules (the agent trigger primitive).
 - **LLM** — one async primitive; provider routing; key resolution.
-- **Desktop** — snapshot/restore of buffers, every frame's window tree
-  (with per-window points), faces. v2 format; reads v1 single-tree files.
+- **Desktop** — snapshot/restore of every frame's window tree (with
+  per-window points), its hidden windows, and declared Scheme globals. Each
+  buffer process checkpoints and restores its own state. The desktop does
+  not restore faces: `themes.scm` derives them from the saved theme name.
+  v3 format; reads v1 single-tree files.
 
 ### compos_ui
 Pure view. Receives the display payload, renders spans (font-lock scopes,
@@ -147,11 +152,12 @@ process's time.
 ## LLM / agents: the plan
 
 Current: `Compos.Core.LLM` — `(llm prompt handler)`, async, supervised, provider
-routing by model prefix (`openrouter:` / `openai:` / bare = anthropic), keys
-from env → `~/.compos/<provider>-key` → doppler. Everything else (chat buffer,
+routing by model prefix (`openrouter:` / `openai:` / `deepseek:` / bare =
+anthropic). Scheme resolves the keys: `packages/keys.scm` reads env →
+`~/.compos/<provider>-key` → doppler. Everything else (chat buffer,
 `M-|` pipes, model menu) is Scheme.
 
-**Backend: adopt `req_llm`.** Hand-rolling providers stops paying as soon as we
+**Backend: `req_llm` (adopted).** Hand-rolling providers stops paying as soon as we
 want streaming, tool-calls, and usage accounting. `req_llm` is Req-based (we
 already depend on Req), covers the providers, and keeps our surface intact:
 `Compos.Core.LLM` stays the only Elixir-side LLM module and keeps exposing
@@ -163,19 +169,19 @@ buffers are processes, the reactor is our trigger system, provenance is our
 loop-prevention, human-gates are minibuffer prompts. Wrapping ours in theirs
 would duplicate both. Revisit only if we want multi-node agent scheduling.
 
-**Driving external agent CLIs (pi, codex, claude):** two mechanisms, both mostly
+**Driving external agent CLIs (pi, codex, claude):** two mechanisms, both
 built:
 1. **PTY/comint** (`Compos.Core.Terminal` with `raw: false`) — already works for any CLI; output
    streams into a buffer the reactor can watch. Good for chat-shaped tools.
 2. **ACP/JSON-RPC over a port** — structured: the editor mediates file reads,
    permission prompts become minibuffer gates, progress becomes buffer updates.
    This is the right home for pi/codex.
-   Needs: a `Port`-based JSON-RPC client primitive (~100 lines Elixir), then the
-   session/permission/tool-dispatch logic in Scheme — `acp.scm` next to
-   `dired.scm`.
+   `Compos.Core.Agent.Backend.ACP` owns the adapter subprocess and the
+   JSON-RPC wire; `scheme/packages/agent.scm` and its modules
+   (`agent-connectors.scm`, `agent-permissions.scm`) hold the policy.
 
 Inverse direction: **MCP server** over the existing RPC core, so external agents
-drive *us* — tools = the semantic layer (`buffer-read`, `ts-query`,
+drive *us* (`priv/compos-mcp-proxy.exs`, a stdio bridge to `~/.compos/sock`) — tools = the semantic layer (`buffer-read`, `ts-query`,
 `semantic-replace`), with `eval` gated behind confirmation.
 
 ## Ordering principle

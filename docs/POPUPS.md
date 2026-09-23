@@ -38,7 +38,7 @@ The layout does not tile a popup window. `window-work-buffer?` answers false for
 
 The keys are the keys that the popper README suggests, except `` C-` ``. That key runs `group-next-mode-buffer`, so `popper-toggle` has no key.
 
-`group-next-buffer` walks every buffer of the group. Cmd-down and Cmd-up run it.
+`group-next-buffer` walks every buffer of the group. Cmd-down runs it, and Cmd-up runs `group-previous-buffer`.
 
 ## Closing a popup
 

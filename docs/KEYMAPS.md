@@ -75,7 +75,8 @@ and the rest of the sequence resolves in that keymap. editor.scm binds
 the Emacs prefix maps in the global map: `ctl-x-map` on `C-x`,
 `mode-specific-map` on `C-c`, `help-map` on `C-h`, `goto-map` on `M-g`,
 `search-map` on `M-s`, and under `C-x`: `ctl-x-r-map`, `ctl-x-4-map`,
-`project-prefix-map`, `vc-prefix-map`, `group-map` on `C-x C-g`. Under
+`project-prefix-map`, `vc-prefix-map`, `group-map` on `C-x g`,
+`buffer-group-map` on `C-x C-g`. Under
 `C-c`: `agent-map` on `a`, `spotify-map` on `S`, `annotate-map` on `!`.
 
 A package binds into the map its keys belong to and never writes the
@@ -124,7 +125,7 @@ command globally. Press `u` to revert your edit.
 
 The editor reads all keymaps. Press `k` to filter by one named keymap,
 or choose `all` to remove that filter. The list shows 60 rows per page.
-Press `SPC` or `n` for the next page. Press `/` to search by key
+`scroll-up-command` (`C-v`) shows the next page. Press `/` to search by key
 sequence, command, keymap, or description.
 The editor marks shadowed bindings and your edits.
 
@@ -134,21 +135,18 @@ key. `WAS` lets the editor restore the previous binding.
 
 ## Layout selection
 
-`C-x l` opens the layout prefix. The next key selects a layout:
+`C-x l` runs `window-layout`, the preview chooser.
+`layout-map` binds one key to each layout command.
+No prefix key leads to `layout-map` at this time.
 
-| Key | Layout |
+| Key | Command |
 | --- | --- |
-| `l` | Preview chooser |
-| `a` | Adaptive |
-| `2` | Two panes |
-| `c` | Columns |
-| `r` | Rows |
-| `g` | Grid |
-| `←` | Main pane on the left |
-| `→` | Main pane on the right |
-| `↑` | Main pane above |
-| `↓` | Main pane below |
-| `f` | Free layout |
-
-Arrow keys name the main pane's position.
-The chooser remains available through `M-x window-layout`.
+| `l` | `window-layout` (preview chooser) |
+| `1` | `window-layout-single` |
+| `2` | `window-layout-two-pane` |
+| `=` | `window-layout-halves` |
+| `c` | `window-layout-columns` |
+| `r` | `window-layout-rows` |
+| `f` | `window-layout-free` |
+| `<right>` | `layout-forward` |
+| `<left>` | `layout-backward` |

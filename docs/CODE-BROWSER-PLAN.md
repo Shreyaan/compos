@@ -3,6 +3,11 @@
 Branch `worktree-codebrowser`, 2026-08-30. Reference: `/Users/svs/src/codescope`
 (the first vision) and Linear "Code browser" CB1-CB10.
 
+> **Status (2026-09-24):** only these docs merged to `main`. The scope store,
+> `scope-mode`, the `scope-*` commands, and the provider chain are not built.
+> The popup functions that 3.4 names (`display-buffer-popup!`,
+> `popup-show-quietly`) no longer exist. `peek-show!` is now in `window.scm`.
+
 The product is the understanding of a codebase, not a file tree. The reader
 sees a summary at every level: the project, a directory, a file, a
 definition, a change. Every summary stays true to the code, and every name
@@ -13,13 +18,13 @@ in a summary is one key away from the code it names.
 | codescope piece | what it is | compos today |
 |---|---|---|
 | `Target` + `Git.Watcher` | one target dir, a debounced fs event on PubSub | `project-current`, `watch-path!`, `fs-change-hook` (editor.scm:2170) |
-| `/diff` + explain button | live `git diff HEAD`, LLM explanation streamed into a pane | `diff-mode` cards + `define-diff-backend` + fs watch (diff-mode.scm); no explanation |
+| `/diff` + explain button | live `git diff HEAD`, LLM explanation streamed into a pane | `diff-mode` cards + `define-diff-backend` + fs watch (diff-mode.scm); `diff-explain` (`?`) explains the whole diff in a separate buffer |
 | `/browse` file view | Monaco, fold bodies, sexp nav, scope tint | `code-browse` (code.scm), tree-sitter or indentation, tint, folds |
 | `Docs` `.codescope/*.md` | hand-editable overview, files sorted by `NN-` prefix | nothing; morg-mode is the renderer to use |
 | `Docs.autolink/1` | every `path/to/file.ext` in prose is a link, verified on disk | nothing (CB8 still open) |
 | `FileDocs` | per-file synopsis cached at `.codescope/files/<rel>.md` | nothing |
 | `DirDocs` | per-directory card grid cached at `.codescope/dirs/<rel>.html` | nothing |
-| `ChangeExplainer` | one prompt: explain the diff and rewrite the file doc | nothing |
+| `ChangeExplainer` | one prompt: explain the diff and rewrite the file doc | `diff-explain` explains the diff; it rewrites no file doc |
 | `Bootstrap` | first run: the agent reads the repo and writes the overview set | nothing |
 | LSP jump (planned) | never built | `lsp.scm` M-. through the code.scm seam; `scheme-ide.scm`; `definition-peek` in morg |
 
@@ -30,17 +35,18 @@ summary is worse than none.
 
 ## 2. What M-. does in a document today
 
-`morg-mode` binds `M-.` to `definition-peek` (morg.scm:691). The command
+`morg-mode` binds `M-.` to `definition-peek` (morg.scm). The command
 reads the name at point, calls `(definition-locate NAME)`, and shows the hit
-in the other window. `M-.` again goes there. Any other key closes the peek.
+in the other window. `M-.` again goes there. The window stays after other keys:
+peek.scm no longer closes it.
 
-`definition-locate` (peek.scm:36) asks one provider: `scheme-ide--find-def`.
+`definition-locate` (peek.scm) asks one provider: `scheme-ide--find-def`.
 So in a document `M-.` works on a Scheme name and on nothing else. An
 Elixir function, a Rust struct, a module name, a file path: "No definition
 of X".
 
 Source buffers are different. There `M-.` is `code-goto-definition`
-(lsp.scm:560): LSP when the buffer has an `lsp-server` local, else a scan of
+(code.scm): it follows a link at point first, else LSP when the buffer has an `lsp-server` local, else a scan of
 the same buffer for a defining word. Neither answers for a document.
 
 So the mechanism the user remembers is real and it is the right shape. It
@@ -65,7 +71,7 @@ Every file is morg. Every file starts with directives:
 
 ```
 #+scope: file
-#+path: apps/compos_core/priv/packages/code.scm
+#+path: scheme/packages/code.scm
 #+source: 9f1c2a...      the git blob sha of the input when the summary was written
 #+inputs: a1b2 c3d4      for a dir: the shas of the child summaries it read
 #+model: claude-sonnet-5
@@ -372,7 +378,7 @@ Files: `packages/peek.scm` (chain), `packages/scope.scm` (new: path and
 outline providers), `packages/lsp.scm` (workspace/symbol), `editor.scm`
 (document symbol alphabet).
 
-Accept: in a morg buffer, `M-.` on `apps/compos_core/priv/packages/code.scm`
+Accept: in a morg buffer, `M-.` on `scheme/packages/code.scm`
 peeks the file; on `code.scm:423` peeks line 423; on `code--goto-definition`
 peeks the Scheme definition; on `Compos.Core.Git.diff` peeks git.ex; on a
 name only elixir-ls knows, the LSP answers when attached. A name that

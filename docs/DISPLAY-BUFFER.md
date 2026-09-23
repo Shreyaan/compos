@@ -1,6 +1,6 @@
 # Display buffer
 
-Where a buffer goes when a command shows it. The mechanism is Emacs' `display-buffer`, in Scheme, in the display-buffer section of `priv/editor.scm`.
+Where a buffer goes when a command shows it. The mechanism is Emacs' `display-buffer`, in Scheme, in the display-buffer section of `scheme/packages/window.scm`.
 
 ## Which window
 
@@ -150,9 +150,10 @@ relayout hooks defer to an explicitly selected target.
 Relayout preserves each view's point and buffer history. The active target is saved with the desktop even without
 switching groups. `window-layout-free` releases the target. A layout holds a fixed number of panes, so work past that number does not add a pane. It takes a pane, and the window that had the pane becomes hidden. The hidden windows make the window ring with the panes, and `layout-forward` and `layout-backward` reach them. `quit-window` in the new window gives the pane back to the hidden window.
 
-The measured regression journeys are in `priv/tests/layout-policy-test.scm`,
+The measured regression journeys are in `scheme/packages/layout-policy-test.scm`,
 with a disposable-frame runner and keyboard-path test in
-`test/compos/layout_policy_test.exs`. Each journey records normalized
+`test/compos/layout_policy_test.exs`. That runner still reads the old
+`priv/tests` path. Each journey records normalized
 `(buffer x y width height)` rectangles after each transition. For example:
 
 | Rows journey | Geometry `(y, height)` in slot order |
@@ -169,8 +170,8 @@ with a disposable-frame runner and keyboard-path test in
 
 The callers pass an alist, a plist:
 
-- `'category KIND`: the kind of display. A peek passes `preview`, a list's row detail passes `detail`. The stock rule `((category preview) (reuse-window use-some-window pop-up-window))` is last in the alist, so a rule for a name wins over it.
-- A display of a buffer from outside the frame's group that names no category is a display of category `foreign` (`display-foreign?`, answered by groups.scm). The stock rule sends it through the window chain (docs/groups.md). `switch-to-buffer!` obeys this rule (Emacs `switch-to-buffer-obey-display-actions`); a mechanism that fills a window it chose calls `switch-to-buffer-here!`. To route foreign buffers through the window chain instead: `(add-display-rule! '(category foreign) 'pop-up-window)`.
+- `'category KIND`: the kind of display. A peek passes `preview`, a list's row detail passes `detail`. The stock rule `((category preview) (reuse-window mode-window use-some-window pop-up-window))` is last in the alist, so a rule for a name wins over it.
+- A display of a buffer from outside the frame's group that names no category is a display of category `foreign` (`display-foreign?`, answered by groups.scm). The stock rule sends it through the window chain (docs/groups.md). `switch-to-buffer!` obeys this rule (Emacs `switch-to-buffer-obey-display-actions`); a mechanism that fills a window it chose calls `switch-to-buffer-here!`. To split a new window for foreign buffers instead: `(add-display-rule! '(category foreign) 'pop-up-window)`.
 - `'inhibit-same-window #t`: keep the selected window out of the chain. `display-buffer-other-window!` is `display-buffer` with this set.
 
 ## Previews are a rule
@@ -218,17 +219,17 @@ of its own — that is how a layout starts growing a pane per row again.
 takes the buffer and answers a name. Without a rule the buffer's own name
 takes a number, as `rename-uniquely` does.
 
-Tests: `priv/tests/detail-test.scm`, run by `test/compos/detail_test.exs`.
+Tests: `scheme/packages/detail-test.scm`, run by the package suite (`--include packages`).
 
 ## quit-window
 
 A display notes what it did to a window: `window` when it made the window, `other` when it took a window that showed another buffer. `q` (`quit-window`) undoes that first, then kills the listing: the window the display made goes, or the buffer the display replaced comes back. `window-quit-restore!` does the undo alone.
 
-Tests: `priv/tests/display-buffer-test.scm`, run by `test/compos/display_buffer_test.exs` in the test daemon (they rearrange windows).
+Tests: `scheme/packages/display-buffer-test.scm`, run by the package suite (`--include packages`).
 
-Cmd-Shift-arrows move the active view onto the neighboring pane's history,
-revealing the source pane's previous group buffer. Focus and point follow the
-view; split geometry stays fixed. With no neighbor or no eligible previous
-buffer, nothing moves. The named `window-*` commands still swap.
+Cmd-Shift-arrows run the `window-*` commands, which swap the active window
+with its neighbor. The `buffer-*` commands move the active view onto the
+neighboring pane's history and show the source pane's previous group buffer.
+They have no default key; `(buffer-default-keybindings)` binds them.
 List modes may specify `'special #f` for persistent app buffers such as
 WhatsApp; generated lists otherwise keep the special default.

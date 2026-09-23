@@ -42,6 +42,7 @@ the component through props.
 - `ui/actions` — a row of clickable actions with their keys
 - `ui/kv` — compact key/value details
 - `ui/keymap` — responsive keycaps and action labels, using theme fonts and colors; optional third column text describes the action
+- `ui/keys-bar` — the keys bar of a list-mode buffer: main keys, `? all N`, and an expanded grid per keymap
 - `ui/group` — a labelled grouping of related blocks
 - `ui/empty` — empty-state notice
 - `ui/badge` — short status chip
@@ -81,5 +82,5 @@ Search these facets with `apropos`; `apropos-components` is only a convenience
 wrapper for `kind=component`.
 
 A buffer can pin component blocks below its content with `footer-line-blocks`.
-List modes opt into the shared keymap footer with `keymap-component #t`; their
-existing `footer` function supplies `(KEY LABEL)` pairs.
+A list mode that declares a `footer` function gets the shared `ui/keys-bar`
+footer. The `footer` function supplies `(KEY LABEL)` pairs.

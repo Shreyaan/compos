@@ -5,10 +5,10 @@ The rules apply to every frame unless a command states a narrower policy.
 
 ## Goals
 
-A kill must leave no window on a dead buffer. A kill should not create duplicate
-windows for a surviving buffer. The editor should change the layout when that
-change can prevent a duplicate. The editor must always keep one live window in
-each frame.
+A kill must leave no window on a dead buffer. A kill does not delete a work
+window, as `kill-buffer` in Emacs does not. The window shows another buffer.
+A refill should not duplicate a buffer that another window of the frame shows.
+The editor must always keep one live window in each frame.
 
 Killing a buffer destroys editor state. It is not the same as hiding a window,
 burying a buffer, closing a popup, or making a live buffer dormant.
@@ -24,8 +24,8 @@ A complete kill has these phases:
 5. The core closes buffer-owned runtime state and destroys the buffer.
 6. Package policy repairs any surviving scoped views.
 
-The core window release is mandatory. Package repair can narrow replacement
-choices, but it cannot leave a window on the dead buffer.
+The core window release (`Editor.release_buffer`) is mandatory. Package repair
+can narrow replacement choices, but it cannot leave a window on the dead buffer.
 
 ## One buffer
 
@@ -59,48 +59,43 @@ The next member observes the layout produced by the previous member.
 The core applies these rules to each frame:
 
 1. If the frame does not show the buffer, its layout does not change.
-2. If other windows survive, remove every window that shows the killed buffer.
-3. Collapse each empty split by promoting its surviving sibling subtree.
-4. If the active window is removed, select the first surviving leaf.
-5. Preserve the window IDs, points, and scroll state of surviving leaves.
-6. Drop the saved window point for every removed leaf.
+2. Every work window that shows the killed buffer stays, and shows another
+   buffer. The layout does not change.
+3. A window first takes a live buffer from its own history that no other window
+   of the frame shows. A buffer that a display or a peek covered comes first.
+4. Drop the saved window point of the killed buffer for every such window.
+5. A float (popup) window that showed the buffer closes when a work window
+   survives in the frame.
+6. A hidden window on the buffer takes a live buffer from its own history. With
+   none, the hidden window goes.
 
-These rules prefer a layout change over a replacement that duplicates a visible
-buffer. They also avoid choosing an unrelated buffer only to preserve a split.
-
-If every leaf in a frame shows the killed buffer, the frame cannot remove every
-leaf. The core keeps the active leaf, or the first leaf when none is active. It
-removes the duplicate leaves and gives the kept leaf a live fallback buffer.
-
-The fallback order is:
+When a window's history has no candidate, the fallback order is:
 
 1. The most recent live buffer that no frame currently shows.
 2. The most recent live buffer.
 3. `*scratch*`.
 
-The first choice avoids a duplicate across frames. The second choice permits a
-duplicate only when the frame needs a live sole window. The final choice creates
+The first choice avoids a duplicate across frames. The final choice creates
 `*scratch*` when required.
 
 ## Important layouts
 
 | Before the kill | Result |
 |---|---|
-| One leaf shows the victim | Keep one leaf and show the fallback. |
-| One victim leaf and one survivor leaf | Remove the victim leaf. |
-| Several victim leaves and one survivor subtree | Remove all victim leaves. |
-| Every leaf shows the victim | Keep one leaf, then show the fallback. |
+| One leaf shows the victim | Keep the leaf and show its previous buffer or the fallback. |
+| One victim leaf and one survivor leaf | Keep both leaves; refill the victim leaf. |
+| Several victim leaves | Keep every leaf; refill each from its own history. |
+| A float leaf shows the victim | Close the float when a work leaf survives. |
 | No leaf shows the victim | Keep the layout unchanged. |
 | Several frames show the victim | Apply the rules independently to each frame. |
-
-Split removal preserves the structure inside the surviving subtree. The removed
-split ratio has no meaning after its branch disappears.
 
 ## Groups and scoped views
 
 A grouped frame must not replace a killed member with a foreign MRU buffer.
-Group repair may choose a hidden live member from that frame's current group.
-If no hidden member exists, it may use another group member or the group chat.
+Group repair (`group-buffer-kill-repair` in `groups.scm`) first chooses the
+member that the window showed before, from its own history. Next it may choose
+hidden group work, then an existing group chat or the group's scratch. A group
+window closes only when its group is dying.
 
 A pinned group uses this final fallback order:
 
@@ -112,9 +107,7 @@ The group chat is a total scoped fallback. Group repair creates it when every
 other member is dead. A global MRU buffer or `*scratch*` must not remain visible
 in the pinned frame after repair.
 
-The general layout rule still applies when another group window already
-survives. In that case, removing the victim window is a valid group repair. A
-pinned group keeps its `current-group` value throughout the kill.
+A pinned group keeps its `current-group` value throughout the kill.
 
 Other packages can use `buffer-kill-repair`. The policy callback inspects the
 live buffer before the core kill and returns a repair thunk. The Scheme wrapper
@@ -144,9 +137,10 @@ a new buffer and does not restore the killed identity.
 Tests must cover these cases:
 
 - A displayed victim never remains in `window-list`.
-- A victim beside a survivor removes its leaf.
-- Duplicate victim leaves collapse to one fallback leaf.
+- A victim beside a survivor keeps its leaf and shows another buffer.
+- Each victim leaf refills from its own history first.
 - A sole victim leaf receives a live fallback.
+- A float on the victim closes when a work leaf survives.
 - A non-visible kill leaves every layout unchanged.
 - A grouped frame never shows a foreign replacement.
 - A pinned group keeps its frame context.

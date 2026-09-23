@@ -26,8 +26,8 @@ inside its level-2 parent.
 ## 2. TODO states and the agenda
 
 Put point on this heading and press `C-c C-t`. `M-x morg-agenda` shows
-dated headings from `morg-agenda-files`. Press `t` on an agenda entry
-to cycle the same state. Press `[` or `]` to move by one week. Press `.`
+dated headings from `morg-agenda-files`. Press `RET` on an agenda entry
+to open its file at the heading. Press `[` or `]` to move by one week. Press `.`
 to return to today.
 
 ### TODO Review the Morg agenda <2026-08-21>

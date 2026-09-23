@@ -1,6 +1,6 @@
 # ComposML 1: semantic HTML for Compos
 
-Status: first LiveView migration implemented in `codex/composml`. This specification
+Status: first LiveView migration implemented; `codex/composml` is merged into main. This specification
 was written before the migration. External XML/XSLT transport remains a separate
 implementation stage, as described below.
 
@@ -463,7 +463,7 @@ boundaries stay explicit; expressions and attributes use Phoenix escaping.
 
 ## Migration validation (2026-09-10)
 
-The migration lives in branch `codex/composml`, based on `45ac86d3`, in the isolated
+The migration was built in branch `codex/composml` (now merged into main), based on `45ac86d3`, in the isolated
 worktree `/private/tmp/compos-composml`. The running original checkout was not
 restarted or changed by this migration.
 
@@ -572,15 +572,15 @@ A list mode can provide `composml-root (buf)` and `composml-record (buf entry)`
 without enabling the block renderer. The shared list publishes derived byte
 ranges and stable record identifiers. LiveView groups its existing rendered
 lines inside domain elements with `display: contents`. Dired uses `directory`
-and `file`; ibuffer uses `buffer-list` and `buffer-entry`; ichat uses
+and `file`; ibuffer uses `buffers` and `buffer`; ichat uses
 `chat-list` and `chat-entry`. Section headings remain headings. Text, faces,
 line numbers, wrapping, and keyboard navigation use the existing text renderer.
-These record wrappers establish identity; column-level domain fields remain
-future work rather than being inferred from formatted text.
+These record wrappers establish identity. Column-level domain fields come from
+`composml-fields` (see below), not from formatted text.
 
 Preview boundaries use `c-preview` around the native iframe. Sandboxing, hooks,
-and document rendering stay on the iframe. Minibuffer collections (including
-imenu) use `c-completions` and `c-completion`, with explicit selection state.
+and document rendering stay on the iframe. Minibuffer collections use `c-completions` and `c-completion`, with explicit
+selection state. Imenu symbol candidates use `symbol-list` and `symbol-entry`.
 
 All shared text-list modes default to `c-list mode="MODE"` and `c-item`
 records. Domain callbacks specialize these names; modes need not copy the

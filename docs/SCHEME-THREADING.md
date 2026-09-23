@@ -210,7 +210,7 @@ Run `M-x telemetry` to open the Scheme telemetry buffer. Use these keys:
 - `c` clears collected events.
 - `q` closes the telemetry buffer.
 
-The collector keeps the newest 1,000 events. `telemetry-event-limit` controls
+The collector keeps the newest 2,000 events. `telemetry-event-limit` controls
 the displayed row count.
 
 ## Source map
@@ -224,5 +224,5 @@ the displayed row count.
 | `apps/compos_core/lib/compos/core/llm.ex` | Effect-aware tool-round dispatch |
 | `apps/compos_scheme/lib/compos/scheme.ex` | The `Scheme.exec` boundary |
 | `apps/compos_scheme/lib/compos/scheme/env.ex` | Local frames, shared ETS rows, caches, publication, and GC coordination |
-| `apps/compos_core/priv/packages/tools.scm` | Tool effects and apropos policy |
-| `apps/compos_core/priv/packages/telemetry.scm` | Telemetry user interface |
+| `scheme/packages/tools.scm` | Tool effects and apropos policy |
+| `scheme/packages/telemetry.scm` | Telemetry user interface |

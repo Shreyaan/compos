@@ -105,10 +105,10 @@ exactly the view a key binding would.
 ## Writing one
 
 ```scheme
-(define-command "ibuffer-prompt"
-  "Switch to a buffer; with a prefix, show it in another window"
+(define-command "chat-switch-prompt"
+  "Switch to a chat by its title; with a prefix, show it in another window"
   (lambda ()
-    (let ((other-window? (and (current-prefix-arg) #t)))
+    (let* ((other-window? (and (current-prefix-arg) #t))
       ...)))
 ```
 
@@ -128,8 +128,9 @@ answer — group_switch_preview_test.exs, project_search_test.exs.
 ## Known gap
 
 `C-x b` is bound to `ibuffer-prompt`, whose body reads no prefix argument
-and passes no `WHERE` to `ibuffer-pick!`. `ibuffer-prompt`, the
-command that does flip to the other window, has no key. switch.scm's own
+and passes no `WHERE` to `ibuffer-pick!`. No buffer-switch command reads
+the prefix; `chat-switch-prompt` is the only switch prompt that flips to the
+other window, and it switches chats. switch.scm's own
 header line and docs/groups.md both describe `C-u C-x b` as the
 other-window flip, and group_switch_preview_test.exs asserts it. Either the
 binding or the docs are wrong.

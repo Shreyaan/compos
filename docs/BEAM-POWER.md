@@ -179,14 +179,18 @@ Named so a contributor can pick one up, not as a warning.
   not: `Desktop.init` sends itself `:restore`, so a Session crash would
   re-restore the whole desktop over live buffers. Start order already comes
   from the list. Anything done here has to leave Desktop out.
-- Visual-line motion decides in the browser. See below: it is the same rule as
-  "derive in the reader", drawn across the client boundary, and drawn wrong.
-  `VISUAL-LINE-WRAP-MAP.md` states it as a task, with the landmines.
+- Visual-line motion decided in the browser. See below: it is the same rule as
+  "derive in the reader", drawn across the client boundary. The wrap map now
+  fixes it. `VISUAL-LINE-WRAP-MAP.md` records the task, its status, and the
+  landmines.
 
 ## The client measures. Scheme decides.
 
 The rule about writers and readers has a twin at the browser boundary, and
-this is the place the codebase currently breaks it.
+this is the place the codebase broke it. The wrap map is now implemented:
+`scheme/packages/visual-line.scm` holds the motion, and `visualLineMove`,
+`visualLineEdge` and `sourceSpot` are deleted. The text below records the
+original reasoning.
 
 One thing the daemon genuinely cannot know is where proportional text wraps.
 That depends on font metrics, the measured pixel width, kerning and zoom.

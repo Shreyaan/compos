@@ -44,7 +44,7 @@ Read the longer arguments:
 
 **Elixir supplies mechanism. Scheme decides policy.**
 
-Elixir owns the work that loops over bytes: ropes, tree-sitter, sockets, PTYs, schedulers, the LLM transport. Scheme owns everything a person calls "the editor": commands, keymaps, modes, hooks, themes, dired, org-mode, chat, mail. That is 17,000 lines of Scheme in apps/compos_core/priv/*.scm`, and 321 commands. You redefine any of them while the editor runs.
+Elixir owns the work that loops over bytes: ropes, tree-sitter, sockets, PTYs, schedulers, the LLM transport. Scheme owns everything a person calls "the editor": commands, keymaps, modes, hooks, themes, dired, org-mode, chat, mail. That is about 117,000 lines of Scheme in `apps/compos_core/priv/*.scm` and `scheme/packages/*.scm`, and more than 1,000 commands. You redefine any of them while the editor runs.
 
 Before we add Elixir code, we ask one question: can this be Scheme plus one small primitive? The answer is usually yes.
 
@@ -96,14 +96,15 @@ The environment is designed to be extended by you to shape you. The emacs-style 
 ```
 apps/compos_scheme   the extension language: values are BEAM terms
 apps/compos_core     buffers, editor state, primitives, NIFs, procs, LLM
-  priv/*.scm        the editor itself
+  priv/*.scm        the kernel: editor.scm, dired, themes, init.scm
   native/compos_ts   tree-sitter Rustler NIF
 apps/compos_ui       Phoenix LiveView frontend (a client — no editor logic)
+scheme/packages      every package: commands, modes, apps, chat
 apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
 ```
 
-Your config loads from `~/.compos/ai-config.scm`, then `~/.compos/init.scm`.
-Both are optional.
+Your config loads from `~/.compos/ai-config.scm`, then `~/.compos/init.scm`,
+then the saved `~/.compos/custom.scm`. All three are optional.
 
 ## Run it
 
@@ -113,8 +114,9 @@ mix run --no-halt
 open -na "Google Chrome" --args --app=http://localhost:4004
 ```
 
-The daemon reads `priv/*.scm` at boot, so a restart reloads them. Browser
-clients reload themselves through a boot-id check.
+The daemon watches `apps/*/lib`, `apps/compos_core/priv`, `scheme/`, and the
+config home. When you save a file, the daemon reloads it without a restart.
+Browser clients reload themselves through a boot-id check.
 
 Each daemon records its name and URL in `~/.compos/daemons.json`. Run another
 daemon with a different home and port, then use `C-x d` to switch the current
@@ -142,7 +144,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer
   | nc -U ~/.compos/sock
 ```
 
-A **buffer link** is one string that names a buffer. `C-x l` copies an
+A **buffer link** is one string that names a buffer. `C-c l` copies an
 `compos://` link for the current buffer and line. The link includes the daemon's
 socket, so it returns to the instance that created it. On macOS, register the
 protocol handler once:
@@ -204,8 +206,6 @@ change, cached on disk, and regenerated explicitly with
 
 ## Known limitations
 
-- **Env frames are never collected.** Every closure call adds a frame to the interpreter store, so long sessions grow. The fix is a reachability sweep or ETS-backed envs.
-- The rope has no rebalancing.
 - The Scheme has no `define-syntax` and no continuations.
 - RPC is newline-delimited and has no auth. Keep it on the local socket.
 And probably a thousand more. This is still alpha software.

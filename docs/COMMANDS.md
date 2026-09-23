@@ -41,7 +41,7 @@ The dispatcher sets `this-command` as a command starts and makes it the next `la
 
 ## The kill ring
 
-A kill command that follows a kill command grows the newest entry: `C-k C-k C-k` yanks back as one piece. `kill-text!` applies the rule; `kill-new`, `current-kill`, `kill-append!` are the Emacs names.
+A kill command that follows a kill command grows the newest entry: `C-k C-k C-k` yanks back as one piece. `kill-text!` applies the rule; `kill-new` and `kill-append!` add to the ring; `kill-top` and `kill-nth` read it.
 `*kill-commands*` lists the commands that count as a kill.
 
 ## Undo
@@ -51,7 +51,7 @@ One command is one undo step. `undo-boundary!` splits the step in progress, so t
 
 ## The mark ring
 
-`C-SPC` pushes the old mark onto the buffer's ring and sets a new one. 
+`C-SPC` (or `M-SPC`) pushes the old mark onto the buffer's ring and sets a new one. 
 `C-u C-SPC` goes back to the mark and pops the ring; a set mark is an active region here, so the pop leaves no region behind. 
 `C-x C-SPC` walks the global mark ring back across buffers. `push-mark!` and `pop-to-mark!` are the functions.
 

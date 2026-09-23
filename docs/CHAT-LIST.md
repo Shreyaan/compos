@@ -5,7 +5,8 @@
 `C-x c` is the minibuffer form — a popup under the work with its filter
 line already open, its own view buffer ` *chats*`, and nothing kept
 after the pick. It is the surface for "switch to that chat, the one
-whose name I half remember". `C-x b` is the same form over the buffers.
+whose name I half remember". `M-x ibuffer-prompt-pretty` is the same form over
+the buffers; `C-x b` is a plain completion list.
 
 `C-x C-c` (also `M-x chat-list`) opens the list in a window. It owns the
 verbs, the grouping and the folds; the minibuffer form borrows none of
@@ -19,7 +20,7 @@ group of its own was tried and reverted too: arriving had to cross
 groups, which dragged the frame through that group's whole layout.
 
 `t` turns the sections off and on. Off is the flat list, most recent
-first — the chat you half-remember the name of is near the top. `/`
+first — the chat you half-remember the name of is near the top. `<`
 cycles what a section is: none, group, state, model.
 
 ## One window, a floating card, and the frame comes back
@@ -49,10 +50,10 @@ list found is recorded on arrival and restored when the list leaves — by
 `q`, and by `RET` too, so the chat you pick lands in the arrangement you
 were working in.
 
-The minibuffer form previews the same way the window form does: a card
-over its own rows. It used to read the chat into the window it was
-invoked from, which took a pane the user had not offered and, when that
-pane was the only other one, looked like no preview at all.
+The minibuffer form shows no card at the moment. `ibuffer-prompt!` records
+the invoking window as `ibuffer-prompt-home-window`, and `listing-preview!`
+refuses a list that has one. It used to read the chat into the window it was
+invoked from, which took a pane the user had not offered.
 
 `C-x c` used to raise before it drew anything. The prompt view is asked
 for the row under the cursor while it is still empty, and a buffer that
@@ -66,8 +67,7 @@ with no point now.
 it, reusing a matching one in the current group without selecting another
 window that shows it. Different groups get separate listing buffers. The
 rows identify buffers. Every listing that draws its rows in a window —
-ibuffer, the chat list, and the chat picker in the minibuffer — previews
-with the card described below. A row whose buffer is already on screen
+ibuffer and the chat list — previews with the card described below. A row whose buffer is already on screen
 gets a card too: highlighting the window that holds it showed nothing new
 and reached for a window the list does not own.
 

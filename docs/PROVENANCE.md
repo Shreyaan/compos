@@ -234,7 +234,12 @@ A mode opt-out is a deliberate product decision, not an inference from "non-file
 
 ## Persistence model
 
-The first backend is a supervised local SQLite store. Celld is deferred.
+The first backend was a supervised local SQLite store. Celld is deferred.
+
+**Current state:** the SQLite store is gone. Each buffer's history is a Loro
+document, written as a log file `~/.compos/docs/ID.loro`. The buffer
+checkpoint holds the recording policy. PROVENANCE-CRDT.md describes the
+current design. The rest of this section describes the SQLite design.
 
 Phase 1 persists:
 
@@ -307,7 +312,9 @@ The live implementation now provides:
 2. a stable cell and root revision for every buffer
 3. default-on recording with explicit mode policy
 4. accepted head and hash linkage in buffer checkpoints
-5. immutable revisions, lifecycle events, and stale proposals in SQLite
+5. immutable history in one Loro CRDT document per buffer, stored as a log
+   file under `~/.compos/docs/` (see PROVENANCE-CRDT.md); the SQLite store
+   and stale proposals are gone
 6. idempotent, non-destructive start and stop operations
 7. explicit gap snapshots for stopped intervals
 8. Scheme status, history, start, stop, and checkpoint operations
@@ -318,18 +325,15 @@ The live implementation now provides:
 Compilation, the focused tests, and eviction recovery pass. Existing persisted
 in-memory epochs are not imported.
 
-One gap remains:
-
-- **Checkpoint records an event, not a boundary.** The store writes a
-  `checkpoint` lifecycle row. It does not close a changeset, because Phase 1
-  has no changeset table. The name promises more than the operation does.
+The earlier checkpoint gap is closed. `buffer-provenance-checkpoint!` now
+closes the pending changeset and writes the history log.
 
 ## Two recording lanes
 
 Recording has two lanes, because the two kinds of edit have different shapes.
 
 **The interactive lane batches.** A keystroke appends one operation to a
-pending changeset held in the buffer process. Nothing reaches SQLite. The
+pending changeset held in the buffer process. Nothing reaches the history log. The
 buffer's existing checkpoint throttle, which already runs at most once every
 1.5 seconds, closes the batch: N operations, one content hash, one
 transaction, one revision. The cost of a keystroke becomes a list append.
@@ -348,8 +352,8 @@ operations: the hash addresses the batch result, and the operations inside it
 replay from the previous hash.
 
 **The atomic lane does not batch.** An agent, an RPC client, or an undo writes
-whole work at once and rarely. Such an edit records synchronously, with the
-compare-and-swap, before its caller hears that it worked. The round trip hides
+whole work at once and rarely. Such an edit commits to the history
+synchronously, before its caller hears that it worked. The round trip hides
 inside the tool call that asked for it, and the attribution for generated
 content is durable immediately, which is the question Provenance exists to
 answer.
@@ -368,10 +372,8 @@ next activation, because the buffer checkpoint carries the accepted head and
 hash and the comparison already catches a mismatch. The durability of the text
 is the checkpoint's job, not Provenance's.
 
-A stale head no longer raises. The buffer is the only writer to its own cell,
-so a stale head means a defect rather than a race. Losing the buffer would
-cost more than losing the batch, so the flush marks the gap, logs the reason,
-and the buffer keeps working.
+A flush does not compare an expected head. The CRDT history has no
+compare-and-swap, so a flush cannot fail on a stale head.
 
 ## Build plan
 
@@ -384,6 +386,8 @@ Build the structured actor context and one cell per buffer. Add default-on recor
 This phase proves two uncertain assumptions. First, the actor context propagates reliably through every mutation path. Second, batching and transaction boundaries keep durable recording off the interactive typing latency path.
 
 ### Phase 2: concurrent proposals
+
+PROVENANCE-CRDT.md supersedes this phase: the CRDT merges concurrent work, so it has no proposals.
 
 Add expected-head acceptance for agent and external edits, durable stale proposals, conflict inspection, rebase, combination, and explicit rejection. Local keyboard editing continues through the serialized buffer path.
 

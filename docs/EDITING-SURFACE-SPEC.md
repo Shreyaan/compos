@@ -102,7 +102,8 @@ An editable surface has a movement state and an editing state. Neither is a
 mode. The user lands on a window in the movement state: the four Cmd-arrows
 travel as keys, so the focus chords move past the buffer. The
 first key that is not ESC or C-g enters the editing state, where the browser
-keeps the Cmd-arrows as line start and end and document start and end. ESC
+keeps Cmd-<left> and Cmd-<right> as line start and end. Cmd-<up> and
+Cmd-<down> walk the group in every state. ESC
 or C-g returns to the movement state; ESC runs `keyboard-quit`. A change of
 the active window or of its buffer is a new landing. A read-only buffer stays
 in the movement state.
@@ -110,7 +111,9 @@ in the movement state.
 The state lives in two places that agree. Scheme owns it for every buffer
 (`editing-state-on!`, `editing-state-off!`, `editing-state?` in `editor.scm`):
 the post-command hook enters the editing state after any command except
-`keyboard-quit`, the directional arrow commands and the neutral commands, the landing check
+`keyboard-quit`, the window commands and the neutral commands. A window
+command is a directional command or any command in the `windows` domain;
+it leaves the state, as `keyboard-quit` does. The landing check also
 leaves it, and the keymap `editing-state-map` is in force only in the editing
 state. A neutral command is one a Shift chord runs (`editing-neutral-commands!`
 in `editor.scm`, called by `cua.scm` and `groups.scm`): pressing S-<left> or
@@ -246,10 +249,10 @@ emphasis toggle. The server keeps every command, keymap, hook, and mode.
    has reported a caret) keeps the server's own visual-line motion.
 
 Still open after F1-F9: F4 (HTML files edited as themselves), F5 (rich
-paste), row-level block styles and tables, `preview-mode` as rendered
-rows for Markdown (the iframe stays for now), C-c/C-x/C-v on an active
+paste), C-c/C-x/C-v on an active
 region in `cua-mode`, and the wrap-map code that the markdown iframe
-still needs.
+still needs. The Markdown painter now draws row-level block styles (quote, code,
+fence, rule) and tables.
 
 ## Implemented text redisplay
 

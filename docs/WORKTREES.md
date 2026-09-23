@@ -1,8 +1,8 @@
 # Worktrees — spec and review (2026-08-20)
 
-Scope: `apps/compos_core/priv/packages/worktrees.scm` (974 lines) and its
-wiring in `editor.scm`, `packages/daemons.scm`, `packages/code.scm`,
-`packages/agent.scm`, and `test/compos/worktrees_test.exs`.
+Scope: `scheme/packages/worktrees.scm` (1000 lines) and its
+wiring in `editor.scm`, `scheme/packages/daemons.scm`, `scheme/packages/code.scm`,
+`scheme/packages/agent.scm`, and `test/compos/worktrees_test.exs`.
 
 What holds: the guards run in a safe order (unsaved → dirty → primary
 dirty → branch). The finish prompt dedups by fingerprint. Optional
@@ -28,11 +28,12 @@ isolation.
 
 There are three ways in; all converge on the same stamp.
 
-1. **Agent spawn.** With `agent-worktree-isolation` on (the default),
-   `chat-attach-agent!` calls `agent-worktree-opts` before
-   `llm-session-open!`. A new thread in a git checkout gets its own
-   worktree as `cwd`. An explicit `'isolated` in the attach opts wins
-   over the defcustom. A thread that already carries a `cwd`, or a
+1. **Agent spawn.** `chat-attach-agent!` calls `agent-worktree-opts`
+   before `llm-session-open!`. When isolation is on, a new thread in a
+   git checkout gets its own worktree as `cwd`. An explicit `'isolated`
+   in the attach opts wins. Next comes the buffer's or the group's
+   `workspace-isolation-choice` (`"worktree"` or `"current"`), then the
+   `agent-worktree-isolation` defcustom. The defcustom is off by default. A thread that already carries a `cwd`, or a
    buffer outside any repository, stays alone. Reattach reuses the
    slug's existing worktree.
 2. **`workspace-init` / code-mode.** From a primary buffer it creates
@@ -51,9 +52,11 @@ checked out rather than re-created (bug 1 today).
 
 `workspace--stamp!` writes the durable identity onto a buffer:
 `workspace-id`, `workspace-name`, `workspace-root`,
-`workspace-project-root`, `workspace-backend`, `workspace-daemon`, and
+`workspace-project-root`, `workspace-backend`,
+`workspace-isolation-choice`, `workspace-daemon`, and
 `default-directory`. It enables `worktree-mode` (header line + window
-class) and sets the buffer's group to the workspace. All of these are
+class). The callers (`find-file`, the task copy, the rebase chat) set
+the buffer's group to the workspace. All of these are
 `chat-identity-locals`: they survive reset, restart, and save. Git —
 not a local — remains the source of truth for dirty/ahead/behind, so
 state display survives reloads without extra persistence.
@@ -99,6 +102,8 @@ fingerprint** (sha + counts): a repeated clean state does not nag.
   worktree, release the daemon claim, and retire the buffers. Any
   failure keeps the workspace; no step may leave the primary checkout
   mid-merge (bug 2 today).
+  Today `L` (`workspace-land`) only merges. It does not rebase, remove,
+  or retire. Only the finish prompt runs the full sequence.
 - **Rebase** (`r`): the machine does not resolve conflicts. It opens
   the workspace's chat and hands the agent a rebase prompt: inspect,
   rebase onto the base, resolve preserving both intents, test, report
@@ -129,9 +134,9 @@ conversation survives; the workspace identity does not.
 ### 1. Cancel breaks re-create
 
 `workspace-cancel` keeps branch `agent/NAME` as a recovery path. But
-`worktree-create` (`worktrees.scm:33`) always passes `-b`, and git
+`worktree-create` (`worktrees.scm:32`) always passes `-b`, and git
 refuses `-b` when the branch exists. A cancelled name can not come
-back. `worktree--next-task-name` (`:757`) checks only directories, so
+back. `worktree--next-task-name` (`:755`) checks only directories, so
 after you cancel `a1`, the next `workspace-init` picks `a1` again and
 fails. Land-and-teardown sets the same trap: it never deletes the
 branch.
@@ -141,12 +146,12 @@ without `-b`.
 
 ### 2. A failed merge leaves the primary mid-merge
 
-`workspace-land-and-teardown!` (`:338`) and `workspace-land` (`:585`)
+`workspace-land-and-teardown!` (`:336`) and `workspace-land` (`:583`)
 run `git merge --no-ff` and only print a message on failure. A conflict
 leaves `MERGE_HEAD` in the primary checkout with no
 `git merge --abort`. The window is small — the primary must change
 between the dirty check and the merge — but the blast radius is the
-user's main tree. The rebase path (`:329`) has the same shape and
+user's main tree. The rebase path (`:327`) has the same shape and
 strands only the worktree.
 
 Fix: on a failed merge, run `git merge --abort` and report; on a failed
@@ -164,7 +169,7 @@ limit for them.
 
 ### 4. An untracked file loses its content in the task copy
 
-`code-worktree--open-copy!` (`:854`) copies source text only when
+`code-worktree--open-copy!` (`:856`) copies source text only when
 `buffer-modified?`. A saved-but-uncommitted file is not in HEAD, so the
 new worktree lacks it, and the copy opens an empty buffer where the
 user's file was.
@@ -174,20 +179,20 @@ is modified.
 
 ## Smaller items
 
-- `worktree--dirty` (`:74`) counts lines of merged stderr as dirty
+- `worktree--dirty` (`:73`) counts lines of merged stderr as dirty
   entries when git fails. An error reads as "N dirty". Guard on git's
   exit or on the porcelain shape.
 - `workspace-new` via M-x from a non-list buffer passes `#f` as root
   into `worktree-create` and crashes. It also accepts spaces and
   slashes in the name, which git rejects with a raw error. Guard the
   root and sanitize the name.
-- `worktree--daemon-port` (`:187`) returns "80" for
+- `worktree--daemon-port` (`:186`) returns "80" for
   `http://localhost:4004/`. A trailing slash defeats the port parse.
 - `daemon-claim-workspace!` is check-then-write on the registry file
   with no lock. Two daemons that both see no owner both claim; the
   last write wins. Concurrent sessions make this reachable.
 - Every `find-file` in any repo runs `git worktree list --porcelain`
-  synchronously in the Session (`:257`). A `*worktrees*` refresh shells
+  synchronously in the Session (`:244`). A `*worktrees*` refresh shells
   2–3 git commands per row plus a full buffer scan. Fine at current
   scale; this is the first place list latency will show.
 - `code-worktree--open-copy!` binds `path` and never uses it.

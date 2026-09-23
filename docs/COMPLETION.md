@@ -15,7 +15,7 @@ engine applies it.
 | `regexp` | every term is a regexp; a bad one matches nothing |
 | `exact` | the label is the input |
 
-All are case-insensitive. `(completion-match? LABEL QUERY [STYLE])` is
+All but `exact` are case-insensitive. `(completion-match? LABEL QUERY [STYLE])` is
 the same matcher for any Scheme that narrows: the list mode filter and
 the switcher use it, so `*scratch*` is a name and `(` is a character.
 
@@ -34,8 +34,7 @@ the input, `'default` answers an empty input and leads the list,
 `'history` names the ring to read and to push on, `'category` picks the
 marginalia annotator, `'style` picks the match style.
 
-`read-string`, `read-number`, `read-buffer` are completing-read of one
-kind. `y-or-n?` takes one key, `yes-or-no?` takes the word,
+`read-string` is completing-read with no candidates. `y-or-n?` takes one key, `yes-or-no?` takes the word,
 `read-char-choice` takes one key from a list.
 
 ## History
@@ -66,7 +65,7 @@ The capf framework answers "what completes here". It never asks: `M-/`
 was the only caller. `completion.scm` is the asking. A mode opts in
 with `(capf-auto-watch! BUF)` from its mode hook, and from then on
 typing in that buffer offers what `M-/` would have offered. scheme-mode
-opts in; nothing else does yet.
+and chat-mode opt in; nothing else does yet.
 
 The watch is the `on-change!` plus `debounce!` pattern the checkers use,
 so a burst of keys costs one collect. Only a person typing forward

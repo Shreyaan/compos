@@ -2,7 +2,7 @@
 
 A Morg document is text. A fenced block's info string names its kind.
 One registration gives a kind its paint, its runner, and its help.
-The registry lives in `priv/packages/morg/morg-kinds.scm`.
+The registry lives in `scheme/packages/morg/morg-kinds.scm`.
 
 ## The pattern
 
@@ -113,7 +113,7 @@ rows. It does not run.
   `fence-kind-run` to dispatch `C-c C-c`.
 - The rendered page (`markdown/html.ex`) offers the run key by the list the
   registry pushes through `preview-run-langs!` on every registration.
-- `llm-mode--blocks` in `editor.scm` derives its reply-landing blocks from
+- `llm-mode--blocks` in `scheme/packages/chat-mode.scm` derives its reply-landing blocks from
   `morg-scan`, the one fence-aware line scanner.
 
 ## The blocks
@@ -167,5 +167,5 @@ no bundled feature uses it, because affordances come from the text.
 - The gutter and end-of-line vocabulary of `docs/ANNOTATIONS.md` can now
   be built on chrome attachments.
 
-Tests: `priv/tests/morg-kinds-test.scm`, plus the babel and paint sections of
-`priv/tests/morg-test.scm` and `priv/tests/markdown-mode-test.scm`.
+Tests: `scheme/packages/morg-kinds-test.scm`, plus the babel and paint sections of
+`scheme/packages/morg-test.scm` and `scheme/packages/markdown-mode-test.scm`.

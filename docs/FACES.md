@@ -80,7 +80,7 @@ paint follows every change. A derived mode inherits its parent's
 keywords. `set-mode!` paints a mode that has keywords.
 
 ```scheme
-(font-lock-add-keywords! "log-mode" '(("^ERROR.*$" "alert") ("[0-9]+" "ts-number")))
+(font-lock-set-keywords! "log-mode" '(("^ERROR.*$" "alert") ("[0-9]+" "ts-number")))
 ```
 
 ## The search and the current line

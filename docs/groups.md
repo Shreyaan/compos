@@ -17,7 +17,7 @@ This document is the specification, in this order:
 
 ### Objects
 
-- A **buffer** is global. It exists once. It carries `groups`: the set of groups it is in, possibly empty.
+- A **buffer** is global. It exists once. It carries `groups`: the one group it is in, or none. A buffer is in one group at a time.
 - A **group** has an opaque ID, a name, one saved layout per frame that has shown it, and one scratch buffer of its own. The members of a group are the buffers whose `groups` include it.
 - A **frame** has a `destination` slot: a group ID or none. It also has a `previous` slot for the toggle.
 - A **project** is a root directory derived from a file path. A project is not a group. It has no members, no layout, no ID, and no verbs. The editor uses it as a fallback in two places (see Projects).
@@ -59,7 +59,7 @@ These are the ways I can create my first group when no group exists yet:
 #### I want to create an empty new group
 - I want to say `group-new`, give it a name and be in a new group with its chat.
 - Any files I open should open in this group.
-- I can pull other buffers to this group. `s-RET` from any minibuffer completion.
+- I can pull other buffers to this group: `group-add`, or `C-t` in the switcher.
 
 #### I want to start a group by opening a buffer/file
 - I open a file, chat, or other useful buffer.
@@ -113,28 +113,27 @@ I want to start from a project or directory
 #### I want to look at a buffer from outside this group
 
 - I pick it from the project or rest section.
-- Showing it changes no membership. The destination does not change.
-- The modeline indicator says "mixed" while it is visible.
+- Showing it adds it to this group (see "A buffer opens in the current group"). A chat of another group does not join.
 - When I kill it, the window shows the next buffer of this group.
 - **Command:** `switch-to-buffer`, then `RET`.
 
 #### I want that outside buffer in this group
 
-- I pick it and accept with `C-RET` instead of `RET`.
-- The buffer is shown and added to the destination group.
+- A plain `RET` already adds it, and the buffer leaves its old group.
+- `C-RET` does the opposite: it goes to the buffer's own group (`buffer-context-switch!`).
 - A mistake is one `remove-group-from-buffer` away.
-- **Command:** `switch-to-buffer`, then `C-RET`.
+- **Command:** `switch-to-buffer`, then `RET`.
 
 #### I want to open a file and have it here
 
 - A file with no buffer joins the destination group when I visit it.
-- A file with a live buffer is shown and keeps its groups.
-- **Solution:** creation joins, display does not. No command.
+- A file with a live buffer is shown and joins the destination group too.
+- **Solution:** creation joins, and a display joins. No command.
 
 #### I want to jump to a definition and have it here
 
 - The jump opens a buffer. The buffer joins the destination group.
-- If the target is a live buffer, the jump shows it and changes no membership.
+- If the target is a live buffer, the jump shows it, and it joins the destination group.
 - **Solution:** the same creation rule. No command.
 
 #### I want to clean junk out of this group
@@ -158,7 +157,7 @@ I want to start from a project or directory
 
 #### I want this buffer in another group too
 
-- The group is added. Existing groups stay.
+- The buffer joins that group and leaves this one: a buffer is in one group at a time.
 - I remain in this group.
 - **Command:** `group-add`.
 
@@ -210,13 +209,13 @@ I want to start from a project or directory
 #### I want to go to this buffer's group
 
 - One group: the frame switches to it.
-- Several groups: I choose one, always.
-- No group: I name a new group and the buffer seeds it.
-- **Command:** `switch-to-buffer-group`.
+- No group, in a project: the frame enters a group named for the project root. The project's other ungrouped open buffers join it.
+- No group and no project: I name a new group and the buffer seeds it.
+- **Command:** `C-RET` in the switcher (`buffer-context-switch!`).
 
 #### I want to change this buffer's groups by hand
 
-- Add one: `group-add`. Replace all: `group-move`. Drop one: `remove-group-from-buffer`.
+- Put it in a group: `group-add` or `group-move`. Both replace its old group. Drop it: `remove-group-from-buffer`.
 - These work when the frame has no destination too.
 
 ### As a user working with several windows
@@ -251,7 +250,7 @@ I want to start from a project or directory
 
 #### I want the current buffer to start a group
 
-- **Command:** `new`, or `switch-to-buffer-group` on an ungrouped buffer.
+- **Command:** `new`, or `C-RET` in the switcher (`buffer-context-switch!`) on an ungrouped buffer.
 
 #### I want to enter a group
 
@@ -303,9 +302,9 @@ I want to start from a project or directory
 
 ### Safety shared by every story
 
-- Showing or switching buffers never changes a buffer's groups.
+- Showing a buffer can add it to the current group (see "A buffer opens in the current group"). It never removes a group.
 - Switching groups never changes a buffer's groups.
-- `group-add` never removes. `group-move` names one destination. `remove-group-from-buffer` drops one group.
+- `group-add` and `group-move` name one destination and replace the old group. `remove-group-from-buffer` drops the group.
 - No membership verb kills a buffer or changes a file.
 - Cancel changes nothing durable.
 - A wrong membership costs one command to fix.
@@ -325,9 +324,9 @@ A buffer created while frame F has destination A joins A. Creation means:
 
 There are no exceptions. Cleanup is fast, so a gate at the door is not needed.
 
-### Display does not join
+### Display joins the current group
 
-Showing a buffer that already exists changes no membership. This covers `RET` in the switcher, `find-file` on a file with a live buffer, and a jump that lands in a live buffer.
+Showing a buffer that already exists puts it in the current group. This covers `RET` in the switcher, `find-file` on a file with a live buffer, and a jump that lands in a live buffer. See "A buffer opens in the current group" for the rule and its exceptions.
 
 ### Agents without a frame
 
@@ -343,13 +342,13 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 
 | Verb | Effect |
 |---|---|
-| `group-add` G | Add the selection to G. Create G when the name is new. Adding a buffer that is in G is a no-op. |
+| `group-add` G | Put the selection in G. Each buffer leaves the group it was in. Create G when the name is new. Adding a buffer that is in G is a no-op. |
 | `group-move` G | Remove the selection from every group, then add it to G. |
 | `remove-buffers-from-group` G | Remove the chosen buffers from G. They stay open. |
 | `remove-group-from-buffer` B | Remove the chosen groups from B's family. B stays open. |
 | `group-switch` G | Save the frame's layout into the outgoing group. Set `previous`. Set `destination` to G. Restore G's layout on this frame. |
 | `group-switch-last` | Swap `destination` and `previous`. |
-| `buffer-context-switch!` | Read the current buffer's groups. 0: prompt for a name and run `group-new`. 1: switch to it. 2 or more: prompt, always. |
+| `buffer-context-switch!` | Read the current buffer's group. None, in a project: enter a group named for the root, and take the project's ungrouped open buffers along. None, no project: prompt for a name and start a group with the buffer. One: switch to it. |
 | `group-new` G | Create G with its chat buffer. Add the seed. Save a layout built from the seed. Switch to G. |
 | `group-dissolve` G | When G has a live parent (see "The overview"): every member joins the parent, then leaves G, and a frame on G switches to the parent. Else: remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
 | `group-kill` G | For each member: when it is in another group, remove it from G; else kill it under the normal modified-buffer protection. Then dissolve G. A frame on G follows the buffer its window fell to into that buffer's group, with the group's layout; a buffer in no group leaves the frame in none. `group-after-kill` is `follow` (this) or `stay`. The kill runs `group-kill-hook` last, with `*group-killed*` = `(ID NAME STOOD?)`. |
@@ -368,8 +367,8 @@ One command per verb. The name says which way the verb runs, so `remove-buffers-
 | `remove-group` | `remove-group-from-buffer` | `C-x C-g r` |
 | `switch` | `group-switch` | `C-x g g`; `RET` in the board |
 | `switch-last` | `group-switch-last` | `C-x g C-g` |
-| `switch-to-buffer-group` | `C-RET` in the switcher (`buffer-context-switch!`) | |
-| `new` | `group-new` | `M-x`; the switcher's last row |
+| `switch-to-buffer-group` | `buffer-context-switch!` | `C-RET` in the switcher |
+| `new` | `group-new` | `C-x g n`, `C-x C-g n`; `C-c C-n` in the group switcher |
 | `dissolve` | `group-dissolve` | `x` in the board |
 | `kill` | `group-kill` | `K` in the board |
 | `rename` | `group-rename` | `r` in the board |
@@ -386,7 +385,7 @@ A kill is a scene change, not a window repair. The frame leaves G before the mem
 
 The kill buries a tombstone: the name, the record's fields, and each member's name and file. The graveyard keeps the last twenty tombstones and persists with the desktop. `group-revive` (`M-x`) completes over them, newest first, and shows each one's members. A name that an open group already has is refused.
 
-`group-switch` prompts with one container card per group, every group the editor holds. The group you stand in is a card like the others: it goes last in its section and never leads, so the default an empty `RET` takes is still a switch. A card says the group's name, how many buffers it holds, and its four most recent members as chips.
+`group-switch` prompts with one container card per group, every group the editor holds. The group you stand in is a card like the others: it goes last in its section and never leads, so the default an empty `RET` takes is still a switch. A card says the group's name and how many buffers it holds. It shows no member chips.
 
 The prompt previews the WHOLE group, never one buffer of it. The preview draws the group in the frame: the layout the group saved, else the arrangement arrival would build for it. It draws in every shape `group-switch-style` takes - `"modal"` (the default, a centered panel with the frame around it), `"popup"` (an overlay on the bottom edge), or `"minibuffer"` (the bottom rows) - because a prompt previews into the frame whatever shape it wears, the way the buffer switcher does. The modal's facts panel says what the group holds and the shape it opens in. It lists no members. Pseudo groups (`Last chats`, the `mode:` groups) come after the real groups; an empty one is left out. The preview waits for the highlight to rest (`group-switch-peek-ms`, 120 ms) before it draws, so holding `C-n` moves through the list without a draw per row. A look is not an arrival: it writes no winner entry, moves no MRU, and leaves the frame's own group alone, and the prompt puts the whole arrangement you came from back when it closes.
 
@@ -396,7 +395,7 @@ The prompt previews the WHOLE group, never one buffer of it. The preview draws t
 - No selection: the seed is empty.
 - The seed spends its marks. A switcher or ibuffer mark dies with its list, but `buffer-select` writes the mark on the buffer, so `new` clears it the way `add` does. An unspent mark would found the next group too.
 
-`switch-to-buffer-group` on an ungrouped buffer still starts a group with that buffer as the seed.
+`C-RET` in the switcher (`buffer-context-switch!`) on an ungrouped buffer still starts a group with that buffer as the seed.
 
 ### Atomic operations
 
@@ -433,7 +432,7 @@ every other buffer
 - The project section follows the current buffer's root. Peek at a file in another project and the middle section shows that project.
 - With a destination and no project: two sections. With no destination in a project: two sections. With neither: one section.
 
-In the switcher, `RET` shows the buffer and changes no membership. `C-RET` shows the buffer and adds it to the destination group. Both take the selection when one is marked. The same verbs apply to every buffer list.
+In the switcher, `RET` shows the buffer and puts it in the current group. `C-RET` goes to the buffer's own group (`buffer-context-switch!`). `C-t` puts the selection in a group. The same verbs apply to every buffer list.
 
 `ibuffer` is a buffer management list. Context-only buffers do not appear until a user visits them. The current group uses the `in this group` heading. Each other group uses its group name. Other groups sort by name. Ungrouped buffers come last. Empty sections omit their headings. A buffer with many memberships appears once. The current group wins, then the first group by name wins. Rows inside each section sort by buffer name. The order is fetched on open and on `g`. A mark, a flag, or a narrowing redraws the rows the table has, so a row never moves under the cursor.
 
@@ -462,7 +461,7 @@ When a member is killed, its window stays in the group. The window shows the mem
 
 The layout chosen at `window-layout` (`C-x l`), or a `window-layout-*` command, is a persistent target. There are five, and each holds a fixed number of panes: `single` one, `two-pane` two, `halves` two, `columns` three, `rows` two. A layout works with one buffer and grows as work opens, up to its capacity. At capacity, a visit replaces the buffer of the selected slot. A passive result opens a new window in the least recently used other pane, and the window that had the pane becomes hidden. Focus changes do not reorder slots. Closing a pane reflows the survivors without reopening hidden work.
 
-Every layout shows a run of the frame's window ring. The ring holds windows, not buffers: the panes, then the hidden windows. A hidden window has no pane, and it keeps its buffer, history, and point. A window joins the ring when it is made, and a smaller layout hides windows instead of deleting them. `layout-forward` (`C-x l <right>`) moves the run one window forward and `layout-backward` (`C-x l <left>`) one back, so each layout goes on for ever in both directions. A Cmd-arrow that finds no window does the same. A walk takes the order of the ring when it starts: the panes in screen order, then the hidden windows, most recently used first. The hidden windows belong to the group: `switch` saves them with the group's layout and restores them, and the desktop saves them.
+Every layout shows a run of the frame's window ring. The ring holds windows, not buffers: the panes, then the hidden windows. A hidden window has no pane, and it keeps its buffer, history, and point. A window joins the ring when it is made, and a smaller layout hides windows instead of deleting them. `layout-forward` moves the run one window forward and `layout-backward` one back (neither has a stock key), so each layout goes on for ever in both directions. A Cmd-arrow that finds no window does the same. A walk takes the order of the ring when it starts: the panes in screen order, then the hidden windows, most recently used first. The hidden windows belong to the group: `switch` saves them with the group's layout and restores them, and the desktop saves them.
 
 Targets belong to the group's saved layout on each frame, and the active target also survives desktop save. A new group starts without inheriting the outgoing target. `window-layout-free` drops the target. See [Display buffer](DISPLAY-BUFFER.md#layout-presets) for eligibility, ordering, replacement, preview, and measured geometry rules.
 
@@ -474,7 +473,7 @@ The frame has no other layouts. `window-layout-free` releases the target, and a 
 
 - Arrow keys select a tile. `m` marks a tile. `q`, `C-g`, and `ESC` quit.
 - Quit restores the saved window tree and the saved current group.
-- `SPC` or `RET` pops the marked buffers, else the selected one, into a new group. The new group takes the first buffer's short name. Each buffer leaves the origin group when one exists. Membership in any other group stays.
+- `SPC` or `RET` pops the marked buffers, else the selected one, into a new group. The new group takes the first buffer's short name. Each buffer leaves the origin group when one exists.
 - The new group records the origin group as its **parent**. `dissolve` on a group with a live parent merges the members back into the parent and the frame follows. A parent that is gone makes the child an ordinary group.
 
 ### Save
@@ -497,7 +496,7 @@ A pinned frame shows a foreign buffer in the selected window: the pin keeps G th
 
 ### Window fill
 
-One pool answers which buffers may fill a window in this frame: `window-fill-buffers` (`priv/editor.scm`). It is the frame's context, the way a completion source answers a prompt — in a group, the group's members (the switcher's members section reads the same list); out of one, the recency ring — minus every buffer that never fills a window: a hidden name, a context-only buffer, the popup's buffer, or a peek. Every site that fills a window reads the pool and never the ring: the columns of a layout, the window a kill empties, the buffer `q` falls to. A layout that read the ring pulled buffers in from other groups.
+One pool answers which buffers may fill a window in this frame: `window-fill-buffers` (`scheme/packages/window.scm`). It is the frame's context, the way a completion source answers a prompt — in a group, the group's members (the switcher's members section reads the same list); out of one, the recency ring — minus every buffer that never fills a window: a hidden name, a context-only buffer, the popup's buffer, or a peek. Every site that fills a window reads the pool and never the ring: the columns of a layout, the window a kill empties, the buffer `q` falls to. A layout that read the ring pulled buffers in from other groups.
 
 `kill-buffer` fills each affected window in this order:
 
@@ -525,24 +524,24 @@ The active groups are derived the same way: `(active-groups)` answers every grou
 
 ### Switch candidates
 
-`C-x g` pins the current group first and the new-group action second, then lists
-other local groups in MRU order. In a mixed frame the selected buffer supplies
-the current group. If there is no current group, the new-group action leads.
-Groups with no MRU entry trail in creation order; other frames' groups follow in
-a marked section. The new-group label describes whether it starts empty or
-uses the selected buffer.
+`C-x g g` lists this frame's groups in MRU order, and the current group
+comes last. In a mixed frame the groups of the selected buffer come first.
+Groups with no MRU entry trail in creation order. The non-empty pseudo groups
+follow, then other frames' groups in a marked section. The new-group action is
+`C-c C-n` in the switcher, not a row. Its label says whether it starts empty,
+moves the selected buffer, or starts with it.
 
 ### Candidate preview
 
-Moving the highlight shows the group under it, whole: the layout that group saved, else the arrangement arrival would build for it. The preview never moves the MRU ring, writes no winner entry, leaves the frame's own group alone, and saves no layout. `RET` puts the arrangement you came from back and then switches; `C-g` puts it back and changes nothing. The `new` row previews nothing. A modal prompt covers the windows, so it previews the group in its facts panel instead: what the group holds and the shape it opens in.
+Moving the highlight shows the group under it, whole: the layout that group saved, else the arrangement arrival would build for it. The preview never moves the MRU ring, writes no winner entry, leaves the frame's own group alone, and saves no layout. `RET` puts the arrangement you came from back and then switches; `C-g` puts it back and changes nothing. The new-group action previews nothing. A modal prompt covers the windows, so it previews the group in its facts panel instead: what the group holds and the shape it opens in.
 
 ### Transient buffers
 
-One predicate, `transient?`, is true for the minibuffer, `*switch*`, the echo area, previews, and the groups board. Transient buffers are excluded from the indicator and from the selection. Every other buffer is a normal buffer.
+One predicate, `buffer-special?`, is true for the minibuffer, `*switch*`, the echo area, previews, and the groups board. A floating window is left out too. Transient buffers are excluded from the indicator and from the selection. Every other buffer is a normal buffer.
 
 ## The scratch buffer
 
-Every group has one scratch buffer named `*scratch: NAME*`.
+Every group has one scratch buffer named `*scratch:NAME*`.
 
 - It is in `scratch-mode`, a Morg note: headings fold, code blocks run, and the motions walk headings, siblings, and links.
 - `move` and `remove` act on it like any buffer; the group recreates its blank pane when it needs one.
@@ -553,12 +552,11 @@ Every group has one scratch buffer named `*scratch: NAME*`.
 
 ## Multi-membership
 
-A buffer can be in many groups. No group is the owner.
+A buffer is in one group at a time. Joining a group is leaving the old one. A desktop from the days of many memberships keeps the first group each buffer joined.
 
-- "Exclusive to G" is derived: the groups are exactly `{G}`.
-- `group-add` never removes. `group-move` names one destination and replaces every group. The two removals drop a membership, one from each side.
-- Three places read a buffer's groups: list sectioning, window fill, and `switch-to-buffer-group`. Layouts store buffer names, not groups.
-- The one prompt in the system is `switch-to-buffer-group` with two or more groups. It always asks.
+- `group-add` and `group-move` name one destination and replace the old group. The two removals drop the membership, one from each side.
+- Three places read a buffer's group: list sectioning, window fill, and `buffer-context-switch!`. Layouts store buffer names, not groups.
+- `buffer-context-switch!` never has two groups to choose from, so it never asks which.
 
 A group grows only while it is the destination of some frame, or by an explicit `group-add`. A group shrinks only by `remove-buffers-from-group`, `remove-group-from-buffer`, `group-move`, `kill-buffer`, `group-dissolve`, or `group-kill`.
 
@@ -672,10 +670,10 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 1. Creation joins with a destination set: file, jump, editor-made buffer, agent-made buffer.
 2. Creation with no destination stays ungrouped.
 3. Showing a live buffer changes no membership: switcher, `find-file`, jump.
-4. `C-RET` semantics in the switcher: show plus add, on one buffer and on a selection.
+4. `C-RET` semantics in the switcher: go to the buffer's own group.
 5. `group-add`, `group-move`, `remove-group-from-buffer` on one buffer, on a selection, on a dired selection, on a path selection.
 6. `new` with a selection seed and with an empty seed; the current buffer is never the seed.
-7. `switch-to-buffer-group` with 0, 1, and many groups; the many case prompts.
+7. `buffer-context-switch!` with no group (in a project, and not) and with one group.
 8. `switch` saves the outgoing layout as it is and restores tree, buffers, point, scroll, and selected window.
 9. A saved layout with a dead buffer restores without that pane.
 10. Window fill order: group member, project file, delete window, scratch as last window, `other-buffer` with no context.
@@ -700,11 +698,11 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 An empty string uses the current group. If the frame has no group, the scene stays ungrouped and omits its group companion.
 The entry selects the destination before it creates panes. Mode hooks do not select the destination.
 
-WhatsApp exposes this choice as `whatsapp-group`, empty by default:
+WhatsApp exposes this choice as `whatsapp-group`, `"*WhatsApp*"` by default. The command never passes an empty string: an empty value names the group `whatsapp`.
 
 ```scheme
-(customize-set! 'whatsapp-group "")          ; use the current group
-(customize-set! 'whatsapp-group "whatsapp")  ; use this named group
+(customize-set! 'whatsapp-group "*WhatsApp*")  ; the default group
+(customize-set! 'whatsapp-group "whatsapp")    ; use this named group
 (run-command "whatsapp")
 ```
 
@@ -719,9 +717,9 @@ Listings keep their own mode preference.
 Opening another buffer of that mode reuses the window, including in a free layout.
 Explicit display rules and other-window constraints still control display requests.
 
-`` C-` `` cycles open buffers of the preferred mode within the current group.
+`` C-` `` (`group-next-mode-buffer`) walks the group's open buffers of the current buffer's major mode.
 Cycling stays in the selected window. Other modes stay out of the cycle.
-`M-x window-cycle-mode` overrides the preference; an empty answer restores automatic selection.
+`M-x window-mode-preference` overrides the preference for routing; an empty answer restores automatic selection.
 An ordinary work buffer of another mode changes the automatic preference.
 
 Scheme callers can inspect `(window-preferred-mode WIN)` and
@@ -734,21 +732,20 @@ Explicit cycle overrides retain their existing runtime-only lifetime.
 `M-x mode-consolidate` gathers open buffers of the window's preferred mode into its history.
 It operates within the current group and frame. Ungrouped work gathers only ungrouped buffers.
 The destination contains only matching buffers, including hidden buffers.
-Its other buffers move together into a persisted invisible window, preserving their order.
+Its other buffers leave its history.
 The destination stays selected in its pane. No new visible windows are created.
 Other visible windows drop matching entries and reveal their next unrelated buffer.
 A window with no remaining buffer closes, reducing the visible layout. No buffer is killed.
 Matching destination history keeps its order; additional buffers follow in most-recent order.
 The command is also available as `(mode-consolidate!)` in Scheme.
 
-`(hidden-window-list)` lists invisible windows for the current frame and group.
-`(hidden-window-buffers ID)` reads a window's ordered stack.
-`(hidden-window-show! ID)` explicitly exchanges that stack with the selected pane's stack.
-The displaced stack becomes invisible. The pane's geometry stays unchanged.
+`(window-hidden-list)` lists the hidden windows of the selected frame as `(WIN BUFFER)` pairs, most recently used first.
+`(layout-hidden-windows)` keeps the ones that this frame's group may show.
+`(window-hidden-delete! WIN)` deletes one. `layout-forward` and `layout-backward` bring a hidden window into a pane.
 
 Quitting a listing restores only its own window history. If that history is empty,
 the window closes instead of refilling from group recency or another window's buffers.
 The last window stays visible when it has no predecessor; quitting reports that condition.
 
-The pinned current/new rows are consistent in homogeneous and mixed layouts.
+The group switcher puts the current group last in homogeneous and mixed layouts.
 The remaining groups preserve MRU order.

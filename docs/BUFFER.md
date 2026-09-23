@@ -91,7 +91,7 @@ A buffer follows its file when something outside the editor writes it: git, anot
 
 **The buffer is the text.** A file that moved is not an authority that overwrites the buffer, it is one more writer whose change has to land beside the buffer's own work. Every mechanism here follows from that.
 
-**The mark, never the modified flag.** A buffer records the text it last agreed with its file on. Inside compos a buffer is where code is written and saving is a separate decision, so buffers carry live unsaved work for hours; and the flag is the very thing that is wrong in this case, because a write behind the editor's back leaves a buffer reading unmodified while its text differs. The mark is taken when the buffer is created, which is `*buffer-created-hooks*` and not `find-file-hook`, because the visit hooks are run by the commands and not by `find-file` or `buffer-save!`, so an agent or a script never reaches them. It moves forward on any file event that finds buffer and file equal, which is also how a save is noticed. A buffer with no mark is left alone: there is no common text to describe either side's change against.
+**The mark, never the modified flag.** A buffer records the text it last agreed with its file on. Inside compos a buffer is where code is written and saving is a separate decision, so buffers carry live unsaved work for hours; and the flag is the very thing that is wrong in this case, because a write behind the editor's back leaves a buffer reading unmodified while its text differs. The mark is taken when the buffer is created, which is `buffer-created-hook` and not `find-file-hook`, because the visit hooks are run by the commands and not by `find-file` or `buffer-save!`, so an agent or a script never reaches them. It moves forward on any file event that finds buffer and file equal, which is also how a save is noticed. A buffer with no mark is left alone: there is no common text to describe either side's change against.
 
 **A file that moved is merged, not applied.** Three texts: the mark, the buffer now, and the file now. Both sides are diffed against the mark, so both changes are described in the same line coordinates. The file's hunks that fall on lines the buffer left alone are applied, translated by how far the buffer's own hunks have moved those lines. A hunk that falls where the buffer also changed is left, and the buffer keeps its version, because the buffer is the one being worked in. After a merge the mark becomes the file's text, which is what the next merge measures against. Only a buffer that still holds its mark exactly takes the file wholesale, and only then is it marked saved.
 
@@ -140,6 +140,8 @@ The buffer layer exposes these conceptual operations:
 - `provenance-history`: read revisions and lifecycle events
 - `provenance-proposals`: read proposals awaiting conflict resolution
 - `provenance-apply`: conditionally accept a proposal against an expected head
+
+Scheme implements five of these today: `buffer-provenance-status`, `buffer-provenance-start!`, `buffer-provenance-stop!`, `buffer-provenance-checkpoint!`, and `buffer-history`. The clear-override, proposals, and apply operations have no primitive yet.
 
 Start and stop are idempotent. Starting MUST NOT replace the existing base or clear prior changes. Checkpointing MUST NOT delete revisions.
 

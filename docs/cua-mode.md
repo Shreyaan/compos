@@ -1,8 +1,8 @@
 # cua-mode
 
 Shift with a motion key extends the region. That is the whole of cua-mode:
-thirteen keys and the `cua-select-*` commands they run, in
-`apps/compos_core/priv/packages/cua.scm`. It is Emacs's `cua-mode` and
+fifteen keys and the `cua-select-*` commands they run, in
+`scheme/packages/cua.scm`. It is Emacs's `cua-mode` and
 `shift-select-mode` in one. It is on from boot, and `M-x cua-mode` toggles it.
 
 ## The keys
@@ -71,14 +71,14 @@ there are worth more as the buffer walk than as a region.
 
 Not enforced yet. Nothing excludes a chat from `cua-mode-map` today, so a chat
 buffer you have typed into is in the editing state, and `S-<left>` extends a
-region there like anywhere else. One `cua-mode-map` is installed for every
-buffer that enters the editing state, so the exclusion needs a per-buffer test
-on that map, at `editing-state-on!`, and not a second map.
+region there like anywhere else. `editing-state-maps-off!` lets a mode refuse
+one map of the state. chat-mode refuses only `editing-caret-map` today, so
+the exclusion is one more name on that call.
 
 ## The code
 
-- `apps/compos_core/priv/packages/cua.scm` - the commands, the keys, the toggle.
+- `scheme/packages/cua.scm` - the commands, the keys, the toggle.
 - `apps/compos_core/priv/editor.scm` - the movement and editing states, `*editing-state-maps*`, and the global map the Emacs keys come from.
-- `apps/compos_core/priv/tests/cua-test.scm` - the selections, and the gate.
+- `scheme/packages/cua-test.scm` - the selections, and the gate.
 - `apps/compos_core/priv/tests/editing-state-test.scm` - the state itself.
 - `docs/KEYMAPS.md` - the ladder. `docs/EDITING-SURFACE-SPEC.md` - the client half of the two states.

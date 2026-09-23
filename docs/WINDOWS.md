@@ -10,7 +10,7 @@ superseded behavior, including filling layouts from buffer recency and refilling
 exhausted windows. Those expectations must change rather than define the product.
 
 This document supersedes conflicting terminology and requirements in
-[the earlier window-history audit](../doc/WINDOWS.md). That audit remains historical evidence.
+the earlier window-history audit (`doc/WINDOWS.md`). Git history keeps that audit; the tree no longer has it.
 
 ## The model
 
@@ -88,7 +88,7 @@ Invoke bare command names with `M-x`; key sequences are shortcuts for those comm
 `window-left/right/up/down` should move the whole window stack.
 `buffer-left/right/up/down` should move only the current buffer.
 `focus-left/right/up/down` only change selection.
-The current window movement implementation swaps visible buffers; I01 specifies the required correction.
+`window-swap!` moves both logical windows between panes, stacks included.
 
 **API** marks an existing Scheme function without a dedicated interactive command.
 **Harness** marks a controlled event, corrupted fixture, or lifecycle test without a user command.
@@ -103,8 +103,8 @@ Set up unusual histories in a disposable test frame, then invoke the listed comm
 | I01 — Move a window | `window-right` / `window-left` (repeat with `window-up` / `window-down`) | Move a window containing A, B, C from the left pane to the right pane. | The same window arrives with C visible and B and A underneath. Its ownership and view state remain attached. |
 | I02 — Move a buffer | Visit B in the source, then `buffer-left` / `buffer-right` (repeat vertically) | Explicitly move B from one window into another. | Only B moves. The source and destination windows retain their identities and remaining stacks. |
 | I03 — Make invisible | **Proposed:** `window-hide`; `C-x 0` tests window deletion separately | Hide a window containing A, B, C. | The window retains its identity, group, stack, and view state. It occupies no pane. |
-| I04 — Reveal an invisible window | **API:** `(hidden-window-show! ID)`; interactive reveal command missing | Explicitly show that window in a pane. | The same window becomes visible with C on top and its remaining stack intact. |
-| I05 — Exchange windows | **API:** `(hidden-window-show! ID)` | Show an invisible window in an occupied pane. | The incoming window occupies that pane. The displaced window becomes invisible with its own stack intact. |
+| I04 — Reveal an invisible window | **Proposed:** `(hidden-window-show! ID)`; no reveal API or command exists | Explicitly show that window in a pane. | The same window becomes visible with C on top and its remaining stack intact. |
+| I05 — Exchange windows | **Proposed:** `(hidden-window-show! ID)` | Show an invisible window in an occupied pane. | The incoming window occupies that pane. The displaced window becomes invisible with its own stack intact. |
 | I06 — Separate identities | `split-window-right` (`C-x 3`); `other-window` (`C-x o`) | Create two explicitly independent views of one buffer in the same group. | The views have separate window identities and independent cursor and history state. Sharing content does not merge the windows. |
 | I07 — One buffer, one group | `group-add`, then `group-move`; **API:** `buffer-add-group!`, `buffer-move-to-group!` | Put a buffer in A, then explicitly move it to B. | B becomes its only group. A loses membership. Opening content elsewhere must not create a second membership. |
 | I08 — Focus is not ownership | `focus-left` / `focus-right`; `other-window` | Focus a different window or an ungrouped utility surface. | Existing windows keep their owners. Ownership is not recalculated from the last selected buffer. |
@@ -144,7 +144,7 @@ A different visible window showing the same mode does not take precedence.
 When no preference exists, normal group-scoped placement chooses a window and
 registers it as that mode's preferred window. This is the default establishment rule.
 An explicit preference command can change it without moving existing buffers.
-The command name below is proposed; `window-cycle-mode` currently chooses a cycling mode.
+`window-mode-preference` sets the selected pane's preferred mode. It steers routing only.
 
 Users may move existing buffers with `buffer-left/right/up/down` or explicitly
 show them in another same-group window. Those actions do not retarget future opens.
@@ -172,7 +172,7 @@ It does not impose a permanent restriction on later buffer placement.
 | O14 — Source differs from destination | `dired-visit` / `notmuch-preview` from the source listing | An action in a listing opens a buffer in another window. | The opened buffer covers the destination's predecessor, not the listing merely because the listing initiated the action. |
 | O15 — No mode information | **API:** `buffer-create`, then `switch-to-buffer!` before mode setup | Open a buffer whose mode has not been established. | Do not infer its destination from stale history or an unrelated buffer's mode. Any provisional window remains group-scoped. |
 | O16 — Mode setup changes | **API:** `set-mode!` after buffer creation; **harness:** deferred setup | Mode setup completes after a buffer is created. | Resolve the now-known mode through the same routing policy. Do not create an additional destination during setup. |
-| O17 — Parent-mode preference | `window-cycle-mode`, then `switch-to-buffer` for a derived mode | A window explicitly prefers a parent mode and a compatible derived-mode buffer opens. | Apply the declared compatibility rule consistently to routing, cycling, and consolidation. |
+| O17 — Parent-mode preference | `window-mode-preference`, then `switch-to-buffer` for a derived mode | A window explicitly prefers a parent mode and a compatible derived-mode buffer opens. | Apply the declared compatibility rule consistently to routing, cycling, and consolidation. |
 | O18 — Failed open | `find-file`; **harness:** load failure or rejected destination | Loading fails or the destination request is rejected. | Preserve all existing windows, stacks, ownership, layout, and focus. |
 
 ### Preferred-window acceptance cases
@@ -185,7 +185,7 @@ It does not impose a permanent restriction on later buffer placement.
 | W04 — Move an existing buffer | `buffer-right` / `buffer-left` | Move a chat out of the preferred chat window. | Honor the move. Retain the original preferred window for future chats. |
 | W05 — New buffer after a move | Open a new chat after W04 | Both windows now contain chats. | Route the new chat to the original preferred window. |
 | W06 — Revisit a moved buffer | `switch-to-buffer`, select the moved chat | The chat remains in its explicitly chosen window. | Select and reveal it there. Do not move it back to the preferred window. |
-| W07 — Change preference | **Proposed:** `window-prefer-mode` in the selected window | Choose a new preferred window for chat-mode. | Future new chats use that window. Existing chats stay where they are. |
+| W07 — Change preference | `window-mode-preference` in the selected window | Choose a new preferred window for chat-mode. | Future new chats use that window. Existing chats stay where they are. |
 | W08 — Move the preferred window | `window-right` / `window-left` | Move the whole preferred window to another pane. | The preference follows the logical window and its stack. |
 | W09 — Consolidate, then move | `mode-consolidate`, then `buffer-right`, then open a new chat | Move one chat away after consolidation. | Keep the explicit move. Send the new chat to the consolidated window. |
 | W10 — Layout after a move | `C-x l c` / `C-x l r` after W09 | Change geometry after explicitly separating chats. | Preserve both stacks. Do not consolidate automatically. |
@@ -226,13 +226,13 @@ the selected window and the mode is that window's declared or automatic preferen
 
 | Case | Command or trigger | Setup and action | Required result |
 | --- | --- | --- | --- |
-| Y01 — Two buffers | `group-next-buffer` (`C-backtick`), repeatedly | Press C-backtick repeatedly in a window with two eligible mode buffers. | Alternate between those buffers in the same window. |
-| Y02 — Several buffers | `group-next-buffer` (`C-backtick`), repeatedly | Cycle through several buffers of the preferred mode. | Follow a stable traversal order for that cycling session. Do not bounce between only the two newest entries. |
-| Y03 — Other modes excluded | `group-next-buffer` (`C-backtick`) | The group also contains files, chats, and directories of other modes. | They do not enter this window's mode cycle. |
-| Y04 — Other groups excluded | `group-next-buffer` (`C-backtick`) | Another group's buffer has the same mode and is more recent. | It does not enter the cycle. |
-| Y05 — Focus preserved | `group-next-buffer` (`C-backtick`) | Cycle while another pane shows a related buffer. | Cycling stays in the selected logical window and does not jump to the other pane. |
-| Y06 — After consolidation | `mode-consolidate`, then `group-next-buffer` (`C-backtick`) | Cycle chats after consolidating them. | Without intervening moves, all consolidated chats are reachable in the destination. Cycling must not undo later explicit moves or recreate stale source history. |
-| Y07 — Explicit preference | `window-cycle-mode`, then `group-next-buffer` | Set an explicit cycle-mode preference. | Cycle the declared mode in this window. This does not reassign the group's preferred destination for new buffers. |
+| Y01 — Two buffers | `group-next-mode-buffer` (`C-backtick`), repeatedly | Press C-backtick repeatedly in a window with two eligible mode buffers. | Alternate between those buffers in the same window. |
+| Y02 — Several buffers | `group-next-mode-buffer` (`C-backtick`), repeatedly | Cycle through several buffers of the current buffer's mode. | Follow a stable traversal order for that cycling session. Do not bounce between only the two newest entries. |
+| Y03 — Other modes excluded | `group-next-mode-buffer` (`C-backtick`) | The group also contains files, chats, and directories of other modes. | They do not enter this window's mode cycle. |
+| Y04 — Other groups excluded | `group-next-mode-buffer` (`C-backtick`) | Another group's buffer has the same mode and is more recent. | It does not enter the cycle. |
+| Y05 — Focus preserved | `group-next-mode-buffer` (`C-backtick`) | Cycle while another pane shows a related buffer. | Cycling stays in the selected logical window and does not jump to the other pane. |
+| Y06 — After consolidation | `mode-consolidate`, then `group-next-mode-buffer` (`C-backtick`) | Cycle chats after consolidating them. | Without intervening moves, all consolidated chats are reachable in the destination. Cycling must not undo later explicit moves or recreate stale source history. |
+| Y07 — Explicit preference | `window-mode-preference`, then `group-next-mode-buffer` | Set an explicit mode preference for the pane. | The walk still follows the current buffer's major mode. The preference steers routing only. |
 | Y08 — Temporary cover | `describe-mode`, then `group-next-buffer` | Help covers the mode window. Invoke its mode cycle. | Use the underlying window preference rather than treating help as a new owner of that window. |
 | Y09 — Buffer killed mid-cycle | `group-next-buffer`; **harness:** kill a candidate before the next invocation | Kill a candidate while a cycle is in progress. | Skip the dead identity without selecting a foreign buffer or corrupting the cycle position. |
 | Y10 — New cycle after another command | `group-next-buffer`, `next-line`, then `group-next-buffer` | Run another command between cycle presses. | Start the next cycle from the current state using the documented recency order. |
@@ -247,17 +247,17 @@ the selected window and the mode is that window's declared or automatic preferen
 | L04 — Invisible same-group windows | `window-layout-rows` (`C-x l r`) | Select a different layout without explicitly asking to reveal invisible windows. | Rearrange the visible windows only. Invisible windows remain invisible. |
 | L05 — Invisible foreign windows | `window-layout-columns` (`C-x l c`) | Select a layout while another group owns invisible windows. | They remain in the other group, untouched. |
 | L06 — Global recency changes | `window-layout-columns` (`C-x l c`); **harness:** change recency headlessly | Touch hidden buffers or run background work, then select the same layout. | The visible window set does not change because recency changed. |
-| L07 — Change geometry | `C-x l r`, `C-x l c`, `C-x l 2`, then `C-x l` plus an arrow | Change rows to columns or two-pane, then scroll the panes. | Each window carries its own stack, ownership, cursor, and return state into its new pane. |
-| L08 — Main direction | `C-x l` plus each arrow; see the direction mapping below | Choose each main-pane direction using the layout shortcuts. | The arrow names the main pane's position. Window stacks are not reversed or exchanged accidentally. |
+| L07 — Change geometry | `C-x l r`, `C-x l c`, `C-x l 2`, then `layout-forward` | Change rows to columns or two-pane, then scroll the panes. | Each window carries its own stack, ownership, cursor, and return state into its new pane. |
+| L08 — Main direction | **Proposed:** `C-x l` plus each arrow | Choose each main-pane direction using the layout shortcuts. | The arrow names the main pane's position. Window stacks are not reversed or exchanged accidentally. |
 | L09 — Smaller target | `window-layout-two-pane` (`C-x l 2`) from a larger arrangement | Select a target with fewer panes than the current arrangement. | Preserve surplus windows as invisible windows owned by the same group. Do not merge their histories into survivors. |
 | L10 — Focus under smaller target | `other-window`, then `window-layout-two-pane` (`C-x l 2`) | Reduce the target while a later window is selected. | Preserve the selected logical window according to the stated main/focus policy. Do not silently discard it because it was late in traversal order. |
 | L11 — Empty source removed | `mode-consolidate` / `quit-window`; also test `delete-window` (`C-x 0`) | Consolidation or quitting exhausts a window. | Remove it and let the layout use fewer windows. Preserve survivors' stack identities. |
 | L12 — No compensating fill | `quit-window` after exhausting its own history | After L11, the group still has hidden buffers and invisible windows. | Do not refill the removed pane automatically. |
 | L13 — Manual geometry | Drag a pane divider, then `switch-to-buffer` for the same mode | Resize panes before opening another buffer of an existing mode. | Reusing the mode destination does not rebuild or resize the layout. |
 | L14 — Same target again | `window-layout-columns` (`C-x l c`) twice | Select the active target again without changing the window set. | No window is replaced by a hidden buffer. Histories and focus remain intact. |
-| L15 — Preview layout | `window-layout` (`C-x l l`), move through candidates | Move through layout choices in the chooser. | Preview geometry using the current eligible windows. Do not import buffers or commit ownership changes. |
-| L16 — Cancel preview | `window-layout` (`C-x l l`), then `keyboard-quit` (`C-g`) | Cancel the layout chooser. | Restore the exact prior windows, stack order, views, focus, and target. |
-| L17 — Commit preview | `window-layout` (`C-x l l`), accept with `RET`, then `winner-undo` | Accept a previewed layout. | Commit one layout change. Undo does not walk through every intermediate preview. |
+| L15 — Preview layout | `window-layout` (`C-x l`), move through candidates | Move through layout choices in the chooser. | Preview geometry using the current eligible windows. Do not import buffers or commit ownership changes. |
+| L16 — Cancel preview | `window-layout` (`C-x l`), then `keyboard-quit` (`C-g`) | Cancel the layout chooser. | Restore the exact prior windows, stack order, views, focus, and target. |
+| L17 — Commit preview | `window-layout` (`C-x l`), accept with `RET`, then `winner-undo` | Accept a previewed layout. | Commit one layout change. Undo does not walk through every intermediate preview. |
 | L18 — Stale cache | `window-layout-columns`; **harness:** stale cached slot order | The cached slot order differs from the actual visible window arrangement. | Preserve logical window identity and the user's current arrangement. Do not move stacks based on stale buffer-name caches. |
 | L19 — Repeated buffer views | `window-layout-rows`; **harness:** independent duplicate views | Two explicitly independent windows show the same buffer with different histories. Retile them before consolidation. | Match by window identity, not buffer name. Neither history replaces the other. |
 | L20 — Explicit foreign ID | **API:** `tile-windows!` compatibility path; **proposed:** logical-window-ID layout API | A layout caller supplies a window ID owned by another group. | Reject that window. Never transfer its ownership or show it temporarily. |
@@ -300,7 +300,7 @@ the selected window and the mode is that window's declared or automatic preferen
 | P07 — Dired with active preview | `dired-quit` (`q`) twice | Press Dired's quit command while its preview is active. | Dismiss the preview first. A later quit unwinds or closes the Dired window itself. |
 | P08 — Delayed preview | `dired-visit`, then `group-switch`; **harness:** delayed callback completion | Schedule a preview, then switch group or repurpose its destination before it completes. | The old callback does not display into the new group or overwrite the repurposed window. |
 | P09 — Temporary cover and preference | `describe-mode`, then `switch-to-buffer` for another chat | Show help over a chat window, then open another chat. | Use the chat window's existing preference and ownership. Help does not create another chat destination. |
-| P10 — Listing is not automatically temporary | `dired` / `notmuch`; then `window-cycle-mode` to inspect preference | Open a persistent directory or application listing. | Keep its own mode preference. Read-only or special-mode status alone does not make it a temporary cover of unrelated work. |
+| P10 — Listing is not automatically temporary | `dired` / `notmuch`; then `window-mode-preference` to inspect preference | Open a persistent directory or application listing. | Keep its own mode preference. Read-only or special-mode status alone does not make it a temporary cover of unrelated work. |
 | P11 — Explicit temporary surface | **API:** set `window-preference-cover`, then `display-buffer` and `quit-window` | Mark an application surface as a temporary preference-preserving cover. | It follows the same return and ownership rules as help. |
 | P12 — Cross-group preview | `dired-visit` / `notmuch-preview`; **harness:** foreign-owned destination | Request a preview that would import another group's owned window. | Reject that destination or require explicit group navigation. Preview is not an ownership exception. |
 
@@ -310,8 +310,8 @@ the selected window and the mode is that window's declared or automatic preferen
 | --- | --- | --- | --- |
 | H01 — Single registry | **Harness:** inspect visible and invisible logical records; registry inspection API pending | Inspect visible and invisible windows. | Both are records in the same identity and ownership system. Visibility is a property, not a separate kind of buffer history. |
 | H02 — Hidden stack survives commands | `mode-consolidate`, then `switch-to-buffer`, `quit-window`, `group-next-buffer` | Create an invisible stack, then open, close, and cycle visible buffers. | The invisible stack remains intact unless an explicit operation targets its entries. |
-| H03 — Reveal preserves geometry | **API:** `(hidden-window-show! ID)` | Explicitly reveal an invisible window in an existing pane. | Exchange the window occupying the pane without creating or resizing a pane. |
-| H04 — Wrong-group reveal | **API:** `(hidden-window-show! FOREIGN-ID)` | Request an invisible window owned by another group. | Reject the request without modifying either group. |
+| H03 — Reveal preserves geometry | **Proposed:** `(hidden-window-show! ID)` | Explicitly reveal an invisible window in an existing pane. | Exchange the window occupying the pane without creating or resizing a pane. |
+| H04 — Wrong-group reveal | **Proposed:** `(hidden-window-show! FOREIGN-ID)` | Request an invisible window owned by another group. | Reject the request without modifying either group. |
 | H05 — Save and restart | **Harness:** desktop save and restore in a disposable session | Save visible and invisible windows, restart, then inspect them. | Restore owners, logical IDs, stack order, mode destinations, visibility, and available view state. Runtime pane handles may differ. |
 | H06 — Save without group switch | `mode-consolidate`; **harness:** immediate desktop save and restore | Consolidate and save the desktop immediately. | The active group's latest registry state is saved without requiring a group switch first. |
 | H07 — Code reload | `reload-file`; **harness:** reload changed window definitions | Reload the window implementation during use. | Existing windows and hidden stacks survive. Defaults do not overwrite live registry state. |
@@ -319,7 +319,7 @@ the selected window and the mode is that window's declared or automatic preferen
 | H09 — Ownership changed at restore | `group-move`; **harness:** restore the older saved desktop | A saved buffer has moved exclusively to another group. | Sanitize both current and hidden entries before showing the window. |
 | H10 — Older desktop format | **Harness:** restore a desktop fixture using the old hidden-window format | Restore a desktop with the former separate hidden-stack records. | Migrate them once into the shared registry without duplicating windows or importing them into another group. |
 | H11 — Reused runtime handle | `delete-window` (`C-x 0`), then `split-window-right`; **harness:** reused pane handle | A new pane receives a handle formerly used by another window. | Old ownership, quit records, and asynchronous callbacks do not attach to it. |
-| H12 — Window hidden by smaller layout | `C-x l 2`; **harness:** save/restore; **API:** `hidden-window-show!` | Reduce the layout, save, restart, then explicitly reveal a surplus window. | The same group-owned stack is still available. |
+| H12 — Window hidden by smaller layout | `C-x l 2`; **harness:** save/restore; **Proposed:** `hidden-window-show!` | Reduce the layout, save, restart, then explicitly reveal a surplus window. | The same group-owned stack is still available. |
 | H13 — Group arrangement saved earlier | `mode-consolidate`, then `group-switch` away and back | A group's old geometry predates consolidation. Restore it after consolidation. | Geometry restoration respects current window identity and mode preferences instead of splitting the consolidated stack back into buffers. |
 | H14 — Focus on restoration | `other-window`; **harness:** desktop save and restore | Save with a non-first window selected, then restore. | Restore that logical selection when it survives; otherwise choose a deterministic surviving window of the same group. |
 
@@ -329,8 +329,8 @@ the selected window and the mode is that window's declared or automatic preferen
 | --- | --- | --- | --- |
 | V01 — Cursor and scroll | `switch-to-buffer` for the cover, then `quit-window` | Cover a buffer, then restore it. | Restore that window's cursor and scroll state, adjusted for intervening edits. Do not use another window's cursor. |
 | V02 — Independent duplicate views | `split-window-right`, `other-window`, move point; then `C-x l r` | Two windows show the same buffer at different locations. Rearrange or restore them. | Keep both locations associated with their respective window identities. |
-| V03 — Manual scrolling | Scroll manually; **proposed:** `window-hide`; **API:** `hidden-window-show!` | Manually scroll a window, hide it, and reveal it. | Preserve its manual/follow state and scroll position where supported. |
-| V04 — Content changes while hidden | **Harness:** edit an invisible window’s buffer; **API:** `hidden-window-show!` | Edit a buffer while its window is invisible. | Preserve document edits and restore an adjusted valid view. Do not restore an old copy of the text. |
+| V03 — Manual scrolling | Scroll manually; **proposed:** `window-hide`, `hidden-window-show!` | Manually scroll a window, hide it, and reveal it. | Preserve its manual/follow state and scroll position where supported. |
+| V04 — Content changes while hidden | **Harness:** edit an invisible window’s buffer; **Proposed:** `hidden-window-show!` | Edit a buffer while its window is invisible. | Preserve document edits and restore an adjusted valid view. Do not restore an old copy of the text. |
 | V05 — Passive display focus | **API:** `(display-buffer BUFFER)` | Display a buffer without selecting it. | Preserve the selected logical window and its editing position. |
 | V06 — Background buffer creation | **API:** `with-current-buffer` and `visit-quietly`; no display command | Create or update buffers headlessly. | Do not create visible panes or change any visible stack. |
 | V07 — Redraw and modeline update | **Harness:** render refresh and modeline update events | Trigger rendering, status updates, or mode-line refreshes. | Do not add return layers, change owners, or reveal hidden windows. |
@@ -358,28 +358,27 @@ A specialized application must not bypass the contract by calling a lower-level 
 
 Run these cases through keyboard dispatch, starting with `C-x l`. See
 [the keymap reference](KEYMAPS.md#layout-selection) for the binding list.
+`C-x l` opens the `window-layout` chooser. In the chooser, each key below
+picks its layout at once. An arrow moves the chooser's highlight.
+`layout-forward` and `layout-backward` have no stock key.
 
 | Key after `C-x l` | Command | Meaning |
 | --- | --- | --- |
-| `l` | `window-layout` | Preview chooser |
 | `1` | `window-layout-single` | One window |
 | `2` | `window-layout-two-pane` | Two panes, 2/3 + 1/3 |
 | `=` | `window-layout-halves` | Two equal panes |
 | `c` | `window-layout-columns` | Three columns |
 | `r` | `window-layout-rows` | Two rows |
-| Right arrow | `layout-forward` | Move the panes one buffer forward |
-| Left arrow | `layout-backward` | Move the panes one buffer backward |
 | `f` | `window-layout-free` | Free layout |
 
-The current main-layout command suffix names the companions' side.
-The arrow names the main pane's side.
+No key chooses the main pane's side at this time. K02 and L08 are proposed.
 
 | Case | Command or trigger | Setup and action | Required result |
 | --- | --- | --- | --- |
 | K01 — Layout prefix | `C-x l 1`, `C-x l 2`, `C-x l =`, `C-x l c`, `C-x l r` | Press C-x l, then each of 1, 2, =, c, and r in separate runs. | Select single, two-pane, halves, columns, and rows respectively. Each uses the window-preservation and group-boundary rules above. |
-| K01b — Scroll the layout | `C-x l <right>`, `C-x l <left>` | Press C-x l, then an arrow. | Move the panes one window along the frame's window ring. The ring is cyclic, so neither direction reaches an end. The window that leaves becomes hidden; it keeps its buffer, history, and point. |
-| K02 — Main direction | `C-x l` plus left, right, up, down | Press C-x l followed by left, right, up, or down. | Place the main pane on the named side. Preserve logical window stacks while changing pane geometry. |
-| K03 — Chooser | `C-x l l`, then `RET` / `C-g` | Press C-x l l, preview layouts, then accept or cancel. | Open the chooser and follow L15–L17. Cancellation restores the original arrangement. |
+| K01b — Scroll the layout | `M-x layout-forward`, `M-x layout-backward` | Run each command. | Move the panes one window along the frame's window ring. The ring is cyclic, so neither direction reaches an end. The window that leaves becomes hidden; it keeps its buffer, history, and point. |
+| K02 — Main direction | **Proposed:** `C-x l` plus left, right, up, down | Press C-x l followed by left, right, up, or down. | Place the main pane on the named side. Preserve logical window stacks while changing pane geometry. |
+| K03 — Chooser | `C-x l`, then `RET` / `C-g` | Press C-x l, preview layouts, then accept or cancel. | Open the chooser and follow L15–L17. Cancellation restores the original arrangement. |
 | K04 — Free layout | `window-layout-free` (`C-x l f`) | Press C-x l f. | Select free layout. Mode routing, consolidation, and group ownership still apply. |
 | K05 — Cancel prefix | `C-x l C-g` | Press C-x l and cancel before selecting a layout. | Leave windows, stacks, focus, geometry, and the layout target unchanged. |
 | K06 — After consolidation | `mode-consolidate`, then every `C-x l` layout selection | Consolidate chats, then exercise every layout shortcut. | Hidden chats never become extra windows. Displaced non-mode windows remain invisible. No shortcut imports another group's content. |
@@ -391,7 +390,7 @@ The arrow names the main pane's side.
 1. Use `switch-to-buffer` to open several chats belonging to one group.
 2. Run `mode-consolidate` in the selected window.
 3. Run `ibuffer` in another window.
-4. Press `C-x l c`; repeat through the chooser with `C-x l l`.
+4. Press `C-x l c`; repeat through the chooser with `C-x l`.
 5. Inspect every visible and invisible window, not just the screen.
 
 **Expected:** one group-owned chat destination remains. Its hidden chats stay in
@@ -500,8 +499,8 @@ Quitting unwinds the local instance's own windows. It does not collapse Recruiti
 layout or select a global recent buffer. Opening an app is not permission to replace
 the host layout. A separate, explicit layout action can apply the app's arrangement.
 
-**Implementation status:** these prefix semantics are proposed. Notmuch and chat-list
-currently use singleton view buffers and enter their own groups. Skipping the group
+**Implementation status:** these prefix semantics are proposed. `M-x notmuch` opens
+its singleton view buffers in the current group. `M-x mail` enters the `mail` group scene. Skipping the group
 switch alone cannot implement local instances safely.
 
 | Case | Command or trigger | Setup and action | Required result |
@@ -548,8 +547,8 @@ they do not claim the current file implementation supports it.
 ## Coverage and completion
 
 Single ownership is already enforced by `buffer-add-group!`, `buffer-move-to-group!`,
-and the chat ownership functions in [groups.scm](../apps/compos_core/priv/packages/groups.scm).
-[groups-test.scm](../apps/compos_core/priv/tests/groups-test.scm) tests immediate replacement
+and the chat ownership functions in [groups.scm](../scheme/packages/groups.scm).
+[groups-test.scm](../scheme/packages/groups-test.scm) tests immediate replacement
 of work-buffer ownership and normalization of legacy multiple memberships.
 These checks do not prove the window registry or proposed application instances.
 
