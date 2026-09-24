@@ -27,8 +27,6 @@ defmodule Compos.Ui.Router do
   scope "/" do
     pipe_through(:browser)
     live("/", Compos.Ui.EditorLive)
-    live("/operad", Compos.Ui.HomepageLive, :operad)
-    live("/emma", Compos.Ui.HomepageLive, :emma)
     live("/compos", Compos.Ui.HomepageLive, :compos)
 
     # a buffer link: the tab's own frame shows BUFFER, at LINE when the

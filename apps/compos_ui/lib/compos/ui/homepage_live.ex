@@ -7,38 +7,13 @@ defmodule Compos.Ui.HomepageLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    brand =
-      case socket.assigns.live_action do
-        :compos ->
-          %{
-            key: :compos,
-            name: "Compos",
-            wordmark: "compos",
-            eyebrow: "COMPOS / QUIET COMPUTING ENVIRONMENT",
-            email: "hello@compos.in",
-            tagline: "The Hackable Harness for Power Users"
-          }
-
-        :emma ->
-          %{
-            key: :emma,
-            name: "Emma",
-            wordmark: "λemma",
-            eyebrow: "Emma — the thinking person’s browser",
-            email: "hello@emma.space",
-            tagline: "The OS for knowledge work"
-          }
-
-        _operad ->
-          %{
-            key: :operad,
-            name: "Operad",
-            wordmark: "operad",
-            eyebrow: "Operad — the thinking person’s browser",
-            email: "hello@operad.work",
-            tagline: "The OS for knowledge work"
-          }
-      end
+    brand = %{
+      name: "Compos",
+      wordmark: "compos",
+      eyebrow: "COMPOS / QUIET COMPUTING ENVIRONMENT",
+      email: "hello@compos.in",
+      tagline: "The Hackable Harness for Power Users"
+    }
 
     {:ok,
      assign(socket,
@@ -61,15 +36,15 @@ defmodule Compos.Ui.HomepageLive do
 
   def composml(assigns) do
     ~M"""
-    <main class={["operad-site", @brand.key == :compos && "compos-site", "palette-#{@palette}"]}>
+    <main class={["home-site", "compos-site", "palette-#{@palette}"]}>
       <style>
-        body:has(.operad-site) {
+        body:has(.home-site) {
           overflow: auto;
           background: #06070a;
           color: #ece9df;
         }
 
-        .operad-site {
+        .home-site {
           --void: #06070a;
           --ink: #0b0c12;
           --panel: #11121a;
@@ -95,10 +70,10 @@ defmodule Compos.Ui.HomepageLive do
           font: 400 16px/1.55 var(--font-sans);
         }
 
-        .operad-site a { color: inherit; text-decoration: none; }
-        .operad-shell { width: min(1480px, calc(100% - 48px)); margin: 0 auto; }
+        .home-site a { color: inherit; text-decoration: none; }
+        .home-shell { width: min(1480px, calc(100% - 48px)); margin: 0 auto; }
 
-        .operad-nav {
+        .home-nav {
           position: relative;
           z-index: 10;
           display: flex;
@@ -108,21 +83,20 @@ defmodule Compos.Ui.HomepageLive do
           border-bottom: 1px solid var(--hairline);
         }
 
-        .operad-brand { display: flex; align-items: center; gap: 12px; }
-        .operad-brand img { width: 38px; height: 38px; border-radius: 11px; }
-        .operad-brand .emma-logo-image { width: 116px; height: auto; border-radius: 0; }
-        .operad-brand .compos-logo-image { width: 42px; height: 42px; border-radius: 50%; }
-        .operad-brand c-text { font-size: 20px; font-weight: 500; letter-spacing: -0.04em; }
-        .operad-brand .compos-wordmark {
+        .home-brand { display: flex; align-items: center; gap: 12px; }
+        .home-brand img { width: 38px; height: 38px; border-radius: 11px; }
+        .home-brand .compos-logo-image { width: 42px; height: 42px; border-radius: 50%; }
+        .home-brand c-text { font-size: 20px; font-weight: 500; letter-spacing: -0.04em; }
+        .home-brand .compos-wordmark {
           color: #d8d5df;
           font: 500 17px/1 var(--font-mono);
           letter-spacing: -0.045em;
         }
-        .operad-nav-links { display: flex; align-items: center; gap: 30px; color: #aaa9b4; font-size: 14px; }
-        .operad-nav-links a { transition: color 160ms ease; }
-        .operad-nav-links a:hover { color: var(--paper); }
+        .home-nav-links { display: flex; align-items: center; gap: 30px; color: #aaa9b4; font-size: 14px; }
+        .home-nav-links a { transition: color 160ms ease; }
+        .home-nav-links a:hover { color: var(--paper); }
 
-        .operad-button {
+        .home-button {
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -136,12 +110,11 @@ defmodule Compos.Ui.HomepageLive do
           transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
         }
 
-        .operad-button:hover { transform: translateY(-2px); border-color: rgba(236, 233, 223, 0.5); }
-        .operad-button.primary { border-color: var(--paper); background: var(--paper); color: #101116; }
-        .operad-button.primary:hover { background: white; }
-        .operad-button.small { min-height: 38px; padding-inline: 17px; }
+        .home-button:hover { transform: translateY(-2px); border-color: rgba(236, 233, 223, 0.5); }
+        .home-button.primary { border-color: var(--paper); background: var(--paper); color: #101116; }
+        .home-button.primary:hover { background: white; }
 
-        .operad-hero {
+        .home-hero {
           position: relative;
           display: grid;
           grid-template-columns: minmax(390px, 0.78fr) minmax(580px, 1.22fr);
@@ -150,8 +123,8 @@ defmodule Compos.Ui.HomepageLive do
           padding: 92px 0 108px;
         }
 
-        .operad-hero-copy { position: relative; z-index: 2; }
-        .operad-eyebrow {
+        .home-hero-copy { position: relative; z-index: 2; }
+        .home-eyebrow {
           display: inline-flex;
           align-items: center;
           gap: 10px;
@@ -163,7 +136,7 @@ defmodule Compos.Ui.HomepageLive do
           text-transform: uppercase;
         }
 
-        .operad-eyebrow::before {
+        .home-eyebrow::before {
           width: 7px;
           height: 7px;
           border-radius: 50%;
@@ -172,13 +145,13 @@ defmodule Compos.Ui.HomepageLive do
           content: "";
         }
 
-        .operad-hero h1 {
+        .home-hero h1 {
           max-width: 670px;
           font: 450 clamp(58px, 6.6vw, 100px)/0.96 var(--font-sans);
           letter-spacing: -0.075em;
         }
 
-        .operad-hero h1 c-text {
+        .home-hero h1 c-text {
           display: block;
           background: linear-gradient(100deg, #f5f2e9 12%, #9e99b8 92%);
           -webkit-background-clip: text;
@@ -186,9 +159,16 @@ defmodule Compos.Ui.HomepageLive do
           color: transparent;
         }
 
-        .compos-site .operad-hero h1 .compos-aspect { display: inline; }
+        .compos-site .home-hero h1 .compos-aspect { display: inline; }
 
-        .operad-hero-lede {
+        .home-hero-subline {
+          margin-top: 22px;
+          color: #cac7d1;
+          font: 500 clamp(18px, 2vw, 22px)/1.4 var(--font-mono);
+          letter-spacing: -0.02em;
+        }
+
+        .home-hero-lede {
           max-width: 610px;
           margin: 32px 0 34px;
           color: #aaa9b4;
@@ -196,12 +176,12 @@ defmodule Compos.Ui.HomepageLive do
           line-height: 1.55;
           letter-spacing: -0.018em;
         }
-        .operad-hero-lede strong { color: #eeebe3; font-weight: 500; }
+        .home-hero-lede strong { color: #eeebe3; font-weight: 500; }
 
-        .operad-actions { display: flex; flex-wrap: wrap; gap: 12px; }
-        .operad-hero-note { max-width: 520px; margin-top: 38px; color: #676672; font: 500 11px/1.8 var(--font-mono); }
-        .operad-hero-art { position: relative; min-height: 620px; }
-        .operad-orbit {
+        .home-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+        .home-hero-note { max-width: 520px; margin-top: 38px; color: #676672; font: 500 11px/1.8 var(--font-mono); }
+        .home-hero-art { position: relative; min-height: 620px; }
+        .home-orbit {
           position: absolute;
           top: 50%;
           left: 50%;
@@ -213,17 +193,17 @@ defmodule Compos.Ui.HomepageLive do
           box-shadow: 0 0 110px rgba(85, 61, 210, 0.16);
         }
 
-        .operad-orbit::before,
-        .operad-orbit::after {
+        .home-orbit::before,
+        .home-orbit::after {
           position: absolute;
           border: 1px solid rgba(236, 233, 223, 0.08);
           border-radius: 50%;
           content: "";
         }
 
-        .operad-orbit::before { inset: 9%; }
-        .operad-orbit::after { inset: 22%; border-style: dashed; }
-        .operad-fractal {
+        .home-orbit::before { inset: 9%; }
+        .home-orbit::after { inset: 22%; border-style: dashed; }
+        .home-fractal {
           position: absolute;
           z-index: 1;
           top: 50%;
@@ -232,10 +212,10 @@ defmodule Compos.Ui.HomepageLive do
           transform: translate(-43%, -50%);
           mix-blend-mode: screen;
           filter: saturate(0.86) contrast(1.08);
-          animation: operad-breathe 10s ease-in-out infinite;
+          animation: home-breathe 10s ease-in-out infinite;
         }
 
-        .compos-site .operad-fractal {
+        .compos-site .home-fractal {
           width: min(680px, 55vw);
           transform: translate(-43%, -50%);
           mix-blend-mode: normal;
@@ -311,8 +291,8 @@ defmodule Compos.Ui.HomepageLive do
           50% { transform: scale(1.04) rotate(2deg); opacity: 1; }
         }
 
-        .compos-site .operad-orbit { opacity: 0.34; }
-        .compos-site .operad-eyebrow::before { border-radius: 0; transform: rotate(45deg); }
+        .compos-site .home-orbit { opacity: 0.34; }
+        .compos-site .home-eyebrow::before { border-radius: 0; transform: rotate(45deg); }
 
         .compos-site.palette-phosphor {
           --violet: #76d39b;
@@ -437,12 +417,12 @@ defmodule Compos.Ui.HomepageLive do
         .palette-swatch:hover,
         .palette-swatch.active { border-color: color-mix(in srgb, var(--swatch), transparent 40%); }
 
-        @keyframes operad-breathe {
+        @keyframes home-breathe {
           0%, 100% { transform: translate(-43%, -50%) scale(0.985); opacity: 0.9; }
           50% { transform: translate(-43%, -50%) scale(1.015); opacity: 1; }
         }
 
-        .operad-proof {
+        .home-proof {
           position: relative;
           z-index: 3;
           margin-top: 0;
@@ -545,156 +525,36 @@ defmodule Compos.Ui.HomepageLive do
         }
         .work-surface.real-product { border-radius: 0; background: #12131a; }
         .product-screenshot { display: block; width: 100%; height: auto; }
-        .capability-band {
-          display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          border-top: 1px solid var(--hairline);
-          border-bottom: 1px solid var(--hairline);
-        }
-        .capability-cell { min-height: 260px; padding: 48px 34px; border-left: 1px solid var(--hairline); }
-        .capability-cell:first-child { border-left: 0; }
-        .capability-cell h2 { margin-bottom: 22px; font-size: clamp(28px, 2.8vw, 43px); font-weight: 450; letter-spacing: -0.05em; }
-        .capability-cell p { color: #868590; font-size: 14px; line-height: 1.7; }
 
-        .surface-topbar {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          height: 48px;
-          padding: 0 18px;
-          border-bottom: 1px solid var(--hairline);
-          color: #888794;
-          font-size: 12px;
-        }
 
-        .surface-dot { width: 8px; height: 8px; border-radius: 50%; background: #34343f; }
-        .surface-title { margin-left: 12px; color: #aaa9b4; }
-        .surface-state { margin-left: auto; color: #8f8e9a; }
-        .surface-state i {
-          display: inline-block;
-          width: 6px;
-          height: 6px;
-          margin-right: 7px;
-          border-radius: 50%;
-          background: #62d7ad;
-        }
 
-        .operad-editor {
-          min-height: 610px;
-          overflow: hidden;
-          background: #101117;
-          color: #c9c7d1;
-          font: 500 12px/1.62 var(--font-mono);
-        }
-        .editor-windows { display: grid; grid-template-columns: 62% 38%; min-height: 568px; }
-        .editor-window { position: relative; display: flex; min-width: 0; flex-direction: column; }
-        .editor-window + .editor-window { border-left: 1px solid #393844; }
-        .buffer-body { flex: 1; min-height: 0; padding: 30px 26px 24px 54px; background: #111219; }
-        .buffer-body.primary { background: #f0ede4; color: #343239; }
-        .buffer-row { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 14px; min-height: 20px; }
-        .line-number { color: #aaa69c; user-select: none; text-align: right; }
-        .buffer-body:not(.primary) .line-number { color: #4f4e5b; }
-        .org-meta { color: #8c829d; }
-        .org-heading { color: #27242d; font-weight: 650; }
-        .org-todo { color: #7762ca; font-weight: 650; }
-        .org-link { color: #417d92; text-decoration: underline; text-underline-offset: 3px; }
-        .buffer-selection { margin: 3px -8px; padding: 5px 8px; background: #dcd6ee; }
-        .cursor-block { display: inline-block; width: 8px; height: 16px; margin-left: 1px; background: #6f59c5; vertical-align: -3px; animation: cursor-blink 1.1s step-end infinite; }
         @keyframes cursor-blink { 50% { opacity: 0; } }
 
-        .context-heading { margin: 0 0 19px; color: #8f83e9; font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase; }
-        .context-query { margin-bottom: 22px; color: #e6e3ec; font-size: 15px; line-height: 1.45; }
-        .context-source { display: grid; grid-template-columns: 18px 1fr; gap: 9px; padding: 8px 0; border-top: 1px solid #252630; }
-        .context-source i { color: #6a5bc1; font-style: normal; }
-        .context-source strong { display: block; color: #b9b6c1; font-size: 11px; font-weight: 500; }
-        .context-source small { color: #656471; font-size: 9px; }
-        .context-trace { margin-top: 23px; padding-left: 13px; border-left: 2px solid #66cbe9; color: #858491; }
-        .context-trace b { display: block; margin-bottom: 5px; color: #78d0e8; font-weight: 500; }
-        .context-trace em { color: #c9c6d1; font-style: normal; }
 
-        .mode-line { display: flex; align-items: center; gap: 10px; min-height: 27px; padding: 0 10px; background: #d8d4e2; color: #45414d; font-size: 9px; white-space: nowrap; }
-        .mode-line.dark { background: #2a2934; color: #aaa7b3; }
-        .mode-line .modified { color: #745cc9; }
-        .mode-line .position { margin-left: auto; }
-        .minibuffer { display: flex; align-items: center; min-height: 42px; padding: 0 15px; border-top: 1px solid #393844; background: #0c0d12; color: #b9b6c1; }
-        .minibuffer .prompt { margin-right: 10px; color: #8f83e9; }
-        .minibuffer .command { color: #e5e2ea; }
-        .minibuffer .hint { margin-left: auto; color: #595864; font-size: 9px; }
 
-        .operad-section { position: relative; padding: 132px 0; border-top: 1px solid var(--hairline); }
-        .section-intro { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: 90px; align-items: start; }
-        .section-number { color: #666572; font: 500 11px/1 var(--font-mono); letter-spacing: 0.12em; }
-        .section-intro h2 { max-width: 760px; font-size: clamp(40px, 5vw, 68px); font-weight: 450; line-height: 1.02; letter-spacing: -0.06em; }
-        .section-intro p { max-width: 660px; margin-top: 26px; color: #9695a1; font-size: 18px; }
 
-        .scattered-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 72px; }
-        .scattered-card { min-height: 210px; padding: 23px; border: 1px solid var(--hairline); border-radius: 18px; background: rgba(255, 255, 255, 0.018); }
-        .scattered-card .card-icon { display: grid; width: 38px; height: 38px; margin-bottom: 48px; place-items: center; border: 1px solid var(--hairline); border-radius: 11px; color: #aaa8b6; }
-        .scattered-card strong { display: block; margin-bottom: 8px; font-size: 15px; font-weight: 500; }
-        .scattered-card p { color: #777683; font-size: 13px; }
 
-        .workspace-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; margin-top: 72px; }
-        .workspace-card { position: relative; overflow: hidden; min-height: 360px; padding: 34px; border: 1px solid var(--hairline); border-radius: 22px; background: #0e0f15; }
-        .workspace-card.wide { grid-row: span 2; min-height: 734px; }
-        .workspace-card h3 { margin-bottom: 12px; font-size: 24px; font-weight: 500; letter-spacing: -0.04em; }
-        .workspace-card > p { max-width: 460px; color: #858491; font-size: 14px; }
 
-        .source-stack { position: absolute; inset: auto 34px 34px; display: grid; gap: 10px; }
-        .source-row { display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--hairline); border-radius: 12px; background: #13141c; }
-        .source-type { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 9px; background: rgba(151, 132, 255, 0.11); color: #b6aaff; font-size: 11px; }
-        .source-row strong { display: block; color: #cac7d1; font-size: 12px; font-weight: 500; }
-        .source-row c-text { color: #6f6e7a; font-size: 10px; }
-        .source-row em { color: #61cda9; font-size: 10px; font-style: normal; }
 
-        .decision-list { margin-top: 32px; }
-        .decision-item { display: flex; gap: 13px; padding: 14px 0; border-bottom: 1px solid var(--hairline); color: #aaa9b4; font-size: 13px; }
-        .decision-item b { color: var(--violet); font-weight: 500; }
-        .task-preview { position: absolute; right: -20px; bottom: -18px; width: 76%; padding: 22px; border: 1px solid rgba(113, 220, 255, 0.16); border-radius: 18px 0 0 0; background: #12141c; transform: rotate(-2deg); }
-        .task-preview small { color: #6b6b78; text-transform: uppercase; letter-spacing: 0.12em; }
-        .task-preview strong { display: block; margin: 13px 0 18px; color: #d8d5df; font-size: 15px; }
-        .task-line { height: 7px; margin-top: 10px; border-radius: 99px; background: #22232e; }
-        .task-line.short { width: 64%; background: rgba(151, 132, 255, 0.26); }
 
-        .control-band { display: grid; grid-template-columns: 1fr 1fr; gap: 70px; align-items: center; }
-        .control-copy h2 { font-size: clamp(42px, 5vw, 68px); font-weight: 450; line-height: 1.02; letter-spacing: -0.06em; }
-        .control-copy p { max-width: 540px; margin-top: 24px; color: #93929f; font-size: 18px; }
-        .control-panel { padding: 26px; border: 1px solid rgba(151, 132, 255, 0.24); border-radius: 20px; background: radial-gradient(circle at 80% 10%, rgba(151, 132, 255, 0.1), transparent 45%), #101117; }
-        .control-panel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; color: #777683; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
-        .control-panel header i { width: 8px; height: 8px; border-radius: 50%; background: #f0b860; box-shadow: 0 0 12px rgba(240, 184, 96, 0.5); }
-        .control-request { padding: 19px; border: 1px solid var(--hairline); border-radius: 14px; background: rgba(0, 0, 0, 0.22); }
-        .control-request strong { display: block; margin-bottom: 8px; color: #dbd8e1; font-size: 15px; }
-        .control-request p { color: #81808c; font-size: 13px; }
-        .control-files { display: flex; gap: 8px; margin: 18px 0; }
-        .control-files c-text { padding: 6px 9px; border-radius: 7px; background: rgba(255, 255, 255, 0.04); color: #898894; font: 500 10px/1 var(--font-mono); }
-        .control-actions { display: flex; justify-content: flex-end; gap: 9px; }
-        .control-principles { border-top: 1px solid var(--hairline); }
-        .principle-row { display: grid; grid-template-columns: 28px 1fr; gap: 18px; padding: 24px 0; border-bottom: 1px solid var(--hairline); }
-        .principle-row b { color: #8f83e9; font: 500 11px/1.5 var(--font-mono); }
-        .principle-row strong { display: block; margin-bottom: 5px; color: #d8d5df; font-size: 16px; font-weight: 500; }
-        .principle-row c-text { color: #74737f; font-size: 13px; }
 
-        .operad-final { padding: 150px 0 90px; text-align: center; }
-        .operad-final img { width: 126px; height: 126px; margin-bottom: 28px; border-radius: 30px; }
-        .operad-final .emma-final-logo { width: min(680px, 90vw); height: auto; border-radius: 0; }
-        .operad-final h2 { font-size: clamp(48px, 6vw, 78px); font-weight: 450; letter-spacing: -0.065em; }
-        .operad-final p { max-width: 580px; margin: 20px auto 32px; color: #8f8e9a; font-size: 18px; }
-        .operad-final .operad-actions { justify-content: center; }
+        .home-final { padding: 150px 0 90px; text-align: center; }
+        .home-final img { width: 126px; height: 126px; margin-bottom: 28px; border-radius: 30px; }
+        .home-final h2 { font-size: clamp(48px, 6vw, 78px); font-weight: 450; letter-spacing: -0.065em; }
+        .home-final p { max-width: 580px; margin: 20px auto 32px; color: #8f8e9a; font-size: 18px; }
+        .home-final .home-actions { justify-content: center; }
 
-        .operad-footer { display: flex; align-items: center; justify-content: space-between; padding: 30px 0 44px; border-top: 1px solid var(--hairline); color: #676672; font-size: 12px; }
-        .operad-footer strong { color: #aaa9b4; font-weight: 500; }
+        .home-footer { display: flex; align-items: center; justify-content: space-between; padding: 30px 0 44px; border-top: 1px solid var(--hairline); color: #676672; font-size: 12px; }
+        .home-footer strong { color: #aaa9b4; font-weight: 500; }
 
         @media (max-width: 900px) {
-          .operad-nav-links a:not(.operad-button) { display: none; }
-          .operad-hero { grid-template-columns: 1fr; padding-top: 68px; text-align: center; }
-          .operad-hero-copy { display: flex; flex-direction: column; align-items: center; }
-          .operad-hero-art { min-height: 410px; }
-          .operad-fractal, .operad-orbit { width: min(540px, 92vw); transform: translate(-50%, -50%); }
-          .operad-fractal { animation: none; }
-          .operad-proof { margin-top: 0; }
-          .operad-editor { min-height: 560px; }
-          .editor-windows { min-height: 518px; grid-template-columns: 58% 42%; }
-          .buffer-body { padding-left: 38px; }
-          .section-intro, .control-band { grid-template-columns: 1fr; gap: 28px; }
+          .home-nav-links a:not(.home-button) { display: none; }
+          .home-hero { grid-template-columns: 1fr; padding-top: 68px; text-align: center; }
+          .home-hero-copy { display: flex; flex-direction: column; align-items: center; }
+          .home-hero-art { min-height: 410px; }
+          .home-fractal, .home-orbit { width: min(540px, 92vw); transform: translate(-50%, -50%); }
+          .home-fractal { animation: none; }
+          .home-proof { margin-top: 0; }
           .compos-essay-head,
           .essay-section { grid-template-columns: 1fr; gap: 30px; }
           .system-grid { grid-template-columns: repeat(2, 1fr); }
@@ -702,50 +562,26 @@ defmodule Compos.Ui.HomepageLive do
           .system-object:nth-child(2n + 1) { border-left: 0; }
           .system-object:nth-child(-n + 3) { border-top: 1px solid var(--hairline); }
           .system-object:nth-child(-n + 2) { border-top: 0; }
-          .scattered-grid { grid-template-columns: repeat(2, 1fr); }
-          .workspace-grid { grid-template-columns: 1fr; }
-          .workspace-card.wide { min-height: 620px; }
-          .capability-band { grid-template-columns: repeat(2, 1fr); }
-          .capability-cell:nth-child(odd) { border-left: 0; }
         }
 
         @media (max-width: 620px) {
-          .operad-shell { width: min(100% - 28px, 1180px); }
-          .operad-nav { height: 66px; }
-          .operad-nav .operad-button { display: none; }
-          .operad-hero { min-height: auto; padding-top: 62px; }
-          .operad-hero h1 { font-size: 56px; }
-          .operad-hero-art { min-height: 330px; }
-          .operad-proof { padding-bottom: 90px; }
-          .operad-editor { min-height: 720px; font-size: 10px; }
-          .editor-windows { display: block; min-height: auto; }
-          .editor-window { min-height: 320px; }
-          .editor-window + .editor-window { border-top: 1px solid #393844; border-left: 0; }
-          .buffer-body { min-height: 293px; padding: 22px 15px 18px 36px; }
-          .context-source:nth-of-type(n+5) { display: none; }
-          .minibuffer .hint { display: none; }
-          .operad-section { padding: 92px 0; }
-          .section-intro h2, .control-copy h2 { font-size: 42px; }
-          .scattered-grid { grid-template-columns: 1fr; }
+          .home-shell { width: min(100% - 28px, 1180px); }
+          .home-nav { height: 66px; }
+          .home-nav .home-button { display: none; }
+          .home-hero { min-height: auto; padding-top: 62px; }
+          .home-hero h1 { font-size: 56px; }
+          .home-hero-art { min-height: 330px; }
+          .home-proof { padding-bottom: 90px; }
           .system-grid { grid-template-columns: 1fr; }
           .system-object,
           .system-object:nth-child(3n + 1),
           .system-object:nth-child(2n + 1) { border-left: 0; border-top: 1px solid var(--hairline); }
           .system-object:first-child { border-top: 0; }
-          .scattered-card { min-height: 170px; }
-          .scattered-card .card-icon { margin-bottom: 32px; }
-          .workspace-card { min-height: 330px; padding: 26px; }
-          .workspace-card.wide { min-height: 590px; }
-          .source-stack { inset: auto 20px 20px; }
-          .control-band { gap: 44px; }
-          .operad-footer { align-items: flex-start; gap: 20px; }
-          .capability-band { grid-template-columns: 1fr; }
-          .capability-cell { min-height: 190px; border-left: 0; border-top: 1px solid var(--hairline); }
-          .capability-cell:first-child { border-top: 0; }
+          .home-footer { align-items: flex-start; gap: 20px; }
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .operad-site *, .operad-site *::before, .operad-site *::after {
+          .home-site *, .home-site *::before, .home-site *::after {
             scroll-behavior: auto !important;
             animation-duration: 0.01ms !important;
             animation-iteration-count: 1 !important;
@@ -753,26 +589,18 @@ defmodule Compos.Ui.HomepageLive do
         }
       </style>
 
-      <c-group class="operad-shell">
-        <nav class="operad-nav" aria-label="Primary navigation">
-          <a class="operad-brand" href="#top" aria-label={"#{@brand.name} home"}>
-            <img :if={@brand.key == :operad} src="/images/operad-fractal-512.png" alt="" />
-            <c-text :if={@brand.key == :operad}>operad</c-text>
+      <c-group class="home-shell">
+        <nav class="home-nav" aria-label="Primary navigation">
+          <a class="home-brand" href="#top" aria-label={"#{@brand.name} home"}>
             <img
-              :if={@brand.key == :emma}
-              class="emma-logo-image"
-              src="/images/emma-logo-v1.png"
-              alt="λemma"
-            />
-            <img
-              :if={@brand.key == :compos}
+             
               class="compos-logo-image"
               src="/images/compos-emblem-v1.png"
               alt=""
             />
-            <c-text :if={@brand.key == :compos} class="compos-wordmark">compos</c-text>
+            <c-text class="compos-wordmark">compos</c-text>
           </a>
-          <c-group class="operad-nav-links">
+          <c-group class="home-nav-links">
             <a href="#read">Read</a>
             <a href="#write">Write</a>
             <a href="#communicate">Communicate</a>
@@ -781,55 +609,37 @@ defmodule Compos.Ui.HomepageLive do
           </c-group>
         </nav>
 
-        <section class="operad-hero" id="top">
-          <c-group class="operad-hero-copy">
-            <c-group class="operad-eyebrow">{@brand.eyebrow}</c-group>
-            <h1 :if={@brand.key != :compos}>The OS for <c-text>knowledge work.</c-text></h1>
-            <h1 :if={@brand.key == :compos}>
-              The <c-text class="compos-aspect">Composable</c-text> OS for knowledge work.
+        <section class="home-hero" id="top">
+          <c-group class="home-hero-copy">
+            <c-group class="home-eyebrow">{@brand.eyebrow}</c-group>
+            <h1>
+              The <c-text class="compos-aspect">Hackable</c-text> Harness for Power Users.
             </h1>
-            <p :if={@brand.key != :compos} class="operad-hero-lede">
-              Bring your documents, conversations, research, tools, and AI into one connected workspace.
-              Everything stays within arm’s reach.
-            </p>
-            <p :if={@brand.key == :compos} class="operad-hero-lede">
+            <p class="home-hero-subline">It's like Emacs, but it's on the BEAM.</p>
+            <p class="home-hero-lede">
               The internet turned work into an interrupt stream. In Compos,
               <strong>the working context is explicit, inspectable, and composed by you.</strong>
               It is a quiet place for thinking, writing, coding, and sustained work.
             </p>
-            <c-group :if={@brand.key != :compos} class="operad-actions">
-              <a class="operad-button primary" href="#access">Get early access</a>
-              <a class="operad-button" href="#workspace">See how it works ↓</a>
+            <c-group class="home-actions">
+              <a class="home-button primary" href="#model">Read the system model ↓</a>
+              <a class="home-button" href="#workspace">Inspect the workspace ↓</a>
             </c-group>
-            <c-group :if={@brand.key == :compos} class="operad-actions">
-              <a class="operad-button primary" href="#model">Read the system model ↓</a>
-              <a class="operad-button" href="#workspace">Inspect the workspace ↓</a>
-            </c-group>
-            <p :if={@brand.key != :compos} class="operad-hero-note">
-              Not a chat window. {@brand.name} holds the live material of every app you work in.
-            </p>
-            <p :if={@brand.key == :compos} class="operad-hero-note">
+            <p class="home-hero-note">
               NO FEED · NO NOTIFICATIONS · EXPLICIT CONTEXT · INTERRUPTIBLE MACHINES
             </p>
           </c-group>
-          <c-group class="operad-hero-art">
-            <c-group class="operad-orbit"></c-group>
+          <c-group class="home-hero-art">
+            <c-group class="home-orbit"></c-group>
             <img
-              :if={@brand.key != :compos}
-              class="operad-fractal"
-              src="/images/operad-fractal-master.png"
-              alt=""
-              aria-hidden="true"
-            />
-            <img
-              :if={@brand.key == :compos}
-              class="operad-fractal"
+             
+              class="home-fractal"
               src="/images/compos-study-symbolic-composition-v1.png"
               alt="Lambda, branching application, and nested scope compose into a shared center"
             />
             <svg
               :if={false}
-              class="operad-fractal compos-symbolic-svg"
+              class="home-fractal compos-symbolic-svg"
               viewBox="0 0 800 800"
               role="img"
               aria-label={if @motif == "lambda", do: "Independent fields compose into lambda", else: "Lambda and nested scope compose into an abstract swan"}
@@ -1039,7 +849,7 @@ defmodule Compos.Ui.HomepageLive do
           </c-group>
         </section>
 
-        <section :if={@brand.key == :compos} class="system-index" id="model" aria-label="Compos system model">
+        <section class="system-index" id="model" aria-label="Compos system model">
           <header>
             <strong>System model</strong>
             <c-text>compos://workspace · six primary objects</c-text>
@@ -1083,19 +893,19 @@ defmodule Compos.Ui.HomepageLive do
           </footer>
         </section>
 
-        <section class="operad-proof" aria-label={"#{@brand.name} product preview"}>
+        <section class="home-proof" aria-label={"#{@brand.name} product preview"}>
           <c-group class="work-surface real-product">
             <img
               class="product-screenshot"
-              src="/images/operad-sentry-workspace.png"
+              src="/images/compos-sentry-workspace.png"
               alt={"#{@brand.name} showing a Sentry issue list with its actions, stack trace, and details beside the work"}
             />
           </c-group>
         </section>
       </c-group>
 
-      <section :if={@brand.key == :compos} class="compos-essay" id="workspace">
-        <c-group class="operad-shell">
+      <section class="compos-essay" id="workspace">
+        <c-group class="home-shell">
           <header class="compos-essay-head">
             <c-text>Design notes / context and attention</c-text>
             <h2>Composing context is a first-class problem for knowledge workers.</h2>
@@ -1164,186 +974,28 @@ defmodule Compos.Ui.HomepageLive do
         </c-group>
       </section>
 
-      <section :if={@brand.key != :compos} class="capability-band" aria-label={"#{@brand.name} capabilities"}>
-        <article class="capability-cell" id="read">
-          <h2>Read.</h2>
-          <p :if={@brand.key != :compos}>Newsletters, papers, threads, and reports become text you can mark up.</p>
-          <p :if={@brand.key == :compos}>Parse remote material into local text. Preserve source identity, location, and annotations.</p>
-        </article>
-        <article class="capability-cell" id="write">
-          <h2>Write.</h2>
-          <p :if={@brand.key != :compos}>Compose across live sources. Keep citations attached to every sentence.</p>
-          <p :if={@brand.key == :compos}>Edit the live object. Keep source links and provenance attached to the resulting text.</p>
-        </article>
-        <article class="capability-cell" id="communicate">
-          <h2>Communicate.</h2>
-          <p :if={@brand.key != :compos}>Reply, assign, and record the decision where the evidence already lives.</p>
-          <p :if={@brand.key == :compos}>Address people and systems from the active context. Record the resulting state transition.</p>
-        </article>
-        <article class="capability-cell" id="monitor">
-          <h2>Monitor.</h2>
-          <p :if={@brand.key != :compos}>Keep errors, deploys, projects, and queues beside the work they affect.</p>
-          <p :if={@brand.key == :compos}>Project event streams into live buffers. Filter, mark, and act without leaving the workspace.</p>
-        </article>
-        <article class="capability-cell" id="fix">
-          <h2>Fix.</h2>
-          <p :if={@brand.key != :compos}>Hand an issue to an agent. Inspect the change, then approve or undo it.</p>
-          <p :if={@brand.key == :compos}>Run a command or delegate an operation. Inspect its diff, provenance, and undo boundary.</p>
-        </article>
-      </section>
 
-      <section :if={@brand.key != :compos} class="operad-section" id="why">
-        <c-group class="operad-shell">
-          <c-group class="section-intro">
-            <c-text class="section-number">01 — THE PROBLEM</c-text>
-            <c-group>
-              <h2 :if={@brand.key != :compos}>Your work is scattered beyond reach.</h2>
-              <h2 :if={@brand.key == :compos}>The network is noisy. Your workspace does not have to be.</h2>
-              <p :if={@brand.key != :compos}>
-                Knowledge work now spans too many tabs, tools, and agents. {@brand.name} gathers it into
-                one navigable information space without hiding what happens.
-              </p>
-              <p :if={@brand.key == :compos}>
-                Feeds, tabs, messages, and agents compete to decide what deserves attention. Compos admits
-                only the context you choose. Nothing arrives merely because it can.
-              </p>
-            </c-group>
-          </c-group>
-          <c-group class="scattered-grid">
-            <c-group class="scattered-card">
-              <c-group class="card-icon">↗</c-group><strong>Every source</strong>
-              <p>Open the evidence behind the current work with one command.</p>
-            </c-group>
-            <c-group class="scattered-card">
-              <c-group class="card-icon">◎</c-group><strong>Every tool</strong>
-              <p>Bring the systems you use into the same live workspace.</p>
-            </c-group>
-            <c-group class="scattered-card">
-              <c-group class="card-icon">Δ</c-group><strong>Every agent</strong>
-              <p>Machine intelligence shares the material already in front of you.</p>
-            </c-group>
-            <c-group class="scattered-card">
-              <c-group class="card-icon">⌘</c-group><strong>Every action</strong>
-              <p>Inspect, run, or reverse the next step without leaving the work.</p>
-            </c-group>
-          </c-group>
-        </c-group>
-      </section>
 
-      <section :if={@brand.key != :compos} class="operad-section" id="workspace">
-        <c-group class="operad-shell">
-          <c-group class="section-intro">
-            <c-text class="section-number">02 — THE WORKSPACE</c-text>
-            <c-group>
-              <h2 :if={@brand.key != :compos}>The right thing appears beside the work.</h2>
-              <h2 :if={@brand.key == :compos}>A place to think, write, code, and finish.</h2>
-              <p :if={@brand.key != :compos}>
-                Open a source, inspect a detail, ask an agent, or run an action without changing context.
-              </p>
-              <p :if={@brand.key == :compos}>
-                The internet becomes material instead of weather. Read a source, shape an argument, inspect
-                a system, or write a program without surrendering the workspace to incoming noise.
-              </p>
-            </c-group>
-          </c-group>
-          <c-group class="workspace-grid">
-            <c-group class="workspace-card wide">
-              <h3>Every source becomes a place you can enter.</h3>
-              <p>Browse the material behind an answer. Move between evidence and work without leaving the workspace.</p>
-              <c-group class="source-stack">
-                <c-group class="source-row">
-                  <c-group class="source-type">PDF</c-group><c-group><strong>Regional outlook 2026</strong><c-text>Market research · page 42</c-text></c-group><em>Relevant</em>
-                </c-group>
-                <c-group class="source-row">
-                  <c-group class="source-type">MTG</c-group><c-group><strong>Customer interview: Acme</strong><c-text>Conversation · 28 minutes</c-text></c-group><em>Quoted</em>
-                </c-group>
-                <c-group class="source-row">
-                  <c-group class="source-type">DOC</c-group><c-group><strong>Expansion assumptions</strong><c-text>Working draft · revised yesterday</c-text></c-group><em>Current</em>
-                </c-group>
-                <c-group class="source-row">
-                  <c-group class="source-type">WEB</c-group><c-group><strong>Local pricing benchmarks</strong><c-text>Research · 6 sources</c-text></c-group><em>Verified</em>
-                </c-group>
-              </c-group>
-            </c-group>
-            <c-group class="workspace-card">
-              <h3>The machine leaves a trail.</h3>
-              <p>See what it read, what it changed, and which decisions shaped the result.</p>
-              <c-group class="decision-list">
-                <c-group class="decision-item"><b>01</b><c-text>Start with one regional market.</c-text></c-group>
-                <c-group class="decision-item"><b>02</b><c-text>Test pricing before hiring.</c-text></c-group>
-                <c-group class="decision-item"><b>03</b><c-text>Review the plan in September.</c-text></c-group>
-              </c-group>
-            </c-group>
-            <c-group class="workspace-card">
-              <h3>Thought becomes work in place.</h3>
-              <p>Research becomes a brief, plan, or finished draft inside the same information space.</p>
-              <c-group class="task-preview">
-                <small>Next action</small>
-                <strong>Prepare the launch recommendation</strong>
-                <c-group class="task-line"></c-group><c-group class="task-line short"></c-group>
-              </c-group>
-            </c-group>
-          </c-group>
-        </c-group>
-      </section>
 
-      <section :if={@brand.key != :compos} class="operad-section">
-        <c-group class="operad-shell control-band">
-          <c-group class="control-copy">
-            <c-text class="section-number">03 — YOUR CONTROL</c-text>
-            <h2 :if={@brand.key != :compos} style="margin-top: 25px">Reach for a command, not another app.</h2>
-            <h2 :if={@brand.key == :compos} style="margin-top: 25px">Quiet is a system property.</h2>
-            <p :if={@brand.key != :compos}>
-              {@brand.name} brings the next source, tool, or action to your current position. Your work
-              stays visible while the workspace changes around it.
-            </p>
-            <p :if={@brand.key == :compos}>
-              Compos does not compete for attention. It waits. Agents work in view and can be paused.
-              Context enters by command, not by feed. The workspace keeps your place.
-            </p>
-          </c-group>
-          <c-group class="control-principles">
-            <c-group class="principle-row">
-              <b>01</b><c-group><strong>It reads in the open.</strong><c-text>Every source stays one command away.</c-text></c-group>
-            </c-group>
-            <c-group class="principle-row">
-              <b>02</b><c-group><strong>It writes in place.</strong><c-text>Changes appear where the work already lives.</c-text></c-group>
-            </c-group>
-            <c-group class="principle-row">
-              <b>03</b><c-group><strong>You can interrupt.</strong><c-text>Inspect, redirect, or take over at any moment.</c-text></c-group>
-            </c-group>
-          </c-group>
-        </c-group>
-      </section>
 
-      <section class="operad-final" id="access">
-        <c-group class="operad-shell">
-          <img :if={@brand.key == :operad} src="/images/operad-fractal-512.png" alt="Operad recursive emblem" />
+      <section class="home-final" id="access">
+        <c-group class="home-shell">
           <img
-            :if={@brand.key == :emma}
-            class="emma-final-logo"
-            src="/images/emma-logo-v1.png"
-            alt="λemma"
-          />
-          <img
-            :if={@brand.key == :compos}
+           
             src="/images/compos-study-symbolic-composition-v1.png"
             alt="Lambda, branching application, and nested scope compose into a shared center"
           />
-          <h2 :if={@brand.key != :compos}>Your whole working world. Within reach.</h2>
-          <h2 :if={@brand.key == :compos}>A quiet computer for serious work.</h2>
-          <p :if={@brand.key != :compos}>{@brand.tagline}.</p>
-          <p :if={@brand.key == :compos}>Active development · local-first runtime · programmable in Scheme · rendered with LiveView.</p>
-          <c-group class="operad-actions">
-            <a class="operad-button primary" href={"mailto:#{@brand.email}?subject=#{@brand.name}%20development%20access"}>Request development access</a>
+          <h2>A quiet computer for serious work.</h2>
+          <p>Active development · local-first runtime · programmable in Scheme · rendered with LiveView.</p>
+          <c-group class="home-actions">
+            <a class="home-button primary" href={"mailto:#{@brand.email}?subject=#{@brand.name}%20development%20access"}>Request development access</a>
           </c-group>
         </c-group>
       </section>
 
-      <footer class="operad-shell operad-footer">
+      <footer class="home-shell home-footer">
         <c-text><strong>{@brand.wordmark}</strong> · {@brand.tagline}</c-text>
-        <c-text :if={@brand.key != :compos}>© 2026 {@brand.name}</c-text>
-        <c-text :if={@brand.key == :compos}>compos.in · © 2026 Compos</c-text>
+        <c-text>compos.in · © 2026 Compos</c-text>
       </footer>
     </main>
     """
