@@ -234,14 +234,20 @@
 (add-hook! 'theme-change-hook 'frame-themes-refresh!)
 (add-hook! 'frame-attach-hook 'frame-theme-attach!)
 
+(define (theme--isolated? &optional frame)
+  ;; FRAME wears its own theme. The boot load of theme.scm runs before
+  ;; window.scm defines frame locals: then no frame is isolated.
+  (and (boundp 'frame-local-in)
+       (frame-local-in (or frame (selected-frame)) 'isolated)))
+
 (define (theme--put! name frame)
   ;; an isolated frame takes the theme alone; any other frame takes it globally
-  (if (frame-local-in frame 'isolated)
+  (if (theme--isolated? frame)
       (frame-theme-apply! name frame)
       (theme-apply! name)))
 
 (define (load-theme name)
-  (if (frame-local 'isolated)
+  (if (theme--isolated?)
       (if (frame-theme-apply! name)
           (message (string-append "Loaded theme " name " in this frame"))
           (message (string-append "No such theme: " name)))
