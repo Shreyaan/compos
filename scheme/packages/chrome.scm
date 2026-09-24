@@ -279,6 +279,44 @@
 ;; the tab asking "is a prompt up?" — after a chord, or on reconnect
 (define (chrome--mb-state) (chrome--with-mb '()))
 
+(define *site-chat-group* "*browse*")
+
+;; One chat per site, all in the *browse* group. The name carries the host,
+;; so the same site finds the same conversation again, and a dormant chat
+;; from an earlier session comes back rather than being made twice.
+(define (chrome--site-chat-name host)
+  (string-append "*chat:browse:" host "*"))
+
+(define (site-chat host &optional tab url)
+  (let ((id (group-ensure-record! *site-chat-group*))
+        (name (chrome--site-chat-name host)))
+    (unless (buffer-known? name)
+      (buffer-create name)
+      (group-chat-init! name id)
+      (chat-set-group! name id)
+      (when (boundp (quote llm-default-bundle-apply!))
+        (llm-default-bundle-apply! name))
+      (when (boundp (quote workspace-chat-inherit!))
+        (workspace-chat-inherit! name (group-name id))))
+    ;; the tab it was last opened from: the way back to the page
+    (buffer-set-local! name 'browse-site host)
+    (when tab (buffer-set-local! name 'browse-tab tab))
+    (when url (buffer-set-local! name 'browse-url url))
+    name))
+
+(define-command "site-chat-tab" "Go back to the browser tab this site chat was opened from"
+  (lambda ()
+    (let ((tab (buffer-local (current-buffer) 'browse-tab))
+          (url (buffer-local (current-buffer) 'browse-url)))
+      ;; ask the browser, not the tab cache: a closed tab answers an error,
+      ;; and only then does the page open again
+      (cond (tab (browser-call "activate" (list 'tab tab)
+                   (lambda (reply)
+                     (unless (plist-get reply 'ok)
+                       (if url (tab-open url) (chrome--report reply))))))
+            (url (tab-open url))
+            (else (message "No tab for this chat"))))))
+
 (define (chrome--serve op args)
   (let ((w (plist-get args 'window)))
     (when w (set-frame-local! 'chrome-window w)))
@@ -303,6 +341,7 @@
         ((equal? op "chord") (chrome--chord (or (plist-get args 'keys) '())))
         ((equal? op "mb-key") (chrome--mb-key (plist-get args 'spec)))
         ((equal? op "mb-state") (chrome--mb-state))
+        ((equal? op "site-chat") (list 'buffer (site-chat (plist-get args 'host) (plist-get args 'tab) (plist-get args 'url))))
         (else (list 'error (string-append "unknown op: " op)))))
 
 (browser-serve! chrome--serve)

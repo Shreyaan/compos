@@ -75,8 +75,7 @@ and the rest of the sequence resolves in that keymap. editor.scm binds
 the Emacs prefix maps in the global map: `ctl-x-map` on `C-x`,
 `mode-specific-map` on `C-c`, `help-map` on `C-h`, `goto-map` on `M-g`,
 `search-map` on `M-s`, and under `C-x`: `ctl-x-r-map`, `ctl-x-4-map`,
-`project-prefix-map`, `vc-prefix-map`, `group-map` on `C-x g`,
-`buffer-group-map` on `C-x C-g`. Under
+`project-prefix-map`, `vc-prefix-map`, `buffer-group-map` on `C-x C-g`. Under
 `C-c`: `agent-map` on `a`, `spotify-map` on `S`, `annotate-map` on `!`.
 
 A package binds into the map its keys belong to and never writes the

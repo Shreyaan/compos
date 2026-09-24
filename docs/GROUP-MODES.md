@@ -9,9 +9,7 @@ a mode in `init.scm` with one form. Elixir does not know that group modes
 exist, except for one late mechanism (per-frame faces, see Phase 5).
 
 This document is the specification. It has the model, the rules, the
-implementation contract, the phases, and the acceptance list. None of it is
-built yet: no `group-modes.scm` exists. `group-setting-set!`, the record's
-`settings` field, and `llm-default-bundle` exist today. Read
+implementation contract, the phases, and the acceptance list. Read
 `docs/groups.md` first: a group mode changes nothing written there.
 
 ## Model
@@ -37,7 +35,7 @@ built yet: no `group-modes.scm` exists. `group-setting-set!`, the record's
   ```
 
   The global default is the value the editor has today: the default
-  connector and model, the layout customs, `*current-theme*`.
+  connector and model, the autolayout customs, `*current-theme*`.
 
 - **Drift** is the state where a group's settings differ from its mode. The
   modeline shows drift. Two commands end it: `group-mode-save` writes the
@@ -93,7 +91,7 @@ built yet: no `group-modes.scm` exists. `group-setting-set!`, the record's
      `'llm-scope 'buffer` on the session buffer. The chat is pinned.
    - `group`: `(group-setting-set! G 'llm NAME)`, then re-applies the bundle
      to every chat of G whose `llm-scope` is not `buffer`.
-   - `global`: sets `llm-default-bundle` (the defcustom in `llm-config.scm`), then re-applies
+   - `global`: sets `llm-default-bundle` (a new defcustom), then re-applies
      to every chat whose `llm-scope` is `#f`.
 9. A chat that a user reconfigured by hand (a model pick, not a bundle) is
    off-bundle. `llm-configure` shows "off-bundle" in the header, and RET on
@@ -105,19 +103,20 @@ built yet: no `group-modes.scm` exists. `group-setting-set!`, the record's
 ### Layout
 
 11. A layout spec is one of:
-    - `NAME`: one of the five layouts in `layouts.scm` -- `single`,
-      `two-pane`, `halves`, `columns` or `rows`. Enter makes it the frame's
-      target layout; leave drops the target when the next group names none.
+    - `(autolayout SIDE RATIO STACK)`: the StumpWM tiler in `layouts.scm`.
+      Enter turns `autolayout-mode` on for the frame with those parameters;
+      leave turns it off when the next group's spec is not `autolayout`.
     - `(DIR RATIO PANE PANE ...)`: the `define-mode-layout!` engine. A PANE is
       `main` (the group's first work buffer by MRU), `chat` (the group chat),
       `scratch` (the group scratch), `"NAME"`, or `(ensure "NAME" "COMMAND")`.
       The engine drops a pane that names no member: a layout never brings a
       foreign buffer into the group (docs/groups.md, sealed groups).
     - a fn of the group id, for a user who wants code.
-12. The custom `window-layout-main-ratio` stays the global default for the
-    two-pane layout.
-13. `group-default-layout!` reads the layout facet. Its current body becomes
-    the layout of the `coding` mode.
+12. The autolayout customs `window-layout-main-side`, `-main-ratio`, and
+    `-stack` stay the global defaults. `autolayout--algorithm` reads the
+    frame's group facets first.
+13. `group-default-layout!` reads the layout facet. Its current body (main
+    left, side right at 0.6) becomes the layout of the `coding` mode.
 
 ### Theme
 
@@ -141,13 +140,13 @@ built yet: no `group-modes.scm` exists. `group-setting-set!`, the record's
     buffers, `chat` when the only member is a chat, and
     `group-mode-default` otherwise. `group-mode-default` is `"coding"`.
 17. `M-x group-mode` opens a completing prompt over the registry for the
-    current group. The switcher (`C-x g g`) shows the mode after the name.
+    current group. The switcher (`C-c g`) shows the mode after the name.
 18. `group-revive!` restores the mode and the settings with the record.
 
 ### Persistence
 
-19. The group record has `settings` at index 9 today. It grows one field,
-    `mode` (index 10). `group-record-colors-restore` carries them. A record from an
+19. The group record grows two fields, `mode` (index 9) and `settings`
+    (index 10). `group-record-colors-restore` carries them. A record from an
     older desktop has neither; the reader treats a missing field as `#f`.
 20. The registry is not persisted. Modes come from `init.scm` and from the
     stock package. `group-mode-save` writes into `*group-mode-overrides*`,
@@ -160,8 +159,8 @@ built yet: no `group-modes.scm` exists. `group-setting-set!`, the record's
 ```scheme
 (define-group-mode "coding"
   'llm "pair"
-  'layout 'two-pane
-  'doc "Two panes, 2/3 and 1/3; the pair bundle")
+  'layout '(autolayout left 0.62 column)
+  'doc "One main pane on the left, the rest stacked; the pair bundle")
 
 (define-group-mode "writing"
   'llm "draft"
@@ -192,24 +191,24 @@ shows the document. `writing-mode` (the buffer minor mode) stays as it is.
 
 ## Implementation contract
 
-- `scheme/packages/group-modes.scm`, loaded after
+- `apps/compos_core/priv/packages/group-modes.scm`, loaded after
   `groups.scm`, `layouts.scm`, and `themes.scm` in `init.scm`. Stock modes
   live at the end of the same file. `writing.scm` registers the writing
   setup fn and loads after it.
-- `groups.scm` changes: the `mode` record field, `group-mode`, `group-mode-set!`,
+- `groups.scm` changes: two record fields, `group-mode`, `group-mode-set!`,
   `group-facet`, `group-setting-set!`, the leave/enter calls in
   `switch-to-group!`, `group-switch-hook`, `group-default-layout!` reads the
   facet, `group-new` calls `group-mode-guess`, the switcher and modeline
   show the mode.
-- `chat-mode.scm` changes: the resolution chain in `llm-config-core`
-  (buffer local -> group facet -> global), `'llm-scope` joins
-  `chat-identity-locals`.
-- `llm-config.scm` changes (the `llm-configure` transient): the scope
-  selector `g`, the header, RET by scope.
-- `layouts.scm` changes: `group-mode-reset-layout`.
+- `editor.scm` changes: `llm-default-bundle` defcustom, the resolution chain
+  in `llm-config-core` (buffer local -> group facet -> global), `'llm-scope`
+  joins `chat-identity-locals`.
+- `transient.scm` changes: the scope selector `g`, the header, RET by scope.
+- `layouts.scm` changes: `autolayout--algorithm` reads frame group facets;
+  `group-mode-reset-layout`.
 - `themes.scm`: no change. Phase 5 adds `(theme-apply! NAME FRAME)`.
 - Every public definition carries `domain!` and `effects!`.
-- Tests in `scheme/packages/group-modes-test.scm`: a dummy mode, a dummy bundle,
+- Tests in `priv/tests/group-mode-test.scm`: a dummy mode, a dummy bundle,
   a dummy theme made with `define-theme`, dummy keys under `<f9>`. No test
   names a production mode's facets or a production binding.
 
@@ -222,7 +221,7 @@ shows the document. `writing-mode` (the buffer minor mode) stays as it is.
    the transient scope selector, drift in the header, `workspace--llm-defaults`
    retired.
 3. **Layout.** Layout specs, `group-default-layout!` reads the facet,
-   a layout name per group, `group-mode-reset-layout`.
+   autolayout facets per group, `group-mode-reset-layout`.
 4. **Stock modes and migration.** The four modes, the four bundles,
    `group-mode-guess`, `writing-layout` folded into `writing`,
    `docs/groups.md` cross-reference, `docs/COMPONENTS.md` for the chooser.
@@ -254,8 +253,9 @@ shows the document. `writing-mode` (the buffer minor mode) stays as it is.
 8. First entry into a group with no saved layout uses the mode's layout
    spec; re-entry uses the saved layout; `group-mode-reset-layout` uses the
    spec again.
-9. A layout-name spec makes that layout the frame's target; a switch to a
-   group with a pane spec drops the target.
+9. An autolayout spec turns `autolayout-mode` on with the spec's side,
+   ratio, and stack for that frame; a switch to a group with a pane spec
+   turns it off.
 10. A pane that names a non-member is dropped.
 11. A record from a desktop written before this change restores with mode
     `#f` and settings `'()`.

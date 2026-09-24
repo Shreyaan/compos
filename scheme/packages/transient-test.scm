@@ -386,7 +386,7 @@
       (run-command "transient-quit-all"))))
 
 (deftest 'transient-cancel-tells-on-quit
-  "C-g runs on-quit with transient-cancelled? true; ESC runs it with false"
+  "transient-cancel-one runs on-quit with transient-cancelled? true; a plain quit runs it with false"
   (lambda ()
     (let ((seen '()))
       (transient-define-prefix "zz-cancel-menu" "Cancel"

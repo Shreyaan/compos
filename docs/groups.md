@@ -365,16 +365,16 @@ One command per verb. The name says which way the verb runs, so `remove-buffers-
 | `move` | `group-move` | `C-x C-g m` |
 | `remove-buffers` | `remove-buffers-from-group` | `M-x` |
 | `remove-group` | `remove-group-from-buffer` | `C-x C-g r` |
-| `switch` | `group-switch` | `C-x g g`; `RET` in the board |
-| `switch-last` | `group-switch-last` | `C-x g C-g` |
+| `switch` | `group-switch` | `C-x g`; `RET` in the board |
+| `switch-last` | `group-switch-last` | `C-x C-g C-g` |
 | `switch-to-buffer-group` | `buffer-context-switch!` | `C-RET` in the switcher |
-| `new` | `group-new` | `C-x g n`, `C-x C-g n`; `C-c C-n` in the group switcher |
+| `new` | `group-new` | `C-x C-g n`; `C-c C-n` in the group switcher |
 | `dissolve` | `group-dissolve` | `x` in the board |
 | `kill` | `group-kill` | `K` in the board |
 | `rename` | `group-rename` | `r` in the board |
 | `revive` | `group-revive` | `M-x` |
-| `groups` | `groups` | `C-x g l` |
-| `members` | `group-members` | `C-x g b`; `b` in the board |
+| `groups` | `groups` | `C-x C-g l` |
+| `members` | `group-members` | `C-x C-g b`; `b` in the board |
 | `buffer-select` | `buffer-select`; `SPC` marks in every list | |
 
 The `group-add` prompt names a default: the group the frame stands in, else the group it last stood in. A bare `RET` joins it; a typed name joins that group or founds it; the `New group` row founds one without entering it.
@@ -524,7 +524,7 @@ The active groups are derived the same way: `(active-groups)` answers every grou
 
 ### Switch candidates
 
-`C-x g g` lists this frame's groups in MRU order, and the current group
+`C-x g` lists this frame's groups in MRU order, and the current group
 comes last. In a mixed frame the groups of the selected buffer come first.
 Groups with no MRU entry trail in creation order. The non-empty pseudo groups
 follow, then other frames' groups in a marked section. The new-group action is

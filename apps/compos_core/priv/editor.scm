@@ -5146,7 +5146,21 @@
            (filter (lambda (name)
                      (apropos-text-hit?
                        (string-append name " " (command-doc name)) words))
-                   (command-names))))))
+                   (command-names)))
+      (map command-palette--recipe-hit
+           (filter (lambda (recipe)
+                     (apropos-text-hit? (command-palette--recipe-text recipe) words))
+                   (if (boundp (quote *recipes*)) *recipes* '()))))))
+
+;; A recipe the palette can draw, in apropos hit shape.
+(define (command-palette--recipe-hit recipe)
+  (list 'kind "recipe" 'name (car recipe) 'inputs (caddr recipe)))
+
+;; A recipe matches on its task words and the aliases people use for it.
+(define (command-palette--recipe-text recipe)
+  (let ((entry (catalog-entry 'recipe (car recipe))))
+    (string-append (car recipe) " "
+                   (or (and entry (catalog--get entry 'aliases)) ""))))
 
 (define (command-palette-candidates query)
   (if (equal? (string-trim query) "")
@@ -5404,7 +5418,6 @@
 (bind-prefix! "ctl-x-map" "4" "ctl-x-4-map")
 (bind-prefix! "ctl-x-map" "p" "project-prefix-map")
 (bind-prefix! "ctl-x-map" "v" "vc-prefix-map")
-(bind-prefix! "ctl-x-map" "g" "group-map")
 (bind-prefix! "ctl-x-map" "C-g" "buffer-group-map")
 (bind-prefix! "mode-specific-map" "a" "agent-map")
 (bind-prefix! "mode-specific-map" "S" "spotify-map")

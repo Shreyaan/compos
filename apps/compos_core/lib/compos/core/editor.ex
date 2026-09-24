@@ -318,6 +318,10 @@ defmodule Compos.Core.Editor do
   def set_frame_group_style(label, color, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_group_style, label, color, fid(fid)})
 
+  @doc "Lay face OPS and a SKIN stylesheet over the global faces for this frame alone; nil OPS clears them."
+  def set_frame_faces(ops, skin, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_frame_faces, ops, skin, fid(fid)})
+
   @doc "Buffers in most-recently-displayed order (Emacs buffer list)."
   def buffer_mru, do: GenServer.call(__MODULE__, :buffer_mru)
 
@@ -903,7 +907,7 @@ defmodule Compos.Core.Editor do
        tree: dtree(f.tree),
        hidden: Enum.map(hidden(f), &dtree/1),
        active_buffer: active,
-       faces: state.faces
+       faces: frame_faces(state, f)
      }, state}
   end
 
@@ -961,8 +965,8 @@ defmodule Compos.Core.Editor do
        workspace: workspace_context(),
        modeline_extra: state.modeline_extra,
        chrome: Map.get(state, :chrome, %{}),
-       faces: state.faces,
-       styles: state.styles
+       faces: frame_faces(state, f),
+       styles: frame_styles(state, f)
      }, state}
   end
 
@@ -990,6 +994,20 @@ defmodule Compos.Core.Editor do
       {:reply, :ok, state}
     else
       updated = f |> Map.put(:group_label, label) |> Map.put(:group_color, color)
+      changed(:ok, put_frame(state, updated), f.id)
+    end
+  end
+
+  # a frame's own theme: face ops replayed over the global faces when that
+  # frame renders, so a later global change still reaches the faces the
+  # frame's theme leaves alone
+  def handle_call({:set_frame_faces, ops, skin, fid}, _from, state) do
+    f = frame(state, fid)
+
+    if Map.get(f, :face_ops) == ops and Map.get(f, :skin) == skin do
+      {:reply, :ok, state}
+    else
+      updated = f |> Map.put(:face_ops, ops) |> Map.put(:skin, skin)
       changed(:ok, put_frame(state, updated), f.id)
     end
   end
@@ -2311,6 +2329,27 @@ defmodule Compos.Core.Editor do
   defp frame(state, fid), do: state.frames[fid] || state.frames[hd(state.frame_mru)]
 
   defp put_frame(state, f), do: %{state | frames: Map.put(state.frames, f.id, f)}
+
+  defp frame_faces(state, f) do
+    case Map.get(f, :face_ops) do
+      nil -> state.faces
+      ops -> apply_face_ops(state.faces, ops)
+    end
+  end
+
+  defp frame_styles(state, f) do
+    case Map.get(f, :face_ops) do
+      nil -> state.styles
+      _ -> Map.put(state.styles, "theme-skin", Map.get(f, :skin) || "")
+    end
+  end
+
+  defp apply_face_ops(faces, ops) do
+    Enum.reduce(ops, faces, fn
+      {:clear, name}, faces -> Map.delete(faces, name)
+      {:set, name, attrs}, faces -> Map.update(faces, name, attrs, &Map.merge(&1, attrs))
+    end)
+  end
 
   defp hidden(f), do: Map.get(f, :hidden, [])
 

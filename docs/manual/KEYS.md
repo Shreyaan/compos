@@ -110,13 +110,13 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x c` | `chat-prompt` | Switch to a chat with the plain minibuffer list |
 | `C-x d` | `daemons` | List daemons and switch this browser tab |
 | `C-x e` | `window-eat` | Eat the neighboring pane and take its space |
-| `C-x g C-g` | `group-switch-last` | Switch back to the group this frame just left |
-| `C-x g b` | `group-members` | Open the switcher on this group's members |
-| `C-x g g` | `group-switch` | Switch to a group and restore its layout |
-| `C-x g l` | `groups` | The groups board: switch, describe, set noise |
-| `C-x g n` | `group-new` | Create and enter an empty group, or seed it with the selection |
-| `C-x g p` | `group-pin` | Toggle a frame pin that keeps the current group through window changes |
-| `C-x g s` | `tile-all` | Open the current group or project in locked columns |
+| `C-x C-g C-g` | `group-switch-last` | Switch back to the group this frame just left |
+| `C-x C-g b` | `group-members` | Open the switcher on this group's members |
+| `C-x g` | `group-switch` | Switch to a group and restore its layout |
+| `C-x C-g l` | `groups` | The groups board: switch, describe, set noise |
+| `C-x C-g n` | `group-new` | Create and enter an empty group, or seed it with the selection |
+| `C-x C-g p` | `group-pin` | Toggle a frame pin that keeps the current group through window changes |
+| `C-x C-g s` | `tile-all` | Open the current group or project in locked columns |
 | `C-x k` | `kill-buffer` | Kill a buffer, defaulting to the current one |
 | `C-x l` | `window-layout` | Choose a tiling layout for visible buffers; the choice is the frame's target layout |
 | `C-x m` | `load-mode` | Choose a mode by name and put this buffer in it |

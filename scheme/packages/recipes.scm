@@ -167,8 +167,9 @@
   "(set-face-attribute! 'default 'fg {{colour}})"
   (list (list 'colour "Colour: ")))
 (defrecipe! "load a theme"
-  "(load-theme! {{theme}})"
-  (list (list 'theme "Theme: ")))
+  "(run-command \"load-theme\")")
+(recipe-aliases! "load a theme"
+  "apply theme switch theme choose theme select theme change theme theme appearance colours colors")
 
 ;;; --- telling the user something -----------------------------------------------
 

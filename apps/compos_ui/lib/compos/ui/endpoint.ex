@@ -8,7 +8,14 @@ defmodule Compos.Ui.Endpoint do
     same_site: "Lax"
   ]
 
-  socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
+  # No session on the live socket: no view reads one, and its only job was
+  # the CSRF check, which needs the cookie. A cookie does not cross into a
+  # frame on another site (the extension's side panel), so the view never
+  # joined there. The origin check does the same job without it: the
+  # machine's own spellings pass, and a page you visit is refused.
+  socket("/live", Phoenix.LiveView.Socket,
+    websocket: [check_origin: {Compos.Ui.Reach, :local_origin?, []}]
+  )
 
   # every spelling of this machine is this machine: the Tauri shell dials
   # 127.0.0.1, a browser tab says localhost, a phone on the tailnet says

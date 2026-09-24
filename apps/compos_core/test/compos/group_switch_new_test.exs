@@ -37,6 +37,15 @@ defmodule Compos.GroupSwitchNewTest do
     assert eval!("(group-resolve-id \"zz-new-cancelled\")") == "#f"
   end
 
+  test "C-c C-n in the group switcher starts a new group" do
+    eval!("(t--sw-setup!) (run-command \"group-switch\")")
+    KeyDispatch.handle_key("C-c")
+    KeyDispatch.handle_key("C-n")
+    assert eval!("(frame-local 'group-switch-new-action)") == "#f"
+    assert eval!("(and (member \"group-switch-modal-map\" (buffer-minor-maps (minibuffer-buffer))) #t)") == "#f"
+    eval!("(minibuffer-cancel!)")
+  end
+
   test "cancelling the group selector removes its modal keymap" do
     eval!("(t--sw-setup!) (run-command \"group-switch\") (minibuffer-cancel!)")
     assert eval!("(frame-local 'group-switch-new-action)") == "#f"

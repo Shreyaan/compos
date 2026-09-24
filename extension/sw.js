@@ -50,6 +50,7 @@ class Conn {
     this.ws = ws;
 
     ws.onopen = () => {
+      for (const w of [...connWaiters]) w(this);
       clearInterval(this.heart);
       this.heart = setInterval(() => this.post({ op: "ping" }), HEARTBEAT_MS);
       // a fresh daemon knows nothing about our windows; tell it at once, so
@@ -724,6 +725,29 @@ function anyConn() {
   return null;
 }
 
+// A message can wake a sleeping worker before any socket is open again: the
+// side panel's first ask always does. Take the first daemon that comes up,
+// and give up after MS.
+const connWaiters = new Set();
+
+function whenConn(ms = 5000) {
+  const c = anyConn();
+  if (c) return Promise.resolve(c);
+  if (!conns.size) sweep();
+  return new Promise((resolve, reject) => {
+    const w = (conn) => {
+      clearTimeout(t);
+      connWaiters.delete(w);
+      resolve(conn);
+    };
+    const t = setTimeout(() => {
+      connWaiters.delete(w);
+      reject(new Error("no compos daemon running"));
+    }, ms);
+    connWaiters.add(w);
+  });
+}
+
 // the compos tab for a window, if this window has one
 function editorFor(windowId) {
   return editors.get(windowId) || null;
@@ -816,6 +840,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       return { registered: msg.frame };
     }
 
+    // the side panel is no tab: it names the page it sits beside
+    if (msg.cmd === "site-chat") {
+      const conn = await whenConn();
+      const r = await conn.ask("site-chat", { host: msg.host, tab: msg.tab, url: msg.url, window: msg.window });
+      return { ...r, port: conn.port };
+    }
+
     const conn = anyConn();
     if (!conn) throw new Error("no compos daemon running");
 
@@ -844,6 +875,26 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   );
 
   return true; // async reply
+});
+
+// --- the site's chat --------------------------------------------------------
+//
+// The toolbar button opens a side panel on THIS tab only, and the panel
+// shows this site's chat. The editor finds or makes it; see sidepanel.js.
+// A compos tab gets none: the chat is already there.
+
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+
+function composTab(url) {
+  const m = /^https?:\/\/(localhost|127\.0\.0\.1):(\d+)\//.exec(url || "");
+  return !!m && conns.has(Number(m[2]));
+}
+
+chrome.action.onClicked.addListener((tab) => {
+  if (!tab.id || composTab(tab.url)) return;
+  // no await between the click and open(): the panel needs the user gesture
+  chrome.sidePanel.setOptions({ tabId: tab.id, path: `sidepanel.html?tab=${tab.id}`, enabled: true });
+  chrome.sidePanel.open({ tabId: tab.id });
 });
 
 // --- getting there ---------------------------------------------------------

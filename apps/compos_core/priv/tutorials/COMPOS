@@ -470,15 +470,15 @@ arrangement you left behind. Switching to a group restores the context, not
 one document.
 
   M-x group-new    Create and enter a group
-  C-x g g          Switch groups
-  C-x g C-g        Return to the previous group
-  C-x g b          List the buffers in the current group
-  C-x g s          Tile the group
+  C-x g            Switch groups
+  C-x C-g C-g      Return to the previous group
+  C-x C-g b        List the buffers in the current group
+  C-x C-g s        Tile the group
 
 >> Type M-x group-new and call the group tutorial-practice.
    With nothing marked, the new group starts empty and opens its scratch
    buffer.
-   Type C-x g g to look at the group switcher, then C-g if you do not want
+   Type C-x g to look at the group switcher, then C-g if you do not want
    to switch.
    Type C-x b, choose TUTORIAL and press RET to return here.
 

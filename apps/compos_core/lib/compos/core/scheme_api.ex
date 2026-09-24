@@ -1930,6 +1930,33 @@ defmodule Compos.Core.SchemeAPI do
 
           :void
         end,
+      {"frame-faces-set!",
+       "(frame-faces-set! OPS SKIN [FRAME]) — lay face-batch! OPS and a SKIN stylesheet over the global faces for FRAME alone; OPS #f gives the frame the global faces again."} =>
+        fn args ->
+          [ops, skin | rest] = args
+
+          ops =
+            if is_list(ops),
+              do:
+                Enum.map(ops, fn
+                  [{:sym, "clear"}, face] ->
+                    {:clear, plain(face)}
+
+                  [{:sym, "set"}, face | kvs] ->
+                    {:set, plain(face),
+                     kvs |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)}
+                end),
+              else: nil
+
+          fid =
+            case rest do
+              [f] when is_binary(f) -> f
+              _ -> nil
+            end
+
+          Editor.set_frame_faces(ops, if(is_binary(skin), do: skin, else: nil), fid)
+          :void
+        end,
       {"face-attribute",
        "(face-attribute FACE ATTR) — the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here."} =>
         fn [face, attr] ->

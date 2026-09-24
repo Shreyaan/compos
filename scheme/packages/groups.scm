@@ -600,7 +600,9 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-frame-styles-refresh!)
   (for-each
     (lambda (frame)
-      (group-frame-style-set! frame (frame-local-in frame 'current-group)))
+      ;; the accent is read in the theme that frame wears
+      (with-theme-frame frame
+        (lambda () (group-frame-style-set! frame (frame-local-in frame 'current-group)))))
     (frame-list)))
 
 (define (group-frame-context-id locals key)
@@ -1170,7 +1172,9 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (group-of-frame? g frame)
   (let ((owner (group-frame-owner g)))
-    (or (equal? owner frame) (not (group-frame-alive? owner)))))
+    (or (equal? owner frame)
+        (and (not (group-frame-alive? owner))
+             (not (and (equal? frame (selected-frame)) (frame-isolated?)))))))
 
 (define (group-here? g)
   (group-of-frame? g (selected-frame)))
@@ -1187,6 +1191,29 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((id (group-resolve-id g)))
     (when (and id (group-unowned? id)) (group-frame-own! id (selected-frame)))
     id))
+
+(define (frame-isolated?)
+  ;; an isolated frame shows only the groups it owns
+  (and (frame-local 'isolated) #t))
+
+(define-command "frame-isolate"
+  "Toggle whether this frame shows only its own groups and wears its own theme"
+  (lambda ()
+    (if (frame-isolated?)
+        (begin
+          (set-frame-local! 'isolated #f)
+          ;; its own theme goes with it
+          (when (frame-theme) (frame-theme-apply! #f))
+          (desktop-dirty!)
+          (frame-group-label-refresh!)
+          (message "Frame shares unowned groups again"))
+        (let ((id (frame-group)))
+          ;; the group in view comes along, so the frame is never empty
+          (when id (group-frame-own! id (selected-frame)))
+          (set-frame-local! 'isolated #t)
+          (desktop-dirty!)
+          (frame-group-label-refresh!)
+          (message "Frame isolated: only its own groups")))))
 
 (define (group-frame-raise! frame)
   ;; a frame that lives in a browser tab comes to the front by its tab. No
@@ -1969,6 +1996,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; Groups without a history entry trail in record order.
 (define (group-ids-mru)
   ;; this workspace only: the frame's own groups, and the unowned ones
+  ;; unless the frame is isolated
   ;;
   ;; The frame tab bar calls this on every render, so it settles the frame
   ;; once for the whole pass and reads the records in one sweep. Going
@@ -1978,6 +2006,7 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; appear in a bar of frame-tabs-limit slots.
   (let* ((here (selected-frame))
          (frames (frame-list))
+         (isolated (frame-isolated?))
          (owner-of (lambda (record)
                      (let loop ((rest (group-record-settings record)))
                        (cond ((not (pair? rest)) #f)
@@ -1987,7 +2016,8 @@ is forgotten and that group falls back to creation order in the switcher."
          (mine (fold (lambda (out record)
                        (let ((owner (owner-of record)))
                          (if (or (equal? owner here)
-                                 (not (and owner (member owner frames) #t)))
+                                 (and (not isolated)
+                                      (not (and owner (member owner frames) #t))))
                              (cons (group-record-id record) out)
                              out)))
                      '() *group-records*)))
@@ -3774,11 +3804,11 @@ is forgotten and that group falls back to creation order in the switcher."
               (group-chat-init! buf id)
               (chat-set-group! buf id)
               (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
-              (when (boundp (quote workspace-chat-inherit!))
-                (workspace-chat-inherit! buf (group-name id)))
-              ;; last, so the named default wins over what the workspace hands down
+              ;; the named default first, so a group's own config overrides it
               (when (boundp (quote llm-default-bundle-apply!))
                 (llm-default-bundle-apply! buf))
+              (when (boundp (quote workspace-chat-inherit!))
+                (workspace-chat-inherit! buf (group-name id)))
               buf))
           (else #f))))
 
@@ -3799,11 +3829,11 @@ is forgotten and that group falls back to creation order in the switcher."
           (group-chat-init! buf id)
           (chat-set-group! buf id)
           (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
-          (when (boundp (quote workspace-chat-inherit!))
-            (workspace-chat-inherit! buf (group-name id)))
-          ;; last, so the named default wins over what the workspace hands down
+          ;; the named default first, so a group's own config overrides it
           (when (boundp (quote llm-default-bundle-apply!))
             (llm-default-bundle-apply! buf))
+          (when (boundp (quote workspace-chat-inherit!))
+            (workspace-chat-inherit! buf (group-name id)))
           ;; a group's chats share one window: the chat pane. A new chat
           ;; replaces the chat already there rather than take a pane of its own.
           (let ((pane (window-showing-mode "chat-mode")))
@@ -4625,23 +4655,19 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; the same glyph is what :group: reaches in a name format
 (name-icon! "group" (mode-icon "groups-mode"))
 
-;; Two prefixes: C-x g holds the group-subject verbs, C-x C-g the
-;; buffer-subject verbs. C-x G is the switcher's groups view (switch.scm).
+;; C-x g switches groups; the other group verbs live under C-x C-g.
+;; C-x G is the switcher's groups view (switch.scm).
 (define (group-keymap-install!)
   (define-key "mode-specific-map" "g" "group-add")
   (define-key "mode-specific-map" "d" "group-describe")
 
-  ;; C-x g — the group is the subject: switch, see its members,
-  ;; the board, tiling, and the pin.
-  (define-key "group-map" "g" "group-switch")
-  (define-key "group-map" "C-g" "group-switch-last")
-  (define-key "group-map" "b" "group-members")
-  (define-key "group-map" "l" "groups")
-  (define-key "group-map" "n" "group-new")
-  (define-key "group-map" "s" "tile-all")
-  (define-key "group-map" "p" "group-pin")
+  (define-key "ctl-x-map" "g" "group-switch")
 
-  ;; C-x C-g — the buffer is the subject; its groups are the object.
+  (define-key "buffer-group-map" "C-g" "group-switch-last")
+  (define-key "buffer-group-map" "b" "group-members")
+  (define-key "buffer-group-map" "l" "groups")
+  (define-key "buffer-group-map" "s" "tile-all")
+  (define-key "buffer-group-map" "p" "group-pin")
   (define-key "buffer-group-map" "a" "group-add")
   (define-key "buffer-group-map" "m" "group-move")
   (define-key "buffer-group-map" "n" "group-new")
@@ -4688,6 +4714,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'group-here? "(group-here? G) -> #t when G belongs to this frame or to none")
 (public! 'group-elsewhere-frame "(group-elsewhere-frame G) -> the other live frame that keeps G, or #f")
 (public! 'group-adopt-here! "(group-adopt-here! G) — an unowned G joins this frame")
+(public! 'frame-isolated? "(frame-isolated?) — #t when this frame shows only the groups it owns")
 (public! 'buffer-family
   "(buffer-family BUFFER) -> the group-relative work family, including its shared scratch companion")
 (public! 'buffer-add-group-as! "(buffer-add-group-as! BUFFER GROUP ROLE) — join GROUP with a semantic role")

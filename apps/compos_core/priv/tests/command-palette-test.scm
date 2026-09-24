@@ -35,3 +35,9 @@
       (check-true! (pair? cands) "there is at least one candidate")
       (check-equal! (car (car cands)) "bind <f9> z to zz-palette-bind"
                     "the first candidate names the bind sentence"))))
+
+(deftest 'a-recipe-alias-finds-the-recipe-in-the-palette
+  "A recipe shows in the palette when the query hits its aliases."
+  (lambda ()
+    (check-true! (assoc "load a theme" (command-palette-candidates "apply theme"))
+                 "apply theme lists the load a theme recipe")))

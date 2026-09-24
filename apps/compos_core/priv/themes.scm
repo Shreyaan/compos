@@ -73,7 +73,7 @@
 
 ;; #f when no theme is loaded, or when the theme leaves this face alone
 (define (theme-face-spec face)
-  (assoc face (theme-faces *current-theme*)))
+  (assoc face (theme-faces (theme-current))))
 
 ;; the value a face wears now, theme first and the package default after,
 ;; which is the order defface! resolves them in. #f when neither names ATTR.
@@ -145,6 +145,16 @@
 ;; put NAME's faces on screen, and nothing else: no file, no message. The
 ;; theme prompt previews through this as the highlight moves. -> #t, or
 ;; #f for a name that is no theme
+(define (theme--ops t base)
+  ;; the face-batch! that takes the faces from BASE's to theme T's
+  (append
+    (map (lambda (f) (list 'clear f))
+         (theme--union (map car *face-defaults*)
+                       (theme--union (map car (theme-faces base))
+                                     (map car (cadr t)))))
+    (map (lambda (d) (cons 'set d)) *face-defaults*)
+    (map (lambda (spec) (cons 'set spec)) (cadr t))))
+
 (define (theme-apply! name)
   (let ((t (assoc name *themes*)))
     (and t
@@ -159,14 +169,7 @@
            ;; render between the clear and the defaults showed a default
            ;; face with no size and a 'ui face with no zoom: every window
            ;; reflowed and its scroll moved.
-           (face-batch!
-             (append
-               (map (lambda (f) (list 'clear f))
-                    (theme--union (map car *face-defaults*)
-                                  (theme--union (map car (theme-faces *current-theme*))
-                                                (map car (cadr t)))))
-               (map (lambda (d) (cons 'set d)) *face-defaults*)
-               (map (lambda (spec) (cons 'set spec)) (cadr t))))
+           (face-batch! (theme--ops t *current-theme*))
            (set! *current-theme* name)
            ;; the skin goes on after the faces, always under one name, so
            ;; the theme you leave takes its stylesheet with it
@@ -174,7 +177,74 @@
            (run-hooks 'theme-change-hook)
            #t))))
 
+;; --- a frame's own theme -------------------------------------------------
+;; An isolated frame wears its own theme. Its faces are ops the editor
+;; replays over the global faces when that frame renders, so the other
+;; frames keep the global theme. The name is a frame local, so it survives
+;; with the desktop and goes back on when a client attaches.
+
+(define *theme-frame* #f)  ; the frame a render path colours, else the selected one
+
+(define (frame-theme &optional frame)
+  ;; the theme FRAME wears on its own, or #f when it wears the global one
+  (let ((name (frame-local-in (or frame (selected-frame)) 'theme)))
+    (and name (assoc name *themes*) name)))
+
+(define (theme-current)
+  ;; the theme on screen in the frame being coloured
+  (or (frame-theme (or *theme-frame* (selected-frame))) *current-theme*))
+
+(define (with-theme-frame frame thunk)
+  ;; THUNK reads faces as FRAME wears them
+  (let ((before *theme-frame*))
+    (set! *theme-frame* frame)
+    (let ((value (thunk)))
+      (set! *theme-frame* before)
+      value)))
+
+(define (frame-theme--push! frame)
+  (let ((name (frame-theme frame)))
+    (if name
+        (frame-faces-set! (theme--ops (assoc name *themes*) *current-theme*)
+                          (theme-skin name) frame)
+        (frame-faces-set! #f #f frame))))
+
+(define (frame-theme-apply! name &optional frame)
+  ;; FRAME wears NAME on its own; NAME #f gives it the global theme again
+  (let ((frame (or frame (selected-frame))))
+    (and (or (not name) (assoc name *themes*))
+         (begin
+           (set-frame-local-in! frame 'theme name)
+           (desktop-dirty!)
+           (frame-theme--push! frame)
+           (run-hooks 'theme-change-hook)
+           #t))))
+
+(define (frame-themes-refresh!)
+  ;; the global faces moved: each frame theme is replayed over the new ones
+  (for-each (lambda (frame) (when (frame-theme frame) (frame-theme--push! frame)))
+            (frame-list)))
+
+(define (frame-theme-attach!)
+  (when (frame-theme) (frame-theme--push! (selected-frame))))
+
+(add-hook! 'theme-change-hook 'frame-themes-refresh!)
+(add-hook! 'frame-attach-hook 'frame-theme-attach!)
+
+(define (theme--put! name frame)
+  ;; an isolated frame takes the theme alone; any other frame takes it globally
+  (if (frame-local-in frame 'isolated)
+      (frame-theme-apply! name frame)
+      (theme-apply! name)))
+
 (define (load-theme name)
+  (if (frame-local 'isolated)
+      (if (frame-theme-apply! name)
+          (message (string-append "Loaded theme " name " in this frame"))
+          (message (string-append "No such theme: " name)))
+      (load-theme--global name)))
+
+(define (load-theme--global name)
   (if (theme-apply! name)
       (begin
         (persist-theme! name)
@@ -1552,24 +1622,28 @@
 ;; theme you had back
 (define theme-preview-ms 80)
 
-(define (theme--preview! name)
-  (let ((n (string-trim name)))
-    (when (assoc n *themes*) (theme-apply! n))))
+(define (theme--preview! pick)
+  ;; PICK is (NAME FRAME): debounce! hands the callback one value
+  (let ((n (string-trim (car pick))))
+    (when (assoc n *themes*) (theme--put! n (cadr pick)))))
 
 (define-command "load-theme" "Choose a color theme, previewing each as you move; RET keeps it"
   (lambda ()
-    (let ((before *current-theme*))
+    (let* ((frame (selected-frame))
+           (own? (and (frame-local-in frame 'isolated) #t))
+           (before (if own? (frame-theme frame) *current-theme*))
+           (now (lambda () (if own? (frame-theme frame) *current-theme*))))
       (minibuffer-read-preview "Load theme: " (history-order 'theme (theme-names))
         (lambda (name)
-          (debounce! "theme-preview" theme-preview-ms theme--preview! name))
+          (debounce! "theme-preview" theme-preview-ms theme--preview! (list name frame)))
         (lambda (name)
           (let ((n (string-trim name)))
             (history-push! 'theme n)
             (load-theme n)))
         (lambda ()
-          (when (and before (not (equal? before *current-theme*)))
-            (theme-apply! before))
-          (message (string-append "Kept theme " (or before ""))))))))
+          (when (and (or own? before) (not (equal? before (now))))
+            (theme--put! before frame))
+          (message (string-append "Kept theme " (or before *current-theme* ""))))))))
 
 ;;; boot: reapply the persisted theme choice (written by load-theme).
 ;;; A home with no choice yet boots into the design's warm dark.
@@ -1580,6 +1654,9 @@
 (category! 'faces)
 (public! 'load-theme "(load-theme NAME) — switch color theme (persists)")
 (public! 'theme-apply! "(theme-apply! NAME) — put NAME's faces on screen without persisting; #t, or #f for no such theme")
+(public! 'frame-theme-apply! "(frame-theme-apply! NAME [FRAME]) — FRAME wears NAME on its own; NAME #f gives it the global theme again")
+(public! 'frame-theme "(frame-theme [FRAME]) -> the theme FRAME wears on its own, or #f")
+(public! 'theme-current "(theme-current) -> the theme on screen in this frame")
 (public! 'defface! "(defface! FACE ATTR VALUE ...) — a package's default face, attribute by attribute; an attribute the theme names wins. 'inherit names a face or a list of faces; 'priority orders overlapping overlays")
 (public! 'face-clear! "(face-clear! FACE) — forget every attribute of FACE")
 (public! 'theme-faces "(theme-faces NAME) -> the theme's face specs")

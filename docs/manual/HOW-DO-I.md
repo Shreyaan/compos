@@ -150,15 +150,15 @@ Press `C-M-v` (`scroll-other-window`) to scroll the other window down, and `M-<u
 
 ### How do I keep the buffers of one task together?
 
-A group is the set of buffers for one task, with the window arrangement you left. Press `C-x g n` (`group-new`) to make a group and enter it. The files you open while you are in a group go into that group.
+A group is the set of buffers for one task, with the window arrangement you left. Press `C-x C-g n` (`group-new`) to make a group and enter it. The files you open while you are in a group go into that group.
 
 `C-c g` (`group-add`) puts the current buffer in a group. `C-x C-g m` (`group-move`) moves it to another group.
 
 ### How do I switch to another task?
 
-Press `C-x g g` (`group-switch`) and choose a group. The editor shows its buffers in the windows you left them in.
+Press `C-x g` (`group-switch`) and choose a group. The editor shows its buffers in the windows you left them in.
 
-`C-x g C-g` (`group-switch-last`) goes back to the group you came from.
+`C-x C-g C-g` (`group-switch-last`) goes back to the group you came from.
 
 ### How do I rename or close a group?
 

@@ -24,12 +24,12 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `group-describe` | `C-c d` | Ask the LLM to write this group's description |
 | `group-dissolve` |  | Dissolve a group; its members merge into the parent group when one exists |
 | `group-kill` |  | Kill every buffer in the current group; in the board, the marked groups |
-| `group-members` | `C-x g b` | Open the switcher on this group's members |
+| `group-members` | `C-x C-g b` | Open the switcher on this group's members |
 | `group-move` | `C-x C-g m` | Move the selected buffers, else this buffer, to one group |
 | `group-move-visible` |  | Move every visible work buffer to another group |
-| `group-new` | `C-x g n` | Create and enter an empty group, or seed it with the selection |
+| `group-new` | `C-x C-g n` | Create and enter an empty group, or seed it with the selection |
 | `group-new-from-visible` | `C-x C-g v` | Found a group from every visible work buffer, with the windows as its first layout |
-| `group-pin` | `C-x g p` | Toggle a frame pin that keeps the current group through window changes |
+| `group-pin` | `C-x C-g p` | Toggle a frame pin that keeps the current group through window changes |
 | `group-reload-config` |  | Re-read this group's config and directory into every buffer in it |
 | `group-rename` |  | Rename the current group; in the board, the group at point |
 | `group-revive` |  | Revive a killed group: its record, layout, and every member that still exists |
@@ -38,7 +38,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `group-switch-new` |  | Create a group from the group switcher |
 | `group-tab-left` | `M-S-<left>` | Switch to the group shown immediately to the left in the top bar |
 | `group-tab-right` | `M-S-<right>` | Switch to the group shown immediately to the right in the top bar |
-| `groups` | `C-x g l` | The groups board: switch, describe, set noise |
+| `groups` | `C-x C-g l` | The groups board: switch, describe, set noise |
 | `ibuffer` | `C-x C-b` | List buffers by group in a buffer |
 | `ibuffer-do-sort-by-alphabetic` |  | Order the rows of a section by name |
 | `ibuffer-do-sort-by-recency` |  | Order the rows of a section by last use |
@@ -1120,8 +1120,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `focus-left` | `s-<left>` | Select the window to the left |
 | `focus-right` | `s-<right>` | Select the window to the right |
 | `focus-up` |  | Select the window above |
-| `group-switch` | `C-x g g` | Switch to a group and restore its layout |
-| `group-switch-last` | `C-x g C-g` | Switch back to the group this frame just left |
+| `group-switch` | `C-x g` | Switch to a group and restore its layout |
+| `group-switch-last` | `C-x C-g C-g` | Switch back to the group this frame just left |
 | `layout-backward` |  | Move the layout one window backward through the frame's window ring |
 | `layout-forward` |  | Move the layout one window forward through the frame's window ring |
 | `mode-consolidate` |  | Gather this group's preferred-mode buffers into the selected window |
@@ -1139,7 +1139,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `reset-layout` |  | Arrange the frame the way this buffer's mode asks |
 | `split-window-below` | `C-x 2` | Split the window in two, one above the other |
 | `split-window-right` | `C-x 3` | Split the window in two, side by side |
-| `tile-all` | `C-x g s` | Open the current group or project in locked columns |
+| `tile-all` | `C-x C-g s` | Open the current group or project in locked columns |
 | `window-down` | `s-S-<down>` | Move this window downward with its complete buffer stack |
 | `window-eat` | `C-x e` | Eat the neighboring pane and take its space |
 | `window-layout` | `C-x l` | Choose a tiling layout for visible buffers; the choice is the frame's target layout |
