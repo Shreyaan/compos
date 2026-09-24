@@ -58,20 +58,6 @@
                     (if (equal? (nth 2 cur) "") "{}" (nth 2 cur)))
               (list "tool-result" id (nth 3 cur) failed?))))))
 
-;; A Claude adapter reports its own picker entry for the model a chat pins.
-;; A pin of claude-opus-5-5[1m] runs as that model, but the adapter reports
-;; opus[1m]. The adapter does not send the resolved id. When the pin is not
-;; in its list and the adapter reports a model other than its default, the
-;; adapter matched the pin, so the chat keeps the id the person chose. An
-;; unmatched pin falls back to "default", and the chat shows that.
-(define (agent-pin-resolved? pin cur available)
-  (and (string? pin)
-       (not (member pin '("" "default")))
-       (not (equal? pin cur))
-       (not (equal? cur "default"))
-       (pair? available)
-       (not (assoc pin available))))
-
 (define (agent-handle-event slug e)
   (let* ((buf (agent-buf slug))
          (type (plist-get e 'type)))
@@ -100,9 +86,9 @@
        ;; a chat that has not attached yet, and after a restart
        (llm-models-seen! (buffer-local buf 'agent-connector)
                          (plist-get e 'available))
+       ;; a model the person chose shows as they chose it
        (let ((cur (plist-get e 'current)))
-         (when (and cur (not (agent-pin-resolved? (buffer-local buf 'agent-model)
-                                                  cur (plist-get e 'available))))
+         (when (and cur (not (buffer-local buf 'agent-model)))
            (buffer-set-local! buf 'agent-model cur)))
        (agent-update-modeline! buf))
 
