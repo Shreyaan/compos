@@ -2162,6 +2162,24 @@
 (public! 'define-list-mode!
   "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Read the app-creator skill before writing one: it owns what a list already does for you and what is yours to declare. Set transient to #f for persistent app buffers (default #t). KEYS. Four are TAKEN -- bound on your map after your own keys, so a mode that declares one silently does not get it: / narrows the rows (list-filter), < and > call the optional regroup and resort callbacks, SPC calls the optional mark-command or list-mark. / is the search key everywhere in this editor and it is the search key here. Another nine are INHERITED from list-mode-map and yours to shadow: f also filters, \\ pops the filter, ? describes the mode, n/p walk, m marks, u/U/* unmark and mark-all, x executes the marks, g reverts (most apps shadow g with their own refetch). Give your own verbs the letters none of these use. Responsive layouts are ordered profiles selected by min-cols, max-cols, or default, first match wins; profiles may override columns, cells, footer, and compact, and the chosen profile is cached per width in the list-layout-cache buffer local. A column width of #f takes the rest of the line, so put the widest text last and budget the fixed widths against the narrow, compact and wide turns. Rows are records, not text: keep the parsed value and let cells render it. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
   'ui)
+
+;; A list's filters, for a caller that narrows without the prompt: a
+;; command written for you, or fast-code writing one.
+(domain! 'interaction)
+(effects! '(write display))
+(public! 'list-filter-push!
+  "(list-filter-push! BUF FILTER) — show only some rows of a list buffer (Dired, ibuffer, any list mode) and hide the rest: only the files of a type, only the names with a word. FILTER is (list \"match\" TEXT), e.g. (list \"match\" \".pdf\"); filters stack"
+  'ui)
+(public! 'list-filter-pop!
+  "(list-filter-pop! BUF) — drop the most recent filter on a list buffer"
+  'ui)
+(public! 'list-filter-clear!
+  "(list-filter-clear! BUF) — drop every filter on a list buffer"
+  'ui)
+(effects! '(read))
+(public! 'list-filters
+  "(list-filters BUF) — the filters narrowing a list buffer, newest first"
+  'ui)
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 
 (domain! 'unknown)

@@ -519,8 +519,25 @@
             (apropos--primitives '() index))))
     (map (lambda (hit) (list (string-downcase (value->string hit)) hit)) hits)))
 
+;; A row's text is lowercased once, when the rows are built, and so are the
+;; query words. apropos--hit? lowercased every row again on every query,
+;; which was two thirds of a search.
 (define (apropos--row-hit? row words)
-  (apropos--hit? (car row) words))
+  (let ((h (car row)))
+    (let loop ((ws words))
+      (cond ((null? ws) #t)
+            ((string-contains? h (car ws)) (loop (cdr ws)))
+            (else #f)))))
+
+;; The longest word is the rarest, so it goes first and most rows fail on
+;; their first test.
+(define (apropos--longest-first words)
+  (map (lambda (p) (nth 2 p))
+       (sort (let loop ((ws words) (i 0) (acc '()))
+               (if (null? ws)
+                   acc
+                   (loop (cdr ws) (+ i 1)
+                         (cons (list (- 0 (string-length (car ws))) i (car ws)) acc)))))))
 
 (define (apropos--same-hit? a b)
   (and (equal? (plist-get a 'kind) (plist-get b 'kind))
@@ -944,7 +961,8 @@
          (wait? (apropos--flag filters0 'wait #t))
          (filters (apropos--without-lexical filters0))
          (words (apropos--words query))
-         (literal-rows (filter (lambda (row) (apropos--row-hit? row words)) rows))
+         (scan (apropos--longest-first words))
+         (literal-rows (filter (lambda (row) (apropos--row-hit? row scan)) rows))
          (literal-hits (map (lambda (row) (car (cdr row))) literal-rows))
          (suggestions (if (pair? literal-hits) '()
                           (apropos--name-suggestions query words index)))
@@ -993,6 +1011,87 @@
 
 (define (apropos-query-words query) (apropos--words query))
 (define (apropos-text-hit? text words) (apropos--hit? text words))
+
+;; A catalog change throws the rows away, and building them again costs
+;; seconds: every command, primitive and function is enriched anew. A caller
+;; that can live with the rows from just before the change takes them, and
+;; one task builds the new ones off the lane.
+;; The task, not a flag: a task that dies leaves a flag set, and nothing
+;; ever rebuilt again.
+(define *apropos--warming* #f)
+
+(define (apropos-warm!)
+  (unless (and *apropos--warming* (task-alive? *apropos--warming*))
+    (set! *apropos--warming*
+          (task-spawn (lambda () (ignore-errors (lambda () (apropos--rows-cached))))))))
+
+(define (apropos--rows-stale-ok)
+  (cond ((and *apropos--rows-cache* (equal? (catalog-generation) *apropos--rows-gen*))
+         *apropos--rows-cache*)
+        (*apropos--rows-cache* (apropos-warm!) *apropos--rows-cache*)
+        (else (apropos--rows-cached))))
+
+;; A lexical apropos that never waits for a rebuild: rows from just before
+;; a catalog change will do, for a caller that asks many times a second.
+(define (apropos-quick query n)
+  (map apropos--public-hit
+       (take-n (apropos--search query (list 'lexical #t 'wait #f)
+                                (apropos--index-stale-ok) (apropos--rows-stale-ok))
+               n)))
+
+;; the index from before a catalog change, while a rebuild is due: asking for
+;; the current one waited on the rebuild's lock, seconds, and a search task
+;; gave up at five
+(define (apropos--index-stale-ok)
+  (if (and *apropos--index-cache* (not (equal? (catalog-generation) *apropos--index-gen*)))
+      (begin (apropos-warm!) *apropos--index-cache*)
+      (apropos--index-cached)))
+
+;; apropos wants every word, which is precision: a sentence finds five
+;; entries or none. A model choosing among entries wants recall, so this
+;; ranks every entry by the words it holds, the rare ones and the ones in
+;; its name counting most. Rows from just before a catalog change will do.
+(define (apropos-recall query n)
+  (let* ((words (apropos--words query))
+         (rows (apropos--rows-stale-ok))
+         ;; one pass: which of the words each entry holds; most hold none,
+         ;; and only the ones that hold some are scored
+         (held (let loop ((rs rows) (i 0) (acc '()))
+                 (if (null? rs)
+                     acc
+                     (let* ((h (car (car rs)))
+                            (in (filter (lambda (w) (string-contains? h w)) words)))
+                       (loop (cdr rs) (+ i 1)
+                             (if (pair? in) (cons (list in i (car rs)) acc) acc))))))
+         ;; a word most entries hold says little, a rare one says what the
+         ;; query is about: "open the groups list" is about groups. Counting
+         ;; words alone ranked first the longest docs, which hold every word.
+         (weight (map (lambda (w)
+                        (list w (/ 1000.0 (+ 20 (length (filter (lambda (x) (member w (car x))) held))))))
+                      words))
+         ;; a word that is the whole name, or one of its parts, says more
+         ;; than one in the doc; ties go to the shorter entry
+         (scored (map (lambda (x)
+                        (let* ((row (nth 2 x))
+                               (nm (let ((s (plist-get (nth 1 row) 'name)))
+                                     (if (string? s) (string-downcase s) "")))
+                               (toks (string-split nm "-"))
+                               (k (fold (lambda (s w)
+                                          (let ((wt (nth 1 (assoc w weight))))
+                                            (+ s (cond ((equal? nm w) (* 4 wt))
+                                                       ((member w toks) (* 2 wt))
+                                                       (else wt)))))
+                                        0.0 (car x))))
+                          (list (- 0 k) (string-length (car row)) (nth 1 x) (nth 1 row))))
+                      held)))
+    (map (lambda (row) (apropos--public-hit (nth 3 row)))
+         (take-n (sort scored) n))))
+(public! 'apropos-quick
+  "(apropos-quick QUERY N) — the first N lexical apropos hits, from rows a catalog change ago if a rebuild is due")
+(public! 'apropos-warm!
+  "(apropos-warm!) — rebuild apropos's rows off the lane after a catalog change")
+(public! 'apropos-recall
+  "(apropos-recall QUERY N) — the N entries holding the most of QUERY's words, for a chooser that wants recall")
 (effects! '(read external spend))
 (public! 'apropos-rebuild-embeddings!
   "(apropos-rebuild-embeddings!) — clear and rebuild the OpenAI embedding cache for the current catalog")

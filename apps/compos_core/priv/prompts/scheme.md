@@ -7,6 +7,7 @@ This is compos Scheme, not Emacs Lisp. Names such as `get-buffer`, `set-buffer`,
 - `(with-current-buffer NAME THUNK)` runs THUNK when an operation needs `current-buffer`.
 - `(message TEXT)` gives a short echo.
 - `(run-command "name")` runs an M-x command.
+- A rest parameter is spelled `&rest`: `(define (f a &rest more) ...)`. The dotted form `(define (f a . more) ...)` does not read. An optional one is `&optional`.
 
 ## Settings
 

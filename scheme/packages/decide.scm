@@ -69,6 +69,28 @@
     ;; cdr here is a list holding it, and calling that is calling a list
     ((cadr fn) state questions model timeout)))
 
+;; decide, answering K instead of returning. The blocking form waits on its
+;; backend through app-await, which looks every 50ms: a laya answer that
+;; took 15ms arrived at 51. Here the backend's own continuation is K's, so
+;; the answer lands the moment it is ready, and nothing waits on the lane.
+;; A backend with no callback of its own runs the blocking form in a task.
+(define (decide-async state questions k &rest opts)
+  (let* ((backend (or (plist-get opts 'backend) 'auto))
+         (timeout (or (plist-get opts 'timeout) 30))
+         (effective (if (equal? backend 'auto) (decide--first-live) backend))
+         (t0 (monotonic-ms)))
+    (cond
+      ((equal? effective 'laya)
+       (laya-predict state questions #f
+         (lambda (reply)
+           (k (if (and reply (plist-get reply 'ok))
+                  (decide--laya->standard (plist-get (plist-get reply 'json) 'result)
+                                          (- (monotonic-ms) t0))
+                  (list 'answers '() 'usage (list 0 0 'laya (- (monotonic-ms) t0))))))))
+      (else
+        (task-run! (lambda () (apply decide state questions opts))
+          (lambda (ok? v) (k (if ok? v (list 'answers '() 'usage (list 0 0 effective 0))))))))))
+
 (define (decide--first-live)
   (let loop ((bs decide-backends))
     (cond ((null? bs) 'jev)
@@ -130,13 +152,15 @@
                                     (or (plist-get reply 'error) "no answer"))))
           (list 'answers '() 'usage (list 0 0 'laya ms))))))
 
-(define (decide--laya->standard result ms)
+(define (decide--laya->standard result &optional ms)
   (let ((raw (if (pair? result) (plist-get result 'answers) '()))
         (usage (or (and (pair? result) (plist-get result 'usage)) '(0 0))))
     (list 'answers (decide--rows (if (pair? raw) raw '()))
-          'usage (list (or (plist-get usage 'input_tokens) 0)
-                       (or (plist-get usage 'output_tokens) 0)
-                       'laya ms))))
+          ;; the time rides along when the caller measured it
+          'usage (append (list (or (plist-get usage 'input_tokens) 0)
+                               (or (plist-get usage 'output_tokens) 0)
+                               'laya)
+                         (if ms (list ms) '())))))
 
 ;; The daemon answers JSON, so one question's answer is a plist pair and
 ;; not an alist cell: (KEY VALUE KEY VALUE ...) becomes ((KEY VALUE) ...).
@@ -273,6 +297,8 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
 
 (public! 'decide
   "(decide STATE QUESTIONS [OPTS ...]) — typed decisions over JEV, Laya, or LLM. Returns (answers ((KEY VALUE) ...) usage (INPUT OUTPUT BACKEND ELAPSED-MS)).")
+(public! 'decide-async
+  "(decide-async STATE QUESTIONS K &rest OPTS) — decide, answering K the moment the backend does; never waits on the lane")
 (public! 'decide-config!
   "(decide-config! '(BACKEND ...)) — declare the backend chain. Which model a job uses is llm-model-presets, not this.")
 (public! 'decide-backends

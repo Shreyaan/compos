@@ -1365,6 +1365,16 @@
 (define (on-buffer-renamed! fn) (add-hook! 'buffer-renamed-hook fn))
 (define (take-n lst n) (take lst n))
 
+;; A whole number from 0 up to N, not N. A generator seeded from the clock:
+;; enough to pick a file or a row at random, not for secrets. The editor had
+;; no random at all, and a model asked to "open a random file" invented one.
+(define *random-state* (+ (* 1000 (current-time)) (monotonic-ms)))
+(define (random n)
+  (set! *random-state*
+        (modulo (+ (* *random-state* 6364136223846793005) 1442695040888963407)
+                18446744073709551616))
+  (modulo (quotient *random-state* 65536) n))
+
 ;;; --- variables: a default and a buffer-local value --------------------------
 ;;; Emacs gives a variable one default and, in a buffer that set it, a
 ;;; local value. Here a global is a Scheme binding and a buffer-local is a
@@ -2409,8 +2419,14 @@
 ;; right, so this path is now reachable rather than theoretical. It must
 ;; never be quiet: say which mode is missing, in the buffer it happened to.
 (define (mode-setup! name)
-  (when (equal? (mode-get name 'kind) 'major)
-    ((mode-get name 'setup))))
+  (cond ((equal? (mode-get name 'kind) 'major)
+         ((mode-get name 'setup)))
+        ((not (mode-get name 'kind))
+         (message (string-append "mode " name " is not defined, so "
+                                 (current-buffer) " has none of its keys: "
+                                 "its package did not load — see *Messages*")
+                  "error"))
+        (else #f)))
 
 ;; What a mode is for, in the mode's own words. describe-mode prints it
 ;; above the key table. A mode without one still gets its keys.
@@ -3015,7 +3031,6 @@
   ;; with-buffer-waking on purpose: that flag is restored by hand, and a
   ;; hook that throws inside it would leave every later wake believing it
   ;; was still waking.
-  ;;
   (buffer-woken! buf))
 
 ;;; --- renaming a buffer ---------------------------------------------------------
@@ -3111,14 +3126,6 @@
 ;; A mechanism that puts a buffer in a window it chose — a layout, a
 ;; swap, a restore, a borrowed window — calls switch-to-buffer-here!.
 (define (switch-to-buffer! buf)
-  ;; An agent on the frame's real windows (with-frame-windows) does not put
-  ;; its work in the selected window. window.scm owns the rule.
-  (if (and (not (buffer-context?)) (boundp 'display-buffer-agent-refuses?)
-           (display-buffer-agent-refuses? buf '()))
-      (begin (display-buffer-agent-refusal buf) #f)
-      (switch-to-buffer--show! buf)))
-
-(define (switch-to-buffer--show! buf)
   ;; A user visit promotes quiet file loads before deciding target eligibility.
   ;; Logical and agent buffer switches remain headless.
   (when (and (not (buffer-context?)) (boundp 'buffer-promote!)
@@ -3158,10 +3165,6 @@
           buf)))
 
 ;; the switch itself: the selected window shows BUF, whatever its group
-;; The trigger is what the buffer OWES, not whether it happened to be
-;; dormant a moment ago. A wake owes its runtime; so does a buffer whose
-;; rebuild failed earlier, and that one used to slip through here and stay
-;; keyless. runtime-owed? answers both, now that the mark is a fact.
 (define (switch-to-buffer-here! buf)
   (let ((restoring (not (buffer-exists? buf)))
         (float (float-window)))
@@ -4749,11 +4752,6 @@
              ((remote-path? path) (remote-visit path))
              ((file-directory? path) (dired-open path))
              ((file-too-big? path) (message (file-too-big-message path)) #f)
-             ;; An agent on the frame's real windows loads the file and
-             ;; shows nothing. It shows the buffer in the other window.
-             ((and (not (buffer-context?))
-                   (agent-edit-author? (current-edit-author)))
-              (visit-quietly path group))
              (else
                (let ((file-buffer (find-file path #f (file-shown-from-disk? path))))
                  ;; An explicit destination joins before display. The derived
@@ -6429,5 +6427,10 @@
 (public! 'global-mode-string-refresh! "(global-mode-string-refresh!) — recompose the segments; call after a thunk's answer changed")
 (effects! '(read))
 (public! 'global-mode-string-segments "(global-mode-string-segments) -> ((CLASS TEXT) ...) the frame modeline shows now")
+
+(category! 'system)
+(domain! 'system)
+(effects! '(read))
+(public! 'random "(random N) -> a whole number from 0 up to N, not N; clock-seeded, to pick at random, not for secrets")
 
 (message "editor.scm loaded")

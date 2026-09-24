@@ -44,18 +44,25 @@
   (lambda ()
     (check-true! (chat-fast-input? "!switch to paper") "a bang opens a fast intent")
     (check-false! (chat-fast-input? "what does ! mean") "a bang mid-sentence is prose")
-    (check-false! (chat-fast-input? "(+ 1 2)") "a parenthesised input is the other path")
-    (check-equal! (chat-fast-code "!switch to paper") "(load-theme \"paper\")"
-                  "the intent resolves to the precise call")
-    (check-true! (chat-scheme-well-formed? (chat-fast-code "!switch to paper"))
-                 "and what it resolves to is well-formed, so RET runs it")))
+    (check-false! (chat-fast-input? "(+ 1 2)") "a parenthesised input is the other path")))
 
-(deftest 'a-bang-that-resolves-to-nothing-says-so
-  "a miss reports in the transcript; it never falls through to a turn"
+(deftest 'a-bang-run-is-told-to-the-agent
+  "it spends no turn, but the next message says what it typed, ran and gave"
   (lambda ()
-    (let ((code (chat-fast-code "!xyzzy frobnicate the quux")))
-      (check-true! (string-prefix? "(error" code) "a miss is an expression that errors")
-      (check-true! (chat-scheme-well-formed? code) "and it is still well-formed"))))
+    ;; a recipe's title resolves without the model
+    (begin
+      (defrecipe! "zz add two numbers" "(+ 1 2)")
+      (let ((buf (t--cs-chat! "!zz add two numbers")))
+        (with-current-buffer buf (lambda () (run-command "agent-send")))
+        (let ((note (chat-fast-note buf)))
+          (check-true! (string-contains? note "!zz add two numbers") "the words typed")
+          (check-true! (string-contains? note "ran (with-frame-windows (lambda () (+ 1 2)))") "the code run")
+          (check-true! (string-contains? note "gave 3") "and what came back"))
+        (buffer-set-local! buf 'chat-fast-runs '())
+        (check-equal! (chat-fast-note buf) "" "no runs, no note")
+        (buffer-kill! buf))
+      (set! *recipes* (remove (lambda (r) (equal? (car r) "zz add two numbers")) *recipes*))
+      (catalog-forget! 'recipe "zz add two numbers"))))
 
 (deftest 'malformed-scheme-goes-nowhere
   "an unbalanced expression is neither evaluated nor sent"
@@ -92,15 +99,17 @@
           (let ((r (chat-scheme--capf)))
             (check-equal! (- (cadr r) (car r)) 3
                           "the range is the phrase after the !, not the word before point")
-            (check-equal! (car (car (caddr r))) "split the window side by side"
-                          "spl finds the recipe, and accepting writes its title"))))
+            (check-equal! (car (car (caddr r))) "spl"
+                          "what you typed comes first, so RET keeps it")
+            (check-equal! (car (cadr (caddr r))) "split the window side by side"
+                          "spl finds the recipe next, and accepting writes its title"))))
       (buffer-kill! buf))
     (let ((buf (t--cs-chat! "!dired")))
       (with-current-buffer buf
         (lambda ()
           (chat-scheme--mode-hook!)
           (end-of-buffer!)
-          (check-equal! (car (car (caddr (chat-scheme--capf)))) "open a directory"
+          (check-equal! (car (cadr (caddr (chat-scheme--capf)))) "open a directory"
                         "an alias matches but the title is what gets written")))
       (buffer-kill! buf))))
 

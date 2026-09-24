@@ -6,6 +6,20 @@
 (unless (boundp 'define-site-app)
   (load "/Users/svs/src/compos/scheme/packages/site-app.scm"))
 
+(define *ats-applications-page*
+  (list 'id 'applications
+        'label "Applications"
+        'key "2"
+        'path "/staff/applications"
+        'wait "#job_applications"
+        'sheet "/Users/svs/src/svs-recruiting/compos-recruiting/applications.xsl"
+        'detail-sheet "/Users/svs/src/svs-recruiting/compos-recruiting/applications-detail.xsl"
+        'detail-wait "body"
+        'detail-mode "ats-application-mode"
+        'columns (list (list 'label "candidate" 'width 24 'field 'candidate)
+                      (list 'label "state" 'width 14 'field 'state)
+                      (list 'label "job" 'width #f 'field 'job))))
+
 (define *ats-spec*
   (list 'name 'ats
         'title "ATS"
@@ -22,6 +36,7 @@
                  ("^(?i)(new|applied|create|created)$" info))
         'pages
         (list
+          *ats-applications-page*
           (list 'id 'approvals
                 'label "Approvals"
                 'key "1"

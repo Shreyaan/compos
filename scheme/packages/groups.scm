@@ -2750,7 +2750,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (let* ((destination (active-window))
          (mode (window-preferred-mode (active-window)))
          (group (or (frame-group) (group-cycle-group)))
-         (open (buffer-list)))
+         (open (buffer-list-mru)))
     (define (matches? buf)
       (and (member buf open) (string? mode)
            (group-cycle-member? buf group)
@@ -3226,7 +3226,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define-command "groups-refresh" "Refresh the groups board"
   (lambda () (list-refresh! *groups-buffer*)))
 
-(define-command "groups" "The groups board: switch, describe, set noise"
+(define-command "groups" "Open the groups list: every buffer group as a board, to switch, describe, set noise"
   (lambda () (list-mode-show! "groups-mode")))
 
 (define-list-mode! "groups-mode"

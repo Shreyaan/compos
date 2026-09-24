@@ -142,8 +142,9 @@
          ;; never rides in the message. The agent reads current context itself.
          (msg (string-append
                 (if (equal? once "") "" (string-append once "\n\n"))
-                (editor-context-preamble buf) raw image-note)))
+                (editor-context-preamble buf) (chat-fast-note buf) raw image-note)))
     (buffer-set-local! buf 'chat-note-once #f)
+    (buffer-set-local! buf 'chat-fast-runs '())
     (buffer-set-local! buf 'chat-pending-images '())
     (if (buffer-local buf 'agent-seed-context)
         (begin
@@ -332,7 +333,9 @@
              (end (+ start (string-byte-length text))))
         (agent-block-push! buf start end "eval" '())))
     (end-of-buffer!)
-    (message (if ok "ok" (cadr result)))))
+    (message (if ok "ok" (cadr result)))
+    ;; what was printed, for a caller that records the run
+    body))
 
 ;; An input that opens with ! is prose for fast-code: it resolves to Scheme
 ;; before it runs, and then takes the same path a parenthesised input takes.
@@ -340,8 +343,37 @@
 (define (chat-fast-input? text)
   (and (boundp 'fast-chat-input?) (fast-chat-input? text)))
 
-(define (chat-fast-code text)
-  (fast-chat-code text))
+(define (chat-fast-resolve text k)
+  (fast-chat-resolve text k))
+
+;; A ! run spends no turn, but the agent is told: the next message carries
+;; what you typed, what it ran and what came back, once. Without it the
+;; agent answered "didn't work" blind to the run that didn't.
+(define (chat-fast-record! buf typed src body)
+  ;; the printed report opens with the expression again; keep what it gave
+  (let* ((nl (string-index body "\n"))
+         (out (if (and nl (string-prefix? "λ" body))
+                  (substring-bytes body (+ nl 1) (string-byte-length body))
+                  body)))
+    (buffer-set-local! buf 'chat-fast-runs
+      (append (or (buffer-local buf 'chat-fast-runs) '())
+              (list (list typed src (if (> (string-length out) 300)
+                                        (string-append (substring out 0 300) "…")
+                                        out)))))))
+
+(define (chat-fast-note buf)
+  (let ((runs (or (buffer-local buf 'chat-fast-runs) '())))
+    (if (null? runs)
+        ""
+        (string-append
+          "[fast-code runs since your last turn — the user typed ! and words; "
+          "fast-code wrote the Scheme and ran it:\n"
+          (apply string-append
+                 (map (lambda (r)
+                        (string-append (car r) "\n  ran " (cadr r)
+                                       "\n  gave " (caddr r) "\n"))
+                      runs))
+          "]\n\n"))))
 
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
@@ -352,11 +384,23 @@
           ;; the prompt is a REPL before it is a conversation, and an input
           ;; that opens with ! is prose fast-code resolves to Scheme first.
           ;; Malformed Scheme goes nowhere: not to the reader, not to the model.
-          (let ((src (if (chat-fast-input? typed) (chat-fast-code typed) typed)))
-            (if (chat-scheme-well-formed? src)
-                (chat-scheme-run! buf src (and (current-prefix-arg) #t))
-                (begin (insert! "\n")
-                       (message "unbalanced expression — RET runs it once it closes"))))
+          ;; The fast model answers after this returns, so its run happens
+          ;; back in this chat, and the prefix arg is read now.
+          (let ((other? (and (current-prefix-arg) #t)))
+            (cond
+              ((chat-fast-input? typed)
+               (chat-fast-resolve typed
+                 (lambda (src)
+                   (with-current-buffer buf
+                     (lambda ()
+                       (let ((printed (chat-scheme-run! buf src other?)))
+                         (fast-chat-ran! typed printed)
+                         (chat-fast-record! buf typed src printed)))))))
+              ((chat-scheme-well-formed? typed)
+               (chat-scheme-run! buf typed other?))
+              (else
+                (insert! "\n")
+                (message "unbalanced expression — RET runs it once it closes"))))
           (let* (;; say something the moment RET lands: the first send spawns a
                  ;; backend and mounts MCP servers, seconds with nothing moving
                  (feedback (when chat?
