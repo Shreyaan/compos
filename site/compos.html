@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compos — The hackable harness for power users</title>
+<meta name="description" content="Code, mail, chat and agents as buffers in one keyboard-driven frame. An Emacs, modernised: on the BEAM, scripted in Scheme.">
+<link rel="icon" type="image/png" href="images/compos-emblem-64.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;1,300;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #080807;
+  --panel: #1c1a15;
+  --panel-2: #1a1813;
+  --ink: #efe9dc;
+  --ink-2: #d6cfc0;
+  --muted: #a79d8c;
+  --faint: #8d8474;
+  --rule: #37312a;
+  --edge: #4a4238;
+  --blue: #9fb0ea;
+  --blue-wash: #282f4a;
+  --green: #79bd93;
+  --amber: #d5ac66;
+  --serif: Spectral, Georgia, serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); }
+body {
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: var(--serif);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+a { color: var(--ink); text-decoration: none; }
+a:hover { color: var(--blue); }
+::selection { background: var(--blue-wash); color: var(--ink); }
+.mono { font-family: var(--mono); }
+.key { color: var(--blue); }
+
+/* top bar */
+.top { border-bottom: 1px solid var(--rule); }
+.top-inner {
+  display: flex; align-items: center; gap: 22px;
+  max-width: 1280px; margin: 0 auto; padding: 12px 32px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand img { width: 22px; height: 22px; display: block; }
+.brand span { font-weight: 600; letter-spacing: .22em; }
+.spacer { flex: 1; }
+.nav { display: flex; gap: 22px; }
+.nav a { color: var(--muted); }
+.nav a:hover { color: var(--ink); }
+.btn-line { padding: 6px 13px; border: 1px solid var(--edge); color: var(--ink); }
+.btn-line:hover { border-color: var(--ink); color: var(--ink); }
+
+/* hero */
+main { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
+.hero {
+  display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 48px; align-items: center; padding: 88px 0 64px;
+}
+.eyebrow {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted);
+}
+.eyebrow i { width: 7px; height: 7px; background: var(--green); display: block; }
+h1 {
+  margin: 26px 0 0; font-weight: 300;
+  font-size: clamp(48px, 7.2vw, 104px); line-height: .95; letter-spacing: -.035em;
+  text-wrap: balance;
+}
+.subline {
+  margin: 22px 0 0; font-family: var(--mono); font-size: clamp(14px, 1.3vw, 16px);
+  color: var(--muted); letter-spacing: .01em;
+}
+.subline b { color: var(--green); font-weight: 500; }
+.lede {
+  margin: 28px 0 0; font-size: clamp(18px, 1.6vw, 21px); line-height: 1.55;
+  color: var(--ink-2); max-width: 40ch; text-wrap: pretty;
+}
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 36px; font-family: var(--mono); font-size: 12.5px; }
+.btn { padding: 13px 22px; }
+.btn-solid { background: var(--ink); color: var(--bg); font-weight: 500; }
+.btn-solid:hover { background: var(--blue); color: var(--bg); }
+.btn-ghost { border: 1px solid var(--edge); color: var(--ink); }
+.btn-ghost:hover { border-color: var(--ink); color: var(--ink); }
+.facts {
+  display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 28px;
+  font-family: var(--mono); font-size: 11.5px; color: var(--faint);
+}
+.emblem { justify-self: end; width: 100%; max-width: 500px; line-height: 0; }
+.emblem img { width: 100%; height: auto; display: block; }
+
+/* the frame */
+.frame-wrap { padding: 0 0 96px; }
+.frame {
+  border: 1px solid var(--edge); background: var(--bg);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .7);
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink-2);
+}
+.tabs {
+  display: flex; align-items: center; gap: 12px; padding: 7px 12px;
+  border-bottom: 1px solid var(--edge); background: var(--panel); font-size: 11px;
+}
+.tabs img { width: 15px; height: 15px; display: block; }
+.tab { letter-spacing: .2em; text-transform: uppercase; color: var(--faint); }
+.tab.on { font-weight: 600; color: var(--ink); }
+.tabs .fill { flex: 1; height: 1px; background: var(--rule); }
+.tabs .count { color: var(--faint); }
+.windows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 5px; padding: 5px; }
+.win { display: flex; flex-direction: column; min-width: 0; }
+.win.selected { background: var(--panel); border: 1px solid var(--edge); }
+.win.other { background: var(--panel-2); border: 1px solid var(--rule); }
+.head { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--rule); }
+.head .name { color: var(--ink); }
+.head .dot { width: 6px; height: 6px; border-radius: 50%; display: block; }
+.head .fold { margin-left: auto; color: var(--faint); }
+.modeline {
+  display: flex; gap: 14px; padding: 5px 12px; border-top: 1px solid var(--rule);
+  font-size: 11px; color: var(--faint);
+}
+.modeline .mode { color: var(--ink-2); }
+.modeline .right { margin-left: auto; }
+pre.code {
+  margin: 0; padding: 16px 14px 20px; flex: 1;
+  font-family: inherit; font-size: 13px; line-height: 1.7; color: var(--ink-2); white-space: pre-wrap;
+}
+.c-comment { color: var(--faint); }
+.c-fn { color: var(--blue); }
+.c-name { color: var(--ink); }
+.c-kw { color: var(--amber); }
+.c-str { color: var(--green); }
+.cursor {
+  display: inline-block; width: 8px; height: 15px; background: var(--blue);
+  vertical-align: -3px; margin-left: 1px;
+}
+.chat { display: flex; flex-direction: column; gap: 14px; padding: 16px 14px 20px; flex: 1; }
+.say { font-family: var(--serif); font-size: 15.5px; line-height: 1.5; color: var(--ink); }
+.reply {
+  border-left: 2px solid var(--blue); background: var(--blue-wash); padding: 10px 12px;
+  font-family: var(--serif); font-size: 15.5px; line-height: 1.5; color: var(--ink-2); text-wrap: pretty;
+}
+.reply code { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+.step { display: flex; gap: 10px; font-size: 11.5px; color: var(--muted); }
+.echo {
+  display: flex; align-items: center; gap: 14px; padding: 7px 12px;
+  border-top: 1px solid var(--edge); font-size: 11.5px; color: var(--muted);
+}
+.echo .msg { margin-right: auto; }
+
+/* section rule */
+.rule {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 24px;
+  padding: 28px 0 40px; border-top: 1px solid var(--rule);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+}
+.rule .title { color: var(--ink); }
+.rule .line { flex: 1; height: 1px; background: var(--rule); min-width: 40px; }
+
+@media (max-width: 980px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .emblem { max-width: 320px; justify-self: start; }
+  .windows { grid-template-columns: minmax(0, 1fr); }
+  .nav { display: none; }
+}
+@media (max-width: 600px) {
+  .top-inner, main { padding-left: 16px; padding-right: 16px; }
+  .hero { padding-top: 56px; }
+  .echo { flex-wrap: wrap; }
+  .echo .msg { flex-basis: 100%; }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <a href="#top" class="brand">
+      <img src="images/compos-emblem-64.png" width="22" height="22" alt="">
+      <span>Compos</span>
+    </a>
+    <span class="spacer"></span>
+    <nav class="nav">
+      <a href="#philosophy">philosophy</a>
+      <a href="https://github.com/svs/compos/tree/main/docs/manual">manual</a>
+      <a href="https://github.com/svs/compos">source</a>
+    </nav>
+    <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn-line">request access</a>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div>
+      <div class="eyebrow"><i></i><span>an emacs, modernised</span></div>
+      <h1>The hackable harness for power users.</h1>
+      <p class="subline">It's like Emacs, but it's on the <b>BEAM</b>.</p>
+      <p class="lede">Code, mail, chat and agents as buffers in one keyboard-driven frame. Every model, tool and keybinding is a form you can read, change and evaluate — while it runs.</p>
+      <div class="actions">
+        <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
+        <a href="https://github.com/svs/compos/tree/main/docs/manual" class="btn btn-ghost">read the manual</a>
+      </div>
+      <div class="facts">
+        <span><span class="key">M-x</span> is the interface</span>
+        <span>·</span>
+        <span>bring your own model</span>
+        <span>·</span>
+        <span>no telemetry</span>
+      </div>
+    </div>
+    <div class="emblem">
+      <img src="images/compos-emblem.webp" width="1000" height="1000" alt="The Compos emblem">
+    </div>
+  </section>
+
+  <section class="frame-wrap" aria-label="A Compos frame: a Scheme buffer beside an agent chat">
+    <div class="frame">
+      <div class="tabs">
+        <img src="images/compos-emblem-64.png" width="15" height="15" alt="">
+        <span class="tab on">vidura</span>
+        <span class="tab">notes</span>
+        <span class="tab">mail</span>
+        <span class="fill"></span>
+        <span class="count">3 windows</span>
+      </div>
+
+      <div class="windows">
+        <div class="win selected">
+          <div class="head">
+            <span class="c-str">λ</span>
+            <span class="name">harness.scm</span>
+            <span class="dot" style="background: var(--amber)"></span>
+            <span class="fold">▾</span>
+          </div>
+<pre class="code"><span class="c-comment">;; a harness is a form. change it, C-x C-e, done.</span>
+(<span class="c-fn">define-harness</span> <span class="c-name">vidura</span>
+  <span class="c-kw">#:model</span>   'claude-opus
+  <span class="c-kw">#:tools</span>   (list shell grep git-log)
+  <span class="c-kw">#:context</span> (buffers 'marked)
+  <span class="c-kw">#:lane</span>    'review)
+
+(<span class="c-fn">bind-key</span> <span class="c-str">"C-c a"</span> 'vidura-ask)<span class="cursor"></span></pre>
+          <div class="modeline"><span class="mode">scheme</span><span>cua</span><span class="right">L8 C27</span></div>
+        </div>
+
+        <div class="win other">
+          <div class="head">
+            <span class="c-fn">◍</span>
+            <span class="name">*chat:vidura*</span>
+            <span class="dot" style="background: var(--green)"></span>
+            <span class="fold">▾</span>
+          </div>
+          <div class="chat">
+            <div class="say">Why does the mode line shed the lane before the model?</div>
+            <div class="reply">Two ranks decide it. I will read <code>mode-line.scm</code> first, then the width hook that calls it.</div>
+            <div class="step"><span class="c-str">✓</span><span>grep "rank" mode-line.scm · 6 matches</span></div>
+            <div class="step"><span class="c-kw">●</span><span>read window-width-hook · 212 lines</span></div>
+          </div>
+          <div class="modeline"><span class="mode">chat</span><span>claude-opus</span><span>review</span><span class="right">turn 4</span></div>
+        </div>
+      </div>
+
+      <div class="echo">
+        <span class="msg">evaluated define-harness vidura — rebound C-c a</span>
+        <span><span class="key">C-c a</span> ask</span>
+        <span><span class="key">M-x</span> command</span>
+        <span><span class="key">C-x C-e</span> eval</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="philosophy" class="rule">
+    <span class="title">§ philosophy</span>
+    <span class="line"></span>
+    <span>next section</span>
+  </section>
+</main>
+
+</body>
+</html>
