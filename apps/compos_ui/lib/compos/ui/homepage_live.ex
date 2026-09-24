@@ -16,7 +16,7 @@ defmodule Compos.Ui.HomepageLive do
             wordmark: "compos",
             eyebrow: "COMPOS / QUIET COMPUTING ENVIRONMENT",
             email: "hello@compos.in",
-            tagline: "The Composable OS for knowledge work"
+            tagline: "The Hackable Harness for Power Users"
           }
 
         :emma ->
