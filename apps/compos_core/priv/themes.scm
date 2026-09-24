@@ -186,8 +186,11 @@
 (define *theme-frame* #f)  ; the frame a render path colours, else the selected one
 
 (define (frame-theme &optional frame)
-  ;; the theme FRAME wears on its own, or #f when it wears the global one
-  (let ((name (frame-local-in (or frame (selected-frame)) 'theme)))
+  ;; the theme FRAME wears on its own, or #f when it wears the global one.
+  ;; themes.scm loads before window.scm defines frame locals, and a face
+  ;; read at load comes here: until then, every frame wears the global theme.
+  (let ((name (and (boundp 'frame-local-in)
+                   (frame-local-in (or frame (selected-frame)) 'theme))))
     (and name (assoc name *themes*) name)))
 
 (define (theme-current)
