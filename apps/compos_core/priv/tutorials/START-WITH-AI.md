@@ -66,8 +66,10 @@ not make another provider's models work.
 
 ## 2. Configure a chat
 
-`M-x setup-inference` can save a default connector for new chats. In a chat,
-`C-c b` changes that chat's complete setup. A default is not a login.
+`M-x setup-inference` can save a default connector for new chats; it does not
+choose a model. In a chat, `C-c b` lets you choose its model, or leave it on
+`default` to let the connector choose. Choosing a connector does not sign you
+in.
 
 >> Type `C-c n` to make a new chat in this group.
    Type `C-c b` in the chat. The left column lists presets; the right column
